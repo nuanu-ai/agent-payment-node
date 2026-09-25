@@ -38,6 +38,12 @@ export declare class RelayEthereumSourceRuntime {
     private signingNonce;
     constructor(state: StateStore, wrapping: WrappingSecretPort, rpc: Pick<HttpsBaseRpc, "batchCall" | "coinbaseGaslessCall" | "submitRawTransaction">, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort);
     execute(operationId: string): Promise<RelayEffectJournal>;
+    private usageIdentity;
+    private usageReservationId;
+    /** Profile/operation -> encrypted custody -> exact usage bucket. A journal with
+     * any marker, or either signed-material slot, forbids cap release. */
+    private withNoEffectProof;
+    private reconcilePreEffectReservation;
     private assertPrepared;
     private summary;
     private assertReady;

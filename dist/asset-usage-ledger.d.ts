@@ -41,6 +41,8 @@ export interface AssetUsageReserveInput extends AssetUsageIdentity {
     readonly amountAtomic: string;
     readonly idempotencyKey: string;
     readonly now: Date;
+    /** Relay-only recovery: caller has proved no journal, signing marker, custody bytes, or send risk. */
+    readonly retryFailedBeforeEffect?: boolean;
 }
 export interface AssetUsageTransitionInput extends AssetUsageIdentity {
     readonly reservationId: string;

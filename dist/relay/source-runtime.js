@@ -106,6 +106,9 @@ export class RelayEthereumSourceRuntime {
             blocked("prepared_operation_missing");
         this.assertPrepared(op);
         return this.state.withLocks([`relay-source-execute:${operationId}`, evmAddressLock(op.sourceAccount)], async () => {
+            // Recover a crash between cap reservation and the first durable effect.
+            // This runs before deadline/policy checks, so an expired quote cannot strand its cap.
+            await this.reconcilePreEffectReservation(op);
             const existing = await new RelayEffectJournalRepository(this.state.root).load(profileHash, operationId);
             const observationOnly = existing !== null && (existing.effects[0].phase === "submitting" ||
                 existing.effects[1].phase === "submitting" || existing.effects[0].phase === "failed" ||
@@ -132,9 +135,17 @@ export class RelayEthereumSourceRuntime {
                 const active = await this.activePolicy(op);
                 if (active === null)
                     blocked("active_policy_missing");
-                await this.usage.reserve({ account: getAddress(op.sourceAccount), chain: "eip155:1",
+                const reserveInput = { account: getAddress(op.sourceAccount), chain: "eip155:1",
                     asset: { kind: "token", identifier: ETHEREUM_USDC }, registry: active.registry,
-                    rail: "bridge", amountAtomic: op.amountAtomic, idempotencyKey: `relay-execute:${op.operationId}`, now: this.clock.now() });
+                    rail: "bridge", amountAtomic: op.amountAtomic, idempotencyKey: `relay-execute:${op.operationId}`, now: this.clock.now() };
+                const previous = await this.usage.load(this.usageIdentity(op), this.usageReservationId(op));
+                if (previous?.state === "failed_before_effect") {
+                    await this.withNoEffectProof(op, async () => {
+                        await this.usage.reserve({ ...reserveInput, retryFailedBeforeEffect: true });
+                    });
+                }
+                else
+                    await this.usage.reserve(reserveInput);
             }
             const common = {
                 now: () => this.clock.now(),
@@ -155,13 +166,65 @@ export class RelayEthereumSourceRuntime {
             const depositPorts = { ...common,
                 sign: async (operation) => this.sign(operation, "deposit"), custody: this.depositCustody,
                 observeApproval: async (hash) => this.observeApproval(hash), observe: async (hash) => this.observeDeposit(hash) };
-            let journal = await new RelayApprovalEffectService(this.state, approvalPorts).run(operationId);
-            await this.updateUsage(op, journal);
-            if (journal.effects[0].phase === "confirmed")
-                journal = await new RelayDepositEffectService(this.state, depositPorts).run(operationId);
-            await this.updateUsage(op, journal);
-            return journal;
+            try {
+                let journal = await new RelayApprovalEffectService(this.state, approvalPorts).run(operationId);
+                await this.updateUsage(op, journal);
+                if (journal.effects[0].phase === "confirmed")
+                    journal = await new RelayDepositEffectService(this.state, depositPorts).run(operationId);
+                await this.updateUsage(op, journal);
+                return journal;
+            }
+            catch (error) {
+                // A cleanup failure must not hide the original execution error. It leaves
+                // the cap conservatively held for the next explicit reconciliation.
+                try {
+                    await this.reconcilePreEffectReservation(op);
+                }
+                catch { /* keep original error */ }
+                throw error;
+            }
         });
+    }
+    usageIdentity(op) {
+        return { account: getAddress(op.sourceAccount), chain: "eip155:1",
+            asset: { kind: "token", identifier: ETHEREUM_USDC } };
+    }
+    usageReservationId(op) {
+        return assetUsageReservationId(this.usageIdentity(op), `relay-execute:${op.operationId}`);
+    }
+    /** Profile/operation -> encrypted custody -> exact usage bucket. A journal with
+     * any marker, or either signed-material slot, forbids cap release. */
+    async withNoEffectProof(op, action) {
+        return this.state.withLocks([`profile:${op.profileHash}`, `operation:${op.operationId}`], async () => this.approvalCustody.withNoMaterial(op, async () => {
+            const journal = await new RelayEffectJournalRepository(this.state.root).load(op.profileHash, op.operationId);
+            if (journal !== null && journal.effects.some(effect => effect.phase !== "pending" ||
+                effect.attempt !== null || effect.observedAt !== null))
+                blocked("source_effect_intent_exists");
+            return action();
+        }));
+    }
+    async reconcilePreEffectReservation(op) {
+        const identity = this.usageIdentity(op), reservationId = this.usageReservationId(op);
+        const current = await this.usage.load(identity, reservationId);
+        if (current === null || current.state !== "reserved")
+            return;
+        try {
+            await this.withNoEffectProof(op, async () => {
+                await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest,
+                    state: "failed_before_effect", expectedCurrentStates: ["reserved"], now: this.clock.now(),
+                    outcomeDigest: hashObject({ operationId: op.operationId, quoteDigest: op.quoteDigest,
+                        requestId: op.statusLocator.requestId, reason: "no_durable_source_effect" }) });
+            });
+        }
+        catch (error) {
+            // A durable intent or signed envelope keeps the cap held. Let the effect
+            // engine take its observation-only replay path; propagate other errors.
+            if (error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED" &&
+                (error.details?.reason === "source_effect_intent_exists" ||
+                    error.details?.reason === "signed_effect_custody_exists"))
+                return;
+            throw error;
+        }
     }
     assertPrepared(op) {
         validateRelayUnsignedOperation(op);
@@ -224,15 +287,16 @@ export class RelayEthereumSourceRuntime {
         }
     }
     async dailyUsageExcludingOwn(op, now) {
-        const identity = { account: getAddress(op.sourceAccount), chain: "eip155:1",
-            asset: { kind: "token", identifier: ETHEREUM_USDC } };
-        const id = assetUsageReservationId(identity, `relay-execute:${op.operationId}`);
+        const identity = this.usageIdentity(op);
+        const id = this.usageReservationId(op);
         const result = await this.usage.usageWithReservation(identity, id, now);
         if (result.reservation === null || result.reservation.amountAtomic !== op.amountAtomic ||
             result.reservation.policyDigest !== op.policyDigest)
             blocked("usage_reservation_missing_or_changed");
         const total = BigInt(result.snapshot.amountAtomic);
-        const own = result.reservation.reservedAt.slice(0, 10) === now.toISOString().slice(0, 10)
+        const own = result.reservation.state !== "failed_before_effect" &&
+            result.reservation.state !== "failed_confirmed_revert" &&
+            result.reservation.reservedAt.slice(0, 10) === now.toISOString().slice(0, 10)
             ? BigInt(op.amountAtomic) : 0n;
         if (total < own)
             corrupt("usage total below own reservation");
@@ -366,7 +430,8 @@ export class RelayEthereumSourceRuntime {
     async updateUsage(op, journal) {
         const approval = journal.effects[0].phase, deposit = journal.effects[1].phase;
         const state = deposit === "confirmed" ? "finalized" : deposit === "failed" ? "failed_confirmed_revert" :
-            approval === "failed" ? "failed_before_effect" : approval === "pending" ? null : "submitted";
+            approval === "failed" ? "failed_confirmed_revert" :
+                (approval === "pending" || approval === "signing_started" || approval === "sealed") ? null : "submitted";
         if (state === null)
             return;
         const identity = { account: getAddress(op.sourceAccount), chain: "eip155:1", asset: { kind: "token", identifier: ETHEREUM_USDC } };
@@ -377,7 +442,7 @@ export class RelayEthereumSourceRuntime {
         if (existing.state === state)
             return;
         await this.usage.transition({ ...identity, reservationId: id, policyDigest: op.policyDigest, state,
-            now: this.clock.now(), ...(state === "finalized" || state === "failed_before_effect" || state === "failed_confirmed_revert"
+            now: this.clock.now(), ...(state === "finalized" || state === "failed_confirmed_revert"
                 ? { outcomeDigest: journal.integrityHash } : {}) });
     }
 }

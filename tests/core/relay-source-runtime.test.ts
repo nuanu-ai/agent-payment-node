@@ -6,9 +6,11 @@ import { encodeFunctionData, keccak256, parseAbi, toBytes, type Hex } from "viem
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../../src/canonical.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
+import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
 import { createRelayEthereumSourceRuntime, RelayEthereumSourceRuntime, type RelayExecutionSummary } from "../../src/relay/source-runtime.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator, validateRelayQuote } from "../../src/relay/quote.js";
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
@@ -39,7 +41,7 @@ async function setup(t: test.TestContext) {
     inventorySha256: inventory.inventorySha256, effectiveAt: "2026-09-29T00:00:00.000Z",
     expiresAt: "2026-10-02T00:00:00.000Z", admissions: [{ chain: "eip155:1", kind: "token",
       identifier: ETHEREUM_USDC, rail: "bridge", maximumPerTransferAtomic: "3000000",
-      dailyLimitAtomic: "5000000", mechanism: { provider: "relay", reference: RELAY_ROUTE_REFERENCE } }], now });
+      dailyLimitAtomic: "3000000", mechanism: { provider: "relay", reference: RELAY_ROUTE_REFERENCE } }], now });
   await policy.appendDecision("default", null, { status: "active", revision: staged.revision,
     stagedRecordDigest: staged.recordDigest, policyDigest: staged.registry.policyDigest,
     registry: staged.registry, approvalFingerprint: "a".repeat(64), decidedAt: now.toISOString() });
@@ -95,9 +97,20 @@ async function setup(t: test.TestContext) {
   };
   const authorization = { confirm: async (value: RelayExecutionSummary) => { confirms++; summary = value; return true; } };
   const runtime = new RelayEthereumSourceRuntime(state, wrapping, rpc, authorization, { now: () => now });
-  return { state, wrapping, runtime, op, rpc,
+  return { state, wrapping, runtime, op, rpc, registry: staged.registry,
     showApproval: () => { approvalVisible = true; },
     get evidence() { return { batches, sends, confirms, summary }; } };
+}
+
+function usageFor(f: Awaited<ReturnType<typeof setup>>, operationId = f.op.operationId) {
+  const ledger = new AssetUsageLedger(f.state.root);
+  const identity = { account: owner, chain: "eip155:1", asset: { kind: "token" as const, identifier: ETHEREUM_USDC } };
+  return { ledger, identity, reservationId: assetUsageReservationId(identity, `relay-execute:${operationId}`) };
+}
+
+function wrongChainRpc(f: Awaited<ReturnType<typeof setup>>) {
+  return { ...f.rpc, batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) =>
+    calls.length === 2 ? ["0x38", { number: "0x10", hash: blockHash, baseFeePerGas: "0x1" }] : f.rpc.batchCall(calls) };
 }
 
 test("explicit authorization seals exact admission and sends the signed approval once", async t => {
@@ -148,5 +161,91 @@ test("changed durable requestId admission blocks observation replay", async t =>
   const saved = JSON.parse(await readFile(path, "utf8"));
   await writeFile(path, JSON.stringify({ ...saved, requestId: `0x${"c".repeat(64)}` }));
   await assert.rejects(f.runtime.execute(f.op.operationId), { code: "APN_STATE_CORRUPT" });
+  assert.equal(f.evidence.sends, 1);
+});
+
+test("pre-effect refusal releases exact reservation and replay reopens it under current cap", async t => {
+  const f = await setup(t);
+  const bad = new RelayEthereumSourceRuntime(f.state, f.wrapping, wrongChainRpc(f),
+    { confirm: async () => true }, { now: () => now });
+  await assert.rejects(bad.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  const { ledger, identity, reservationId } = usageFor(f);
+  assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
+  assert.equal((await ledger.usage(identity, now)).amountAtomic, "0");
+  assert.equal(await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId), null);
+  const result = await f.runtime.execute(f.op.operationId);
+  assert.equal(result.effects[0].phase, "submitting");
+  assert.equal((await ledger.load(identity, reservationId))?.state, "submitted");
+  assert.equal(f.evidence.sends, 1);
+});
+
+test("signer failure after durable marker holds cap and replay never signs or sends", async t => {
+  const f = await setup(t);
+  Object.defineProperty(f.runtime, "sign", { value: async () => { throw new Error("synthetic signer failure"); } });
+  await assert.rejects(f.runtime.execute(f.op.operationId), /synthetic signer failure/u);
+  const { ledger, identity, reservationId } = usageFor(f);
+  assert.equal((await ledger.load(identity, reservationId))?.state, "reserved");
+  assert.equal((await ledger.usage(identity, now)).amountAtomic, "2500000");
+  assert.equal((await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId))?.effects[0].phase,
+    "signing_started");
+  const replay = await f.runtime.execute(f.op.operationId);
+  assert.equal(replay.effects[0].phase, "signing_started");
+  assert.equal(f.evidence.sends, 0);
+});
+
+test("orphan reservation is reconciled before expired quote rejection after restart", async t => {
+  const f = await setup(t);
+  const { ledger, identity, reservationId } = usageFor(f);
+  await ledger.reserve({ ...identity, registry: f.registry, rail: "bridge", amountAtomic: f.op.amountAtomic,
+    idempotencyKey: `relay-execute:${f.op.operationId}`, now });
+  const expired = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc,
+    { confirm: async () => true }, { now: () => new Date(f.op.deadline) });
+  await assert.rejects(expired.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
+  assert.equal((await ledger.usage(identity, new Date(f.op.deadline))).amountAtomic, "0");
+  assert.equal(f.evidence.batches, 0);
+  assert.equal(f.evidence.sends, 0);
+});
+
+test("unmarked pending journal also permits exact pre-effect recovery", async t => {
+  const f = await setup(t);
+  const { ledger, identity, reservationId } = usageFor(f);
+  await ledger.reserve({ ...identity, registry: f.registry, rail: "bridge", amountAtomic: f.op.amountAtomic,
+    idempotencyKey: `relay-execute:${f.op.operationId}`, now });
+  const effects = new RelayEffectJournalRepository(f.state.root);
+  await effects.create(f.op.profileHash, f.op.operationId, now.toISOString());
+  const expired = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc,
+    { confirm: async () => true }, { now: () => new Date(f.op.deadline) });
+  await assert.rejects(expired.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
+  assert.equal((await ledger.usage(identity, new Date(f.op.deadline))).amountAtomic, "0");
+  assert.equal(f.evidence.sends, 0);
+});
+
+test("concurrent same-op calls send once", async t => {
+  const f = await setup(t);
+  const [a, b] = await Promise.all([f.runtime.execute(f.op.operationId), f.runtime.execute(f.op.operationId)]);
+  assert.equal(a.effects[0].phase, "submitting");
+  assert.equal(b.effects[0].phase, "submitting");
+  assert.equal(f.evidence.sends, 1);
+});
+
+test("released cap admits an unrelated op, then full cap recheck denies reopening the first", async t => {
+  const f = await setup(t);
+  const bad = new RelayEthereumSourceRuntime(f.state, f.wrapping, wrongChainRpc(f),
+    { confirm: async () => true }, { now: () => now });
+  await assert.rejects(bad.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  const { integrityHash: _integrityHash, ...original } = f.op;
+  const other = freezeRelayUnsignedOperation({ ...original, operationId: "5".repeat(64),
+    idempotencyHash: "6".repeat(64), requestHash: "7".repeat(64) });
+  const operations = new RelayUnsignedOperationRepository(f.state.root);
+  await operations.persistLocked(other);
+  const journal = await f.runtime.execute(other.operationId);
+  assert.equal(journal.effects[0].phase, "submitting");
+  assert.equal(f.evidence.sends, 1);
+  await assert.rejects(f.runtime.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  const { ledger, identity, reservationId } = usageFor(f);
+  assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
+  assert.equal((await ledger.usage(identity, now)).amountAtomic, "2500000");
   assert.equal(f.evidence.sends, 1);
 });
