@@ -9,14 +9,15 @@ import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayEncryptedApprovalCustody } from "./approval-effect.js";
+import { RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, RELAY_BNB_POLYGON_ROUTE_REFERENCE } from "./native-quote.js";
 
 export class RelayRetireService {
   constructor(private readonly state: StateStore, private readonly clock: ClockPort,
     private readonly wrapping: WrappingSecretPort = new MacOSLoginKeychainSecret()) {}
 
   async retire(input: { readonly profile: string; readonly operationId: string }) {
-    if (input.profile !== "default" || !/^[a-f0-9]{64}$/u.test(input.operationId))
-      throw new ApnError("APN_INVALID_INPUT", "Relay retirement requires the default profile and an operation ID.");
+    if ((input.profile !== "default" && input.profile !== "evm-live-buyer") || !/^[a-f0-9]{64}$/u.test(input.operationId))
+      throw new ApnError("APN_INVALID_INPUT", "Relay retirement requires an admitted profile and an operation ID.");
     allowlistProfileHash(input.profile);
     const profileHash = this.state.profileHash(input.profile);
     await this.state.initialize();
@@ -26,6 +27,17 @@ export class RelayRetireService {
         // Distinguish an operation belonging to another profile from one that does not exist.
         await new OperationService(this.state).required(input.operationId);
         throw new ApnError("APN_OPERATION_BLOCKED", "The operation is not a prepared Relay quote for this profile.");
+      }
+      if (input.profile === "evm-live-buyer" && (op.nativeQuote === undefined || op.quote !== undefined ||
+        op.sourceChainId !== 56 || op.destinationChainId !== 137 ||
+        op.sourceAccount.toLowerCase() !== RELAY_BNB_SOURCE.toLowerCase() ||
+        op.recipient.toLowerCase() !== RELAY_POLYGON_RECIPIENT.toLowerCase() ||
+        op.nativeQuote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE ||
+        op.policyDigest === undefined || op.policyRevision === undefined)) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is limited to the buyer BNB native to Polygon quote.");
+      }
+      if (input.profile === "default" && op.nativeQuote !== undefined) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Default Relay retirement requires its Ethereum USDC quote.");
       }
       const retirements = new RelayRetirementRepository(this.state.root);
       const existing = await retirements.load(op);
@@ -40,7 +52,7 @@ export class RelayRetireService {
             const now = this.clock.now();
             if (!Number.isFinite(now.getTime())) throw new ApnError("APN_INVALID_INPUT", "Relay retirement clock is invalid.");
             return publicRelayUnsignedOperation(op, await retirements.persistLocked(op, now.toISOString()));
-          }));
+          }, input.profile === "evm-live-buyer" ? 56 : 1), input.profile);
     });
   }
 }

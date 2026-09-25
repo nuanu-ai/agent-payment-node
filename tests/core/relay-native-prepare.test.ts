@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { OperationService } from "../../src/operation-service.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
+import { RelayRetireService } from "../../src/relay/retire.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT,
   validateRelayNativeQuote } from "../../src/relay/native-quote.js";
 import { StateStore } from "../../src/state.js";
@@ -75,4 +78,72 @@ test("BNB native prepare refuses missing native asset, route pin, wrong owner an
   assert.equal(calls, 1);
   await assert.rejects(new OperationService(state).required(state.operationId(input.profile, input.idempotencyKey)),
     { code: "APN_OPERATION_NOT_FOUND" });
+});
+
+test("buyer BNB native quote retires locally, keeps its saved quote and admits a fresh key", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root);
+  let quotes = 0;
+  const prepare = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => policy(), publicAccount: async () => RELAY_BNB_SOURCE, dailyUsage: async () => "0",
+    nativeQuote: async intent => { quotes++; return validateRelayNativeQuote(await fixture(), intent); },
+  });
+  const first = await prepare.prepareNative(input);
+  const savedPath = join(temp.root, "relay-unsigned-operations", first.profileHash, `${first.operationId}.json`);
+  const savedBytes = await readFile(savedPath);
+  const next = { ...input, idempotencyKey: "relay-bnb-pol-0002" };
+  await assert.rejects(prepare.prepareNative(next), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(quotes, 1);
+  assert.deepEqual(bindArgv(["relay", "retire", "--profile", input.profile, "--operation", first.operationId]).request,
+    { command: "relay.retire", profile: input.profile, operationId: first.operationId });
+  const retire = new RelayRetireService(state, { now: () => instant }, {
+    load: async () => { throw new Error("unexpected wallet secret read"); },
+    create: async () => { throw new Error("unexpected wallet secret creation"); },
+  });
+  const result = await retire.retire({ profile: input.profile, operationId: first.operationId });
+  assert.equal(result.state, "retired"); assert.equal(result.terminal, true);
+  assert.deepEqual(await retire.retire({ profile: input.profile, operationId: first.operationId }), result);
+  assert.deepEqual(await new OperationService(state).status(first.operationId), result);
+  assert.deepEqual(await readFile(savedPath), savedBytes);
+  assert.deepEqual(await prepare.prepareNative(input), result);
+  const fresh = await prepare.prepareNative(next);
+  assert.equal(fresh.state, "prepared"); assert.equal(quotes, 2);
+});
+
+test("buyer Relay retirement rejects wrong profile and an existing native usage reservation", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root);
+  const prepare = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => policy(), publicAccount: async () => RELAY_BNB_SOURCE, dailyUsage: async () => "0",
+    nativeQuote: async intent => validateRelayNativeQuote(await fixture(), intent),
+  });
+  const first = await prepare.prepareNative(input);
+  const retire = new RelayRetireService(state, { now: () => instant });
+  await assert.rejects(retire.retire({ profile: "default", operationId: first.operationId }),
+    { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(retire.retire({ profile: "other", operationId: first.operationId }),
+    { code: "APN_INVALID_INPUT" });
+  await new AssetUsageLedger(temp.root).reserve({ account: RELAY_BNB_SOURCE, chain: "eip155:56",
+    asset: { kind: "native", identifier: null }, registry: policy().registry, rail: "bridge",
+    amountAtomic: input.amountAtomic, idempotencyKey: input.idempotencyKey, now: instant });
+  await assert.rejects(retire.retire({ profile: input.profile, operationId: first.operationId }),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await new OperationService(state).status(first.operationId) as { state: string }).state, "prepared");
+});
+
+test("buyer Relay retirement fails closed on changed saved quote or policy binding", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root);
+  const first = await new RelayUnsignedPrepareService(state, { now: () => instant }, undefined, {
+    activePolicy: async () => policy(), publicAccount: async () => RELAY_BNB_SOURCE, dailyUsage: async () => "0",
+    nativeQuote: async intent => validateRelayNativeQuote(await fixture(), intent),
+  }).prepareNative(input);
+  const path = join(temp.root, "relay-unsigned-operations", first.profileHash, `${first.operationId}.json`);
+  const original = JSON.parse(await readFile(path, "utf8"));
+  await writeFile(path, JSON.stringify({ ...original, policyDigest: "b".repeat(64) }));
+  await assert.rejects(new RelayRetireService(state, { now: () => instant }).retire({
+    profile: input.profile, operationId: first.operationId }), { code: "APN_STATE_CORRUPT" });
+  await writeFile(path, JSON.stringify({ ...original, nativeQuote: { ...original.nativeQuote, recipient: RELAY_BNB_SOURCE } }));
+  await assert.rejects(new RelayRetireService(state, { now: () => instant }).retire({
+    profile: input.profile, operationId: first.operationId }), { code: "APN_STATE_CORRUPT" });
 });
