@@ -1,4 +1,4 @@
-/** One guarded BNB native deposit for the fixed Relay BNB -> Polygon quote. */
+/** One guarded BNB native deposit for the fixed Relay BNB -> Polygon or Monad quote. */
 import { randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -18,7 +18,7 @@ import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRe
 import { HttpsBaseRpc } from "../rpc.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { StateStore } from "../state.js";
-import { RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, verifySavedRelayNativeQuote } from "./native-quote.js";
+import { RELAY_BNB_SOURCE, relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
 import { ETHEREUM_DEPOSITORY } from "./quote.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 
@@ -131,7 +131,7 @@ async function verifySigned(op: RelayUnsignedOperation, raw: Hex, expectedNonce?
   return keccak256(raw);
 }
 export interface RelayNativeSourcePorts {
-  readonly confirm: (summary: { operationId: string; sourceChainId: 56; destinationChainId: 137; sourceAccount: string;
+  readonly confirm: (summary: { operationId: string; sourceChainId: 56; destinationChainId: 137 | 143; sourceAccount: string;
     recipient: string; amountAtomic: string; minOutputAtomic: string; deadline: string; quoteDigest: string;
     requestId: string; depositNetworkFeeCeilingWei: string; depository: string; valueWei: string }) => Promise<boolean>;
   readonly rpc: Rpc;
@@ -168,9 +168,11 @@ export class RelayNativeSourceRuntime {
   private assertLane(op: RelayUnsignedOperation): void {
     validateRelayUnsignedOperation(op);
     const q = op.nativeQuote, d = q?.deposit;
-    if (op.quote !== undefined || op.sourceChainId !== 56 || op.destinationChainId !== 137 ||
-      !same(op.sourceAccount, RELAY_BNB_SOURCE) || !same(op.recipient, RELAY_POLYGON_RECIPIENT) ||
-      q?.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE || d === undefined ||
+    let route: ReturnType<typeof relayNativeRoute>;
+    try { route = relayNativeRoute(op.recipient); } catch { blocked("saved_native_quote_or_route"); }
+    if (op.quote !== undefined || op.sourceChainId !== 56 || op.destinationChainId !== route.chainId ||
+      !same(op.sourceAccount, RELAY_BNB_SOURCE) || !same(op.recipient, route.recipient) ||
+      q?.routeReference !== route.reference || d === undefined ||
       op.statusLocator === undefined || op.policyDigest === undefined || op.policyRevision === undefined ||
       op.depositNetworkFeeCeilingWei === undefined || q.statusLocator?.requestId !== op.statusLocator.requestId ||
       !same(d.to, ETHEREUM_DEPOSITORY) || !same(d.from, op.sourceAccount) || d.chainId !== 56 ||
@@ -212,7 +214,7 @@ export class RelayNativeSourceRuntime {
       rail: "bridge", amountAtomic: op.amountAtomic, dailyUsageAtomic: (BigInt(current.snapshot.amountAtomic) - own).toString(),
       asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
     const pin = decision.asset.mechanismPins?.bridge;
-    if (pin?.provider !== "relay" || pin.reference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE) blocked("route_pin");
+    if (pin?.provider !== "relay" || pin.reference !== op.nativeQuote!.routeReference) blocked("route_pin");
     return active;
   }
   private async funding(op: RelayUnsignedOperation, rpc: Rpc): Promise<bigint> {
@@ -306,7 +308,7 @@ export class RelayNativeSourceRuntime {
       return j;
     }
     const observationOnly = j?.phase === "submitting";
-    if (!observationOnly && await this.ports.confirm({ operationId: op.operationId, sourceChainId: 56, destinationChainId: 137,
+    if (!observationOnly && await this.ports.confirm({ operationId: op.operationId, sourceChainId: 56, destinationChainId: op.destinationChainId as 137 | 143,
       sourceAccount: op.sourceAccount, recipient: op.recipient, amountAtomic: op.amountAtomic,
       minOutputAtomic: op.minOutputAtomic, deadline: op.deadline, quoteDigest: op.quoteDigest,
       requestId: op.statusLocator!.requestId, depositNetworkFeeCeilingWei: op.depositNetworkFeeCeilingWei!,
