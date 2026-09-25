@@ -12,6 +12,7 @@ import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownershi
 import { ETHEREUM_USDC, requestRelayQuote } from "./quote.js";
 import { RELAY_BNB_SOURCE, relayNativeRoute, requestRelayNativeQuote } from "./native-quote.js";
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
+export const RELAY_BASE_ROUTE_REFERENCE = "ethereum-usdc-base-eth-v1";
 const POSITIVE = /^[1-9][0-9]*$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 function refuse(reason) {
@@ -28,7 +29,7 @@ export class RelayUnsignedPrepareService {
         this.operations = operations;
         this.ports = ports;
     }
-    async prepare(input) {
+    async prepare(input, route = "bnb") {
         if (input.profile !== "default")
             refuse("relay_default_profile_only");
         if (!ADDRESS.test(input.recipient) ||
@@ -40,12 +41,12 @@ export class RelayUnsignedPrepareService {
         const profileHash = this.state.profileHash(input.profile);
         const operationId = this.state.operationId(input.profile, input.idempotencyKey);
         const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
-        const requestHash = hashObject({ ...input, recipient: input.recipient.toLowerCase() });
+        const requestHash = hashObject({ ...input, recipient: input.recipient.toLowerCase(), ...(route === "base" ? { route } : {}) });
         const replay = await this.operations.resolvePrepare({ kind: "relay_unsigned", profileHash, operationId,
             idempotencyHash, requestHash });
         if (replay !== null) {
-            if (replay.kind !== "relay_unsigned")
-                throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Relay replay changed operation kind.");
+            if (replay.kind !== "relay_unsigned" || replay.record.destinationChainId !== (route === "base" ? 8453 : 56))
+                throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Relay replay changed operation kind or route.");
             return await this.operations.relayStatus(replay.record);
         }
         const now = this.clock.now();
@@ -69,7 +70,7 @@ export class RelayUnsignedPrepareService {
             asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: input.amountAtomic,
             dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
         const pin = admission.asset.mechanismPins?.bridge;
-        if (pin?.provider !== "relay" || pin.reference !== RELAY_ROUTE_REFERENCE)
+        if (pin?.provider !== "relay" || pin.reference !== (route === "base" ? RELAY_BASE_ROUTE_REFERENCE : RELAY_ROUTE_REFERENCE))
             refuse("relay_route_pin_required");
         await this.state.initialize();
         // Fail closed before quoting. The final owner check and create-only write
@@ -78,10 +79,12 @@ export class RelayUnsignedPrepareService {
         await checkOwner();
         await this.operations.assertProfileAvailable(profileHash);
         const intent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
-            minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
+            minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000),
+            ...(route === "base" ? { destinationChainId: 8453 } : {}) };
         const quote = await (this.ports.quote?.(intent) ?? requestRelayQuote(intent));
         const { quoteDigest, ...projection } = quote;
         if (hashObject(projection) !== quoteDigest || quote.payer !== payer || quote.recipient !== intent.recipient ||
+            quote.orderData.output.chainId !== route || quote.routeReference !== (route === "base" ? RELAY_BASE_ROUTE_REFERENCE : undefined) ||
             quote.principalAtomic !== input.amountAtomic || BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
             quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
             (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
@@ -91,7 +94,7 @@ export class RelayUnsignedPrepareService {
         }
         const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
             kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-            requestHash, sourceChainId: 1, destinationChainId: 56, sourceAccount: payer, recipient: intent.recipient,
+            requestHash, sourceChainId: 1, destinationChainId: route === "base" ? 8453 : 56, sourceAccount: payer, recipient: intent.recipient,
             quoteDigest, quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
             policyDigest: active.digest, policyRevision: active.revision,
             approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
@@ -100,6 +103,7 @@ export class RelayUnsignedPrepareService {
             createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
         return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
     }
+    async prepareBase(input) { return this.prepare(input, "base"); }
     async prepareNative(input) {
         if (!ADDRESS.test(input.recipient) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||

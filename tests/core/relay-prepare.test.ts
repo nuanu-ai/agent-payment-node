@@ -58,6 +58,14 @@ function serviceFor(state: StateStore, quoteCalled: () => void) {
   });
 }
 
+test("Base route cannot borrow the existing BNB owner policy pin", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let quotes = 0;
+  await assert.rejects(serviceFor(state, () => quotes++).prepareBase(input), { code: "APN_ALLOWLIST_REFUSED" });
+  assert.equal(quotes, 0);
+});
+
 test("Relay owner guard blocks another provider profile before quote, ignoring provider ID and address case", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root); await state.initialize();

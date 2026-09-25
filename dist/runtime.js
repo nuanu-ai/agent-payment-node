@@ -9,6 +9,7 @@ export class RuntimeContext {
     relayRetire;
     relayStatus;
     relayObserve;
+    relayBaseObserve;
     relayExecute;
     relayNativeExecute;
     relayExecuteConfirmation;

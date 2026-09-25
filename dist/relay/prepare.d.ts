@@ -5,6 +5,7 @@ import { StateStore } from "../state.js";
 import { type RelayQuoteIntent, type ValidatedRelayQuote } from "./quote.js";
 import { type RelayNativeQuoteIntent, type ValidatedRelayNativeQuote } from "./native-quote.js";
 export declare const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
+export declare const RELAY_BASE_ROUTE_REFERENCE = "ethereum-usdc-base-eth-v1";
 export interface RelayPrepareInput {
     readonly profile: string;
     readonly recipient: string;
@@ -35,6 +36,7 @@ export declare class RelayUnsignedPrepareService {
     private readonly operations;
     private readonly ports;
     constructor(state: StateStore, clock: ClockPort, operations?: OperationService, ports?: RelayPreparePorts);
-    prepare(input: RelayPrepareInput): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
+    prepare(input: RelayPrepareInput, route?: "bnb" | "base"): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
+    prepareBase(input: RelayPrepareInput): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
     prepareNative(input: RelayNativePrepareInput): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
 }

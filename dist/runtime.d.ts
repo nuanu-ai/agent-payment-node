@@ -3,6 +3,7 @@ import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
+import type { RelayBaseObserveService } from "./relay/base-observe.js";
 import type { RelayEffectJournal } from "./relay/effect-journal.js";
 import type { RelayNativeSourceRuntime } from "./relay/native-source.js";
 import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
@@ -64,6 +65,7 @@ export interface CoreDependencies {
     readonly relayRetire?: RelayRetireService;
     readonly relayStatus?: RelayKeylessStatusService;
     readonly relayObserve?: RelayObserveService;
+    readonly relayBaseObserve?: RelayBaseObserveService;
     readonly relayExecute?: RelayExecuteHandler;
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
@@ -125,6 +127,7 @@ export declare class RuntimeContext {
     readonly relayRetire?: RelayRetireService;
     readonly relayStatus?: RelayKeylessStatusService;
     readonly relayObserve?: RelayObserveService;
+    readonly relayBaseObserve?: RelayBaseObserveService;
     readonly relayExecute?: RelayExecuteHandler;
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;

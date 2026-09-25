@@ -8,7 +8,7 @@ export declare class RelayKeylessStatusService {
         operationId: string;
         provider: "relay";
         sourceChainId: 1 | 56;
-        destinationChainId: 56 | 137 | 143;
+        destinationChainId: 56 | 8453 | 137 | 143;
         status: string;
         chainIdentityObserved: boolean;
         inTxHashes: readonly string[];
