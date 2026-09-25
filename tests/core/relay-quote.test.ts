@@ -102,3 +102,41 @@ test("order, recipient, minimum, expiry, depository, approval and deposit mutati
     await assert.rejects(validateRelayQuote(quote, intent), /Relay quote rejected:/, name);
   }
 });
+
+test("Relay status/v3 request ID is canonical, digest-bound and independent of order ID", async () => {
+  const quote = await fixture();
+  const requestId = `0x${"ab".repeat(32)}`;
+  quote.requestId = requestId;
+  quote.steps[0].requestId = requestId;
+  quote.steps[1].requestId = requestId;
+  quote.steps[1].items[0].check = {
+    endpoint: `/intents/status/v3?requestId=${requestId}`, method: "GET",
+  };
+  const validated = await validateRelayQuote(quote, intent);
+  assert.deepEqual(validated.statusLocator, { requestId,
+    endpoint: `https://api.relay.link/intents/status/v3?requestId=${requestId}` });
+  assert.notEqual(validated.statusLocator?.requestId, validated.orderId);
+  assert.notEqual(validated.quoteDigest, (await validateRelayQuote(await fixture(), intent)).quoteDigest);
+  const changed = await fixture(); changed.requestId = `0x${"cd".repeat(32)}`;
+  assert.notEqual((await validateRelayQuote(changed, intent)).quoteDigest, validated.quoteDigest);
+});
+
+test("conflicting, missing and hostile Relay status locators fail closed", async () => {
+  const requestId = `0x${"ab".repeat(32)}`;
+  const edits: Array<[string, (quote: any) => void]> = [
+    ["conflicting step request IDs", q => { q.requestId = requestId; q.steps[1].requestId = `0x${"cd".repeat(32)}`; }],
+    ["conflicting check ID", q => { q.requestId = requestId; q.steps[1].items[0].check = { method: "GET", endpoint: `/intents/status/v3?requestId=0x${"cd".repeat(32)}` }; }],
+    ["missing check request ID", q => { q.steps[1].items[0].check = { method: "GET", endpoint: "/intents/status/v3" }; }],
+    ["foreign host", q => { q.requestId = requestId; q.steps[1].items[0].check = { method: "GET", endpoint: `https://evil.example/intents/status/v3?requestId=${requestId}` }; }],
+    ["host spoof", q => { q.requestId = requestId; q.steps[1].items[0].check = { method: "GET", endpoint: `https://api.relay.link.evil.example/intents/status/v3?requestId=${requestId}` }; }],
+    ["protocol relative host", q => { q.requestId = requestId; q.steps[1].items[0].check = { method: "GET", endpoint: `//evil.example/intents/status/v3?requestId=${requestId}` }; }],
+    ["wrong path", q => { q.requestId = requestId; q.steps[1].items[0].check = { method: "GET", endpoint: `/requests/v3?requestId=${requestId}` }; }],
+    ["duplicate query", q => { q.requestId = requestId; q.steps[1].items[0].check = { method: "GET", endpoint: `/intents/status/v3?requestId=${requestId}&requestId=${requestId}` }; }],
+    ["mutation method", q => { q.requestId = requestId; q.steps[1].items[0].check = { method: "POST", endpoint: `/intents/status/v3?requestId=${requestId}` }; }],
+  ];
+  for (const [name, edit] of edits) {
+    const quote = await fixture(); edit(quote);
+    await assert.rejects(validateRelayQuote(quote, intent), /Relay quote rejected:/, name);
+  }
+  assert.equal((await validateRelayQuote(await fixture(), intent)).statusLocator, undefined);
+});

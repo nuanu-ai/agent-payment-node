@@ -13,6 +13,7 @@ export declare function relayQuoteRequest(intent: RelayQuoteIntent): Record<stri
 export interface ValidatedRelayQuote {
     readonly schemaVersion: "apn.relay-quote.v1";
     readonly quoteDigest: string;
+    readonly statusLocator?: RelayStatusLocator;
     readonly orderId: string;
     readonly orderSignature: string;
     readonly solver: string;
@@ -66,6 +67,12 @@ export interface ValidatedRelayQuote {
     readonly approval: RelayQuoteTransaction;
     readonly deposit: RelayQuoteTransaction;
 }
+export interface RelayStatusLocator {
+    readonly requestId: string;
+    readonly endpoint: string;
+}
+/** Only the Relay status/v3 endpoint can supply a status locator. Never follow a quote URL. */
+export declare function relayStatusLocator(requestId: unknown, endpoint?: unknown): RelayStatusLocator;
 export interface RelayQuoteTransaction {
     readonly from: string;
     readonly to: string;

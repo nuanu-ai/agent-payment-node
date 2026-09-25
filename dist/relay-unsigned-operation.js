@@ -1,5 +1,6 @@
 /** An immutable Relay quote projection. Its transactions are unsigned and have no execution path. */
 import { hashObject } from "./canonical.js";
+import { relayStatusLocator } from "./relay/quote.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { z } from "zod";
@@ -21,6 +22,7 @@ const body = z.strictObject({
     sourceAccount: address,
     recipient: address,
     quoteDigest: hash,
+    statusLocator: z.strictObject({ requestId: z.string(), endpoint: z.string() }).optional(),
     quote: z.custom((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
     policyDigest: hash.optional(),
     policyRevision: z.number().int().positive().optional(),
@@ -50,6 +52,11 @@ export function validateRelayUnsignedOperation(value) {
         try {
             const { quoteDigest, ...projection } = operation.quote;
             if (hashObject(projection) !== quoteDigest || quoteDigest !== operation.quoteDigest ||
+                (operation.quote.statusLocator === undefined) !== (operation.statusLocator === undefined) ||
+                (operation.statusLocator !== undefined &&
+                    (relayStatusLocator(operation.statusLocator.requestId, operation.statusLocator.endpoint).endpoint !== operation.statusLocator.endpoint ||
+                        operation.quote.statusLocator?.requestId !== operation.statusLocator.requestId ||
+                        operation.quote.statusLocator?.endpoint !== operation.statusLocator.endpoint)) ||
                 operation.quote.payer !== operation.sourceAccount.toLowerCase() ||
                 operation.quote.recipient !== operation.recipient.toLowerCase() ||
                 operation.quote.principalAtomic !== operation.amountAtomic ||
@@ -63,6 +70,8 @@ export function validateRelayUnsignedOperation(value) {
             corrupt();
         }
     }
+    else if (operation.statusLocator !== undefined)
+        corrupt();
     return operation;
 }
 export function freezeRelayUnsignedOperation(input) {
@@ -74,7 +83,8 @@ export function freezeRelayUnsignedOperation(input) {
 export function publicRelayUnsignedOperation(operation) {
     const { integrityHash: _integrityHash, ...publicFields } = validateRelayUnsignedOperation(operation);
     return { ...publicFields, proofClass: "saved_unsigned_quote", balanceEvidence: "not_checked",
-        allowanceEvidence: "not_checked", executionAdmitted: false, nextActions: [] };
+        allowanceEvidence: "not_checked", statusObservable: operation.statusLocator !== undefined,
+        executionAdmitted: false, nextActions: [] };
 }
 export class RelayUnsignedOperationRepository extends SecureStateStore {
     async loadOperation(profileHash, operationId) {
