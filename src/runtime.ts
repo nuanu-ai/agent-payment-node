@@ -2,6 +2,7 @@ import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
+import type { RelayEffectJournal } from "./relay/effect-journal.js";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { setTimeout as waitFor } from "node:timers/promises";
@@ -46,11 +47,31 @@ import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
+export interface RelayExecutionConfirmationSummary {
+  readonly operationId: string;
+  readonly sourceChainId: 1;
+  readonly destinationChainId: 56;
+  readonly sourceAccount: string;
+  readonly sourceToken: string;
+  readonly amountAtomic: string;
+  readonly recipient: string;
+  readonly minOutputAtomic: string;
+  readonly deadline: string;
+  readonly requestId: string;
+  readonly quoteDigest: string;
+  readonly approvalNetworkFeeCeilingWei: string;
+  readonly depositNetworkFeeCeilingWei: string;
+}
+export type RelayExecuteConfirmation = (summary: RelayExecutionConfirmationSummary) => Promise<boolean>;
+export interface RelayExecuteHandler { execute(operationId: string): Promise<RelayEffectJournal> }
+
 export interface CoreDependencies {
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
   readonly relayStatus?: RelayKeylessStatusService;
+  readonly relayExecute?: RelayExecuteHandler;
+  readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -105,6 +126,8 @@ export class RuntimeContext {
   readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
   readonly relayStatus?: RelayKeylessStatusService;
+  readonly relayExecute?: RelayExecuteHandler;
+  readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -160,6 +183,8 @@ export class RuntimeContext {
     if (dependencies.relayPreflight !== undefined) this.relayPreflight = dependencies.relayPreflight;
     if (dependencies.relayRetire !== undefined) this.relayRetire = dependencies.relayRetire;
     if (dependencies.relayStatus !== undefined) this.relayStatus = dependencies.relayStatus;
+    if (dependencies.relayExecute !== undefined) this.relayExecute = dependencies.relayExecute;
+    if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;

@@ -8,6 +8,8 @@ export class RuntimeContext {
     relayPreflight;
     relayRetire;
     relayStatus;
+    relayExecute;
+    relayExecuteConfirmation;
     stargateNative;
     stargateToken;
     portfolio;
@@ -66,6 +68,10 @@ export class RuntimeContext {
             this.relayRetire = dependencies.relayRetire;
         if (dependencies.relayStatus !== undefined)
             this.relayStatus = dependencies.relayStatus;
+        if (dependencies.relayExecute !== undefined)
+            this.relayExecute = dependencies.relayExecute;
+        if (dependencies.relayExecuteConfirmation !== undefined)
+            this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
         if (dependencies.stargateNative !== undefined)
             this.stargateNative = dependencies.stargateNative;
         if (dependencies.stargateToken !== undefined)
