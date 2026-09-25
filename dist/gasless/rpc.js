@@ -29,11 +29,14 @@ export class GaslessRpcRequestSession {
     verifiedChains = new Set();
     protocolAnchors = new Map();
     reserve() {
-        if (this.terminalStatus !== null)
-            this.rejectHttp(this.terminalStatus);
+        this.assertActive();
         if (this.posts >= MAX_INVOCATION_POSTS)
             gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
         this.posts += 1;
+    }
+    assertActive() {
+        if (this.terminalStatus !== null)
+            this.rejectHttp(this.terminalStatus);
     }
     rejectHttp(status) {
         this.terminalStatus = status;
@@ -58,6 +61,16 @@ export class GaslessRpcRequestSession {
 /** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
 export async function withGaslessRpcInvocation(work) {
     return await invocation.run(new GaslessRpcRequestSession(), work);
+}
+/** Reuse the public command's budget, or start one for a directly invoked observation port. */
+export async function withinGaslessRpcInvocation(work) {
+    return invocation.getStore() === undefined ? await withGaslessRpcInvocation(work) : await work();
+}
+export function gaslessRpcInvocation() {
+    const session = invocation.getStore();
+    if (session === undefined)
+        gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_invocation_missing");
+    return session;
 }
 export function gaslessRpcFactory(environment) {
     const cache = new Map(), transport = new GaslessHttps();
@@ -163,7 +176,7 @@ export class GaslessRpc {
         const session = invocation.getStore() ?? this.fallbackSession;
         session.reserve();
         try {
-            response = await this.transport.request(this.bundlerEndpoint, "POST", canonicalJson(requests), MAX_RESPONSE, "APN_RPC_CONFIG");
+            response = await this.transport.request(this.bundlerEndpoint, "POST", canonicalJson(requests), MAX_RESPONSE, "APN_RPC_CONFIG", () => session.assertActive());
         }
         catch {
             throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable.");
@@ -316,7 +329,7 @@ export class GaslessRpc {
         session.reserve();
         let response;
         try {
-            response = await transport.request(this.bundlerEndpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG");
+            response = await transport.request(this.bundlerEndpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG", () => session.assertActive());
         }
         catch {
             throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable.");
@@ -353,7 +366,7 @@ export class GaslessRpc {
         try {
             session.reserve();
             const requests = reads.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
-            const response = await this.transport.request(this.rpcEndpoint, "POST", canonicalJson(requests.length === 1 ? requests[0] : requests), MAX_RESPONSE, "APN_RPC_CONFIG");
+            const response = await this.transport.request(this.rpcEndpoint, "POST", canonicalJson(requests.length === 1 ? requests[0] : requests), MAX_RESPONSE, "APN_RPC_CONFIG", () => session.assertActive());
             assertHttpStatus(response.status, session);
             if (reads.length === 1) {
                 reads[0].resolve(parseRpcResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), reads[0].id));

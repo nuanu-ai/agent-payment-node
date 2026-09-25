@@ -9,6 +9,7 @@ export declare class GaslessRpcRequestSession {
     private readonly verifiedChains;
     private readonly protocolAnchors;
     reserve(): void;
+    assertActive(): void;
     rejectHttp(status: number): never;
     hasVerifiedChain(rpc: GaslessRpc): boolean;
     verifyChain(rpc: GaslessRpc): void;
@@ -16,6 +17,9 @@ export declare class GaslessRpcRequestSession {
 }
 /** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
 export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T>;
+/** Reuse the public command's budget, or start one for a directly invoked observation port. */
+export declare function withinGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T>;
+export declare function gaslessRpcInvocation(): GaslessRpcRequestSession;
 export declare function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>): GaslessRpcFactory;
 export declare class GaslessRpc implements GaslessRpcPort {
     private readonly transport;

@@ -17,7 +17,7 @@ import { gaslessSignedFees } from "./wire.js";
 /** A transient check failure is retried inside the approved window, before a disclosure as well as after one. */
 const GUARD_ATTEMPTS = 18, GUARD_RETRY_MS = 5_000;
 const TRANSIENT_REASONS = new Set(["gasless_rpc_unavailable", "gasless_bundler_fee_drift",
-  "gasless_rpc_response", "gasless_provider_response", "gasless_mirror_estimate_unavailable"]);
+  "gasless_provider_response", "gasless_mirror_estimate_unavailable"]);
 
 export class GaslessExecution {
   private readonly observation: GaslessObservationService;

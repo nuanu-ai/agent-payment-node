@@ -7,12 +7,12 @@ import { hashObject, sha256 } from "../../src/canonical.js";
 import type { Address, Hex } from "../../src/model.js";
 import { GASLESS_ENTRYPOINT_ABI, GASLESS_PAYMASTER_ABI, GASLESS_TOKEN_ABI } from "../../src/gasless/abi.js";
 import { gaslessFee, gaslessGas } from "../../src/gasless/economics.js";
-import { GaslessHttps, GaslessPostPacer, type GaslessTransport } from "../../src/gasless/https.js";
+import { GaslessHttps, GaslessPostPacer, gaslessResponseDisposition, type GaslessTransport } from "../../src/gasless/https.js";
 import type { GaslessBlock, GaslessChainId, GaslessCursor, GaslessDeployment, GaslessIntent, GaslessLog,
   GaslessSnapshot } from "../../src/gasless/model.js";
 import type { GaslessBootstrapMaterial, GaslessUserOperationMaterial } from "../../src/gasless/ports.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
-import { GaslessRpc, gaslessRpcFactory, withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
+import { GaslessRpc, GaslessRpcRequestSession, gaslessRpcFactory, withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
 import { observeGasless, type GaslessObservationContext } from "../../src/gasless/rpc-observe.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "../../src/gasless/rpc-state.js";
 import { verifyGaslessOuterTransaction } from "../../src/gasless/rpc-transaction.js";
@@ -155,6 +155,25 @@ test("gasless extra in-invocation reads exhaust the cap before any send marker",
   assert.equal(record.failure, "gasless_rpc_request_budget");
 });
 
+test("gasless post-TTY duplicate batch ID is terminal before signing even if a retry would be valid", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  let malformed = 0;
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input);
+    s.setBatchReply(rows => { malformed += 1; return malformed === 1
+      ? [{ ...rows[0]!, id: rows[1]!.id }, ...rows.slice(1)] : rows; });
+    return accepted; };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(malformed, 1);
+  assert.equal(record.bootstrap.signingAttempts, 0);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+  assert.equal(record.failure, "gasless_rpc_response");
+});
+
 for (const boundary of ["before_bootstrap", "before_send"] as const) {
   for (const fault of ["chain", "entrypoint", "balance", "allowance", "nonce", "fees"] as const) {
     test(`gasless production ${fault} drift ${boundary} blocks the next effect`, async (t) => {
@@ -265,6 +284,40 @@ test("gasless HTTP 429 is terminal for its invocation without another transport 
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
     assert.equal(calls, after429);
   });
+});
+
+test("malformed HTTP 429 headers and oversized body are discarded before protocol parsing", async () => {
+  assert.equal(gaslessResponseDisposition(429, "gzip", "invalid-length", 32), "terminal");
+  assert.equal(gaslessResponseDisposition(429, "gzip", String(2 ** 24), 32), "terminal");
+  assert.equal(gaslessResponseDisposition(200, "gzip", "invalid-length", 32), "reject");
+  let calls = 0, now = 0;
+  const pacer = new GaslessPostPacer(() => now, async milliseconds => { now += milliseconds; });
+  const transport: GaslessTransport = { request: async (endpoint, _method, _body, _max, _code, beforeSend) =>
+    await pacer.run(endpoint, new AbortController().signal, async () => {
+      beforeSend?.(); calls += 1; return { status: 429, body: "canary_secret".repeat(300_000) };
+    }) };
+  const rpc = new GaslessRpc(8453, "https://public.pimlico.io/base", "https://public.pimlico.io/bundler", transport);
+  await withGaslessRpcInvocation(async () => {
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
+    await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
+  });
+  assert.equal(calls, 1);
+});
+
+test("same-family queued POSTs recheck terminal 429 after pacing and never start", async () => {
+  let now = 0;
+  const starts: number[] = [], waits: number[] = [];
+  const pacer = new GaslessPostPacer(() => now, async milliseconds => { waits.push(milliseconds); now += milliseconds; });
+  const session = new GaslessRpcRequestSession(), signal = new AbortController().signal;
+  const request = async () => { session.reserve(); return await pacer.run("https://public.pimlico.io", signal, async () => {
+    session.assertActive(); starts.push(now);
+    if (starts.length === 1) session.rejectHttp(429);
+    return 200;
+  }); };
+  const outcomes = await Promise.allSettled([request(), request(), request()]);
+  assert.equal(outcomes.every(result => result.status === "rejected"), true);
+  assert.deepEqual(starts, [0]);
+  assert.equal(waits.length >= 1 && waits.every(value => value >= 750), true);
 });
 
 test("gasless generic non-200 HTTP response is terminal for its invocation", async () => {
@@ -675,7 +728,7 @@ for (const fault of ["transport", "range", "count", "reorg"] as const) {
       { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash }, cursor);
     assert.equal(observation.status, "unresolved"); assert.equal(observation.settlement, null);
     assert.deepEqual(observation.cursor, cursor); assert.equal(observation.evidenceHash, null);
-    assert.equal(requests, fault === "count" ? 2 : fault === "reorg" ? 26 : 3);
+    assert.equal(requests, 26, "all bounded read-only ranges are requested in one batch");
   });
 }
 

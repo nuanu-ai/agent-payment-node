@@ -20,10 +20,13 @@ export declare class GaslessObservationRpc implements GaslessObservationPort {
     private sequence;
     private readonly rpcCall;
     private queue;
+    private readonly pendingReads;
     private lastRequestAt;
     private unavailable;
     constructor(chainId: GaslessChainId, rpcUrl: string, environmentName: string, transport?: GaslessTransport, pacing?: GaslessObservationPacing);
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
+    private observeWithinInvocation;
     private call;
+    private flushReads;
     private request;
 }

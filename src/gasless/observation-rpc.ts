@@ -8,6 +8,7 @@ import { validateGaslessIntent } from "./intent-validation.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation } from "./model.js";
 import { gaslessObservationRpcEnv, gaslessObservationSource } from "./observation-source.js";
 import type { GaslessObservationPort, GaslessObservationRpcFactory } from "./ports.js";
+import { gaslessRpcInvocation, withinGaslessRpcInvocation, type GaslessRpcRequestSession } from "./rpc.js";
 import { recheckBlock, rpcJson, rpcQuantity, rpcRecord, type GaslessRpcCall, type GaslessRpcMethod } from "./rpc-codec.js";
 import { observeGasless } from "./rpc-observe.js";
 import { verifyProtocolAt } from "./rpc-state.js";
@@ -18,6 +19,14 @@ const READ_METHODS = new Set<GaslessRpcMethod>(["eth_chainId", "eth_getBlockByNu
   "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
 const MAX_RESPONSE = 2 * 1024 * 1024;
 const OBSERVATION_REQUEST_INTERVAL_MS = 1_000;
+
+interface PendingRead {
+  readonly id: string;
+  readonly method: GaslessRpcMethod;
+  readonly params: readonly unknown[];
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: unknown) => void;
+}
 
 export interface GaslessObservationPacing {
   readonly minimumIntervalMs: number;
@@ -51,6 +60,7 @@ export class GaslessObservationRpc implements GaslessObservationPort {
   private sequence = 0n;
   private readonly rpcCall: GaslessRpcCall;
   private queue: Promise<void> = Promise.resolve();
+  private readonly pendingReads = new Map<GaslessRpcRequestSession, PendingRead[]>();
   private lastRequestAt: number | null = null;
   private unavailable = false;
 
@@ -67,6 +77,11 @@ export class GaslessObservationRpc implements GaslessObservationPort {
   }
 
   async observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation> {
+    return await withinGaslessRpcInvocation(async () => await this.observeWithinInvocation(intent, identity, cursor));
+  }
+
+  private async observeWithinInvocation(intent: GaslessIntent, identity: GaslessEffectIdentity,
+    cursor: GaslessCursor): Promise<GaslessObservation> {
     this.unavailable = false;
     validateGaslessIntent(intent);
     if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
@@ -91,25 +106,43 @@ export class GaslessObservationRpc implements GaslessObservationPort {
 
   private async call(method: GaslessRpcMethod, params: readonly unknown[]): Promise<unknown> {
     if (!READ_METHODS.has(method)) gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_method");
-    const id = (++this.sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
-    let response;
-    try { response = await this.request(body); }
-    catch (error) {
-      if (error instanceof ApnError && error.details?.reason === "gasless_observation_rpc_unavailable") throw error;
-      this.unavailable = true; throw observationUnavailable();
-    }
-    if (response.status !== 200) gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_http_status");
-    const record = rpcRecord(rpcJson(response.body, MAX_RESPONSE));
-    const result = Object.hasOwn(record, "result"), error = Object.hasOwn(record, "error");
-    if (record.jsonrpc !== "2.0" || record.id !== id || result === error ||
-      !exactKeys(record, result ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"])) {
-      gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
-    }
-    if (error) gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_error");
-    return record.result;
+    return await withinGaslessRpcInvocation(async () => await new Promise<unknown>((resolve, reject) => {
+      const session = gaslessRpcInvocation(), pending = this.pendingReads.get(session);
+      const row: PendingRead = { id: (++this.sequence).toString(), method, params, resolve, reject };
+      if (pending !== undefined) { pending.push(row); return; }
+      this.pendingReads.set(session, [row]);
+      queueMicrotask(() => { void this.flushReads(session); });
+    }));
   }
 
-  private async request(body: string): Promise<{ readonly status: number; readonly body: string }> {
+  private async flushReads(session: GaslessRpcRequestSession): Promise<void> {
+    const reads = this.pendingReads.get(session);
+    if (reads === undefined) return;
+    this.pendingReads.delete(session);
+    try {
+      const requests = reads.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
+      const response = await this.request(canonicalJson(requests.length === 1 ? requests[0] : requests), session);
+      if (reads.length === 1) {
+        reads[0]!.resolve(parseObservationResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), reads[0]!.id));
+        return;
+      }
+      const rows = rpcJson(response.body, MAX_RESPONSE);
+      if (!Array.isArray(rows) || rows.length !== reads.length) gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+      const expected = new Set(reads.map(row => row.id)), results = new Map<string, unknown>();
+      for (const value of rows) {
+        const record = rpcRecord(value), id = record.id;
+        if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
+          gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+        }
+        results.set(id, parseObservationResult(record, id));
+      }
+      for (const read of reads) read.resolve(results.get(read.id));
+    } catch (error) {
+      for (const read of reads) read.reject(error);
+    }
+  }
+
+  private async request(body: string, session: GaslessRpcRequestSession): Promise<{ readonly status: number; readonly body: string }> {
     const pending = this.queue.then(async () => {
       if (this.unavailable) throw observationUnavailable();
       if (this.lastRequestAt !== null) {
@@ -117,22 +150,39 @@ export class GaslessObservationRpc implements GaslessObservationPort {
         if (remaining > 0) await this.pacing.sleep(remaining);
       }
       if (this.unavailable) throw observationUnavailable();
-      this.lastRequestAt = this.pacing.monotonicNow();
       try {
-        const response = await this.transport.request(this.endpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG");
-        if (response.status === 408 || response.status === 429 || response.status >= 500) {
-          this.unavailable = true; throw observationUnavailable();
+        session.reserve();
+        this.lastRequestAt = this.pacing.monotonicNow();
+        const response = await this.transport.request(this.endpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG",
+          () => session.assertActive());
+        if (response.status !== 200) {
+          try { session.rejectHttp(response.status); }
+          catch (error) {
+            if (response.status === 408 || response.status === 429 || response.status >= 500) throw observationUnavailable();
+            throw error;
+          }
         }
         return response;
       } catch (error) {
         this.unavailable = true;
         if (error instanceof ApnError && error.details?.reason === "gasless_observation_rpc_unavailable") throw error;
+        if (error instanceof ApnError && error.code === "APN_RPC_PROTOCOL") throw error;
         throw observationUnavailable();
       }
     });
     this.queue = pending.then(() => undefined, () => undefined);
     return await pending;
   }
+}
+
+function parseObservationResult(record: Record<string, unknown>, id: string): unknown {
+  const result = Object.hasOwn(record, "result"), error = Object.hasOwn(record, "error");
+  if (record.jsonrpc !== "2.0" || record.id !== id || result === error ||
+    !exactKeys(record, result ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"])) {
+    gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+  }
+  if (error) gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_error");
+  return record.result;
 }
 
 function observationUnavailable(): ApnError {

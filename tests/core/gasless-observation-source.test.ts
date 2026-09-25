@@ -11,7 +11,10 @@ import { assertGaslessObservationSource, gaslessObservationSource } from "../../
 import type { GaslessObservationPort, GaslessObservationRpcFactory } from "../../src/gasless/ports.js";
 import { gaslessReceipt, publicGaslessOperation } from "../../src/gasless/receipt.js";
 import type { GaslessDependencies } from "../../src/gasless/service.js";
+import { GaslessObservationRpc } from "../../src/gasless/observation-rpc.js";
+import type { GaslessTransport } from "../../src/gasless/https.js";
 import { gaslessFixture, GaslessTestRpc, testWord } from "./gasless-helpers.js";
+import { ObservationTransport } from "./gasless-fixtures/observation-transport.js";
 import { temporaryState } from "./helpers.js";
 
 const OBSERVATION_ENV = "APN_ETHEREUM_ARCHIVE_RPC_URL";
@@ -94,6 +97,25 @@ test("explicit alternate observer settles one submitted operation without any ef
   assert.equal((repeatedReceipt.receipt as { receipt_hash: string }).receipt_hash, receiptHash);
 });
 
+test("explicit resume keeps every physical observation POST within one cap and at least 750 ms apart", async t => {
+  const { fixture, id, before } = await submittedFixture(t, "observation-source-physical-budget-0001");
+  const endpoint = "https://archive.example/base-observation", delegate = await ObservationTransport.create(endpoint, before.intent);
+  let now = 0;
+  const starts: number[] = [];
+  const transport: GaslessTransport = { request: async (...args) => {
+    starts.push(now); return await delegate.request(...args);
+  } };
+  const observer = new GaslessObservationRpc(8453, endpoint, OBSERVATION_ENV, transport,
+    { minimumIntervalMs: 750, monotonicNow: () => now, sleep: async milliseconds => { now += milliseconds; } });
+  const runtime = observationCore(fixture, () => observer);
+  const result = await runtime.core.execute({ command: "operation.resume", operationId: id,
+    observationRpcEnv: OBSERVATION_ENV });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(starts.length > 1 && starts.length <= 24, `resume used ${starts.length} physical POSTs`);
+  assert.equal(starts.every((value, index) => index === 0 || value - starts[index - 1]! >= 750), true);
+  assert.deepEqual(runtime.effects, { rpc: 0, factory: 1, load: 0, seal: 0 });
+});
+
 test("explicit mode returns before observer resolution for pre-signing state and classifies a missing factory", async (t) => {
   await t.test("pre-signing no-op", async (child) => {
     const temporary = await temporaryState();
@@ -136,7 +158,8 @@ test("explicit mode returns before observer resolution for pre-signing state and
 test("accepted non-terminal alternate observation retains the explicit source in next actions", async (t) => {
   const { fixture, id, before } = await submittedFixture(t, "observation-source-next-action-0001");
   const observer = new StaticObserver();
-  observer.result = { ...before.observation!,
+  observer.result = { status: "pending", transactionHash: null, settlement: null, cursor: before.cursor,
+    evidenceHash: hashObject({ id, status: "pending" }), reason: null,
     source: gaslessObservationSource(before.intent, OBSERVATION_ENV, observer) };
   const runtime = observationCore(fixture, () => observer);
   const result = await runtime.core.execute({ command: "operation.resume", operationId: id,
@@ -349,6 +372,8 @@ test("ordinary recovery keeps original endpoint binding and legacy observations 
     const fixture = await gaslessFixture(temporary.root);
     const { id } = await fixture.prepare("observation-source-legacy-0001");
     assert.equal((await fixture.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+    assert.equal((await fixture.record(id)).state, "submitted_pending");
+    assert.equal((await fixture.core.execute({ command: "operation.resume", operationId: id })).ok, true);
     const operation = await fixture.record(id);
     assert.equal(operation.state, "completed");
     assert.equal(operation.observation?.source, undefined);

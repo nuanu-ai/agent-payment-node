@@ -4,6 +4,18 @@ import { setTimeout as pause } from "node:timers/promises";
 import { ApnError } from "../errors.js";
 import { rpcProviderFamily } from "../lifi/rpc-scheduler.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress } from "../network-policy.js";
+/** HTTP refusal is decided from the status line before untrusted headers or body are parsed. */
+export function gaslessResponseDisposition(status, encoding, declared, maximumBytes) {
+    if (status !== 200)
+        return "terminal";
+    if (encoding !== undefined && encoding !== "identity")
+        return "reject";
+    if (declared !== undefined && (typeof declared !== "string" ||
+        !/^(?:0|[1-9][0-9]*)$/u.test(declared) || BigInt(declared) > BigInt(maximumBytes))) {
+        return "reject";
+    }
+    return "read";
+}
 /** One queue per provider family, shared by all gasless HTTPS clients in this process. */
 export class GaslessPostPacer {
     now;
@@ -51,7 +63,7 @@ export class GaslessHttps {
     constructor(pacer = sharedPostPacer) {
         this.pacer = pacer;
     }
-    async request(endpointInput, method, body, maximumBytes, code) {
+    async request(endpointInput, method, body, maximumBytes, code, beforeSend) {
         const expires = performance.now() + 15_000;
         const endpoint = parsePublicHttpsUrl(endpointInput, code, "Gasless endpoint", 2048);
         if (body !== null && Buffer.byteLength(body, "utf8") > 256 * 1024)
@@ -74,10 +86,14 @@ export class GaslessHttps {
             deadline.assert();
             const addresses = await abortable(resolvePublicAddresses(endpoint, code, "Gasless endpoint"), deadline.signal);
             deadline.assert();
-            return method === "POST" ? await this.pacer.run(endpoint.origin, deadline.signal, async () => {
-                deadline.assert();
-                return await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
-            }) : await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
+            if (method === "POST")
+                return await this.pacer.run(endpoint.origin, deadline.signal, async () => {
+                    deadline.assert();
+                    beforeSend?.();
+                    return await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
+                });
+            beforeSend?.();
+            return await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
         }
         finally {
             clearTimeout(timer);
@@ -200,14 +216,15 @@ function send(endpoint, method, body, addresses, maximumBytes, deadline, code) {
                     return;
                 }
                 const status = response.statusCode ?? 0;
-                const encoding = response.headers["content-encoding"];
-                if ((status >= 300 && status < 400) || (encoding !== undefined && encoding !== "identity")) {
-                    finish(failure(code, "redirect_or_encoding"));
+                const declared = response.headers["content-length"];
+                const disposition = gaslessResponseDisposition(status, response.headers["content-encoding"], declared, maximumBytes);
+                if (disposition === "terminal") {
+                    finish(null, { status, body: "" });
+                    response.destroy();
                     return;
                 }
-                const declared = response.headers["content-length"];
-                if (declared !== undefined && (!/^(?:0|[1-9][0-9]*)$/u.test(declared) || BigInt(declared) > BigInt(maximumBytes))) {
-                    finish(failure(code, "response_size"));
+                if (disposition === "reject") {
+                    finish(failure(code, "redirect_or_encoding_or_size"));
                     return;
                 }
                 let size = 0;
