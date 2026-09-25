@@ -2,7 +2,8 @@ import { encodeFunctionData, getAddress, keccak256, parseTransaction, recoverTra
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from "./constants.js";
 import { ApnError, assertInput } from "./errors.js";
-import { MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
+import { evmUint, MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
+import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { multiplyAtomic, parseAtomic } from "./money.js";
 import { canonicalAddress, validateBalance } from "./wallet-policy.js";
 import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
@@ -179,8 +180,16 @@ export function publicOperation(operation) {
     };
 }
 export function publicReceipt(receipt) {
+    const evidence = receipt.evmEvidence;
+    const evmFinality = receipt.evm !== undefined && receipt.evmEvidence?.transactionVerified === true
+        ? receipt.blockNumberAtomic !== undefined && directEvmRequiresSafeHead(receipt.evm.asset.chainId) &&
+            evidence?.safeBlockNumberAtomic !== undefined && evidence.safeBlockHash !== undefined &&
+            evmUint(evidence.safeBlockNumberAtomic) >= evmUint(receipt.blockNumberAtomic) &&
+            (evidence.safeBlockNumberAtomic !== receipt.blockNumberAtomic || evidence.safeBlockHash === evidence.blockHash)
+            ? "rpc_safe_inclusion" : "inclusion_only"
+        : "not_observed";
     return {
-        ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, ...(receipt.evm.feeQuote.feeModel === undefined ? {} : { fee_model: receipt.evm.feeQuote.feeModel }), chain_evidence: receipt.evmEvidence ?? null, finality: receipt.evmEvidence?.transactionVerified === true ? receipt.evm.asset.chainId === 42161 ? "rpc_safe_inclusion" : "inclusion_only" : "not_observed" }),
+        ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, ...(receipt.evm.feeQuote.feeModel === undefined ? {} : { fee_model: receipt.evm.feeQuote.feeModel }), chain_evidence: receipt.evmEvidence ?? null, finality: evmFinality }),
         operation_id: receipt.operationId,
         state: receipt.state,
         terminal: receipt.terminal,
