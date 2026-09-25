@@ -1,9 +1,10 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
+import { loadAllowlistInventory, } from "./allowlist-inventory.js";
 import { allowlistProfileHash, canonicalAllowlistAccount, isoInstant, validateAllowlistAdmission, } from "./allowlist-policy-overlay.js";
 import { ASSET_POLICY_REGISTRY_SCHEMA_V2, sealAssetPolicyRegistry, } from "./asset-policy-registry.js";
 import { stateCorrupt } from "./secure-state-store.js";
+import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2 = "apn.allowlist-policy-overlay.v2";
 export const ALLOWLIST_POLICY_RECORD_SCHEMA_V2 = "apn.allowlist-policy-record.v2";
 /** The owner-written file format accepted by `apn allowlist policy stage --file`. */
@@ -22,7 +23,7 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
     const overlay = { ...body, overlayDigest: domainHash(ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2, canonicalJson(body)) };
     const merged = new Map();
     for (const admission of overlay.admissions) {
-        const asset = resolveAllowlistAsset(admission, inventory);
+        const asset = resolveDirectPolicyAsset(admission, inventory);
         const key = `${asset.chain}\0${asset.kind}\0${asset.identifier ?? ""}`;
         const row = merged.get(key) ?? { asset, rails: { direct: false, gasless: false, x402: false, bridge: false, swap: false },
             railCaps: {}, pins: {} };
@@ -118,7 +119,7 @@ function overlayInput(value, inventory) {
     const identities = new Set();
     const families = new Set();
     for (const row of admissions) {
-        const asset = resolveAllowlistAsset(row, inventory);
+        const asset = resolveDirectPolicyAsset(row, inventory);
         families.add(asset.family);
         const identity = `${asset.chain}\0${asset.kind}\0${asset.identifier ?? ""}\0${row.rail}`;
         if (identities.has(identity))

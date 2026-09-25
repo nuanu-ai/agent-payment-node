@@ -126,7 +126,7 @@ export declare function directEvmNetworkByCaip2(chain: string): DirectEvmNetwork
 export declare function directEvmQuoteFeeModel(chainId: DirectEvmChainId): DirectEvmQuoteFeeModel | undefined;
 export declare function directEvmRequiresSafeHead(chainId: DirectEvmChainId): boolean;
 /**
- * The frozen list rows of one direct network: its native coin and pinned token contracts with list decimals. The
- * registry's native coin must agree with the list row, so a list revision cannot silently rename or re-scale it.
+ * Direct rows of one network: frozen native/token identities plus the three C1-12 direct-only token deployments.
+ * The registry's native coin must agree with the frozen row, so a list revision cannot silently rename or re-scale it.
  */
 export declare function directEvmListRows(chainId: DirectEvmChainId): readonly CandidateAsset[];

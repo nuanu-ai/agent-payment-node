@@ -5,6 +5,7 @@ import { ASSET_POLICY_REGISTRY_SCHEMA_V2, evaluateAssetPolicy, type AssetPolicyA
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity, type AssetUsageReservation } from "./asset-usage-ledger.js";
 import { DirectAssetUsageAdapter, validateDirectAssetUsageLease, type DirectAssetUsageLease } from "./direct-asset-usage.js";
 import { ApnError } from "./errors.js";
+import { directEvmSupplementalAsset } from "./evm-direct-supplemental-assets.js";
 import type { ClockPort } from "./ports.js";
 
 export const DIRECT_ALLOWLIST_SCHEMA = "apn.direct-allowlist.v1" as const;
@@ -34,15 +35,16 @@ export type DirectAllowlistRefusal =
 /** Where the owning journal says the effect is. The ledger follows it forward and never moves backward. */
 export type DirectUsageTarget = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
 
-/** The frozen-list row for a direct transfer. Pure: it runs before any RPC, custody or signing call. */
+/** A pinned direct row. Pure: it runs before any RPC, custody or signing call. */
 export function requireListedDirectAsset(chain: string, asset: AssetUsageIdentity["asset"]): CandidateAsset {
   const inventory = loadAllowlistInventory();
   if (!inventory.networks.some((network) => network.chain === chain)) {
     refuse("allowlist_network_unlisted", "The network is not on the frozen allowlist; direct transfers are refused.", { chain });
   }
-  const row = inventory.assets.find((entry) => entry.chain === chain && entry.kind === asset.kind && entry.identifier === asset.identifier);
+  const row = inventory.assets.find((entry) => entry.chain === chain && entry.kind === asset.kind && entry.identifier === asset.identifier)
+    ?? (asset.kind === "token" ? directEvmSupplementalAsset(chain, asset.identifier) : undefined);
   if (row === undefined) {
-    refuse("allowlist_asset_unlisted", "The asset is not on the frozen allowlist for this network; only pinned list contracts are accepted.",
+    refuse("allowlist_asset_unlisted", "The asset has no pinned direct identity for this network.",
       { chain, asset: asset.identifier ?? "native" });
   }
   return row;

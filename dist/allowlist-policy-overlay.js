@@ -2,12 +2,13 @@ import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { ALLOWLIST_DATASET_SCHEMA, loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
+import { ALLOWLIST_DATASET_SCHEMA, loadAllowlistInventory, } from "./allowlist-inventory.js";
 import { sealAssetPolicyRegistry, } from "./asset-policy-registry.js";
 import { parseAtomic } from "./money.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
 import { validateSwapMechanismPin } from "./swap/pin.js";
+import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA = "apn.allowlist-policy-overlay.v1";
 export const ALLOWLIST_POLICY_RECORD_SCHEMA = "apn.allowlist-policy-record.v1";
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -31,7 +32,7 @@ export function compileAllowlistPolicyOverlay(raw, inventory = loadAllowlistInve
     };
     const chains = new Map();
     for (const admission of overlay.admissions) {
-        const asset = resolveAllowlistAsset(admission, inventory);
+        const asset = resolveDirectPolicyAsset(admission, inventory);
         const rails = { direct: admission.rail === "direct", gasless: admission.rail === "gasless",
             x402: admission.rail === "x402", bridge: admission.rail === "bridge", swap: admission.rail === "swap" };
         const row = {
@@ -104,7 +105,7 @@ function overlayInput(value, inventory) {
     const identities = new Set();
     let family;
     for (const row of admissions) {
-        const asset = resolveAllowlistAsset(row, inventory);
+        const asset = resolveDirectPolicyAsset(row, inventory);
         if (family === undefined)
             family = asset.family;
         if (asset.family !== family)
