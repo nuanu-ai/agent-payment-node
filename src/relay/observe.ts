@@ -7,6 +7,7 @@ import { verifyDepositObservation, type RelayDepositObservation } from "./deposi
 import { proveRelayBnbDestination, type RelayBnbProofPorts, type RelayBnbProofResult } from "./destination-proof.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayKeylessStatusService } from "./status.js";
+import { BNB_NATIVE, ETHEREUM_USDC } from "./quote.js";
 
 const OPERATION = /^[a-f0-9]{64}$/u;
 export interface RelaySourceFinalityPorts {
@@ -45,6 +46,14 @@ export class RelayObserveService {
     if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
     if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
       throw new ApnError("APN_OPERATION_BLOCKED", "Relay operation is retired.");
+    const quote = op.quote;
+    if (op.sourceChainId !== 1 || op.destinationChainId !== 56 || quote === undefined ||
+      op.nativeQuote !== undefined || quote.paymentDetails?.chainId !== "ethereum" ||
+      quote.paymentDetails.currency.toLowerCase() !== ETHEREUM_USDC.toLowerCase() ||
+      quote.orderData?.output?.chainId !== "bnb" || quote.orderData.output.payments.length !== 1 ||
+      quote.orderData.output.payments[0]?.currency.toLowerCase() !== BNB_NATIVE.toLowerCase())
+      throw new ApnError("APN_OPERATION_BLOCKED", "Relay observe supports only the saved Ethereum USDC to BNB lane.",
+        { reason: "relay_observe_unsupported_lane" });
     const result = (state: RelayObserveState, reason: string, sourceFinalized = false,
       providerStatus: string | null = null, providerStatusBound = false,
       destinationProof: RelayBnbProofResult | null = null): RelayObserveResult => ({

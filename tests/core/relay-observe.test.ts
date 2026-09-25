@@ -12,6 +12,7 @@ import { runCli } from "../../src/cli.js";
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "../../src/relay/observe-rpc.js";
 import { RelayKeylessStatusService } from "../../src/relay/status.js";
 import { ETHEREUM_DEPOSITORY, relayStatusLocator, validateRelayQuote } from "../../src/relay/quote.js";
+import { RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, validateRelayNativeQuote } from "../../src/relay/native-quote.js";
 import type { RelayBnbProofPorts } from "../../src/relay/destination-proof.js";
 import { StateStore } from "../../src/state.js";
 import type { HttpsBaseRpc } from "../../src/rpc.js";
@@ -378,4 +379,35 @@ test("Relay observe CLI keeps provider failure and source mismatch below operati
     assert.equal(evidence.paidAcceptance, false);
     assert.equal(evidence.causalLinkCryptographicallyProven, false);
   }
+});
+
+test("Relay observe CLI rejects saved BNB native to Polygon operations before external reads", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const raw = JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-polygon-native-quote-20260925.json", "utf8"));
+  const nativeQuote = await validateRelayNativeQuote(raw, { payer: RELAY_BNB_SOURCE,
+    recipient: RELAY_POLYGON_RECIPIENT, amountAtomic: "1500000000000000",
+    minimumOutputWei: "9000000000000000000", nowSeconds: 1790909529 });
+  const op = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
+    kind: "relay_unsigned", state: "prepared", terminal: false,
+    profileHash: "1".repeat(64), operationId: "9".repeat(64), idempotencyHash: "3".repeat(64),
+    requestHash: "4".repeat(64), sourceChainId: 56, destinationChainId: 137,
+    sourceAccount: RELAY_BNB_SOURCE.toLowerCase(), recipient: RELAY_POLYGON_RECIPIENT.toLowerCase(),
+    quoteDigest: nativeQuote.quoteDigest, nativeQuote, statusLocator: nativeQuote.statusLocator,
+    policyDigest: "5".repeat(64), policyRevision: 1,
+    depositNetworkFeeCeilingWei: nativeQuote.deposit.maximumNetworkFeeWei,
+    amountAtomic: "1500000000000000", minOutputAtomic: nativeQuote.minimumOutputWei,
+    createdAt: new Date(1790909529 * 1000).toISOString(),
+    deadline: new Date(nativeQuote.deadline * 1000).toISOString() });
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
+  let reads = 0;
+  const fake = { batchCall: async () => { reads++; return []; } } as unknown as HttpsBaseRpc;
+  const result = await runCli(["relay", "observe", "--operation", op.operationId,
+    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"], {},
+  { stateRoot: temp.root, relayObserveSourceRpc: fake, relayObserveBnbRpc: fake,
+    relayStatusFetch: async () => { reads++; throw new Error("unexpected provider read"); } });
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(result.error?.details?.reason, "relay_observe_unsupported_lane");
+  assert.equal(reads, 0);
+  assert.equal(JSON.stringify(result).includes(nativeQuote.statusLocator?.requestId ?? "unavailable"), false);
 });
