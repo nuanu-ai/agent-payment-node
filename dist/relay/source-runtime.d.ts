@@ -22,7 +22,7 @@ export interface RelayExecutionAuthorizationPort {
     confirm(summary: RelayExecutionSummary): Promise<boolean>;
 }
 /** Production constructor uses one explicit public HTTPS Ethereum RPC, with no Relay credential. */
-export declare function createRelayEthereumSourceRuntime(state: StateStore, wrappingSecret: WrappingSecretPort, rpcUrl: string, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort): RelayEthereumSourceRuntime;
+export declare function createRelayEthereumSourceRuntime(state: StateStore, wrappingSecret: WrappingSecretPort, rpcUrl: string, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort, transport?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">): RelayEthereumSourceRuntime;
 /** The constructor accepts an injected RPC surface so tests can never reach a network. */
 export declare class RelayEthereumSourceRuntime {
     private readonly state;

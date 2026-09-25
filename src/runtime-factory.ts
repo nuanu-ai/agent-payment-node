@@ -2,6 +2,7 @@ import { RelayUnsignedPrepareService, type RelayPreparePorts } from "./relay/pre
 import { RelayReadOnlyPreflightService, type RelayPreflightPorts } from "./relay/preflight.js";
 import { RelayRetireService } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
+import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
@@ -17,7 +18,7 @@ import type { ProfilePolicyPort } from "./profile-policy.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
-import { TtyTransferApproval } from "./tty-approval.js";
+import { TtyRelayExecuteConfirmation, TtyTransferApproval, type TtyTransferApprovalOptions } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
 import { TtyForegroundAuthentication } from "./foreground-auth.js";
@@ -122,6 +123,9 @@ import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
 export interface RuntimeFactoryOptions {
+  /** Synthetic CLI test seam; source runtime still owns confirmation, pacing, and source effect guards. */
+  readonly relayExecuteTransport?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
+  readonly relayExecuteTtyOptions?: TtyTransferApprovalOptions;
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreparePorts?: RelayPreparePorts;
   readonly relayPreflight?: RelayReadOnlyPreflightService;
@@ -283,6 +287,12 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       : undefined
   );
   const clock = options.clock ?? { now: () => new Date() };
+  const relayAuthorization = bound.request.command === "relay.execute"
+    ? new TtyRelayExecuteConfirmation(options.relayExecuteTtyOptions) : undefined;
+  const relayExecuteConfirmation = relayAuthorization?.confirm.bind(relayAuthorization);
+  const relayExecute = relayAuthorization === undefined ? undefined
+    : createRelayEthereumSourceRuntime(state, wrappingSecret, bound.rpcUrl ?? "", { confirm: relayExecuteConfirmation! },
+      clock, options.relayExecuteTransport);
   const stargateNative = options.stargateNative ?? (bound.request.command.startsWith("stargate.native.")
     ? new StargateNativeService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
   const stargateToken = options.stargateToken ?? (bound.request.command.startsWith("stargate.token.")
@@ -315,6 +325,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     : undefined);
   return new ApnCore({
     state,
+    ...(relayExecute === undefined ? {} : { relayExecute, relayExecuteConfirmation: relayExecuteConfirmation! }),
     ...(stargateNative === undefined ? {} : { stargateNative }),
     ...(stargateToken === undefined ? {} : { stargateToken }),
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.

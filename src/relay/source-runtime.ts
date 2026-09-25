@@ -90,13 +90,15 @@ class RelayExecutionAdmissionStore extends SecureStateStore {
 
 /** Production constructor uses one explicit public HTTPS Ethereum RPC, with no Relay credential. */
 export function createRelayEthereumSourceRuntime(state: StateStore, wrappingSecret: WrappingSecretPort,
-  rpcUrl: string, authorization: RelayExecutionAuthorizationPort, clock: ClockPort = { now: () => new Date() }): RelayEthereumSourceRuntime {
+  rpcUrl: string, authorization: RelayExecutionAuthorizationPort, clock: ClockPort = { now: () => new Date() },
+  transport?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">): RelayEthereumSourceRuntime {
   let endpoint: URL;
   try { endpoint = new URL(rpcUrl); }
   catch { throw new ApnError("APN_RPC_CONFIG", "Relay execution requires one HTTPS RPC URL."); }
   if (endpoint.pathname !== "/" || endpoint.search !== "" || endpoint.hash !== "" || endpoint.username !== "" || endpoint.password !== "")
     throw new ApnError("APN_RPC_CONFIG", "Relay execution requires a keyless HTTPS RPC origin without a signed path or query.");
-  return new RelayEthereumSourceRuntime(state, wrappingSecret, new HttpsBaseRpc(rpcUrl), authorization, clock, endpoint.origin);
+  const validatedTransport = new HttpsBaseRpc(rpcUrl);
+  return new RelayEthereumSourceRuntime(state, wrappingSecret, transport ?? validatedTransport, authorization, clock, endpoint.origin);
 }
 
 /** The constructor accepts an injected RPC surface so tests can never reach a network. */
