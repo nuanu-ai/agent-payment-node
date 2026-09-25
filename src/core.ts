@@ -184,6 +184,12 @@ export class ApnCore {
         }
         return dataOutcome(await service.execute(request.operationId), "source_effect_journal");
       }
+      case "relay.native.execute": {
+        canonicalOperationId(request.operationId);
+        const service = this.context.relayNativeExecute;
+        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native execute runtime and foreground confirmation are required.");
+        return dataOutcome(await service.execute(request.operationId), "source_effect_journal");
+      }
       case "relay.retire": {
         const service = this.context.relayRetire;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay retirement runtime is unavailable.");

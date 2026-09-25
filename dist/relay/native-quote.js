@@ -225,6 +225,33 @@ export async function validateRelayNativeQuote(value, intent) {
             maxPriorityFeePerGas: priority.toString(), maximumNetworkFeeWei: (gas * maxFeePerGas).toString() } };
     return freeze({ ...projection, quoteDigest: hashObject(projection) });
 }
+/** Recheck the saved quote's solver authority and native deposit at the execution boundary. */
+export async function verifySavedRelayNativeQuote(quote) {
+    if (quote.schemaVersion !== "apn.relay-native-quote.v1" || quote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE ||
+        hashObject((({ quoteDigest: _digest, ...projection }) => projection)(quote)) !== quote.quoteDigest)
+        fail("saved digest");
+    let orderId, signer;
+    try {
+        orderId = getOrderId(quote.orderData, CHAINS);
+        signer = await recoverMessageAddress({ message: { raw: orderId }, signature: quote.orderSignature });
+    }
+    catch {
+        return fail("saved order authority");
+    }
+    if (!same(orderId, quote.orderId) || !same(signer, RELAY_SOLVER) || !same(quote.solver, RELAY_SOLVER))
+        fail("saved order authority");
+    try {
+        const decoded = decodeFunctionData({ abi: DEPOSIT_NATIVE, data: quote.deposit.data });
+        if (decoded.functionName !== "depositNative" || !same(decoded.args[0], quote.payer) ||
+            !same(decoded.args[1], orderId) ||
+            !same(encodeFunctionData({ abi: DEPOSIT_NATIVE, functionName: "depositNative", args: [...decoded.args] }), quote.deposit.data) ||
+            quote.deposit.value !== quote.principalAtomic || !same(quote.deposit.to, ETHEREUM_DEPOSITORY))
+            fail("saved deposit");
+    }
+    catch {
+        fail("saved deposit");
+    }
+}
 /** One public quote POST, no API key or retry. */
 export async function requestRelayNativeQuote(intent, fetcher = fetch, now = () => Math.floor(Date.now() / 1000)) {
     const response = await fetcher("https://api.relay.link/quote/v2", { method: "POST",

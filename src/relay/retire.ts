@@ -8,6 +8,7 @@ import { RelayRetirementRepository, RelayUnsignedOperationRepository, publicRela
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
+import { RelayNativeSourceJournalRepository } from "./native-source.js";
 import { RelayEncryptedApprovalCustody } from "./approval-effect.js";
 import { RELAY_BNB_SOURCE, relayNativeRoute } from "./native-quote.js";
 
@@ -47,6 +48,10 @@ export class RelayRetireService {
       // Any effect intent, including a pending journal, makes local retirement unsafe.
       if (await new RelayEffectJournalRepository(this.state.root).load(profileHash, input.operationId) !== null) {
         throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because an effect journal exists.");
+      }
+      if (input.profile === "evm-live-buyer" &&
+        await new RelayNativeSourceJournalRepository(this.state.root).load(op) !== null) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because a native source journal exists.");
       }
       return new RelayEncryptedApprovalCustody(this.state, this.wrapping).withNoMaterial(op, async () =>
         new AssetUsageLedger(this.state.root).withNoMatchingRelayReservation(op.sourceAccount, op.policyDigest,

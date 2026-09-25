@@ -664,6 +664,7 @@ apn relay prepare --profile default --recipient <address> --amount-atomic <usdc>
 apn relay native prepare --profile <bnb-owner-profile> --recipient 0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14 --amount-atomic <bnb-wei> --min-output-atomic <pol-wei> --max-deposit-network-fee-wei <bnb-wei> --idempotency-key <key>
 apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>
 apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>
+apn relay native execute --operation <operation-id> --rpc-url <bnb-rpc>
 apn relay retire --profile <default|evm-live-buyer> --operation <operation-id>
 apn relay status --operation <operation-id>
 apn relay observe --operation <operation-id> --rpc-url <ethereum-rpc> --bnb-rpc-url <bnb-rpc>
@@ -790,7 +791,12 @@ at the default recipient `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`.
 It requires an active owner policy for the BNB native bridge asset pinned to
 `bnb-native-polygon-native-v1`. It saves the verified quote and unsigned native
 deposit envelope. The existing Relay preflight and execute paths remain bound
-to the Ethereum USDC to BNB lane and refuse this native operation.
+to the Ethereum USDC to BNB lane and refuse this native operation. `relay native
+execute` requires the saved buyer operation, active native bridge policy,
+encrypted local buyer wallet, fresh BNB funding and nonce, and foreground
+confirmation. It signs and marks one exact native deposit before the only send;
+an ambiguous send is observed by its saved hash and never repeated. Its source
+journal proves neither Polygon delivery nor paid acceptance.
 
 `relay observe` reads one saved Ethereum USDC to BNB operation. Supply explicit
 credential-free public HTTPS Ethereum and BNB RPC URLs. It checks the finalized
