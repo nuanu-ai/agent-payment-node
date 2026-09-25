@@ -12,7 +12,7 @@ declare const body: z.ZodObject<{
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
     sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -41,7 +41,7 @@ declare const schema: z.ZodObject<{
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
     sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -74,43 +74,21 @@ declare const retirementSchema: z.ZodObject<{
 export type RelayRetirement = z.infer<typeof retirementSchema>;
 export declare function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOperation;
 export declare function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput): RelayUnsignedOperation;
-export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement?: RelayRetirement | null): {
-    proofClass: "saved_unsigned_quote";
-    balanceEvidence: "not_checked";
-    allowanceEvidence: "not_checked";
-    statusObservable: boolean;
-    executionAdmitted: false;
-    nextActions: readonly [];
-    state: "prepared" | "retired";
-    terminal: boolean;
-    retiredAt?: string;
-    retirementIntegrityHash?: string;
-    schemaVersion: "apn.relay-unsigned-operation.v1";
-    kind: "relay_unsigned";
-    profileHash: string;
-    operationId: string;
-    idempotencyHash: string;
-    requestHash: string;
-    sourceChainId: 1 | 56;
-    destinationChainId: 137 | 56;
-    sourceAccount: string;
-    recipient: string;
-    quoteDigest: string;
-    amountAtomic: string;
-    minOutputAtomic: string;
-    createdAt: string;
-    deadline: string;
-    statusLocator?: {
-        requestId: string;
-        endpoint: string;
-    } | undefined;
-    quote?: ValidatedRelayQuote | undefined;
-    nativeQuote?: ValidatedRelayNativeQuote | undefined;
-    policyDigest?: string | undefined;
-    policyRevision?: number | undefined;
-    approvalNetworkFeeCeilingWei?: string | undefined;
-    depositNetworkFeeCeilingWei?: string | undefined;
+export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation, "integrityHash" | "statusLocator" | "quote" | "nativeQuote" | "state" | "terminal"> & {
+    readonly quote?: Omit<ValidatedRelayQuote, "statusLocator">;
+    readonly nativeQuote?: Omit<ValidatedRelayNativeQuote, "statusLocator">;
+    readonly state: "prepared" | "retired";
+    readonly terminal: boolean;
+    readonly retiredAt?: string;
+    readonly retirementIntegrityHash?: string;
+    readonly proofClass: "saved_unsigned_quote";
+    readonly balanceEvidence: "not_checked";
+    readonly allowanceEvidence: "not_checked";
+    readonly statusObservable: boolean;
+    readonly executionAdmitted: false;
+    readonly nextActions: readonly [];
 };
+export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement?: RelayRetirement | null): PublicRelayUnsignedOperation;
 /** Separate create-only marker preserves the original prepared quote byte for byte. */
 export declare class RelayRetirementRepository extends SecureStateStore {
     private path;
