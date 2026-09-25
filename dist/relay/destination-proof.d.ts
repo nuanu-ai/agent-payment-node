@@ -88,3 +88,5 @@ export declare function proveRelayBnbDestination(input: Readonly<{
 }>, ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;
 /** Base credit observation has no source journal or order-causal proof. */
 export declare function proveRelayBaseDestination(operation: RelayUnsignedOperation, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;
+/** A provider candidate is only a discovery hint; even a real native credit is not causal proof. */
+export declare function proveRelayNativeDestination(operation: RelayUnsignedOperation, sourceHash: string, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult>;

@@ -3,6 +3,7 @@ import type { Hex } from "viem";
 import { validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { verifyDepositObservation, type RelayDepositObservation } from "./deposit-effect.js";
 import { BNB_NATIVE } from "./quote.js";
+import { relayNativeRoute } from "./native-quote.js";
 
 const HASH = /^0x[0-9a-fA-F]{64}$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
@@ -138,8 +139,25 @@ export async function proveRelayBaseDestination(operation: RelayUnsignedOperatio
   return inspectCandidate(op, "", candidateHashes[0]!.toLowerCase(), ports, 8453);
 }
 
+/** A provider candidate is only a discovery hint; even a real native credit is not causal proof. */
+export async function proveRelayNativeDestination(operation: RelayUnsignedOperation,
+  sourceHash: string, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult> {
+  const op = validateRelayUnsignedOperation(operation), quote = op.nativeQuote;
+  if (!quote || op.sourceChainId !== 56 || ![137, 143].includes(op.destinationChainId) ||
+    quote.routeReference !== relayNativeRoute(op.sourceAccount, op.recipient).reference ||
+    quote.recipient.toLowerCase() !== op.recipient.toLowerCase() ||
+    BigInt(quote.minimumOutputWei) < BigInt(op.minOutputAtomic)) return mismatch("saved_native_quote_binding");
+  if (!HASH.test(sourceHash) || candidateHashes.length !== 1 || !HASH.test(candidateHashes[0]!))
+    return mismatch("native_candidate_hashes_invalid");
+  let chainId: number;
+  try { chainId = await ports.chainId(); } catch { return unproven("destination_rpc_unavailable"); }
+  if (chainId !== op.destinationChainId) return mismatch("destination_chain_id");
+  return inspectCandidate(op, sourceHash.toLowerCase(), candidateHashes[0]!.toLowerCase(), ports,
+    op.destinationChainId as 137 | 143);
+}
+
 async function inspectCandidate(op: RelayUnsignedOperation, sourceHash: string, hash: string,
-  ports: RelayBnbProofPorts, expectedChainId: 56 | 8453): Promise<RelayBnbProofResult> {
+  ports: RelayBnbProofPorts, expectedChainId: 56 | 137 | 143 | 8453): Promise<RelayBnbProofResult> {
   let tx: RelayBnbTransaction | null, receipt: RelayBnbReceipt | null;
   try { [tx, receipt] = await Promise.all([ports.transaction(hash), ports.receipt(hash)]); }
   catch { return unproven("bnb_rpc_unavailable"); }
@@ -180,7 +198,7 @@ async function inspectCandidate(op: RelayUnsignedOperation, sourceHash: string, 
   }
   return { status: "recipient_credit_proven", relayOrderFulfillmentProven: false, paidAcceptance: false, proof: {
     operationId: op.operationId, operationIntegrityHash: op.integrityHash, quoteDigest: op.quoteDigest,
-    orderId: op.quote!.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
+    orderId: op.nativeQuote?.orderId ?? op.quote!.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
     destinationBlockNumber: receipt.blockNumber.toString(), destinationBlockHash: receipt.blockHash.toLowerCase(),
     finalityBlockNumber: safe.number.toString(), finalityBlockHash: safe.hash.toLowerCase(),
     recipient: op.recipient.toLowerCase(), minimumOutputWei: op.minOutputAtomic, creditedWei: credited.toString(), method } };
