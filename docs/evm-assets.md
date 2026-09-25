@@ -130,6 +130,13 @@ choice follows what each chain's `safe` tag means, measured on 2026-09-18:
 - BNB, Avalanche, Sei: `safe` equals latest (fast or instant finality), so
   the check adds finality evidence at no delay. Monad: `safe` is the voted
   block, one block (about 0.4 s) behind latest.
+
+On 2026-09-25 the selected public BNB endpoint returned `missing trie node`
+for a `safe` state read while `latest` succeeded. Direct BNB native commands
+therefore use batched prepare and approval reads with a 24 physical POST cap
+and persistent provider pacing. The `safe` receipt proof remains required;
+an unavailable `safe` read leaves the signed operation nonterminal for
+observation-only recovery. `latest` is not substituted for `safe`.
 - OP Mainnet and Unichain: `safe` is L1-derived and lagged 94 and 346 blocks;
   they keep Base's inclusion rule, like Base on the same stack.
 - Linea: `safe` equals `finalized` (L1 finality), 614 blocks (about 20 min)

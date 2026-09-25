@@ -18,9 +18,14 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
     const binding = operation.evm;
     if (binding === undefined || operation.economics === undefined)
         throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
+    if (operation.chainId === 56)
+        rpcPort.armBnbDirectRpcGuard?.();
     const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
+    const grouped = operation.chainId === 56 && asset.kind === "native" ? rpc.prepareBnbNative?.() : undefined;
+    if (operation.chainId === 56 && grouped === undefined)
+        throw new ApnError("APN_RPC_CONFIG", "BNB native approval requires batched RPC reads.");
     // The balance reader checks the selected chain before and after its pinned reads.
-    const balance = await rpc.balance(operation.walletAddress, {
+    const balance = await (grouped ?? rpc).balance(operation.walletAddress, {
         chainId: operation.chainId, token: asset.kind === "native" ? "native" : asset.address, decimals: asset.decimals,
     });
     if (balance.address !== operation.walletAddress || balance.asset.chainId !== asset.chainId ||
@@ -28,10 +33,10 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
         throw new ApnError("APN_ASSET_MISMATCH", "Current balance does not match the approved frozen asset.");
     }
     if (beforeSigning) {
-        const [nonce, fees] = await Promise.all([
+        const [nonce, fees] = grouped === undefined ? await Promise.all([
             rpc.nonce(operation.chainId, operation.walletAddress, "pending"),
             rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)),
-        ]);
+        ]) : await grouped.nonceEstimate(operation.walletAddress, evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)).then(({ nonce, estimated }) => [nonce, estimated]);
         let executableNonce = BigInt(nonce);
         if (operation.chainId === 1 && stateRoot !== undefined) {
             const owned = new Set((await occupiedUniswapTokenNonces(stateRoot, operation.walletAddress)).map(String));
@@ -50,7 +55,7 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
             throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "Current Arbitrum inclusive gas or price exceeds the frozen signed envelope; retain this operation without replacement.");
         }
     }
-    const quote = await rpc.feeQuote(operation.chainId, operation.economics);
+    const quote = await (grouped === undefined ? rpc.feeQuote(operation.chainId, operation.economics) : grouped.feeQuote(operation.economics));
     requireEvmFunding(balance, operation.amountAtomic, quote, binding.maxFeeWei);
 }
 export function evmCustodyPayload(operation) {

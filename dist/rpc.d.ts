@@ -1,5 +1,6 @@
 import type { EvmChainId } from "./evm-asset.js";
 import { EvmRpc } from "./evm-rpc.js";
+import type { StateStore } from "./state.js";
 import type { Address, Hex } from "./model.js";
 import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402AuthorizationState, X402AuthorizationUsedLogs, X402BlockReference, X402PrepareEvidence, X402RpcBlock, X402RpcHead, X402RpcPort, X402RpcReceipt, X402TransferLogs } from "./ports.js";
 export type ReadOnlyRpcBatchCall = {
@@ -15,11 +16,15 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private pinnedAddresses;
     private readonly totalDeadlineMs;
     private readonly abortSignal;
+    private directGuard;
+    private readonly directGuardState;
     constructor(endpoint: string, options?: {
         readonly totalDeadlineMs?: number;
         readonly x402ChainId?: EvmChainId;
         readonly abortSignal?: AbortSignal;
+        readonly directGuardState?: StateStore;
     });
+    armBnbDirectRpcGuard(): void;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal: AbortSignal): HttpsBaseRpc;
     /** Resolve and validate public addresses before a caller reserves a physical POST start. */
@@ -72,6 +77,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     batchCall(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]>;
     private callX402Logs;
     private resolvePublicAddresses;
+    private postDirectGuarded;
     private remainingTimeoutMs;
 }
 export declare function parseRpcResultEnvelope(raw: string, id: string, method?: string): unknown;
