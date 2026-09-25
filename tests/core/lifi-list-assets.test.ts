@@ -80,7 +80,8 @@ test("the bridge registry is the frozen list's exact identities; WBTC stays a le
     { decimals: 6, approval: "zero_first", transferFee: "tether_fee_zero", peers: [], stargate: null });
   assert.equal(usdt.code.upgradeability, "immutable");
   const capabilities = bridgeCapabilities();
-  assert.ok(capabilities.chains.every((row) => row.native_coin.tools.join() === "across"));
+  assert.ok(capabilities.chains.every((row) => row.native_coin.tools.join() ===
+    (row.chain === "eip155:1" || row.chain === "eip155:8453" ? "across,stargateV2" : "across")));
   assert.equal(capabilities.chains.find((row) => row.chain === "eip155:56")?.native_coin.bridgeable_principal, true);
   assert.equal(capabilities.chains.find((row) => row.chain === "eip155:59144")?.native_coin.bridgeable_principal, true);
 });
@@ -91,7 +92,8 @@ test("unlisted, unpaired and mixed-kind legs are refused with a named reason", a
   assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 8453, fromToken: BRIDGE_ZERO_ADDRESS, toToken: USDC[8453] }), /admitted_asset_pair/u);
   assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 8453, fromToken: USDC[1], toToken: BRIDGE_ZERO_ADDRESS }), /admitted_asset_pair/u);
   assert.throws(() => bridgeTokenRow(1, BRIDGE_ZERO_ADDRESS), /native_sentinel_is_not_a_token/u);
-  assert.throws(() => bridgeDeployment(1, 8453, "stargateV2", BRIDGE_ZERO_ADDRESS), /stargate_pool_asset_unreviewed/u);
+  assert.equal(bridgeDeployment(1, 8453, "stargateV2", BRIDGE_ZERO_ADDRESS).endpointId, 30101);
+  assert.throws(() => bridgeDeployment(1, 42161, "stargateV2", BRIDGE_ZERO_ADDRESS), /stargate_native_pair_unreviewed/u);
   assert.throws(() => bridgeDeployment(1, 42161, "across", USDT), /finite_chain/u);
   // The live 1 USDT Ethereum -> Arbitrum quote delivers USDT0, which the frozen list does not name.
   const usdt = (await capture()).usdt["eth-arb"];
@@ -109,11 +111,11 @@ test("unlisted, unpaired and mixed-kind legs are refused with a named reason", a
 });
 
 for (const pair of ["eth-base", "eth-arb"] as const) {
-  test(`captured native ${pair} routes: Across decodes exactly as a value transfer and Stargate native is not preparable`, async () => {
+  test(`captured native ${pair} routes: Across decodes exactly as a value transfer and Stargate admission stays directional`, async () => {
     const to = pair === "eth-base" ? 8453 : 42161;
     const { routes, materialization: m, implicitProtocolFeeAtomic } = await nativeRoute(pair);
     assert.deepEqual(routes.map((r) => [r.choice.tool, r.choice.preparable, r.choice.unavailableReason]),
-      [["across", true, null], ["stargateV2", false, "asset_tool_unreviewed"]]);
+      [["across", true, null], ["stargateV2", pair === "eth-base", pair === "eth-base" ? null : "asset_tool_unreviewed"]]);
     const d = decodeBridgeCall(m);
     assert.equal(m.transaction.valueAtomic, ONE_MILLI_ETH); assert.equal(d.sourceValueAtomic, ONE_MILLI_ETH);
     assert.equal(d.sourceToken, BRIDGE_ZERO_ADDRESS); assert.equal(d.destinationToken, BRIDGE_ZERO_ADDRESS);

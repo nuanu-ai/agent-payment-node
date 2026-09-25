@@ -76,8 +76,10 @@ export class BridgePreparation {
       const parsed = materializeBridgeRoute(selected, response, quote.request, quote.owner.address), m = parsed.materialization, decoded = decodeBridgeCall(m);
       if (decoded.composite !== undefined) await verifyFlyHeaderSignature(decoded.composite, BNB_COMPOSITE.signer);
       const [sourceDeployment, destinationDeployment] = await Promise.all([
-        source.deployment(m.tool, m.request.toChainId, m.request.fromToken, sourceSafeBlock),
-        destination.deployment(m.tool, m.request.fromChainId, m.request.toToken, destinationSafeBlock),
+        source.deployment(m.tool, m.request.toChainId, m.request.fromToken, sourceSafeBlock,
+          m.tool === "stargateV2" && bridgeNativePrincipal(m.request)),
+        destination.deployment(m.tool, m.request.fromChainId, m.request.toToken, destinationSafeBlock,
+          m.tool === "stargateV2" && bridgeNativePrincipal(m.request)),
       ]);
       const planned: readonly BridgeTransaction[] = bridgeNativePrincipal(m.request) ? [m.transaction] : [{ chainId: m.request.fromChainId,
         from: m.sender, to: m.request.fromToken, data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" }];

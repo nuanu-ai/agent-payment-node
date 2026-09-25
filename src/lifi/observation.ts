@@ -5,7 +5,7 @@ import type { BridgeDeploymentIdentity, BridgeDestinationTransactionProof, Bridg
 import { retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
-import { bridgeProtocolEmitter } from "./deployments.js";
+import { bridgeDeployment, bridgeProtocolEmitter } from "./deployments.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
 import { bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { approvalIncluded } from "./transaction.js";
@@ -201,13 +201,14 @@ export class BridgeObservation {
     const proveNativeDelta = bridgeProviderBoundNativeDestination(request);
     const bnb = op.intent.decoded.composite !== undefined;
     let canonical = null;
+    let canonicalDeployment: BridgeDeploymentIdentity | null = null;
     const observe = async (transactionHash: Hex, nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]) =>
       destination.observeDestination === undefined
         ? await destination.observe(transactionHash, undefined, nativeDelivery)
         : await destination.observeDestination(transactionHash, nativeDelivery);
     if (bnb) {
       canonical = requireSafeDestination(await observe(hash));
-      await this.historicalDeployment(op, destination, canonical.transaction, op.intent.destinationDeployment);
+      canonicalDeployment = await this.historicalDeployment(op, destination, canonical.transaction, op.intent.destinationDeployment);
       try { validateBnbFilledRelay(op.sourceProof!, op.intent.materialization, op.intent.decoded, canonical.receipt); }
       catch { throw new BnbProtocolMismatch(); }
     }
@@ -218,9 +219,17 @@ export class BridgeObservation {
         ? op.sourceProof!.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic }) } : undefined));
     if (canonical !== null && (!bridgeSame(proofIdentity(canonical.transaction), proofIdentity(found.transaction)) ||
       !bridgeSame(canonical.receipt.logs, found.receipt.logs))) bridgeFailure("APN_RPC_PROTOCOL", "destination_trace_rebind");
-    if (canonical === null) await this.historicalDeployment(op, destination, found.transaction, op.intent.destinationDeployment);
+    const observedDeployment = canonicalDeployment ??
+      await this.historicalDeployment(op, destination, found.transaction, op.intent.destinationDeployment);
     let proof;
-    try { proof = bridgeDestinationProof(op.sourceProof!, op.intent.materialization, op.intent.decoded, found.receipt); }
+    const nativeStargate = op.intent.decoded.protocol.kind === "stargateV2" &&
+      op.intent.decoded.protocol.assetId === 13;
+    const pool = nativeStargate ? bridgeDeployment(8453, 1, "stargateV2", request.toToken) : null;
+    const poolCodeHash = pool?.code.find((row) => row.address === pool.protocolEmitter)?.codeHash;
+    if (nativeStargate && poolCodeHash === undefined) bridgeFailure("APN_RPC_PROTOCOL", "stargate_native_destination_pin");
+    try { proof = bridgeDestinationProof(op.sourceProof!, op.intent.materialization, op.intent.decoded, found.receipt,
+      nativeStargate ? { pool: pool!.protocolEmitter, frozenDeployment: op.intent.destinationDeployment,
+        observedDeployment, frozenPoolCodeHash: poolCodeHash!, observedPoolCodeHash: poolCodeHash! } : undefined); }
     catch (error) { if (bnb) throw new BnbProtocolMismatch(); throw error; }
     const safeBlock = found.transaction.safeBlock;
     if (safeBlock === null) throw new DestinationPending();
@@ -234,7 +243,7 @@ export class BridgeObservation {
       failure: exceptional ? { reason: `provider_${provider}_unproved`, residualAllowance: null } : null });
   }
   private async historicalDeployment(op: BridgeOperationRecord, rpc: BridgeRpcPort,
-    proof: BridgeTransactionProof | BridgeDestinationTransactionProof, frozen: BridgeDeploymentIdentity): Promise<void> {
+    proof: BridgeTransactionProof | BridgeDestinationTransactionProof, frozen: BridgeDeploymentIdentity): Promise<BridgeDeploymentIdentity> {
     if (rpc.origin !== frozen.rpcOrigin || proof.rpcOrigin !== frozen.rpcOrigin || proof.chainId !== frozen.chainId) bridgeFailure("APN_RPC_CONFIG", "observation_RPC_identity");
     const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId,
       frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken,
@@ -243,6 +252,7 @@ export class BridgeObservation {
     if (current.codeHash !== frozen.codeHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_code_hash");
     if (current.configurationHash !== frozen.configurationHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_configuration_hash");
     if (!bridgeSame(current.block, proof.block)) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_block");
+    return current;
   }
 }
 function sourceProofDiagnostic(error: unknown): ApnError {

@@ -1,4 +1,4 @@
-import { decodeEventLog, getAddress, keccak256 } from "viem";
+import { decodeEventLog, keccak256 } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
 import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
@@ -26,12 +26,7 @@ type OFTSent = Readonly<{ guid: Hex; dstEid: number; fromAddress: Address; amoun
 type OFTReceived = Readonly<{ guid: Hex; srcEid: number; toAddress: Address; amountReceivedLD: bigint }>;
 type Transfer = Readonly<{ from: Address; to: Address; value: bigint }>;
 
-// Official Stargate V2 deployment at ce598b8d16472cd76ee47d30b8a40bc5c1b667bb.
-// This source-only pin does not admit the native asset to the executable deployment registry.
-const ETHEREUM_STARGATE_NATIVE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
-const BASE_STARGATE_NATIVE_POOL = getAddress("0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7");
-
-/** Offline evidence only. The frozen hashes must come from an independently reviewed deployment pin. */
+/** Frozen and observed deployment identities are checked again at the exact destination receipt block. */
 export interface NativeStargateDestinationPin {
   readonly pool: Address;
   readonly frozenDeployment: BridgeDeploymentIdentity;
@@ -49,7 +44,7 @@ export function bridgeSourceProof(materialization: BridgeMaterialization, decode
   if (nativeStargate) validateNativeStargateSource(decoded, materialization);
   else if (decoded.sourceToken === BRIDGE_ZERO_ADDRESS) nativeMovement(decoded.sourceChainId, receipt, "wrap", decoded.bridgeAmountAtomic);
   else validateSourceTransfers(decoded, receipt);
-  const correlation = decoded.tool === "across" ? acrossSource(decoded, receipt) : stargateSource(decoded, receipt, nativeStargate);
+  const correlation = decoded.tool === "across" ? acrossSource(decoded, receipt) : stargateSource(decoded, receipt);
   return {
     tool: decoded.tool, chainId: receipt.chainId, transactionHash: receipt.transactionHash,
     blockNumberAtomic: receipt.blockNumberAtomic, blockHash: receipt.blockHash,
@@ -179,9 +174,9 @@ function validateNativeStargateSource(decoded: DecodedBridgeCall, materializatio
     materialization.transaction.valueAtomic !== decoded.sourceValueAtomic) fail("stargate_native_source_binding");
 }
 
-function stargateSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, native = false): StargateCorrelation {
+function stargateSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): StargateCorrelation {
   if (decoded.protocol.kind !== "stargateV2") return fail("stargate_shape");
-  const emitter = native ? ETHEREUM_STARGATE_NATIVE_POOL : bridgeProtocolEmitter(decoded.sourceChainId, "stargateV2", decoded.sourceToken);
+  const emitter = bridgeProtocolEmitter(decoded.sourceChainId, "stargateV2", decoded.sourceToken);
   const e = oneEvent(receipt, emitter, EVENT_TOPICS.oftSent, "OFTSent") as OFTSent;
   if (e.guid.toLowerCase() === BRIDGE_ZERO_WORD || e.dstEid !== decoded.protocol.dstEid || e.fromAddress !== BRIDGE_DIAMOND ||
     e.amountSentLD.toString() !== decoded.bridgeAmountAtomic || e.amountReceivedLD < BigInt(decoded.minimumOutputAtomic)) fail("OFTSent");
@@ -283,7 +278,7 @@ function validateNativeStargateDestinationPin(decoded: DecodedBridgeCall, receip
   if (decoded.protocol.kind !== "stargateV2" || decoded.protocol.assetId !== 13 || decoded.sourceChainId !== 1 ||
     decoded.destinationChainId !== 8453 || decoded.sourceToken !== BRIDGE_ZERO_ADDRESS ||
     decoded.destinationToken !== BRIDGE_ZERO_ADDRESS || decoded.protocol.dstEid !== 30184 || pin === undefined ||
-    pin.pool !== BASE_STARGATE_NATIVE_POOL) fail("stargate_native_destination_pin");
+    pin.pool !== bridgeProtocolEmitter(8453, "stargateV2", BRIDGE_ZERO_ADDRESS)) fail("stargate_native_destination_pin");
   const frozen = pin.frozenDeployment, observed = pin.observedDeployment;
   if (frozen.chainId !== 8453 || frozen.peerChainId !== 1 || frozen.tool !== "stargateV2" ||
     observed.chainId !== frozen.chainId || observed.peerChainId !== frozen.peerChainId || observed.tool !== frozen.tool ||

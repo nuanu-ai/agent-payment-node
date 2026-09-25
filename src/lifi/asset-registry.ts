@@ -36,7 +36,7 @@ export type BridgeTokenCode =
   | { readonly upgradeability: "beacon_proxy"; readonly codeHash: Hex; readonly beacon: Address;
       readonly beaconCodeHash: Hex; readonly implementation: Address; readonly implementationCodeHash: Hex };
 export interface BridgeStargatePool {
-  readonly assetId: 1;
+  readonly assetId: 1 | 13;
   readonly router: Address;
   readonly routerCodeHash: Hex;
   readonly sharedDecimals: number;
@@ -53,8 +53,7 @@ export interface BridgeWrappedNative {
 }
 /**
  * Native coins are first class. The provider's zero-address wire sentinel names the native coin as a route leg and
- * is never a token. A native principal is carried by Across only: its deposit wraps into the pinned wrapped-native
- * contract and its fill unwraps from it, so both movements are provable by exact logs of that contract.
+ * is never a token. The sole Stargate native direction is Ethereum to Base; other native routes use Across.
  */
 export interface BridgeNativeCoin {
   readonly kind: "native";
@@ -64,7 +63,7 @@ export interface BridgeNativeCoin {
   readonly decimals: 18;
   readonly pairKey: "eth" | "bnb" | "mon";
   readonly acrossSupported: true;
-  readonly stargate: null;
+  readonly stargate: BridgeStargatePool | null;
   readonly peers: readonly BridgeChainId[];
   readonly wrapped: BridgeWrappedNative;
   readonly listing: "frozen_list";
@@ -101,7 +100,8 @@ export interface BridgeChainRow {
 
 const native = (chainId: BridgeChainId, symbol: "ETH" | "BNB" | "MON", peers: readonly BridgeChainId[], wrapped: BridgeWrappedNative): BridgeNativeCoin =>
   ({ kind: "native", chainId, symbol, coinKey: symbol, decimals: 18, pairKey: symbol.toLowerCase() as BridgeNativeCoin["pairKey"], acrossSupported: true,
-    stargate: null, peers, wrapped, listing: "frozen_list" });
+    stargate: chainId === 1 ? NATIVE_STARGATE_ETHEREUM : chainId === 8453 ? NATIVE_STARGATE_BASE : null,
+    peers, wrapped, listing: "frozen_list" });
 /** Read from mainnet: WETH9 on Ethereum and Base has no proxy slot; Arbitrum's aeWETH is an EIP-1967 transparent proxy. */
 const WRAPPED_NATIVE: Readonly<Record<BridgeChainId, BridgeWrappedNative>> = {
   1: { address: getAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"), events: "weth9",
@@ -122,6 +122,20 @@ const WRAPPED_NATIVE: Readonly<Record<BridgeChainId, BridgeWrappedNative>> = {
 };
 const config = (values: readonly string[]): BridgeStargatePool["addressConfig"] =>
   values.map((value) => getAddress(value)) as unknown as BridgeStargatePool["addressConfig"];
+
+/** Paired EIP-1898 safe-block reads, 25 Sep 2026; direction is restricted at route/deployment admission. */
+const NATIVE_STARGATE_ETHEREUM: BridgeStargatePool = { assetId: 13,
+  router: getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931"),
+  routerCodeHash: "0x1d390e7a18e79e4d3c3402aba4453b8f6ef1f7dc9de5dc6fab5b5d88d723639a", sharedDecimals: 6,
+  addressConfig: config(["0x3e368b6c95c6fefb7a16dcc0d756389f3c658a06", "0xe37f7c80ced04c4f243c0fd04a5510d663cb88b5",
+    "0x1041d127b2d4bc700f0f563883bc689502606918", "0x6d6620eFa72948C5f68A3C8646d58C00d3f4A980",
+    "0x9b4d17b45d60b8173a5904b85a7baaec291e9173", BRIDGE_ZERO_ADDRESS]) };
+const NATIVE_STARGATE_BASE: BridgeStargatePool = { assetId: 13,
+  router: getAddress("0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7"),
+  routerCodeHash: "0xc2021862bb6d1b44c6f4ec866c51979e9f95dfc4afd77e0ece9215bb38deff84", sharedDecimals: 6,
+  addressConfig: config(["0x17e450be3ba9557f2378e20d64ad417e59ef9a34", "0xe37f7c80ced04c4f243c0fd04a5510d663cb88b5",
+    "0xd47b03ee6d86cf251ee7860fb2acf9f91b9fd4d7", "0x5634c4a5FEd09819E3c46D86A965Dd9447d86e47",
+    "0x12dc9256acc9895b076f6638d628382881e62cee", BRIDGE_ZERO_ADDRESS]) };
 
 const USDC_ETHEREUM: BridgeTokenAsset = {
   kind: "erc20", chainId: 1, address: getAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),

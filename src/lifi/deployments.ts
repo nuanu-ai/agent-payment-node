@@ -2,7 +2,7 @@ import { encodeAbiParameters, encodeFunctionData, getAddress, parseAbiParameters
 import type { BridgeChainId } from "./chains.js";
 import type { Address, Hex } from "../model.js";
 import { ACROSS_SELECTOR, deploymentAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, LAYER_ZERO_ENDPOINT, STARGATE_SELECTOR } from "./abi.js";
-import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgePeerToken, bridgeTokenRow, type BridgeAsset, type BridgeTokenAsset, type BridgeTokenCode } from "./asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgePeerToken, type BridgeAsset, type BridgeTokenAsset, type BridgeTokenCode } from "./asset-registry.js";
 import type { BridgeDeploymentContract, BridgeTool } from "./model.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, bridgeFailure } from "./validation.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
@@ -97,6 +97,25 @@ export function bridgeDeployment(chainId: BridgeChainId, peerChainId: BridgeChai
   const asset = bridgeAssetRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
   if (!asset.peers.includes(peerChainId)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_chain");
   const pool = bridgeAssetTool(asset, tool);
+  if (tool === "stargateV2" && asset.kind === "native") {
+    if (!((chainId === 1 && peerChainId === 8453) || (chainId === 8453 && peerChainId === 1)) ||
+      pool === null || pool.assetId !== 13) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_native_pair_unreviewed");
+    const s = STARGATE[chainId];
+    if (s === undefined) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_chain_unreviewed");
+    return { chainId, peerChainId, tool, diamond: BRIDGE_DIAMOND, feeForwarder: FEE_FORWARDER,
+      feeRecipient: FEE_RECIPIENT, token: BRIDGE_ZERO_ADDRESS, protocolEmitter: pool.router,
+      endpointId: s.localEid, quoteTimeBufferAtomic: null, fillDeadlineBufferAtomic: null,
+      code: [code(pool.router, pool.routerCodeHash), s.messaging, code(BRIDGE_DIAMOND, DIAMOND_HASH[chainId]!), s.facet],
+      reads: [
+        call(s.messaging.address, "stargateImpls", [13], wordAddress(pool.router)),
+        // The paired capture covered 0x14d53077. The executable swap-and-start selector is distinct and
+        // must be checked at the same fresh safe block before any operation is admitted.
+        call(BRIDGE_DIAMOND, "facetAddress", ["0x14d53077"], wordAddress(s.facet.address)),
+        call(BRIDGE_DIAMOND, "facetAddress", [STARGATE_SELECTOR], wordAddress(s.facet.address)),
+        call(pool.router, "getAddressConfig", [], encodeAbiParameters(parseAbiParameters("address,address,address,address,address,address"), pool.addressConfig)),
+        call(s.facet.address, "tokenMessaging", [], wordAddress(s.messaging.address)),
+      ] };
+  }
   const wrapped = BRIDGE_ASSET_REGISTRY[chainId].nativeCoin.wrapped;
   const destinationOnly = (chainId === 143 || chainId === 59144) && peerChainId === 1 && tool === "across" && asset.kind === "native";
   const diamondHash = DIAMOND_HASH[chainId];
@@ -163,7 +182,7 @@ export function bridgeProtocolEmitter(chainId: BridgeChainId, tool: BridgeTool, 
     if (across === undefined) return bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "across_chain_unreviewed");
     return across.spoke.address;
   }
-  const pool = bridgeAssetTool(bridgeTokenRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE"), tool);
+  const pool = bridgeAssetTool(bridgeAssetRow(chainId, token, "APN_PROVIDER_CAPABILITY_UNAVAILABLE"), tool);
   if (pool === null) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "stargate_pool_asset_unreviewed");
   return pool.router;
 }

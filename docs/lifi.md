@@ -233,11 +233,11 @@ touches Base. A row with no peer is refused as `asset_has_no_listed_peer`.
 
 | Asset | Why it is refused |
 | --- | --- |
-| Native ETH principal over Stargate | Stargate's native pools have not been reviewed; the route is listed but not preparable (`asset_tool_unreviewed`) |
+| Native principal over Stargate outside Ethereum ETH to Base ETH | Only the Ethereum→Base asset ID 13 pool pair is pinned and admitted; other directions return `asset_tool_unreviewed` |
 | WETH on any admitted chain | not on the frozen list; LI.FI itself filters the route because Across does not send WETH to EOAs |
 | USDT from Ethereum | the row is pinned but has no peer: LI.FI's Arbitrum USDT output is USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, which the frozen list does not name, and LI.FI returns no Across or Stargate route from USDT to a listed USDC without a swap |
 | Any token the frozen list does not name (DAI, cbBTC, USD₮0, ...) | `asset_not_on_frozen_list` |
-| Any Stargate pool other than `assetId 1` | the pool has not been reviewed the way USDC was |
+| Stargate pools other than USDC `assetId 1` and Ethereum→Base native `assetId 13` | no pinned pool pair and correlated proof |
 | Any fee-on-transfer or rebasing token | the exact-amount `Transfer` proof cannot hold |
 | A proxy with no stable implementation, admin or beacon slot | there is nothing to pin an upgrade against |
 | Any EVM chain absent from `BRIDGE_CHAINS` | no reviewed registry row, deployment proof, RPC policy, destination observation or finite execution path exists for it |
@@ -419,8 +419,9 @@ and Jovian configuration. A missing operator receipt field never implies zero.
 
 ## Native ETH principal
 
-A native principal is carried by Across V4 only, between any two of Ethereum,
-Base and Arbitrum One, and from Ethereum to Linea or Monad. There is no approval effect: the approval cap is zero,
+A native principal is carried by Across V4 between any two of Ethereum,
+Base and Arbitrum One, and from Ethereum to Linea or Monad. The one reviewed Stargate
+direction is Ethereum ETH to Base ETH via Taxi asset ID 13. There is no approval effect: the approval cap is zero,
 the account's allowance is the constant zero, and the principal is the bridge
 transaction's `value`. The decoder accepts exactly the call LI.FI returned in the
 read-only captures of 18 September 2026:
@@ -440,7 +441,7 @@ read-only captures of 18 September 2026:
 The route estimate must state `skipApproval: true` and must not ask for an
 approval reset. Every fee row is the native coin itself (`asset: "native"`);
 LI.FI's fixed fee must equal the forwarded amount. The captured Ethereum to
-Base native Stargate Taxi calldata can be decoded offline with asset ID 13:
+Base native Stargate Taxi calldata decodes with asset ID 13:
 transaction value equals the source principal plus the separate LayerZero native
 fee. An offline destination decoder conditionally accepts the canonical
 `OFTReceived` from the official Base native pool when a frozen code and
@@ -450,13 +451,14 @@ decoded route and source correlation bind the destination EID and sender.
 At the verified `StargatePoolNative` implementation, `OFTReceived` follows a
 successful native outflow. A supplied native call trace or balance snapshot is
 validated, but neither is required: the recipient may spend in the same block.
-A cached failure without a successful event cannot prove delivery. The offline
-tests use synthetic, caller-supplied deployment hashes; there is no independently
-verified historical on-chain pin for this LI.FI lane yet. Live asset ID 13
-mapping, pool/router bytecode and configuration pins, and paid two-chain
-acceptance remain outstanding. The
-route remains listed but not preparable. A token request can never reuse native
-calldata.
+A cached failure without a successful event cannot prove delivery. The
+[paired safe-block pin record](lifi-stargate-native-pins-2026-09-25.md) covers both
+native pools, both LI.FI facets, code hashes, asset ID 13 mappings, address
+configuration, TokenMessaging links and the executable selector. Preparation
+and historical observation must verify fresh code/configuration at exact block
+hashes. Live route preparation, source effect, destination delivery, receipt
+recovery and paid two-chain acceptance remain outstanding. A token request can
+never reuse native calldata.
 
 Source proof replaces the three ERC-20 `Transfer` logs with the wrap: exactly
 one wrapped-native log crediting the source SpokePool with the bridge amount
