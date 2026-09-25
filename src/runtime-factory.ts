@@ -8,6 +8,8 @@ import { RelayBaseObserveService } from "./relay/base-observe.js";
 import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
 import { RelayArbitrumApprovalDecisionService } from "./relay/arbitrum-approval-decision.js";
 import { LocalRelayArbitrumApprovalSigner, RelayArbitrumApprovalExecuteService } from "./relay/arbitrum-approval-execute.js";
+import { LocalRelayArbitrumDepositSigner, RelayArbitrumDepositDispatchService } from "./relay/arbitrum-deposit-dispatch.js";
+import { RelayArbitrumDepositPreflightReader } from "./relay/arbitrum-deposit-preflight.js";
 import { RelayArbitrumApprovalPreflightReader } from "./relay/arbitrum-approval-preflight.js";
 import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
 import { RelayArbitrumSourceFinalityObserver } from "./relay/arbitrum-source-finality.js";
@@ -29,7 +31,7 @@ import type { ProfilePolicyPort } from "./profile-policy.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
-import { TtyRelayArbitrumApprovalConfirmation, TtyRelayExecuteConfirmation, TtyRelayNativeExecuteConfirmation, TtyTransferApproval, type TtyTransferApprovalOptions } from "./tty-approval.js";
+import { TtyRelayArbitrumApprovalConfirmation, TtyRelayArbitrumDepositConfirmation, TtyRelayExecuteConfirmation, TtyRelayNativeExecuteConfirmation, TtyTransferApproval, type TtyTransferApprovalOptions } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
 import { TtyForegroundAuthentication } from "./foreground-auth.js";
@@ -150,8 +152,10 @@ export interface RuntimeFactoryOptions {
   readonly relayArbitrumObserveRpc?: HttpsBaseRpc;
   readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
   readonly relayArbitrumApprovalExecute?: RelayArbitrumApprovalExecuteService;
+  readonly relayArbitrumDepositDispatch?: RelayArbitrumDepositDispatchService;
   readonly relayArbitrumApprovalRpc?: Pick<HttpsBaseRpc, "batchCall">;
   readonly relayArbitrumApprovalExecuteRpc?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
+  readonly relayArbitrumDepositDispatchRpc?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
   readonly relayObserveBaseRpc?: HttpsBaseRpc;
   readonly relayObserveSourceRpc?: HttpsBaseRpc;
   readonly relayObserveBnbRpc?: HttpsBaseRpc;
@@ -237,6 +241,20 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     return new ApnCore({ state, relayArbitrumApprovalExecute: options.relayArbitrumApprovalExecute ??
       new RelayArbitrumApprovalExecuteService(state, reader, {
         confirm: summary => tty.confirm(summary), signer: new LocalRelayArbitrumApprovalSigner(state, wrapping),
+        send: raw => guard.post(url, () => rpc.submitRawTransaction(raw)),
+        now: () => options.clock?.now() ?? new Date(),
+      }, wrapping) });
+  }
+  if (bound.request.command === "relay.arbitrum.deposit-dispatch") {
+    const url = bound.rpcUrl ?? "";
+    const guard = new EvmDirectRpcGuard(state);
+    const rpc = options.relayArbitrumDepositDispatchRpc ?? new HttpsBaseRpc(url);
+    const reader = new RelayArbitrumDepositPreflightReader(url, state, rpc, () => guard);
+    const wrapping = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+    const tty = new TtyRelayArbitrumDepositConfirmation(options.relayExecuteTtyOptions);
+    return new ApnCore({ state, relayArbitrumDepositDispatch: options.relayArbitrumDepositDispatch ??
+      new RelayArbitrumDepositDispatchService(state, reader, {
+        confirm: summary => tty.confirm(summary), signer: new LocalRelayArbitrumDepositSigner(state, wrapping),
         send: raw => guard.post(url, () => rpc.submitRawTransaction(raw)),
         now: () => options.clock?.now() ?? new Date(),
       }, wrapping) });

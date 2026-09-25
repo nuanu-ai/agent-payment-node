@@ -1,6 +1,7 @@
 /** Saved-operation Arbitrum source observation. No wallet, signer, send, or destination assertion. */
-import type { Hex } from "viem";
+import { getAddress, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
@@ -8,6 +9,7 @@ import { ArbitrumSourceEffectJournalRepository, type ArbitrumEffectRole,
   type ArbitrumSourceEffectJournal } from "./arbitrum-source-effect-journal.js";
 import { RelayArbitrumSourceFinalityObserver, type RelayArbitrumExpectedEffect,
   type RelayArbitrumSourceProof } from "./arbitrum-source-finality.js";
+import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const observable = new Set(["submitting", "submitted", "unknown_finality"]);
@@ -37,8 +39,8 @@ function boundProof(proof: RelayArbitrumSourceProof, role: ArbitrumEffectRole,
   return proof.sourceChainId === 42161 && proof.proofClass === "canonical_safe_source_receipts" &&
     proof.destinationDeliveryProven === false && proof.causalLinkCryptographicallyProven === false &&
     proof.paidAcceptance === false && same(proof.deposit.transactionHash, chosen.transactionHash) &&
-    (role === "approval" ? proof.approval === null : approval !== null && proof.approval !== null &&
-      same(proof.approval.transactionHash, approval.transactionHash));
+    (role === "approval" ? proof.approval === null : approval === null ? proof.approval === null :
+      proof.approval !== null && same(proof.approval.transactionHash, approval.transactionHash));
 }
 export interface RelayArbitrumSourceObservePorts {
   readonly operation?: (operationId: string) => Promise<RelayUnsignedOperation | null>;
@@ -47,10 +49,25 @@ export interface RelayArbitrumSourceObservePorts {
     role: ArbitrumEffectRole, proofDigest: string, verify: (input: {
       operation: RelayUnsignedOperation; journal: ArbitrumSourceEffectJournal; role: ArbitrumEffectRole;
       outcome: "confirmed" | "failed"; proofDigest: string }) => Promise<boolean>) => Promise<ArbitrumSourceEffectJournal>;
+  /** Synthetic seam; production finalizes the shared usage reservation from the saved safe source proof. */
+  readonly finalizeUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
 }
 export class RelayArbitrumSourceObserveService {
   constructor(private readonly state: StateStore, private readonly observer: Pick<RelayArbitrumSourceFinalityObserver, "observe">,
     private readonly ports: RelayArbitrumSourceObservePorts = {}) {}
+
+  private async finalizeUsage(op: RelayUnsignedOperation, journal: ArbitrumSourceEffectJournal): Promise<void> {
+    const proofDigest = journal.effects[1].attempt?.observationDigest;
+    if (journal.effects[1].phase !== "confirmed" || !proofDigest || !HASH.test(proofDigest) ||
+      journal.operationIntegrityHash !== op.integrityHash) corrupt("deposit_source_proof_required_for_usage");
+    if (this.ports.finalizeUsage !== undefined) return this.ports.finalizeUsage(op, proofDigest);
+    const identity = { account: getAddress(op.sourceAccount), chain: "eip155:42161",
+      asset: { kind: "token" as const, identifier: RELAY_ARBITRUM_USDC } };
+    await new AssetUsageLedger(this.state.root).transition({ ...identity,
+      reservationId: assetUsageReservationId(identity, `relay-arbitrum-approval:${op.operationId}`),
+      policyDigest: op.policyDigest!, state: "finalized", outcomeDigest: proofDigest,
+      expectedCurrentStates: ["reserved", "submitted", "unknown_finality", "finalized"], now: new Date() });
+  }
 
   async observe(operationId: string) {
     if (!HASH.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum observe requires an operation ID.");
@@ -76,15 +93,18 @@ export class RelayArbitrumSourceObserveService {
     if (journal.operationIntegrityHash !== op.integrityHash || journal.quoteDigest !== op.quoteDigest ||
       journal.orderId !== op.arbitrumDraft.orderId) corrupt("journal_operation_binding");
     const [approvalEffect, depositEffect] = journal.effects;
-    if (depositEffect.phase === "confirmed") return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
-    if (approvalEffect.phase === "approval_skipped") return output("approval_skipped",
+    if (depositEffect.phase === "confirmed") {
+      await this.finalizeUsage(op, journal);
+      return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
+    }
+    if (approvalEffect.phase === "approval_skipped" && depositEffect.phase === "pending") return output("approval_skipped",
       "canonical_allowance_observed_deposit_recheck_required");
-    const role: ArbitrumEffectRole = approvalEffect.phase === "confirmed" ? "deposit" : "approval";
+    const role: ArbitrumEffectRole = ["confirmed", "approval_skipped"].includes(approvalEffect.phase) ? "deposit" : "approval";
     const current = role === "approval" ? approvalEffect : depositEffect;
-    if (!observable.has(current.phase)) return output(role === "deposit" ? "approval_source_confirmed" : "observation_only",
+    if (!observable.has(current.phase)) return output(role === "deposit" && approvalEffect.phase === "confirmed" ? "approval_source_confirmed" : "observation_only",
       role === "deposit" ? "deposit_effect_not_submitting" : "approval_effect_not_submitting");
     const chosen = expected(op, journal, role);
-    const approval = role === "deposit" ? expected(op, journal, "approval") : null;
+    const approval = role === "deposit" && approvalEffect.phase === "confirmed" ? expected(op, journal, "approval") : null;
     // The standalone observer owns the persisted 24-POST cap, 750 ms pacing, and no-429-retry policy.
     const proof = await this.observer.observe(chosen, approval ?? undefined);
     if (proof === null || !boundProof(proof, role, chosen, approval))
@@ -101,6 +121,7 @@ export class RelayArbitrumSourceObserveService {
         journal.integrityHash, { kind: "record_verified_observation", role, outcome: "confirmed", proofDigest }));
     if (next.effects[role === "approval" ? 0 : 1].phase !== "confirmed" ||
       next.effects[role === "approval" ? 0 : 1].attempt?.observationDigest !== proofDigest) corrupt("transition_result");
+    if (role === "deposit") await this.finalizeUsage(op, next);
     return { ...output(role === "approval" ? "approval_source_confirmed" : "deposit_source_confirmed",
       "canonical_safe_source_receipt", proof), approvalPhase: next.effects[0].phase, depositPhase: next.effects[1].phase };
   }
