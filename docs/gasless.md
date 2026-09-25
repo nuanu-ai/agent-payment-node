@@ -34,7 +34,11 @@ mechanism. Approval reserves the gross amount in the common asset usage ledger
 before the first signature. APN rechecks the active policy and remaining cap
 before signing, disclosure and dispatch. A revoked or replaced policy blocks
 new effects; an already attempted transfer remains observation only and keeps
-its durable usage reservation until a proven outcome. Historical local Base
+its durable usage reservation until a proven outcome. A safe confirmed revert
+releases gross usage after allowance cleanup while retaining the actual fee in
+the settlement record. Safe permission invalidation also releases usage when
+the payment was never submitted; attempted submissions with unknown financial
+results remain reserved. Historical local Base
 operations without this binding cannot be approved or replayed; signed ones
 remain available for observation. These controls have synthetic test evidence,
 not a fresh mainnet transfer acceptance.

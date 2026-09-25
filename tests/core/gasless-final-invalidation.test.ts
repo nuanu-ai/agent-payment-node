@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { hashObject } from "../../src/canonical.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import type { GaslessObservation } from "../../src/gasless/model.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import { OperationService } from "../../src/operation-service.js";
@@ -91,6 +92,14 @@ for (const [delegation, mode] of finalCases) test(`gasless ${delegation} ${mode}
   assert.equal(publicOp.payment_submission_attempted, mode !== "sealed_unsubmitted"); assert.equal(publicOp.payment_submitted, null);
   assert.equal(publicOp.prior_payment_effects, "unknown"); assert.equal(publicOp.permission.guard_held, false);
   assert.equal(publicOp.transfer.actual_delivered_atomic, null); assert.equal(publicOp.fees.actual_fee_atomic, null);
+  const usage = new AssetUsageLedger(temporary.root);
+  const identity = { account: s.account.address, chain: "eip155:8453",
+    asset: { kind: "token" as const, identifier: after.intent.token } };
+  const lease = await usage.load(identity, after.intent.allowlist!.reservationId);
+  assert.equal(lease?.state, mode === "sealed_unsubmitted" ? "released_unsubmitted" :
+    mode === "attempted_pending" ? "submitted" : "unknown_finality");
+  assert.equal((await usage.usage(identity, s.now)).amountAtomic,
+    mode === "sealed_unsubmitted" ? "0" : after.intent.request.grossAtomic);
   assert.equal(s.wrapping.loads, loads); assert.equal(custodyCalls(), 0); assert.equal(s.rpc.sends.length, sends);
   assert.equal(s.rpc.calls.filter(c => c === "estimate").length, estimates);
   await new OperationService(s.state).assertProfileAvailable(after.profileHash);

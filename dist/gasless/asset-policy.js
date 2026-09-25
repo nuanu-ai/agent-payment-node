@@ -115,8 +115,15 @@ export class GaslessAssetPolicy {
                 corrupt();
             return;
         }
-        if (lease.state === "failed_before_effect" && op.state === "failed_before_effect")
+        if (lease.state === "failed_before_effect" || lease.state === "failed_confirmed_revert" ||
+            lease.state === "released_unsubmitted") {
+            const expected = lease.state === "released_unsubmitted"
+                ? op.state === "failed_permissions_invalidated" && op.userOperation.submissionAttempts === 0
+                : lease.state === op.state;
+            if (!expected || lease.outcomeDigest !== op.integrityHash)
+                corrupt();
             return;
+        }
         this.checkedReservation(op, lease);
         if (lease.state === "submitted" && op.userOperation.submissionAttempts === 0)
             corrupt();
@@ -126,7 +133,12 @@ export class GaslessAssetPolicy {
         let target = null;
         if (op.state === "failed_before_effect")
             target = "failed_before_effect";
-        else if (op.state === "completed" || op.state === "failed_confirmed_revert")
+        else if (op.state === "failed_confirmed_revert")
+            target = "failed_confirmed_revert";
+        else if (op.state === "failed_permissions_invalidated" && op.userOperation.submissionAttempts === 0) {
+            target = "released_unsubmitted";
+        }
+        else if (op.state === "completed")
             target = "finalized";
         else if (op.userOperation.submissionAttempts === 1)
             target = op.state === "unknown_finality" || op.state === "abandoned_unknown"
@@ -147,7 +159,9 @@ export class GaslessAssetPolicy {
             corrupt();
         await this.usage.transition({ ...account, reservationId: bound.reservationId, policyDigest: bound.policyDigest,
             state: target, now: at(this.now()),
-            ...(target === "failed_before_effect" || target === "finalized" ? { outcomeDigest: op.integrityHash } : {}) });
+            ...(target === "failed_before_effect" || target === "released_unsubmitted" ||
+                target === "failed_confirmed_revert" || target === "finalized"
+                ? { outcomeDigest: op.integrityHash } : {}) });
     }
     assertBinding(op) {
         const bound = op.intent.allowlist;
@@ -161,7 +175,8 @@ export class GaslessAssetPolicy {
         if (lease.reservationId !== bound.reservationId || lease.policyDigest !== bound.policyDigest ||
             lease.rail !== "gasless" || lease.amountAtomic !== op.intent.request.grossAtomic ||
             canonicalJson({ account: lease.account, chain: lease.chain, asset: lease.asset }) !== canonicalJson(identity(op.intent)) ||
-            lease.state === "failed_before_effect" || lease.state === "failed_confirmed_revert")
+            lease.state === "failed_before_effect" || lease.state === "released_unsubmitted" ||
+            lease.state === "failed_confirmed_revert")
             corrupt();
         return BigInt(lease.amountAtomic);
     }

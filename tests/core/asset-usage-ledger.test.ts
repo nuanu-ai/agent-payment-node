@@ -100,6 +100,23 @@ test("an exposed reservation cannot claim pre-effect failure and remains charged
   assert.equal((await ledger.usage(identity, new Date("2026-09-20T10:00:00.000Z"))).amountAtomic, "100");
 });
 
+test("proven unsubmitted payment releases gross usage with a distinct terminal lease", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const held = await reserve(ledger, "unsubmitted-permission-proof", "100", "gasless");
+  await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "unknown_finality", now: new Date("2026-09-17T10:01:00.000Z") });
+  const released = await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "released_unsubmitted", now: new Date("2026-09-17T10:02:00.000Z"), outcomeDigest: "f".repeat(64) });
+  assert.equal(released.effectAt, null);
+  assert.equal(released.outcomeDigest, "f".repeat(64));
+  assert.equal((await ledger.load(identity, held.reservationId))?.state, "released_unsubmitted");
+  assert.equal((await ledger.usage(identity, new Date("2026-09-17T10:03:00.000Z"))).amountAtomic, "0");
+  await assert.rejects(ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "finalized", now: new Date("2026-09-17T10:04:00.000Z"), outcomeDigest: "f".repeat(64) }),
+  { code: "APN_OPERATION_BLOCKED" });
+});
+
 test("concurrent duplicate reservation is idempotent and concurrent distinct reservations cannot race past the cap", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const first = new AssetUsageLedger(temporary.root);

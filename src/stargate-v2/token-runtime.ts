@@ -20,6 +20,12 @@ import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJourna
   STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH,
   type StargateTokenDestinationEvidence, type StargateTokenEnvelope, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
+import type { StargateTokenUsageState } from "./token-model.js";
+
+function stargateUsageState(state: AssetUsageState): StargateTokenUsageState {
+  if (state === "released_unsubmitted") throw new ApnError("APN_STATE_CORRUPT", "Stargate usage has an incompatible release state.");
+  return state;
+}
 
 function blocked(reason: string): never { throw new ApnError("APN_RPC_CONFIG", `Stargate token runtime unavailable: ${reason}.`, { reason }); }
 function quantity(v: unknown) { if (typeof v !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(v)) throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC quantity."); return BigInt(v); }
@@ -82,22 +88,23 @@ export class StargateTokenService {
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
       observeDestination: async input => await observeStargateTokenDestination(destination, input, tokenAt), now: this.now };
   }
-  private async reserveUsage(op: StargateTokenOperation): Promise<AssetUsageState> { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);
+  private async reserveUsage(op: StargateTokenOperation): Promise<StargateTokenUsageState> { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);
     if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again.");
-    const at = new Date(this.now()); return (await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
-      idempotencyKey: usageKey(op.operationId), now: at })).state; }
-  private async followUsage(op: StargateTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert"): Promise<AssetUsageState> {
+    const at = new Date(this.now()); return stargateUsageState((await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
+      idempotencyKey: usageKey(op.operationId), now: at })).state); }
+  private async followUsage(op: StargateTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert"): Promise<StargateTokenUsageState> {
     const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId));
     const current = await this.usage.load(identity, reservationId); if (current === null) { if (target === "failed_before_effect") return target; throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation is missing."); }
-    if (current.state === target) return current.state;
-    if (target === "submitted" && current.state === "unknown_finality") return current.state;
-    if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state)) {
-      if (target === "submitted" || target === "unknown_finality") return current.state;
+    const state = stargateUsageState(current.state);
+    if (state === target) return state;
+    if (target === "submitted" && state === "unknown_finality") return state;
+    if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(state)) {
+      if (target === "submitted" || target === "unknown_finality") return state;
       throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation reached a conflicting terminal state.");
     }
     const outcome = ["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(target)
       ? { outcomeDigest: domainHash("apn.stargate-token-usage-outcome.v1", canonicalJson({ operationId: op.operationId, target, integrityHash: op.integrityHash })) } : {};
-    return (await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome })).state;
+    return stargateUsageState((await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome })).state);
   }
   private remote() { if (this.source !== undefined && this.destination !== undefined) return { source: this.source, destination: this.destination }; const source = this.env.APN_OPTIMISM_RPC_URL, destination = this.env.APN_POLYGON_RPC_URL; if (source === undefined || destination === undefined) blocked("APN_OPTIMISM_RPC_URL_and_APN_POLYGON_RPC_URL_required"); this.source = new StargateJsonRpc(source); this.destination = new StargateJsonRpc(destination); return { source: this.source, destination: this.destination }; }
 }

@@ -10,7 +10,7 @@ import { validateGaslessIntent } from "../../src/gasless/intent-validation.js";
 import { newGaslessOperation, transitionGasless } from "../../src/gasless/transitions.js";
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { gaslessEnvelopeBinding } from "../../src/gasless/wire.js";
-import { gaslessFixture, GASLESS_TEST_RECIPIENT } from "./gasless-helpers.js";
+import { gaslessFixture, GASLESS_TEST_RECIPIENT, testWord } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 const now = new Date("2026-09-18T02:00:00.000Z");
@@ -164,6 +164,73 @@ test("revocation after the durable send marker keeps saved-hash observation and 
   const lease = await new AssetUsageLedger(temporary.root).load({ ...account, account: s.account.address },
     (await s.record(id)).intent.allowlist!.reservationId);
   assert.equal(lease?.state, "finalized");
+});
+
+test("safe reverted transfer releases gross daily usage after allowance cleanup while retaining its actual fee", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await gaslessFixture(temporary.root, 8453, { now, activatePolicy: false });
+  await activate(temporary.root, s.profile, s.account.address, { daily: s.request.grossAtomic });
+  const { id } = await s.prepare("reverted-gross-usage");
+  s.rpc.success = false;
+  assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  const usage = new AssetUsageLedger(temporary.root), identity = { ...account, account: s.account.address };
+  assert.equal((await usage.usage(identity, now)).amountAtomic, s.request.grossAtomic);
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  assert.equal((await s.record(id)).state, "failed_effects_pending");
+  assert.equal((await usage.usage(identity, now)).amountAtomic, s.request.grossAtomic);
+  s.rpc.safeAllowance = "0";
+  s.rpc.safeNumber = "103";
+  s.now.setTime(s.now.getTime() + 360000);
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  const final = await s.record(id);
+  assert.equal(final.state, "failed_confirmed_revert");
+  assert.equal(final.settlement?.accounting.deliveredAtomic, "0");
+  assert.ok(BigInt(final.settlement!.accounting.feeAtomic) > 0n);
+  const lease = await usage.load(identity, final.intent.allowlist!.reservationId);
+  assert.equal(lease?.state, "failed_confirmed_revert");
+  assert.equal(lease?.outcomeDigest, final.integrityHash);
+  assert.equal((await usage.usage(identity, s.now)).amountAtomic, "0");
+  assert.equal((await s.prepare("after-reverted-gross-usage")).operation.state, "awaiting_approval");
+  assert.equal(s.rpc.sends.length, 1);
+});
+
+test("safe bootstrap permission invalidation releases an unsubmitted payment without replay", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await gaslessFixture(temporary.root, 8453, { now, activatePolicy: false });
+  await activate(temporary.root, s.profile, s.account.address, { daily: s.request.grossAtomic });
+  const { id } = await s.prepare("unsubmitted-invalidation");
+  s.rpc.estimateFails = true;
+  assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  const before = await s.record(id), i = before.intent.initialSnapshot;
+  assert.equal(before.userOperation.submissionAttempts, 0);
+  assert.equal(before.bootstrap.disclosureAttempts, 1);
+  const usage = new AssetUsageLedger(temporary.root), identity = { ...account, account: s.account.address };
+  assert.equal((await usage.usage(identity, now)).amountAtomic, s.request.grossAtomic);
+  const nonce = (BigInt(i.eoaNonceAtomic) + 1n).toString();
+  const accountState = { owner: i.owner, balanceAtomic: i.balanceAtomic, nativeBalanceWei: i.nativeBalanceWei,
+    allowanceAtomic: "0", permitNonceAtomic: (BigInt(i.permitNonceAtomic) + 1n).toString(),
+    entryPointNonceAtomic: i.entryPointNonceAtomic, eoaNonceAtomic: nonce, pendingEoaNonceAtomic: nonce,
+    delegation: i.delegation };
+  const proof = { chainId: i.chainId, intentHash: hashObject(before.intent),
+    bootstrapMaterialHash: before.bootstrap.materialHash!, protocolHash: i.protocolHash,
+    safeBlock: { numberAtomic: "101", hash: testWord("101"), timestampAtomic: i.block.timestampAtomic },
+    headBlock: { numberAtomic: "102", hash: testWord("102"), timestampAtomic: i.block.timestampAtomic },
+    safeAccount: accountState, headAccount: accountState };
+  s.rpc.observe = async () => ({ status: "permissions_invalidated", transactionHash: null, settlement: null,
+    cursor: before.cursor, evidenceHash: hashObject(proof), reason: "gasless_bootstrap_permissions_invalidated",
+    permissionInvalidation: proof });
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  const final = await s.record(id);
+  assert.equal(final.state, "failed_permissions_invalidated");
+  assert.equal(final.userOperation.submissionAttempts, 0);
+  assert.equal(final.settlement, null);
+  assert.equal(s.rpc.sends.length, 0);
+  const lease = await usage.load(identity, final.intent.allowlist!.reservationId);
+  assert.equal(lease?.state, "released_unsubmitted");
+  assert.equal(lease?.outcomeDigest, final.integrityHash);
+  assert.equal((await usage.usage(identity, now)).amountAtomic, "0");
+  assert.equal((await s.core.execute({ command: "operation.status", operationId: id })).ok, true);
+  assert.equal((await s.prepare("after-unsubmitted-invalidation")).operation.state, "awaiting_approval");
 });
 
 test("historical unbound Base records refuse a new effect and observe prior synthetic submission only", async t => {
