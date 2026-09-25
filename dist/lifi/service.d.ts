@@ -12,6 +12,7 @@ export interface BridgeDependencies {
     readonly rpcFor: BridgeRpcFactory;
     readonly custody: BridgeCustodyPort;
     readonly approval?: BridgeApprovalPort;
+    readonly lineaArchiveDeploymentScalarCode?: boolean;
 }
 export interface BridgeDeploymentMigrationResult {
     readonly schema_version: (BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit)["schemaVersion"];
@@ -19,6 +20,12 @@ export interface BridgeDeploymentMigrationResult {
     readonly proof_class: "local_journal_migration";
     readonly operation: PublicBridgeOperation;
     readonly audit: BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit;
+    readonly next_actions: readonly string[];
+}
+export interface BridgeDeploymentMigrationPending {
+    readonly status: "pending";
+    readonly proof_class: "local_journal_migration";
+    readonly operation_id: string;
     readonly next_actions: readonly string[];
 }
 export declare class BridgeService {
@@ -636,7 +643,12 @@ export declare class BridgeService {
     }>;
     status(operationId: string): Promise<StoredPublicBridgeOperation>;
     receipt(operationId: string): Promise<BridgeReceipt | Record<string, unknown>>;
-    repairDeployment(operationId: string): Promise<BridgeDeploymentMigrationResult>;
+    repairDeployment(operationId: string): Promise<BridgeDeploymentMigrationResult | {
+        status: "pending";
+        proof_class: "local_journal_migration";
+        operation_id: "0e3491acbe5a0b9687d0d18e7e4bc605199a9d8b9cb7ab5c8c9217e303eba189";
+        next_actions: string[];
+    }>;
     private dependencies;
     private preparation;
     private execution;

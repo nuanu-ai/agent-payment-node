@@ -122,7 +122,10 @@ export interface BaseMigrationObservation {
     readonly transaction: BridgeTransactionProof;
     readonly receipt: BridgeProtocolReceipt;
 }
+export declare function assertBaseDeploymentMigrationCandidate(operation: BridgeOperationRecord): void;
 export declare function assertBaseDeploymentMigrationProof(operation: BridgeOperationRecord, source: BaseMigrationObservation, sourceDeployment: BridgeDeploymentIdentity, destination: BaseMigrationObservation, destinationDeployment: BridgeDeploymentIdentity, sourceFinalityBlock: BridgeBlock, destinationFinalityBlock: BridgeBlock): BridgeVerifiedDestinationProof;
+/** Checkpoint only the independently pinned source evidence; finality is reread on resume. */
+export declare function assertBaseDeploymentMigrationSourceProof(operation: BridgeOperationRecord, source: BaseMigrationObservation, sourceDeployment: BridgeDeploymentIdentity): void;
 export declare function migrateBaseDeploymentOperation(operation: BridgeOperationRecord, destinationProof?: BridgeVerifiedDestinationProof): {
     readonly operation: BridgeOperationRecord;
     readonly previousOperation: BridgeOperationRecord;

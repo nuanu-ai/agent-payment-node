@@ -3,7 +3,8 @@ import { type BridgeOperationRecord } from "./operation-model.js";
 import { type BridgeReceipt } from "./receipt.js";
 import { type LegacyBridgeOperationRecord, type StoredBridgeOperationRecord } from "./legacy-operation.js";
 import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
-import type { BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
+import { type BaseDeploymentMigrationAudit, type BaseMigrationObservation } from "./base-deployment-migration.js";
+import type { BridgeDeploymentIdentity } from "./model.js";
 export declare class BridgeOperationRepository extends SecureStateStore {
     private initialized;
     private ready;
@@ -27,6 +28,12 @@ export declare class BridgeOperationRepository extends SecureStateStore {
     migrateLegacyDeployment(previous: BridgeOperationRecord, next: BridgeOperationRecord, audit: BaseDeploymentMigrationAudit): Promise<void>;
     /** Finish or verify the receipt replacement after the legacy operation was atomically replaced. */
     repairMigratedLegacyDeployment(previous: BridgeOperationRecord, op: BridgeOperationRecord, audit: BaseDeploymentMigrationAudit): Promise<void>;
+    /** Immutable source phase for the one recognized Base migration. Caller holds profile and operation locks. */
+    baseMigrationSourceCheckpoint(op: BridgeOperationRecord): Promise<{
+        observation: BaseMigrationObservation;
+        deployment: BridgeDeploymentIdentity;
+    } | null>;
+    saveBaseMigrationSourceCheckpoint(op: BridgeOperationRecord, observation: BaseMigrationObservation, deployment: BridgeDeploymentIdentity): Promise<void>;
     loadReceipt(profileHash: string, operationId: string): Promise<BridgeReceipt>;
     loadLegacyReceipt(op: LegacyBridgeOperationRecord): Promise<Record<string, unknown>>;
     private path;

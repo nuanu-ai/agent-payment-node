@@ -135,9 +135,24 @@ test("repair-deployment migrates the copied journal audit-first and is restart-i
   s.source.send = s.destination.send = async () => { sends++; throw new Error("send forbidden"); };
   s.custody.load = async () => { custody++; throw new Error("custody forbidden"); };
   s.custody.seal = async () => { custody++; throw new Error("custody forbidden"); };
+  const pending = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
+  assert.equal(pending.ok, true); assert.equal((pending.data as any).status, "pending");
+  assert.deepEqual((await s.core.bridges.records.findStoredOperation(id) as any).raw.effects, old.effects);
+  const checkpointPath = resolve(temporary.root, "bridge-migrations", profile, `${id}.source.json`);
+  const checkpoint = await readFile(checkpointPath);
+  const tampered = JSON.parse(checkpoint.toString()); tampered.observation.transaction.status = "reverted";
+  await writeFile(checkpointPath, `${JSON.stringify(tampered)}\n`, { mode: 0o600 });
+  const corrupt = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
+  assert.equal(corrupt.ok, false); assert.equal(corrupt.error?.code, "APN_STATE_CORRUPT");
+  await writeFile(checkpointPath, checkpoint, { mode: 0o600 });
+  s.destination.observe = async () => ({ ...destination, transaction: { ...destination.transaction, status: "reverted" } });
+  const reverted = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
+  assert.equal(reverted.ok, false); assert.equal(reverted.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal((await s.core.bridges.records.findStoredOperation(id) as any).raw.integrityHash, old.integrityHash);
+  s.destination.observe = async (hash) => { destinationObservations++; assert.equal(hash, candidate.destinationTransactionHash); return destination; };
   const result = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
   assert.equal(result.ok, true, result.error?.message); assert.equal((result.data as any).status, "migrated");
-  assert.equal(sourceObservations, 1); assert.equal(destinationObservations, 1); assert.equal(deployments, 2);
+  assert.equal(sourceObservations, 1); assert.equal(destinationObservations, 1); assert.equal(deployments, 3);
   assert.equal(sends, 0); assert.equal(custody, 0);
   const saved = (await s.core.bridges.records.findOperation(id))!;
   assert.equal(saved.integrityHash, candidate.newIntegrityHash); assert.deepEqual(saved.effects, old.effects);
@@ -146,7 +161,7 @@ test("repair-deployment migrates the copied journal audit-first and is restart-i
   const currentReceipt = await readFile(receiptPath);
   const repeated = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
   assert.equal(repeated.ok, true); assert.equal((repeated.data as any).status, "already_current");
-  assert.equal(sourceObservations, 1); assert.equal(destinationObservations, 1); assert.equal(deployments, 2);
+  assert.equal(sourceObservations, 1); assert.equal(destinationObservations, 1); assert.equal(deployments, 3);
   // Interruption after the operation replacement but before receipt replacement is repaired from the immutable audit.
   await writeFile(receiptPath, legacyReceipt, { mode: 0o600 });
   const restarted = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
@@ -161,7 +176,7 @@ test("repair-deployment migrates the copied journal audit-first and is restart-i
 test("repair-deployment fits its production 29-request BridgeRpc session shape with archive chunks capped at three", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const requests: Array<{ origin: string; route: "primary" | "archive"; items: Array<{ id: string; method: string; params: unknown[] }> }> = [];
-  let repairSession: RpcReadSession | undefined;
+  const repairSessions: RpcReadSession[] = [];
   const shapeRpc = (chainId: BridgeChainId, session: RpcReadSession): BridgeRpcPort => {
     const origin = chainId === 1 ? candidate.verifiedSourceDeployment.rpcOrigin : candidate.newDestinationDeployment.rpcOrigin;
     const archiveOrigin = `${origin}/archive`;
@@ -196,7 +211,7 @@ test("repair-deployment fits its production 29-request BridgeRpc session shape w
     return rpc;
   };
   const rpcFor = (chainId: BridgeChainId, session?: RpcReadSession) => {
-    assert.ok(session); repairSession ??= session; assert.equal(session, repairSession); return shapeRpc(chainId, session);
+    assert.ok(session); if (!repairSessions.includes(session)) repairSessions.push(session); return shapeRpc(chainId, session);
   };
   const clockStart = Date.parse("2026-09-22T00:00:00.000Z"); let clockReads = 0;
   const s = await lifiFixture(temporary.root, "eth-base", { initializeWallet: false, policy: false, rpcFor,
@@ -206,10 +221,20 @@ test("repair-deployment fits its production 29-request BridgeRpc session shape w
   await mkdir(resolve(temporary.root, "bridge-receipts", profile), { recursive: true, mode: 0o700 });
   await writeFile(resolve(temporary.root, "bridge-operations", profile, `${id}.json`), `${JSON.stringify(old)}\n`, { mode: 0o600 });
   await writeFile(resolve(temporary.root, "bridge-receipts", profile, `${id}.json`), await readFile(fixturePath("deployment-receipt")), { mode: 0o600 });
-  const result = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
+  const pending = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
+  assert.equal(pending.ok, true, JSON.stringify(pending.error)); assert.equal((pending.data as any).status, "pending");
+  assert.equal(requests.length, 12);
+  assert.equal(repairSessions.length, 1); assert.equal(repairSessions[0]!.telemetry().httpRequests, 12);
+  const checkpointPath = resolve(temporary.root, "bridge-migrations", profile, `${id}.source.json`);
+  assert.ok(JSON.parse(await readFile(checkpointPath, "utf8")).digest);
+  const restart = await lifiFixture(temporary.root, "eth-base", { initializeWallet: false, policy: false, rpcFor,
+    clockNow: () => new Date(clockStart + Math.floor(clockReads++ / 5) * 750) });
+  const result = await restart.core.execute({ command: "operation.repair-deployment", operationId: id });
   assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal((result.data as any).status, "migrated");
-  assert.ok(repairSession); assert.equal(repairSession.telemetry().httpRequests, 29);
-  assert.equal(repairSession.telemetry().httpAttempts, 29); assert.equal(repairSession.telemetry().remainingHttpRequests, 2);
+  assert.equal(repairSessions.length, 2);
+  assert.deepEqual(repairSessions.map((session) => session.telemetry().httpRequests), [12, 17]);
+  assert.deepEqual(repairSessions.map((session) => session.telemetry().httpAttempts), [12, 17]);
+  assert.deepEqual(repairSessions.map((session) => session.physicalBudget?.remaining()), [12, 7]);
   const archive = requests.filter((request) => request.route === "archive");
   assert.equal(requests.length, 29); assert.ok(archive.every((request) => request.items.length <= 3));
   assert.deepEqual(archive.slice(2).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2]);
