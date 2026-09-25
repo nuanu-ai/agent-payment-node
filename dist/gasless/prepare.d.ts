@@ -1,6 +1,6 @@
 import type { OperationService } from "../operation-service.js";
 import type { StateStore } from "../state.js";
-import type { GaslessAssetPolicy } from "./asset-policy.js";
+import { type GaslessAssetPolicy } from "./asset-policy.js";
 import type { GaslessRequest } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import type { GaslessOperationRepository } from "./operation-repository.js";
