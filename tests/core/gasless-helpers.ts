@@ -4,6 +4,7 @@ import { ApnError } from "../../src/errors.js";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { ApnCore } from "../../src/core.js";
 import { hashObject } from "../../src/canonical.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { Address, Hex } from "../../src/model.js";
@@ -16,6 +17,7 @@ import type { GaslessOperationRecord } from "../../src/gasless/operation-model.j
 import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
 import type { GaslessApprovalPort, GaslessCustodyPort, GaslessRpcPort, GaslessSealedMaterial } from "../../src/gasless/ports.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
+import { baseLocalGaslessMechanism } from "../../src/gasless/asset-policy.js";
 import { gaslessFailure } from "../../src/gasless/validation.js";
 
 export const GASLESS_TEST_RECIPIENT = getAddress("0x4444444444444444444444444444444444444444");
@@ -125,6 +127,7 @@ export class GaslessTestRpc implements GaslessRpcPort {
 }
 export async function gaslessFixture(root: string, chainId: GaslessChainId = 8453, options: {
   now?: Date; wrapping?: GaslessWrapping; rpc?: GaslessTestRpc; key?: Hex; initializeWallet?: boolean;
+  activatePolicy?: boolean;
   delegation?: "empty" | "expected"; custody?: GaslessCustodyPort; abandonApproval?: OperationAbandonApprovalPort;
 } = {}) {
   const now = options.now ?? new Date("2026-09-09T00:00:00.000Z"), key = options.key ?? generatePrivateKey();
@@ -137,6 +140,18 @@ export async function gaslessFixture(root: string, chainId: GaslessChainId = 845
     await wallets.save(identity, { version: "apn.wallet-secret.v1", privateKey: key, directEffects: {}, x402Effects: {} }, Buffer.alloc(32, 73));
     await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile, profileHash: state.profileHash(profile),
       address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash }));
+  }
+  if (chainId === 8453 && options.initializeWallet !== false && options.activatePolicy !== false) {
+    const store = new AllowlistPolicyStore(root), row = gaslessDeployment(8453);
+    const record = await store.stage({ profile, now, policy: { schemaVersion: "apn.allowlist-policy-file.v1",
+      overlayVersion: "gasless-fixture.1", accounts: { evm: account.address },
+      effectiveAt: new Date(now.getTime() - 1_000).toISOString(),
+      admissions: [{ chain: "eip155:8453", kind: "token", identifier: row.token, rail: "gasless",
+        maximumPerTransferAtomic: "100000000", dailyLimitAtomic: "1000000000",
+        mechanism: baseLocalGaslessMechanism() }] } });
+    await store.appendDecision(profile, null, { status: "active", revision: record.revision,
+      stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest,
+      registry: record.registry, approvalFingerprint: hashObject("gasless-fixture-policy"), decidedAt: now.toISOString() });
   }
   const rpc = options.rpc ?? new GaslessTestRpc(chainId, account.address, options.delegation ?? "empty", now);
   const approval = new GaslessApproval(), custody = options.custody ?? new LocalGaslessCustody(state, wrapping, () => now.getTime());

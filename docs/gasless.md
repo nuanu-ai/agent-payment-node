@@ -19,6 +19,31 @@ The local path reserves a maximum USDC fee and sends the remainder. Circle's
 token paymaster supplies native gas; APN approves and accounts for the fee in
 canonical USDC.
 
+For **local Base USDC** (`eip155:8453`), prepare requires an active owner asset
+policy for the exact local wallet account and canonical token
+`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Admit the `gasless` rail with
+positive per-operation and UTC daily caps and this exact mechanism:
+
+```json
+{ "provider": "local", "reference": "eip155:8453:0x0578cFB241215b77442a541325d6A4E6dFE700Ec" }
+```
+
+The reference names the Base Circle USDC paymaster in APN's pinned deployment
+registry. Preparation saves the active policy digest, revision, activation and
+mechanism. Approval reserves the gross amount in the common asset usage ledger
+before the first signature. APN rechecks the active policy and remaining cap
+before signing, disclosure and dispatch. A revoked or replaced policy blocks
+new effects; an already attempted transfer remains observation only and keeps
+its durable usage reservation until a proven outcome. A safe confirmed revert
+replaces gross reserved usage with the proven USDC fee after allowance cleanup;
+the settlement record keeps that fee separate from the zero delivered amount.
+Safe permission invalidation also releases usage when
+the payment was never submitted; attempted submissions with unknown financial
+results remain reserved. Historical local Base
+operations without this binding cannot be approved or replayed; signed ones
+remain available for observation. These controls have synthetic test evidence,
+not a fresh mainnet transfer acceptance.
+
 Use an existing local EVM wallet profile and an explicit public HTTPS RPC for
 the selected numeric chain ID. APN checks the actual chain, deployed bytecode,
 proxy implementation slots, linked signature checker, USDC domain and account

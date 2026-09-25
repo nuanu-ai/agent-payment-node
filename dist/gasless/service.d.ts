@@ -1,5 +1,6 @@
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
+import { GaslessAssetPolicy } from "./asset-policy.js";
 import type { GaslessChainId } from "./model.js";
 import { GaslessOperationRepository } from "./operation-repository.js";
 import type { GaslessApprovalPort, GaslessCustodyPort, GaslessObservationRpcFactory, GaslessRpcFactory } from "./ports.js";
@@ -14,6 +15,7 @@ export declare class GaslessService {
     private readonly context;
     readonly records: GaslessOperationRepository;
     readonly operations: OperationService;
+    readonly policy: GaslessAssetPolicy;
     constructor(context: RuntimeContext);
     balance(profile: string, chainId: GaslessChainId): Promise<{
         profile: string;
@@ -35,6 +37,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -129,6 +143,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -225,6 +251,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -325,6 +363,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -419,6 +469,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -515,6 +577,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -615,6 +689,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -709,6 +795,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -805,6 +903,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -905,6 +1015,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -999,6 +1121,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -1095,6 +1229,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -1198,6 +1344,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -1294,6 +1452,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -1392,6 +1562,18 @@ export declare class GaslessService {
         rpc_origin: string;
         bundler_origin: string;
         policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
             identity: string;
             policy_hash: string;
             approved_at: string | null;
@@ -1490,5 +1672,7 @@ export declare class GaslessService {
     private dependencies;
     private execution;
     private save;
+    private legacyBase;
+    private legacyRecovery;
     private locked;
 }

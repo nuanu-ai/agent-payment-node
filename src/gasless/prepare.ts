@@ -1,9 +1,11 @@
 import { hashObject } from "../canonical.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import type { OperationService } from "../operation-service.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
+import type { GaslessAssetPolicy } from "./asset-policy.js";
 import type { GaslessIntent, GaslessRequest } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import type { GaslessOperationRepository } from "./operation-repository.js";
@@ -21,6 +23,7 @@ export interface GaslessPreparationOptions {
   readonly operations: OperationService;
   readonly rpcFor: GaslessRpcFactory;
   readonly now: () => number;
+  readonly policy: GaslessAssetPolicy;
 }
 export class GaslessPreparation {
   constructor(private readonly o: GaslessPreparationOptions) {}
@@ -30,7 +33,9 @@ export class GaslessPreparation {
     const key = canonicalIdempotencyKey(input.idempotencyKey), state = this.o.state;
     const profileHash = state.profileHash(profile), operationId = state.operationId(profile, key);
     const idempotencyHash = state.idempotencyHash(key), requestHash = hashObject({ profile, request });
-    return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
+    return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`,
+      `operation:idempotency:${idempotencyHash}`], async () => await state.withLocks([
+      `profile:${allowlistProfileHash(profile)}`], async () => {
       const existing = await this.o.operations.resolvePrepare({ kind: "gasless_transfer", profileHash,
         operationId, idempotencyHash, requestHash });
       if (existing !== null) {
@@ -39,6 +44,8 @@ export class GaslessPreparation {
       }
       assertGaslessExecutionChain(request.chainId);
       const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
+      const allowlist = request.chainId === 8453 ? await this.o.policy.prepare({ profile, owner: binding.owner,
+        request, token: row.token }, operationId) : undefined;
       await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, binding.owner.address);
       if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {
         gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
@@ -59,10 +66,11 @@ export class GaslessPreparation {
         entryPoint: row.entryPoint, delegate: row.delegate, feeCapAtomic, recipientAtomic,
         callData: gaslessBatch(row.token, request.recipient, recipientAtomic, row.paymaster), preparedAt,
         expiresAt: new Date(Date.parse(preparedAt) + GASLESS_TTL_MS).toISOString(),
-        policyHash: hashObject({ identity: "apn.gasless.foreground-approval.v1", request }) };
+        policyHash: hashObject({ identity: "apn.gasless.foreground-approval.v1", request }),
+        ...(allowlist === undefined ? {} : { allowlist }) };
       const intent = { ...unsigned, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(unsigned)) };
       const operation = newGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash, intent });
       await this.o.records.persist(operation); return operation;
-    });
+    }));
   }
 }

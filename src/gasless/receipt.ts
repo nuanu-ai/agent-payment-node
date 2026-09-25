@@ -69,7 +69,11 @@ export function publicGaslessOperation(op: GaslessOperationRecord) {
     rpc_origin: i.initialSnapshot.rpcOrigin, bundler_origin: i.initialSnapshot.bundlerOrigin,
     policy: { identity: "apn.gasless.foreground-approval.v1", policy_hash: i.policyHash,
       approved_at: op.approval?.approvedAt ?? null, action_deadline: i.expiresAt,
-      onchain_user_operation_expiry: false, onchain_permit_expiry: false },
+      onchain_user_operation_expiry: false, onchain_permit_expiry: false,
+      ...(i.allowlist === undefined ? {} : { asset_allowlist: { policy_digest: i.allowlist.policyDigest,
+        policy_revision: i.allowlist.policyRevision, activation_digest: i.allowlist.activationDigest,
+        chain: i.allowlist.chain, token: i.allowlist.token, mechanism: i.allowlist.mechanism,
+        reservation_id: i.allowlist.reservationId } }) },
     created_at: op.createdAt, updated_at: op.updatedAt, expires_at: i.expiresAt,
     next_actions: gaslessNextActions(op),
   };

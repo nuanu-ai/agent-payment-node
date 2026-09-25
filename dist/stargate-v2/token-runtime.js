@@ -11,6 +11,11 @@ import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, 
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
 import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
+function stargateUsageState(state) {
+    if (state === "released_unsubmitted")
+        throw new ApnError("APN_STATE_CORRUPT", "Stargate usage has an incompatible release state.");
+    return state;
+}
 function blocked(reason) { throw new ApnError("APN_RPC_CONFIG", `Stargate token runtime unavailable: ${reason}.`, { reason }); }
 function quantity(v) { if (typeof v !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(v))
     throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC quantity."); return BigInt(v); }
@@ -142,8 +147,8 @@ export class StargateTokenService {
         if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision)
             throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again.");
         const at = new Date(this.now());
-        return (await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
-            idempotencyKey: usageKey(op.operationId), now: at })).state;
+        return stargateUsageState((await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
+            idempotencyKey: usageKey(op.operationId), now: at })).state);
     }
     async followUsage(op, target) {
         const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId));
@@ -153,18 +158,19 @@ export class StargateTokenService {
                 return target;
             throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation is missing.");
         }
-        if (current.state === target)
-            return current.state;
-        if (target === "submitted" && current.state === "unknown_finality")
-            return current.state;
-        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state)) {
+        const state = stargateUsageState(current.state);
+        if (state === target)
+            return state;
+        if (target === "submitted" && state === "unknown_finality")
+            return state;
+        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(state)) {
             if (target === "submitted" || target === "unknown_finality")
-                return current.state;
+                return state;
             throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation reached a conflicting terminal state.");
         }
         const outcome = ["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(target)
             ? { outcomeDigest: domainHash("apn.stargate-token-usage-outcome.v1", canonicalJson({ operationId: op.operationId, target, integrityHash: op.integrityHash })) } : {};
-        return (await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome })).state;
+        return stargateUsageState((await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome })).state);
     }
     remote() { if (this.source !== undefined && this.destination !== undefined)
         return { source: this.source, destination: this.destination }; const source = this.env.APN_OPTIMISM_RPC_URL, destination = this.env.APN_POLYGON_RPC_URL; if (source === undefined || destination === undefined)

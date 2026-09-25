@@ -190,6 +190,18 @@ export declare const intentSchema: z.ZodObject<{
     preparedAt: z.ZodString;
     expiresAt: z.ZodString;
     policyHash: z.ZodString;
+    allowlist: z.ZodOptional<z.ZodObject<{
+        policyDigest: z.ZodString;
+        policyRevision: z.ZodNumber;
+        activationDigest: z.ZodString;
+        chain: z.ZodLiteral<"eip155:8453">;
+        token: z.ZodString;
+        mechanism: z.ZodObject<{
+            provider: z.ZodLiteral<"local">;
+            reference: z.ZodString;
+        }, z.core.$strict>;
+        reservationId: z.ZodString;
+    }, z.core.$strict>>;
 }, z.core.$strict>;
 export declare const estimateSchema: z.ZodObject<{
     verificationGasLimit: z.ZodString;
@@ -976,6 +988,18 @@ export declare const operationSchema: z.ZodObject<{
         preparedAt: z.ZodString;
         expiresAt: z.ZodString;
         policyHash: z.ZodString;
+        allowlist: z.ZodOptional<z.ZodObject<{
+            policyDigest: z.ZodString;
+            policyRevision: z.ZodNumber;
+            activationDigest: z.ZodString;
+            chain: z.ZodLiteral<"eip155:8453">;
+            token: z.ZodString;
+            mechanism: z.ZodObject<{
+                provider: z.ZodLiteral<"local">;
+                reference: z.ZodString;
+            }, z.core.$strict>;
+            reservationId: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     transitions: z.ZodArray<z.ZodObject<{
         at: z.ZodString;

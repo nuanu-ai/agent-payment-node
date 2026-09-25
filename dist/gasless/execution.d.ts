@@ -1,3 +1,4 @@
+import type { GaslessAssetPolicy } from "./asset-policy.js";
 import type { WaitPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { type GaslessSave } from "./observation.js";
@@ -10,8 +11,9 @@ export declare class GaslessExecution {
     private readonly now;
     private readonly save;
     private readonly wait;
+    private readonly policy?;
     private readonly observation;
-    constructor(state: StateStore, rpc: GaslessRpcPort, custody: GaslessCustodyPort, now: () => number, save: GaslessSave, wait: WaitPort);
+    constructor(state: StateStore, rpc: GaslessRpcPort, custody: GaslessCustodyPort, now: () => number, save: GaslessSave, wait: WaitPort, policy?: GaslessAssetPolicy | undefined);
     approve(op: GaslessOperationRecord, approval: GaslessApprovalPort): Promise<GaslessOperationRecord>;
     run(op: GaslessOperationRecord): Promise<GaslessOperationRecord>;
     /** `mirrored` is true only on the approval path, which already ran the mirror estimate before the screen. */

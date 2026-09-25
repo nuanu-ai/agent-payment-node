@@ -127,6 +127,19 @@ export interface GaslessSnapshot extends GaslessAccountState {
     readonly maxFeePerGas: string;
     readonly maxPriorityFeePerGas: string;
 }
+/** Frozen owner activation for the local Base USDC rail. Absent only on historical journals. */
+export interface GaslessAllowlistBinding {
+    readonly policyDigest: string;
+    readonly policyRevision: number;
+    readonly activationDigest: string;
+    readonly chain: "eip155:8453";
+    readonly token: Address;
+    readonly mechanism: Readonly<{
+        provider: "local";
+        reference: string;
+    }>;
+    readonly reservationId: string;
+}
 export interface GaslessIntent {
     /** Absent on legacy journals; never reinterpret their signed wire or hash. */
     readonly wireVersion?: "apn.gasless-wire.v2" | "apn.gasless-wire.v3" | "apn.gasless-wire.v4";
@@ -148,6 +161,7 @@ export interface GaslessIntent {
     readonly preparedAt: string;
     readonly expiresAt: string;
     readonly policyHash: string;
+    readonly allowlist?: GaslessAllowlistBinding;
 }
 /** Exact JSON-RPC representation. No signed bytes are stored in the operation journal. */
 export interface GaslessAuthorization {
