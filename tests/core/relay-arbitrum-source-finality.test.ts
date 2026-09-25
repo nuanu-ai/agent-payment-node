@@ -27,10 +27,14 @@ async function setup(mutate?: Mutation, guardLimit = 24,
   let posts = 0, clock = 1_000_000;
   const requests: string[][] = [];
   const rpc = { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
-    const leg = Math.floor(posts / 2), pass = posts % 2;
+    const final = calls.length > 4;
+    const leg = final ? effects.length : Math.floor(posts / 2), pass = final ? 2 : posts % 2;
     requests.push(calls.map(call => call.method)); posts++;
     const effect = effects[leg]!;
-    const rows: unknown[] = pass === 0
+    const rows: unknown[] = final
+      ? ["0xa4b1", ...effects.flatMap(item => [
+        { number: "0x64", hash: inclusion }, tx(item), receipt(item)]), { number: "0x70", hash: safe }]
+      : pass === 0
       ? ["0xa4b1", tx(effect), receipt(effect), { number: "0x70", hash: safe }]
       : [{ number: "0x64", hash: inclusion }, { number: "0x70", hash: safe }, tx(effect), receipt(effect)];
     mutate?.(rows, leg, pass);
@@ -41,7 +45,7 @@ async function setup(mutate?: Mutation, guardLimit = 24,
   return { observer, cleanup: temp.cleanup, requests, posts: () => posts, clock: () => clock };
 }
 
-test("approval and deposit require exact canonical safe source receipts within four physical POSTs", async t => {
+test("approval and deposit require joint canonical safe source proof within five physical POSTs", async t => {
   const f = await setup(undefined, 24, [approval, deposit]); t.after(f.cleanup);
   const proof = await f.observer.observe(deposit, approval);
   assert.equal(proof?.proofClass, "canonical_safe_source_receipts");
@@ -50,14 +54,31 @@ test("approval and deposit require exact canonical safe source receipts within f
   assert.equal(proof?.destinationDeliveryProven, false);
   assert.equal(proof?.causalLinkCryptographicallyProven, false);
   assert.equal(proof?.paidAcceptance, false);
-  assert.equal(f.posts(), 4);
-  assert.equal(f.clock(), 1_002_250);
+  assert.equal(f.posts(), 5);
+  assert.equal(f.clock(), 1_003_000);
   assert.deepEqual(f.requests, [
     ["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber"],
     ["eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getTransactionByHash", "eth_getTransactionReceipt"],
     ["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber"],
     ["eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getTransactionByHash", "eth_getTransactionReceipt"],
+    ["eth_chainId", "eth_getBlockByNumber", "eth_getTransactionByHash", "eth_getTransactionReceipt",
+      "eth_getBlockByNumber", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber"],
   ]);
+});
+
+test("retreating current safe head and approval reorg between legs refuse the joint proof", async t => {
+  const cases: Mutation[] = [
+    (rows, _, pass) => { if (pass === 2) rows[7] = { number: "0x63", hash: hash("e") }; },
+    (rows, _, pass) => { if (pass === 2) rows[1] = { number: "0x64", hash: hash("e") }; },
+    (rows, _, pass) => { if (pass === 2) rows[3] = { ...rows[3] as object, blockHash: hash("e") }; },
+    (rows, _, pass) => { if (pass === 2) rows[0] = "0x1"; },
+  ];
+  for (const [index, mutate] of cases.entries()) {
+    const f = await setup(mutate, 24, [approval, deposit]); t.after(f.cleanup);
+    if (index === 3) await assert.rejects(f.observer.observe(deposit, approval), { code: "APN_CHAIN_MISMATCH" });
+    else assert.equal(await f.observer.observe(deposit, approval), null);
+    assert.equal(f.posts(), 5);
+  }
 });
 
 test("canonical reorg, unsafe head, changed receipt, revert and missing transaction remain unproven", async t => {
@@ -110,6 +131,9 @@ test("malformed batch, timeout, terminal 429 and hard request cap cannot return 
   const limited = await setup(undefined, 1); t.after(limited.cleanup);
   await assert.rejects(limited.observer.observe(deposit), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.equal(limited.posts(), 1);
+  const finalLimited = await setup(undefined, 4, [approval, deposit]); t.after(finalLimited.cleanup);
+  await assert.rejects(finalLimited.observer.observe(deposit, approval), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(finalLimited.posts(), 4);
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root); await state.initialize();
   let attempts = 0;

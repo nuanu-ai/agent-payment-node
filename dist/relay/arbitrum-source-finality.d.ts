@@ -32,7 +32,7 @@ export interface RelayArbitrumSourceProof {
     readonly causalLinkCryptographicallyProven: false;
     readonly paidAcceptance: false;
 }
-/** Each invocation has one shared 24-POST guard; each effect consumes at most two read-only batches. */
+/** One shared 24-POST guard; at most two batches per effect plus one joint final recheck. */
 export declare class RelayArbitrumSourceFinalityObserver {
     private readonly url;
     private readonly state;
@@ -41,5 +41,6 @@ export declare class RelayArbitrumSourceFinalityObserver {
     constructor(url: string, state: StateStore, rpc?: Pick<HttpsBaseRpc, "batchCall">, guardFactory?: () => EvmDirectRpcGuard);
     observe(deposit: RelayArbitrumExpectedEffect, approval?: RelayArbitrumExpectedEffect): Promise<RelayArbitrumSourceProof | null>;
     private batch;
+    private confirmTogether;
     private effect;
 }
