@@ -212,6 +212,38 @@ test("safe reverted transfers charge their proven USDC fees to the daily cap aft
   assert.equal(s.rpc.sends.length, 2);
 });
 
+test("zero-fee safe revert reaches a terminal journal and zero-consumption lease", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await gaslessFixture(temporary.root, 8453, { now, activatePolicy: false });
+  await activate(temporary.root, s.profile, s.account.address, { daily: s.request.grossAtomic });
+  const { id } = await s.prepare("zero-fee-revert");
+  s.rpc.success = false; s.rpc.safeAllowance = "0";
+  const observe = s.rpc.observe.bind(s.rpc);
+  s.rpc.observe = async (intent, identity, cursor) => {
+    const result = await observe(intent, identity, cursor);
+    if (result.settlement === null) return result;
+    const accounting = { ...result.settlement.accounting,
+      refundAtomic: result.settlement.accounting.prefundAtomic, feeAtomic: "0" };
+    const settlement = { ...result.settlement, accounting };
+    return { ...result, settlement, evidenceHash: hashObject(settlement) };
+  };
+  assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  const final = await s.record(id), usage = new AssetUsageLedger(temporary.root);
+  const identity = { ...account, account: s.account.address };
+  assert.equal(final.state, "failed_confirmed_revert");
+  assert.equal(final.settlement?.accounting.feeAtomic, "0");
+  assert.equal(final.settlement?.accounting.deliveredAtomic, "0");
+  const lease = await usage.load(identity, final.intent.allowlist!.reservationId);
+  assert.equal(lease?.state, "failed_confirmed_revert");
+  assert.equal(lease?.consumedAtomic, "0");
+  assert.equal(lease?.outcomeDigest, final.integrityHash);
+  assert.equal((await usage.usage(identity, now)).amountAtomic, "0");
+  assert.equal((await s.core.execute({ command: "operation.status", operationId: id })).ok, true);
+  assert.equal((await s.prepare("after-zero-fee-revert")).operation.state, "awaiting_approval");
+  assert.equal(s.rpc.sends.length, 1);
+});
+
 test("safe bootstrap permission invalidation releases an unsubmitted payment without replay", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root, 8453, { now, activatePolicy: false });

@@ -256,7 +256,7 @@ function validateBody(value) {
         corrupt("The usage rail binding is invalid.");
     atomic(value.amountAtomic, true, true);
     if (value.consumedAtomic !== undefined && (value.state !== "failed_confirmed_revert" ||
-        atomic(value.consumedAtomic, true, true) > atomic(value.amountAtomic, true, true))) {
+        atomic(value.consumedAtomic, false, true) > atomic(value.amountAtomic, true, true))) {
         corrupt("Confirmed-revert consumption is invalid.");
     }
     if (!["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "released_unsubmitted", "failed_confirmed_revert"].includes(value.state))
@@ -309,7 +309,7 @@ function sumUsage(records, now) {
             continue;
         if (record.state === "failed_confirmed_revert" && record.effectAt.slice(0, 10) !== day)
             continue;
-        total += atomic(record.state === "failed_confirmed_revert" ? record.consumedAtomic : record.amountAtomic, true, true);
+        total += atomic(record.state === "failed_confirmed_revert" ? record.consumedAtomic : record.amountAtomic, record.state !== "failed_confirmed_revert", true);
         if (total > MAX_UINT256)
             corrupt("The usage ledger total exceeds uint256.");
     }
