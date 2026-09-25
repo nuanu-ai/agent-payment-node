@@ -1,5 +1,6 @@
 /** Offline Arbitrum source draft and read-only funding snapshot. No operation repository or dispatch uses this module. */
 import { hashObject } from "../canonical.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
@@ -26,8 +27,8 @@ function frozen(value) {
     }
     return value;
 }
-function policy(active, owner, principal, usage, now) {
-    if (active.profile !== "default" || active.digest !== active.registry.policyDigest ||
+function policy(active, profile, owner, principal, usage, now) {
+    if (active.profile !== profile || active.digest !== active.registry.policyDigest ||
         !Number.isSafeInteger(active.revision) || active.revision <= 0 ||
         active.accounts.evm === undefined || !same(active.accounts.evm, owner) ||
         (active.registry.expiresAt !== undefined && now.toISOString() >= active.registry.expiresAt))
@@ -42,7 +43,8 @@ function policy(active, owner, principal, usage, now) {
 }
 export async function createRelayArbitrumSourceDraft(input) {
     const { now, activePolicy, publicAccount, dailyUsageAtomic, rawQuote, ...request } = input;
-    if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || input.profile !== "default" ||
+    allowlistProfileHash(input.profile);
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
         !ADDRESS.test(input.owner) || !ADDRESS.test(publicAccount) || !same(input.owner, publicAccount))
         blocked("source_owner");
     for (const [name, value] of [["amount", input.amountAtomic], ["minimum", input.minimumOutputAtomic],
@@ -52,7 +54,7 @@ export async function createRelayArbitrumSourceDraft(input) {
     if (amount(input.amountAtomic, "amount") === 0n || amount(input.minimumOutputAtomic, "minimum") === 0n)
         blocked("zero_amount");
     const owner = input.owner.toLowerCase();
-    policy(activePolicy, owner, input.amountAtomic, dailyUsageAtomic, now);
+    policy(activePolicy, input.profile, owner, input.amountAtomic, dailyUsageAtomic, now);
     const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(rawQuote, { payer: owner,
         amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minimumOutputAtomic,
         nowSeconds: Math.floor(now.getTime() / 1000) });
@@ -81,7 +83,7 @@ export async function preflightRelayArbitrumSourceDraft(draft, active, publicAcc
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
         !ADDRESS.test(publicAccount) || !same(publicAccount, draft.owner) ||
         draft.schemaVersion !== "apn.relay-arbitrum-source-draft.v1" || draft.sourceChainId !== 42161 ||
-        draft.destinationChainId !== 1 || draft.profile !== "default" ||
+        draft.destinationChainId !== 1 ||
         !same(draft.sourceToken, RELAY_ARBITRUM_USDC) || !same(draft.destinationToken, ETHEREUM_USDC) ||
         !same(draft.recipient, RELAY_ETHEREUM_USDC_RECIPIENT) || draft.executionAdmitted !== false ||
         draft.nextActions.length !== 0)
@@ -94,7 +96,8 @@ export async function preflightRelayArbitrumSourceDraft(draft, active, publicAcc
     if (hashObject(body) !== integrityHash || active.digest !== draft.policyDigest ||
         active.revision !== draft.policyRevision || now.getTime() + 60_000 >= Date.parse(draft.deadline))
         blocked("draft_integrity_or_expiry");
-    policy(active, draft.owner, draft.amountAtomic, dailyUsageAtomic, now);
+    allowlistProfileHash(draft.profile);
+    policy(active, draft.profile, draft.owner, draft.amountAtomic, dailyUsageAtomic, now);
     const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(draft.rawQuote, { payer: draft.owner,
         amountAtomic: draft.amountAtomic, minimumOutputAtomic: draft.minimumOutputAtomic,
         nowSeconds: Math.floor(now.getTime() / 1000) });

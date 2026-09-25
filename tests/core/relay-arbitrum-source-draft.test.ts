@@ -14,7 +14,7 @@ const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 const quote = async (): Promise<any> => JSON.parse(await readFile(
   "tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json", "utf8"));
 
-function active(reference = RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE) {
+function active(reference = RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE, profile = "default") {
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
     registryVersion: "test.arbitrum.1", publishedAt: "2026-09-25T00:00:00.000Z",
     effectiveDate: "2026-09-25", effectiveAt: "2026-09-25T00:00:00.000Z",
@@ -23,7 +23,7 @@ function active(reference = RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE) {
         rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
         railCaps: { bridge: { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "2000000" } },
         mechanismPins: { bridge: { provider: "relay", reference } } }] }] });
-  return { profile: "default", registry, digest: registry.policyDigest, revision: 1,
+  return { profile, registry, digest: registry.policyDigest, revision: 1,
     accounts: { evm: owner }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
 }
 
@@ -44,6 +44,14 @@ test("offline source draft binds quote, policy pin, recipient and all fee ceilin
   assert.deepEqual(draft.nextActions, []);
   assert.ok(Object.isFrozen(draft) && Object.isFrozen(draft.rawQuote));
   assert.match(draft.integrityHash, /^[a-f0-9]{64}$/u);
+});
+
+test("source draft binds buyer profile to the matching active policy", async () => {
+  const buyer = { ...await input(), profile: "evm-live-buyer", activePolicy: active(RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE, "evm-live-buyer") };
+  const draft = await createRelayArbitrumSourceDraft(buyer);
+  assert.equal(draft.profile, "evm-live-buyer");
+  await assert.rejects(createRelayArbitrumSourceDraft({ ...buyer, activePolicy: active() }),
+    { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("source draft rejects policy, quote, owner, recipient and fee drift", async () => {

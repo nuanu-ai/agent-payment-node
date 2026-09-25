@@ -23,7 +23,7 @@ const blockHash = `0x${"12".repeat(32)}`;
 const head = { number: "0x100", hash: blockHash, baseFeePerGas: "0x1" };
 const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 const quoteFile = resolve("tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json");
-function active(revision = 1) {
+function active(revision = 1, profile = "default") {
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
     registryVersion: "test.relay.arb.decision.1", publishedAt: "2026-09-25T00:00:00.000Z",
     effectiveDate: "2026-09-25", effectiveAt: "2026-09-25T00:00:00.000Z",
@@ -32,19 +32,19 @@ function active(revision = 1) {
         rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
         railCaps: { bridge: { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "2000000" } },
         mechanismPins: { bridge: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } } }] }] });
-  return { profile: "default", registry, digest: registry.policyDigest, revision,
+  return { profile, registry, digest: registry.policyDigest, revision,
     accounts: { evm: owner }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
 }
-async function prepared() {
+async function prepared(profile = "default") {
   const temporary = await temporaryState();
   const state = new StateStore(temporary.root);
   const service = new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
-    { activePolicy: async () => active(), dailyUsage: async () => "0" });
-  const saved = await service.prepareArbitrum({ profile: "default", owner, amountAtomic: "500000",
+    { activePolicy: async () => active(1, profile), dailyUsage: async () => "0" });
+  const saved = await service.prepareArbitrum({ profile, owner, amountAtomic: "500000",
     minOutputAtomic: "94065", maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
     maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-approval-decision" });
   const operation = await new RelayUnsignedOperationRepository(temporary.root).loadOperation(
-    state.profileHash("default"), saved.operationId);
+    state.profileHash(profile), saved.operationId);
   assert.ok(operation);
   return { temporary, state, operation };
 }
@@ -56,7 +56,7 @@ function responses(allowance: bigint, hash = blockHash) {
 let providerTick = 1000;
 function service(state: StateStore, allowances: readonly bigint[], options: {
   readonly secondHash?: string; readonly policyRevision?: number; readonly onBatch?: (index: number) => void;
-  readonly rateLimitAt?: number;
+  readonly rateLimitAt?: number; readonly profile?: string;
 } = {}) {
   let calls = 0;
   const starts: number[] = [];
@@ -76,7 +76,7 @@ function service(state: StateStore, allowances: readonly bigint[], options: {
       return responses(allowances[Math.floor(index / 3)]!, index >= 3 && options.secondHash ? options.secondHash : blockHash)[index % 3]!;
     } }, () => guard, async () => {});
   const decision = new RelayArbitrumApprovalDecisionService(state, reader,
-    { activePolicy: async () => active(options.policyRevision), dailyUsage: async () => "0", now: () => now });
+    { activePolicy: async () => active(options.policyRevision, options.profile), dailyUsage: async () => "0", now: () => now });
   return { decision, calls: () => calls, starts, guard };
 }
 
@@ -100,6 +100,16 @@ test("saved operation command persists only a fresh canonical skip, with six gua
   assert.equal(j.effects[1].phase, "pending");
   await assert.rejects(decision.decide("default", operation.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(calls(), 6);
+});
+
+test("buyer approval check uses its own active profile and rejects a different policy", async t => {
+  const { temporary, state, operation } = await prepared("evm-live-buyer"); t.after(temporary.cleanup);
+  await assert.rejects(service(state, [500_000n], { profile: "default" }).decision.decide(
+    "evm-live-buyer", operation.operationId), { code: "APN_OPERATION_BLOCKED" });
+  const buyer = service(state, [500_000n, 500_000n], { profile: "evm-live-buyer" });
+  const result = await buyer.decision.decide("evm-live-buyer", operation.operationId);
+  assert.equal(result.state, "approval_skipped");
+  assert.equal(buyer.calls(), 6);
 });
 
 test("production locked policy read returns without recursively acquiring its profile lock", async t => {
@@ -136,7 +146,7 @@ test("reorg, stale policy, 429, forged saved operation and cross-profile access 
   await assert.rejects(limited.decision.decide("default", operation.operationId), { code: "APN_RPC_RATE_LIMITED" });
   assert.equal(limited.calls(), 2);
   await assert.rejects(service(state, [500_000n]).decision.decide("other", operation.operationId),
-    { code: "APN_INVALID_INPUT" });
+    { code: "APN_OPERATION_NOT_FOUND" });
   const path = join(temporary.root, "relay-unsigned-operations", operation.profileHash, `${operation.operationId}.json`);
   const saved = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
   await writeFile(path, JSON.stringify({ ...saved, amountAtomic: "1" }), { mode: 0o600 });

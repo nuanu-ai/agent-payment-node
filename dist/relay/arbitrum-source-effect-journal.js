@@ -346,7 +346,9 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     /** Atomically create a skipped journal only after an injected fresh canonical allowance read. */
     async skipApprovalIfVerified(profileHash, operationId, expectedIntegrityHash, verifier, policyUnderLock, additionalLocks = []) {
         await this.initialize();
-        return this.withLocks([`profile:${profileHash}`, `profile:${allowlistProfileHash("default")}`,
+        const operation = await this.operation(profileHash, operationId);
+        const profile = operation.arbitrumDraft.profile;
+        return this.withLocks([`profile:${profileHash}`, `profile:${allowlistProfileHash(profile)}`,
             `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`, ...additionalLocks], async () => {
             const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
             if (await new RelayRetirementRepository(this.root).load(op) !== null)
@@ -363,9 +365,9 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
                 blocked("stale_journal_revision");
             if (j.effects[0].phase !== "pending" || j.effects[1].phase !== "pending")
                 blocked("approval_already_started");
-            const activePolicy = policyUnderLock === undefined ? activeAssetPolicyFromState(await new AllowlistPolicyStore(this.root).readUnderProfileLock("default"), started) :
-                await policyUnderLock("default", started);
-            if (activePolicy === null || activePolicy.digest !== op.policyDigest ||
+            const activePolicy = policyUnderLock === undefined ? activeAssetPolicyFromState(await new AllowlistPolicyStore(this.root).readUnderProfileLock(profile), started) :
+                await policyUnderLock(profile, started);
+            if (activePolicy === null || activePolicy.profile !== profile || activePolicy.digest !== op.policyDigest ||
                 activePolicy.revision !== op.policyRevision || activePolicy.accounts.evm?.toLowerCase() !== op.sourceAccount)
                 blocked("active_owner_policy_required");
             const read = await verifier({ operation: op, journal: j, activePolicy });

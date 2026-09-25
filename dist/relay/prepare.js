@@ -112,7 +112,8 @@ export class RelayUnsignedPrepareService {
     async prepareBase(input) { return this.prepare(input, "base"); }
     /** A local quote file is validated before create-only persistence; no network or wallet is used. */
     async prepareArbitrum(input) {
-        if (input.profile !== "default" || !ADDRESS.test(input.owner) || !isAbsolute(input.quoteFile) ||
+        allowlistProfileHash(input.profile);
+        if (!ADDRESS.test(input.owner) || !isAbsolute(input.quoteFile) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxProviderFeeAtomic,
                 input.maxApprovalNetworkFeeWei, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
             !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
@@ -136,7 +137,7 @@ export class RelayUnsignedPrepareService {
         if (!Number.isFinite(now.getTime()))
             throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum prepare clock is invalid.");
         const active = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile));
-        if (active === null || active.accounts.evm?.toLowerCase() !== owner)
+        if (active === null || active.profile !== input.profile || active.accounts.evm?.toLowerCase() !== owner)
             refuse("relay_arbitrum_active_owner_policy_required");
         const usage = await (this.ports.dailyUsage?.(owner, now) ?? new AssetUsageLedger(this.state.root).usage({
             account: owner, chain: "eip155:42161", asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC },
@@ -160,7 +161,7 @@ export class RelayUnsignedPrepareService {
                 await file.close();
             }
         })());
-        const draft = await createRelayArbitrumSourceDraft({ profile: "default", owner, publicAccount: owner,
+        const draft = await createRelayArbitrumSourceDraft({ profile: input.profile, owner, publicAccount: owner,
             amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minOutputAtomic,
             maxProviderFeeAtomic: input.maxProviderFeeAtomic,
             maxApprovalNetworkFeeWei: input.maxApprovalNetworkFeeWei,
