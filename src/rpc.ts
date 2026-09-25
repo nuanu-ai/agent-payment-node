@@ -341,7 +341,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   async submitRawTransaction(rawTransaction: Hex): Promise<Hex> {
     try { return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction]), 32); }
     catch (error) {
-      if (error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED") throw error;
+      if (error instanceof ApnError && (error.code === "APN_RPC_BUDGET_EXCEEDED" || error.code === "APN_PROVIDER_UNAVAILABLE")) throw error;
       if (error instanceof ApnError && error.details?.httpStatus === 429) throw error;
       throw new ApnError("APN_RPC_AMBIGUOUS", "Transaction submission outcome is ambiguous.");
     }
