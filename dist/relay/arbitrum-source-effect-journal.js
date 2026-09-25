@@ -5,11 +5,14 @@ import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
+import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
+import { ETHEREUM_DEPOSITORY } from "./quote.js";
 const HASH = /^[a-f0-9]{64}$/u;
 const TX = /^0x(?:[a-fA-F0-9]{2})+$/u;
 const UINT = /^(0|[1-9][0-9]*)$/u;
+const BLOCK_HASH = /^0x[a-f0-9]{64}$/u;
 const phases = ["pending", "signing_started", "sealed", "submitting",
-    "submitted", "unknown_finality", "confirmed", "failed"];
+    "submitted", "unknown_finality", "confirmed", "failed", "approval_skipped"];
 const iso = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value)) &&
     new Date(value).toISOString() === value;
 const exact = (value, names) => Object.keys(value).sort().join() === [...names].sort().join();
@@ -31,6 +34,19 @@ function effectEnvelope(op, role) {
     const steps = op.arbitrumDraft.rawQuote.steps;
     // The durable operation repository re-decodes the entire quote before any repository read/write.
     return steps[role === "approval" ? 0 : 1].items[0].data;
+}
+function validSkipProof(proof, op, createdAt) {
+    const draft = op.arbitrumDraft;
+    return exact(proof, ["proofClass", "operationIntegrityHash", "policyDigest", "policyRevision", "token",
+        "owner", "spender", "amountAtomic", "allowanceAtomic", "blockNumber", "blockHash", "observedAt"]) &&
+        proof.proofClass === "canonical_allowance_observation" && proof.operationIntegrityHash === op.integrityHash &&
+        proof.policyDigest === draft.policyDigest && proof.policyRevision === draft.policyRevision &&
+        same(proof.token, RELAY_ARBITRUM_USDC) && same(proof.owner, op.sourceAccount) &&
+        same(proof.spender, ETHEREUM_DEPOSITORY) && proof.amountAtomic === op.amountAtomic &&
+        UINT.test(proof.allowanceAtomic) && BigInt(proof.allowanceAtomic) >= BigInt(op.amountAtomic) &&
+        UINT.test(proof.blockNumber) && BLOCK_HASH.test(proof.blockHash) &&
+        proof.blockHash !== `0x${"0".repeat(64)}` && iso(proof.observedAt) &&
+        Date.parse(proof.observedAt) >= Date.parse(createdAt) && Date.parse(proof.observedAt) < Date.parse(op.deadline);
 }
 async function verifySigned(op, role, raw, nonce) {
     if (!TX.test(raw) || raw.length > 16_386 || !UINT.test(nonce))
@@ -71,9 +87,16 @@ function shape(j, op) {
         corrupt("binding");
     for (const [index, role] of ["approval", "deposit"].entries()) {
         const effect = j.effects[index];
-        if (effect === undefined || !exact(effect, ["role", "phase", "attempt"]) || effect.role !== role ||
+        if (effect === undefined || !exact(effect, effect.phase === "approval_skipped" ?
+            ["role", "phase", "attempt", "skipProof"] : ["role", "phase", "attempt"]) || effect.role !== role ||
             !phases.includes(effect.phase))
             corrupt("effect_shape");
+        if (effect.phase === "approval_skipped") {
+            if (role !== "approval" || effect.attempt !== null || effect.skipProof === undefined ||
+                !validSkipProof(effect.skipProof, op, j.createdAt))
+                corrupt("approval_skip_proof");
+            continue;
+        }
         if (effect.phase === "pending") {
             if (effect.attempt !== null)
                 corrupt("pending_attempt");
@@ -194,15 +217,21 @@ export async function arbitrumSourceRecoveryClass(j, op) {
         return "failed";
     if (deposit.phase === "confirmed")
         return "completed";
+    if (approval.phase === "approval_skipped")
+        return "approval_skipped";
     if (deposit.phase !== "pending" || ["signing_started", "sealed", "submitting", "submitted", "unknown_finality"].includes(approval.phase))
         return "observation_only";
     return approval.phase === "confirmed" ? "approval_confirmed" : "not_started";
 }
 export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     verifiedObservation;
-    constructor(root, verifiedObservation) {
+    verifiedAllowance;
+    clock;
+    constructor(root, verifiedObservation, verifiedAllowance, clock = () => new Date()) {
         super(root);
         this.verifiedObservation = verifiedObservation;
+        this.verifiedAllowance = verifiedAllowance;
+        this.clock = clock;
     }
     operations = new RelayUnsignedOperationRepository(this.root);
     path(profileHash, operationId) {
@@ -259,6 +288,47 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     }
     async beginSigning(profileHash, operationId, expectedIntegrityHash, role, at) {
         return this.transition(profileHash, operationId, expectedIntegrityHash, { kind: "begin_signing", role, marker: randomBytes(32).toString("hex"), at });
+    }
+    /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
+    async skipApproval(profileHash, operationId, expectedIntegrityHash) {
+        await this.initialize();
+        return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => {
+            const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
+            if (await new RelayRetirementRepository(this.root).load(op) !== null)
+                blocked("operation_retired");
+            const data = await this.readJson(path);
+            if (data === null)
+                throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay Arbitrum source effect journal was not found.");
+            const j = await validateArbitrumSourceEffectJournal(data, op);
+            if (j.integrityHash !== expectedIntegrityHash)
+                blocked("stale_journal_revision");
+            if (j.effects[0].phase !== "pending" || j.effects[1].phase !== "pending")
+                blocked("approval_already_started");
+            if (this.verifiedAllowance === undefined)
+                blocked("canonical_allowance_verifier_unavailable");
+            const read = await this.verifiedAllowance({ operation: op, journal: j });
+            const now = this.clock();
+            if (read === null || !(now instanceof Date) || !Number.isFinite(now.getTime()) ||
+                !iso(read.observedAt) || Date.parse(read.observedAt) > now.getTime() ||
+                now.getTime() - Date.parse(read.observedAt) > 30_000 ||
+                now.getTime() + 60_000 >= Date.parse(op.deadline))
+                blocked("fresh_canonical_allowance_unavailable");
+            const proof = { proofClass: "canonical_allowance_observation",
+                operationIntegrityHash: op.integrityHash, policyDigest: read.policyDigest,
+                policyRevision: read.policyRevision, token: RELAY_ARBITRUM_USDC,
+                owner: op.sourceAccount, spender: ETHEREUM_DEPOSITORY, amountAtomic: op.amountAtomic,
+                allowanceAtomic: read.allowanceAtomic, blockNumber: read.blockNumber,
+                blockHash: read.blockHash, observedAt: read.observedAt };
+            if (!validSkipProof(proof, op, j.createdAt))
+                blocked("allowance_or_policy_mismatch");
+            const effects = [
+                { role: "approval", phase: "approval_skipped", attempt: null, skipProof: proof }, j.effects[1]
+            ];
+            const body = { ...fields(j), effects };
+            const next = await validateArbitrumSourceEffectJournal({ ...body, integrityHash: hashObject(body) }, op);
+            await this.writeJson(path, next);
+            return next;
+        });
     }
 }
 //# sourceMappingURL=arbitrum-source-effect-journal.js.map

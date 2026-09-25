@@ -1,7 +1,22 @@
 import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore } from "../secure-state-store.js";
 export type ArbitrumEffectRole = "approval" | "deposit";
-export type ArbitrumEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | "confirmed" | "failed";
+export type ArbitrumEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | "confirmed" | "failed" | "approval_skipped";
+export interface ArbitrumApprovalSkipProof {
+    readonly proofClass: "canonical_allowance_observation";
+    readonly operationIntegrityHash: string;
+    readonly policyDigest: string;
+    readonly policyRevision: number;
+    readonly token: string;
+    readonly owner: string;
+    readonly spender: string;
+    readonly amountAtomic: string;
+    readonly allowanceAtomic: string;
+    readonly blockNumber: string;
+    readonly blockHash: string;
+    readonly observedAt: string;
+}
+export type ArbitrumVerifiedAllowanceRead = Omit<ArbitrumApprovalSkipProof, "proofClass" | "operationIntegrityHash" | "token" | "owner" | "spender" | "amountAtomic">;
 export interface ArbitrumEffectAttempt {
     readonly marker: string;
     readonly markedAt: string;
@@ -15,6 +30,7 @@ export interface ArbitrumSourceEffect {
     readonly role: ArbitrumEffectRole;
     readonly phase: ArbitrumEffectPhase;
     readonly attempt: ArbitrumEffectAttempt | null;
+    readonly skipProof?: ArbitrumApprovalSkipProof;
 }
 export interface ArbitrumSourceEffectJournal {
     readonly schemaVersion: "apn.relay-arbitrum-source-effect-journal.v1";
@@ -57,16 +73,21 @@ export type ArbitrumEffectEvent = {
 export declare function validateArbitrumSourceEffectJournal(value: unknown, op: RelayUnsignedOperation): Promise<ArbitrumSourceEffectJournal>;
 export declare function createArbitrumSourceEffectJournal(op: RelayUnsignedOperation, createdAt: string): Promise<ArbitrumSourceEffectJournal>;
 export declare function advanceArbitrumSourceEffectJournal(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;
-export declare function arbitrumSourceRecoveryClass(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation): Promise<"not_started" | "observation_only" | "approval_confirmed" | "completed" | "failed">;
+export declare function arbitrumSourceRecoveryClass(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation): Promise<"not_started" | "observation_only" | "approval_confirmed" | "approval_skipped" | "completed" | "failed">;
 export declare class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     private readonly verifiedObservation?;
+    private readonly verifiedAllowance?;
+    private readonly clock;
     constructor(root: string, verifiedObservation?: ((input: {
         readonly operation: RelayUnsignedOperation;
         readonly journal: ArbitrumSourceEffectJournal;
         readonly role: ArbitrumEffectRole;
         readonly outcome: "confirmed" | "failed";
         readonly proofDigest: string;
-    }) => Promise<boolean>) | undefined);
+    }) => Promise<boolean>) | undefined, verifiedAllowance?: ((input: {
+        readonly operation: RelayUnsignedOperation;
+        readonly journal: ArbitrumSourceEffectJournal;
+    }) => Promise<ArbitrumVerifiedAllowanceRead | null>) | undefined, clock?: () => Date);
     private readonly operations;
     private path;
     private operation;
@@ -74,4 +95,6 @@ export declare class ArbitrumSourceEffectJournalRepository extends SecureStateSt
     create(profileHash: string, operationId: string, createdAt: string): Promise<ArbitrumSourceEffectJournal>;
     transition(profileHash: string, operationId: string, expectedIntegrityHash: string, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;
     beginSigning(profileHash: string, operationId: string, expectedIntegrityHash: string, role: ArbitrumEffectRole, at: string): Promise<ArbitrumSourceEffectJournal>;
+    /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
+    skipApproval(profileHash: string, operationId: string, expectedIntegrityHash: string): Promise<ArbitrumSourceEffectJournal>;
 }

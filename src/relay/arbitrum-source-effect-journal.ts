@@ -6,10 +6,28 @@ import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation,
   type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
+import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
+import { ETHEREUM_DEPOSITORY } from "./quote.js";
 
 export type ArbitrumEffectRole = "approval" | "deposit";
 export type ArbitrumEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submitted" |
-  "unknown_finality" | "confirmed" | "failed";
+  "unknown_finality" | "confirmed" | "failed" | "approval_skipped";
+export interface ArbitrumApprovalSkipProof {
+  readonly proofClass: "canonical_allowance_observation";
+  readonly operationIntegrityHash: string;
+  readonly policyDigest: string;
+  readonly policyRevision: number;
+  readonly token: string;
+  readonly owner: string;
+  readonly spender: string;
+  readonly amountAtomic: string;
+  readonly allowanceAtomic: string;
+  readonly blockNumber: string;
+  readonly blockHash: string;
+  readonly observedAt: string;
+}
+export type ArbitrumVerifiedAllowanceRead = Omit<ArbitrumApprovalSkipProof,
+  "proofClass" | "operationIntegrityHash" | "token" | "owner" | "spender" | "amountAtomic">;
 export interface ArbitrumEffectAttempt {
   readonly marker: string;
   readonly markedAt: string;
@@ -23,6 +41,7 @@ export interface ArbitrumSourceEffect {
   readonly role: ArbitrumEffectRole;
   readonly phase: ArbitrumEffectPhase;
   readonly attempt: ArbitrumEffectAttempt | null;
+  readonly skipProof?: ArbitrumApprovalSkipProof;
 }
 export interface ArbitrumSourceEffectJournal {
   readonly schemaVersion: "apn.relay-arbitrum-source-effect-journal.v1";
@@ -49,8 +68,9 @@ export type ArbitrumEffectEvent =
 const HASH = /^[a-f0-9]{64}$/u;
 const TX = /^0x(?:[a-fA-F0-9]{2})+$/u;
 const UINT = /^(0|[1-9][0-9]*)$/u;
+const BLOCK_HASH = /^0x[a-f0-9]{64}$/u;
 const phases: readonly ArbitrumEffectPhase[] = ["pending", "signing_started", "sealed", "submitting",
-  "submitted", "unknown_finality", "confirmed", "failed"];
+  "submitted", "unknown_finality", "confirmed", "failed", "approval_skipped"];
 const iso = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)) &&
   new Date(value).toISOString() === value;
 const exact = (value: object, names: readonly string[]) => Object.keys(value).sort().join() === [...names].sort().join();
@@ -70,6 +90,19 @@ function effectEnvelope(op: RelayUnsignedOperation, role: ArbitrumEffectRole) {
   const steps = (op.arbitrumDraft!.rawQuote as { steps: Array<{ items: Array<{ data: unknown }> }> }).steps;
   // The durable operation repository re-decodes the entire quote before any repository read/write.
   return steps[role === "approval" ? 0 : 1]!.items[0]!.data;
+}
+function validSkipProof(proof: ArbitrumApprovalSkipProof, op: RelayUnsignedOperation, createdAt: string): boolean {
+  const draft = op.arbitrumDraft!;
+  return exact(proof, ["proofClass", "operationIntegrityHash", "policyDigest", "policyRevision", "token",
+    "owner", "spender", "amountAtomic", "allowanceAtomic", "blockNumber", "blockHash", "observedAt"]) &&
+    proof.proofClass === "canonical_allowance_observation" && proof.operationIntegrityHash === op.integrityHash &&
+    proof.policyDigest === draft.policyDigest && proof.policyRevision === draft.policyRevision &&
+    same(proof.token, RELAY_ARBITRUM_USDC) && same(proof.owner, op.sourceAccount) &&
+    same(proof.spender, ETHEREUM_DEPOSITORY) && proof.amountAtomic === op.amountAtomic &&
+    UINT.test(proof.allowanceAtomic) && BigInt(proof.allowanceAtomic) >= BigInt(op.amountAtomic) &&
+    UINT.test(proof.blockNumber) && BLOCK_HASH.test(proof.blockHash) &&
+    proof.blockHash !== `0x${"0".repeat(64)}` && iso(proof.observedAt) &&
+    Date.parse(proof.observedAt) >= Date.parse(createdAt) && Date.parse(proof.observedAt) < Date.parse(op.deadline);
 }
 async function verifySigned(op: RelayUnsignedOperation, role: ArbitrumEffectRole,
   raw: string, nonce: string): Promise<string> {
@@ -106,8 +139,14 @@ function shape(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation): void
     !HASH.test(j.integrityHash) || j.integrityHash !== hashObject(fields(j))) corrupt("binding");
   for (const [index, role] of ["approval", "deposit"].entries()) {
     const effect = j.effects[index];
-    if (effect === undefined || !exact(effect, ["role", "phase", "attempt"]) || effect.role !== role ||
+    if (effect === undefined || !exact(effect, effect.phase === "approval_skipped" ?
+      ["role", "phase", "attempt", "skipProof"] : ["role", "phase", "attempt"]) || effect.role !== role ||
       !phases.includes(effect.phase)) corrupt("effect_shape");
+    if (effect.phase === "approval_skipped") {
+      if (role !== "approval" || effect.attempt !== null || effect.skipProof === undefined ||
+        !validSkipProof(effect.skipProof, op, j.createdAt)) corrupt("approval_skip_proof");
+      continue;
+    }
     if (effect.phase === "pending") {
       if (effect.attempt !== null) corrupt("pending_attempt");
       continue;
@@ -208,11 +247,12 @@ export async function advanceArbitrumSourceEffectJournal(j: ArbitrumSourceEffect
   return validateArbitrumSourceEffectJournal({ ...data, integrityHash: hashObject(data) }, op);
 }
 export async function arbitrumSourceRecoveryClass(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation):
-  Promise<"not_started" | "observation_only" | "approval_confirmed" | "completed" | "failed"> {
+  Promise<"not_started" | "observation_only" | "approval_confirmed" | "approval_skipped" | "completed" | "failed"> {
   await validateArbitrumSourceEffectJournal(j, op);
   const [approval, deposit] = j.effects;
   if (approval.phase === "failed" || deposit.phase === "failed") return "failed";
   if (deposit.phase === "confirmed") return "completed";
+  if (approval.phase === "approval_skipped") return "approval_skipped";
   if (deposit.phase !== "pending" || ["signing_started", "sealed", "submitting", "submitted", "unknown_finality"].includes(approval.phase))
     return "observation_only";
   return approval.phase === "confirmed" ? "approval_confirmed" : "not_started";
@@ -222,7 +262,9 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     readonly operation: RelayUnsignedOperation; readonly journal: ArbitrumSourceEffectJournal;
     readonly role: ArbitrumEffectRole; readonly outcome: "confirmed" | "failed";
     readonly proofDigest: string;
-  }) => Promise<boolean>) { super(root); }
+  }) => Promise<boolean>, private readonly verifiedAllowance?: (input: {
+    readonly operation: RelayUnsignedOperation; readonly journal: ArbitrumSourceEffectJournal;
+  }) => Promise<ArbitrumVerifiedAllowanceRead | null>, private readonly clock: () => Date = () => new Date()) { super(root); }
   private readonly operations = new RelayUnsignedOperationRepository(this.root);
   private path(profileHash: string, operationId: string): string {
     stateIdentifier(profileHash, "Relay Arbitrum effect profile"); stateIdentifier(operationId, "Relay Arbitrum effect operation");
@@ -271,5 +313,38 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     role: ArbitrumEffectRole, at: string): Promise<ArbitrumSourceEffectJournal> {
     return this.transition(profileHash, operationId, expectedIntegrityHash,
       { kind: "begin_signing", role, marker: randomBytes(32).toString("hex"), at });
+  }
+  /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
+  async skipApproval(profileHash: string, operationId: string,
+    expectedIntegrityHash: string): Promise<ArbitrumSourceEffectJournal> {
+    await this.initialize();
+    return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => {
+      const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
+      if (await new RelayRetirementRepository(this.root).load(op) !== null) blocked("operation_retired");
+      const data = await this.readJson(path);
+      if (data === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay Arbitrum source effect journal was not found.");
+      const j = await validateArbitrumSourceEffectJournal(data, op);
+      if (j.integrityHash !== expectedIntegrityHash) blocked("stale_journal_revision");
+      if (j.effects[0].phase !== "pending" || j.effects[1].phase !== "pending") blocked("approval_already_started");
+      if (this.verifiedAllowance === undefined) blocked("canonical_allowance_verifier_unavailable");
+      const read = await this.verifiedAllowance({ operation: op, journal: j });
+      const now = this.clock();
+      if (read === null || !(now instanceof Date) || !Number.isFinite(now.getTime()) ||
+        !iso(read.observedAt) || Date.parse(read.observedAt) > now.getTime() ||
+        now.getTime() - Date.parse(read.observedAt) > 30_000 ||
+        now.getTime() + 60_000 >= Date.parse(op.deadline)) blocked("fresh_canonical_allowance_unavailable");
+      const proof: ArbitrumApprovalSkipProof = { proofClass: "canonical_allowance_observation",
+        operationIntegrityHash: op.integrityHash, policyDigest: read.policyDigest,
+        policyRevision: read.policyRevision, token: RELAY_ARBITRUM_USDC,
+        owner: op.sourceAccount, spender: ETHEREUM_DEPOSITORY, amountAtomic: op.amountAtomic,
+        allowanceAtomic: read.allowanceAtomic, blockNumber: read.blockNumber,
+        blockHash: read.blockHash, observedAt: read.observedAt };
+      if (!validSkipProof(proof, op, j.createdAt)) blocked("allowance_or_policy_mismatch");
+      const effects: [ArbitrumSourceEffect, ArbitrumSourceEffect] = [
+        { role: "approval", phase: "approval_skipped", attempt: null, skipProof: proof }, j.effects[1]];
+      const body = { ...fields(j), effects };
+      const next = await validateArbitrumSourceEffectJournal({ ...body, integrityHash: hashObject(body) }, op);
+      await this.writeJson(path, next); return next;
+    });
   }
 }
