@@ -11,7 +11,7 @@ import { StateStore } from "../state.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayNativeSourceJournalRepository } from "./native-source.js";
 import { RelayEncryptedApprovalCustody } from "./approval-effect.js";
-import { RELAY_BNB_SOURCE, relayNativeRoute } from "./native-quote.js";
+import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, relayNativeRoute } from "./native-quote.js";
 export class RelayRetireService {
     state;
     clock;
@@ -28,29 +28,27 @@ export class RelayRetireService {
         const profileHash = this.state.profileHash(input.profile);
         await this.state.initialize();
         return this.state.withLocks([`profile:${profileHash}`, `operation:${input.operationId}`,
-            ...(input.profile === "evm-live-buyer" ? [`relay-native-source:${input.operationId}`, evmAddressLock(RELAY_BNB_SOURCE)] : [])], async () => {
+            `relay-native-source:${input.operationId}`,
+            evmAddressLock(input.profile === "evm-live-buyer" ? RELAY_BNB_SOURCE : RELAY_BNB_DEFAULT_SOURCE)], async () => {
             const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, input.operationId);
             if (op === null) {
                 // Distinguish an operation belonging to another profile from one that does not exist.
                 await new OperationService(this.state).required(input.operationId);
                 throw new ApnError("APN_OPERATION_BLOCKED", "The operation is not a prepared Relay quote for this profile.");
             }
-            if (input.profile === "evm-live-buyer") {
+            if (input.profile === "evm-live-buyer" || op.nativeQuote !== undefined) {
                 let route = null;
                 try {
-                    route = relayNativeRoute(op.recipient);
+                    route = relayNativeRoute(op.sourceAccount, op.recipient);
                 }
-                catch { /* outside the buyer native lanes */ }
-                if (route === null || op.nativeQuote === undefined || op.quote !== undefined ||
+                catch { /* outside the native lanes */ }
+                if (route === null || route.profile !== input.profile || op.nativeQuote === undefined || op.quote !== undefined ||
                     op.sourceChainId !== 56 || op.destinationChainId !== route.chainId ||
-                    op.sourceAccount.toLowerCase() !== RELAY_BNB_SOURCE.toLowerCase() ||
+                    op.sourceAccount.toLowerCase() !== route.payer.toLowerCase() ||
                     op.nativeQuote.routeReference !== route.reference ||
                     op.policyDigest === undefined || op.policyRevision === undefined) {
-                    throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement requires an exact buyer native quote.");
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement requires an exact profile native quote.");
                 }
-            }
-            if (input.profile === "default" && op.nativeQuote !== undefined) {
-                throw new ApnError("APN_OPERATION_BLOCKED", "Default Relay retirement requires its Ethereum USDC quote.");
             }
             const retirements = new RelayRetirementRepository(this.state.root);
             const existing = await retirements.load(op);
@@ -58,7 +56,7 @@ export class RelayRetireService {
             if (await new RelayEffectJournalRepository(this.state.root).load(profileHash, input.operationId) !== null) {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because an effect journal exists.");
             }
-            const nativeJournal = input.profile === "evm-live-buyer"
+            const nativeJournal = op.nativeQuote !== undefined
                 ? await new RelayNativeSourceJournalRepository(this.state.root).load(op) : null;
             if (nativeJournal !== null && nativeJournal.phase !== "failed_before_effect") {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because a native source journal exists.");
@@ -78,7 +76,7 @@ export class RelayRetireService {
                 if (!Number.isFinite(now.getTime()))
                     throw new ApnError("APN_INVALID_INPUT", "Relay retirement clock is invalid.");
                 return publicRelayUnsignedOperation(op, await retirements.persistLocked(op, now.toISOString()));
-            }, input.profile === "evm-live-buyer" ? 56 : 1, nativeReservationId), input.profile);
+            }, op.nativeQuote !== undefined ? 56 : 1, nativeReservationId), input.profile);
         });
     }
 }

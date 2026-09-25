@@ -15,10 +15,9 @@ import { isGrantedPermissionRecord } from "../metamask-smart-account-record.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import { SecureStateStore } from "../secure-state-store.js";
-import { RELAY_BNB_SOURCE, relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
+import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
 import { ETHEREUM_DEPOSITORY } from "./quote.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
-const PROFILE = "evm-live-buyer";
 const HASH = /^[a-f0-9]{64}$/u, TX_HASH = /^0x[a-f0-9]{64}$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay BNB source execution is blocked.", { reason }); }
@@ -158,7 +157,7 @@ export class RelayNativeSourceRuntime {
     async execute(operationId) {
         if (!HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay native execute requires an operation ID.");
-        const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(this.state.profileHash(PROFILE), operationId);
+        const op = await new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId);
         if (op === null)
             blocked("prepared_operation_missing");
         this.assertLane(op);
@@ -186,13 +185,14 @@ export class RelayNativeSourceRuntime {
         const q = op.nativeQuote, d = q?.deposit;
         let route;
         try {
-            route = relayNativeRoute(op.recipient);
+            route = relayNativeRoute(op.sourceAccount, op.recipient);
         }
         catch {
             blocked("saved_native_quote_or_route");
         }
         if (op.quote !== undefined || op.sourceChainId !== 56 || op.destinationChainId !== route.chainId ||
-            !same(op.sourceAccount, RELAY_BNB_SOURCE) || !same(op.recipient, route.recipient) ||
+            op.profileHash !== this.state.profileHash(route.profile) ||
+            !same(op.sourceAccount, route.payer) || !same(op.recipient, route.recipient) ||
             q?.routeReference !== route.reference || d === undefined ||
             op.statusLocator === undefined || op.policyDigest === undefined || op.policyRevision === undefined ||
             op.depositNetworkFeeCeilingWei === undefined || q.statusLocator?.requestId !== op.statusLocator.requestId ||
@@ -219,8 +219,9 @@ export class RelayNativeSourceRuntime {
         return { account: getAddress(op.sourceAccount), chain: "eip155:56", asset: { kind: "native", identifier: null } };
     }
     async active(op) {
-        const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, PROFILE);
-        if (active === null || active.profile !== PROFILE || active.digest !== op.policyDigest ||
+        const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
+        const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile);
+        if (active === null || active.profile !== profile || active.digest !== op.policyDigest ||
             active.revision !== op.policyRevision || !same(active.accounts.evm ?? "", op.sourceAccount))
             blocked("active_policy_or_owner");
         return active;
@@ -273,8 +274,9 @@ export class RelayNativeSourceRuntime {
         return nonce;
     }
     async custody(op, signed) {
-        return this.state.withLocks([walletCustodyLock(this.state, PROFILE)], async () => {
-            const wallet = await this.wallets.describe(PROFILE);
+        const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
+        return this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
+            const wallet = await this.wallets.describe(profile);
             if (wallet === null)
                 blocked("encrypted_wallet_missing");
             try {
@@ -381,7 +383,7 @@ export class RelayNativeSourceRuntime {
             await this.admission(op, this.clock.now());
             const nonce = await this.funding(op, rpc);
             j = await this.journals.advance(op, j.integrityHash, "signing_started", null, this.clock.now());
-            const wallet = await this.wallets.describe(PROFILE);
+            const wallet = await this.wallets.describe(relayNativeRoute(op.sourceAccount, op.recipient).profile);
             if (wallet === null)
                 blocked("encrypted_wallet_missing");
             let raw;
@@ -447,8 +449,9 @@ export class RelayNativeSourceRuntime {
     /** The only closure without a chain result: journal has no hash or send marker,
      * and encrypted custody is proven empty under its mutation lock. */
     async closeUnsignedAttempt(op, j) {
-        return this.state.withLocks([walletCustodyLock(this.state, PROFILE)], async () => {
-            const wallet = await this.wallets.describe(PROFILE);
+        const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
+        return this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
+            const wallet = await this.wallets.describe(profile);
             if (wallet === null)
                 blocked("encrypted_wallet_missing");
             try {

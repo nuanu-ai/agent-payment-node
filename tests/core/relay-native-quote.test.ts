@@ -35,7 +35,8 @@ test("BNB native to Polygon native POL request and captured quote bind one unsig
 });
 
 test("BNB native route refuses other accounts, currencies, native value, calldata and order mutations", async () => {
-  assert.throws(() => relayNativeQuoteRequest({ ...intent, payer: RELAY_POLYGON_RECIPIENT }));
+  assert.throws(() => relayNativeQuoteRequest({ ...intent, payer: RELAY_POLYGON_RECIPIENT,
+    recipient: RELAY_BNB_SOURCE }));
   assert.throws(() => relayNativeQuoteRequest({ ...intent, recipient: "0x1111111111111111111111111111111111111111" }));
   assert.throws(() => relayNativeQuoteRequest({ ...intent, amountAtomic: "1.5" }));
   const edits: Array<[string, (q: any) => void]> = [
