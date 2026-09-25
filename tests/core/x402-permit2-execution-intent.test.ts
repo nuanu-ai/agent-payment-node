@@ -4,10 +4,17 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import type { PaymentRequired } from "@x402/core/types";
+import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
+import { AssetUsageLedger, type AssetUsageReservation } from "../../src/asset-usage-ledger.js";
+import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
+import { SecureStateStore } from "../../src/secure-state-store.js";
 import { temporaryState } from "./helpers.js";
 import { Permit2ExecutionIntentJournal, type Permit2IntentInput, type Permit2IntentReadPort } from
   "../../src/x402-permit2/execution-intent.js";
+import { Permit2ExposureLifecycle, permit2UsageIdentity, permit2UsageKey, permit2UsageReservationId,
+  type Permit2EffectBinding, type Permit2EffectPorts } from
+  "../../src/x402-permit2/exposure-lifecycle.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { hashChallenge, preparePermit2Payment, type Permit2PrepareInput } from "../../src/x402-permit2/prepare.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from
@@ -17,6 +24,16 @@ const accepts = (JSON.parse(readFileSync("tests/fixtures/x402-permit2/payment-re
   { accepts: unknown[] }).accepts;
 const asset = X402_PERMIT2_ASSETS[0]!;
 const payer = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" as `0x${string}`;
+const registry = sealAssetPolicyRegistry({
+  schemaVersion: "apn.asset-policy-registry.v1", registryVersion: "permit2-test-v1",
+  publishedAt: "2026-09-17T00:00:00.000Z", effectiveDate: "2026-09-17",
+  chains: [{ chain: asset.chain, family: "evm", name: "Avalanche C-Chain", assets: [{
+    kind: "token", identifier: asset.token, symbol: "USDT", decimals: 6,
+    rails: { direct: false, gasless: false, x402: true, bridge: false, swap: false },
+    caps: { maximumPerTransferAtomic: "20000", dailyLimitAtomic: "30000" },
+    mechanismPins: { x402: X402_PERMIT2_MECHANISM },
+  }] }],
+} satisfies UnsignedAssetPolicyRegistry);
 const challenge: PaymentRequired = { x402Version: 2, resource: { url: "https://seller.example/data" },
   accepts: accepts as PaymentRequired["accepts"] };
 const selection = selectPermit2Offer(accepts, payer);
@@ -25,7 +42,7 @@ const original: Permit2PrepareInput = {
   expected: { index: selection.index, requirement: selection.requirement, challengeHash: hashChallenge(challenge) },
   owner: { active: true, account: payer, chain: asset.chain, token: asset.token, rail: "x402",
     mechanism: X402_PERMIT2_MECHANISM, maximumPerTransferAtomic: "20000", dailyLimitAtomic: "30000",
-    usedTodayAtomic: "5000", policyDigest: "a".repeat(64) },
+    usedTodayAtomic: "5000", policyDigest: registry.policyDigest },
   evidence: { chainId: 43114, account: payer, observedAtSeconds: 1_789_719_995,
     balanceAtomic: "20000", allowanceAtomic: "10000", tokenDomainSeparator: asset.tokenDomainSeparator,
     proxyCodeHash: asset.proxyCodeHash, permit2Deployed: true, nonceBitmapWordIndex: "0",
@@ -138,3 +155,233 @@ test("read only prepare creates no operation and has no paid outcome", async (t)
   assert.equal("signature" in intent, false);
   assert.equal("transactionHash" in intent, false);
 });
+
+function fakeEffects(changes: Partial<Permit2EffectPorts> = {}) {
+  const calls = { reserve: 0, sign: 0, submit: 0, observe: 0 };
+  const reservations = new Map<string, AssetUsageReservation>();
+  const time = { nowSeconds: request.nowSeconds };
+  const ports: Permit2EffectPorts = {
+    nowSeconds: () => time.nowSeconds,
+    reserve: async binding => { calls.reserve++; const id = permit2UsageReservationId(binding);
+      const prior = reservations.get(id);
+      if (prior !== undefined) return prior;
+      const body = { schemaVersion: "apn.asset-usage-reservation.v1" as const,
+        ...permit2UsageIdentity(binding), reservationId: id,
+        idempotencyHash: sha256(`asset-usage-idempotency\0${permit2UsageKey(binding)}`),
+        policyDigest: binding.policyDigest, registryVersion: registry.registryVersion, rail: "x402" as const,
+        amountAtomic: binding.amountAtomic, state: "reserved" as const,
+        reservedAt: new Date(time.nowSeconds * 1000).toISOString(),
+        updatedAt: new Date(time.nowSeconds * 1000).toISOString(), effectAt: null, outcomeDigest: null };
+      const record = { ...body, reservationDigest: domainHash(body.schemaVersion, canonicalJson(body)) };
+      reservations.set(id, record); return record; },
+    lookup: async binding => reservations.get(permit2UsageReservationId(binding)) ?? null,
+    sign: async () => { calls.sign++; return "fake-authorization"; },
+    submit: async (_binding, authorization) => { calls.submit++; assert.equal(authorization, "fake-authorization");
+      return { reference: "fake-reference" }; },
+    observe: async () => { calls.observe++; return null; },
+    ...changes,
+  };
+  return { ports, calls, reservations, time };
+}
+
+test("reservation crash before and after the port call reuses the exact reservation", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  class CrashAtReserved extends Permit2ExposureLifecycle {
+    fail = true;
+    protected override async writeJson(path: string, value: unknown, createOnly = false): Promise<void> {
+      if (this.fail && path.startsWith("permit2-exposures/") &&
+          (value as { state?: string }).state === "reserved") { this.fail = false; throw new Error("crash after reserve"); }
+      await super.writeJson(path, value, createOnly);
+    }
+  }
+  const effects = fakeEffects();
+  const crash = new CrashAtReserved(state.root);
+  await assert.rejects(crash.resume(intent.operationId, prepared, effects.ports), /crash after reserve/u);
+  assert.equal((await crash.load(intent.operationId))?.state, "reserving");
+  assert.deepEqual(effects.calls, { reserve: 1, sign: 0, submit: 0, observe: 0 });
+  const resumed = await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, effects.ports);
+  assert.equal(resumed.state, "submitted_pending");
+  assert.deepEqual(effects.calls, { reserve: 2, sign: 1, submit: 1, observe: 0 });
+  assert.equal(effects.reservations.size, 1);
+  await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, effects.ports);
+  assert.deepEqual(effects.calls, { reserve: 2, sign: 1, submit: 1, observe: 0 });
+});
+
+test("reservation port failure before persistence cannot reach signer or submitter", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const failed = fakeEffects({ reserve: async () => { throw new Error("reservation unavailable"); } });
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  await assert.rejects(lifecycle.resume(intent.operationId, prepared, failed.ports),
+    /reservation unavailable/u);
+  assert.equal((await lifecycle.load(intent.operationId))?.state, "reserving");
+  assert.deepEqual(failed.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  const retry = fakeEffects();
+  assert.equal((await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    retry.ports)).state, "submitted_pending");
+  assert.deepEqual(retry.calls, { reserve: 1, sign: 1, submit: 1, observe: 0 });
+});
+
+test("reservation port can acquire the exposure lock and concurrent resumes sign once", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const probe = new SecureStateStore(state.root);
+  const effects = fakeEffects();
+  const reserve = effects.ports.reserve;
+  let arrivals = 0;
+  let release!: () => void;
+  const bothReserved = new Promise<void>(resolve => { release = resolve; });
+  effects.ports.reserve = async binding => {
+    const result = await probe.withLocks([`permit2-exposure:${intent.operationId}`],
+      async () => await reserve(binding), { waitMs: 100 });
+    if (++arrivals === 2) release();
+    await bothReserved;
+    return result;
+  };
+  const [a, b] = await Promise.all([
+    new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, effects.ports),
+    new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, effects.ports),
+  ]);
+  assert.equal(arrivals, 2);
+  assert.equal(a.state, "submitted_pending");
+  assert.equal(b.state, "submitted_pending");
+  assert.deepEqual(effects.calls, { reserve: 2, sign: 1, submit: 1, observe: 0 });
+  assert.equal(effects.reservations.size, 1);
+});
+
+test("real common usage ledger computes and persists a distinct exact lease ID", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const ledger = new AssetUsageLedger(state.root);
+  const effects = fakeEffects({
+    reserve: async binding => await ledger.reserve({ ...permit2UsageIdentity(binding), registry, rail: "x402",
+      amountAtomic: binding.amountAtomic, idempotencyKey: permit2UsageKey(binding),
+      now: new Date(request.nowSeconds * 1000) }),
+    lookup: async binding => await ledger.load(permit2UsageIdentity(binding), permit2UsageReservationId(binding)),
+  });
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  const result = await lifecycle.resume(intent.operationId, prepared, effects.ports);
+  const actualId = permit2UsageReservationId(intent);
+  assert.notEqual(actualId, intent.reservationId);
+  assert.equal(result.usageReservationId, actualId);
+  const lease = await ledger.load(permit2UsageIdentity(intent), actualId);
+  assert.equal(result.usageReservationDigest, lease?.reservationDigest);
+  assert.equal(lease?.policyDigest, intent.policyDigest);
+  assert.equal(lease?.state, "reserved");
+  assert.equal((await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    effects.ports)).integrityHash, result.integrityHash);
+});
+
+test("expired reserving retry only looks up an existing lease and never creates a new cap hold", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const effects = fakeEffects();
+  let reserveCalls = 0;
+  effects.ports.reserve = async () => { reserveCalls++; throw new Error("reserve failed before lease"); };
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  await assert.rejects(lifecycle.resume(intent.operationId, prepared, effects.ports), /reserve failed before lease/u);
+  effects.time.nowSeconds = Number(intent.deadline) + 1;
+  assert.equal((await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    effects.ports)).state, "reserving");
+  assert.equal(reserveCalls, 1);
+  assert.equal(effects.reservations.size, 0);
+  assert.equal(effects.calls.sign, 0);
+});
+
+test("expired reserving retry recovers a lease created before crash without signing", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  class CrashAfterReserve extends Permit2ExposureLifecycle {
+    protected override async writeJson(path: string, value: unknown, createOnly = false): Promise<void> {
+      if (path.startsWith("permit2-exposures/") && (value as { state?: string }).state === "reserved") {
+        throw new Error("crash after ledger reserve");
+      }
+      await super.writeJson(path, value, createOnly);
+    }
+  }
+  const effects = fakeEffects();
+  await assert.rejects(new CrashAfterReserve(state.root).resume(intent.operationId, prepared,
+    effects.ports), /crash after ledger reserve/u);
+  assert.equal(effects.reservations.size, 1);
+  effects.time.nowSeconds = Number(intent.deadline) + 1;
+  const recovered = await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, effects.ports);
+  assert.equal(recovered.state, "reserved");
+  assert.equal(recovered.usageReservationId, permit2UsageReservationId(intent));
+  assert.deepEqual(effects.calls, { reserve: 1, sign: 0, submit: 0, observe: 0 });
+});
+
+test("crash before exposure publication cannot reach signer; after signer handoff never signs again", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  class CrashAtExposure extends Permit2ExposureLifecycle {
+    fail = true;
+    protected override async writeJson(path: string, value: unknown, createOnly = false): Promise<void> {
+      if (this.fail && path.startsWith("permit2-exposures/") &&
+          (value as { state?: string }).state === "exposure_unknown") { this.fail = false; throw new Error("crash before handoff"); }
+      await super.writeJson(path, value, createOnly);
+    }
+  }
+  const effects = fakeEffects();
+  const crash = new CrashAtExposure(state.root);
+  await assert.rejects(crash.resume(intent.operationId, prepared, effects.ports), /crash before handoff/u);
+  assert.equal((await crash.load(intent.operationId))?.state, "reserved");
+  assert.equal(effects.calls.sign, 0);
+  const signing = fakeEffects({ sign: async () => { effects.calls.sign++; throw new Error("signer handoff lost"); } });
+  await assert.rejects(new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    signing.ports), /signer handoff lost/u);
+  assert.equal((await crash.load(intent.operationId))?.state, "exposure_unknown");
+  const retry = fakeEffects();
+  await new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared, retry.ports);
+  assert.deepEqual(retry.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  assert.equal(effects.calls.sign, 1);
+});
+
+test("ambiguous submission, 429, not-found and repeated resume retain unknown exposure", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const effects = fakeEffects({ submit: async () => { throw new Error("submission timed out"); } });
+  await assert.rejects(new Permit2ExposureLifecycle(state.root).resume(intent.operationId, prepared,
+    effects.ports), /submission timed out/u);
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  assert.equal((await lifecycle.load(intent.operationId))?.state, "exposure_unknown");
+  const read = fakeEffects({ observe: async () => { throw new Error("429"); } });
+  assert.equal((await lifecycle.reconcile(intent.operationId, read.ports)).state, "exposure_unknown");
+  assert.equal((await lifecycle.reconcile(intent.operationId, { observe: async () => null })).state, "exposure_unknown");
+  await lifecycle.resume(intent.operationId, prepared, read.ports);
+  assert.deepEqual(read.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  assert.equal((await lifecycle.load(intent.operationId))?.proofDigest, null);
+});
+
+test("acknowledged submission settles only through observation; no production signer or sender is wired", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const effects = fakeEffects();
+  assert.equal((await new Permit2ExecutionIntentJournal(state.root).load(intent.operationId))?.capability, "execution_blocked");
+  assert.deepEqual(effects.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  const lifecycle = new Permit2ExposureLifecycle(state.root);
+  assert.equal((await lifecycle.resume(intent.operationId, prepared, effects.ports)).state, "submitted_pending");
+  assert.equal((await lifecycle.reconcile(intent.operationId, { observe: async () => ({ kind: "pending" }) })).state,
+    "submitted_pending");
+  const settled = await lifecycle.reconcile(intent.operationId,
+    { observe: async () => ({ kind: "settled", proofDigest: "b".repeat(64) }) });
+  assert.equal(settled.state, "settled");
+  assert.equal((await lifecycle.reconcile(intent.operationId, readOnlyObserve())).integrityHash, settled.integrityHash);
+  assert.equal(readFileSync("src/runtime-factory.ts", "utf8").includes("Permit2ExposureLifecycle"), false);
+  assert.equal(readFileSync("src/x402-permit2/exposure-lifecycle.ts", "utf8").includes("createPermit2Production"), false);
+});
+
+test("forged prepared signing data cannot reach reservation or signer", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const effects = fakeEffects();
+  const forged = { ...prepared, plan: { ...prepared.plan, permit2: { ...prepared.plan.permit2,
+    message: { ...prepared.plan.permit2.message, nonce: 8n } } } };
+  await assert.rejects(new Permit2ExposureLifecycle(state.root).resume(intent.operationId, forged, effects.ports), errorCode("APN_OPERATION_BLOCKED"));
+  assert.deepEqual(effects.calls, { reserve: 0, sign: 0, submit: 0, observe: 0 });
+  assert.equal(await new Permit2ExposureLifecycle(state.root).load(intent.operationId), null);
+});
+
+function readOnlyObserve(): Pick<Permit2EffectPorts, "observe"> {
+  return { observe: async () => { throw new Error("settled replay must not observe"); } };
+}
