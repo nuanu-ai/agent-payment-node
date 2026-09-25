@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { bindArgv } from "../../src/command-binder.js";
+import { ApnCore } from "../../src/core.js";
 import { OperationService } from "../../src/operation-service.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
@@ -43,14 +44,23 @@ test("BNB native prepare is policy bound, durable, unsigned and replayed without
     "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
     "--max-deposit-network-fee-wei", input.maxDepositNetworkFeeWei, "--idempotency-key", input.idempotencyKey]).request,
     { command: "relay.native.prepare", ...input });
-  const first = await service.prepareNative(input);
+  const commandInput = { command: "relay.native.prepare" as const, ...input };
+  const first = await service.prepareNative(commandInput);
   assert.equal(first.sourceChainId, 56); assert.equal(first.destinationChainId, 137);
   assert.equal(first.quote, undefined); assert.ok(first.nativeQuote);
   assert.equal(first.executionAdmitted, false); assert.equal(first.balanceEvidence, "not_checked");
   assert.equal(first.allowanceEvidence, "not_checked"); assert.equal(first.statusObservable, true);
   assert.equal(first.policyDigest, policy().digest);
   assert.equal(first.nativeQuote.deposit.value, input.amountAtomic);
-  assert.deepEqual(await service.prepareNative(input), first); assert.equal(calls, 1);
+  const providerId = (await fixture() as any).requestId as string;
+  assert.equal(first.statusObservable, true);
+  assert.equal(JSON.stringify(first).includes(providerId), false);
+  const prepareEnvelope = await new ApnCore({ state, relayPrepare: service }).execute(commandInput);
+  assert.equal(prepareEnvelope.ok, true);
+  assert.equal(JSON.stringify(prepareEnvelope).includes(providerId), false);
+  assert.equal(JSON.stringify(await new ApnCore({ state }).execute({ command: "operation.status",
+    operationId: first.operationId })).includes(providerId), false);
+  assert.deepEqual(await service.prepareNative(commandInput), first); assert.equal(calls, 1);
   assert.deepEqual(await new OperationService(new StateStore(temp.root)).status(first.operationId), first);
   await assert.rejects(service.prepareNative({ ...input, amountAtomic: "1500000000000001" }),
     { code: "APN_IDEMPOTENCY_CONFLICT" });
@@ -70,7 +80,7 @@ test("BNB native prepare refuses missing native asset, route pin, wrong owner an
   await assert.rejects(service(policy(RELAY_BNB_POLYGON_ROUTE_REFERENCE, "token")).prepareNative(input));
   await assert.rejects(service({ ...policy(), accounts: { evm: RELAY_POLYGON_RECIPIENT } }).prepareNative(input),
     { code: "APN_ALLOWLIST_REFUSED" });
-  await assert.rejects(service(policy()).prepareNative({ ...input, recipient: RELAY_BNB_SOURCE }),
+  await assert.rejects(service(policy()).prepareNative({ ...input, recipient: "0x1111111111111111111111111111111111111111" }),
     { code: "APN_INVALID_INPUT" });
   assert.equal(calls, 0);
   await assert.rejects(service(policy()).prepareNative({ ...input, maxDepositNetworkFeeWei: "1" }),

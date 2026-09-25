@@ -10,7 +10,7 @@ import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../r
 import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote } from "./quote.js";
-import { RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, requestRelayNativeQuote } from "./native-quote.js";
+import { RELAY_BNB_SOURCE, relayNativeRoute, requestRelayNativeQuote } from "./native-quote.js";
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
 const POSITIVE = /^[1-9][0-9]*$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
@@ -101,21 +101,28 @@ export class RelayUnsignedPrepareService {
         return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
     }
     async prepareNative(input) {
-        if (!ADDRESS.test(input.recipient) || input.recipient.toLowerCase() !== RELAY_POLYGON_RECIPIENT.toLowerCase() ||
+        if (!ADDRESS.test(input.recipient) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
             !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
             throw new ApnError("APN_INVALID_INPUT", "Relay native prepare inputs are invalid.");
+        }
+        let route;
+        try {
+            route = relayNativeRoute(input.recipient);
+        }
+        catch {
+            throw new ApnError("APN_INVALID_INPUT", "Relay native recipient is outside admitted routes.");
         }
         allowlistProfileHash(input.profile);
         const profileHash = this.state.profileHash(input.profile);
         const operationId = this.state.operationId(input.profile, input.idempotencyKey);
         const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
         const requestHash = hashObject({ ...input, recipient: input.recipient.toLowerCase(),
-            routeReference: RELAY_BNB_POLYGON_ROUTE_REFERENCE });
+            routeReference: route.reference });
         const replay = await this.operations.resolvePrepare({ kind: "relay_unsigned", profileHash, operationId,
             idempotencyHash, requestHash });
         if (replay !== null) {
-            if (replay.kind !== "relay_unsigned" || replay.record.nativeQuote === undefined) {
+            if (replay.kind !== "relay_unsigned" || replay.record.nativeQuote?.routeReference !== route.reference) {
                 throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Relay native replay changed operation kind or route.");
             }
             return this.operations.relayStatus(replay.record);
@@ -141,7 +148,7 @@ export class RelayUnsignedPrepareService {
             asset: { kind: "native", identifier: null }, rail: "bridge", amountAtomic: input.amountAtomic,
             dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
         const pin = admission.asset.mechanismPins?.bridge;
-        if (pin?.provider !== "relay" || pin.reference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE)
+        if (pin?.provider !== "relay" || pin.reference !== route.reference)
             refuse("relay_native_route_pin_required");
         await this.state.initialize();
         const checkOwner = async () => this.state.withLocks([evmAddressLock(payer)], async () => assertExclusiveEvmOwner(this.state, payer, profileHash));
@@ -151,7 +158,7 @@ export class RelayUnsignedPrepareService {
             minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
         const quote = await (this.ports.nativeQuote?.(intent) ?? requestRelayNativeQuote(intent));
         const { quoteDigest, ...projection } = quote;
-        if (hashObject(projection) !== quoteDigest || quote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE ||
+        if (hashObject(projection) !== quoteDigest || quote.routeReference !== route.reference ||
             quote.payer !== payer || quote.recipient !== intent.recipient || quote.principalAtomic !== input.amountAtomic ||
             BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
             quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
@@ -161,7 +168,7 @@ export class RelayUnsignedPrepareService {
         }
         const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
             kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-            requestHash, sourceChainId: 56, destinationChainId: 137, sourceAccount: payer, recipient: intent.recipient,
+            requestHash, sourceChainId: 56, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
             quoteDigest, nativeQuote: quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
             policyDigest: active.digest, policyRevision: active.revision,
             depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
