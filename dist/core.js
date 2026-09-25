@@ -109,6 +109,12 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Base prepare runtime is unavailable.");
                 return operationOutcome(await service.prepareBase(request));
             }
+            case "relay.arbitrum.prepare": {
+                const service = this.context.relayPrepare;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Arbitrum prepare runtime is unavailable.");
+                return operationOutcome(await service.prepareArbitrum(request));
+            }
             case "relay.native.prepare": {
                 const service = this.context.relayPrepare;
                 if (service === undefined)

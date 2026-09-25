@@ -24,6 +24,17 @@ export type CommandRequest = {
     readonly maxDepositNetworkFeeWei: string;
     readonly idempotencyKey: string;
 } | {
+    readonly command: "relay.arbitrum.prepare";
+    readonly profile: string;
+    readonly owner: string;
+    readonly amountAtomic: string;
+    readonly minOutputAtomic: string;
+    readonly maxProviderFeeAtomic: string;
+    readonly maxApprovalNetworkFeeWei: string;
+    readonly maxDepositNetworkFeeWei: string;
+    readonly quoteFile: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "relay.native.prepare";
     readonly profile: string;
     readonly recipient: string;

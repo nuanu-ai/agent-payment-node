@@ -1,5 +1,8 @@
 /** Prepare one Relay quote as a durable, unsigned owner-policy-bound operation. */
 import { hashObject } from "../canonical.js";
+import { open } from "node:fs/promises";
+import { constants } from "node:fs";
+import { isAbsolute } from "node:path";
 import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
@@ -11,6 +14,9 @@ import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote } from "./quote.js";
 import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, relayNativeRoute, requestRelayNativeQuote } from "./native-quote.js";
+import { createRelayArbitrumSourceDraft } from "./arbitrum-usdc-source-draft.js";
+import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT } from "./arbitrum-usdc-ethereum-quote.js";
+import { relayStatusLocator } from "./quote.js";
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
 export const RELAY_BASE_ROUTE_REFERENCE = "ethereum-usdc-base-eth-v1";
 const POSITIVE = /^[1-9][0-9]*$/u;
@@ -104,6 +110,74 @@ export class RelayUnsignedPrepareService {
         return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
     }
     async prepareBase(input) { return this.prepare(input, "base"); }
+    /** A local quote file is validated before create-only persistence; no network or wallet is used. */
+    async prepareArbitrum(input) {
+        if (input.profile !== "default" || !ADDRESS.test(input.owner) || !isAbsolute(input.quoteFile) ||
+            ![input.amountAtomic, input.minOutputAtomic, input.maxProviderFeeAtomic,
+                input.maxApprovalNetworkFeeWei, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
+            !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
+            throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum prepare inputs are invalid.");
+        }
+        const profileHash = this.state.profileHash(input.profile);
+        const operationId = this.state.operationId(input.profile, input.idempotencyKey);
+        const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
+        const owner = input.owner.toLowerCase();
+        const requestHash = hashObject({ command: "relay.arbitrum.prepare", ...input, owner });
+        const replay = await this.operations.resolvePrepare({ kind: "relay_unsigned", profileHash, operationId,
+            idempotencyHash, requestHash });
+        if (replay !== null) {
+            if (replay.kind !== "relay_unsigned" || replay.record.sourceChainId !== 42161 ||
+                replay.record.arbitrumDraft === undefined) {
+                throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Relay Arbitrum replay changed operation kind or route.");
+            }
+            return this.operations.relayStatus(replay.record);
+        }
+        const now = this.clock.now();
+        if (!Number.isFinite(now.getTime()))
+            throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum prepare clock is invalid.");
+        const active = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile));
+        if (active === null || active.accounts.evm?.toLowerCase() !== owner)
+            refuse("relay_arbitrum_active_owner_policy_required");
+        const usage = await (this.ports.dailyUsage?.(owner, now) ?? new AssetUsageLedger(this.state.root).usage({
+            account: owner, chain: "eip155:42161", asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC },
+        }, now).then(value => value.amountAtomic));
+        await this.state.initialize();
+        await this.state.withLocks([evmAddressLock(owner)], async () => assertExclusiveEvmOwner(this.state, owner, profileHash));
+        await this.operations.assertProfileAvailable(profileHash);
+        const rawQuote = await (this.ports.arbitrumQuoteFile?.(input.quoteFile) ?? (async () => {
+            const file = await open(input.quoteFile, constants.O_RDONLY | constants.O_NOFOLLOW)
+                .catch(() => { throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file cannot be opened."); });
+            try {
+                const stat = await file.stat();
+                if (!stat.isFile() || stat.size > 65_536)
+                    throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is invalid or too large.");
+                const bytes = await file.readFile();
+                if (bytes.length > 65_536)
+                    throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is too large.");
+                return JSON.parse(bytes.toString("utf8"));
+            }
+            finally {
+                await file.close();
+            }
+        })());
+        const draft = await createRelayArbitrumSourceDraft({ profile: "default", owner, publicAccount: owner,
+            amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minOutputAtomic,
+            maxProviderFeeAtomic: input.maxProviderFeeAtomic,
+            maxApprovalNetworkFeeWei: input.maxApprovalNetworkFeeWei,
+            maxDepositNetworkFeeWei: input.maxDepositNetworkFeeWei, dailyUsageAtomic: usage,
+            activePolicy: active, rawQuote, now });
+        const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
+            kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
+            requestHash, sourceChainId: 42161, destinationChainId: 1, sourceAccount: owner,
+            recipient: RELAY_ETHEREUM_USDC_RECIPIENT.toLowerCase(), quoteDigest: draft.quoteDigest,
+            statusLocator: relayStatusLocator(draft.requestId), arbitrumDraft: draft,
+            policyDigest: draft.policyDigest, policyRevision: draft.policyRevision,
+            approvalNetworkFeeCeilingWei: draft.maxApprovalNetworkFeeWei,
+            depositNetworkFeeCeilingWei: draft.maxDepositNetworkFeeWei,
+            amountAtomic: draft.amountAtomic, minOutputAtomic: draft.minimumOutputAtomic,
+            createdAt: draft.createdAt, deadline: draft.deadline });
+        return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+    }
     async prepareNative(input) {
         if (!ADDRESS.test(input.recipient) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||

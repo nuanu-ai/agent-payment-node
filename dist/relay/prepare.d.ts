@@ -21,6 +21,7 @@ export interface RelayPreparePorts {
     readonly dailyUsage?: (account: string, now: Date) => Promise<string>;
     readonly quote?: (intent: RelayQuoteIntent) => Promise<ValidatedRelayQuote>;
     readonly nativeQuote?: (intent: RelayNativeQuoteIntent) => Promise<ValidatedRelayNativeQuote>;
+    readonly arbitrumQuoteFile?: (path: string) => Promise<unknown>;
 }
 export interface RelayNativePrepareInput {
     readonly profile: string;
@@ -28,6 +29,17 @@ export interface RelayNativePrepareInput {
     readonly amountAtomic: string;
     readonly minOutputAtomic: string;
     readonly maxDepositNetworkFeeWei: string;
+    readonly idempotencyKey: string;
+}
+export interface RelayArbitrumPrepareInput {
+    readonly profile: string;
+    readonly owner: string;
+    readonly amountAtomic: string;
+    readonly minOutputAtomic: string;
+    readonly maxProviderFeeAtomic: string;
+    readonly maxApprovalNetworkFeeWei: string;
+    readonly maxDepositNetworkFeeWei: string;
+    readonly quoteFile: string;
     readonly idempotencyKey: string;
 }
 export declare class RelayUnsignedPrepareService {
@@ -38,5 +50,7 @@ export declare class RelayUnsignedPrepareService {
     constructor(state: StateStore, clock: ClockPort, operations?: OperationService, ports?: RelayPreparePorts);
     prepare(input: RelayPrepareInput, route?: "bnb" | "base"): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
     prepareBase(input: RelayPrepareInput): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
+    /** A local quote file is validated before create-only persistence; no network or wallet is used. */
+    prepareArbitrum(input: RelayArbitrumPrepareInput): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
     prepareNative(input: RelayNativePrepareInput): Promise<import("../relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
 }

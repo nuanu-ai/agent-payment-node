@@ -259,6 +259,7 @@ export class OperationService {
 
   /** Source finality ends this operation's spend attempt. Destination delivery is observed separately. */
   private async relaySourceCompletion(operation: RelayUnsignedOperation): Promise<{ journalIntegrityHash: string } | null> {
+    if (operation.arbitrumDraft !== undefined) return null;
     if (operation.nativeQuote !== undefined) {
       const journal = await new RelayNativeSourceJournalRepository(this.state.root).load(operation);
       return journal?.phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
