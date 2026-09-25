@@ -48,21 +48,23 @@ export class TtyRelayNativeExecuteConfirmation {
     }
     async confirm(summary) {
         const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
+        const destination = summary.destinationChainId === 143 ? "Monad (eip155:143)" : "Polygon (eip155:137)";
+        const outputSymbol = summary.destinationChainId === 143 ? "MON" : "POL";
         try {
             await exactChainConsent([
                 "Agent Payment Node Relay BNB native source execution",
                 `Operation: ${summary.operationId}`,
                 "Source chain: BNB Chain (eip155:56)",
-                "Destination chain: Polygon (eip155:137)",
+                `Destination chain: ${destination}`,
                 `Source account: ${summary.sourceAccount}`,
                 `Native BNB value: ${summary.valueWei} wei`,
                 `Depository: ${summary.depository}`,
                 `Recipient: ${summary.recipient}`,
-                `Minimum native POL output: ${summary.minOutputAtomic} wei`,
+                `Minimum native ${outputSymbol} output: ${summary.minOutputAtomic} wei`,
                 `Quote deadline: ${summary.deadline}`,
                 `Network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
                 `Quote digest: ${summary.quoteDigest}`,
-                "This confirms only the BNB source deposit; Polygon delivery and paid acceptance require separate proof.",
+                `This confirms only the BNB source deposit; ${destination} delivery and paid acceptance require separate proof.`,
             ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
             return true;
         }

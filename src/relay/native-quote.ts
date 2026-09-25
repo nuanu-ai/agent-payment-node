@@ -194,8 +194,31 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
 
 /** Recheck the saved quote's solver authority and native deposit at the execution boundary. */
 export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuote): Promise<void> {
-  if (quote.schemaVersion !== "apn.relay-native-quote.v1" || quote.routeReference !== RELAY_BNB_POLYGON_ROUTE_REFERENCE ||
+  const route = relayNativeRoute(quote.recipient);
+  if (quote.schemaVersion !== "apn.relay-native-quote.v1" || quote.routeReference !== route.reference ||
     hashObject((({ quoteDigest: _digest, ...projection }) => projection)(quote)) !== quote.quoteDigest) fail("saved digest");
+  const order = record(quote.orderData, "saved order"), input = one(order.inputs, "saved inputs"),
+    payment = record(input.payment, "saved payment"), output = record(order.output, "saved output"),
+    payee = one(output.payments, "saved output payments"), refunds = list(input.refunds, "saved refunds");
+  if (order.version !== "v1" || order.solverChainId !== "base" || !same(address(order.solver, "saved solver"), RELAY_SOLVER) ||
+    payment.chainId !== "bnb" || !same(address(payment.currency, "saved input currency"), BNB_NATIVE) ||
+    amount(payment.amount, "saved input amount") !== amount(quote.principalAtomic, "saved principal") || payment.weight !== "1" ||
+    output.chainId !== route.chain || !same(address(payee.recipient, "saved payee"), route.recipient) ||
+    !same(address(payee.currency, "saved output currency"), BNB_NATIVE) ||
+    amount(payee.minimumAmount, "saved minimum") !== amount(quote.minimumOutputWei, "saved minimum") ||
+    list(output.calls, "saved calls").length !== 0 || list(order.fees, "saved fees").length !== 0 ||
+    refunds.length !== 2 || quote.deadline !== output.deadline ||
+    !same(address(quote.payer, "saved payer"), RELAY_BNB_SOURCE) ||
+    quote.paymentDetails.chainId !== "bnb" || !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) ||
+    !same(quote.paymentDetails.currency, BNB_NATIVE) || quote.paymentDetails.amount !== quote.principalAtomic ||
+    quote.deposit.chainId !== 56 || !same(quote.deposit.from, quote.payer)) fail("saved route");
+  for (const [index, expected] of [{ chain: "bnb", recipient: quote.payer, currency: BNB_NATIVE },
+    { chain: route.chain, recipient: route.recipient, currency: route.refundCurrency }].entries()) {
+    const refund = record(refunds[index], "saved refund");
+    if (refund.chainId !== expected.chain || !same(address(refund.recipient, "saved refund recipient"), expected.recipient) ||
+      !same(address(refund.currency, "saved refund currency"), expected.currency) ||
+      amount(refund.minimumAmount, "saved refund minimum") !== 0n || refund.deadline !== quote.deadline) fail("saved refund");
+  }
   let orderId: string, signer: string;
   try {
     orderId = getOrderId(quote.orderData as Parameters<typeof getOrderId>[0], CHAINS);
