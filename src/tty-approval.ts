@@ -7,6 +7,8 @@ import type { Address } from "./model.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
 import type { RailApprovalPort } from "./direct-rail-ports.js";
 import { chainDisplay, type ChainPolicy, type ChainPolicyApprovalPort } from "./chain-policy.js";
+import type { RelayExecutionConfirmationSummary } from "./runtime.js";
+import type { RelayExecutionAuthorizationPort } from "./relay/source-runtime.js";
 
 export const TTY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
@@ -45,6 +47,37 @@ export interface TtyTransferApprovalOptions {
   readonly signal?: AbortSignal;
   readonly openTerminal?: () => Promise<ApprovalTerminal>;
   readonly isTerminal?: (fd: number) => boolean;
+}
+
+/** A fresh foreground consent for each Relay source execution attempt. */
+export class TtyRelayExecuteConfirmation implements RelayExecutionAuthorizationPort {
+  constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
+
+  async confirm(summary: RelayExecutionConfirmationSummary): Promise<boolean> {
+    const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
+    try {
+      await exactChainConsent([
+        "Agent Payment Node Relay Ethereum source execution",
+        `Operation: ${summary.operationId}`,
+        `Source chain: Ethereum (eip155:${summary.sourceChainId})`,
+        `Destination chain: BNB Chain (eip155:${summary.destinationChainId})`,
+        `Source account: ${summary.sourceAccount}`,
+        `Source token: ${summary.sourceToken}`,
+        `Amount: ${summary.amountAtomic} token atomic`,
+        `Recipient: ${summary.recipient}`,
+        `Minimum output: ${summary.minOutputAtomic} native atomic`,
+        `Quote deadline: ${summary.deadline}`,
+        `Approval network fee ceiling: ${summary.approvalNetworkFeeCeilingWei} wei`,
+        `Deposit network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
+        `Quote digest: ${summary.quoteDigest}`,
+        "This confirms Ethereum approval and deposit source effects only; destination delivery is separate.",
+      ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
+      return true;
+    } catch (error) {
+      if (error instanceof ApnError && error.code === "APN_NATIVE_REJECTED") return false;
+      throw error;
+    }
+  }
 }
 
 export class TtyTransferApproval implements TransferApprovalPort {

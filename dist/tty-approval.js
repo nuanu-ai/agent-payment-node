@@ -6,6 +6,40 @@ import { directEvmNetwork } from "./evm-direct-networks.js";
 import { chainDisplay } from "./chain-policy.js";
 export const TTY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
+/** A fresh foreground consent for each Relay source execution attempt. */
+export class TtyRelayExecuteConfirmation {
+    options;
+    constructor(options = {}) {
+        this.options = options;
+    }
+    async confirm(summary) {
+        const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
+        try {
+            await exactChainConsent([
+                "Agent Payment Node Relay Ethereum source execution",
+                `Operation: ${summary.operationId}`,
+                `Source chain: Ethereum (eip155:${summary.sourceChainId})`,
+                `Destination chain: BNB Chain (eip155:${summary.destinationChainId})`,
+                `Source account: ${summary.sourceAccount}`,
+                `Source token: ${summary.sourceToken}`,
+                `Amount: ${summary.amountAtomic} token atomic`,
+                `Recipient: ${summary.recipient}`,
+                `Minimum output: ${summary.minOutputAtomic} native atomic`,
+                `Quote deadline: ${summary.deadline}`,
+                `Approval network fee ceiling: ${summary.approvalNetworkFeeCeilingWei} wei`,
+                `Deposit network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
+                `Quote digest: ${summary.quoteDigest}`,
+                "This confirms Ethereum approval and deposit source effects only; destination delivery is separate.",
+            ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
+            return true;
+        }
+        catch (error) {
+            if (error instanceof ApnError && error.code === "APN_NATIVE_REJECTED")
+                return false;
+            throw error;
+        }
+    }
+}
 export class TtyTransferApproval {
     deadlineMs;
     signal;

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { bindArgv } from "../../src/command-binder.js";
+import { approvalCode } from "../../src/approval-code.js";
 import { runCli } from "../../src/cli.js";
+import { TtyRelayExecuteConfirmation } from "../../src/tty-approval.js";
 import { ApnCore } from "../../src/core.js";
 import { StateStore } from "../../src/state.js";
 import type { RelayEffectJournal } from "../../src/relay/effect-journal.js";
@@ -56,4 +58,29 @@ test("Relay execute CLI has no implicit signing or sending runtime", async t => 
   assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
   assert.equal(result.operation, null);
   assert.equal(result.receipt, null);
+});
+
+test("Relay foreground prompt shows payment terms, hides request ID, and fails closed", async () => {
+  let written = "";
+  const summary = { operationId, sourceChainId: 1 as const, destinationChainId: 56 as const,
+    sourceAccount: "0x1111111111111111111111111111111111111111",
+    sourceToken: "0x2222222222222222222222222222222222222222", amountAtomic: "2500000",
+    recipient: "0x3333333333333333333333333333333333333333", minOutputAtomic: "3000000000000000",
+    deadline: new Date(Date.now() + 120_000).toISOString(), requestId: "secret-request-id",
+    quoteDigest: "b".repeat(64), approvalNetworkFeeCeilingWei: "1000", depositNetworkFeeCeilingWei: "2000" };
+  const terminal = { fd: 0, write: async (value: string) => { written += value; },
+    read: async function* () { yield Buffer.from("decline\n"); }, close: async () => {} };
+  const confirmation = new TtyRelayExecuteConfirmation({ isTerminal: () => true, openTerminal: async () => terminal });
+  assert.equal(await confirmation.confirm(summary), false);
+  for (const expected of ["Ethereum", "BNB Chain", summary.sourceToken, summary.amountAtomic,
+    summary.recipient, summary.minOutputAtomic, summary.deadline, summary.approvalNetworkFeeCeilingWei,
+    summary.depositNetworkFeeCeilingWei, operationId]) assert.ok(written.includes(expected));
+  assert.ok(!written.includes(summary.requestId));
+  assert.equal(await new TtyRelayExecuteConfirmation({ isTerminal: () => false,
+    openTerminal: async () => terminal }).confirm(summary), false);
+  const accepted = { ...terminal, read: async function* () {
+    yield Buffer.from(`${approvalCode("bridge", summary.operationId, summary.quoteDigest)}\n`);
+  } };
+  assert.equal(await new TtyRelayExecuteConfirmation({ isTerminal: () => true,
+    openTerminal: async () => accepted }).confirm(summary), true);
 });
