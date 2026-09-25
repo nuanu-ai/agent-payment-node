@@ -1,14 +1,15 @@
-/** One finite Relay v2 BNB native to Polygon native POL quote; no signing or submission. */
+/** Finite Relay v2 BNB native quotes to pinned Polygon or Monad recipients; no signing or submission. */
 import { getOrderId } from "@relay-protocol/settlement-sdk";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import { hashObject } from "../canonical.js";
 import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
 export const RELAY_BNB_POLYGON_ROUTE_REFERENCE = "bnb-native-polygon-native-v1";
+export const RELAY_BNB_MONAD_ROUTE_REFERENCE = "bnb-native-monad-native-v1";
 export const POLYGON_USDC = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
 export const RELAY_BNB_SOURCE = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
 export const RELAY_POLYGON_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const DEPOSIT_NATIVE = parseAbi(["function depositNative(address depositor, bytes32 id) payable"]);
-const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm", polygon: "ethereum-vm" };
+const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm", polygon: "ethereum-vm", monad: "ethereum-vm" };
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u, UINT = /^(0|[1-9][0-9]*)$/u;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/u, HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -44,18 +45,34 @@ function freeze(value) {
     }
     return value;
 }
+export function relayNativeRoute(recipient) {
+    if (same(address(recipient, "recipient"), RELAY_POLYGON_RECIPIENT))
+        return {
+            reference: RELAY_BNB_POLYGON_ROUTE_REFERENCE,
+            chainId: 137, chain: "polygon",
+            recipient: RELAY_POLYGON_RECIPIENT, refundCurrency: POLYGON_USDC
+        };
+    if (same(recipient, RELAY_BNB_SOURCE))
+        return {
+            reference: RELAY_BNB_MONAD_ROUTE_REFERENCE,
+            chainId: 143, chain: "monad",
+            recipient: RELAY_BNB_SOURCE, refundCurrency: BNB_NATIVE
+        };
+    return fail("recipient");
+}
 export function relayNativeQuoteRequest(intent) {
+    const route = relayNativeRoute(intent.recipient);
     if (!same(address(intent.payer, "payer"), RELAY_BNB_SOURCE) ||
-        !same(address(intent.recipient, "recipient"), RELAY_POLYGON_RECIPIENT) ||
         amount(intent.amountAtomic, "amount") <= 0n || amount(intent.minimumOutputWei, "minimum output") <= 0n)
         fail("lane intent");
-    return { user: intent.payer, originChainId: 56, destinationChainId: 137,
+    return { user: intent.payer, originChainId: 56, destinationChainId: route.chainId,
         originCurrency: BNB_NATIVE, destinationCurrency: BNB_NATIVE,
         amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: intent.recipient,
         refundTo: intent.payer, includeProtocolData: true, usePermit: false, useDepositAddress: false };
 }
 export async function validateRelayNativeQuote(value, intent) {
     relayNativeQuoteRequest(intent);
+    const route = relayNativeRoute(intent.recipient);
     if (!Number.isSafeInteger(intent.nowSeconds) || intent.nowSeconds < 0)
         fail("clock");
     const quote = record(value, "quote"), steps = list(quote.steps, "steps");
@@ -111,7 +128,7 @@ export async function validateRelayNativeQuote(value, intent) {
     if (order.version !== "v1" || order.solverChainId !== "base" || !same(address(order.solver, "solver"), RELAY_SOLVER) ||
         payment.chainId !== "bnb" || !same(address(payment.currency, "input currency"), BNB_NATIVE) ||
         amount(payment.amount, "input amount") !== amount(intent.amountAtomic, "amount") || payment.weight !== "1" ||
-        output.chainId !== "polygon" || !same(address(payee.currency, "output currency"), BNB_NATIVE) ||
+        output.chainId !== route.chain || !same(address(payee.currency, "output currency"), BNB_NATIVE) ||
         !same(address(payee.recipient, "payee"), intent.recipient) || refunds.length !== 2 ||
         list(output.calls, "calls").length !== 0 || list(order.fees, "fees").length !== 0)
         fail("order identity");
@@ -123,7 +140,7 @@ export async function validateRelayNativeQuote(value, intent) {
         deadline > intent.nowSeconds + 7 * 86400)
         fail("deadline");
     const expectedRefunds = [{ chainId: "bnb", recipient: intent.payer, currency: BNB_NATIVE },
-        { chainId: "polygon", recipient: intent.recipient, currency: POLYGON_USDC }];
+        { chainId: route.chain, recipient: intent.recipient, currency: route.refundCurrency }];
     const projectedRefunds = refunds.map((value, index) => {
         const refund = record(value, "refund"), expected = expectedRefunds[index];
         keys(refund, ["chainId", "recipient", "currency", "minimumAmount", "deadline", "extraData"], "refund extension");
@@ -138,7 +155,7 @@ export async function validateRelayNativeQuote(value, intent) {
     const orderData = { version: "v1", solverChainId: "base", solver: address(order.solver, "solver").toLowerCase(),
         salt: bytes32(order.salt, "salt"), inputs: [{ payment: { chainId: "bnb", currency: BNB_NATIVE,
                     amount: amount(payment.amount, "input amount").toString(), weight: "1" }, refunds: projectedRefunds }],
-        output: { chainId: "polygon", payments: [{ recipient: address(payee.recipient, "payee").toLowerCase(),
+        output: { chainId: route.chain, payments: [{ recipient: address(payee.recipient, "payee").toLowerCase(),
                     currency: BNB_NATIVE, minimumAmount: minimum.toString(), expectedAmount: amount(payee.expectedAmount, "expected output").toString() }],
             calls: [], deadline, extraData: bytes32(output.extraData, "output extra data") }, fees: [] };
     let orderId;
@@ -170,7 +187,7 @@ export async function validateRelayNativeQuote(value, intent) {
     const quotedDetails = record(quote.details, "details"), inCurrency = record(record(quotedDetails.currencyIn, "currency in").currency, "input token"), out = record(quotedDetails.currencyOut, "currency out"), outCurrency = record(out.currency, "output token");
     if (!same(address(quotedDetails.sender, "sender"), intent.payer) || !same(address(quotedDetails.recipient, "recipient"), intent.recipient) ||
         inCurrency.chainId !== 56 || !same(address(inCurrency.address, "input token"), BNB_NATIVE) ||
-        outCurrency.chainId !== 137 || !same(address(outCurrency.address, "output token"), BNB_NATIVE) ||
+        outCurrency.chainId !== route.chainId || !same(address(outCurrency.address, "output token"), BNB_NATIVE) ||
         amount(record(quotedDetails.currencyIn, "currency in").amount, "details input") !== amount(intent.amountAtomic, "amount") ||
         amount(out.minimumAmount, "details minimum") !== minimum)
         fail("quote details");
@@ -195,7 +212,7 @@ export async function validateRelayNativeQuote(value, intent) {
         return fail("deposit calldata");
     }
     const projection = { schemaVersion: "apn.relay-native-quote.v1",
-        routeReference: RELAY_BNB_POLYGON_ROUTE_REFERENCE,
+        routeReference: route.reference,
         ...(statusLocator === undefined ? {} : { statusLocator }), orderId: orderId.toLowerCase(),
         orderSignature: signature.toLowerCase(), solver: RELAY_SOLVER, payer: intent.payer.toLowerCase(),
         recipient: intent.recipient.toLowerCase(), principalAtomic: amount(intent.amountAtomic, "amount").toString(), orderData,

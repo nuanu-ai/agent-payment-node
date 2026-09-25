@@ -253,15 +253,25 @@ test("Relay prepare persists a quote-bound status locator and rejects locator ta
       return validateRelayQuote(source, intent);
     },
   });
-  const first = await service.prepare(input);
+  const commandInput = { command: "relay.prepare" as const, ...input };
+  const first = await service.prepare(commandInput);
   assert.equal(first.statusObservable, true);
   assert.equal(first.executionAdmitted, false);
-  assert.equal(first.statusLocator?.requestId, requestId);
+  assert.equal("statusLocator" in first, false);
+  assert.equal("statusLocator" in first.quote!, false);
+  assert.equal(JSON.stringify(first).includes(requestId), false);
+  const prepareEnvelope = await new ApnCore({ state, relayPrepare: service }).execute(commandInput);
+  assert.equal(prepareEnvelope.ok, true);
+  assert.equal(JSON.stringify(prepareEnvelope).includes(requestId), false);
   assert.deepEqual((await new OperationService(new StateStore(temporary.root)).status(first.operationId)), first);
+  const envelope = await new ApnCore({ state }).execute({ command: "operation.status", operationId: first.operationId });
+  assert.equal(envelope.ok, true);
+  assert.equal(JSON.stringify(envelope).includes(requestId), false);
   const { validateRelayUnsignedOperation } = await import("../../src/relay-unsigned-operation.js");
   const { join } = await import("node:path");
   const saved = JSON.parse(await readFile(join(temporary.root, "relay-unsigned-operations",
     state.profileHash("default"), `${first.operationId}.json`), "utf8")) as Record<string, unknown>;
+  assert.equal((saved.statusLocator as { requestId: string }).requestId, requestId);
   const { integrityHash: _integrityHash, ...fields } = saved;
   const changed = { ...fields, statusLocator: { requestId: `0x${"cd".repeat(32)}`,
     endpoint: `https://api.relay.link/intents/status/v3?requestId=0x${"cd".repeat(32)}` } };
