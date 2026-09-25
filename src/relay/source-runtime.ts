@@ -1,5 +1,6 @@
 /** Explicit, foreground Ethereum source execution for one saved Relay operation. */
 import { getAddress, type Hex } from "viem";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
@@ -20,6 +21,7 @@ import { RelayApprovalEffectService, RelayEncryptedApprovalCustody, type RelayAp
 import { RelayDepositEffectService, RelayEncryptedDepositCustody, type RelayDepositObservation, type RelayDepositPorts } from "./deposit-effect.js";
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
+import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -94,7 +96,7 @@ export function createRelayEthereumSourceRuntime(state: StateStore, wrappingSecr
   catch { throw new ApnError("APN_RPC_CONFIG", "Relay execution requires one HTTPS RPC URL."); }
   if (endpoint.pathname !== "/" || endpoint.search !== "" || endpoint.hash !== "" || endpoint.username !== "" || endpoint.password !== "")
     throw new ApnError("APN_RPC_CONFIG", "Relay execution requires a keyless HTTPS RPC origin without a signed path or query.");
-  return new RelayEthereumSourceRuntime(state, wrappingSecret, new HttpsBaseRpc(rpcUrl), authorization, clock);
+  return new RelayEthereumSourceRuntime(state, wrappingSecret, new HttpsBaseRpc(rpcUrl), authorization, clock, endpoint.origin);
 }
 
 /** The constructor accepts an injected RPC surface so tests can never reach a network. */
@@ -105,9 +107,11 @@ export class RelayEthereumSourceRuntime {
   private readonly usage: AssetUsageLedger;
   private readonly approvalCustody: RelayEncryptedApprovalCustody;
   private readonly depositCustody: RelayEncryptedDepositCustody;
+  private readonly rpcScope = new AsyncLocalStorage<Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">>();
   private signingNonce: bigint | null = null;
-  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly rpc: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">,
-    private readonly authorization: RelayExecutionAuthorizationPort, private readonly clock: ClockPort = { now: () => new Date() }) {
+  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly transport: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">,
+    private readonly authorization: RelayExecutionAuthorizationPort, private readonly clock: ClockPort = { now: () => new Date() },
+    private readonly pacedOrigin?: string) {
     this.wallets = new EncryptedWalletStore(state, wrapping);
     this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
     this.admissions = new RelayExecutionAdmissionStore(state.root);
@@ -116,7 +120,26 @@ export class RelayEthereumSourceRuntime {
     this.depositCustody = new RelayEncryptedDepositCustody(state, wrapping);
   }
 
+  private get rpc(): Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction"> {
+    return this.rpcScope.getStore() ?? this.transport;
+  }
+
   async execute(operationId: string): Promise<RelayEffectJournal> {
+    if (this.pacedOrigin === undefined) return await this.executeScoped(operationId);
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), RELAY_EXECUTION_WALL_MS);
+    try {
+      const transport = this.transport instanceof HttpsBaseRpc ? this.transport.withAbortSignal(abort.signal) : this.transport;
+      const invocation = new RelayRpcInvocation(this.state, this.pacedOrigin, transport, abort.signal,
+        transport instanceof HttpsBaseRpc ? () => transport.primePublicAddresses() : undefined);
+      const journal = await this.rpcScope.run(invocation.rpc, () => this.executeScoped(operationId));
+      invocation.assertAllowed();
+      return journal;
+    }
+    finally { clearTimeout(timeout); }
+  }
+
+  private async executeScoped(operationId: string): Promise<RelayEffectJournal> {
     if (!HASH.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay execution requires one operation ID.");
     const profileHash = this.state.profileHash("default");
     const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId);
