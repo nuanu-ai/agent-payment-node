@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { keccak256, type Hex } from "viem";
+import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
+import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce,
-  createRelayNativeSourceRuntime, publicRelayNativeSourceJournal } from "../../src/relay/native-source.js";
+  createRelayNativeSourceRuntime, publicRelayNativeSourceJournal, RelayNativeSourceRuntime } from "../../src/relay/native-source.js";
+import { RelayRetireService } from "../../src/relay/retire.js";
 import { RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, validateRelayNativeQuote,
   verifySavedRelayNativeQuote } from "../../src/relay/native-quote.js";
 import { StateStore } from "../../src/state.js";
@@ -90,4 +94,53 @@ test("installed native execute CLI refuses absent buyer custody before any RPC o
   assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
   assert.equal(posts, 0);
   assert.equal(await new RelayNativeSourceJournalRepository(temp.root).load(op), null);
+});
+
+test("crash after signing marker with empty custody closes no-effect, releases cap and permits retirement", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root);
+  const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
+    registryVersion: "relay-native-crash.test.1", publishedAt: "2026-09-30T00:00:00.000Z",
+    effectiveDate: "2026-09-30", effectiveAt: "2026-09-30T00:00:00.000Z", expiresAt: "2026-10-03T00:00:00.000Z",
+    chains: [{ chain: "eip155:56", family: "evm", name: "BNB Smart Chain", assets: [{ kind: "native", identifier: null,
+      symbol: "BNB", decimals: 18, rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
+      railCaps: { bridge: { maximumPerTransferAtomic: "2000000000000000", dailyLimitAtomic: "3000000000000000" } },
+      mechanismPins: { bridge: { provider: "relay", reference: "bnb-native-polygon-native-v1" } } }] }] });
+  const original = await prepared(state), { integrityHash: _, ...fields } = original;
+  const op = freezeRelayUnsignedOperation({ ...fields, policyDigest: registry.policyDigest });
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
+  const walletFields = { schemaVersion: "apn.state.v1" as const, profile: "evm-live-buyer",
+    profileHash: op.profileHash, address: RELAY_BNB_SOURCE as Hex, createdAt: now.toISOString(),
+    bindingHash: hashObject({ profile: "evm-live-buyer", address: RELAY_BNB_SOURCE, createdAt: now.toISOString() }) };
+  await state.writeNewWallet({ ...walletFields, integrityHash: hashObject(walletFields) });
+  const identity = { account: RELAY_BNB_SOURCE, chain: "eip155:56", asset: { kind: "native" as const, identifier: null } };
+  const ledger = new AssetUsageLedger(temp.root), reservationId = assetUsageReservationId(identity,
+    `relay-native-execute:${op.operationId}`);
+  await ledger.reserve({ ...identity, registry, rail: "bridge", amountAtomic: op.amountAtomic,
+    idempotencyKey: `relay-native-execute:${op.operationId}`, now });
+  const journalStore = new RelayNativeSourceJournalRepository(temp.root);
+  let journal = await journalStore.advance(op, null, "pending", null, now);
+  journal = await journalStore.advance(op, journal.integrityHash, "signing_started", null, now);
+  let sends = 0;
+  const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
+  const runtime = new RelayNativeSourceRuntime(state, wrapping, { confirm: async () => true,
+    rpc: { batchCall: async () => { throw new Error("unexpected RPC read"); },
+      submitRawTransaction: async () => { sends++; throw new Error("unexpected send"); } } }, { now: () => now });
+  // A deterministic crash seam: the signing marker was durable, but no encrypted signed slot was saved.
+  const key = domainHash("apn.relay-native-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
+  const directEffects: Record<string, unknown> = { [key]: { unreadable: true } };
+  Object.assign(runtime, { wallets: { describe: async () => ({ identity: { address: RELAY_BNB_SOURCE },
+    secret: { directEffects } }), clear: () => {} } });
+  await assert.rejects(runtime.execute(op.operationId), { code: "APN_STATE_CORRUPT" });
+  assert.equal((await journalStore.load(op))?.phase, "signing_started");
+  assert.equal((await ledger.load(identity, reservationId))?.state, "reserved");
+  delete directEffects[key];
+  journal = await runtime.execute(op.operationId);
+  assert.equal(journal.phase, "failed_before_effect"); assert.equal(journal.transactionHash, null);
+  assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
+  assert.equal(sends, 0);
+  assert.equal((await runtime.execute(op.operationId)).phase, "failed_before_effect");
+  const retired = await new RelayRetireService(state, { now: () => now }, wrapping).retire({
+    profile: "evm-live-buyer", operationId: op.operationId });
+  assert.equal(retired.state, "retired");
 });

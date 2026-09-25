@@ -28,7 +28,7 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", "Relay BNB source execution is blocked.", { reason }); }
 function corrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT", `Relay BNB source state is invalid: ${reason}.`); }
 type Rpc = Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
-type Phase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed";
+type Phase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "failed_before_effect";
 export interface RelayNativeSourceJournal {
   readonly schemaVersion: "apn.relay-native-source-journal.v1";
   readonly profileHash: string; readonly operationId: string; readonly operationIntegrityHash: string;
@@ -52,15 +52,17 @@ function validateJournal(value: unknown, op: RelayUnsignedOperation): RelayNativ
   if (Object.keys(j).sort().join() !== keys.sort().join() || j.schemaVersion !== "apn.relay-native-source-journal.v1" ||
     j.profileHash !== op.profileHash || j.operationId !== op.operationId || j.operationIntegrityHash !== op.integrityHash ||
     j.quoteDigest !== op.quoteDigest || j.requestId !== op.statusLocator?.requestId ||
-    j.depositEnvelopeHash !== hashObject(op.nativeQuote!.deposit) || !["pending", "signing_started", "sealed", "submitting", "confirmed", "failed"].includes(j.phase) ||
+    j.depositEnvelopeHash !== hashObject(op.nativeQuote!.deposit) || !["pending", "signing_started", "sealed", "submitting", "confirmed", "failed", "failed_before_effect"].includes(j.phase) ||
     j.integrityHash !== hashObject(journalBody(j))) corrupt("journal binding");
   if (j.phase === "pending") {
     if (j.marker !== null || j.markedAt !== null || j.transactionHash !== null || j.observedAt !== null) corrupt("pending journal");
   } else {
     if (typeof j.marker !== "string" || !HASH.test(j.marker) || typeof j.markedAt !== "string" ||
       !Number.isFinite(Date.parse(j.markedAt))) corrupt("journal marker");
-    if (j.phase === "signing_started" ? j.transactionHash !== null : typeof j.transactionHash !== "string" || !TX_HASH.test(j.transactionHash)) corrupt("journal hash");
-    if (["confirmed", "failed"].includes(j.phase) ? typeof j.observedAt !== "string" || !Number.isFinite(Date.parse(j.observedAt)) : j.observedAt !== null) corrupt("journal observation");
+    if (["signing_started", "failed_before_effect"].includes(j.phase) ? j.transactionHash !== null :
+      typeof j.transactionHash !== "string" || !TX_HASH.test(j.transactionHash)) corrupt("journal hash");
+    if (["confirmed", "failed", "failed_before_effect"].includes(j.phase) ?
+      typeof j.observedAt !== "string" || !Number.isFinite(Date.parse(j.observedAt)) : j.observedAt !== null) corrupt("journal observation");
   }
   return j;
 }
@@ -78,6 +80,7 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
       const previous = old?.phase ?? null;
       if (!((previous === null && phase === "pending") || (previous === "pending" && phase === "signing_started") ||
          (previous === "signing_started" && phase === "sealed") || (previous === "sealed" && phase === "submitting") ||
+         (previous === "signing_started" && phase === "failed_before_effect") ||
          (previous === "submitting" && (phase === "confirmed" || phase === "failed")))) blocked("journal_transition");
       const fields = previous === null ? { schemaVersion: "apn.relay-native-source-journal.v1" as const,
         profileHash: op.profileHash, operationId: op.operationId, operationIntegrityHash: op.integrityHash,
@@ -87,7 +90,7 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
           marker: phase === "signing_started" ? randomBytes(32).toString("hex") : old!.marker,
           markedAt: phase === "signing_started" ? now.toISOString() : old!.markedAt,
           transactionHash: phase === "sealed" ? hash : old!.transactionHash,
-          observedAt: phase === "confirmed" || phase === "failed" ? now.toISOString() : old!.observedAt };
+          observedAt: phase === "confirmed" || phase === "failed" || phase === "failed_before_effect" ? now.toISOString() : old!.observedAt };
       const next = validateJournal({ ...fields, integrityHash: hashObject(fields) }, op);
       await this.ensureDirectory(`relay-native-source-journals/${op.profileHash}`);
       await this.writeJson(this.path(op), next, previous === null);
@@ -298,7 +301,7 @@ export class RelayNativeSourceRuntime {
           outcomeDigest: hashObject({ operationId: op.operationId, quoteDigest: op.quoteDigest, reason: "no_source_marker" }) });
       } else if (prior !== null && prior.state !== "failed_before_effect") corrupt("usage without source marker");
     }
-    if (j?.phase === "confirmed" || j?.phase === "failed") {
+    if (j?.phase === "confirmed" || j?.phase === "failed" || j?.phase === "failed_before_effect") {
       await this.settleUsage(op, j);
       return j;
     }
@@ -338,7 +341,11 @@ export class RelayNativeSourceRuntime {
     }
     if (j.phase === "signing_started") {
       const signed = await this.custody(op);
-      if (signed === null) return j; // A crash before sealing is deliberately never signed again.
+      if (signed === null) {
+        j = await this.closeUnsignedAttempt(op, j);
+        await this.settleUsage(op, j);
+        return j;
+      }
       j = await this.journals.advance(op, j.integrityHash, "sealed", signed.hash, this.clock.now());
     }
     if (j.phase === "sealed") {
@@ -359,15 +366,32 @@ export class RelayNativeSourceRuntime {
     return j;
   }
   private async settleUsage(op: RelayUnsignedOperation, j: RelayNativeSourceJournal): Promise<void> {
-    if (j.phase !== "confirmed" && j.phase !== "failed") return;
+    if (j.phase !== "confirmed" && j.phase !== "failed" && j.phase !== "failed_before_effect") return;
     const identity = this.usageIdentity(op);
     const reservationId = assetUsageReservationId(identity, `relay-native-execute:${op.operationId}`);
     const current = await this.usage.load(identity, reservationId);
     if (current === null) corrupt("usage reservation missing");
-    const target = j.phase === "confirmed" ? "finalized" : "failed_confirmed_revert";
+    const target = j.phase === "confirmed" ? "finalized" :
+      j.phase === "failed_before_effect" ? "failed_before_effect" : "failed_confirmed_revert";
     if (current.state === target) return;
     await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest!,
       state: target, now: this.clock.now(), outcomeDigest: j.integrityHash });
+  }
+  /** The only closure without a chain result: journal has no hash or send marker,
+   * and encrypted custody is proven empty under its mutation lock. */
+  private async closeUnsignedAttempt(op: RelayUnsignedOperation,
+    j: RelayNativeSourceJournal): Promise<RelayNativeSourceJournal> {
+    return this.state.withLocks([walletCustodyLock(this.state, PROFILE)], async () => {
+      const wallet = await this.wallets.describe(PROFILE);
+      if (wallet === null) blocked("encrypted_wallet_missing");
+      try {
+        if (!same(wallet.identity.address, op.sourceAccount)) corrupt("encrypted_wallet_owner");
+        if (wallet.secret.directEffects[custodyKey(op)] !== undefined) blocked("signed_native_custody_exists");
+        if (j.phase !== "signing_started" || j.transactionHash !== null || j.observedAt !== null)
+          blocked("no_effect_closure_requires_unsigned_marker");
+        return this.journals.advance(op, j.integrityHash, "failed_before_effect", null, this.clock.now());
+      } finally { this.wallets.clear(wallet.secret); }
+    });
   }
 }
 

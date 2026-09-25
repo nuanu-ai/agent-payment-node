@@ -24,6 +24,9 @@ function key(op) {
 function depositKey(op) {
     return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
 }
+function nativeDepositKey(op) {
+    return domainHash("apn.relay-native-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
+}
 /** Reuses the existing AES-GCM encrypted wallet secret and hash-bound direct-effect slot. */
 export class RelayEncryptedApprovalCustody {
     state;
@@ -42,7 +45,8 @@ export class RelayEncryptedApprovalCustody {
                     corrupt("custody envelope disappeared");
                 try {
                     if (wallet.secret.directEffects[key(op)] !== undefined ||
-                        wallet.secret.directEffects[depositKey(op)] !== undefined)
+                        wallet.secret.directEffects[depositKey(op)] !== undefined ||
+                        (op.nativeQuote !== undefined && wallet.secret.directEffects[nativeDepositKey(op)] !== undefined))
                         blocked("signed_effect_custody_exists");
                 }
                 finally {

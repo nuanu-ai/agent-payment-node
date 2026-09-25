@@ -6,7 +6,7 @@ import { HttpsBaseRpc } from "../rpc.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { StateStore } from "../state.js";
 type Rpc = Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
-type Phase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed";
+type Phase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "failed_before_effect";
 export interface RelayNativeSourceJournal {
     readonly schemaVersion: "apn.relay-native-source-journal.v1";
     readonly profileHash: string;
@@ -83,6 +83,9 @@ export declare class RelayNativeSourceRuntime {
     private observe;
     private run;
     private settleUsage;
+    /** The only closure without a chain result: journal has no hash or send marker,
+     * and encrypted custody is proven empty under its mutation lock. */
+    private closeUnsignedAttempt;
 }
 export declare function createRelayNativeSourceRuntime(state: StateStore, wrapping: WrappingSecretPort, rpcUrl: string, confirm: RelayNativeSourcePorts["confirm"], clock?: ClockPort, transport?: Rpc): RelayNativeSourceRuntime;
 export {};
