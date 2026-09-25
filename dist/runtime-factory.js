@@ -179,7 +179,7 @@ export function createApnCore(bound, options = {}) {
         ...(stargateNative === undefined ? {} : { stargateNative }),
         ...(stargateToken === undefined ? {} : { stargateToken }),
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
-        ...(bound.request.command === "relay.prepare" || options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
+        ...(bound.request.command === "relay.prepare" || bound.request.command === "relay.native.prepare" || options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
         ...(bound.request.command === "relay.retire" ? { relayRetire: new RelayRetireService(state, clock, wrappingSecret) } : {}),
         ...(bound.request.command === "relay.status" || options.relayStatus !== undefined ? {
             relayStatus: options.relayStatus ?? new RelayKeylessStatusService(state, options.relayStatusFetch),
