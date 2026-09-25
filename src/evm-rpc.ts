@@ -29,9 +29,10 @@ export class EvmRpc implements EvmRpcPort {
   prepareUnichainUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(130, "usdc"); }
   preparePolygonUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(137, "usdc"); }
   prepareBnbNative(): EvmNativePrepareReads { return this.prepareNativeBatched(56); }
+  prepareEthereumNative(): EvmNativePrepareReads { return this.prepareNativeBatched(1); }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 59144 | 130 | 137 | 56, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
+  private prepareNativeBatched(chainId: 1 | 59144 | 130 | 137 | 56, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {

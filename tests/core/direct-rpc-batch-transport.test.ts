@@ -130,6 +130,33 @@ function lineaRead(method: string, params: readonly unknown[], reorg = false): u
   throw new Error(`unexpected ${method}`);
 }
 
+test("Ethereum native prepare batches 17 logical reads into eight physical POSTs and rejects malformed batches", async (t) => {
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
+      result: entry.method === "eth_chainId" ? "0x1" : lineaRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const grouped = new HttpsBaseRpc(endpoint).evm.prepareEthereumNative();
+  const balance = await grouped.balance(WALLET, { chainId: 1, token: "native" });
+  const { nonce, estimated } = await grouped.nonceEstimate(WALLET,
+    { chainId: 1, from: WALLET, to: RECIPIENT, valueAtomic: "100", data: "0x" });
+  const economics = { nonceAtomic: nonce, ...estimated,
+    maximumGasCostAtomic: (BigInt(estimated.gasLimitAtomic) * BigInt(estimated.maxFeePerGasAtomic)).toString() };
+  const quote = await grouped.feeQuote(economics);
+  assert.equal(balance.assetAtomic, BigInt("0x100000000000000").toString());
+  assert.equal(quote.totalQuoteWei, economics.maximumGasCostAtomic);
+  assert.equal(bodies.length, 8);
+  assert.equal(bodies.flatMap(raw => { const body = JSON.parse(raw); return Array.isArray(body) ? body : [body]; }).length, 17);
+});
+
+test("Ethereum native batch rejection stops after one physical POST", async (t) => {
+  const bodies = mockHttps(t, () => ({ status: 429, raw: secret }));
+  await assert.rejects(new HttpsBaseRpc(endpoint).evm.prepareEthereumNative().balance(WALLET,
+    { chainId: 1, token: "native" }), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 1);
+});
+
 test("opted-in Linea native prepare makes 17 logical reads in eight physical POSTs and matches scalar economics", async (t) => {
   const bodies = mockHttps(t, (body) => {
     const reads = Array.isArray(body) ? body : [body];

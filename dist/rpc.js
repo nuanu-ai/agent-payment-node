@@ -43,8 +43,11 @@ export class HttpsBaseRpc {
         this.x402ChainId = x402Network(options.x402ChainId).chainId;
     }
     armBnbDirectRpcGuard() {
+        this.armEvmDirectRpcGuard();
+    }
+    armEvmDirectRpcGuard() {
         if (this.directGuardState === undefined)
-            throw new ApnError("APN_RPC_CONFIG", "BNB direct RPC guard state is unavailable.");
+            throw new ApnError("APN_RPC_CONFIG", "Direct EVM RPC guard state is unavailable.");
         this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState);
     }
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
