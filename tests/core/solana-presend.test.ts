@@ -41,6 +41,20 @@ test("the time the owner spends reading the screen no longer consumes the sendin
   assert.equal((receipt.receipt as { send_binding: { blockReference: string } }).send_binding.blockReference, REBOUND_BLOCKHASH);
 });
 
+test("the send guard reads the fresh blockhash and height in one physical request", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol");
+  const before = s.rpc.physicalRequests;
+  const result = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  assert.deepEqual(s.rpc.batches, [["getLatestBlockhash", "getBlockHeight"]]);
+  assert.equal(s.rpc.calls.length - s.rpc.physicalRequests, 1);
+  assert.equal(before, 6);
+  assert.equal(s.rpc.physicalRequests - before, 28);
+  assert.equal(s.rpc.physicalRequests, 34);
+  assert.equal(s.rpc.submissions.length, 1);
+});
+
 test("a frozen block reference that died while the owner read the screen is replaced, not refused", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare("usdc");

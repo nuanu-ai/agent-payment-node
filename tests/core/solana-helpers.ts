@@ -15,7 +15,7 @@ import { ApnError } from "../../src/errors.js";
 import { StateStore } from "../../src/state.js";
 import { associatedToken } from "../../src/solana/accounts.js";
 import { SolanaLocalAdapter } from "../../src/solana/local-adapter.js";
-import type { SolanaMethod, SolanaRpcPort } from "../../src/solana/rpc.js";
+import type { SolanaBatchRead, SolanaMethod, SolanaRpcPort } from "../../src/solana/rpc.js";
 import { SOLANA_CHAIN, activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 
 export const SOL_RECIPIENT = "So11111111111111111111111111111111111111112";
@@ -46,6 +46,8 @@ export class SolanaWait implements WaitPort {
 export class SolanaTestRpc implements SolanaRpcPort {
   readonly originHash = sha256("synthetic_solana_rpc");
   readonly calls: SolanaMethod[] = [];
+  physicalRequests = 0;
+  readonly batches: SolanaMethod[][] = [];
   readonly submissions: string[] = [];
   sender = ""; sourceAta = ""; destinationAta = "";
   genesis = SOLANA_GENESIS; finalized = true; absentHistory = false; submissionTimeout = false;
@@ -67,6 +69,15 @@ export class SolanaTestRpc implements SolanaRpcPort {
   }
   async useMint(mint: string): Promise<void> { this.mint = mint; await this.bind(this.sender); }
   async call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown> {
+    this.physicalRequests++;
+    return await this.respond(method, params);
+  }
+  async batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]> {
+    this.physicalRequests++;
+    this.batches.push(reads.map(read => read.method));
+    return await Promise.all(reads.map(read => this.respond(read.method, read.params)));
+  }
+  private async respond(method: SolanaMethod, params: readonly unknown[]): Promise<unknown> {
     this.calls.push(method);
     switch (method) {
       case "getGenesisHash": return this.genesis;
