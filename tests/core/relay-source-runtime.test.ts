@@ -65,33 +65,39 @@ async function setup(t: test.TestContext) {
     amountAtomic: "2500000", minOutputAtomic: quote.minimumOutputWei,
     createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
   const operations = new RelayUnsignedOperationRepository(temp.root); await operations.initialize(); await operations.persistLocked(op);
-  let batches = 0, sends = 0, confirms = 0, approvalVisible = false;
+  let batches = 0, sends = 0, confirms = 0, approvalVisible = false, depositVisible = false, reorgOnRecheck = false;
   let summary: RelayExecutionSummary | null = null;
   const submitted: Hex[] = [];
   const approvalTopic = keccak256(toBytes("Approval(address,address,uint256)"));
   const rpc = {
     batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]): Promise<readonly unknown[]> => {
       batches++;
+      if (calls[0]?.method === "eth_getTransactionByHash") {
+        assert.deepEqual(calls.map(item => item.method), ["eth_getTransactionByHash", "eth_getTransactionReceipt"]);
+        const index = submitted.findIndex(raw => keccak256(raw) === calls[0]?.params[0]);
+        if (index < 0 || (index === 0 && !approvalVisible) || (index === 1 && !depositVisible))
+          return [null, null];
+        const hash = calls[0].params[0];
+        return [{ hash, chainId: "0x1", type: "0x2", blockNumber: "0x10", blockHash,
+          from: owner, to: index === 0 ? ETHEREUM_USDC : ETHEREUM_DEPOSITORY,
+          input: index === 0 ? quote.approval.data : quote.deposit.data, value: "0x0" },
+        { transactionHash: hash, blockNumber: "0x10", blockHash, status: "0x1",
+          logs: index === 0 ? [{ address: ETHEREUM_USDC, transactionHash: hash, blockNumber: "0x10", blockHash,
+            removed: false, topics: [approvalTopic, word(BigInt(owner)), word(BigInt(ETHEREUM_DEPOSITORY))],
+            data: word(2500000n) }] : [] }];
+      }
+      if (calls[0]?.method === "eth_getBlockByNumber" && calls[0].params[0] === "0x10" && calls.length === 2)
+        return [{ number: "0x10", hash: blockHash }, { number: "0x10", hash: blockHash }];
+      if (calls.length === 3 && calls[2]?.method === "eth_chainId")
+        return [{ number: "0x10", hash: reorgOnRecheck ? `0x${"c".repeat(64)}` : blockHash },
+          { number: "0x10", hash: blockHash }, "0x1"];
       if (calls.length === 2) return ["0x1", { number: "0x10", hash: blockHash, baseFeePerGas: "0x1" }];
       if (calls.length === 7) {
         for (const item of calls.slice(1, 4)) assert.deepEqual(item.params.at(-1), { blockHash, requireCanonical: true });
         return [{ number: "0x10", hash: blockHash }, "0xde0b6b3a7640000", word(2500000n),
           word(approvalVisible ? 2500000n : 0n), approvalVisible ? "0x8" : "0x7", "0x1", "0x1"];
       }
-      if (calls.length === 1) return ["0x1"];
       throw new Error("Unexpected RPC batch");
-    },
-    coinbaseGaslessCall: async (method: string, params: readonly unknown[]) => {
-      if (!approvalVisible || submitted.length === 0) return null;
-      if (method === "eth_getBlockByNumber") return { number: "0x10", hash: blockHash };
-      if (params[0] !== keccak256(submitted[0]!)) return null;
-      if (method === "eth_getTransactionByHash") return { hash: params[0], chainId: "0x1", type: "0x2",
-        blockNumber: "0x10", blockHash, from: owner, to: ETHEREUM_USDC, input: quote.approval.data, value: "0x0" };
-      if (method === "eth_getTransactionReceipt") return { transactionHash: params[0], blockNumber: "0x10", blockHash,
-        status: "0x1", logs: [{ address: ETHEREUM_USDC, transactionHash: params[0], blockNumber: "0x10", blockHash,
-          removed: false, topics: [approvalTopic, word(BigInt(owner)), word(BigInt(ETHEREUM_DEPOSITORY))],
-          data: word(2500000n) }] };
-      throw new Error("Unexpected RPC method");
     },
     submitRawTransaction: async (raw: Hex) => { sends++; submitted.push(raw); return keccak256(raw); },
   };
@@ -99,6 +105,8 @@ async function setup(t: test.TestContext) {
   const runtime = new RelayEthereumSourceRuntime(state, wrapping, rpc, authorization, { now: () => now });
   return { state, wrapping, runtime, op, rpc, registry: staged.registry,
     showApproval: () => { approvalVisible = true; },
+    showDeposit: () => { depositVisible = true; },
+    reorgOnRecheck: () => { reorgOnRecheck = true; },
     get evidence() { return { batches, sends, confirms, summary }; } };
 }
 
@@ -145,6 +153,38 @@ test("finalized canonical approval advances to one deposit send", async t => {
   assert.equal(f.evidence.sends, 2);
   await f.runtime.execute(f.op.operationId);
   assert.equal(f.evidence.sends, 2);
+});
+
+test("approval and deposit finality use bounded physical POSTs and preserve journal phases", async t => {
+  const f = await setup(t);
+  let journal = await f.runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "submitting");
+  assert.equal(journal.effects[1].phase, "pending");
+  const pendingApprovalPosts = f.evidence.batches;
+  f.showApproval();
+  journal = await f.runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "confirmed");
+  assert.equal(journal.effects[1].phase, "submitting");
+  const pendingDepositPosts = f.evidence.batches;
+  f.showDeposit();
+  journal = await f.runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "confirmed");
+  assert.equal(journal.effects[1].phase, "confirmed");
+  assert.equal(f.evidence.sends, 2);
+  assert.deepEqual({ pendingApprovalPosts, pendingDepositPosts, finalizedPosts: f.evidence.batches },
+    { pendingApprovalPosts: 5, pendingDepositPosts: 19, finalizedPosts: 22 });
+  assert.equal(f.evidence.batches + f.evidence.sends, 24);
+});
+
+test("recheck reorg preserves the submitting approval and never resends", async t => {
+  const f = await setup(t);
+  await f.runtime.execute(f.op.operationId);
+  f.showApproval(); f.reorgOnRecheck();
+  const journal = await f.runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "submitting");
+  assert.equal(journal.effects[1].phase, "pending");
+  assert.equal(f.evidence.sends, 1);
+  assert.equal(f.evidence.batches, 8);
 });
 
 test("production Relay RPC factory rejects signed paths and query credentials", async t => {

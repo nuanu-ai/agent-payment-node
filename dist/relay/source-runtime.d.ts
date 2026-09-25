@@ -36,7 +36,7 @@ export declare class RelayEthereumSourceRuntime {
     private readonly approvalCustody;
     private readonly depositCustody;
     private signingNonce;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, rpc: Pick<HttpsBaseRpc, "batchCall" | "coinbaseGaslessCall" | "submitRawTransaction">, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, rpc: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">, authorization: RelayExecutionAuthorizationPort, clock?: ClockPort);
     execute(operationId: string): Promise<RelayEffectJournal>;
     private usageIdentity;
     private usageReservationId;
