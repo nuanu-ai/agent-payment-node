@@ -13,6 +13,7 @@ export declare class EvmRpc implements EvmRpcPort {
     prepareUnichainNative(): EvmNativePrepareReads;
     prepareUnichainUsdc(): EvmNativePrepareReads;
     preparePolygonUsdc(): EvmNativePrepareReads;
+    prepareBnbNative(): EvmNativePrepareReads;
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
     private prepareNativeBatched;
     assertChain(chainId: DirectEvmChainId): Promise<void>;
