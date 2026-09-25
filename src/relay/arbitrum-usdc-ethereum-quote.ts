@@ -5,8 +5,8 @@ import type { Hex } from "viem";
 import { hashObject } from "../canonical.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
 
-export const RELAY_ARBITRUM_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-export const RELAY_ETHEREUM_USDC_RECIPIENT = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
+export const RELAY_ARBITRUM_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as const;
+export const RELAY_ETHEREUM_USDC_RECIPIENT = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04" as const;
 // The captured signed order has no calls and names this exact router in all extraData fields.
 const ROUTER_DATA = "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
 const CHAINS = { arbitrum: "ethereum-vm", ethereum: "ethereum-vm", base: "ethereum-vm" } as const;
@@ -201,7 +201,7 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown,
     routeReference: "arbitrum-usdc-ethereum-usdc-observation-v1" as const,
     statusLocator: locator, orderId: orderId.toLowerCase(), orderSignature: signature.toLowerCase(),
     solver: RELAY_SOLVER, payer, recipient, sourceRefundRecipient: payer,
-    principalAtomic: intent.amountAtomic, minimumOutputAtomic: minimum.toString(), deadline,
+    principalAtomic: intent.amountAtomic, minimumOutputAtomic: minimum.toString(), deadline: deadline as number,
     providerFeeAtomic: feeAmounts.relayer!.toString(), quotedDepositNetworkFeeWei: feeAmounts.gas!.toString(),
     orderData, paymentDetails: { chainId: "arbitrum" as const, depository: ETHEREUM_DEPOSITORY,
       currency: RELAY_ARBITRUM_USDC.toLowerCase(), amount: intent.amountAtomic }, approval, deposit };
