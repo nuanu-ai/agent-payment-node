@@ -11,7 +11,8 @@ import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce,
   createRelayNativeSourceRuntime, publicRelayNativeSourceJournal, RelayNativeSourceRuntime } from "../../src/relay/native-source.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
-import { RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, validateRelayNativeQuote,
+import { RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE, RELAY_BNB_DEFAULT_SOURCE,
+  RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, validateRelayNativeQuote,
   verifySavedRelayNativeQuote } from "../../src/relay/native-quote.js";
 import { StateStore } from "../../src/state.js";
 import { TtyRelayNativeExecuteConfirmation } from "../../src/tty-approval.js";
@@ -31,6 +32,22 @@ async function prepared(state: StateStore, monad = false) {
     operationId: "2".repeat(64), idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64),
     sourceChainId: 56, destinationChainId: monad ? 143 : 137, sourceAccount: RELAY_BNB_SOURCE.toLowerCase(),
     recipient: recipient.toLowerCase(), quoteDigest: quote.quoteDigest,
+    nativeQuote: quote, statusLocator: quote.statusLocator, policyDigest: "5".repeat(64), policyRevision: 1,
+    depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei, amountAtomic: quote.principalAtomic,
+    minOutputAtomic: quote.minimumOutputWei, createdAt: now.toISOString(),
+    deadline: new Date(quote.deadline * 1000).toISOString() });
+}
+async function preparedDefault(state: StateStore) {
+  const raw = JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-monad-native-default-quote-20260925.json", "utf8"));
+  const quote = await validateRelayNativeQuote(raw, { payer: RELAY_BNB_DEFAULT_SOURCE,
+    recipient: RELAY_BNB_DEFAULT_SOURCE, amountAtomic: "1200000000000000",
+    minimumOutputWei: "32000000000000000000", nowSeconds: Math.floor(now.getTime() / 1000) });
+  assert.ok(quote.statusLocator);
+  return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
+    state: "prepared", terminal: false, profileHash: state.profileHash("default"),
+    operationId: "6".repeat(64), idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64),
+    sourceChainId: 56, destinationChainId: 143, sourceAccount: RELAY_BNB_DEFAULT_SOURCE.toLowerCase(),
+    recipient: RELAY_BNB_DEFAULT_SOURCE.toLowerCase(), quoteDigest: quote.quoteDigest,
     nativeQuote: quote, statusLocator: quote.statusLocator, policyDigest: "5".repeat(64), policyRevision: 1,
     depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei, amountAtomic: quote.principalAtomic,
     minOutputAtomic: quote.minimumOutputWei, createdAt: now.toISOString(),
@@ -78,6 +95,28 @@ test("Monad execute uses the shared source journal and refuses absent buyer cust
     "https://bsc-rpc.publicnode.com", async () => { calls++; return true; }, { now: () => now },
     { batchCall: async () => { calls++; return []; }, submitRawTransaction: async () => { calls++; return "0x0"; } });
   await assert.rejects(runtime.execute(op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(calls, 0);
+  assert.equal(await new RelayNativeSourceJournalRepository(temp.root).load(op), null);
+});
+
+for (const profile of ["evm-live-buyer", "default"] as const) test(`${profile} native execution refuses a foreign delegated grant before RPC`, async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root), op = profile === "default" ? await preparedDefault(state) : await prepared(state, true);
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
+  const walletFields = { schemaVersion: "apn.state.v1" as const, profile, profileHash: op.profileHash,
+    address: op.sourceAccount as Hex, createdAt: now.toISOString(),
+    bindingHash: hashObject({ profile, address: op.sourceAccount, createdAt: now.toISOString() }) };
+  await state.writeNewWallet({ ...walletFields, integrityHash: hashObject(walletFields) });
+  let calls = 0;
+  const runtime = new RelayNativeSourceRuntime(state,
+    { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) },
+    { confirm: async () => { calls++; return true; }, rpc: {
+      batchCall: async () => { calls++; return []; }, submitRawTransaction: async () => { calls++; return "0x0"; },
+    } }, { now: () => now });
+  Object.assign(runtime, { permissions: { listAll: async () => [{ phase: "active",
+    owner_address: op.sourceAccount, profile_hash: "f".repeat(64) }] } });
+  await assert.rejects(runtime.execute(op.operationId), { code: "APN_OPERATION_BLOCKED",
+    details: { reason: "foreign_encrypted_metamask_grant" } });
   assert.equal(calls, 0);
   assert.equal(await new RelayNativeSourceJournalRepository(temp.root).load(op), null);
 });
@@ -154,24 +193,29 @@ test("installed native execute CLI refuses absent buyer custody before any RPC o
   assert.equal(await new RelayNativeSourceJournalRepository(temp.root).load(op), null);
 });
 
-for (const monad of [false, true]) test(`${monad ? "Monad" : "Polygon"} crash after signing marker with empty custody closes no-effect, releases cap and permits retirement`, async t => {
+for (const lane of ["polygon", "buyer-monad", "default-monad"] as const) test(`${lane} crash after signing marker with empty custody closes no-effect, releases cap and permits retirement`, async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root);
+  const monad = lane !== "polygon", defaultRoute = lane === "default-monad";
+  const profile = defaultRoute ? "default" : "evm-live-buyer";
+  const owner = defaultRoute ? RELAY_BNB_DEFAULT_SOURCE : RELAY_BNB_SOURCE;
+  const routeReference = defaultRoute ? RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE :
+    monad ? RELAY_BNB_MONAD_ROUTE_REFERENCE : "bnb-native-polygon-native-v1";
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
     registryVersion: "relay-native-crash.test.1", publishedAt: "2026-09-30T00:00:00.000Z",
     effectiveDate: "2026-09-30", effectiveAt: "2026-09-30T00:00:00.000Z", expiresAt: "2026-10-03T00:00:00.000Z",
     chains: [{ chain: "eip155:56", family: "evm", name: "BNB Smart Chain", assets: [{ kind: "native", identifier: null,
       symbol: "BNB", decimals: 18, rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
       railCaps: { bridge: { maximumPerTransferAtomic: "2000000000000000", dailyLimitAtomic: "3000000000000000" } },
-      mechanismPins: { bridge: { provider: "relay", reference: monad ? RELAY_BNB_MONAD_ROUTE_REFERENCE : "bnb-native-polygon-native-v1" } } }] }] });
-  const original = await prepared(state, monad), { integrityHash: _, ...fields } = original;
+      mechanismPins: { bridge: { provider: "relay", reference: routeReference } } }] }] });
+  const original = defaultRoute ? await preparedDefault(state) : await prepared(state, monad), { integrityHash: _, ...fields } = original;
   const op = freezeRelayUnsignedOperation({ ...fields, policyDigest: registry.policyDigest });
   await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
-  const walletFields = { schemaVersion: "apn.state.v1" as const, profile: "evm-live-buyer",
-    profileHash: op.profileHash, address: RELAY_BNB_SOURCE as Hex, createdAt: now.toISOString(),
-    bindingHash: hashObject({ profile: "evm-live-buyer", address: RELAY_BNB_SOURCE, createdAt: now.toISOString() }) };
+  const walletFields = { schemaVersion: "apn.state.v1" as const, profile,
+    profileHash: op.profileHash, address: owner as Hex, createdAt: now.toISOString(),
+    bindingHash: hashObject({ profile, address: owner, createdAt: now.toISOString() }) };
   await state.writeNewWallet({ ...walletFields, integrityHash: hashObject(walletFields) });
-  const identity = { account: RELAY_BNB_SOURCE, chain: "eip155:56", asset: { kind: "native" as const, identifier: null } };
+  const identity = { account: owner, chain: "eip155:56", asset: { kind: "native" as const, identifier: null } };
   const ledger = new AssetUsageLedger(temp.root), reservationId = assetUsageReservationId(identity,
     `relay-native-execute:${op.operationId}`);
   await ledger.reserve({ ...identity, registry, rail: "bridge", amountAtomic: op.amountAtomic,
@@ -187,7 +231,7 @@ for (const monad of [false, true]) test(`${monad ? "Monad" : "Polygon"} crash af
   // A deterministic crash seam: the signing marker was durable, but no encrypted signed slot was saved.
   const key = domainHash("apn.relay-native-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
   const directEffects: Record<string, unknown> = { [key]: { unreadable: true } };
-  Object.assign(runtime, { wallets: { describe: async () => ({ identity: { address: RELAY_BNB_SOURCE },
+  Object.assign(runtime, { wallets: { describe: async () => ({ identity: { address: owner },
     secret: { directEffects } }), clear: () => {} } });
   await assert.rejects(runtime.execute(op.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal((await journalStore.load(op))?.phase, "signing_started");
@@ -199,6 +243,6 @@ for (const monad of [false, true]) test(`${monad ? "Monad" : "Polygon"} crash af
   assert.equal(sends, 0);
   assert.equal((await runtime.execute(op.operationId)).phase, "failed_before_effect");
   const retired = await new RelayRetireService(state, { now: () => now }, wrapping).retire({
-    profile: "evm-live-buyer", operationId: op.operationId });
+    profile, operationId: op.operationId });
   assert.equal(retired.state, "retired");
 });
