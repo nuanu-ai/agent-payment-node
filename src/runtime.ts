@@ -4,6 +4,7 @@ import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
 import type { RelayBaseObserveService } from "./relay/base-observe.js";
+import type { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
 import type { RelayEffectJournal } from "./relay/effect-journal.js";
 import type { RelayNativeSourceRuntime } from "./relay/native-source.js";
 import { randomUUID } from "node:crypto";
@@ -75,6 +76,7 @@ export interface CoreDependencies {
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayObserve?: RelayObserveService;
   readonly relayBaseObserve?: RelayBaseObserveService;
+  readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
   readonly relayExecute?: RelayExecuteHandler;
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
@@ -134,6 +136,7 @@ export class RuntimeContext {
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayObserve?: RelayObserveService;
   readonly relayBaseObserve?: RelayBaseObserveService;
+  readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
   readonly relayExecute?: RelayExecuteHandler;
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
@@ -194,6 +197,7 @@ export class RuntimeContext {
     if (dependencies.relayStatus !== undefined) this.relayStatus = dependencies.relayStatus;
     if (dependencies.relayObserve !== undefined) this.relayObserve = dependencies.relayObserve;
     if (dependencies.relayBaseObserve !== undefined) this.relayBaseObserve = dependencies.relayBaseObserve;
+    if (dependencies.relayArbitrumObserve !== undefined) this.relayArbitrumObserve = dependencies.relayArbitrumObserve;
     if (dependencies.relayExecute !== undefined) this.relayExecute = dependencies.relayExecute;
     if (dependencies.relayNativeExecute !== undefined) this.relayNativeExecute = dependencies.relayNativeExecute;
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;

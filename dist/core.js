@@ -166,6 +166,12 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Base observe runtime is unavailable.");
                 return dataOutcome(await service.observe(request.operationId), "read_only_rpc_observation");
             }
+            case "relay.arbitrum.observe": {
+                const service = this.context.relayArbitrumObserve;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Arbitrum source observer is unavailable.");
+                return dataOutcome(await service.observe(request.operationId), "read_only_rpc_observation");
+            }
             case "stargate.native.prepare": {
                 const service = this.context.stargateNative;
                 if (service === undefined)
