@@ -59,6 +59,8 @@ function bindParsedCatalog(parsed) {
         return { request: { command: "relay.preflight", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay execute")
         return { request: { command: "relay.execute", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+    if (parsed.command.path.join(" ") === "relay native execute")
+        return { request: { command: "relay.native.execute", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay retire")
         return { request: { command: "relay.retire", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay status")

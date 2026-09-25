@@ -67,7 +67,7 @@ export declare class AssetUsageLedger extends SecureStateStore {
     private initialized;
     /** Relay and this ledger hash idempotency keys in separate domains. Hold the
      * exact source asset bucket lock through the caller's retirement write. */
-    withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, sourceChainId?: 1 | 56): Promise<T>;
+    withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, sourceChainId?: 1 | 56, allowFailedBeforeEffectReservationId?: string): Promise<T>;
     reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
     usage(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;

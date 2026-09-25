@@ -40,6 +40,39 @@ export class TtyRelayExecuteConfirmation {
         }
     }
 }
+/** Fresh consent naming the native value and exact BNB depository. */
+export class TtyRelayNativeExecuteConfirmation {
+    options;
+    constructor(options = {}) {
+        this.options = options;
+    }
+    async confirm(summary) {
+        const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
+        try {
+            await exactChainConsent([
+                "Agent Payment Node Relay BNB native source execution",
+                `Operation: ${summary.operationId}`,
+                "Source chain: BNB Chain (eip155:56)",
+                "Destination chain: Polygon (eip155:137)",
+                `Source account: ${summary.sourceAccount}`,
+                `Native BNB value: ${summary.valueWei} wei`,
+                `Depository: ${summary.depository}`,
+                `Recipient: ${summary.recipient}`,
+                `Minimum native POL output: ${summary.minOutputAtomic} wei`,
+                `Quote deadline: ${summary.deadline}`,
+                `Network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
+                `Quote digest: ${summary.quoteDigest}`,
+                "This confirms only the BNB source deposit; Polygon delivery and paid acceptance require separate proof.",
+            ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
+            return true;
+        }
+        catch (error) {
+            if (error instanceof ApnError && error.code === "APN_NATIVE_REJECTED")
+                return false;
+            throw error;
+        }
+    }
+}
 export class TtyTransferApproval {
     deadlineMs;
     signal;

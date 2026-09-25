@@ -5,6 +5,7 @@ import { RelayKeylessStatusService } from "./relay/status.js";
 import { RelayObserveService } from "./relay/observe.js";
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
+import { createRelayNativeSourceRuntime } from "./relay/native-source.js";
 import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
@@ -20,7 +21,7 @@ import type { ProfilePolicyPort } from "./profile-policy.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
-import { TtyRelayExecuteConfirmation, TtyTransferApproval, type TtyTransferApprovalOptions } from "./tty-approval.js";
+import { TtyRelayExecuteConfirmation, TtyRelayNativeExecuteConfirmation, TtyTransferApproval, type TtyTransferApprovalOptions } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
 import { TtyForegroundAuthentication } from "./foreground-auth.js";
@@ -315,6 +316,11 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const relayExecute = relayAuthorization === undefined ? undefined
     : createRelayEthereumSourceRuntime(state, wrappingSecret, bound.rpcUrl ?? "", { confirm: relayExecuteConfirmation! },
       clock, options.relayExecuteTransport);
+  const nativeRelayAuthorization = bound.request.command === "relay.native.execute"
+    ? new TtyRelayNativeExecuteConfirmation(options.relayExecuteTtyOptions) : undefined;
+  const relayNativeExecute = nativeRelayAuthorization === undefined ? undefined
+    : createRelayNativeSourceRuntime(state, wrappingSecret, bound.rpcUrl ?? "",
+      nativeRelayAuthorization.confirm.bind(nativeRelayAuthorization), clock, options.relayExecuteTransport);
   const stargateNative = options.stargateNative ?? (bound.request.command.startsWith("stargate.native.")
     ? new StargateNativeService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
   const stargateToken = options.stargateToken ?? (bound.request.command.startsWith("stargate.token.")
@@ -348,6 +354,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   return new ApnCore({
     state,
     ...(relayExecute === undefined ? {} : { relayExecute, relayExecuteConfirmation: relayExecuteConfirmation! }),
+    ...(relayNativeExecute === undefined ? {} : { relayNativeExecute }),
     ...(stargateNative === undefined ? {} : { stargateNative }),
     ...(stargateToken === undefined ? {} : { stargateToken }),
     // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.

@@ -20,7 +20,7 @@ export class AssetUsageLedger extends SecureStateStore {
     initialized;
     /** Relay and this ledger hash idempotency keys in separate domains. Hold the
      * exact source asset bucket lock through the caller's retirement write. */
-    async withNoMatchingRelayReservation(account, policyDigest, amountAtomic, action, sourceChainId = 1) {
+    async withNoMatchingRelayReservation(account, policyDigest, amountAtomic, action, sourceChainId = 1, allowFailedBeforeEffectReservationId) {
         if (policyDigest !== undefined)
             digest(policyDigest, "Policy digest");
         const identity = validateIdentity(sourceChainId === 56
@@ -31,7 +31,8 @@ export class AssetUsageLedger extends SecureStateStore {
         return this.withLocks([this.bucketLock(identity)], async () => {
             const records = await this.loadBucket(identity);
             if (records.some(record => record.rail === "bridge" &&
-                (policyDigest === undefined || record.policyDigest === policyDigest) && record.amountAtomic === amountAtomic)) {
+                (policyDigest === undefined || record.policyDigest === policyDigest) && record.amountAtomic === amountAtomic &&
+                !(record.reservationId === allowFailedBeforeEffectReservationId && record.state === "failed_before_effect"))) {
                 throw blocked("Relay retirement is refused because a matching usage reservation exists.");
             }
             return action();

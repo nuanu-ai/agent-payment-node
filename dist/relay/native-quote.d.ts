@@ -58,5 +58,7 @@ export interface ValidatedRelayNativeQuote {
     }>;
 }
 export declare function validateRelayNativeQuote(value: unknown, intent: RelayNativeQuoteIntent): Promise<ValidatedRelayNativeQuote>;
+/** Recheck the saved quote's solver authority and native deposit at the execution boundary. */
+export declare function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuote): Promise<void>;
 /** One public quote POST, no API key or retry. */
 export declare function requestRelayNativeQuote(intent: RelayNativeQuoteIntent, fetcher?: typeof fetch, now?: () => number): Promise<ValidatedRelayNativeQuote>;
