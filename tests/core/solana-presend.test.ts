@@ -58,12 +58,11 @@ test("the SOL journey batches independent reads within each safety checkpoint", 
     ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
     ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
     ["getGenesisHash", "getSignatureStatuses"],
-    ["getTransaction", "getTransaction"],
   ]);
   assert.equal(s.rpc.calls.length, 35);
-  assert.equal(s.rpc.physicalRequests, 21);
+  assert.equal(s.rpc.physicalRequests, 22);
   assert.equal(before, 5);
-  assert.equal(s.rpc.physicalRequests - before, 16);
+  assert.equal(s.rpc.physicalRequests - before, 17);
   assert.ok(atApproval > 0 && atApproval < s.rpc.physicalRequests);
   assert.ok(s.rpc.batches.every(batch => !batch.includes("sendTransaction") && !batch.includes("simulateTransaction")));
   assert.ok(s.rpc.calls.indexOf("simulateTransaction") < s.rpc.calls.indexOf("sendTransaction"));
@@ -76,7 +75,7 @@ test("the USDC journey batches rent with the fee after the account snapshot", as
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
   assert.equal(s.rpc.calls.length, 42);
-  assert.equal(s.rpc.physicalRequests, 23);
+  assert.equal(s.rpc.physicalRequests, 24);
   assert.equal(s.rpc.batches.filter(batch => batch.join(",") === "getFeeForMessage,getMinimumBalanceForRentExemption").length, 5);
   assert.equal(s.rpc.submissions.length, 1);
 });

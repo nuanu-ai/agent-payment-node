@@ -601,6 +601,31 @@ for (const asset of ["sol", "usdc"] as const) test(`${asset} completed RPC statu
   assert.equal((recovered.operation as { state: string }).state, "completed"); assert.equal(s.rpc.submissions.length, 1);
 });
 
+test("finalized SOL observation reads transaction encodings separately and rejects malformed wire evidence", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol"); s.rpc.finalized = false;
+  assert.equal((await s.core.rails.approve(id) as { state: string }).state, "submitted_pending");
+  const originalBatch = s.rpc.batch.bind(s.rpc);
+  Object.assign(s.rpc, { batch: async (...args: Parameters<typeof originalBatch>) => {
+    if (args[0].some(read => read.method === "getTransaction")) throw new Error("provider rejects transaction batch");
+    return await originalBatch(...args);
+  } });
+  const originalCall = s.rpc.call.bind(s.rpc);
+  s.rpc.finalized = true;
+  Object.assign(s.rpc, { call: async (...args: Parameters<typeof originalCall>) =>
+    args[0] === "getTransaction" && (args[1][1] as { encoding: string }).encoding === "base64" ? null : await originalCall(...args) });
+  assert.equal((await s.core.rails.resume(id) as { state: string }).state, "submitted_pending");
+  assert.equal((await s.core.rails.records.findOperation(id))!.evidence, null);
+  Object.assign(s.rpc, { call: originalCall });
+  assert.equal((await s.core.rails.resume(id) as { state: string }).state, "completed");
+  const record = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(record.evidence?.transactionId, record.transactionId);
+  assert.equal(record.evidence?.amountAtomic, "1000");
+  assert.equal(record.evidence?.recipient, SOL_RECIPIENT);
+  assert.equal(record.evidence?.recipientEffectVerified, true);
+  assert.equal(s.rpc.submissions.length, 1);
+});
+
 test("local SOL resume releases locks during saved-effect observation and discards a competing journal update", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare(); s.rpc.finalized = false;
