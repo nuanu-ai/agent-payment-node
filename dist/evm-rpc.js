@@ -29,6 +29,7 @@ export class EvmRpc {
     prepareUnichainUsdc() { return this.prepareNativeBatched(130, "usdc"); }
     preparePolygonUsdc() { return this.prepareNativeBatched(137, "usdc"); }
     prepareBnbNative() { return this.prepareNativeBatched(56); }
+    prepareEthereumNative() { return this.prepareNativeBatched(1); }
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
     prepareNativeBatched(chainId, asset = "native") {
         if (this.batchCall === undefined)

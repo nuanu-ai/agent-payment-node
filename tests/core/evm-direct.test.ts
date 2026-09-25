@@ -117,7 +117,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.rpc.genericBalanceCalls, calls);
   await assert.rejects(setup.core.transfer.prepare({ ...request, amount: "2" }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };
-  assert.equal(approved.state, "completed");
+  assert.equal(approved.state, chainId === 1 && kind === "native" ? "submitted_pending" : "completed");
   const raw = setup.rpc.submissions[0]!;
   const transaction = parseTransaction(raw);
   assert.equal(transaction.chainId, chainId);
@@ -126,6 +126,9 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.approval.intents.length, 1);
   const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
   assert.deepEqual(await restarted.core.transfer.status(prepared.operation_id), approved);
+  if (chainId === 1 && kind === "native") {
+    assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  }
   const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { state: string; finality: string };
   assert.equal(receipt.state, "completed");
   assert.equal(receipt.finality, chainId === 42161 ? "rpc_safe_inclusion" : "inclusion_only");
@@ -236,13 +239,44 @@ test("all EVM chains keep the frozen signed envelope across harmless live fee an
         maxFeePerGasAtomic: (BigInt(setup.rpc.fees.maxFeePerGasAtomic) + 1_000_000_000n).toString(),
       };
 
-      assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
+      assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state,
+        chainId === 1 ? "submitted_pending" : "completed");
       assert.equal(setup.approval.intents.length, 1);
       assert.equal(setup.rpc.submissions.length, 1);
     } finally {
       await temporary.cleanup();
     }
   }
+});
+
+test("Ethereum signed native transfer refuses depleted funding, then resumes with one send and explicit observation", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const rpc = new EvmTestRpc(); rpc.chainId = 1; rpc.l1Fee = 0n; rpc.operatorFee = 0n;
+  const originalQuote = rpc.evm.feeQuote;
+  let quoteReads = 0;
+  Object.assign(rpc.evm, { feeQuote: async (...args: Parameters<typeof originalQuote>) => {
+    quoteReads += 1; return await originalQuote(...args);
+  } });
+  const setup = evmCore(temporary.root, rpc, undefined, undefined, native => ({ request: async request => {
+    const result = await native.request(request);
+    if (request.operation === "directTransfer.approveAndSign") rpc.nativeAtomic = "0";
+    return result;
+  } }));
+  await ensureDirectWallet(setup);
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" },
+    amount: "0.000001" }) as { operation_id: string };
+  assert.equal(quoteReads, 1);
+  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_INSUFFICIENT_ASSET" });
+  assert.equal(quoteReads, 2, "the signed Ethereum envelope reuses its validated frozen quote");
+  assert.equal((await setup.core.transfer.status(prepared.operation_id) as { state: string }).state, "signed_not_submitted");
+  assert.equal(rpc.broadcastCount, 0);
+  rpc.nativeAtomic = "1000000000000000000";
+  const restarted = evmCore(temporary.root, rpc, setup.wrapping);
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  assert.equal(rpc.broadcastCount, 1);
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  assert.equal(rpc.broadcastCount, 1);
+  assert.equal(restarted.approval.intents.length, 0);
 });
 
 test("fresh custody recovers the encrypted signature after process loss before public effect binding", async (context) => {

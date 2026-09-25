@@ -71,7 +71,11 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   }
 
   armBnbDirectRpcGuard(): void {
-    if (this.directGuardState === undefined) throw new ApnError("APN_RPC_CONFIG", "BNB direct RPC guard state is unavailable.");
+    this.armEvmDirectRpcGuard();
+  }
+
+  armEvmDirectRpcGuard(): void {
+    if (this.directGuardState === undefined) throw new ApnError("APN_RPC_CONFIG", "Direct EVM RPC guard state is unavailable.");
     this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState);
   }
 
