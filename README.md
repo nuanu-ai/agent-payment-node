@@ -660,6 +660,7 @@ returned. The signer must perform network reads outside that lock.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
+apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
 apn relay base prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
 apn relay base observe --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
 apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
@@ -669,7 +670,7 @@ apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>
 apn relay native execute --operation <operation-id> --rpc-url <bnb-rpc>
 apn relay retire --profile <default|evm-live-buyer> --operation <operation-id>
 apn relay status --operation <operation-id>
-apn relay observe --operation <operation-id> --rpc-url <ethereum-rpc> --bnb-rpc-url <bnb-rpc>
+apn relay observe --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
 apn stargate native execute --operation <operation-id>
 apn stargate native observe --operation <operation-id>
