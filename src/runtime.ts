@@ -193,6 +193,7 @@ export class RuntimeContext {
     if (dependencies.relayRetire !== undefined) this.relayRetire = dependencies.relayRetire;
     if (dependencies.relayStatus !== undefined) this.relayStatus = dependencies.relayStatus;
     if (dependencies.relayObserve !== undefined) this.relayObserve = dependencies.relayObserve;
+    if (dependencies.relayBaseObserve !== undefined) this.relayBaseObserve = dependencies.relayBaseObserve;
     if (dependencies.relayExecute !== undefined) this.relayExecute = dependencies.relayExecute;
     if (dependencies.relayNativeExecute !== undefined) this.relayNativeExecute = dependencies.relayNativeExecute;
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;

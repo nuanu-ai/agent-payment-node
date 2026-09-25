@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { bindArgv } from "../../src/command-binder.js";
+import { createApnCore } from "../../src/runtime-factory.js";
 import { hashObject } from "../../src/canonical.js";
 import { proveRelayBaseDestination, type RelayBnbProofPorts } from "../../src/relay/destination-proof.js";
 import { RelayBaseObserveService } from "../../src/relay/base-observe.js";
@@ -121,4 +122,11 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   assert.equal(observed.paidAcceptance, false); assert.equal(observed.sourceFinalized, false);
   assert.equal(observed.operationalAcceptance, false);
   assert.equal(statusCalls, 1); assert.equal(rpcCalls, 1);
+  const routedService = new RelayBaseObserveService(state, () => ({ ...ports }),
+    new RelayKeylessStatusService(state, fetcher));
+  const core = createApnCore(bindArgv(["relay", "base", "observe", "--operation", op.operationId,
+    "--rpc-url", "https://base.example"]), { stateRoot: temporary.root, relayBaseObserve: routedService });
+  const routed = await core.execute({ command: "relay.base.observe", operationId: op.operationId });
+  assert.equal(routed.ok, true, JSON.stringify(routed));
+  assert.equal(core.context.relayBaseObserve, routedService);
 });
