@@ -100,7 +100,6 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
     let response: LifiResponse;
     try {
-      await telemetrySession?.physicalBudget?.beforePost(method);
       options.onRequest?.({ origin: target.origin, endpointRole, methods: [method], batchSize: 1 });
       telemetrySession?.recordPhysicalAttempt(endpointRole, [method]);
       response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
@@ -135,7 +134,6 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     try {
       const parsed = JSON.parse(body) as { method: string } | Array<{ method: string }>;
       const rows = Array.isArray(parsed) ? parsed : [parsed];
-      await telemetrySession?.physicalBudget?.beforePost(rpcMethod);
       options.onRequest?.({ origin: target.origin, endpointRole, methods: rows.map((row) => row.method), batchSize: rows.length });
       telemetrySession?.recordPhysicalAttempt(endpointRole, rows.map((row) => row.method));
       response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");

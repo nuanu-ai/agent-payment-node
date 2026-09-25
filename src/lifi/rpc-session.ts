@@ -217,7 +217,7 @@ export class RpcReadSession {
   /** One raw send through the same persisted provider-family pacing and cooldown as reads. */
   async submit(origin: string, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown> {
     if (method !== "eth_sendRawTransaction") throw invalidRpcReadMethod();
-    return await this.schedule(origin, async () => await oneAttempt(method, params));
+    return await this.schedule(origin, method, async () => await oneAttempt(method, params));
   }
 
   async read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall,
@@ -417,7 +417,7 @@ export class RpcReadSession {
     methodsForAttempt: readonly string[] = [method], allowRetry = true): Promise<unknown> {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await this.schedule(origin, () => {
+        return await this.schedule(origin, method, () => {
           this.assertBeforeAttempt(method); this.httpAttempts += 1; this.recordAttemptShape(methodsForAttempt); return oneAttempt();
         });
       } catch (error) {
@@ -444,10 +444,12 @@ export class RpcReadSession {
       }
     }
   }
-  private schedule(originInput: string, task: () => Promise<unknown>): Promise<unknown> {
+  private schedule(originInput: string, method: string, task: () => Promise<unknown>): Promise<unknown> {
     this.assertBeforeQueue("rpc");
     return this.providerScheduler.schedule(originInput, this.now, this.wait, (delay) => this.assertBeforeWait("rpc", delay), async () => {
       this.assertDeadline("rpc"); return await task();
+    }, this.physicalBudget === undefined ? undefined : async () => {
+      this.assertDeadline(method); await this.physicalBudget!.beforePost(method);
     });
   }
   private recordAttemptShape(methods: readonly string[]): void {

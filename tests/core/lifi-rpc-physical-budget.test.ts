@@ -65,3 +65,33 @@ test("LI.FI raw send 429 persists provider cooldown before the next read", async
   await rpc.assertChain();
   assert.deepEqual(waits, [2_000]); assert.deepEqual(methods, ["eth_sendRawTransaction", "eth_chainId"]);
 });
+
+test("persisted family start follows physical admission delayed by another chain", async () => {
+  let now = 0;
+  const starts: Array<{ family: string; at: number }> = [];
+  const persisted = new Map<string, number>();
+  const coordinator = { coordinate: async <T>(family: string,
+    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
+      saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) =>
+    await work(persisted.get(family) ?? null, async (value) => { persisted.set(family, value); }, null, async () => {}) };
+  const factory = bridgeRpcFactory({ APN_ETHEREUM_RPC_URL: "https://ethereum-rpc.publicnode.com",
+    APN_BASE_RPC_URL: "https://base.drpc.org" }, { transport: { request: async (endpoint: string, _verb: string, body: string) => {
+    const family = new URL(endpoint).hostname.endsWith("drpc.org") ? "drpc.org" : "publicnode.com";
+    starts.push({ family, at: now });
+    const request = JSON.parse(body) as { id: string };
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id,
+      result: family === "drpc.org" ? "0x2105" : "0x1" }) };
+  } } });
+  const budget = new BridgeRpcPhysicalBudget(() => now, async (ms) => { now += ms; });
+  const first = new RpcReadSession({ now: () => now, wait: async (ms) => { now += ms; },
+    providerScheduler: new RpcProviderScheduler(coordinator, () => now), physicalBudget: budget });
+  await factory(1, first).assertChain();
+  await factory(8453, first).assertChain();
+  assert.equal(persisted.get("drpc.org"), 750);
+  const sibling = new RpcReadSession({ now: () => now, wait: async (ms) => { now += ms; },
+    providerScheduler: new RpcProviderScheduler(coordinator, () => now) });
+  await factory(8453, sibling).assertChain();
+  assert.deepEqual(starts, [
+    { family: "publicnode.com", at: 0 }, { family: "drpc.org", at: 750 }, { family: "drpc.org", at: 1_500 },
+  ]);
+});
