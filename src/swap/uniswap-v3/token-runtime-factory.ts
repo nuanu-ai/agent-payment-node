@@ -1,6 +1,8 @@
 import { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import { approvalCode } from "../../approval-code.js";
 import { ApnError } from "../../errors.js";
+import { assertExclusiveRelayExecutionOwner } from "../../evm-address-ownership.js";
+import { EncryptedSmartAccountPermissionStore } from "../../encrypted-smart-account-permission-store.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
 import type { ClockPort } from "../../ports.js";
@@ -25,7 +27,10 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
   readonly tty?: TtyTransferApprovalOptions; readonly verifyPins?: (call: EvmRpcCall, tag: import("viem").Hex) => Promise<void> }): UniswapTokenCommandRuntime {
   const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()),
     observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call, input.verifyPins), ledger = new AssetUsageLedger(state.root),
-    usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
+    usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins),
+    permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
+  const approveOwner = async (op: UniswapTokenOperation) =>
+    await assertExclusiveRelayExecutionOwner(state, permissions, op.account, state.profileHash(op.profile));
   const ports: UniswapTokenExecutionPorts & { confirm(material: import("./token-material.js").UniswapTokenMaterial): Promise<void> } = {
     now: () => clock.now(), withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
     allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
@@ -37,8 +42,9 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     probeSealed: async (op, kind, nonce) => await custody.probeSealed(op, kind, nonce),
     send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => {
       await custody.bindEffectProvider(op, kind); return await observer.observe(op, kind, hash); },
-    foregroundApprove: async (op) => await foreground(input.foreground === "approve", op, false, clock.now(), input.tty),
-    foregroundCleanup: async (op) => await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty), confirm: async (material) => await guard.confirm(material),
+    foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
+    foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },
+    confirm: async (material) => await guard.confirm(material),
   };
   const admit = async (request: Parameters<UniswapTokenQuoteBuilder["quote"]>[0], now: Date) => await usage.admitQuote(request, now);
   return new InstalledUniswapTokenRuntime(new UniswapTokenQuoteBuilder(call, materials, admit, () => clock.now(), input.verifyPins), materials,

@@ -50,17 +50,27 @@ export async function assertExclusiveRelayExecutionOwner(
   address: string,
   ownProfileHash: string,
 ): Promise<void> {
-  const target = address.toLowerCase();
   if (!ADDRESS.test(address) || !PROFILE_HASH.test(ownProfileHash)) {
     throw new ApnError("APN_INVALID_INPUT", "Relay execution ownership identity is invalid.");
   }
   await state.withLocks([evmAddressLock(address)], async () => {
-    await assertExclusiveEvmOwner(state, address, ownProfileHash);
-    for (const record of await permissions.listAll()) {
-      if (isGrantedPermissionRecord(record) && record.owner_address.toLowerCase() === target &&
-        record.profile_hash !== ownProfileHash) {
-        throw new ApnError("APN_OPERATION_BLOCKED", "EVM address has a Smart Account grant in another APN profile.");
-      }
-    }
+    await assertExclusiveEvmOwnerIncludingGrants(state, permissions, address, ownProfileHash);
   });
+}
+
+/** Caller holds evmAddressLock(address), including through the effect boundary. */
+export async function assertExclusiveEvmOwnerIncludingGrants(
+  state: StateStore,
+  permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">,
+  address: string,
+  ownProfileHash: string,
+): Promise<void> {
+  await assertExclusiveEvmOwner(state, address, ownProfileHash);
+  const target = address.toLowerCase();
+  for (const record of await permissions.listAll()) {
+    if (isGrantedPermissionRecord(record) && record.owner_address.toLowerCase() === target &&
+      record.profile_hash !== ownProfileHash) {
+      throw new ApnError("APN_OPERATION_BLOCKED", "EVM address has a Smart Account grant in another APN profile.");
+    }
+  }
 }
