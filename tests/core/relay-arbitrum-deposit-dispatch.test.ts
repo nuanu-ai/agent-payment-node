@@ -12,6 +12,7 @@ import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { bindArgv } from "../../src/command-binder.js";
+import { ApnError } from "../../src/errors.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { freezeRelayUnsignedOperation, type RelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
 import { RelayArbitrumDepositDispatchService } from "../../src/relay/arbitrum-deposit-dispatch.js";
@@ -20,6 +21,7 @@ import { advanceArbitrumSourceEffectJournal, createArbitrumSourceEffectJournal,
   type ArbitrumSourceEffectJournal, type ArbitrumSourceEffectJournalRepository } from "../../src/relay/arbitrum-source-effect-journal.js";
 import { RELAY_ARBITRUM_USDC } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
 import { RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } from "../../src/relay/arbitrum-usdc-source-draft.js";
+import { RelayArbitrumSourceObserveService } from "../../src/relay/arbitrum-source-observe.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
@@ -77,7 +79,7 @@ async function skippedJournal(op: RelayUnsignedOperation) {
     attempt: null, skipProof: proof }, initial.effects[1]] as const };
   return { ...body, integrityHash: hashObject(body) } as ArbitrumSourceEffectJournal;
 }
-async function confirmedJournal(op: RelayUnsignedOperation) {
+async function approvalJournal(op: RelayUnsignedOperation, observe: boolean) {
   let current = await createArbitrumSourceEffectJournal(op, now.toISOString());
   current = await advanceArbitrumSourceEffectJournal(current, op, { kind: "begin_signing", role: "approval",
     marker: randomBytes(32).toString("hex"), at: now.toISOString() });
@@ -89,9 +91,12 @@ async function confirmedJournal(op: RelayUnsignedOperation) {
     { kind: "seal_signed", role: "approval", rawTransaction: raw, nonce: "6" });
   current = await advanceArbitrumSourceEffectJournal(current, op,
     { kind: "mark_submitting", role: "approval", at: now.toISOString() });
-  return advanceArbitrumSourceEffectJournal(current, op,
-    { kind: "record_verified_observation", role: "approval", outcome: "confirmed", proofDigest: "1".repeat(64) });
+  current = await advanceArbitrumSourceEffectJournal(current, op,
+    { kind: "record_send", role: "approval", outcome: "uncertain" });
+  return observe ? advanceArbitrumSourceEffectJournal(current, op,
+    { kind: "record_verified_observation", role: "approval", outcome: "confirmed", proofDigest: "1".repeat(64) }) : current;
 }
+const confirmedJournal = (op: RelayUnsignedOperation) => approvalJournal(op, true);
 function harness(state: StateStore, op: RelayUnsignedOperation, initial: ArbitrumSourceEffectJournal,
   options: { failReadAt?: number; revokeAtPolicyRead?: number; send?: (raw: Hex) => Promise<Hex>;
     confirm?: boolean } = {}) {
@@ -173,6 +178,30 @@ test("confirmed approval admits deposit but ambiguous send cannot replay", async
   assert.equal((await lease(state, op))?.state, "unknown_finality");
   await h.service.execute("default", op.operationId);
   assert.equal(h.counts().sends, 1);
+  let depositJournal = h.journal();
+  const blockHash = `0x${"3".repeat(64)}` as Hex;
+  const source = new RelayArbitrumSourceObserveService(state, { observe: async (deposit, approval) => ({
+    sourceChainId: 42161 as const, rpcOrigin: "https://arb-rpc.example",
+    deposit: { transactionHash: deposit.transactionHash, blockNumber: "120", blockHash },
+    approval: approval === undefined ? null : { transactionHash: approval.transactionHash,
+      blockNumber: "100", blockHash },
+    safeHead: { number: "130", hash: `0x${"4".repeat(64)}` as Hex },
+    proofClass: "canonical_safe_source_receipts" as const,
+    destinationDeliveryProven: false as const, causalLinkCryptographicallyProven: false as const,
+    paidAcceptance: false as const,
+  }) }, { operation: async () => op, journal: async () => depositJournal,
+    transition: async (_profileHash, _id, expectedHash, role, digest, verify) => {
+      assert.equal(expectedHash, depositJournal.integrityHash);
+      assert.equal(await verify({ operation: op, journal: depositJournal, role,
+        outcome: "confirmed", proofDigest: digest }), true);
+      depositJournal = await advanceArbitrumSourceEffectJournal(depositJournal, op,
+        { kind: "record_verified_observation", role, outcome: "confirmed", proofDigest: digest });
+      return depositJournal;
+    } });
+  assert.equal((await source.observe(op.operationId)).state, "deposit_source_confirmed");
+  assert.equal((await lease(state, op))?.state, "finalized");
+  assert.equal((await lease(state, op))?.outcomeDigest, depositJournal.effects[1].attempt?.observationDigest);
+  assert.equal((await source.observe(op.operationId)).state, "deposit_source_confirmed");
 });
 
 test("approval gate, owner decline, policy race and canonical reorg prevent send", async t => {
@@ -190,4 +219,72 @@ test("approval gate, owner decline, policy race and canonical reorg prevent send
   const reorg = harness(state, op, await skippedJournal(op), { failReadAt: 2 });
   assert.equal((await reorg.service.execute("default", op.operationId)).state, "observation_only");
   assert.equal(reorg.counts().sends, 0);
+});
+
+test("uncertain approval lease remains counted after safe approval proof and permits one deposit", async t => {
+  const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
+  const policy = { ...active(fixtureOwner), accounts: { evm: account.address.toLowerCase() } };
+  const identity = { account: account.address, chain: "eip155:42161",
+    asset: { kind: "token" as const, identifier: RELAY_ARBITRUM_USDC } };
+  const usage = new AssetUsageLedger(state.root);
+  const reserved = await usage.reserve({ ...identity, registry: policy.registry, rail: "bridge",
+    mechanism: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE },
+    amountAtomic: op.amountAtomic, idempotencyKey: `relay-arbitrum-approval:${op.operationId}`, now });
+  await usage.transition({ ...identity, reservationId: reserved.reservationId,
+    policyDigest: op.policyDigest!, state: "unknown_finality", expectedCurrentStates: ["reserved"], now });
+  let journal = await approvalJournal(op, false);
+  const unconfirmed = harness(state, op, journal);
+  await assert.rejects(() => unconfirmed.service.execute("default", op.operationId));
+  assert.equal(unconfirmed.counts().sends, 0);
+  const observe = new RelayArbitrumSourceObserveService(state, { observe: async expected => ({
+    sourceChainId: 42161 as const, rpcOrigin: "https://arb-rpc.example",
+    deposit: { transactionHash: expected.transactionHash, blockNumber: "100",
+      blockHash: `0x${"1".repeat(64)}` as Hex }, approval: null,
+    safeHead: { number: "110", hash: `0x${"2".repeat(64)}` as Hex },
+    proofClass: "canonical_safe_source_receipts" as const,
+    destinationDeliveryProven: false as const, causalLinkCryptographicallyProven: false as const,
+    paidAcceptance: false as const,
+  }) }, { operation: async () => op, journal: async () => journal,
+    transition: async (_profileHash, _id, expectedHash, role, digest, verify) => {
+      assert.equal(expectedHash, journal.integrityHash);
+      assert.equal(await verify({ operation: op, journal, role, outcome: "confirmed", proofDigest: digest }), true);
+      journal = await advanceArbitrumSourceEffectJournal(journal, op,
+        { kind: "record_verified_observation", role, outcome: "confirmed", proofDigest: digest });
+      return journal;
+    } });
+  assert.equal((await observe.observe(op.operationId)).state, "approval_source_confirmed");
+  assert.equal(journal.effects[0].phase, "confirmed");
+  const h = harness(state, op, journal);
+  assert.equal((await h.service.execute("default", op.operationId)).state, "deposit_submitted");
+  assert.equal((await lease(state, op))?.state, "unknown_finality");
+  await h.service.execute("default", op.operationId);
+  assert.equal(h.counts().sends, 1);
+});
+
+test("submitting marker before any POST and 429 before start never claim dispatch or replay", async t => {
+  const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
+  let journal = await skippedJournal(op);
+  journal = await advanceArbitrumSourceEffectJournal(journal, op, { kind: "begin_signing",
+    role: "deposit", marker: randomBytes(32).toString("hex"), at: now.toISOString() });
+  const envelope = (op.arbitrumDraft!.rawQuote as any).steps[1].items[0].data;
+  const raw = await account.signTransaction({ type: "eip1559", chainId: 42161, nonce: 7,
+    to: envelope.to as Hex, data: envelope.data as Hex, value: 0n, gas: BigInt(envelope.gas),
+    maxFeePerGas: BigInt(envelope.maxFeePerGas), maxPriorityFeePerGas: BigInt(envelope.maxPriorityFeePerGas) });
+  journal = await advanceArbitrumSourceEffectJournal(journal, op,
+    { kind: "seal_signed", role: "deposit", rawTransaction: raw, nonce: "7" });
+  journal = await advanceArbitrumSourceEffectJournal(journal, op,
+    { kind: "mark_submitting", role: "deposit", at: now.toISOString() });
+  const crashed = harness(state, op, journal);
+  const replay = await crashed.service.execute("default", op.operationId);
+  assert.equal(replay.state, "observation_only");
+  assert.equal(replay.depositDispatched, false);
+  assert.equal(crashed.counts().sends, 0);
+  const limited = harness(state, op, await skippedJournal(op), {
+    send: async () => { throw new ApnError("APN_RPC_RATE_LIMITED", "before POST", { httpStatus: 429 }); },
+  });
+  const first = await limited.service.execute("default", op.operationId);
+  assert.equal(first.depositPhase, "unknown_finality");
+  assert.equal(first.depositDispatched, false);
+  await limited.service.execute("default", op.operationId);
+  assert.equal(limited.counts().sends, 1);
 });

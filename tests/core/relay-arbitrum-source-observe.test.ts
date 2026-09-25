@@ -86,6 +86,7 @@ test("saved hash-bound uncertain send observes approval then joint deposit, with
     return proof(deposit, approval);
   } };
   const ports = { operation: async () => op, journal: async () => journal,
+    finalizeUsage: async () => {},
     transition: async (_profileHash: string, _operationId: string, expectedHash: string,
       role: "approval" | "deposit", digest: string, verify: (input: any) => Promise<boolean>) => {
       assert.equal(expectedHash, journal.integrityHash);
@@ -181,6 +182,7 @@ test("verified approval skip observes a dispatched deposit without invented appr
   const service = new RelayArbitrumSourceObserveService(new StateStore(temp.root), {
     observe: async (deposit, approval) => { readApproval = approval !== undefined; return proof(deposit, approval); },
   }, { operation: async () => op, journal: async () => journal,
+    finalizeUsage: async () => {},
     transition: async (_profileHash, _operationId, expectedHash, role, digest, verify) => {
       assert.equal(expectedHash, journal.integrityHash);
       assert.equal(await verify({ operation: op, journal, role, outcome: "confirmed", proofDigest: digest }), true);

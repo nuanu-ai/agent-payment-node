@@ -121,21 +121,31 @@ export class RelayArbitrumDepositDispatchService {
       blocked("usage_reservation_changed");
     return (BigInt(snapshot.amountAtomic) - own).toString();
   }
-  private async reserve(op: RelayUnsignedOperation, active: ActiveAssetPolicy): Promise<void> {
+  private async reserve(op: RelayUnsignedOperation, active: ActiveAssetPolicy,
+    journal: ArbitrumSourceEffectJournal): Promise<"reserved" | "submitted" | "unknown_finality"> {
     const at = this.now();
     if (active.digest !== op.policyDigest || active.revision !== op.policyRevision ||
       !same(active.accounts.evm ?? "", op.sourceAccount)) blocked("active_policy_changed_before_lease");
     const reservation = await this.usage.reserve({ ...this.usageIdentity(op), registry: active.registry,
       rail: "bridge", mechanism: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE },
       amountAtomic: op.amountAtomic, idempotencyKey: `relay-arbitrum-approval:${op.operationId}`, now: at });
-    if (!["reserved", "submitted"].includes(reservation.state) || reservation.policyDigest !== op.policyDigest) blocked("usage_lease_unavailable");
+    if (reservation.policyDigest !== op.policyDigest) blocked("usage_lease_unavailable");
+    if (reservation.state === "unknown_finality") {
+      if (journal.operationIntegrityHash !== op.integrityHash || journal.effects[0].phase !== "confirmed" ||
+        journal.effects[0].attempt?.observationDigest === null ||
+        journal.effects[0].attempt?.observationDigest === undefined)
+        blocked("uncertain_approval_lease_requires_confirmed_source_proof");
+      return "unknown_finality";
+    }
+    if (reservation.state !== "reserved" && reservation.state !== "submitted") blocked("usage_lease_unavailable");
+    return reservation.state;
   }
   private result(op: RelayUnsignedOperation, journal: ArbitrumSourceEffectJournal | null, state: string, reason: string) {
     return { operationId: op.operationId, state, reason, approvalPhase: journal?.effects[0].phase ?? null,
       depositPhase: journal?.effects[1].phase ?? null,
       transactionHash: journal?.effects[1].attempt?.transactionHash ?? null,
       journalIntegrityHash: journal?.integrityHash ?? null,
-      depositDispatched: ["submitting", "submitted", "unknown_finality", "confirmed"].includes(journal?.effects[1].phase ?? ""),
+      depositDispatched: ["submitted", "confirmed"].includes(journal?.effects[1].phase ?? ""),
       destinationDeliveryProven: false as const, paidAcceptance: false as const };
   }
   private async lockedPolicy(): Promise<ActiveAssetPolicy | null> {
@@ -186,7 +196,7 @@ export class RelayArbitrumDepositDispatchService {
       if (!fresh.readOnlyConditionsSatisfied ||
         fresh.confirmedNonce !== fresh.pendingNonce) blocked("deposit_preflight_changed");
 
-      await this.reserve(op, freshPolicy);
+      const leaseState = await this.reserve(op, freshPolicy, journal);
       journal = await this.journals.beginSigningUnderLocks(profileHash, operationId, journal.integrityHash, "deposit", this.now().toISOString());
       let raw: Hex;
       try { raw = await this.ports.signer.sign(op, fresh.confirmedNonce, journal); }
@@ -213,8 +223,11 @@ export class RelayArbitrumDepositDispatchService {
       catch { /* A transport error, including HTTP 429, leaves one ambiguous send. */ }
       journal = await this.journals.transitionUnderLocks(profileHash, operationId, journal.integrityHash,
         { kind: "record_send", role: "deposit", outcome });
-      await this.usage.transition({ ...this.usageIdentity(op), reservationId: this.reservationId(op),
-        policyDigest: op.policyDigest!, state: outcome === "accepted" ? "submitted" : "unknown_finality",
+      // A confirmed approval may still carry an unknown_finality lease from an earlier
+      // ambiguous approval send. Keep that reservation counted and conservative.
+      if (leaseState !== "unknown_finality") await this.usage.transition({ ...this.usageIdentity(op),
+        reservationId: this.reservationId(op), policyDigest: op.policyDigest!,
+        state: outcome === "accepted" ? "submitted" : "unknown_finality",
         expectedCurrentStates: ["reserved", "submitted"], now: this.now() });
       return this.result(op, journal, outcome === "accepted" ? "deposit_submitted" : "observation_only",
         outcome === "accepted" ? "single_send_accepted" : "single_send_uncertain");

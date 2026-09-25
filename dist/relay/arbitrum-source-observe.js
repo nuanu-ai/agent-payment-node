@@ -1,8 +1,12 @@
+/** Saved-operation Arbitrum source observation. No wallet, signer, send, or destination assertion. */
+import { getAddress } from "viem";
 import { hashObject } from "../canonical.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { ArbitrumSourceEffectJournalRepository } from "./arbitrum-source-effect-journal.js";
 import { RelayArbitrumSourceFinalityObserver } from "./arbitrum-source-finality.js";
+import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 const HASH = /^[a-f0-9]{64}$/u;
 const observable = new Set(["submitting", "submitted", "unknown_finality"]);
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
@@ -41,6 +45,20 @@ export class RelayArbitrumSourceObserveService {
         this.observer = observer;
         this.ports = ports;
     }
+    async finalizeUsage(op, journal) {
+        const proofDigest = journal.effects[1].attempt?.observationDigest;
+        if (journal.effects[1].phase !== "confirmed" || !proofDigest || !HASH.test(proofDigest) ||
+            journal.operationIntegrityHash !== op.integrityHash)
+            corrupt("deposit_source_proof_required_for_usage");
+        if (this.ports.finalizeUsage !== undefined)
+            return this.ports.finalizeUsage(op, proofDigest);
+        const identity = { account: getAddress(op.sourceAccount), chain: "eip155:42161",
+            asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC } };
+        await new AssetUsageLedger(this.state.root).transition({ ...identity,
+            reservationId: assetUsageReservationId(identity, `relay-arbitrum-approval:${op.operationId}`),
+            policyDigest: op.policyDigest, state: "finalized", outcomeDigest: proofDigest,
+            expectedCurrentStates: ["reserved", "submitted", "unknown_finality", "finalized"], now: new Date() });
+    }
     async observe(operationId) {
         if (!HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum observe requires an operation ID.");
@@ -69,8 +87,10 @@ export class RelayArbitrumSourceObserveService {
             journal.orderId !== op.arbitrumDraft.orderId)
             corrupt("journal_operation_binding");
         const [approvalEffect, depositEffect] = journal.effects;
-        if (depositEffect.phase === "confirmed")
+        if (depositEffect.phase === "confirmed") {
+            await this.finalizeUsage(op, journal);
             return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
+        }
         if (approvalEffect.phase === "approval_skipped" && depositEffect.phase === "pending")
             return output("approval_skipped", "canonical_allowance_observed_deposit_recheck_required");
         const role = ["confirmed", "approval_skipped"].includes(approvalEffect.phase) ? "deposit" : "approval";
@@ -93,6 +113,8 @@ export class RelayArbitrumSourceObserveService {
         if (next.effects[role === "approval" ? 0 : 1].phase !== "confirmed" ||
             next.effects[role === "approval" ? 0 : 1].attempt?.observationDigest !== proofDigest)
             corrupt("transition_result");
+        if (role === "deposit")
+            await this.finalizeUsage(op, next);
         return { ...output(role === "approval" ? "approval_source_confirmed" : "deposit_source_confirmed", "canonical_safe_source_receipt", proof), approvalPhase: next.effects[0].phase, depositPhase: next.effects[1].phase };
     }
 }
