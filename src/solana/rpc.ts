@@ -6,6 +6,7 @@ import { atomic, SOLANA_GENESIS } from "../chain-policy.js";
 import { ApnError } from "../errors.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { solanaHttpsFetch } from "./https.js";
+import type { SolanaRpcPacer } from "./pacing.js";
 
 export type SolanaMethod = "getGenesisHash" | "getMultipleAccounts" | "getAccountInfo" | "getLatestBlockhash" | "getBlockHeight" | "getFeeForMessage" | "getMinimumBalanceForRentExemption" | "simulateTransaction" | "sendTransaction" | "getSignatureStatuses" | "getTransaction" | "getBlock";
 export type SolanaReadMethod = Exclude<SolanaMethod, "simulateTransaction" | "sendTransaction">;
@@ -40,7 +41,7 @@ export class SolanaRpcBudget {
   get physicalRequests(): number { return this.physical; }
   get remainingPhysicalRequests(): number { return this.maxPhysicalRequests - this.physical; }
   /** Reserve and pace before transport. The queue owns no operation or storage lock. */
-  async acquire(logicalCalls: number): Promise<void> {
+  async acquire(logicalCalls: number): Promise<() => void> {
     this.logical += logicalCalls;
     const previous = this.turn;
     let release!: () => void;
@@ -61,6 +62,8 @@ export class SolanaRpcBudget {
       this.physical += 1;
       this.nextStart = this.now() + this.minimumIntervalMs;
     } finally { release(); }
+    let cancelled = false;
+    return () => { if (!cancelled) { cancelled = true; this.physical -= 1; } };
   }
 }
 const READ_METHODS: ReadonlySet<string> = new Set<SolanaReadMethod>([
@@ -87,7 +90,7 @@ export class SolanaRpc implements SolanaRpcPort {
   readonly originHash: string;
   readonly budget: SolanaRpcBudget | undefined;
   constructor(private readonly endpoint?: string, private readonly fetcher: typeof fetch = solanaHttpsFetch,
-    budget?: SolanaRpcBudget) {
+    budget?: SolanaRpcBudget, private readonly pacer?: Pick<SolanaRpcPacer, "schedule">) {
     this.originHash = endpoint === undefined ? sha256("solana_rpc_unconfigured") : sha256(endpoint);
     // Stage integration passes one bounded budget through an operation, outside state locks.
     this.budget = budget;
@@ -125,7 +128,17 @@ export class SolanaRpc implements SolanaRpcPort {
     if (url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.hash !== "" || url.search !== "" || url.port !== "" && url.port !== "443") configFailure();
     let payload: string;
     try { payload = JSON.stringify(body); } catch { return protocolFailure(); }
-    await this.budget?.acquire(logicalCalls);
+    const cancelUnstarted = await this.budget?.acquire(logicalCalls);
+    let started = false;
+    try {
+      if (this.pacer === undefined) { started = true; return await this.post(url, payload, effect); }
+      return await this.pacer.schedule(url.toString(), () => { started = true; return this.post(url, payload, effect); });
+    } catch (error) {
+      if (!started) cancelUnstarted?.();
+      throw error;
+    }
+  }
+  private async post(url: URL, payload: string, effect: boolean): Promise<unknown> {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 10_000); deadline.unref();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
