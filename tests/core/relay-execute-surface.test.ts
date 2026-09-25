@@ -3,6 +3,7 @@ import test from "node:test";
 import { bindArgv } from "../../src/command-binder.js";
 import { approvalCode } from "../../src/approval-code.js";
 import { runCli } from "../../src/cli.js";
+import { createApnCore } from "../../src/runtime-factory.js";
 import { TtyRelayExecuteConfirmation } from "../../src/tty-approval.js";
 import { ApnCore } from "../../src/core.js";
 import { StateStore } from "../../src/state.js";
@@ -51,13 +52,43 @@ test("Relay execute dispatch fails closed without both source handler and foregr
   assert.equal((result.data as RelayEffectJournal).operationId, operationId);
 });
 
-test("Relay execute CLI has no implicit signing or sending runtime", async t => {
+test("Relay execute CLI refuses an operation that was not prepared", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const result = await runCli(argv, {}, { stateRoot: temporary.root });
   assert.equal(result.ok, false);
-  assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
   assert.equal(result.operation, null);
   assert.equal(result.receipt, null);
+});
+
+test("Relay execute CLI rejects credential-bearing RPC before source execution", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  let starts = 0;
+  const transport = { batchCall: async () => { starts++; return []; },
+    submitRawTransaction: async () => { starts++; return `0x${"a".repeat(64)}` as const; } };
+  for (const rpcUrl of ["https://rpc.example/private", "https://rpc.example/?key=secret",
+    "https://user:pass@rpc.example", "https://rpc.example/#fragment"]) {
+    const result = await runCli(["relay", "execute", "--operation", operationId, "--rpc-url", rpcUrl], {},
+      { stateRoot: temporary.root, relayExecuteTransport: transport });
+    assert.equal(result.ok, false);
+    assert.ok(["APN_INVALID_INPUT", "APN_RPC_CONFIG"].includes(result.error?.code ?? ""));
+  }
+  assert.equal(starts, 0);
+});
+
+test("Relay status and preflight do not install the source execution runtime", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  let starts = 0;
+  const transport = { batchCall: async () => { starts++; return []; },
+    submitRawTransaction: async () => { starts++; return `0x${"a".repeat(64)}` as const; } };
+  for (const args of [["relay", "status", "--operation", operationId],
+    ["relay", "preflight", "--profile", "default", "--operation", operationId,
+      "--rpc-url", "https://rpc.example"]]) {
+    const core = createApnCore(bindArgv(args), { stateRoot: temporary.root, relayExecuteTransport: transport });
+    assert.equal(core.context.relayExecute, undefined);
+    assert.equal(core.context.relayExecuteConfirmation, undefined);
+  }
+  assert.equal(starts, 0);
 });
 
 test("Relay foreground prompt shows payment terms, hides request ID, and fails closed", async () => {
