@@ -18,7 +18,7 @@ import { isLegacyBridgeOperation, type StoredBridgeOperationRecord } from "./leg
 import { LINEA_DEPLOYMENT_MIGRATION_CANDIDATE, assertLineaDeploymentMigrationProof, migrateLineaDeploymentOperation } from "./deployment-migration.js";
 import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
 import { bridgeProtocolEmitter } from "./deployments.js";
-import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation,
+import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation,
   type BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { sha256 } from "../canonical.js";
@@ -36,6 +36,12 @@ export interface BridgeDeploymentMigrationResult {
   readonly proof_class: "local_journal_migration";
   readonly operation: PublicBridgeOperation;
   readonly audit: BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit;
+  readonly next_actions: readonly string[];
+}
+export interface BridgeDeploymentMigrationPending {
+  readonly status: "pending";
+  readonly proof_class: "local_journal_migration";
+  readonly operation_id: string;
   readonly next_actions: readonly string[];
 }
 export class BridgeService {
@@ -94,18 +100,18 @@ export class BridgeService {
   async repairDeployment(operationId: string) {
     return await this.deploymentMigrationLocked(operationId, async (op) => {
       const raw = isLegacyBridgeOperation(op) ? op.raw : op;
-      // The recognized Base migration needs 29 clean HTTP requests: two seven-request observations,
-      // five Ethereum and eight Base deployment chunks, and two finality reads. Keep two request
-      // retries plus two additional attempt-only retries bounded inside the one repair command.
+      // The recognized Base migration needs 29 clean POSTs: 12 source reads, then 17 destination
+      // and finality reads after a durable source checkpoint. Each command gets a fresh physical cap.
       const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 31, maxHttpAttempts: 33,
         archiveDeploymentBatchMaxItems: 3,
-        physicalBudget: new BridgeRpcPhysicalBudget() });
+        providerScheduler: this.providerScheduler, physicalBudget: new BridgeRpcPhysicalBudget() });
       if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
         if (!isLegacyBridgeOperation(op)) {
           const eligible = migrateBaseDeploymentOperation(raw);
           await this.records.repairMigratedLegacyDeployment(eligible.previousOperation, eligible.operation, eligible.audit);
           return migrationProjection(eligible.operation, eligible.audit, true);
         }
+        assertBaseDeploymentMigrationCandidate(raw);
         const d = this.context.bridge;
         if (d === undefined) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bridge_runtime_unavailable");
         const request = raw.intent.materialization.request, source = d.rpcFor(request.fromChainId, session), destination = d.rpcFor(request.toChainId, session);
@@ -115,18 +121,23 @@ export class BridgeService {
         }
         const effect = raw.effects.find((entry) => entry.role === "bridge");
         if (effect?.transactionHash !== BASE_DEPLOYMENT_MIGRATION_CANDIDATE.sourceTransactionHash) bridgeFailure("APN_OPERATION_BLOCKED", "migration_source_transaction_missing");
-        const [sourceObserved, destinationObserved] = await Promise.all([
-          source.observe(effect.transactionHash, effect.envelope),
-          destination.observe(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationTransactionHash),
-        ]);
-        if (sourceObserved === null || destinationObserved === null) bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
-        const [sourceDeployment, destinationDeployment, sourceFinalityBlock, destinationFinalityBlock] = await Promise.all([
-          source.deployment("across", request.toChainId, request.fromToken, sourceObserved.transaction.block),
-          destination.deployment("across", request.fromChainId, request.toToken, destinationObserved.transaction.block),
+        const checkpoint = await this.records.baseMigrationSourceCheckpoint(raw);
+        if (checkpoint === null) {
+          const sourceObserved = await source.observe(effect.transactionHash, effect.envelope);
+          if (sourceObserved === null) bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
+          const sourceDeployment = await source.deployment("across", request.toChainId, request.fromToken, sourceObserved.transaction.block);
+          await this.records.saveBaseMigrationSourceCheckpoint(raw, sourceObserved, sourceDeployment);
+          return { status: "pending", proof_class: "local_journal_migration", operation_id: raw.operationId,
+            next_actions: [`apn operation repair-deployment --operation ${raw.operationId}`] } satisfies BridgeDeploymentMigrationPending;
+        }
+        const destinationObserved = await destination.observe(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationTransactionHash);
+        if (destinationObserved === null) bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
+        const destinationDeployment = await destination.deployment("across", request.fromChainId, request.toToken, destinationObserved.transaction.block);
+        const [sourceFinalityBlock, destinationFinalityBlock] = await Promise.all([
           source.block(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.sourceSafeBlock.numberAtomic),
           destination.block(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationSafeBlock.numberAtomic),
         ]);
-        const destinationProof = assertBaseDeploymentMigrationProof(raw, sourceObserved, sourceDeployment, destinationObserved, destinationDeployment,
+        const destinationProof = assertBaseDeploymentMigrationProof(raw, checkpoint.observation, checkpoint.deployment, destinationObserved, destinationDeployment,
           sourceFinalityBlock, destinationFinalityBlock);
         const migration = migrateBaseDeploymentOperation(raw, destinationProof);
         await this.records.migrateLegacyDeployment(raw, migration.operation, migration.audit);
