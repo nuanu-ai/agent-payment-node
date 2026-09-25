@@ -106,3 +106,21 @@ test("HTTP 429 preserves retry-after and simulation does not recast it as transi
     "details" in error && (error.details as { retryAfterMs?: number })?.retryAfterMs === 3000);
   assert.equal(posts, 1); assert.equal(budget.logicalCalls, 1); assert.equal(budget.physicalRequests, 1);
 });
+
+test("a batched read returns HTTP 429 after one POST without retrying", async () => {
+  let posts = 0;
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 8 });
+  const rpc = new SolanaRpc("https://rpc.example", (async () => {
+    posts++;
+    return json({ error: "rate limited" }, 429, { "retry-after": "4" });
+  }) as typeof fetch, budget);
+  await assert.rejects(rpc.batch([
+    { method: "getGenesisHash", params: [] },
+    { method: "getMultipleAccounts", params: [["synthetic"], { encoding: "base64" }] },
+  ]), (error: unknown) => typeof error === "object" && error !== null && "code" in error &&
+    error.code === "APN_RPC_RATE_LIMITED" && "details" in error &&
+    (error.details as { retryAfterMs?: number })?.retryAfterMs === 4000);
+  assert.equal(posts, 1);
+  assert.equal(budget.logicalCalls, 2);
+  assert.equal(budget.physicalRequests, 1);
+});

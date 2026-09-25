@@ -14,6 +14,10 @@ export async function readAccounts(rpc, addresses) {
     addresses.forEach(solanaAddress);
     return multipleAccounts(await rpc.call("getMultipleAccounts", [addresses, { encoding: "base64", commitment: "confirmed" }]), addresses.length);
 }
+export function accountRead(addresses) {
+    addresses.forEach(solanaAddress);
+    return { method: "getMultipleAccounts", params: [addresses, { encoding: "base64", commitment: "confirmed" }] };
+}
 /** Decodes one base64 `getMultipleAccounts` result that must carry exactly `count` entries. */
 export function multipleAccounts(value, count) {
     const response = rpcRecord(value);

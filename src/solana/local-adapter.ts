@@ -6,11 +6,11 @@ import type { ChainAccount, ChainAsset, ChainAssetAlias, ChainBalance, ChainWall
 import { ApnError } from "../errors.js";
 import { validateRailPrepared } from "../rail-operation-model.js";
 import { railSendLifetime, SOLANA_APPROVAL_WINDOW_MS, validateRailSendBinding } from "../rail-send-binding.js";
-import { associatedToken, readAccounts, requireNativeAccount, requireSolanaFunds, requireTokenMint, tokenAccountAmount } from "./accounts.js";
+import { accountRead, associatedToken, multipleAccounts, readAccounts, requireNativeAccount, requireSolanaFunds, requireTokenMint, tokenAccountAmount } from "./accounts.js";
 import { inspectSolana } from "./evidence.js";
 import { solanaMessage, validateSolanaEffect, validateSolanaMessage } from "./message.js";
 import { simulateSolanaSend } from "./simulation.js";
-import { assertSolanaNetwork, protocolFailure, rpcAtomic, rpcRecord, solanaAddress, solanaSignature, type SolanaRpcPort } from "./rpc.js";
+import { assertSolanaNetwork, assertSolanaNetworkValue, protocolFailure, rpcAtomic, rpcRecord, solanaAddress, solanaReadBatch, solanaSignature, type SolanaRpcPort } from "./rpc.js";
 
 export class SolanaLocalAdapter implements DirectRailPort {
   readonly rail = "solana" as const;
@@ -42,11 +42,13 @@ export class SolanaLocalAdapter implements DirectRailPort {
     await this.currentAccount(account); await this.assertNetwork();
     if (canonicalJson(this.asset(asset.alias)) !== canonicalJson(asset)) mismatch();
     solanaAddress(input.recipient); atomic(input.amountAtomic, true); atomic(input.maximumFeeAtomic, true);
-    const snapshot = await transferSnapshot(this.rpc, account, asset, input.recipient);
-    const block = rpcRecord(rpcRecord(await this.rpc.call("getLatestBlockhash", [{ commitment: "confirmed" }])).value);
+    const addresses = await transferAddresses(account, asset, input.recipient);
+    const [accountsValue, blockValue] = await solanaReadBatch(this.rpc, [accountRead(addresses),
+      { method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] }]);
+    const snapshot = transferSnapshotValue(accountsValue, addresses, account, asset, input.recipient);
+    const block = rpcRecord(rpcRecord(blockValue).value);
     if (typeof block.blockhash !== "string") protocolFailure(); solanaAddress(block.blockhash);
     const lastValidBlockHeight = rpcAtomic(block.lastValidBlockHeight).toString();
-    const rent = snapshot.createsRecipientAccount ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
     const skeleton = {
       rail: "solana" as const, networkIdentity: SOLANA_GENESIS, asset, sender: account.address, recipient: input.recipient,
       amountAtomic: input.amountAtomic, maximumFeeAtomic: input.maximumFeeAtomic,
@@ -56,7 +58,7 @@ export class SolanaLocalAdapter implements DirectRailPort {
       createsRecipientAccount: snapshot.createsRecipientAccount,
     };
     const message = await solanaMessage(skeleton);
-    const fee = await messageFee(this.rpc, message.messageBase64);
+    const { fee, rent } = await messageFeeAndRent(this.rpc, message.messageBase64, snapshot.createsRecipientAccount);
     if (fee + rent > atomic(input.maximumFeeAtomic)) throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "The Solana network fee and recipient rent exceed the selected cap.");
     requireSolanaFunds(snapshot.native, snapshot.token, atomic(input.amountAtomic), fee + rent, asset.kind === "native");
     return validateRailPrepared({ ...skeleton, unsignedPayload: message.unsignedPayload,
@@ -65,22 +67,30 @@ export class SolanaLocalAdapter implements DirectRailPort {
     }, account);
   }
   async revalidate(account: ChainAccount, prepared: RailPreparedTransfer, send: RailSendBinding | null = null): Promise<void> {
-    await this.currentAccount(account); validateRailPrepared(prepared, account); await this.assertNetwork();
+    await this.currentAccount(account); validateRailPrepared(prepared, account);
     if (send !== null) validateRailSendBinding(send, prepared);
     const message = await validateSolanaMessage(prepared, send);
     // The bytes proven by the pre-send simulation are the only bytes this operation may ever seal.
     if (send !== null && sha256(message.unsignedPayload) !== send.simulation.payloadHash) mismatch();
     if (this.now().getTime() >= Date.parse(prepared.expiresAt)) expired();
-    await this.validBlock(prepared, send);
-    const snapshot = await transferSnapshot(this.rpc, account, prepared.asset, prepared.recipient);
+    const addresses = await transferAddresses(account, prepared.asset, prepared.recipient);
+    const reads = [{ method: "getGenesisHash" as const, params: [] },
+      ...(send === null ? [] : [{ method: "getBlockHeight" as const, params: [{ commitment: "confirmed" }] }]),
+      accountRead(addresses)];
+    const values = await solanaReadBatch(this.rpc, reads);
+    assertSolanaNetworkValue(values[0]);
+    if (send !== null) this.validBlockValue(prepared, send, values[1]);
+    const snapshot = transferSnapshotValue(values[values.length - 1], addresses, account, prepared.asset, prepared.recipient);
     if (snapshot.createsRecipientAccount && !prepared.createsRecipientAccount) expired();
-    const rent = snapshot.createsRecipientAccount ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
+    const rent = snapshot.createsRecipientAccount && send === null
+      ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
     // A reference the network has already forgotten cannot be priced at all: getFeeForMessage answers null for it.
     // Before the send guard runs, that says nothing about this transfer, because the guard prices the reference it
     // acquires and nothing can be sealed without its binding. Pricing the frozen message here would put the owner's
     // reading time back inside the sending window.
-    if (send !== null && await messageFee(this.rpc, message.messageBase64) > atomic(prepared.economics.networkFeeMaximumAtomic)) expired();
-    if (rent > atomic(prepared.economics.recipientRentAtomic)) expired();
+    const priced = send === null ? null : await messageFeeAndRent(this.rpc, message.messageBase64, snapshot.createsRecipientAccount);
+    if (priced !== null && priced.fee > atomic(prepared.economics.networkFeeMaximumAtomic)) expired();
+    if ((priced?.rent ?? rent) > atomic(prepared.economics.recipientRentAtomic)) expired();
     requireSolanaFunds(snapshot.native, snapshot.token, atomic(prepared.amountAtomic), atomic(prepared.economics.maximumNativeDebitAtomic), prepared.asset.kind === "native");
   }
   /**
@@ -89,26 +99,26 @@ export class SolanaLocalAdapter implements DirectRailPort {
    * frozen fee, rent and funding bounds, and simulates the exact bytes with `sigVerify: false`.
    */
   async bindSend(account: ChainAccount, prepared: RailPreparedTransfer): Promise<RailSendBinding> {
-    await this.currentAccount(account); validateRailPrepared(prepared, account); await this.assertNetwork();
+    await this.currentAccount(account); validateRailPrepared(prepared, account);
     await validateSolanaMessage(prepared);
     if (this.now().getTime() >= Date.parse(prepared.expiresAt)) expired();
-    const [latestBlock, height] = this.rpc.batch === undefined
-      ? [await this.rpc.call("getLatestBlockhash", [{ commitment: "confirmed" }]),
-        await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }])]
-      : await this.rpc.batch([
+    const addresses = await transferAddresses(account, prepared.asset, prepared.recipient);
+    const [genesis, latestBlock, height, accountsValue] = await solanaReadBatch(this.rpc, [
+        { method: "getGenesisHash", params: [] },
         { method: "getLatestBlockhash", params: [{ commitment: "confirmed" }] },
         { method: "getBlockHeight", params: [{ commitment: "confirmed" }] },
+        accountRead(addresses),
       ]);
+    assertSolanaNetworkValue(genesis);
     const block = rpcRecord(rpcRecord(latestBlock).value);
     if (typeof block.blockhash !== "string") protocolFailure(); solanaAddress(block.blockhash);
     const observedBlockHeight = rpcAtomic(height);
     const candidate = { blockReference: block.blockhash, lastValidBlockHeight: rpcAtomic(block.lastValidBlockHeight).toString(),
       observedBlockHeight: observedBlockHeight.toString(), acquiredAt: this.now().toISOString() };
     const message = await solanaMessage(prepared, candidate);
-    const snapshot = await transferSnapshot(this.rpc, account, prepared.asset, prepared.recipient);
+    const snapshot = transferSnapshotValue(accountsValue, addresses, account, prepared.asset, prepared.recipient);
     if (snapshot.createsRecipientAccount && !prepared.createsRecipientAccount) expired();
-    const rent = snapshot.createsRecipientAccount ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
-    const fee = await messageFee(this.rpc, message.messageBase64);
+    const { fee, rent } = await messageFeeAndRent(this.rpc, message.messageBase64, snapshot.createsRecipientAccount);
     if (fee > atomic(prepared.economics.networkFeeMaximumAtomic) || rent > atomic(prepared.economics.recipientRentAtomic)) expired();
     requireSolanaFunds(snapshot.native, snapshot.token, atomic(prepared.amountAtomic), atomic(prepared.economics.maximumNativeDebitAtomic), prepared.asset.kind === "native");
     const simulation = await simulateSolanaSend(this.rpc, message.unsignedPayload);
@@ -169,10 +179,9 @@ export class SolanaLocalAdapter implements DirectRailPort {
    * reference: nothing can be sealed without a binding, and the guard acquires a fresh window of its own. Requiring
    * the frozen one here would put the owner's reading time back inside the sending window, which is the whole bug.
    */
-  private async validBlock(prepared: RailPreparedTransfer, send: RailSendBinding | null): Promise<void> {
-    if (send === null) return;
+  private validBlockValue(prepared: RailPreparedTransfer, send: RailSendBinding, height: unknown): void {
     const lastValidBlockHeight = railSendLifetime(prepared, send).lastValidBlockHeight;
-    if (lastValidBlockHeight === null || rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }])) > atomic(lastValidBlockHeight)) expired();
+    if (lastValidBlockHeight === null || rpcAtomic(height) > atomic(lastValidBlockHeight)) expired();
   }
 }
 
@@ -187,10 +196,15 @@ export async function readSolanaBalance(rpc: SolanaRpcPort, account: ChainAccoun
   return { account, asset, amountAtomic: amount.toString(), nativeBalanceAtomic: native.toString(), networkIdentity: SOLANA_GENESIS,
     blockNumberAtomic: response.slot.toString(), observedAt: now.toISOString(), rpcOriginHash: rpc.originHash };
 }
-async function transferSnapshot(rpc: SolanaRpcPort, account: ChainAccount, asset: ChainAsset, recipient: string) {
+async function transferAddresses(account: ChainAccount, asset: ChainAsset, recipient: string): Promise<readonly string[]> {
   const source = asset.kind === "token" ? await associatedToken(account.address, asset.identifier) : null;
   const destination = asset.kind === "token" ? await associatedToken(recipient, asset.identifier) : null;
-  const response = await readAccounts(rpc, [account.address, ...(source === null || destination === null ? [] : [asset.identifier, source, destination])]);
+  return [account.address, ...(source === null || destination === null ? [] : [asset.identifier, source, destination])];
+}
+function transferSnapshotValue(value: unknown, addresses: readonly string[], account: ChainAccount, asset: ChainAsset, recipient: string) {
+  const source = asset.kind === "token" ? addresses[2]! : null;
+  const destination = asset.kind === "token" ? addresses[3]! : null;
+  const response = multipleAccounts(value, addresses.length);
   const native = requireNativeAccount(response.accounts[0] ?? null); let token = 0n; let createsRecipientAccount = false;
   if (source !== null && destination !== null) {
     requireTokenMint(response.accounts[1] ?? null, asset.decimals); token = tokenAccountAmount(response.accounts[2] ?? null, account.address, asset.identifier);
@@ -199,7 +213,18 @@ async function transferSnapshot(rpc: SolanaRpcPort, account: ChainAccount, asset
   return { native, token, source, destination, createsRecipientAccount };
 }
 async function messageFee(rpc: SolanaRpcPort, messageBase64: string): Promise<bigint> {
-  const value = rpcRecord(await rpc.call("getFeeForMessage", [messageBase64, { commitment: "confirmed" }])).value;
+  return feeValue(await rpc.call("getFeeForMessage", [messageBase64, { commitment: "confirmed" }]));
+}
+async function messageFeeAndRent(rpc: SolanaRpcPort, messageBase64: string, needRent: boolean): Promise<{ readonly fee: bigint; readonly rent: bigint }> {
+  if (!needRent) return { fee: await messageFee(rpc, messageBase64), rent: 0n };
+  const [fee, rent] = await solanaReadBatch(rpc, [
+    { method: "getFeeForMessage", params: [messageBase64, { commitment: "confirmed" }] },
+    { method: "getMinimumBalanceForRentExemption", params: [165, { commitment: "confirmed" }] },
+  ]);
+  return { fee: feeValue(fee), rent: rpcAtomic(rent) };
+}
+function feeValue(result: unknown): bigint {
+  const value = rpcRecord(result).value;
   if (value === null) expired();
   const fee = rpcAtomic(value); if (fee === 0n) protocolFailure(); return fee;
 }
