@@ -94,8 +94,14 @@ export declare class ArbitrumSourceEffectJournalRepository extends SecureStateSt
     private operation;
     load(profileHash: string, operationId: string): Promise<ArbitrumSourceEffectJournal | null>;
     create(profileHash: string, operationId: string, createdAt: string): Promise<ArbitrumSourceEffectJournal>;
+    /** Caller holds profile, operation and effect locks in the shared canonical order. */
+    createUnderLocks(profileHash: string, operationId: string, createdAt: string): Promise<ArbitrumSourceEffectJournal>;
     transition(profileHash: string, operationId: string, expectedIntegrityHash: string, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;
+    /** Caller holds profile, operation and effect locks in the shared canonical order. */
+    transitionUnderLocks(profileHash: string, operationId: string, expectedIntegrityHash: string, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;
     beginSigning(profileHash: string, operationId: string, expectedIntegrityHash: string, role: ArbitrumEffectRole, at: string): Promise<ArbitrumSourceEffectJournal>;
+    /** Caller holds profile, operation and effect locks in the shared canonical order. */
+    beginSigningUnderLocks(profileHash: string, operationId: string, expectedIntegrityHash: string, role: ArbitrumEffectRole, at: string): Promise<ArbitrumSourceEffectJournal>;
     /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
     skipApproval(profileHash: string, operationId: string, expectedIntegrityHash: string): Promise<ArbitrumSourceEffectJournal>;
     /** Atomically create a skipped journal only after an injected fresh canonical allowance read. */
@@ -103,5 +109,5 @@ export declare class ArbitrumSourceEffectJournalRepository extends SecureStateSt
         readonly operation: RelayUnsignedOperation;
         readonly journal: ArbitrumSourceEffectJournal;
         readonly activePolicy: ActiveAssetPolicy;
-    }) => Promise<ArbitrumVerifiedAllowanceRead | null>, policyUnderLock?: (profile: string, at: Date) => Promise<ActiveAssetPolicy | null>): Promise<ArbitrumSourceEffectJournal | null>;
+    }) => Promise<ArbitrumVerifiedAllowanceRead | null>, policyUnderLock?: (profile: string, at: Date) => Promise<ActiveAssetPolicy | null>, additionalLocks?: readonly string[]): Promise<ArbitrumSourceEffectJournal | null>;
 }

@@ -1,7 +1,9 @@
 /** One guarded approval transaction for a saved Arbitrum USDC Relay operation. */
 import { privateKeyToAccount } from "viem/accounts";
 import { getAddress } from "viem";
-import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { activeAssetPolicyFromState } from "../allowlist-active-policy.js";
+import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
@@ -84,11 +86,10 @@ export class RelayArbitrumApprovalExecuteService {
         if (wallet !== null && !same(wallet.address, op.sourceAccount))
             blocked("public_wallet_owner_changed");
     }
-    async snapshot(op) {
+    async snapshot(op, active) {
         const at = this.now();
         await this.owner(op);
-        const active = await (this.ports.activePolicy?.(at) ?? loadActiveAssetPolicyRegistry(this.state.root, "default", at));
-        if (active === null || active.digest !== op.policyDigest || active.revision !== op.policyRevision ||
+        if (active.digest !== op.policyDigest || active.revision !== op.policyRevision ||
             !same(active.accounts.evm ?? "", op.sourceAccount))
             blocked("active_owner_policy_required");
         const usage = await (this.ports.dailyUsage?.(op.sourceAccount, at) ?? this.dailyUsageExcludingOwn(op, at));
@@ -110,10 +111,9 @@ export class RelayArbitrumApprovalExecuteService {
             blocked("usage_reservation_changed");
         return (BigInt(snapshot.amountAtomic) - own).toString();
     }
-    async reserve(op) {
+    async reserve(op, active) {
         const at = this.now();
-        const active = await (this.ports.activePolicy?.(at) ?? loadActiveAssetPolicyRegistry(this.state.root, "default", at));
-        if (active === null || active.digest !== op.policyDigest || active.revision !== op.policyRevision ||
+        if (active.digest !== op.policyDigest || active.revision !== op.policyRevision ||
             !same(active.accounts.evm ?? "", op.sourceAccount))
             blocked("active_policy_changed_before_lease");
         const reservation = await this.usage.reserve({ ...this.usageIdentity(op), registry: active.registry,
@@ -129,6 +129,11 @@ export class RelayArbitrumApprovalExecuteService {
             journalIntegrityHash: journal?.integrityHash ?? null, depositDispatched: false,
             destinationDeliveryProven: false, paidAcceptance: false };
     }
+    async lockedPolicy() {
+        const at = this.now();
+        return this.ports.activePolicyUnderLock === undefined ? activeAssetPolicyFromState(await new AllowlistPolicyStore(this.state.root).readUnderProfileLock("default"), at) :
+            this.ports.activePolicyUnderLock(at);
+    }
     async execute(profile, operationId) {
         if (profile !== "default" || !HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum approval requires default profile and an operation ID.");
@@ -140,32 +145,47 @@ export class RelayArbitrumApprovalExecuteService {
         if (op.arbitrumDraft === undefined || op.sourceChainId !== 42161 || op.destinationChainId !== 1 ||
             op.arbitrumDraft.executionAdmitted !== false)
             blocked("exact_saved_arbitrum_route_required");
-        return this.state.withLocks([`relay-arbitrum-approval-execute:${operationId}`, evmAddressLock(op.sourceAccount)], async () => {
+        if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
+            blocked("operation_retired");
+        const previous = await this.journals.load(profileHash, operationId);
+        if (previous !== null && (previous.effects[0].phase !== "pending" || previous.effects[1].phase !== "pending"))
+            return this.result(op, previous, "observation_only", "approval_effect_already_started");
+        const summary = { operationId, sourceChainId: 42161, destinationChainId: 1,
+            owner: op.sourceAccount, token: RELAY_ARBITRUM_USDC, spender: ETHEREUM_DEPOSITORY,
+            approvalValueAtomic: op.amountAtomic, quoteDigest: op.quoteDigest, deadline: op.deadline,
+            approvalNetworkFeeCeilingWei: op.approvalNetworkFeeCeilingWei };
+        if (!await this.ports.confirm(summary))
+            blocked("foreground_authorization_declined");
+        // No terminal wait occurs under a policy lock. Every effect-side lock is then acquired together
+        // in SecureStateStore's profile -> operation -> remaining-key order.
+        return this.state.withLocks([`profile:${profileHash}`, `profile:${allowlistProfileHash("default")}`,
+            `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`,
+            `relay-arbitrum-approval-execute:${operationId}`, evmAddressLock(op.sourceAccount)], async () => {
             if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
                 blocked("operation_retired");
             let journal = await this.journals.load(profileHash, operationId);
             if (journal !== null && (journal.effects[0].phase !== "pending" || journal.effects[1].phase !== "pending"))
                 return this.result(op, journal, "observation_only", "approval_effect_already_started");
-            const summary = { operationId, sourceChainId: 42161, destinationChainId: 1,
-                owner: op.sourceAccount, token: RELAY_ARBITRUM_USDC, spender: ETHEREUM_DEPOSITORY,
-                approvalValueAtomic: op.amountAtomic, quoteDigest: op.quoteDigest, deadline: op.deadline,
-                approvalNetworkFeeCeilingWei: op.approvalNetworkFeeCeilingWei };
-            if (!await this.ports.confirm(summary))
-                blocked("foreground_authorization_declined");
-            const first = await this.snapshot(op);
+            const firstPolicy = await this.lockedPolicy();
+            if (firstPolicy === null)
+                blocked("active_owner_policy_required");
+            const first = await this.snapshot(op, firstPolicy);
             if (!first.approvalRequired)
                 return this.result(op, journal, "approval_not_needed", "fresh_allowance_covers_principal");
             if (!first.readOnlyConditionsSatisfied)
                 blocked(`preflight:${first.reasons.join(",")}`);
             // A second canonical read closes the gap between owner consent and the irreversible marker.
-            const fresh = await this.snapshot(op);
+            const freshPolicy = await this.lockedPolicy();
+            if (freshPolicy === null)
+                blocked("active_owner_policy_required");
+            const fresh = await this.snapshot(op, freshPolicy);
             if (!fresh.approvalRequired || !fresh.readOnlyConditionsSatisfied ||
                 fresh.confirmedNonce !== fresh.pendingNonce)
                 blocked("approval_preflight_changed");
             if (journal === null)
-                journal = await this.journals.create(profileHash, operationId, this.now().toISOString());
-            await this.reserve(op);
-            journal = await this.journals.beginSigning(profileHash, operationId, journal.integrityHash, "approval", this.now().toISOString());
+                journal = await this.journals.createUnderLocks(profileHash, operationId, this.now().toISOString());
+            await this.reserve(op, freshPolicy);
+            journal = await this.journals.beginSigningUnderLocks(profileHash, operationId, journal.integrityHash, "approval", this.now().toISOString());
             let raw;
             try {
                 raw = await this.ports.signer.sign(op, fresh.confirmedNonce, journal);
@@ -173,10 +193,14 @@ export class RelayArbitrumApprovalExecuteService {
             catch {
                 return this.result(op, journal, "observation_only", "signing_outcome_uncertain");
             }
-            journal = await this.journals.transition(profileHash, operationId, journal.integrityHash, { kind: "seal_signed", role: "approval", rawTransaction: raw, nonce: fresh.confirmedNonce });
-            // Recheck allowance, nonce, funding, fee and policy after signing. Any mismatch leaves a sealed, unsent effect.
+            journal = await this.journals.transitionUnderLocks(profileHash, operationId, journal.integrityHash, { kind: "seal_signed", role: "approval", rawTransaction: raw, nonce: fresh.confirmedNonce });
+            // Re-read the authenticated policy head under the same profile lock and keep it until the send settles.
+            const finalPolicy = await this.lockedPolicy();
+            if (finalPolicy === null || finalPolicy.digest !== op.policyDigest ||
+                finalPolicy.revision !== op.policyRevision || !same(finalPolicy.accounts.evm ?? "", op.sourceAccount))
+                return this.result(op, journal, "observation_only", "active_policy_revoked_or_changed");
             try {
-                const final = await this.snapshot(op);
+                const final = await this.snapshot(op, finalPolicy);
                 if (!final.approvalRequired || !final.readOnlyConditionsSatisfied ||
                     final.confirmedNonce !== fresh.confirmedNonce || final.pendingNonce !== fresh.confirmedNonce ||
                     this.now().getTime() - Date.parse(final.observedAt) > 30_000)
@@ -186,7 +210,7 @@ export class RelayArbitrumApprovalExecuteService {
                 return this.result(op, journal, "observation_only", "pre_send_conditions_unavailable");
             }
             await this.owner(op);
-            journal = await this.journals.transition(profileHash, operationId, journal.integrityHash, { kind: "mark_submitting", role: "approval", at: this.now().toISOString() });
+            journal = await this.journals.transitionUnderLocks(profileHash, operationId, journal.integrityHash, { kind: "mark_submitting", role: "approval", at: this.now().toISOString() });
             const expectedHash = journal.effects[0].attempt.transactionHash;
             let outcome = "uncertain";
             try {
@@ -194,7 +218,7 @@ export class RelayArbitrumApprovalExecuteService {
                     outcome = "accepted";
             }
             catch { /* A transport error, including HTTP 429, leaves one ambiguous send. */ }
-            journal = await this.journals.transition(profileHash, operationId, journal.integrityHash, { kind: "record_send", role: "approval", outcome });
+            journal = await this.journals.transitionUnderLocks(profileHash, operationId, journal.integrityHash, { kind: "record_send", role: "approval", outcome });
             await this.usage.transition({ ...this.usageIdentity(op), reservationId: this.reservationId(op),
                 policyDigest: op.policyDigest, state: outcome === "accepted" ? "submitted" : "unknown_finality",
                 expectedCurrentStates: ["reserved"], now: this.now() });

@@ -24,12 +24,13 @@ export interface RelayArbitrumApprovalExecutePorts {
     readonly confirm: (summary: RelayArbitrumApprovalSummary) => Promise<boolean>;
     readonly signer: RelayArbitrumApprovalSigner;
     readonly send: (raw: Hex) => Promise<Hex>;
-    readonly activePolicy?: (at: Date) => Promise<ActiveAssetPolicy | null>;
+    /** Caller holds the allowlist profile lock. Production uses the authenticated policy store. */
+    readonly activePolicyUnderLock?: (at: Date) => Promise<ActiveAssetPolicy | null>;
     readonly dailyUsage?: (owner: string, at: Date) => Promise<string>;
     readonly now?: () => Date;
     /** Synthetic seams; production uses the verified durable repositories. */
     readonly operation?: (profileHash: string, operationId: string) => Promise<RelayUnsignedOperation | null>;
-    readonly journals?: Pick<ArbitrumSourceEffectJournalRepository, "load" | "create" | "beginSigning" | "transition">;
+    readonly journals?: Pick<ArbitrumSourceEffectJournalRepository, "load" | "createUnderLocks" | "beginSigningUnderLocks" | "transitionUnderLocks">;
 }
 /** Unlocks local custody only after a durable signing marker exists. */
 export declare class LocalRelayArbitrumApprovalSigner implements RelayArbitrumApprovalSigner {
@@ -54,6 +55,7 @@ export declare class RelayArbitrumApprovalExecuteService {
     private dailyUsageExcludingOwn;
     private reserve;
     private result;
+    private lockedPolicy;
     execute(profile: string, operationId: string): Promise<{
         operationId: string;
         state: string;

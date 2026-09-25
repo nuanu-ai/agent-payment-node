@@ -64,9 +64,7 @@ export class RelayArbitrumApprovalDecisionService {
     if (first.approvalRequired) return output("approval_required", first, null);
     if (!first.readOnlyConditionsSatisfied) return output("preflight_blocked", first, null);
     const verified: { value: typeof first | null } = { value: null };
-    const journal = await this.state.withLocks([`relay-arbitrum-approval-execute:${operationId}`,
-      evmAddressLock(operation.sourceAccount)], async () =>
-      new ArbitrumSourceEffectJournalRepository(this.state.root, undefined, undefined,
+    const journal = await new ArbitrumSourceEffectJournalRepository(this.state.root, undefined, undefined,
       this.ports.now).skipApprovalIfVerified(profileHash, operationId, existing?.integrityHash ?? null,
       async input => {
         if (input.operation.integrityHash !== operation.integrityHash ||
@@ -78,7 +76,8 @@ export class RelayArbitrumApprovalDecisionService {
         return { policyDigest: verified.value.policyDigest, policyRevision: verified.value.policyRevision,
           allowanceAtomic: verified.value.allowanceAtomic, blockNumber: verified.value.observationBlockNumber,
           blockHash: verified.value.observationBlockHash, observedAt: verified.value.observedAt };
-      }, this.ports.activePolicy));
+      }, this.ports.activePolicy,
+      [`relay-arbitrum-approval-execute:${operationId}`, evmAddressLock(operation.sourceAccount)]);
     if (journal === null) {
       if (verified.value === null) return blocked("canonical_allowance_read_missing");
       return output("approval_required", verified.value, null);
