@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
+import { sha256 } from "../../src/canonical.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE as candidate, assertBaseDeploymentMigrationProof,
   migrateBaseDeploymentOperation, type BaseMigrationObservation } from "../../src/lifi/base-deployment-migration.js";
 import type { BridgeChainId } from "../../src/lifi/chains.js";
@@ -10,6 +11,8 @@ import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import type { BridgeDeploymentIdentity, BridgeTool } from "../../src/lifi/model.js";
 import type { BridgeRpcPort } from "../../src/lifi/ports.js";
 import { BridgeRpc, type RpcBatchReadItem, type RpcReadSession } from "../../src/lifi/rpc.js";
+import { RpcHttpFailure } from "../../src/lifi/rpc-session.js";
+import { StateStore } from "../../src/state.js";
 import { validateBridgeOperation, validateLegacyBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { temporaryState } from "./helpers.js";
 import { lifiFixture } from "./lifi-helpers.js";
@@ -175,14 +178,16 @@ test("repair-deployment migrates the copied journal audit-first and is restart-i
 
 test("repair-deployment fits its production 29-request BridgeRpc session shape with archive chunks capped at three", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const requests: Array<{ origin: string; route: "primary" | "archive"; items: Array<{ id: string; method: string; params: unknown[] }> }> = [];
+  const requests: Array<{ origin: string; route: "primary" | "archive"; startedAt: number;
+    items: Array<{ id: string; method: string; params: unknown[] }> }> = [];
   const repairSessions: RpcReadSession[] = [];
   const shapeRpc = (chainId: BridgeChainId, session: RpcReadSession): BridgeRpcPort => {
     const origin = chainId === 1 ? candidate.verifiedSourceDeployment.rpcOrigin : candidate.newDestinationDeployment.rpcOrigin;
     const archiveOrigin = `${origin}/archive`;
     const attempt = (route: "primary" | "archive") => async (body: string) => {
       const parsed = JSON.parse(body) as { id: string; method: string; params: unknown[] } | Array<{ id: string; method: string; params: unknown[] }>;
-      const items = Array.isArray(parsed) ? parsed : [parsed]; requests.push({ origin: route === "archive" ? archiveOrigin : origin, route, items });
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      requests.push({ origin: route === "archive" ? archiveOrigin : origin, route, startedAt: Date.now(), items });
       const response = items.map((item) => ({ jsonrpc: "2.0", id: item.id, result: "0x1" }));
       return Array.isArray(parsed) ? response : response[0];
     };
@@ -213,9 +218,8 @@ test("repair-deployment fits its production 29-request BridgeRpc session shape w
   const rpcFor = (chainId: BridgeChainId, session?: RpcReadSession) => {
     assert.ok(session); if (!repairSessions.includes(session)) repairSessions.push(session); return shapeRpc(chainId, session);
   };
-  const clockStart = Date.parse("2026-09-22T00:00:00.000Z"); let clockReads = 0;
   const s = await lifiFixture(temporary.root, "eth-base", { initializeWallet: false, policy: false, rpcFor,
-    clockNow: () => new Date(clockStart + Math.floor(clockReads++ / 5) * 750) });
+    clockNow: () => new Date() });
   const old = await fixture(), id = old.operationId, profile = old.profileHash;
   await mkdir(resolve(temporary.root, "bridge-operations", profile), { recursive: true, mode: 0o700 });
   await mkdir(resolve(temporary.root, "bridge-receipts", profile), { recursive: true, mode: 0o700 });
@@ -227,15 +231,51 @@ test("repair-deployment fits its production 29-request BridgeRpc session shape w
   assert.equal(repairSessions.length, 1); assert.equal(repairSessions[0]!.telemetry().httpRequests, 12);
   const checkpointPath = resolve(temporary.root, "bridge-migrations", profile, `${id}.source.json`);
   assert.ok(JSON.parse(await readFile(checkpointPath, "utf8")).digest);
+  const pacing = new StateStore(temporary.root), family = sha256("rpc-provider-family\0drpc.org");
+  const sourcePhaseStart = await pacing.loadRpcProviderPacing(family);
+  assert.ok(sourcePhaseStart !== null, "the source phase must persist provider pacing for a fresh invocation");
   const restart = await lifiFixture(temporary.root, "eth-base", { initializeWallet: false, policy: false, rpcFor,
-    clockNow: () => new Date(clockStart + Math.floor(clockReads++ / 5) * 750) });
+    clockNow: () => new Date() });
   const result = await restart.core.execute({ command: "operation.repair-deployment", operationId: id });
   assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal((result.data as any).status, "migrated");
   assert.equal(repairSessions.length, 2);
+  assert.ok(requests[12]!.startedAt - requests[11]!.startedAt >= 750,
+    "the first resumed POST must observe the prior invocation's persisted 750 ms gap");
+  assert.ok((await pacing.loadRpcProviderPacing(family))! >= sourcePhaseStart + 750,
+    "the resumed phase must respect the persisted provider gap");
   assert.deepEqual(repairSessions.map((session) => session.telemetry().httpRequests), [12, 17]);
   assert.deepEqual(repairSessions.map((session) => session.telemetry().httpAttempts), [12, 17]);
   assert.deepEqual(repairSessions.map((session) => session.physicalBudget?.remaining()), [12, 7]);
   const archive = requests.filter((request) => request.route === "archive");
   assert.equal(requests.length, 29); assert.ok(archive.every((request) => request.items.length <= 3));
   assert.deepEqual(archive.slice(2).map((request) => request.items.length), [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2]);
+});
+
+test("Base repair persists a terminal 429 cooldown without a checkpoint or effect mutation", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  let posts = 0;
+  const rpcFor = (chainId: BridgeChainId, session?: RpcReadSession): BridgeRpcPort => {
+    assert.ok(session);
+    const origin = chainId === 1 ? candidate.verifiedSourceDeployment.rpcOrigin : candidate.newDestinationDeployment.rpcOrigin;
+    const rpc = new BridgeRpc(chainId, origin, async () => "0x1");
+    rpc.observe = async () => {
+      await session.read(origin, chainId, "eth_chainId", [], async () => {
+        posts += 1; throw new RpcHttpFailure("eth_chainId", 429, 5_000);
+      });
+      throw new Error("429 must stop observation");
+    };
+    return rpc;
+  };
+  const s = await lifiFixture(temporary.root, "eth-base", { initializeWallet: false, policy: false, rpcFor });
+  const old = await fixture(), id = old.operationId, profile = old.profileHash;
+  await mkdir(resolve(temporary.root, "bridge-operations", profile), { recursive: true, mode: 0o700 });
+  await mkdir(resolve(temporary.root, "bridge-receipts", profile), { recursive: true, mode: 0o700 });
+  await writeFile(resolve(temporary.root, "bridge-operations", profile, `${id}.json`), `${JSON.stringify(old)}\n`, { mode: 0o600 });
+  await writeFile(resolve(temporary.root, "bridge-receipts", profile, `${id}.json`), await readFile(fixturePath("deployment-receipt")), { mode: 0o600 });
+  const result = await s.core.execute({ command: "operation.repair-deployment", operationId: id });
+  assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_RPC_RATE_LIMITED"); assert.equal(posts, 1);
+  const family = sha256("rpc-provider-family\0drpc.org");
+  assert.ok((await new StateStore(temporary.root).loadRpcProviderCooldown(family))! > Date.now());
+  assert.equal(await s.core.bridges.records.baseMigrationSourceCheckpoint(old), null);
+  assert.deepEqual((await s.core.bridges.records.findStoredOperation(id) as any).raw.effects, old.effects);
 });

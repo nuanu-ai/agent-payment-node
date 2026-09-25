@@ -77,7 +77,7 @@ export class BridgeService {
             // and finality reads after a durable source checkpoint. Each command gets a fresh physical cap.
             const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 31, maxHttpAttempts: 33,
                 archiveDeploymentBatchMaxItems: 3,
-                physicalBudget: new BridgeRpcPhysicalBudget() });
+                providerScheduler: this.providerScheduler, physicalBudget: new BridgeRpcPhysicalBudget() });
             if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
                 if (!isLegacyBridgeOperation(op)) {
                     const eligible = migrateBaseDeploymentOperation(raw);
