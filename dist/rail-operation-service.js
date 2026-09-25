@@ -115,6 +115,9 @@ export class RailOperationService {
         });
     }
     async resume(operationId) {
+        const found = await this.required(canonicalOperationId(operationId));
+        if (found.account.rail === "solana" && found.account.provider === "local")
+            return await this.resumeLocalSolana(found.operationId, found.profileHash);
         return await this.locked(operationId, async (operation) => {
             if (operation.terminal || operation.state === "awaiting_approval")
                 return operation;
@@ -134,6 +137,76 @@ export class RailOperationService {
             if (operation.state === "submitting")
                 operation = await this.move(operation, "unknown_finality", "interrupted_submission_observation_only", "effect_outcome_unknown");
             return await this.inspect(operation, adapter);
+        });
+    }
+    /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
+    async resumeLocalSolana(operationId, profileHash) {
+        const keys = [`profile:${profileHash}`, `operation:${operationId}`];
+        const snapshot = await this.context.state.withLocks(keys, async () => {
+            let operation = await this.required(operationId);
+            await this.records.repairReceipt(operation);
+            await this.followUsage(operation);
+            if (operation.terminal || operation.state === "awaiting_approval")
+                return { operation, observe: false };
+            const adapter = this.adapter(operation);
+            if (operation.state === "signing_started" || operation.state === "signed_not_submitted") {
+                const effect = await adapter.recoverEffect(binding(operation));
+                if (effect === null) {
+                    if (operation.state !== "signing_started")
+                        corrupt();
+                    operation = await this.move(operation, "failed_before_effect", "custody_proved_no_sealed_effect", "durable_pre_effect");
+                }
+                else {
+                    this.assertEffect(operation, effect);
+                    if (operation.state === "signing_started")
+                        operation = await this.move(operation, "signed_not_submitted", "encrypted_effect_recovered", "durable_signed_effect", effect);
+                    operation = await this.firstLocalSubmit(operation, adapter, effect);
+                }
+                return { operation, observe: false };
+            }
+            // A crashed submit is ambiguous. Persist this boundary before any unlocked observation;
+            // recovery must never call submit again.
+            if (operation.state === "submitting")
+                operation = await this.move(operation, "unknown_finality", "interrupted_submission_observation_only", "effect_outcome_unknown");
+            return { operation, observe: true };
+        });
+        if (!snapshot.observe)
+            return publicRailOperation(snapshot.operation);
+        const frozen = snapshot.operation;
+        const inspection = await this.inspectEvidence(frozen, this.adapter(frozen));
+        return await this.context.state.withLocks(keys, async () => {
+            const latest = await this.required(operationId);
+            await this.records.repairReceipt(latest);
+            await this.followUsage(latest);
+            // The journal hash covers the state, fingerprint, transaction ID, payload hash and send
+            // binding. A competing resume/abandon wins; its latest record is returned unchanged.
+            if (latest.integrityHash !== frozen.integrityHash || latest.profileHash !== profileHash ||
+                latest.fingerprint !== frozen.fingerprint || latest.transactionId !== frozen.transactionId ||
+                latest.rawPayloadHash !== frozen.rawPayloadHash || canonicalJson(latest.send ?? null) !== canonicalJson(frozen.send ?? null)) {
+                return publicRailOperation(latest);
+            }
+            if (inspection === null || !("evidence" in inspection))
+                return publicRailOperation(latest);
+            // Check the current owner and policies again while holding both locks. Drift leaves the
+            // ambiguous operation intact for a fresh reconciliation rather than accepting stale proof.
+            try {
+                const account = await this.policies.account(latest.profile, latest.account.rail);
+                if (canonicalJson(account) !== canonicalJson(latest.account))
+                    return publicRailOperation(latest);
+                const policy = await this.policies.authorize(account, latest.prepared.asset.alias, latest.prepared.maximumFeeAtomic);
+                if (policy.policyHash !== latest.policyHash)
+                    return publicRailOperation(latest);
+                if (latest.allowlist !== undefined)
+                    await this.allowlist.confirm(railAllowlistSubject(latest), latest.allowlist);
+            }
+            catch {
+                return publicRailOperation(latest);
+            }
+            const next = transitionRail(latest, { state: inspection.status, at: this.context.clock.now().toISOString(),
+                reason: inspection.status === "completed" ? "exact_finalized_transfer_verified" : "exact_finalized_revert_verified",
+                proofClass: "solana_finalized_transaction_effect", evidence: inspection.evidence });
+            await this.records.persist(next);
+            return publicRailOperation(await this.followUsage(next));
         });
     }
     async receipt(operationId) {
@@ -218,15 +291,9 @@ export class RailOperationService {
     async inspect(operation, adapter) {
         if (operation.transactionId === null)
             return operation;
-        let result;
-        try {
-            if (await adapter.assertNetwork() !== operation.prepared.networkIdentity)
-                throw new Error("network mismatch");
-            result = await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined, operation.send ?? null);
-        }
-        catch {
+        const result = await this.inspectEvidence(operation, adapter);
+        if (result === null)
             return operation;
-        }
         if (!("evidence" in result))
             return operation;
         const next = transitionRail(operation, { state: result.status, at: this.context.clock.now().toISOString(),
@@ -234,6 +301,18 @@ export class RailOperationService {
             proofClass: operation.account.rail === "solana" ? "solana_finalized_transaction_effect" : "tron_solidified_transaction_effect", evidence: result.evidence });
         await this.records.persist(next);
         return await this.followUsage(next);
+    }
+    async inspectEvidence(operation, adapter) {
+        if (operation.transactionId === null)
+            return null;
+        try {
+            if (await adapter.assertNetwork() !== operation.prepared.networkIdentity)
+                return null;
+            return await adapter.inspect(operation.account, operation.prepared, operation.transactionId, operation.rawPayloadHash ?? undefined, operation.send ?? null);
+        }
+        catch {
+            return null;
+        }
     }
     assertEffect(operation, effect) {
         validateRailTransactionId(effect.transactionId, operation.account.rail);
