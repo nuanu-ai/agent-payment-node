@@ -28,6 +28,7 @@ export class EvmRpc {
     prepareUnichainNative() { return this.prepareNativeBatched(130); }
     prepareUnichainUsdc() { return this.prepareNativeBatched(130, "usdc"); }
     preparePolygonUsdc() { return this.prepareNativeBatched(137, "usdc"); }
+    prepareBnbNative() { return this.prepareNativeBatched(56); }
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
     prepareNativeBatched(chainId, asset = "native") {
         if (this.batchCall === undefined)
@@ -223,8 +224,19 @@ export class EvmRpc {
         };
     }
     async receipt(chainId, transactionHash) {
-        await this.assertChain(chainId);
-        const raw = await this.call("eth_getTransactionReceipt", [transactionHash]);
+        let raw;
+        if (chainId === 56 && this.batchCall !== undefined) {
+            const [identity, receipt] = await this.batchCall([
+                { method: "eth_chainId", params: [] }, { method: "eth_getTransactionReceipt", params: [transactionHash] },
+            ]);
+            if (evmRpcQuantity(identity) !== 56n)
+                throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+            raw = receipt;
+        }
+        else {
+            await this.assertChain(chainId);
+            raw = await this.call("eth_getTransactionReceipt", [transactionHash]);
+        }
         if (raw === null)
             return null;
         const receipt = evmRpcRecord(raw);

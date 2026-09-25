@@ -211,6 +211,46 @@ function unichainRead(method: string, params: readonly unknown[]): unknown {
   throw new Error(`unexpected ${method}`);
 }
 
+test("BNB native grouped prepare uses eight physical POSTs and preserves a zero base fee", async (t) => {
+  const bodies = mockHttps(t, (body) => {
+    const reads = Array.isArray(body) ? body : [body];
+    const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
+      result: entry.method === "eth_chainId" ? "0x38" :
+        entry.method === "eth_getBlockByNumber" ? { number: "0x10", hash: UNICHAIN_HASH, baseFeePerGas: "0x0" } :
+          unichainRead(entry.method, entry.params) }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const grouped = new HttpsBaseRpc(endpoint).evm.prepareBnbNative();
+  const balance = await grouped.balance(WALLET, { chainId: 56, token: "native" });
+  const { nonce, estimated } = await grouped.nonceEstimate(WALLET,
+    { chainId: 56, from: WALLET, to: RECIPIENT, valueAtomic: "100", data: "0x" });
+  const economics = { nonceAtomic: nonce, ...estimated,
+    maximumGasCostAtomic: (BigInt(estimated.gasLimitAtomic) * BigInt(estimated.maxFeePerGasAtomic)).toString() };
+  const quote = await grouped.feeQuote(economics);
+  assert.equal(bodies.length, 8);
+  assert.equal(estimated.maxFeePerGasAtomic, "1");
+  assert.equal(quote.totalQuoteWei, economics.maximumGasCostAtomic);
+  requireEvmFunding(balance, "100", quote, quote.totalQuoteWei);
+});
+
+test("BNB receipt lookup binds chain identity in two physical POSTs", async t => {
+  const transactionHash = `0x${"a".repeat(64)}` as const;
+  const bodies = mockHttps(t, body => {
+    const calls = Array.isArray(body) ? body : [body];
+    const responses = calls.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
+      result: entry.method === "eth_chainId" ? "0x38" : {
+        transactionHash, blockHash: UNICHAIN_HASH, blockNumber: "0x10", status: "0x1", logs: [],
+      } }));
+    return { status: 200, raw: JSON.stringify(Array.isArray(body) ? responses.reverse() : responses[0]) };
+  });
+  const receipt = await new HttpsBaseRpc(endpoint).evm.receipt(56, transactionHash);
+  assert.equal(receipt?.transactionHash, transactionHash);
+  assert.equal(bodies.length, 2);
+  assert.deepEqual(bodies.map(raw => {
+    const request = JSON.parse(raw); return (Array.isArray(request) ? request : [request]).map((entry: any) => entry.method);
+  }), [["eth_chainId", "eth_getTransactionReceipt"], ["eth_chainId"]]);
+});
+
 test("Unichain native opt-in matches scalar balance, nonce, estimate and OP fee quote with nine modeled POSTs", async (t) => {
   const bodies = mockHttps(t, (body) => {
     const reads = Array.isArray(body) ? body : [body];

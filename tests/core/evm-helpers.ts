@@ -55,6 +55,13 @@ export class EvmTestRpc extends TestRpc {
   receiptStatus: "success" | "reverted" = "success";
   broadcastCount = 0;
   readonly evm: EvmRpcPort = {
+    prepareBnbNative: () => ({
+      balance: (address, selection) => this.evm.balance(address, selection),
+      nonceEstimate: async (address, transaction) => ({
+        nonce: await this.evm.nonce(56, address, "pending"), estimated: await this.evm.estimate(transaction),
+      }),
+      feeQuote: economics => this.evm.feeQuote(56, economics),
+    }),
     assertChain: async (chainId) => { if (chainId !== this.chainId) throw new ApnError("APN_CHAIN_MISMATCH", "Wrong selected chain."); },
     balance: async (address, selection) => {
       this.genericBalanceCalls += 1;

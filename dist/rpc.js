@@ -8,6 +8,7 @@ import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRA
 import { ApnError } from "./errors.js";
 import { jsonRpcRequestHeaders } from "./rpc-request-headers.js";
 import { EvmRpc } from "./evm-rpc.js";
+import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
 import { parseAtomic } from "./money.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses } from "./network-policy.js";
 import { parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
@@ -29,6 +30,8 @@ export class HttpsBaseRpc {
     pinnedAddresses;
     totalDeadlineMs;
     abortSignal;
+    directGuard;
+    directGuardState;
     constructor(endpoint, options = {}) {
         const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
         this.endpoint = parsed;
@@ -36,7 +39,13 @@ export class HttpsBaseRpc {
         this.evm = new EvmRpc((method, params) => this.call(method, params), this.rpcOrigin, undefined, (calls) => this.batchCall(calls));
         this.totalDeadlineMs = options.totalDeadlineMs;
         this.abortSignal = options.abortSignal;
+        this.directGuardState = options.directGuardState;
         this.x402ChainId = x402Network(options.x402ChainId).chainId;
+    }
+    armBnbDirectRpcGuard() {
+        if (this.directGuardState === undefined)
+            throw new ApnError("APN_RPC_CONFIG", "BNB direct RPC guard state is unavailable.");
+        this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState);
     }
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal) {
@@ -346,7 +355,7 @@ export class HttpsBaseRpc {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal);
+        const raw = await this.postDirectGuarded(body, addresses, method);
         return parseRpcResultEnvelope(raw, id, method);
     }
     async batchCall(calls) {
@@ -369,7 +378,7 @@ export class HttpsBaseRpc {
             throw new ApnError("APN_INVALID_INPUT", "RPC batch request exceeds the size limit.");
         }
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), "batch", false, this.abortSignal);
+        const raw = await this.postDirectGuarded(body, addresses, "batch");
         return parseRpcBatchResultEnvelope(raw, ids);
     }
     async callX402Logs(params) {
@@ -381,6 +390,10 @@ export class HttpsBaseRpc {
     }
     async resolvePublicAddresses() {
         return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
+    }
+    async postDirectGuarded(body, addresses, method) {
+        const post = () => postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal);
+        return this.directGuard === undefined ? await post() : await this.directGuard.post(this.endpoint.toString(), post);
     }
     remainingTimeoutMs() {
         if (this.totalDeadlineMs === undefined)
