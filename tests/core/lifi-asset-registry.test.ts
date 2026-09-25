@@ -30,10 +30,11 @@ test("LI.FI registry admits exactly the reviewed chains, first-class native coin
     assert.equal(row.caip2, `eip155:${chainId}`);
     const native = bridgeNativeCoin(chainId);
     assert.deepEqual({ kind: native.kind, chainId: native.chainId, symbol: native.symbol, coinKey: native.coinKey, decimals: native.decimals,
-      pairKey: native.pairKey, stargate: native.stargate, listing: native.listing },
+      pairKey: native.pairKey, stargateAssetId: native.stargate?.assetId ?? null, listing: native.listing },
     { kind: "native", chainId, symbol: chainId === 56 ? "BNB" : chainId === 143 ? "MON" : "ETH",
       coinKey: chainId === 56 ? "BNB" : chainId === 143 ? "MON" : "ETH",
-      decimals: 18, pairKey: chainId === 56 ? "bnb" : chainId === 143 ? "mon" : "eth", stargate: null, listing: "frozen_list" });
+      decimals: 18, pairKey: chainId === 56 ? "bnb" : chainId === 143 ? "mon" : "eth",
+      stargateAssetId: chainId === 1 || chainId === 8453 ? 13 : null, listing: "frozen_list" });
     assert.ok(row.tokens.every((asset) => asset.kind === "erc20" && asset.address !== BRIDGE_ZERO_ADDRESS));
   }
   assert.deepEqual(BRIDGE_CHAINS.map((id) => BRIDGE_ASSET_REGISTRY[id].tokens.map((t) => `${t.symbol}/${t.coinKey}/${t.decimals}`)),

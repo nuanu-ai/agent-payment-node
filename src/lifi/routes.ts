@@ -22,9 +22,11 @@ function requestAsset(request: BridgeRouteRequest, chainId: BridgeChainId): Brid
   if (chainId === request.toChainId) return bridgeAssetRow(chainId, request.toToken);
   return bridgeFailure("APN_PROVIDER_PROTOCOL", "route_chain_identity");
 }
-/** A tool is preparable only when both legs are reviewed for it: a native principal has no reviewed Stargate pool. */
+/** A tool is preparable only when both legs and this exact direction have reviewed deployment proofs. */
 function toolGate(tool: string, request: BridgeRouteRequest): string | null {
   if (tool !== "across" && tool !== "stargateV2") return "finite_decoder_and_correlated_evidence_unavailable";
+  if (tool === "stargateV2" && bridgeNativePrincipal(request) &&
+      (request.fromChainId !== 1 || request.toChainId !== 8453 || request.toToken !== BRIDGE_ZERO_ADDRESS)) return "asset_tool_unreviewed";
   if (!bridgeExecutionDestination(request.toChainId)) {
     const row = bridgeQuoteDestination(request.toChainId);
     if (!row.tools.includes(tool as never)) return "destination_tool_quote_unavailable";

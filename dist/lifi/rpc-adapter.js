@@ -66,7 +66,7 @@ export class BridgeRpc {
     async deployment(tool, peerChainId, token, block, exactHashPin = false) {
         if (this.batchCall === undefined)
             await this.assertChain();
-        const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token), compactDeployment = tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161), tag = exactHashPin && compactDeployment ? { blockHash: at.hash, requireCanonical: true } : quantity(BigInt(at.numberAtomic));
+        const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token), compactDeployment = tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161), tag = exactHashPin ? { blockHash: at.hash, requireCanonical: true } : quantity(BigInt(at.numberAtomic));
         const code = [], configuration = [];
         const feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
         const multicallHash = compactDeployment

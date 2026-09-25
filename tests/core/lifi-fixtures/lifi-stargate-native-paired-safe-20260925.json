@@ -1,0 +1,325 @@
+{
+  "attempt": "fresh_followup",
+  "prior_attempt_physical_posts": 3,
+  "followup_post_cap": 4,
+  "minimum_inter_post_start_gap_ms": 750,
+  "pacing_lock": "/tmp/nuanu-apn-public-rpc-pacer.lock",
+  "physical_post_count": 4,
+  "posts": [
+    {
+      "label": "ethereum.safe_header",
+      "host": "ethereum-rpc.publicnode.com",
+      "started_at_utc": "2026-09-25T06:56:37.676Z",
+      "start_monotonic_ns": 325566667397958,
+      "gap_since_prior_process_or_post_ms": 338069.854,
+      "request_members": 1,
+      "http_status": 200,
+      "response_bytes": 35613,
+      "elapsed_ms": 373.4
+    },
+    {
+      "label": "base.safe_header",
+      "host": "mainnet.base.org",
+      "started_at_utc": "2026-09-25T06:56:38.431Z",
+      "start_monotonic_ns": 325567422827333,
+      "gap_since_prior_process_or_post_ms": 755.429,
+      "request_members": 1,
+      "http_status": 200,
+      "response_bytes": 11720,
+      "elapsed_ms": 462.4
+    },
+    {
+      "label": "ethereum.state_batch",
+      "host": "ethereum-rpc.publicnode.com",
+      "started_at_utc": "2026-09-25T06:56:39.191Z",
+      "start_monotonic_ns": 325568182870333,
+      "gap_since_prior_process_or_post_ms": 760.043,
+      "request_members": 8,
+      "http_status": 200,
+      "response_bytes": 116995,
+      "elapsed_ms": 421.8
+    },
+    {
+      "label": "base.state_batch",
+      "host": "mainnet.base.org",
+      "started_at_utc": "2026-09-25T06:56:39.948Z",
+      "start_monotonic_ns": 325568940401958,
+      "gap_since_prior_process_or_post_ms": 757.532,
+      "request_members": 8,
+      "http_status": 200,
+      "response_bytes": 122284,
+      "elapsed_ms": 449.0
+    }
+  ],
+  "chains": [
+    {
+      "chain": "ethereum",
+      "rpc_host": "ethereum-rpc.publicnode.com",
+      "response_id": 100,
+      "rpc_error": null,
+      "safe_header": {
+        "number": "0x18d889e",
+        "hash": "0xc273ddf05ea9419078f7de501490d6c8d7f1b80d105c76b4bebf8e909df8c2e6",
+        "timestamp": "0x6ab618d7",
+        "parentHash": "0x54a8bc02c7263eff8c44a38f72e938a5e0b578cfab8e451bfa1e95d59fc313df"
+      },
+      "safe_timestamp_unix": 1790318807,
+      "safe_timestamp_utc": "2026-09-25T06:46:47Z"
+    },
+    {
+      "chain": "base",
+      "rpc_host": "mainnet.base.org",
+      "response_id": 101,
+      "rpc_error": null,
+      "safe_header": {
+        "number": "0x315df11",
+        "hash": "0xb4a719c69abd5799942ad6be592a1a06ff683843efc1ff187a49ecdf4c48eeae",
+        "timestamp": "0x6ab61b05",
+        "parentHash": "0xbada0ec0f7a942298e09bd0f63c875900f1742300e44f0b5b7b49630e8ad65c4"
+      },
+      "safe_timestamp_unix": 1790319365,
+      "safe_timestamp_utc": "2026-09-25T06:56:05Z"
+    },
+    {
+      "chain": "ethereum",
+      "rpc_host": "ethereum-rpc.publicnode.com",
+      "state_block_hash": "0xc273ddf05ea9419078f7de501490d6c8d7f1b80d105c76b4bebf8e909df8c2e6",
+      "hash_pinned_eip1898": true,
+      "batch_members_sent": 8,
+      "received_response_ids": [
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207
+      ],
+      "response_member_count": 8,
+      "members": [
+        {
+          "id": 200,
+          "code_name": "pool",
+          "code_bytes": 22628
+        },
+        {
+          "id": 201,
+          "code_name": "messaging",
+          "code_bytes": 21135
+        },
+        {
+          "id": 202,
+          "code_name": "diamond",
+          "code_bytes": 5176
+        },
+        {
+          "id": 203,
+          "code_name": "facet",
+          "code_bytes": 9106
+        },
+        {
+          "id": 204,
+          "call_name": "stargateImpls(13)",
+          "result": "0x00000000000000000000000077b2043768d28e9c9ab44e1abfc95944bce57931",
+          "result_hex_chars": 66
+        },
+        {
+          "id": 205,
+          "call_name": "facetAddress(0x14d53077)",
+          "result": "0x000000000000000000000000bf4ad13fa0e6e05916a78c201f147c5152dbe1c9",
+          "result_hex_chars": 66
+        },
+        {
+          "id": 206,
+          "call_name": "pool.getAddressConfig()",
+          "result": "0x0000000000000000000000003e368b6c95c6fefb7a16dcc0d756389f3c658a06000000000000000000000000e37f7c80ced04c4f243c0fd04a5510d663cb88b50000000000000000000000001041d127b2d4bc700f0f563883bc6895026069180000000000000000000000006d6620efa72948c5f68a3c8646d58c00d3f4a9800000000000000000000000009b4d17b45d60b8173a5904b85a7baaec291e91730000000000000000000000000000000000000000000000000000000000000000",
+          "result_hex_chars": 386
+        },
+        {
+          "id": 207,
+          "call_name": "facet.tokenMessaging()",
+          "result": "0x0000000000000000000000006d6620efa72948c5f68a3c8646d58c00d3f4a980",
+          "result_hex_chars": 66
+        }
+      ],
+      "code_hashes": {
+        "pool": {
+          "bytes": 22628,
+          "keccak256": "0x1d390e7a18e79e4d3c3402aba4453b8f6ef1f7dc9de5dc6fab5b5d88d723639a"
+        },
+        "messaging": {
+          "bytes": 21135,
+          "keccak256": "0xef22a8fb9189866e656f799d686af5c5cdeb0ab47e1baa4f636f6d8253af970c"
+        },
+        "diamond": {
+          "bytes": 5176,
+          "keccak256": "0x828f8a0694bfba25c80a406283f149d701cdc944acbbc18b57315cf157db9220"
+        },
+        "facet": {
+          "bytes": 9106,
+          "keccak256": "0x23db18775c54e7533c4a6cc48d1dee2d2f43957a7a1ec25e48b06a519119dde7"
+        }
+      },
+      "call_results": {
+        "stargateImpls(13)": "0x00000000000000000000000077b2043768d28e9c9ab44e1abfc95944bce57931",
+        "facetAddress(0x14d53077)": "0x000000000000000000000000bf4ad13fa0e6e05916a78c201f147c5152dbe1c9",
+        "pool.getAddressConfig()": "0x0000000000000000000000003e368b6c95c6fefb7a16dcc0d756389f3c658a06000000000000000000000000e37f7c80ced04c4f243c0fd04a5510d663cb88b50000000000000000000000001041d127b2d4bc700f0f563883bc6895026069180000000000000000000000006d6620efa72948c5f68a3c8646d58c00d3f4a9800000000000000000000000009b4d17b45d60b8173a5904b85a7baaec291e91730000000000000000000000000000000000000000000000000000000000000000",
+        "facet.tokenMessaging()": "0x0000000000000000000000006d6620efa72948c5f68a3c8646d58c00d3f4a980"
+      },
+      "decoded_calls": {
+        "stargateImpls(13)": "0x77b2043768d28e9c9ab44e1abfc95944bce57931",
+        "facetAddress(0x14d53077)": "0xbf4ad13fa0e6e05916a78c201f147c5152dbe1c9",
+        "pool.getAddressConfig.addresses": [
+          "0x3e368b6c95c6fefb7a16dcc0d756389f3c658a06",
+          "0xe37f7c80ced04c4f243c0fd04a5510d663cb88b5",
+          "0x1041d127b2d4bc700f0f563883bc689502606918",
+          "0x6d6620efa72948c5f68a3c8646d58c00d3f4a980",
+          "0x9b4d17b45d60b8173a5904b85a7baaec291e9173",
+          "0x0000000000000000000000000000000000000000"
+        ],
+        "facet.tokenMessaging()": "0x6d6620efa72948c5f68a3c8646d58c00d3f4a980"
+      },
+      "checks": {
+        "exactly_eight_unique_response_ids": true,
+        "all_members_have_no_rpc_error": true,
+        "abi_outputs_decode": true,
+        "stargateImpls(13)_maps_official_pool": true,
+        "facetAddress_maps_origin_main_facet": true,
+        "pool_config_fourth_address_matches_official_messaging": true,
+        "facet_tokenMessaging_matches_official_messaging": true,
+        "pool_code_nonempty": true,
+        "messaging_code_nonempty": true,
+        "diamond_code_nonempty": true,
+        "facet_code_nonempty": true,
+        "diamond_code_hash_matches_origin_main_pin": true,
+        "facet_code_hash_matches_origin_main_pin": true,
+        "messaging_code_hash_matches_origin_main_pin": true
+      },
+      "semantic_status": "pass"
+    },
+    {
+      "chain": "base",
+      "rpc_host": "mainnet.base.org",
+      "state_block_hash": "0xb4a719c69abd5799942ad6be592a1a06ff683843efc1ff187a49ecdf4c48eeae",
+      "hash_pinned_eip1898": true,
+      "batch_members_sent": 8,
+      "received_response_ids": [
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227
+      ],
+      "response_member_count": 8,
+      "members": [
+        {
+          "id": 220,
+          "code_name": "pool",
+          "code_bytes": 22628
+        },
+        {
+          "id": 221,
+          "code_name": "messaging",
+          "code_bytes": 21135
+        },
+        {
+          "id": 222,
+          "code_name": "diamond",
+          "code_bytes": 5176
+        },
+        {
+          "id": 223,
+          "code_name": "facet",
+          "code_bytes": 11750
+        },
+        {
+          "id": 224,
+          "call_name": "stargateImpls(13)",
+          "result": "0x000000000000000000000000dc181bd607330aeebef6ea62e03e5e1fb4b6f7c7",
+          "result_hex_chars": 66
+        },
+        {
+          "id": 225,
+          "call_name": "facetAddress(0x14d53077)",
+          "result": "0x0000000000000000000000006e378c84e657c57b2a8d183cff30ee5cc8989b61",
+          "result_hex_chars": 66
+        },
+        {
+          "id": 226,
+          "call_name": "pool.getAddressConfig()",
+          "result": "0x00000000000000000000000017e450be3ba9557f2378e20d64ad417e59ef9a34000000000000000000000000e37f7c80ced04c4f243c0fd04a5510d663cb88b5000000000000000000000000d47b03ee6d86cf251ee7860fb2acf9f91b9fd4d70000000000000000000000005634c4a5fed09819e3c46d86a965dd9447d86e4700000000000000000000000012dc9256acc9895b076f6638d628382881e62cee0000000000000000000000000000000000000000000000000000000000000000",
+          "result_hex_chars": 386
+        },
+        {
+          "id": 227,
+          "call_name": "facet.tokenMessaging()",
+          "result": "0x0000000000000000000000005634c4a5fed09819e3c46d86a965dd9447d86e47",
+          "result_hex_chars": 66
+        }
+      ],
+      "code_hashes": {
+        "pool": {
+          "bytes": 22628,
+          "keccak256": "0xc2021862bb6d1b44c6f4ec866c51979e9f95dfc4afd77e0ece9215bb38deff84"
+        },
+        "messaging": {
+          "bytes": 21135,
+          "keccak256": "0x39a8d1450f34fc251bc4e7a0ca2af68a26802e21f6f8630b62bd3681d4fee784"
+        },
+        "diamond": {
+          "bytes": 5176,
+          "keccak256": "0x5efa2ebe1ed041ce83c069f1cedc04945f1438680dacf5f88068ef6c7d94110a"
+        },
+        "facet": {
+          "bytes": 11750,
+          "keccak256": "0xadfcb37ab133b53cd78cd2a81d408f9317c386cd5891ce37730a755db7984113"
+        }
+      },
+      "call_results": {
+        "stargateImpls(13)": "0x000000000000000000000000dc181bd607330aeebef6ea62e03e5e1fb4b6f7c7",
+        "facetAddress(0x14d53077)": "0x0000000000000000000000006e378c84e657c57b2a8d183cff30ee5cc8989b61",
+        "pool.getAddressConfig()": "0x00000000000000000000000017e450be3ba9557f2378e20d64ad417e59ef9a34000000000000000000000000e37f7c80ced04c4f243c0fd04a5510d663cb88b5000000000000000000000000d47b03ee6d86cf251ee7860fb2acf9f91b9fd4d70000000000000000000000005634c4a5fed09819e3c46d86a965dd9447d86e4700000000000000000000000012dc9256acc9895b076f6638d628382881e62cee0000000000000000000000000000000000000000000000000000000000000000",
+        "facet.tokenMessaging()": "0x0000000000000000000000005634c4a5fed09819e3c46d86a965dd9447d86e47"
+      },
+      "decoded_calls": {
+        "stargateImpls(13)": "0xdc181bd607330aeebef6ea62e03e5e1fb4b6f7c7",
+        "facetAddress(0x14d53077)": "0x6e378c84e657c57b2a8d183cff30ee5cc8989b61",
+        "pool.getAddressConfig.addresses": [
+          "0x17e450be3ba9557f2378e20d64ad417e59ef9a34",
+          "0xe37f7c80ced04c4f243c0fd04a5510d663cb88b5",
+          "0xd47b03ee6d86cf251ee7860fb2acf9f91b9fd4d7",
+          "0x5634c4a5fed09819e3c46d86a965dd9447d86e47",
+          "0x12dc9256acc9895b076f6638d628382881e62cee",
+          "0x0000000000000000000000000000000000000000"
+        ],
+        "facet.tokenMessaging()": "0x5634c4a5fed09819e3c46d86a965dd9447d86e47"
+      },
+      "checks": {
+        "exactly_eight_unique_response_ids": true,
+        "all_members_have_no_rpc_error": true,
+        "abi_outputs_decode": true,
+        "stargateImpls(13)_maps_official_pool": true,
+        "facetAddress_maps_origin_main_facet": true,
+        "pool_config_fourth_address_matches_official_messaging": true,
+        "facet_tokenMessaging_matches_official_messaging": true,
+        "pool_code_nonempty": true,
+        "messaging_code_nonempty": true,
+        "diamond_code_nonempty": true,
+        "facet_code_nonempty": true,
+        "diamond_code_hash_matches_origin_main_pin": true,
+        "facet_code_hash_matches_origin_main_pin": true,
+        "messaging_code_hash_matches_origin_main_pin": true
+      },
+      "semantic_status": "pass"
+    }
+  ],
+  "semantic_status": "pass",
+  "stop_reason": null,
+  "safe_header_timestamp_delta_seconds": 558,
+  "followup_minimum_spacing_met": true,
+  "cumulative_physical_posts_across_attempts": 7
+}
