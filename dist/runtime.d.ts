@@ -1,6 +1,7 @@
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
+import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
@@ -39,6 +40,7 @@ export interface CoreDependencies {
     readonly relayPrepare?: RelayUnsignedPrepareService;
     readonly relayPreflight?: RelayReadOnlyPreflightService;
     readonly relayRetire?: RelayRetireService;
+    readonly relayStatus?: RelayKeylessStatusService;
     readonly stargateNative?: StargateNativeService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
@@ -95,6 +97,7 @@ export declare class RuntimeContext {
     readonly relayPrepare?: RelayUnsignedPrepareService;
     readonly relayPreflight?: RelayReadOnlyPreflightService;
     readonly relayRetire?: RelayRetireService;
+    readonly relayStatus?: RelayKeylessStatusService;
     readonly stargateNative?: StargateNativeService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;

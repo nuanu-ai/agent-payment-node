@@ -10,6 +10,7 @@ export type CommandRequest =
   | { readonly command: "relay.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.preflight"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.retire"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "relay.status"; readonly operationId: string }
   | { readonly command: "stargate.native.prepare"; readonly profile: string; readonly amountAtomic: string;
       readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "stargate.native.execute" | "stargate.native.observe" | "stargate.native.status" | "stargate.native.receipt"; readonly operationId: string }
