@@ -5,7 +5,7 @@ import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
-import type { GaslessAssetPolicy } from "./asset-policy.js";
+import { gaslessPolicyChain, type GaslessAssetPolicy } from "./asset-policy.js";
 import type { GaslessIntent, GaslessRequest } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import type { GaslessOperationRepository } from "./operation-repository.js";
@@ -44,7 +44,7 @@ export class GaslessPreparation {
       }
       assertGaslessExecutionChain(request.chainId);
       const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
-      const allowlist = request.chainId === 8453 ? await this.o.policy.prepare({ profile, owner: binding.owner,
+      const allowlist = gaslessPolicyChain(request.chainId) !== null ? await this.o.policy.prepare({ profile, owner: binding.owner,
         request, token: row.token }, operationId) : undefined;
       await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, binding.owner.address);
       if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {

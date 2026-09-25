@@ -19,16 +19,22 @@ The local path reserves a maximum USDC fee and sends the remainder. Circle's
 token paymaster supplies native gas; APN approves and accounts for the fee in
 canonical USDC.
 
-For **local Base USDC** (`eip155:8453`), prepare requires an active owner asset
-policy for the exact local wallet account and canonical token
-`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Admit the `gasless` rail with
-positive per-operation and UTC daily caps and this exact mechanism:
+For **local Base USDC** (`eip155:8453`) and **local Ethereum USDC** (`eip155:1`),
+prepare requires an active owner asset policy for the exact local wallet account
+and canonical token on that chain. Base uses
+`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`; Ethereum uses
+`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`. Admit the `gasless` rail
+with positive per-operation and UTC daily caps and the corresponding exact mechanism:
 
 ```json
 { "provider": "local", "reference": "eip155:8453:0x0578cFB241215b77442a541325d6A4E6dFE700Ec" }
 ```
 
-The reference names the Base Circle USDC paymaster in APN's pinned deployment
+```json
+{ "provider": "local", "reference": "eip155:1:0x0578cFB241215b77442a541325d6A4E6dFE700Ec" }
+```
+
+Each reference names the chain's Circle USDC paymaster in APN's pinned deployment
 registry. Preparation saves the active policy digest, revision, activation and
 mechanism. Approval reserves the gross amount in the common asset usage ledger
 before the first signature. APN rechecks the active policy and remaining cap
@@ -39,7 +45,7 @@ replaces gross reserved usage with the proven USDC fee after allowance cleanup;
 the settlement record keeps that fee separate from the zero delivered amount.
 Safe permission invalidation also releases usage when
 the payment was never submitted; attempted submissions with unknown financial
-results remain reserved. Historical local Base
+results remain reserved. Historical unbound local Base or Ethereum
 operations without this binding cannot be approved or replayed; signed ones
 remain available for observation. These controls have synthetic test evidence,
 not a fresh mainnet transfer acceptance.

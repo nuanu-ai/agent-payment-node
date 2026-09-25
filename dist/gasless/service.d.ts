@@ -41,7 +41,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -147,7 +147,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -255,7 +255,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -367,7 +367,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -473,7 +473,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -581,7 +581,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -693,7 +693,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -799,7 +799,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -907,7 +907,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -1019,7 +1019,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -1125,7 +1125,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -1233,7 +1233,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -1348,7 +1348,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -1456,7 +1456,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -1566,7 +1566,7 @@ export declare class GaslessService {
                 policy_digest: string;
                 policy_revision: number;
                 activation_digest: string;
-                chain: "eip155:8453";
+                chain: "eip155:1" | "eip155:8453";
                 token: `0x${string}`;
                 mechanism: Readonly<{
                     provider: "local";
@@ -1672,7 +1672,7 @@ export declare class GaslessService {
     private dependencies;
     private execution;
     private save;
-    private legacyBase;
+    private legacyPolicyOperation;
     private legacyRecovery;
     private locked;
 }

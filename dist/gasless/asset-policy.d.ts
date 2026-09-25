@@ -1,9 +1,16 @@
 import type { StateStore } from "../state.js";
 import type { GaslessAllowlistBinding, GaslessIntent } from "./model.js";
+import type { GaslessChainId } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 export declare const BASE_GASLESS_CHAIN: "eip155:8453";
-/** The reference is the canonical Base Circle USDC paymaster, never a caller-supplied URL or alias. */
-export declare function baseLocalGaslessMechanism(): {
+export declare const ETHEREUM_GASLESS_CHAIN: "eip155:1";
+export declare function gaslessPolicyChain(chainId: GaslessChainId): typeof BASE_GASLESS_CHAIN | typeof ETHEREUM_GASLESS_CHAIN | null;
+/** The reference names the canonical Circle USDC paymaster for the selected network. */
+export declare function localGaslessMechanism(chainId: GaslessChainId): {
+    provider: "local";
+    reference: string;
+};
+export declare const baseLocalGaslessMechanism: () => {
     provider: "local";
     reference: string;
 };

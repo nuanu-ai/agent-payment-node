@@ -6,15 +6,26 @@ import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger
 import { gaslessDeployment } from "./registry.js";
 import { gaslessFailure } from "./validation.js";
 export const BASE_GASLESS_CHAIN = "eip155:8453";
-/** The reference is the canonical Base Circle USDC paymaster, never a caller-supplied URL or alias. */
-export function baseLocalGaslessMechanism() {
-    return { provider: "local",
-        reference: `${BASE_GASLESS_CHAIN}:${gaslessDeployment(8453).paymaster}` };
+export const ETHEREUM_GASLESS_CHAIN = "eip155:1";
+export function gaslessPolicyChain(chainId) {
+    return chainId === 8453 ? BASE_GASLESS_CHAIN : chainId === 1 ? ETHEREUM_GASLESS_CHAIN : null;
 }
-const identity = (intent) => ({
-    account: intent.owner.address, chain: BASE_GASLESS_CHAIN,
-    asset: { kind: "token", identifier: gaslessDeployment(8453).token },
-});
+/** The reference names the canonical Circle USDC paymaster for the selected network. */
+export function localGaslessMechanism(chainId) {
+    const chain = gaslessPolicyChain(chainId);
+    if (chain === null)
+        return refused("gasless_allowlist_unsupported_chain");
+    return { provider: "local",
+        reference: `${chain}:${gaslessDeployment(chainId).paymaster}` };
+}
+export const baseLocalGaslessMechanism = () => localGaslessMechanism(8453);
+const identity = (intent) => {
+    const chain = gaslessPolicyChain(intent.request.chainId);
+    if (chain === null)
+        return refused("gasless_allowlist_unsupported_chain");
+    return { account: intent.owner.address, chain,
+        asset: { kind: "token", identifier: gaslessDeployment(intent.request.chainId).token } };
+};
 const at = (now) => new Date(now);
 const refused = (reason) => gaslessFailure("APN_ALLOWLIST_REFUSED", reason);
 const corrupt = () => gaslessFailure("APN_STATE_CORRUPT", "gasless_allowlist_binding");
@@ -37,13 +48,16 @@ export class GaslessAssetPolicy {
         return active;
     }
     admit(active, intent, dailyUsageAtomic) {
-        const deployment = gaslessDeployment(8453), pin = baseLocalGaslessMechanism();
+        const chain = gaslessPolicyChain(intent.request.chainId);
+        if (chain === null)
+            return refused("gasless_allowlist_unsupported_chain");
+        const deployment = gaslessDeployment(intent.request.chainId), pin = localGaslessMechanism(intent.request.chainId);
         if (active.profile !== intent.profile || active.accounts.evm !== intent.owner.address ||
-            active.digest !== active.registry.policyDigest || intent.request.chainId !== 8453 || intent.token !== deployment.token) {
+            active.digest !== active.registry.policyDigest || intent.token !== deployment.token) {
             refused("gasless_allowlist_identity");
         }
         const date = at(this.now()).toISOString();
-        const admission = evaluateAssetPolicy(active.registry, { chain: BASE_GASLESS_CHAIN,
+        const admission = evaluateAssetPolicy(active.registry, { chain,
             asset: { kind: "token", identifier: deployment.token }, rail: "gasless",
             amountAtomic: intent.request.grossAtomic, dailyUsageAtomic,
             asOfDate: date.slice(0, 10), asOf: date });
@@ -56,14 +70,17 @@ export class GaslessAssetPolicy {
         const active = await this.active(intent.profile);
         const account = identity(intent), usage = await this.usage.usage(account, at(this.now()));
         this.admit(active, intent, usage.amountAtomic);
+        const chain = gaslessPolicyChain(intent.request.chainId);
+        if (chain === null)
+            return refused("gasless_allowlist_unsupported_chain");
         return { policyDigest: active.digest, policyRevision: active.revision,
-            activationDigest: active.activationDigest, chain: BASE_GASLESS_CHAIN,
-            token: gaslessDeployment(8453).token, mechanism: baseLocalGaslessMechanism(),
+            activationDigest: active.activationDigest, chain,
+            token: gaslessDeployment(intent.request.chainId).token, mechanism: localGaslessMechanism(intent.request.chainId),
             reservationId: assetUsageReservationId(account, operationId) };
     }
     /** Recheck the owner activation and caps before every first signature, disclosure and dispatch. */
     async assert(op, requireReservation) {
-        if (op.intent.request.chainId !== 8453)
+        if (gaslessPolicyChain(op.intent.request.chainId) === null)
             return;
         const bound = op.intent.allowlist;
         if (bound === undefined)
@@ -87,7 +104,7 @@ export class GaslessAssetPolicy {
         this.admit(active, op.intent, other.toString());
     }
     async reserve(op) {
-        if (op.intent.request.chainId !== 8453)
+        if (gaslessPolicyChain(op.intent.request.chainId) === null)
             return;
         await this.assert(op, false);
         const bound = op.intent.allowlist;
@@ -105,7 +122,7 @@ export class GaslessAssetPolicy {
     }
     /** A saved operation is authoritative; a crash between journal and ledger writes is repaired on the next read. */
     async reconcile(op) {
-        if (op.intent.request.chainId !== 8453 || op.intent.allowlist === undefined)
+        if (gaslessPolicyChain(op.intent.request.chainId) === null || op.intent.allowlist === undefined)
             return;
         this.assertBinding(op);
         const bound = op.intent.allowlist, account = identity(op.intent);
@@ -168,8 +185,9 @@ export class GaslessAssetPolicy {
     }
     assertBinding(op) {
         const bound = op.intent.allowlist;
-        if (bound === undefined || bound.chain !== BASE_GASLESS_CHAIN || bound.token !== gaslessDeployment(8453).token ||
-            canonicalJson(bound.mechanism) !== canonicalJson(baseLocalGaslessMechanism()) ||
+        if (bound === undefined || bound.chain !== gaslessPolicyChain(op.intent.request.chainId) ||
+            bound.token !== gaslessDeployment(op.intent.request.chainId).token ||
+            canonicalJson(bound.mechanism) !== canonicalJson(localGaslessMechanism(op.intent.request.chainId)) ||
             bound.reservationId !== assetUsageReservationId(identity(op.intent), op.operationId))
             corrupt();
     }

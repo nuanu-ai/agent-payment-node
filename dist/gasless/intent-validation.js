@@ -1,5 +1,5 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
-import { BASE_GASLESS_CHAIN, baseLocalGaslessMechanism } from "./asset-policy.js";
+import { gaslessPolicyChain, localGaslessMechanism } from "./asset-policy.js";
 import { assertGaslessSnapshot, gaslessFee, gaslessFeeCapCovers, validateGaslessStoredOffer } from "./economics.js";
 import { gaslessDeployment, gaslessIntentAsset, gaslessProtocolHash } from "./registry.js";
 import { intentSchema } from "./schema.js";
@@ -26,9 +26,9 @@ export function validateGaslessIntent(value) {
         i.policyHash !== hashObject({ identity: "apn.gasless.foreground-approval.v1", request: r }) ||
         i.unsignedEnvelopeHash !== hashObject(gaslessEnvelopeBinding(i)))
         gaslessFailure("APN_STATE_CORRUPT", "gasless_intent_binding");
-    if (i.allowlist !== undefined && (r.chainId !== 8453 || i.allowlist.chain !== BASE_GASLESS_CHAIN ||
+    if (i.allowlist !== undefined && (gaslessPolicyChain(r.chainId) === null || i.allowlist.chain !== gaslessPolicyChain(r.chainId) ||
         i.allowlist.token !== row.token || i.allowlist.policyRevision < 1 ||
-        canonicalJson(i.allowlist.mechanism) !== canonicalJson(baseLocalGaslessMechanism()))) {
+        canonicalJson(i.allowlist.mechanism) !== canonicalJson(localGaslessMechanism(r.chainId)))) {
         gaslessFailure("APN_STATE_CORRUPT", "gasless_allowlist_binding");
     }
     if ([GASLESS_ZERO_ADDRESS, i.owner.address, i.token, i.paymaster, i.entryPoint, i.delegate].includes(r.recipient)) {

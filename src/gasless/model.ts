@@ -118,12 +118,12 @@ export interface GaslessSnapshot extends GaslessAccountState {
   readonly maxFeePerGas: string;
   readonly maxPriorityFeePerGas: string;
 }
-/** Frozen owner activation for the local Base USDC rail. Absent only on historical journals. */
+/** Frozen owner activation for local Base or Ethereum USDC. Absent on historical journals. */
 export interface GaslessAllowlistBinding {
   readonly policyDigest: string;
   readonly policyRevision: number;
   readonly activationDigest: string;
-  readonly chain: "eip155:8453";
+  readonly chain: "eip155:8453" | "eip155:1";
   readonly token: Address;
   readonly mechanism: Readonly<{ provider: "local"; reference: string }>;
   readonly reservationId: string;
