@@ -2,16 +2,20 @@
 import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
+import { MacOSLoginKeychainSecret } from "../macos-keychain.js";
 import { OperationService } from "../operation-service.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { StateStore } from "../state.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
+import { RelayEncryptedApprovalCustody } from "./approval-effect.js";
 export class RelayRetireService {
     state;
     clock;
-    constructor(state, clock) {
+    wrapping;
+    constructor(state, clock, wrapping = new MacOSLoginKeychainSecret()) {
         this.state = state;
         this.clock = clock;
+        this.wrapping = wrapping;
     }
     async retire(input) {
         if (input.profile !== "default" || !/^[a-f0-9]{64}$/u.test(input.operationId))
@@ -29,16 +33,17 @@ export class RelayRetireService {
             const retirements = new RelayRetirementRepository(this.state.root);
             const existing = await retirements.load(op);
             // Any effect intent, including a pending journal, makes local retirement unsafe.
-            if (await new RelayEffectJournalRepository(this.state.root).load(profileHash, input.operationId) !== null ||
-                await new AssetUsageLedger(this.state.root).hasMatchingRelayReservation(op.sourceAccount, op.policyDigest, op.amountAtomic)) {
-                throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because effect or usage state exists.");
+            if (await new RelayEffectJournalRepository(this.state.root).load(profileHash, input.operationId) !== null) {
+                throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because an effect journal exists.");
             }
-            if (existing !== null)
-                return publicRelayUnsignedOperation(op, existing);
-            const now = this.clock.now();
-            if (!Number.isFinite(now.getTime()))
-                throw new ApnError("APN_INVALID_INPUT", "Relay retirement clock is invalid.");
-            return publicRelayUnsignedOperation(op, await retirements.persistLocked(op, now.toISOString()));
+            return new RelayEncryptedApprovalCustody(this.state, this.wrapping).withNoMaterial(op, async () => new AssetUsageLedger(this.state.root).withNoMatchingRelayReservation(op.sourceAccount, op.policyDigest, op.amountAtomic, async () => {
+                if (existing !== null)
+                    return publicRelayUnsignedOperation(op, existing);
+                const now = this.clock.now();
+                if (!Number.isFinite(now.getTime()))
+                    throw new ApnError("APN_INVALID_INPUT", "Relay retirement clock is invalid.");
+                return publicRelayUnsignedOperation(op, await retirements.persistLocked(op, now.toISOString()));
+            }));
         });
     }
 }

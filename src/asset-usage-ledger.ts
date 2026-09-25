@@ -86,26 +86,22 @@ type ReservationBody = Omit<AssetUsageReservation, "reservationDigest">;
 export class AssetUsageLedger extends SecureStateStore {
   private initialized: Promise<void> | undefined;
 
-  /** Relay and this ledger hash idempotency keys in separate domains. Match the
-   * available policy and payment identity conservatively before retirement. */
-  async hasMatchingRelayReservation(account: string, policyDigest: string | undefined, amountAtomic: string): Promise<boolean> {
+  /** Relay and this ledger hash idempotency keys in separate domains. Hold the
+   * exact Ethereum USDC bucket lock through the caller's retirement write. */
+  async withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined,
+    amountAtomic: string, action: () => Promise<T>): Promise<T> {
     if (policyDigest !== undefined) digest(policyDigest, "Policy digest");
+    const identity = validateIdentity({ account: getAddress(account), chain: "eip155:1",
+      asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" } });
     await this.ready();
-    for (const entry of await this.readDirectory("asset-usage")) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !DIGEST.test(entry.name)) corrupt("The usage ledger bucket is invalid.");
-      for (const item of await this.readDirectory(`asset-usage/${entry.name}`)) {
-        if (!item.isFile() || item.isSymbolicLink() || !item.name.endsWith(".json") || !DIGEST.test(item.name.slice(0, -5))) corrupt("The usage ledger entry is invalid.");
-        const value = await this.readJson(`asset-usage/${entry.name}/${item.name}`);
-        if (value === null) corrupt("A usage reservation disappeared during a protected read.");
-        const record = validateAssetUsageReservation(value);
-        if (record.reservationId !== item.name.slice(0, -5) || this.bucketDirectory(exactIdentity(record)) !== `asset-usage/${entry.name}`) corrupt("The usage reservation path is invalid.");
-        if (record.chain === "eip155:1" && record.account.toLowerCase() === account.toLowerCase() &&
-          record.asset.kind === "token" && record.asset.identifier.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" &&
-          record.rail === "bridge" && (policyDigest === undefined || record.policyDigest === policyDigest) &&
-          record.amountAtomic === amountAtomic) return true;
+    return this.withLocks([this.bucketLock(identity)], async () => {
+      const records = await this.loadBucket(identity);
+      if (records.some(record => record.rail === "bridge" &&
+        (policyDigest === undefined || record.policyDigest === policyDigest) && record.amountAtomic === amountAtomic)) {
+        throw blocked("Relay retirement is refused because a matching usage reservation exists.");
       }
-    }
-    return false;
+      return action();
+    });
   }
 
   async reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation> {

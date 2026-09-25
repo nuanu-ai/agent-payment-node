@@ -647,7 +647,8 @@ Relay exposes unsigned prepare, read-only preflight, and local retirement. Retir
 an untouched prepared quote with `apn relay retire --profile default --operation <id>`
 to release the profile for a fresh quote under a new idempotency key. The saved
 quote remains intact; status reports `retired`. Retirement refuses any effect
-journal or usage reservation and makes the old quote ineligible for preflight.
+journal, matching usage reservation, or encrypted approval custody entry and
+makes the old quote ineligible for preflight.
 Any Relay execution signer must call `assertExclusiveRelayExecutionOwner` immediately
 before signing and again immediately before its first submission. The helper
 holds the shared EVM address lock while checking public profile and wallet
