@@ -53,7 +53,7 @@ import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RelayExecutionConfirmationSummary {
   readonly operationId: string;
   readonly sourceChainId: 1;
-  readonly destinationChainId: 56;
+  readonly destinationChainId: 56 | 8453;
   readonly sourceAccount: string;
   readonly sourceToken: string;
   readonly amountAtomic: string;

@@ -20,6 +20,7 @@ import type { StateStore } from "../state.js";
 import { RelayApprovalEffectService, RelayEncryptedApprovalCustody, type RelayApprovalObservation, type RelayApprovalPorts } from "./approval-effect.js";
 import { RelayDepositEffectService, RelayEncryptedDepositCustody, type RelayDepositObservation, type RelayDepositPorts } from "./deposit-effect.js";
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
+import { relayExecutionRoute } from "./execution-route.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 
@@ -31,7 +32,7 @@ function corrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT"
 export interface RelayExecutionSummary {
   readonly operationId: string;
   readonly sourceChainId: 1;
-  readonly destinationChainId: 56;
+  readonly destinationChainId: 56 | 8453;
   readonly sourceAccount: string;
   readonly sourceToken: string;
   readonly amountAtomic: string;
@@ -252,14 +253,15 @@ export class RelayEthereumSourceRuntime {
 
   private assertPrepared(op: RelayUnsignedOperation): void {
     validateRelayUnsignedOperation(op);
-    if (op.sourceChainId !== 1 || op.destinationChainId !== 56 || op.quote === undefined || op.statusLocator === undefined ||
+    if (op.sourceChainId !== 1 || op.quote === undefined || op.statusLocator === undefined ||
       op.policyDigest === undefined || op.policyRevision === undefined || op.approvalNetworkFeeCeilingWei === undefined ||
       op.depositNetworkFeeCeilingWei === undefined || op.quote.statusLocator?.requestId !== op.statusLocator.requestId ||
       op.quote.quoteDigest !== op.quoteDigest) blocked("saved_quote_or_request_id_required");
+    relayExecutionRoute(op);
   }
   private summary(op: RelayUnsignedOperation): RelayExecutionSummary {
     this.assertPrepared(op);
-    return { operationId: op.operationId, sourceChainId: 1, destinationChainId: 56, sourceAccount: op.sourceAccount,
+    return { operationId: op.operationId, sourceChainId: 1, destinationChainId: op.destinationChainId as 56 | 8453, sourceAccount: op.sourceAccount,
       sourceToken: ETHEREUM_USDC, amountAtomic: op.amountAtomic, recipient: op.recipient,
       minOutputAtomic: op.minOutputAtomic, deadline: op.deadline, requestId: op.statusLocator!.requestId,
       quoteDigest: op.quoteDigest, approvalNetworkFeeCeilingWei: op.approvalNetworkFeeCeilingWei!,
