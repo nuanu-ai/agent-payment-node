@@ -17,6 +17,8 @@ import {
 } from "./metamask-smart-account-record.js";
 import type { StateStore } from "./state.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
+import { stateCorrupt, stateSecurity } from "./secure-state-store.js";
+import { evmAddressLock } from "./evm-address-ownership.js";
 
 const ENVELOPE_VERSION = "apn.metamask-smart-account-permission-envelope.v1" as const;
 
@@ -55,12 +57,36 @@ export class EncryptedSmartAccountPermissionStore implements SmartAccountPermiss
     const envelope = parseEnvelope(value, profileHash);
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) corrupt("The Smart Account wrapping secret is missing.");
-    try { return decrypt(envelope, wrapping); }
+    try {
+      const record = decrypt(envelope, wrapping);
+      if (record.profile_hash !== profileHash) corrupt("Smart Account permission path binding is invalid.");
+      return record;
+    }
     finally { wrapping.fill(0); }
+  }
+
+  /** Scan only while the caller holds evmAddressLock(address). Every entry is authenticated. */
+  async listAll(): Promise<readonly SmartAccountPermissionRecord[]> {
+    const profileHashes = await this.files.profileHashes();
+    const records: SmartAccountPermissionRecord[] = [];
+    for (const profileHash of profileHashes) {
+      const record = await this.load(profileHash);
+      if (record === null) stateCorrupt("Smart Account permission disappeared during ownership check.");
+      records.push(record);
+    }
+    return records;
   }
 
   async save(record: SmartAccountPermissionRecord): Promise<void> {
     validateProtectedRecord(record);
+    if (isGrantedPermissionRecord(record)) {
+      await this.state.withLocks([evmAddressLock(record.owner_address)], async () => await this.writeProtected(record));
+      return;
+    }
+    await this.writeProtected(record);
+  }
+
+  private async writeProtected(record: SmartAccountPermissionRecord): Promise<void> {
     const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
     const salt = randomBytes(32);
     const nonce = randomBytes(12);
@@ -117,6 +143,16 @@ export class EncryptedSmartAccountPermissionStore implements SmartAccountPermiss
 }
 
 class PermissionEnvelopeState extends SecureStateStore {
+  async profileHashes(): Promise<readonly string[]> {
+    const entries = await this.readDirectory("smart-account-permissions");
+    return entries.map((entry) => {
+      if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) {
+        stateSecurity("Smart Account permissions directory contains an unsafe entry.");
+      }
+      return entry.name.slice(0, -".json".length);
+    });
+  }
+
   async load(profileHash: string): Promise<unknown | null> {
     stateIdentifier(profileHash, "Smart Account profile hash");
     return await this.readJson(join("smart-account-permissions", `${profileHash}.json`));
