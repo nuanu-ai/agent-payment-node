@@ -28,7 +28,7 @@
         "@solana/kit": "8.2.0",
         "@toruslabs/ethereum-controllers": "9.12.0",
         "@x402/core": "2.23.0",
-        "@x402/evm": "2.23.0",
+        "@x402/evm": "2.24.0",
         "awal": "2.12.1",
         "tronweb": "6.5.0",
         "viem": "2.55.19",
@@ -11414,13 +11414,22 @@
       }
     },
     "node_modules/@x402/evm": {
-      "version": "2.23.0",
-      "resolved": "https://registry.npmjs.org/@x402/evm/-/evm-2.23.0.tgz",
-      "integrity": "sha512-Ikaya5c0/qV/pdFRGfGSdlUX3ELZaUgrddsmmXZHPANtIAQ5uFH15+O+9Bt4PqdAXqCuS43WskJ7HgiLn/uW2g==",
+      "version": "2.24.0",
+      "resolved": "https://registry.npmjs.org/@x402/evm/-/evm-2.24.0.tgz",
+      "integrity": "sha512-npH4A8P/HurcMOjIsri0VrHCb/TNbiIZgCrUrL2c+rbuwpyOtIT+6KT/yfwD53ckOttEE44yJqeK32MCvJ1Tug==",
       "license": "Apache-2.0",
       "dependencies": {
-        "@x402/core": "~2.23.0",
+        "@x402/core": "~2.24.0",
         "viem": "^2.48.11",
+        "zod": "^3.24.2"
+      }
+    },
+    "node_modules/@x402/evm/node_modules/@x402/core": {
+      "version": "2.24.0",
+      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.24.0.tgz",
+      "integrity": "sha512-zKFbG+RgUhBXT9RcBQZGPW1cZXL9xpiTv68XSSuO1SMoobudmVvxYgP/bhoxJuAoqJjjEceeAhT4/EcA/wolrQ==",
+      "license": "Apache-2.0",
+      "dependencies": {
         "zod": "^3.24.2"
       }
     },
