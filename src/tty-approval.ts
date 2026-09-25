@@ -8,6 +8,7 @@ import type { EvmDirectBinding } from "./evm-direct.js";
 import type { RailApprovalPort } from "./direct-rail-ports.js";
 import { chainDisplay, type ChainPolicy, type ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { RelayExecutionConfirmationSummary } from "./runtime.js";
+import type { RelayExecutionAuthorizationPort } from "./relay/source-runtime.js";
 
 export const TTY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
@@ -49,7 +50,7 @@ export interface TtyTransferApprovalOptions {
 }
 
 /** A fresh foreground consent for each Relay source execution attempt. */
-export class TtyRelayExecuteConfirmation {
+export class TtyRelayExecuteConfirmation implements RelayExecutionAuthorizationPort {
   constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
 
   async confirm(summary: RelayExecutionConfirmationSummary): Promise<boolean> {
