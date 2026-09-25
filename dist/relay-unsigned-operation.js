@@ -1,7 +1,7 @@
 /** An immutable Relay quote projection. Its transactions are unsigned and have no execution path. */
 import { hashObject } from "./canonical.js";
 import { relayStatusLocator } from "./relay/quote.js";
-import { RELAY_BNB_SOURCE, relayNativeRoute } from "./relay/native-quote.js";
+import { relayNativeRoute } from "./relay/native-quote.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { z } from "zod";
@@ -57,13 +57,13 @@ export function validateRelayUnsignedOperation(value) {
         const quote = operation.nativeQuote;
         let route;
         try {
-            route = relayNativeRoute(operation.recipient);
+            route = relayNativeRoute(operation.sourceAccount, operation.recipient);
         }
         catch {
             return corrupt();
         }
         if (operation.quote !== undefined || operation.sourceChainId !== 56 || operation.destinationChainId !== route.chainId ||
-            operation.sourceAccount.toLowerCase() !== RELAY_BNB_SOURCE.toLowerCase() ||
+            operation.sourceAccount.toLowerCase() !== route.payer.toLowerCase() ||
             quote.routeReference !== route.reference || quote.schemaVersion !== "apn.relay-native-quote.v1" ||
             operation.approvalNetworkFeeCeilingWei !== undefined || operation.policyDigest === undefined ||
             operation.policyRevision === undefined || operation.depositNetworkFeeCeilingWei === undefined ||
