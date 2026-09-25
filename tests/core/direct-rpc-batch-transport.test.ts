@@ -137,6 +137,21 @@ test("batch rejects unsuccessful HTTP once with safe method and status only", as
   assert.equal(bodies.length, 1);
 });
 
+test("guarded Base raw send makes one POST on 429 and rejects the next attempt from persisted cooldown", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root); await state.initialize();
+  const bodies = mockHttps(t, () => ({ status: 429, raw: secret }));
+  const first = new HttpsBaseRpc(endpoint, { directGuardState: state });
+  first.armEvmDirectRpcGuard();
+  await assert.rejects(first.submitRawTransaction("0x01"), { code: "APN_RPC_RATE_LIMITED" });
+  assert.equal(bodies.length, 1);
+  assert.equal(JSON.parse(bodies[0]!).method, "eth_sendRawTransaction");
+  const second = new HttpsBaseRpc(endpoint, { directGuardState: state });
+  second.armEvmDirectRpcGuard();
+  await assert.rejects(second.submitRawTransaction("0x01"), { code: "APN_PROVIDER_UNAVAILABLE" });
+  assert.equal(bodies.length, 1);
+});
+
 test("batch refuses write methods before network and scalar calls retain string IDs", async (t) => {
   const bodies = mockHttps(t, (body) => {
     assert.equal(Array.isArray(body), false);

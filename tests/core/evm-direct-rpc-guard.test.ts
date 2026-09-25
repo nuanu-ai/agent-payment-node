@@ -12,18 +12,21 @@ test("direct EVM guard counts physical POSTs, caps at 24 and persists 750 ms sta
   const wait = async (ms: number) => { now += ms; };
   const first = new EvmDirectRpcGuard(state, 24, () => now, wait);
   for (let n = 0; n < 24; n += 1) {
-    await first.post("https://bsc-rpc.publicnode.com", async () => { starts += 1; return null; });
+    await first.post("https://base-rpc.publicnode.com", async () => { starts += 1; return null; });
   }
   assert.equal(first.physicalRequests, 24);
   assert.equal(starts, 24);
-  await assert.rejects(first.post("https://bsc-rpc.publicnode.com", async () => { starts += 1; }),
+  await assert.rejects(first.post("https://base-rpc.publicnode.com", async () => { starts += 1; }),
     { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.equal(starts, 24);
   const before = now;
   const second = new EvmDirectRpcGuard(state, 24, () => now, wait);
-  await second.post("https://bsc-rpc.publicnode.com", async () => { starts += 1; });
+  await second.post("https://eth-rpc.publicnode.com", async () => { starts += 1; });
   assert.equal(now - before, 750);
   assert.equal(starts, 25);
+  const third = new EvmDirectRpcGuard(state, 24, () => now, wait);
+  await third.post("https://bsc-rpc.publicnode.com", async () => { starts += 1; });
+  assert.equal(now - before, 1_500, "Base, Ethereum and BNB share persisted publicnode family pacing");
 });
 
 test("direct EVM guard makes a single attempt on 429 and retains provider cooldown", async t => {

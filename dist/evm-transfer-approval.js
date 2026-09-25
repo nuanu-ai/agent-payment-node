@@ -18,7 +18,7 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
     const binding = operation.evm;
     if (binding === undefined || operation.economics === undefined)
         throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
-    if (operation.chainId === 1 || operation.chainId === 56)
+    if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453)
         rpcPort.armEvmDirectRpcGuard?.();
     const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
     const grouped = asset.kind === "native" ? operation.chainId === 1 ? rpc.prepareEthereumNative?.() :

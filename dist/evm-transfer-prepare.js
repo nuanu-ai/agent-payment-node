@@ -66,7 +66,7 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
                 chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
                 asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
             const rpcPort = context.requireRpc();
-            if (selection.chainId === 1 || selection.chainId === 56)
+            if (selection.chainId === 1 || selection.chainId === 56 || selection.chainId === 8453)
                 rpcPort.armEvmDirectRpcGuard?.();
             const rpc = requireEvmRpc(rpcPort);
             const ethereumNative = selection.chainId === 1 && selection.token === "native";

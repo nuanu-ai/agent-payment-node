@@ -78,6 +78,7 @@ export class TransferService {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
             await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, wallet.address);
             const rpc = this.context.requireRpc();
+            rpc.armEvmDirectRpcGuard?.();
             await rpc.assertBaseChain();
             const data = transferData(recipient, amount.atomic);
             const [balances, nonceAtomic, fees] = await Promise.all([
@@ -162,6 +163,8 @@ export class TransferService {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
             const rpc = this.context.requireRpc();
+            if (operation.chainId === 8453)
+                rpc.armEvmDirectRpcGuard?.();
             const check = async () => await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
             if (operation.evm === undefined)
                 await check();
@@ -226,7 +229,7 @@ export class TransferService {
             throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
         if (found.providerDirect !== undefined)
             return await this.providerDirect.resume(operationId, waitSeconds);
-        if (found.evm?.asset.chainId === 1 || found.evm?.asset.chainId === 56)
+        if (found.chainId === 1 || found.chainId === 56 || found.chainId === 8453)
             this.context.requireRpc().armEvmDirectRpcGuard?.();
         if (waitSeconds !== undefined) {
             throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
