@@ -6,6 +6,7 @@ import type { GaslessEffectIdentity, GaslessIntent } from "../../src/gasless/mod
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import { GaslessObservationRpc, gaslessObservationRpcFactory,
   type GaslessObservationPacing } from "../../src/gasless/observation-rpc.js";
+import { withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { ObservationTransport, type ObservationFault } from "./gasless-fixtures/observation-transport.js";
@@ -260,6 +261,39 @@ test("explicit observer serializes and spaces calls without retrying an unavaila
       assert.equal(String(result.reason).includes("canary_provider_secret"), false);
     }
   }
+});
+
+test("explicit observation shares the 24 physical POST invocation cap", async t => {
+  const { operation } = await prepared(t, "final", "expected");
+  const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
+  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
+  const call = (rpc as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call.bind(rpc);
+  await withGaslessRpcInvocation(async () => {
+    for (let index = 0; index < 24; index += 1) await call("eth_chainId", []);
+    await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor), (error: any) =>
+      error.code === "APN_RPC_AMBIGUOUS" && error.details?.reason === "gasless_observation_rpc_unavailable");
+  });
+  assert.equal(transport.calls.length, 24);
+});
+
+test("explicit observation rejects a duplicate read-batch ID without single-read fallback", async t => {
+  const { operation } = await prepared(t, "bootstrap", "expected");
+  const delegate = await ObservationTransport.create(ENDPOINT, operation.intent);
+  let physical = 0, batches = 0;
+  const transport: GaslessTransport = { request: async (...args) => {
+    physical += 1;
+    const response = await delegate.request(...args), request = JSON.parse(args[2]!) as Json | Json[];
+    if (!Array.isArray(request)) return response;
+    batches += 1;
+    const rows = JSON.parse(response.body) as Json[];
+    rows[1]!.id = rows[0]!.id;
+    return { ...response, body: JSON.stringify(rows) };
+  } };
+  const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
+  await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor),
+    { code: "APN_RPC_PROTOCOL" });
+  assert.equal(batches, 1);
+  assert.equal(physical, 3, "chain, initial anchor, then one malformed proof batch");
 });
 
 test("one unavailable observation does not poison a later same-instance recovery", async t => {

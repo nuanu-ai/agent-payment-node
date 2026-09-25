@@ -42,6 +42,8 @@ test("local gasless owner abandonment refuses a terminal operation", async (t) =
   const approval = new AbandonApproval();
   const s = await gaslessFixture(temporary.root, 8453, { abandonApproval: approval }), { id } = await s.prepare();
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  assert.equal((await s.record(id)).state, "submitted_pending");
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
   assert.equal((await s.record(id)).state, "completed");
   s.now.setTime(s.now.getTime() + 360000);
   assert.equal((await s.core.execute({ command: "operation.abandon", operationId: id })).error?.code, "APN_OPERATION_BLOCKED");

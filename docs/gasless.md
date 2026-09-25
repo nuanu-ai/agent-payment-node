@@ -142,6 +142,7 @@ apn gasless transfer prepare --profile default --chain 8453 \
   --to <recipient-address> --amount 10 --max-fee 0.2 --min-received 9.8 \
   --idempotency-key <unique-key>
 apn gasless transfer approve --operation <operation-id>
+apn operation resume --operation <operation-id>
 apn operation status --operation <operation-id>
 apn receipt get --operation <operation-id>
 ```
@@ -163,6 +164,9 @@ foreground terminal. The code is derived from the full operation fingerprint,
 and for MetaMask also from the full operation ID, so it approves only this
 operation. MCP returns that exact
 CLI handoff and cannot satisfy this approval with injected automation.
+For a local wallet, a successful first send returns `submitted_pending` (or
+`unknown_finality` if its response is lost). Run `operation resume` to observe
+canonical finality and settlement. Approval never sends the same operation twice.
 
 The same global idempotency key and profile guards cover direct transfers,
 x402, Solana/TRON, LI.FI and gasless operations. Repeating the identical prepare

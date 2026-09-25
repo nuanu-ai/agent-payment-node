@@ -6,7 +6,7 @@ import { sha256 } from "../../../src/canonical.js";
 import type { GaslessTransport } from "../../../src/gasless/https.js";
 import type { GaslessIntent } from "../../../src/gasless/model.js";
 import { gaslessAsset, gaslessDeployment } from "../../../src/gasless/registry.js";
-import { GaslessRpc, gaslessBalanceSlot } from "../../../src/gasless/rpc.js";
+import { GaslessRpc, gaslessBalanceSlot, withGaslessRpcInvocation } from "../../../src/gasless/rpc.js";
 import { gaslessUserOperationHash } from "../../../src/gasless/wire.js";
 import { gaslessFixture } from "../gasless-helpers.js";
 
@@ -30,22 +30,25 @@ export async function bundledGaslessFixture(root: string) {
   const blockHash = `0x${sha256("bundler-budget-block")}`;
   const at = { number: "0x64", hash: blockHash, timestamp: `0x${Math.floor(s.now.getTime() / 1000).toString(16)}`,
     baseFeePerGas: "0xf4240" };
-  const calls: Array<{ method: string; bundler: boolean; afterApproval: boolean }> = [];
+  const calls: Array<{ method: string; methods: readonly string[]; bundler: boolean; afterApproval: boolean }> = [];
   const estimates: unknown[][] = [];
   let approved = false, limit = 20, intent: GaslessIntent | undefined;
-  let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees" | "decimals" | "layout" = "";
+  let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees" | "decimals" | "layout" |
+    "code" | "proxy" | "reorg" = "";
   let batchReply: (rows: Json[]) => unknown = rows => rows;
   let feeQuote: unknown;
   const transport: GaslessTransport = { request: async (endpoint, method, body) => {
     assert.equal(method, "POST"); assert.notEqual(body, null);
     const request = JSON.parse(body!) as Json | Json[], bundler = endpoint === BUNDLER_URL;
     assert.ok(bundler || endpoint === RPC_URL);
-    calls.push({ method: Array.isArray(request) ? "read_only_batch" : request.method, bundler, afterApproval: approved });
+    calls.push({ method: Array.isArray(request) ? "read_only_batch" : request.method,
+      methods: Array.isArray(request) ? request.map(row => row.method) : [request.method], bundler, afterApproval: approved });
     if (bundler && calls.filter(c => c.bundler).length > limit) return { status: 429, body: "fixture limit" };
     if (Array.isArray(request)) {
-      assert.equal(bundler, true); assert.equal(request.length, 3);
+      if (bundler) assert.equal(request.length, 3);
+      else assert.ok(request.length >= 2);
       const rows = request.map(row => ({ jsonrpc: "2.0", id: row.id, result: response(row.method, row.params) }));
-      return { status: 200, body: JSON.stringify(batchReply(rows)) };
+      return { status: 200, body: JSON.stringify(bundler ? batchReply(rows) : rows) };
     }
     const result = response(request.method, request.params as readonly unknown[]);
     return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) };
@@ -59,17 +62,19 @@ export async function bundledGaslessFixture(root: string) {
         return [name, { maxFeePerGas: `0x${(2_000_000n + priority).toString(16)}`,
           maxPriorityFeePerGas: `0x${priority.toString(16)}` }];
       }));
-    if (method === "eth_getBlockByNumber") { assert.ok(["latest", "safe", "0x64"].includes(params[0] as string)); return at; }
+    if (method === "eth_getBlockByNumber") { assert.ok(["latest", "safe", "0x64"].includes(params[0] as string));
+      return fault === "reorg" && params[0] === "0x64" ? { ...at, hash: `0x${"fe".repeat(32)}` } : at; }
     if (method === "eth_maxPriorityFeePerGas") return "0x186a0";
     if (method === "eth_getBalance") return "0x0";
     if (method === "eth_getTransactionCount") return "0x1";
     if (method === "eth_getCode") {
       if ((params[0] as string).toLowerCase() === s.account.address.toLowerCase()) return "0x";
+      if (fault === "code" && (params[0] as string).toLowerCase() === row.token.toLowerCase()) return "0x01";
       const code = codes.get((params[0] as string).toLowerCase()); assert.ok(code); return code;
     }
     if (method === "eth_getStorageAt") {
       const read = row.reads.find(r => r.kind === "storage" && r.address === params[0] && r.data === params[1]);
-      if (read) return read.expected;
+      if (read) return fault === "proxy" ? word(1n) : read.expected;
       // The mirror estimate measures the row's balance-layout claim before overriding it.
       assert.equal(params[0], asset.token); assert.equal(params[1], balanceLayoutSlot);
       return word(fault === "layout" ? 1n : fault === "balance" ? 0n : 100_000_000n);
@@ -101,8 +106,11 @@ export async function bundledGaslessFixture(root: string) {
   s.approval.confirm = async input => { approved = true; return await confirm(input); };
   const core = new ApnCore({ state: s.state, gasless: { ...s.dependencies, rpcFor: () => rpc },
     clock: { now: () => new Date(s.now) }, wait: s.wait });
+  const execute = core.execute.bind(core);
+  core.execute = async request => await withGaslessRpcInvocation(async () => await execute(request));
   return { ...s, core, rpc, calls, estimates, setLimit: (value: number) => { limit = value; },
     setFault: (value: typeof fault) => { fault = value; },
+    setBlockHash: (hash: string) => { at.hash = hash; },
     setBatchReply: (value: typeof batchReply) => { batchReply = value; },
     setFeeQuote: (value: unknown) => { feeQuote = value; },
     prepare: async () => {

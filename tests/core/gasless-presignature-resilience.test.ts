@@ -10,6 +10,10 @@ import { temporaryState } from "./helpers.js";
 const approve = async (s: Awaited<ReturnType<typeof gaslessFixture>>, id: string) => {
   const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(response.ok, true, response.error?.message);
+  if ((await s.record(id)).state === "submitted_pending") {
+    const observed = await s.core.execute({ command: "operation.resume", operationId: id });
+    assert.equal(observed.ok, true, observed.error?.message);
+  }
   return await s.record(id);
 };
 /** Injects a fault the moment the owner confirms, so it lands on the first check after approval. */

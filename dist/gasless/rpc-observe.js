@@ -55,9 +55,15 @@ async function scan(context, intent, userOperationHash, cursor) {
         const candidates = new Set();
         let logCount = 0;
         // Keep one bounded cursor step while supporting public RPC range limits.
+        const ranges = [];
         for (let from = start; from <= end; from += LOG_REQUEST_WINDOW) {
             const to = minimum(end, from + LOG_REQUEST_WINDOW - 1n);
-            const value = await context.rpc("eth_getLogs", [{ ...filter, fromBlock: quantity(from), toBlock: quantity(to) }]);
+            ranges.push({ from, to });
+        }
+        // Each range remains bounded to ten blocks; read-only JSON-RPC batching keeps a 256-block scan within one POST.
+        const values = await Promise.all(ranges.map(({ from, to }) => context.rpc("eth_getLogs", [{ ...filter, fromBlock: quantity(from), toBlock: quantity(to) }])));
+        for (let index = 0; index < ranges.length; index += 1) {
+            const { from, to } = ranges[index], value = values[index];
             if (!Array.isArray(value) || value.length > 128 - logCount)
                 gaslessFailure("APN_RPC_PROTOCOL", "gasless_scan_log_count");
             logCount += value.length;

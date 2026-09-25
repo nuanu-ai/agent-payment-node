@@ -39,8 +39,8 @@ export async function guardGaslessOperation(state: StateStore, rpc: GaslessRpcPo
 /** Only reason tokens produced by this module family may enter the durable journal. */
 export function gaslessReason(error: unknown, fallback: string): string {
   if (error instanceof ApnError) {
-    const match = /^Gasless validation failed: (gasless_[a-z0-9_]{1,87})\.$/u.exec(error.message);
-    if (match !== null) return match[1]!;
+    const match = /^Gasless validation failed: (gasless_[a-zA-Z0-9_]{1,87})\.$/u.exec(error.message);
+    if (match !== null) return match[1]!.toLowerCase();
     if (error.code === "APN_PROFILE_DRIFT") return "gasless_identity_drift";
     // A transport failure carries no gasless reason of its own, and must not read as an unknown guard failure.
     if (error.code === "APN_RPC_AMBIGUOUS") return "gasless_rpc_unavailable";
