@@ -62,6 +62,38 @@ test("token production session performs one atomic max-three batch with redacted
   const projected = JSON.stringify(telemetry); assert.doesNotMatch(projected, /rpc\.example|111111111111|eth_getBalance.*0x/u);
 });
 
+test("token primary accepts only identical duplicate result envelopes in a two-read batch", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  let response: (rows: readonly { id: string }[]) => unknown = (rows) => [
+    { jsonrpc: "2.0", id: rows[0]!.id, result: "0x1" },
+    { jsonrpc: "2.0", id: rows[1]!.id, result: "0x2" },
+    { jsonrpc: "2.0", id: rows[1]!.id, result: "0x2" },
+  ];
+  let posts = 0;
+  const rpc = createTokenRpc({ environment: URLS, state: new StateStore(temp.root), now: Date.now,
+    maxHttpRequests: 6, deadlineMs: 10_000, transport: { request: async (_url, _method, body) => {
+      posts += 1; return { status: 200, body: JSON.stringify(response(JSON.parse(body!) as { id: string }[])) };
+    } } });
+  const items = [
+    { method: "eth_chainId", params: [], cachePolicy: "none" as const, decoder: tokenChain },
+    { method: "eth_getBalance", params: [ACCOUNT, "latest"], cachePolicy: "none" as const, decoder: tokenQuantity },
+  ];
+  assert.deepEqual(await rpc.batch!("primary", items), ["0x1", "0x2"]);
+  assert.equal(posts, 1);
+  const first = { jsonrpc: "2.0", id: "1", result: "0x1" };
+  const second = { jsonrpc: "2.0", id: "2", result: "0x2" };
+  for (const malformed of [
+    [first, second, { ...second, result: "0x3" }],
+    [first, structuredClone(first), structuredClone(first)],
+    [first, second, structuredClone(second), structuredClone(second), structuredClone(second)],
+    [first, second, { ...second, extra: true }],
+  ]) {
+    response = () => malformed;
+    await assert.rejects(rpc.batch!("primary", items), { code: "APN_RPC_PROTOCOL" });
+  }
+  assert.equal(posts, 5);
+});
+
 test("archive reads reject a non-Ethereum identity before historical evidence", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); let attempts = 0;
   const rpc = createTokenRpc({ environment: URLS, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 2, deadlineMs: 10_000,
