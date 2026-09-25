@@ -31,7 +31,7 @@ export declare class RailOperationService {
     resume(operationId: string): Promise<unknown>;
     /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
     private resumeLocalSolana;
-    private resumeLocalSolanaClaimed;
+    private resumeLocalSolanaPhase;
     receipt(operationId: string): Promise<unknown>;
     private locked;
     private required;

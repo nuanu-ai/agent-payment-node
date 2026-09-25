@@ -485,7 +485,7 @@ export class RailOperationService {
         });
         if (acknowledged.state !== "submitted_pending")
             return publicRailOperation(acknowledged);
-        return await this.resumeLocalSolanaClaimed(acknowledged.operationId, acknowledged.profileHash);
+        return await this.resumeLocalSolanaPhase(acknowledged.operationId, acknowledged.profileHash, true);
     }
     async resume(operationId) {
         const found = await this.required(canonicalOperationId(operationId));
@@ -514,12 +514,9 @@ export class RailOperationService {
     }
     /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
     async resumeLocalSolana(operationId, profileHash) {
-        const found = await this.required(operationId);
-        if (found.state !== "signing_started" && found.state !== "signed_not_submitted" && found.state !== "submitting")
-            return await this.resumeLocalSolanaClaimed(operationId, profileHash);
-        return await this.context.state.withLocks([`rail:approval-claim:${operationId}`], async () => await this.resumeLocalSolanaClaimed(operationId, profileHash), { waitMs: 300_000 });
+        return await this.resumeLocalSolanaPhase(operationId, profileHash, false);
     }
-    async resumeLocalSolanaClaimed(operationId, profileHash) {
+    async resumeLocalSolanaPhase(operationId, profileHash, hasClaim) {
         const keys = [`profile:${profileHash}`, `operation:${operationId}`];
         const snapshot = await this.context.state.withLocks(keys, async () => {
             let operation = await this.required(operationId);
@@ -527,6 +524,10 @@ export class RailOperationService {
             await this.followUsage(operation);
             if (operation.terminal || operation.state === "awaiting_approval")
                 return { operation, mode: "done" };
+            // The state decision belongs under the money locks. If approval advanced after an
+            // unlocked caller's first read, acquire its claim before touching sign/submit recovery.
+            if (!hasClaim && ["signing_started", "signed_not_submitted", "submitting"].includes(operation.state))
+                return { operation, mode: "claim" };
             if (operation.state === "signing_started" || operation.state === "signed_not_submitted") {
                 return { operation, mode: "execute" };
             }
@@ -538,6 +539,8 @@ export class RailOperationService {
         });
         if (snapshot.mode === "done")
             return publicRailOperation(snapshot.operation);
+        if (snapshot.mode === "claim")
+            return await this.context.state.withLocks([`rail:approval-claim:${operationId}`], async () => await this.resumeLocalSolanaPhase(operationId, profileHash, true), { waitMs: 300_000 });
         if (snapshot.mode === "execute")
             return await this.executeLocalSolanaClaimed(snapshot.operation, this.adapter(snapshot.operation));
         const frozen = snapshot.operation;
