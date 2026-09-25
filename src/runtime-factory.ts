@@ -2,6 +2,8 @@ import { RelayUnsignedPrepareService, type RelayPreparePorts } from "./relay/pre
 import { RelayReadOnlyPreflightService, type RelayPreflightPorts } from "./relay/preflight.js";
 import { RelayRetireService } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
+import { RelayObserveService } from "./relay/observe.js";
+import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
@@ -133,6 +135,9 @@ export interface RuntimeFactoryOptions {
   readonly relayPreflightPorts?: RelayPreflightPorts;
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayStatusFetch?: typeof fetch;
+  readonly relayObserve?: RelayObserveService;
+  readonly relayObserveSourceRpc?: HttpsBaseRpc;
+  readonly relayObserveBnbRpc?: HttpsBaseRpc;
   readonly stargateNative?: StargateNativeService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -190,6 +195,16 @@ export interface RuntimeFactoryOptions {
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
   const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
+  if (bound.request.command === "relay.observe") {
+    const sourceUrl = bound.rpcUrl ?? "";
+    const bnbUrl = bound.bnbRpcUrl ?? "";
+    // Construct only keyless readers. No wallet, signer, custody, or execution runtime is installed.
+    const source = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc);
+    const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc);
+    return new ApnCore({ state, relayObserve: options.relayObserve ??
+      new RelayObserveService(state, source, bnbInvocation,
+        new RelayKeylessStatusService(state, options.relayStatusFetch)) });
+  }
   const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
   const approvalLimits = bound.request.command === "circle.approval.prepare" ? {
     maxGasLimitAtomic: bound.request.maxGasLimitAtomic, maxFeePerGasWei: bound.request.maxFeePerGasWei,

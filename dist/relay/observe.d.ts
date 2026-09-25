@@ -11,7 +11,6 @@ export interface RelaySourceFinalityPorts {
 export type RelayObserveState = "prepared_waiting" | "approval_pending" | "deposit_pending" | "source_unproven" | "source_finalized" | "provider_candidate_unproven" | "recipient_credit_observed" | "operational_acceptance";
 export interface RelayObserveResult {
     readonly operationId: string;
-    readonly requestId: string | null;
     readonly state: RelayObserveState;
     readonly reason: string;
     readonly sourceFinalized: boolean;
