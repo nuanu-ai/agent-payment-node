@@ -10,6 +10,7 @@ import { chainDisplay, type ChainPolicy, type ChainPolicyApprovalPort } from "./
 import type { RelayExecutionConfirmationSummary } from "./runtime.js";
 import type { RelayExecutionAuthorizationPort } from "./relay/source-runtime.js";
 import type { RelayNativeSourcePorts } from "./relay/native-source.js";
+import type { RelayArbitrumApprovalSummary } from "./relay/arbitrum-approval-execute.js";
 
 export const TTY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
@@ -72,6 +73,34 @@ export class TtyRelayExecuteConfirmation implements RelayExecutionAuthorizationP
         `Deposit network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
         `Quote digest: ${summary.quoteDigest}`,
         "This confirms Ethereum approval and deposit source effects only; destination delivery is separate.",
+      ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
+      return true;
+    } catch (error) {
+      if (error instanceof ApnError && error.code === "APN_NATIVE_REJECTED") return false;
+      throw error;
+    }
+  }
+}
+
+/** The challenge identifies the single Arbitrum ERC20 approval and its exact saved quote. */
+export class TtyRelayArbitrumApprovalConfirmation {
+  constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
+  async confirm(summary: RelayArbitrumApprovalSummary): Promise<boolean> {
+    const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
+    try {
+      await exactChainConsent([
+        "Agent Payment Node Relay Arbitrum USDC approval",
+        `Operation: ${summary.operationId}`,
+        `Source chain: Arbitrum One (eip155:${summary.sourceChainId})`,
+        `Destination chain: Ethereum (eip155:${summary.destinationChainId})`,
+        `Owner: ${summary.owner}`,
+        `Token: ${summary.token}`,
+        `Spender: ${summary.spender}`,
+        `Approval value: ${summary.approvalValueAtomic} USDC atomic`,
+        `Approval network fee ceiling: ${summary.approvalNetworkFeeCeilingWei} wei`,
+        `Quote deadline: ${summary.deadline}`,
+        `Quote digest: ${summary.quoteDigest}`,
+        "This confirms one Arbitrum approval transaction only.",
       ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
       return true;
     } catch (error) {

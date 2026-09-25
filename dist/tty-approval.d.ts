@@ -5,6 +5,7 @@ import { type ChainPolicy, type ChainPolicyApprovalPort } from "./chain-policy.j
 import type { RelayExecutionConfirmationSummary } from "./runtime.js";
 import type { RelayExecutionAuthorizationPort } from "./relay/source-runtime.js";
 import type { RelayNativeSourcePorts } from "./relay/native-source.js";
+import type { RelayArbitrumApprovalSummary } from "./relay/arbitrum-approval-execute.js";
 export declare const TTY_APPROVAL_DEADLINE_MS = 60000;
 export interface TransferApprovalIntent {
     readonly evm?: EvmDirectBinding;
@@ -43,6 +44,12 @@ export declare class TtyRelayExecuteConfirmation implements RelayExecutionAuthor
     private readonly options;
     constructor(options?: TtyTransferApprovalOptions);
     confirm(summary: RelayExecutionConfirmationSummary): Promise<boolean>;
+}
+/** The challenge identifies the single Arbitrum ERC20 approval and its exact saved quote. */
+export declare class TtyRelayArbitrumApprovalConfirmation {
+    private readonly options;
+    constructor(options?: TtyTransferApprovalOptions);
+    confirm(summary: RelayArbitrumApprovalSummary): Promise<boolean>;
 }
 /** Fresh consent naming the native value and exact BNB depository. */
 export declare class TtyRelayNativeExecuteConfirmation {
