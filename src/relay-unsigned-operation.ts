@@ -21,7 +21,7 @@ const body = z.strictObject({
   idempotencyHash: hash,
   requestHash: hash,
   sourceChainId: z.union([z.literal(1), z.literal(56)]),
-  destinationChainId: z.union([z.literal(56), z.literal(137), z.literal(143)]),
+  destinationChainId: z.union([z.literal(56), z.literal(137), z.literal(143), z.literal(8453)]),
   sourceAccount: address,
   recipient: address,
   quoteDigest: hash,
@@ -76,7 +76,8 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
       (operation.statusLocator !== undefined && (quote.statusLocator?.requestId !== operation.statusLocator.requestId ||
         quote.statusLocator?.endpoint !== operation.statusLocator.endpoint ||
         relayStatusLocator(operation.statusLocator.requestId, operation.statusLocator.endpoint).endpoint !== operation.statusLocator.endpoint))) corrupt();
-  } else if (operation.sourceChainId !== 1 || operation.destinationChainId !== 56) corrupt();
+  } else if (operation.sourceChainId !== 1 || ![56, 8453].includes(operation.destinationChainId) ||
+    (operation.destinationChainId === 8453 && operation.quote === undefined)) corrupt();
   if (operation.quote !== undefined) {
     try {
       const { quoteDigest, ...projection } = operation.quote;
@@ -88,6 +89,9 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
             operation.quote.statusLocator?.endpoint !== operation.statusLocator.endpoint)) ||
         operation.quote.payer !== operation.sourceAccount.toLowerCase() ||
         operation.quote.recipient !== operation.recipient.toLowerCase() ||
+        operation.quote.orderData.output.chainId !== (operation.destinationChainId === 8453 ? "base" : "bnb") ||
+        operation.quote.routeReference !== (operation.destinationChainId === 8453 ? "ethereum-usdc-base-eth-v1" : undefined) ||
+        operation.quote.paymentDetails.chainId !== "ethereum" ||
         operation.quote.principalAtomic !== operation.amountAtomic ||
         operation.quote.minimumOutputWei !== operation.minOutputAtomic ||
         new Date(operation.quote.deadline * 1000).toISOString() !== operation.deadline ||

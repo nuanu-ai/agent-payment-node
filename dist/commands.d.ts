@@ -15,6 +15,15 @@ export type CommandRequest = {
     readonly maxDepositNetworkFeeWei: string;
     readonly idempotencyKey: string;
 } | {
+    readonly command: "relay.base.prepare";
+    readonly profile: string;
+    readonly recipient: string;
+    readonly amountAtomic: string;
+    readonly minOutputAtomic: string;
+    readonly maxApprovalNetworkFeeWei: string;
+    readonly maxDepositNetworkFeeWei: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "relay.native.prepare";
     readonly profile: string;
     readonly recipient: string;
@@ -41,6 +50,9 @@ export type CommandRequest = {
     readonly operationId: string;
 } | {
     readonly command: "relay.observe";
+    readonly operationId: string;
+} | {
+    readonly command: "relay.base.observe";
     readonly operationId: string;
 } | {
     readonly command: "stargate.native.prepare";

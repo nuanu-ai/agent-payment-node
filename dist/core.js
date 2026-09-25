@@ -103,6 +103,12 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay prepare runtime is unavailable.");
                 return operationOutcome(await service.prepare(request));
             }
+            case "relay.base.prepare": {
+                const service = this.context.relayPrepare;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Base prepare runtime is unavailable.");
+                return operationOutcome(await service.prepareBase(request));
+            }
             case "relay.native.prepare": {
                 const service = this.context.relayPrepare;
                 if (service === undefined)
@@ -146,6 +152,12 @@ export class ApnCore {
                 const service = this.context.relayObserve;
                 if (service === undefined)
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay observe runtime is unavailable.");
+                return dataOutcome(await service.observe(request.operationId), "read_only_rpc_observation");
+            }
+            case "relay.base.observe": {
+                const service = this.context.relayBaseObserve;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Base observe runtime is unavailable.");
                 return dataOutcome(await service.observe(request.operationId), "read_only_rpc_observation");
             }
             case "stargate.native.prepare": {

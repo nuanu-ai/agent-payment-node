@@ -6,6 +6,7 @@ import { hashObject } from "../canonical.js";
 
 export const ETHEREUM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 export const BNB_NATIVE = "0x0000000000000000000000000000000000000000";
+export const BASE_NATIVE = BNB_NATIVE;
 // Independently read from Relay GET /chains on 2026-09-25. A change requires fresh review.
 export const ETHEREUM_DEPOSITORY = "0x4cd00e387622c35bddb9b4c962c136462338bc31";
 export const RELAY_SOLVER = "0xf70da97812cb96acdf810712aa562db8dfa3dbef";
@@ -41,12 +42,17 @@ export interface RelayQuoteIntent {
   readonly amountAtomic: string;
   readonly minimumOutputWei: string;
   readonly nowSeconds: number;
+  readonly destinationChainId?: 56 | 8453;
 }
+
+const destination = (intent: RelayQuoteIntent): "bnb" | "base" => intent.destinationChainId === 8453 ? "base" : "bnb";
 
 export function relayQuoteRequest(intent: RelayQuoteIntent): Record<string, unknown> {
   address(intent.payer, "payer"); address(intent.recipient, "recipient");
+  if (intent.destinationChainId !== undefined && intent.destinationChainId !== 56 && intent.destinationChainId !== 8453)
+    fail("destination chain");
   if (amount(intent.amountAtomic, "amount") <= 0n || amount(intent.minimumOutputWei, "minimum output") <= 0n) fail("amount");
-  return { user: intent.payer, originChainId: 1, destinationChainId: 56,
+  return { user: intent.payer, originChainId: 1, destinationChainId: intent.destinationChainId ?? 56,
     originCurrency: ETHEREUM_USDC, destinationCurrency: BNB_NATIVE,
     amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: intent.recipient,
     refundTo: intent.payer, includeProtocolData: true, usePermit: false, useDepositAddress: false };
@@ -55,6 +61,7 @@ export function relayQuoteRequest(intent: RelayQuoteIntent): Record<string, unkn
 export interface ValidatedRelayQuote {
   readonly schemaVersion: "apn.relay-quote.v1";
   readonly quoteDigest: string;
+  readonly routeReference?: "ethereum-usdc-base-eth-v1";
   readonly statusLocator?: RelayStatusLocator;
   readonly orderId: string;
   readonly orderSignature: string;
@@ -66,9 +73,9 @@ export interface ValidatedRelayQuote {
   readonly orderData: Readonly<{
     version: "v1"; solverChainId: "base"; solver: string; salt: string;
     inputs: readonly Readonly<{ payment: Readonly<{ chainId: "ethereum"; currency: string; amount: string; weight: "1" }>;
-      refunds: readonly Readonly<{ chainId: "ethereum" | "bnb"; recipient: string; currency: string;
+      refunds: readonly Readonly<{ chainId: "ethereum" | "bnb" | "base"; recipient: string; currency: string;
         minimumAmount: "0"; deadline: number; extraData: string }>[] }>[];
-    output: Readonly<{ chainId: "bnb"; payments: readonly Readonly<{ recipient: string; currency: string;
+    output: Readonly<{ chainId: "bnb" | "base"; payments: readonly Readonly<{ recipient: string; currency: string;
       minimumAmount: string; expectedAmount: string }>[]; calls: readonly []; deadline: number; extraData: string }>;
     fees: readonly [];
   }>;
@@ -180,6 +187,7 @@ function transaction(value: unknown, expectedId: string, intent: RelayQuoteInten
 
 export async function validateRelayQuote(value: unknown, intent: RelayQuoteIntent): Promise<ValidatedRelayQuote> {
   relayQuoteRequest(intent);
+  const destinationChain = destination(intent);
   if (!Number.isSafeInteger(intent.nowSeconds) || intent.nowSeconds < 0) fail("clock");
   const quote = object(value, "quote");
   const steps = array(quote.steps, "steps");
@@ -203,14 +211,14 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
     !same(address(order.solver, "solver"), RELAY_SOLVER) ||
     payment.chainId !== "ethereum" || !same(address(payment.currency, "input currency"), ETHEREUM_USDC) ||
     amount(payment.amount, "input amount") !== amount(intent.amountAtomic, "intent amount") || payment.weight !== "1" ||
-    output.chainId !== "bnb" || !same(address(payee.currency, "output currency"), BNB_NATIVE) ||
+    output.chainId !== destinationChain || !same(address(payee.currency, "output currency"), BNB_NATIVE) ||
     !same(address(payee.recipient, "recipient"), intent.recipient)) fail("order identity");
   const minimum = amount(payee.minimumAmount, "minimum output");
   if (minimum < amount(intent.minimumOutputWei, "required minimum") || amount(payee.expectedAmount, "expected output") < minimum) fail("output minimum");
   const deadline = output.deadline;
   if (typeof deadline !== "number" || !Number.isSafeInteger(deadline) || deadline <= intent.nowSeconds + 60 || deadline > intent.nowSeconds + 7 * 86400) fail("deadline");
   for (const [index, expected] of [[0, { chain: "ethereum", recipient: intent.payer, currency: ETHEREUM_USDC }],
-    [1, { chain: "bnb", recipient: intent.recipient, currency: BNB_NATIVE }]] as const) {
+    [1, { chain: destinationChain, recipient: intent.recipient, currency: BNB_NATIVE }]] as const) {
     const refund = object(refunds[index], "refund");
     onlyKeys(refund, ["chainId", "recipient", "currency", "minimumAmount", "deadline", "extraData"], "refund extension");
     if (refund.chainId !== expected.chain || !same(address(refund.recipient, "refund recipient"), expected.recipient) ||
@@ -224,12 +232,12 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
       amount: amount(payment.amount, "input amount").toString(), weight: "1" },
       refunds: refunds.map((entry, index) => {
         const refund = object(entry, "refund");
-        return { chainId: index === 0 ? "ethereum" as const : "bnb" as const,
+        return { chainId: index === 0 ? "ethereum" as const : destinationChain,
           recipient: address(refund.recipient, "refund recipient").toLowerCase(),
           currency: address(refund.currency, "refund currency").toLowerCase(), minimumAmount: "0" as const,
           deadline: deadline as number, extraData: bytes32(refund.extraData, "refund extra data") };
       }) }],
-    output: { chainId: "bnb", payments: [{ recipient: address(payee.recipient, "recipient").toLowerCase(),
+    output: { chainId: destinationChain, payments: [{ recipient: address(payee.recipient, "recipient").toLowerCase(),
       currency: address(payee.currency, "output currency").toLowerCase(), minimumAmount: minimum.toString(),
       expectedAmount: amount(payee.expectedAmount, "expected output").toString() }], calls: [],
       deadline: deadline as number, extraData: bytes32(output.extraData, "output extra data") }, fees: [] };
@@ -238,7 +246,7 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
   const inToken = object(currencyIn.currency, "input token"), outToken = object(currencyOut.currency, "output token");
   if (!same(address(details.sender, "sender"), intent.payer) || !same(address(details.recipient, "recipient"), intent.recipient) ||
     inToken.chainId !== 1 || !same(address(inToken.address, "input token"), ETHEREUM_USDC) ||
-    outToken.chainId !== 56 || !same(address(outToken.address, "output token"), BNB_NATIVE) ||
+    outToken.chainId !== (intent.destinationChainId ?? 56) || !same(address(outToken.address, "output token"), BNB_NATIVE) ||
     amount(currencyIn.amount, "details input") !== amount(intent.amountAtomic, "intent input") ||
     amount(currencyOut.minimumAmount, "details minimum") !== minimum) fail("quote details");
   let orderId: string;
@@ -271,6 +279,7 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
     if (!same(encodeFunctionData({ abi: DEPOSIT_ABI, functionName: "depositErc20", args: [...deposited.args] }), deposit.data as string)) fail("deposit calldata");
   } catch { return fail("call data"); }
   const projection = { schemaVersion: "apn.relay-quote.v1" as const,
+    ...(destinationChain === "base" ? { routeReference: "ethereum-usdc-base-eth-v1" as const } : {}),
     ...(statusLocator === undefined ? {} : { statusLocator }), orderId: orderId.toLowerCase(),
     orderSignature: signature.toLowerCase(), solver: RELAY_SOLVER, payer: intent.payer.toLowerCase(),
     recipient: intent.recipient.toLowerCase(), sourceRefundRecipient: intent.payer.toLowerCase(),
