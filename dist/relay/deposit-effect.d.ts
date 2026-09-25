@@ -1,4 +1,5 @@
 import { type Hex } from "viem";
+import type { WrappingSecretPort } from "../macos-keychain.js";
 import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
@@ -10,6 +11,14 @@ export interface RelaySignedDeposit {
 }
 export interface RelayDepositCustodyPort {
     /** Durable, operation-bound storage. An unreadable or missing sealed value must fail closed. */
+    load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null>;
+    seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void>;
+}
+/** Encrypted, hash-bound signed material for the one permitted deposit attempt. */
+export declare class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
+    private readonly state;
+    private readonly wallets;
+    constructor(state: StateStore, wrapping: WrappingSecretPort);
     load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null>;
     seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void>;
 }
