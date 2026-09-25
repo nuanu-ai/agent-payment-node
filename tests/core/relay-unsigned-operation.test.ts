@@ -37,6 +37,7 @@ test("Relay unsigned registry survives reopen, holds the Ethereum sender, and re
   assert.equal(status.recipient, OTHER); assert.equal(status.quoteDigest, HASH("2"));
   assert.equal(status.amountAtomic, operation.amountAtomic); assert.equal(status.minOutputAtomic, operation.minOutputAtomic);
   assert.equal(status.deadline, operation.deadline); assert.equal(status.executionAdmitted, false);
+  assert.equal(status.statusObservable, false);
   await assert.rejects(reopened.assertEvmAccountAvailable(operation.profileHash, 1, ACCOUNT), { code: "APN_OPERATION_BLOCKED" });
   await reopened.assertEvmAccountAvailable(operation.profileHash, 56, ACCOUNT);
   await assert.rejects(reopened.assertProfileAvailable(operation.profileHash), { code: "APN_OPERATION_BLOCKED" });

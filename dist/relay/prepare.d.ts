@@ -29,6 +29,7 @@ export declare class RelayUnsignedPrepareService {
         proofClass: "saved_unsigned_quote";
         balanceEvidence: "not_checked";
         allowanceEvidence: "not_checked";
+        statusObservable: boolean;
         executionAdmitted: false;
         nextActions: readonly [];
         schemaVersion: "apn.relay-unsigned-operation.v1";
@@ -48,6 +49,10 @@ export declare class RelayUnsignedPrepareService {
         minOutputAtomic: string;
         createdAt: string;
         deadline: string;
+        statusLocator?: {
+            requestId: string;
+            endpoint: string;
+        } | undefined;
         quote?: ValidatedRelayQuote | undefined;
         policyDigest?: string | undefined;
         policyRevision?: number | undefined;

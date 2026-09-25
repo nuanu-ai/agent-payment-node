@@ -14,6 +14,9 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const UINT = /^(0|[1-9][0-9]*)$/;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
+const RELAY_REQUEST_ID = /^0x[0-9a-fA-F]{64}$/;
+const RELAY_STATUS_ORIGIN = "https://api.relay.link";
+const RELAY_STATUS_PATH = "/intents/status/v3";
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const fail = (reason) => { throw new Error(`Relay quote rejected: ${reason}`); };
 const object = (value, reason) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : fail(reason);
@@ -40,6 +43,69 @@ export function relayQuoteRequest(intent) {
         originCurrency: ETHEREUM_USDC, destinationCurrency: BNB_NATIVE,
         amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: intent.recipient,
         refundTo: intent.payer, includeProtocolData: true, usePermit: false, useDepositAddress: false };
+}
+/** Only the Relay status/v3 endpoint can supply a status locator. Never follow a quote URL. */
+export function relayStatusLocator(requestId, endpoint) {
+    const id = string(requestId, "request id");
+    if (!RELAY_REQUEST_ID.test(id))
+        fail("request id");
+    const canonicalId = id.toLowerCase();
+    const canonicalEndpoint = `${RELAY_STATUS_ORIGIN}${RELAY_STATUS_PATH}?requestId=${canonicalId}`;
+    if (endpoint !== undefined) {
+        const source = string(endpoint, "status endpoint");
+        let url;
+        try {
+            url = new URL(source, RELAY_STATUS_ORIGIN);
+        }
+        catch {
+            return fail("status endpoint");
+        }
+        if (url.origin !== RELAY_STATUS_ORIGIN || url.pathname !== RELAY_STATUS_PATH ||
+            url.username || url.password || url.hash || [...url.searchParams.keys()].length !== 1 ||
+            url.searchParams.get("requestId")?.toLowerCase() !== canonicalId ||
+            !RELAY_REQUEST_ID.test(url.searchParams.get("requestId") ?? "") ||
+            (source.startsWith("/") && source.startsWith("//")) ||
+            (!source.startsWith("/") && !source.startsWith(`${RELAY_STATUS_ORIGIN}/`)))
+            fail("status endpoint");
+    }
+    return { requestId: canonicalId, endpoint: canonicalEndpoint };
+}
+function quoteStatusLocator(quote, steps) {
+    const ids = [];
+    const endpoints = [];
+    if (quote.requestId !== undefined)
+        ids.push(quote.requestId);
+    for (const value of steps) {
+        const step = object(value, "step");
+        if (step.requestId !== undefined)
+            ids.push(step.requestId);
+        const item = exactlyOne(step.items, "step items");
+        if (item.check !== undefined) {
+            const check = object(item.check, "step check");
+            onlyKeys(check, ["endpoint", "method"], "step check extension");
+            if (check.method !== "GET")
+                fail("step check method");
+            const endpoint = string(check.endpoint, "status endpoint");
+            let url;
+            try {
+                url = new URL(endpoint, RELAY_STATUS_ORIGIN);
+            }
+            catch {
+                return fail("status endpoint");
+            }
+            ids.push(url.searchParams.get("requestId"));
+            endpoints.push(endpoint);
+        }
+    }
+    if (ids.length === 0)
+        return undefined;
+    const locator = relayStatusLocator(ids[0]);
+    for (const value of ids.slice(1))
+        if (relayStatusLocator(value).requestId !== locator.requestId)
+            fail("conflicting request ids");
+    for (const endpoint of endpoints)
+        relayStatusLocator(locator.requestId, endpoint);
+    return locator;
 }
 function onlyKeys(value, keys, reason) {
     for (const key of Object.keys(value))
@@ -103,6 +169,7 @@ export async function validateRelayQuote(value, intent) {
     const steps = array(quote.steps, "steps");
     if (steps.length !== 2)
         fail("unsupported steps");
+    const statusLocator = quoteStatusLocator(quote, steps);
     const protocol = object(object(quote.protocol, "protocol").v2, "protocol v2");
     if (protocol.hubType !== "onchain")
         fail("hub type");
@@ -216,7 +283,8 @@ export async function validateRelayQuote(value, intent) {
     catch {
         return fail("call data");
     }
-    const projection = { schemaVersion: "apn.relay-quote.v1", orderId: orderId.toLowerCase(),
+    const projection = { schemaVersion: "apn.relay-quote.v1",
+        ...(statusLocator === undefined ? {} : { statusLocator }), orderId: orderId.toLowerCase(),
         orderSignature: signature.toLowerCase(), solver: RELAY_SOLVER, payer: intent.payer.toLowerCase(),
         recipient: intent.recipient.toLowerCase(), sourceRefundRecipient: intent.payer.toLowerCase(),
         principalAtomic: amount(intent.amountAtomic, "amount").toString(), orderData,
