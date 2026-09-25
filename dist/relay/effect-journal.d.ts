@@ -31,16 +31,16 @@ export interface RelayEffectJournal {
 }
 export type RelayEffectEvent = Readonly<{
     kind: "mark_signing";
-    role: "approval";
+    role: RelayEffectRole;
     marker: string;
     at: string;
 }> | Readonly<{
     kind: "seal_signed";
-    role: "approval";
+    role: RelayEffectRole;
     transactionHash: string;
 }> | Readonly<{
     kind: "mark_submitting";
-    role: "approval";
+    role: RelayEffectRole;
     at: string;
 }> | Readonly<{
     kind: "mark_submission";
