@@ -63,6 +63,9 @@ export interface AssetUsageSnapshot {
  */
 export declare class AssetUsageLedger extends SecureStateStore {
     private initialized;
+    /** Relay and this ledger hash idempotency keys in separate domains. Match the
+     * available policy and payment identity conservatively before retirement. */
+    hasMatchingRelayReservation(account: string, policyDigest: string | undefined, amountAtomic: string): Promise<boolean>;
     reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
     usage(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;

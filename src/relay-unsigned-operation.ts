@@ -38,6 +38,10 @@ const body = z.strictObject({
 const schema = body.safeExtend({ integrityHash: hash });
 export type RelayUnsignedOperation = z.infer<typeof schema>;
 export type RelayUnsignedOperationInput = z.infer<typeof body>;
+const retirementBody = z.strictObject({ schemaVersion: z.literal("apn.relay-retirement.v1"),
+  profileHash: hash, operationId: hash, preparedIntegrityHash: hash, retiredAt: timestamp });
+const retirementSchema = retirementBody.safeExtend({ integrityHash: hash });
+export type RelayRetirement = z.infer<typeof retirementSchema>;
 
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "Relay unsigned operation is invalid."); }
 
@@ -78,11 +82,49 @@ export function freezeRelayUnsignedOperation(input: RelayUnsignedOperationInput)
   return validateRelayUnsignedOperation({ ...parsed.data, integrityHash: hashObject(parsed.data) });
 }
 
-export function publicRelayUnsignedOperation(operation: RelayUnsignedOperation) {
+export function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement: RelayRetirement | null = null) {
   const { integrityHash: _integrityHash, ...publicFields } = validateRelayUnsignedOperation(operation);
-  return { ...publicFields, proofClass: "saved_unsigned_quote" as const, balanceEvidence: "not_checked" as const,
+  return { ...publicFields, ...(retirement === null ? {} : { state: "retired" as const, terminal: true as const,
+    retiredAt: retirement.retiredAt, retirementIntegrityHash: retirement.integrityHash }),
+    proofClass: "saved_unsigned_quote" as const, balanceEvidence: "not_checked" as const,
     allowanceEvidence: "not_checked" as const, statusObservable: operation.statusLocator !== undefined,
     executionAdmitted: false as const, nextActions: [] as const };
+}
+
+/** Separate create-only marker preserves the original prepared quote byte for byte. */
+export class RelayRetirementRepository extends SecureStateStore {
+  private path(profileHash: string, operationId: string): string {
+    stateIdentifier(profileHash, "Relay retirement profile"); stateIdentifier(operationId, "Relay retirement operation");
+    return `relay-retirements/${profileHash}/${operationId}.json`;
+  }
+  async load(operation: RelayUnsignedOperation): Promise<RelayRetirement | null> {
+    validateRelayUnsignedOperation(operation);
+    const value = await this.readJson(this.path(operation.profileHash, operation.operationId));
+    if (value === null) return null;
+    const parsed = retirementSchema.safeParse(value);
+    if (!parsed.success) corrupt();
+    const { integrityHash, ...fields } = parsed.data;
+    if (hashObject(fields) !== integrityHash || fields.profileHash !== operation.profileHash ||
+      fields.operationId !== operation.operationId || fields.preparedIntegrityHash !== operation.integrityHash ||
+      new Date(fields.retiredAt).toISOString() !== fields.retiredAt ||
+      Date.parse(fields.retiredAt) < Date.parse(operation.createdAt)) corrupt();
+    return parsed.data;
+  }
+  /** Caller holds profile and operation locks and has checked all effect stores. */
+  async persistLocked(operation: RelayUnsignedOperation, retiredAt: string): Promise<RelayRetirement> {
+    const existing = await this.load(operation);
+    if (existing !== null) return existing;
+    if (Number.isNaN(Date.parse(retiredAt)) || new Date(retiredAt).toISOString() !== retiredAt ||
+      Date.parse(retiredAt) < Date.parse(operation.createdAt)) {
+      throw new ApnError("APN_INVALID_INPUT", "Relay retirement time is invalid.");
+    }
+    const fields = { schemaVersion: "apn.relay-retirement.v1" as const, profileHash: operation.profileHash,
+      operationId: operation.operationId, preparedIntegrityHash: operation.integrityHash, retiredAt };
+    const marker = retirementSchema.parse({ ...fields, integrityHash: hashObject(fields) });
+    await this.initialize(); await this.ensureDirectory(`relay-retirements/${operation.profileHash}`);
+    await this.writeJson(this.path(operation.profileHash, operation.operationId), marker, true);
+    return marker;
+  }
 }
 
 export class RelayUnsignedOperationRepository extends SecureStateStore {

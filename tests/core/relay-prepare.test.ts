@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import test from "node:test";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { OperationService } from "../../src/operation-service.js";
@@ -14,6 +14,11 @@ import { evmAddressLock } from "../../src/evm-address-ownership.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { temporaryState, TestNative } from "./helpers.js";
 import { ApnCore } from "../../src/core.js";
+import { RelayRetireService } from "../../src/relay/retire.js";
+import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
+import { RelayReadOnlyPreflightService } from "../../src/relay/preflight.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { join } from "node:path";
 
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const recipient = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
@@ -257,6 +262,89 @@ test("Relay prepare persists a quote-bound status locator and rejects locator ta
     endpoint: `https://api.relay.link/intents/status/v3?requestId=0x${"cd".repeat(32)}` } };
   assert.throws(() => validateRelayUnsignedOperation({ ...changed, integrityHash: hashObject(changed) }),
     { code: "APN_STATE_CORRUPT" });
+});
+
+test("Relay retirement preserves quote, unblocks a fresh key, and never calls a network port", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  let quotes = 0;
+  const prepare = serviceFor(state, () => quotes++);
+  const first = await prepare.prepare(input);
+  const beforeBytes = await readFile(join(temporary.root, "relay-unsigned-operations", first.profileHash, `${first.operationId}.json`));
+  await assert.rejects(prepare.prepare({ ...input, idempotencyKey: "relay-prepare-0002" }), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(quotes, 1);
+  const retire = new RelayRetireService(state, { now: () => instant });
+  const bound = bindArgv(["relay", "retire", "--profile", "default", "--operation", first.operationId]);
+  assert.deepEqual(bound.request, { command: "relay.retire", profile: "default", operationId: first.operationId });
+  const retired = await retire.retire({ profile: "default", operationId: first.operationId });
+  assert.equal(retired.state, "retired"); assert.equal(retired.terminal, true);
+  assert.equal(retired.executionAdmitted, false);
+  assert.deepEqual(await retire.retire({ profile: "default", operationId: first.operationId }), retired);
+  assert.deepEqual(await new OperationService(new StateStore(temporary.root)).status(first.operationId), retired);
+  assert.deepEqual(await prepare.prepare(input), retired);
+  assert.deepEqual(await readFile(join(temporary.root, "relay-unsigned-operations", first.profileHash, `${first.operationId}.json`)), beforeBytes);
+  const fresh = await prepare.prepare({ ...input, idempotencyKey: "relay-prepare-0002" });
+  assert.equal(fresh.state, "prepared"); assert.notEqual(fresh.operationId, first.operationId); assert.equal(quotes, 2);
+  let rpcCalls = 0;
+  await assert.rejects(new RelayReadOnlyPreflightService(state, { now: () => instant },
+    { batch: async () => { rpcCalls++; return []; } }).preflight({ profile: "default", operationId: first.operationId }),
+  { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(rpcCalls, 0);
+});
+
+test("Relay retirement refuses existing effects and corrupted marker; parallel retirement is idempotent", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), prepare = serviceFor(state, () => {});
+  const first = await prepare.prepare(input);
+  const retire = new RelayRetireService(state, { now: () => instant });
+  const results = await Promise.all([retire.retire({ profile: "default", operationId: first.operationId }),
+    retire.retire({ profile: "default", operationId: first.operationId })]);
+  assert.deepEqual(results[0], results[1]);
+  await assert.rejects(new RelayEffectJournalRepository(temporary.root).create(first.profileHash, first.operationId, instant.toISOString()),
+    { code: "APN_OPERATION_BLOCKED" });
+  const marker = join(temporary.root, "relay-retirements", first.profileHash, `${first.operationId}.json`);
+  await writeFile(marker, JSON.stringify({ ...JSON.parse(await readFile(marker, "utf8")), retiredAt: "2026-09-30T00:00:00.000Z" }));
+  await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(retire.retire({ profile: "default", operationId: first.operationId }), { code: "APN_STATE_CORRUPT" });
+});
+
+test("Relay retirement refuses even an unattempted effect journal", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), first = await serviceFor(state, () => {}).prepare(input);
+  await new RelayEffectJournalRepository(temporary.root).create(first.profileHash, first.operationId, instant.toISOString());
+  await assert.rejects(new RelayRetireService(state, { now: () => instant }).retire({ profile: "default", operationId: first.operationId }),
+    { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("Relay retirement refuses a matching usage reservation", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), first = await serviceFor(state, () => {}).prepare(input);
+  await new AssetUsageLedger(temporary.root).reserve({ account: payer, chain: "eip155:1",
+    asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+    registry: policy().registry, rail: "bridge", amountAtomic: input.amountAtomic,
+    idempotencyKey: input.idempotencyKey, now: instant });
+  await assert.rejects(new RelayRetireService(state, { now: () => instant }).retire({ profile: "default", operationId: first.operationId }),
+    { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("Relay retire and fresh prepare serialize without losing the new operation", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), prepare = serviceFor(state, () => {});
+  const first = await prepare.prepare(input);
+  const nextInput = { ...input, idempotencyKey: "relay-prepare-0002" };
+  const [retired, concurrent] = await Promise.allSettled([
+    new RelayRetireService(state, { now: () => instant }).retire({ profile: "default", operationId: first.operationId }),
+    prepare.prepare(nextInput),
+  ]);
+  assert.equal(retired.status, "fulfilled");
+  if (concurrent.status === "rejected") {
+    assert.equal((concurrent.reason as { code?: string }).code, "APN_OPERATION_BLOCKED");
+    await prepare.prepare(nextInput);
+  }
+  const status = await new OperationService(state).status(state.operationId("default", nextInput.idempotencyKey)) as { state: string };
+  assert.equal(status.state, "prepared");
+  await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("Relay prepare uses the checksummed owner for ledger usage before quoting and replays without quoting", async t => {

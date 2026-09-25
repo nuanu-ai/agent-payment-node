@@ -643,8 +643,12 @@ JSON-RPC errors and malformed evidence are not retried. Each network reports
 reported as `external_provider_profile`, not guessed. There is no balance
 cache: every run reads the chains.
 
-Relay currently exposes unsigned prepare and read-only preflight only. A future
-Relay execution signer must call `assertExclusiveRelayExecutionOwner` immediately
+Relay exposes unsigned prepare, read-only preflight, and local retirement. Retire
+an untouched prepared quote with `apn relay retire --profile default --operation <id>`
+to release the profile for a fresh quote under a new idempotency key. The saved
+quote remains intact; status reports `retired`. Retirement refuses any effect
+journal or usage reservation and makes the old quote ineligible for preflight.
+Any Relay execution signer must call `assertExclusiveRelayExecutionOwner` immediately
 before signing and again immediately before its first submission. The helper
 holds the shared EVM address lock while checking public profile and wallet
 identities and decrypting every locally stored MetaMask Smart Account permission
@@ -657,6 +661,7 @@ returned. The signer must perform network reads outside that lock.
 ```text
 apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
 apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>
+apn relay retire --profile default --operation <operation-id>
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
 apn stargate native execute --operation <operation-id>
 apn stargate native observe --operation <operation-id>
