@@ -1,4 +1,4 @@
-import { canonicalJson, hashObject, sha256 } from "./canonical.js";
+import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
 import { chainAsset, chainDecimal } from "./chain-policy.js";
 import { ChainPolicyService } from "./chain-policy-service.js";
 import { ApnError } from "./errors.js";
@@ -8,8 +8,9 @@ import { RailOperationRepository } from "./rail-operation-repository.js";
 import { RAIL_PRESEND_ATTEMPTS, RAIL_PRESEND_MIN_REMAINING_MS, RAIL_PRESEND_RETRY_MS, railSendReason, railSendTransient } from "./rail-send-binding.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
-import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
+import { DirectAllowlistGate, refuse, validateDirectAllowlistBinding } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject, railUsageTarget, requireListedRailAsset } from "./rail-direct-allowlist.js";
+import { SecureStateStore } from "./secure-state-store.js";
 export class RailOperationService {
     context;
     records;
@@ -35,6 +36,9 @@ export class RailOperationService {
         const operationId = state.operationId(profile, key);
         const idempotencyHash = state.idempotencyHash(key);
         await this.context.ready();
+        if (input.rail === "solana" && (await this.policies.account(profile, "solana")).provider === "local") {
+            return await this.prepareLocalSolana(input, { profile, asset, amountAtomic, maximumFeeAtomic, profileHash, operationId, idempotencyHash });
+        }
         return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
             const account = await this.policies.account(profile, input.rail);
             const adapter = this.policies.adapter(input.rail, account.provider);
@@ -61,6 +65,123 @@ export class RailOperationService {
             await this.records.persist(operation);
             return publicRailOperation(operation);
         });
+    }
+    /** A durable, key-scoped claim survives a crash; only its short commit phases hold money-operation locks. */
+    async prepareLocalSolana(input, values) {
+        const { profile, asset, amountAtomic, maximumFeeAtomic, profileHash, operationId, idempotencyHash } = values;
+        const state = this.context.state;
+        const locks = [`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`];
+        const claims = new RailPrepareClaimStore(state.root);
+        // The per-key claim lock serializes duplicate prepares without holding a profile, operation,
+        // or idempotency lock through an RPC cooldown. A crashed process releases this advisory lock.
+        return await state.withLocks([`rail:prepare-claim:${idempotencyHash}`], async () => {
+            const staged = await state.withLocks(locks, async () => {
+                const account = await this.policies.account(profile, "solana");
+                if (account.provider !== "local")
+                    throw new ApnError("APN_PROFILE_DRIFT", "The Solana execution owner changed during preparation.");
+                const adapter = this.policies.adapter("solana", account.provider);
+                const recipient = adapter.canonicalAddress(input.recipient);
+                if (recipient === account.address)
+                    throw new ApnError("APN_INVALID_INPUT", "The recipient must differ from the sender for a direct rail transfer.");
+                const inputHash = hashObject({ kind: "rail_transfer", profile, rail: "solana", asset, recipient, amountAtomic, maximumFeeAtomic });
+                const requestHash = hashObject({ kind: "rail_transfer", account, asset, recipient, amountAtomic, maximumFeeAtomic });
+                // A different operation kind may have committed this idempotency key while a crashed
+                // Solana prepare left its claim behind. The operation is authoritative, but a claim
+                // belonging to another profile must never be removed by this caller.
+                const persisted = await this.operations.findIdempotency(idempotencyHash);
+                if (persisted !== null) {
+                    const stale = await claims.load(idempotencyHash);
+                    if (stale?.profileHash === profileHash && stale.operationId === operationId &&
+                        persisted.record.idempotencyHash === stale.idempotencyHash)
+                        await claims.removeIfMatches(stale);
+                    const existing = await this.operations.resolvePrepare({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash });
+                    if (existing === null)
+                        corrupt();
+                    if (existing.kind !== "rail_transfer")
+                        corrupt();
+                    return { existing: publicRailOperation(existing.record) };
+                }
+                const saved = await claims.load(idempotencyHash);
+                if (saved !== null && (saved.profileHash !== profileHash || saved.operationId !== operationId)) {
+                    throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key already has a pending preparation for another profile.");
+                }
+                if (saved !== null && saved.inputHash !== inputHash) {
+                    throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key already has a pending preparation with different inputs.");
+                }
+                if (saved !== null && (saved.accountIdentityHash !== account.identityHash || saved.requestHash !== requestHash)) {
+                    await claims.removeIfMatches(saved);
+                    throw new ApnError("APN_PROFILE_DRIFT", "The pending Solana preparation's account changed; start a new preparation.");
+                }
+                let policy;
+                let allowlist;
+                try {
+                    await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
+                    policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
+                    allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
+                }
+                catch (error) {
+                    if (saved !== null)
+                        await claims.removeIfMatches(saved);
+                    throw error;
+                }
+                const candidate = { schemaVersion: "apn.rail-prepare-claim.v1", profileHash, operationId,
+                    idempotencyHash, inputHash, requestHash, accountIdentityHash: account.identityHash, policyHash: policy.policyHash, allowlist };
+                if (saved !== null && (saved.policyHash !== policy.policyHash ||
+                    canonicalJson(saved.allowlist) !== canonicalJson(allowlist))) {
+                    await claims.removeIfMatches(saved);
+                    throw new ApnError("APN_PROFILE_DRIFT", "The pending Solana preparation's owner or policy changed; start a new preparation.");
+                }
+                const claim = saved ?? sealPrepareClaim(candidate);
+                if (saved === null)
+                    await claims.create(claim);
+                return { account, adapter, recipient, requestHash, policy, allowlist, claim };
+            });
+            if ("existing" in staged)
+                return staged.existing;
+            const { account, adapter, recipient, requestHash, policy, allowlist, claim } = staged;
+            try {
+                const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
+                validateRailPrepared(prepared, account);
+                if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic ||
+                    canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity)
+                    corrupt();
+                return await state.withLocks(locks, async () => {
+                    const existing = await this.operations.resolvePrepare({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash });
+                    if (existing !== null) {
+                        if (existing.kind !== "rail_transfer")
+                            corrupt();
+                        await claims.removeIfMatches(claim);
+                        return publicRailOperation(existing.record);
+                    }
+                    const currentClaim = await claims.load(idempotencyHash);
+                    if (currentClaim?.integrityHash !== claim.integrityHash)
+                        corrupt();
+                    const currentAccount = await this.policies.account(profile, "solana");
+                    if (canonicalJson(currentAccount) !== canonicalJson(account))
+                        throw new ApnError("APN_PROFILE_DRIFT", "The Solana account changed during preparation.");
+                    await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
+                    const currentPolicy = await this.policies.authorize(currentAccount, input.asset, maximumFeeAtomic);
+                    if (currentPolicy.policyHash !== policy.policyHash)
+                        throw new ApnError("APN_PROFILE_DRIFT", "The Solana chain policy changed during preparation.");
+                    const currentAllowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account: currentAccount, prepared: { asset, amountAtomic } }));
+                    if (canonicalJson(currentAllowlist) !== canonicalJson(allowlist))
+                        throw new ApnError("APN_PROFILE_DRIFT", "The owner allowlist changed during preparation.");
+                    if (await this.records.loadOperation(profileHash, operationId) !== null)
+                        corrupt();
+                    const operation = newRailOperation({ schemaVersion: "apn.rail-operation.v1", kind: "rail_transfer", operationId,
+                        profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash, allowlist });
+                    await this.records.persist(operation);
+                    await claims.removeIfMatches(claim);
+                    return publicRailOperation(operation);
+                });
+            }
+            catch (error) {
+                // An incomplete RPC read has no effect and no operation. An actual process crash leaves
+                // the claim for the next same-key caller, which reacquires this claim lock and retries.
+                await state.withLocks(locks, async () => { await claims.removeIfMatches(claim); });
+                throw error;
+            }
+        }, { waitMs: 300_000 });
     }
     async approve(operationId) {
         return await this.locked(operationId, async (operation) => {
@@ -350,4 +471,58 @@ export class RailOperationService {
 }
 function binding(operation) { return { account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, prepared: operation.prepared, send: operation.send ?? null }; }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "The direct-rail effect or operation binding is invalid."); }
+const CLAIM_HASH = /^[a-f0-9]{64}$/u;
+function sealPrepareClaim(body) {
+    return validatePrepareClaim({ ...body, integrityHash: hashObject(body) });
+}
+function validatePrepareClaim(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "profileHash", "operationId", "idempotencyHash",
+        "inputHash", "requestHash", "accountIdentityHash", "policyHash", "allowlist", "integrityHash"]) ||
+        value.schemaVersion !== "apn.rail-prepare-claim.v1")
+        corrupt();
+    for (const key of ["profileHash", "operationId", "idempotencyHash", "inputHash", "requestHash", "accountIdentityHash", "policyHash", "integrityHash"]) {
+        if (typeof value[key] !== "string" || !CLAIM_HASH.test(value[key]))
+            corrupt();
+    }
+    validateDirectAllowlistBinding(value.allowlist);
+    const { integrityHash, ...body } = value;
+    if (hashObject(body) !== integrityHash)
+        corrupt();
+    return value;
+}
+class RailPrepareClaimStore extends SecureStateStore {
+    initialized;
+    async ready() {
+        this.initialized ??= (async () => { await super.initialize(); await this.ensureDirectory("rail-prepare-claims"); })();
+        await this.initialized;
+    }
+    path(idempotencyHash) {
+        if (!CLAIM_HASH.test(idempotencyHash))
+            corrupt();
+        return `rail-prepare-claims/${idempotencyHash}.json`;
+    }
+    async load(idempotencyHash) {
+        await this.ready();
+        const value = await this.readJson(this.path(idempotencyHash));
+        if (value === null)
+            return null;
+        const claim = validatePrepareClaim(value);
+        if (claim.idempotencyHash !== idempotencyHash)
+            corrupt();
+        return claim;
+    }
+    async create(claim) {
+        validatePrepareClaim(claim);
+        await this.ready();
+        await this.writeJson(this.path(claim.idempotencyHash), claim, true);
+    }
+    async remove(idempotencyHash) {
+        await this.ready();
+        await this.removeFile(this.path(idempotencyHash));
+    }
+    async removeIfMatches(claim) {
+        if ((await this.load(claim.idempotencyHash))?.integrityHash === claim.integrityHash)
+            await this.remove(claim.idempotencyHash);
+    }
+}
 //# sourceMappingURL=rail-operation-service.js.map
