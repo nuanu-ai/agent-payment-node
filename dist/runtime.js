@@ -13,6 +13,7 @@ export class RuntimeContext {
     relayArbitrumObserve;
     relayArbitrumApprovalDecision;
     relayArbitrumApprovalExecute;
+    relayArbitrumDepositDispatch;
     relayExecute;
     relayNativeExecute;
     relayExecuteConfirmation;
@@ -84,6 +85,8 @@ export class RuntimeContext {
             this.relayArbitrumApprovalDecision = dependencies.relayArbitrumApprovalDecision;
         if (dependencies.relayArbitrumApprovalExecute !== undefined)
             this.relayArbitrumApprovalExecute = dependencies.relayArbitrumApprovalExecute;
+        if (dependencies.relayArbitrumDepositDispatch !== undefined)
+            this.relayArbitrumDepositDispatch = dependencies.relayArbitrumDepositDispatch;
         if (dependencies.relayExecute !== undefined)
             this.relayExecute = dependencies.relayExecute;
         if (dependencies.relayNativeExecute !== undefined)

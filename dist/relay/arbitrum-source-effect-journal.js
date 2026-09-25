@@ -127,7 +127,7 @@ function shape(j, op) {
             a.observationDigest !== null)
             corrupt("observation_binding");
     }
-    if (j.effects[1].phase !== "pending" && j.effects[0].phase !== "confirmed")
+    if (j.effects[1].phase !== "pending" && !["confirmed", "approval_skipped"].includes(j.effects[0].phase))
         corrupt("deposit_order");
     const approvalNonce = j.effects[0].attempt?.nonce;
     const depositNonce = j.effects[1].attempt?.nonce;
@@ -171,8 +171,8 @@ export async function advanceArbitrumSourceEffectJournal(j, op, event) {
     await validateArbitrumSourceEffectJournal(j, op);
     const index = event.role === "approval" ? 0 : event.role === "deposit" ? 1 : blocked("role");
     const current = j.effects[index];
-    if (event.role === "deposit" && j.effects[0].phase !== "confirmed")
-        blocked("approval_not_confirmed");
+    if (event.role === "deposit" && !["confirmed", "approval_skipped"].includes(j.effects[0].phase))
+        blocked("approval_not_confirmed_or_verified_skipped");
     let next;
     switch (event.kind) {
         case "begin_signing":
@@ -220,10 +220,10 @@ export async function arbitrumSourceRecoveryClass(j, op) {
         return "failed";
     if (deposit.phase === "confirmed")
         return "completed";
-    if (approval.phase === "approval_skipped")
-        return "approval_skipped";
     if (deposit.phase !== "pending" || ["signing_started", "sealed", "submitting", "submitted", "unknown_finality"].includes(approval.phase))
         return "observation_only";
+    if (approval.phase === "approval_skipped")
+        return "approval_skipped";
     return approval.phase === "confirmed" ? "approval_confirmed" : "not_started";
 }
 export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {

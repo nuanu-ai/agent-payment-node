@@ -63,6 +63,8 @@ function bindParsedCatalog(parsed) {
         return { request: { command: "relay.arbitrum.approval-check", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay arbitrum approval-execute")
         return { request: { command: "relay.arbitrum.approval-execute", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+    if (parsed.command.path.join(" ") === "relay arbitrum deposit-dispatch")
+        return { request: { command: "relay.arbitrum.deposit-dispatch", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay native prepare")
         return { request: { command: "relay.native.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay preflight")

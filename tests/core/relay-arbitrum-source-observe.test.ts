@@ -86,6 +86,7 @@ test("saved hash-bound uncertain send observes approval then joint deposit, with
     return proof(deposit, approval);
   } };
   const ports = { operation: async () => op, journal: async () => journal,
+    finalizeUsage: async () => {},
     transition: async (_profileHash: string, _operationId: string, expectedHash: string,
       role: "approval" | "deposit", digest: string, verify: (input: any) => Promise<boolean>) => {
       assert.equal(expectedHash, journal.integrityHash);
@@ -161,4 +162,37 @@ test("installed command refuses absent saved operation before any RPC", async t 
   assert.equal(outcome.ok, false);
   assert.equal(outcome.error?.code, "APN_OPERATION_NOT_FOUND");
   assert.equal(posts, 0);
+});
+
+test("verified approval skip observes a dispatched deposit without invented approval receipt", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const op = await synthetic();
+  const initial = await createArbitrumSourceEffectJournal(op, now);
+  const { integrityHash: _, ...fields } = initial;
+  const skipProof = { proofClass: "canonical_allowance_observation" as const,
+    operationIntegrityHash: op.integrityHash, policyDigest: op.policyDigest!, policyRevision: op.policyRevision!,
+    token: RELAY_ARBITRUM_USDC, owner: op.sourceAccount,
+    spender: (await import("../../src/relay/quote.js")).ETHEREUM_DEPOSITORY,
+    amountAtomic: op.amountAtomic, allowanceAtomic: op.amountAtomic,
+    blockNumber: "99", blockHash, observedAt: now };
+  const body = { ...fields, effects: [{ role: "approval" as const, phase: "approval_skipped" as const,
+    attempt: null, skipProof }, initial.effects[1]] as const };
+  let journal = await marked(op, "deposit", { ...body, integrityHash: hashObject(body) }, 7);
+  let readApproval = true;
+  const service = new RelayArbitrumSourceObserveService(new StateStore(temp.root), {
+    observe: async (deposit, approval) => { readApproval = approval !== undefined; return proof(deposit, approval); },
+  }, { operation: async () => op, journal: async () => journal,
+    finalizeUsage: async () => {},
+    transition: async (_profileHash, _operationId, expectedHash, role, digest, verify) => {
+      assert.equal(expectedHash, journal.integrityHash);
+      assert.equal(await verify({ operation: op, journal, role, outcome: "confirmed", proofDigest: digest }), true);
+      journal = await advanceArbitrumSourceEffectJournal(journal, op,
+        { kind: "record_verified_observation", role, outcome: "confirmed", proofDigest: digest });
+      return journal;
+    } });
+  const result = await service.observe(op.operationId);
+  assert.equal(readApproval, false);
+  assert.equal(result.state, "deposit_source_confirmed");
+  assert.equal(result.sourceProof?.approval, null);
+  assert.equal(result.destinationDeliveryProven, false);
 });

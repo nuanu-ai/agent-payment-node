@@ -46,6 +46,10 @@ export type CommandRequest = {
     readonly profile: string;
     readonly operationId: string;
 } | {
+    readonly command: "relay.arbitrum.deposit-dispatch";
+    readonly profile: string;
+    readonly operationId: string;
+} | {
     readonly command: "relay.native.prepare";
     readonly profile: string;
     readonly recipient: string;

@@ -1,5 +1,5 @@
 /** Saved-operation Arbitrum source observation. No wallet, signer, send, or destination assertion. */
-import type { Hex } from "viem";
+import { type Hex } from "viem";
 import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import { type ArbitrumEffectRole, type ArbitrumSourceEffectJournal } from "./arbitrum-source-effect-journal.js";
@@ -14,12 +14,15 @@ export interface RelayArbitrumSourceObservePorts {
         outcome: "confirmed" | "failed";
         proofDigest: string;
     }) => Promise<boolean>) => Promise<ArbitrumSourceEffectJournal>;
+    /** Synthetic seam; production finalizes the shared usage reservation from the saved safe source proof. */
+    readonly finalizeUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
 }
 export declare class RelayArbitrumSourceObserveService {
     private readonly state;
     private readonly observer;
     private readonly ports;
     constructor(state: StateStore, observer: Pick<RelayArbitrumSourceFinalityObserver, "observe">, ports?: RelayArbitrumSourceObservePorts);
+    private finalizeUsage;
     observe(operationId: string): Promise<{
         operationId: string;
         state: "observation_only" | "source_effect_not_recorded" | "approval_skipped" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";

@@ -6,6 +6,7 @@ import type { RelayExecutionConfirmationSummary } from "./runtime.js";
 import type { RelayExecutionAuthorizationPort } from "./relay/source-runtime.js";
 import type { RelayNativeSourcePorts } from "./relay/native-source.js";
 import type { RelayArbitrumApprovalSummary } from "./relay/arbitrum-approval-execute.js";
+import type { RelayArbitrumDepositSummary } from "./relay/arbitrum-deposit-dispatch.js";
 export declare const TTY_APPROVAL_DEADLINE_MS = 60000;
 export interface TransferApprovalIntent {
     readonly evm?: EvmDirectBinding;
@@ -50,6 +51,12 @@ export declare class TtyRelayArbitrumApprovalConfirmation {
     private readonly options;
     constructor(options?: TtyTransferApprovalOptions);
     confirm(summary: RelayArbitrumApprovalSummary): Promise<boolean>;
+}
+/** Fresh foreground consent for the single saved Arbitrum deposit effect. */
+export declare class TtyRelayArbitrumDepositConfirmation {
+    private readonly options;
+    constructor(options?: TtyTransferApprovalOptions);
+    confirm(summary: RelayArbitrumDepositSummary): Promise<boolean>;
 }
 /** Fresh consent naming the native value and exact BNB depository. */
 export declare class TtyRelayNativeExecuteConfirmation {
