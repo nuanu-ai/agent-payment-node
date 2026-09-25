@@ -42,6 +42,6 @@ export declare class SolanaLocalAdapter implements DirectRailPort {
      * reference: nothing can be sealed without a binding, and the guard acquires a fresh window of its own. Requiring
      * the frozen one here would put the owner's reading time back inside the sending window, which is the whole bug.
      */
-    private validBlock;
+    private validBlockValue;
 }
 export declare function readSolanaBalance(rpc: SolanaRpcPort, account: ChainAccount, asset: ChainAsset, now: Date): Promise<ChainBalance>;

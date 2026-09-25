@@ -6,18 +6,26 @@ import type { ChainAccount, RailFinalEvidence, RailInspection, RailPreparedTrans
 import { railSendLifetime } from "../rail-send-binding.js";
 import { associatedToken } from "./accounts.js";
 import { solanaTransferInstructions, validateSolanaMessage } from "./message.js";
-import { assertSolanaNetwork, protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaAddress, solanaSignature, type SolanaRpcPort } from "./rpc.js";
+import { assertSolanaNetworkValue, protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaAddress, solanaReadBatch, solanaSignature, type SolanaRpcPort } from "./rpc.js";
 
 const COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111";
 export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string, now: Date, send: RailSendBinding | null = null): Promise<RailInspection> {
-  await assertSolanaNetwork(rpc); solanaSignature(transactionId);
-  const response = rpcRecord(await rpc.call("getSignatureStatuses", [[transactionId], { searchTransactionHistory: true }]));
+  solanaSignature(transactionId);
+  const [genesis, statusesValue] = await solanaReadBatch(rpc, [
+    { method: "getGenesisHash", params: [] },
+    { method: "getSignatureStatuses", params: [[transactionId], { searchTransactionHistory: true }] },
+  ]);
+  assertSolanaNetworkValue(genesis);
+  const response = rpcRecord(statusesValue);
   const statuses = rpcArray(response.value, 1);
   if (statuses.length !== 1) protocolFailure();
   if (statuses[0] === null) return { status: "unproven", reason: "signature_history_unavailable" };
   const status = rpcRecord(statuses[0]);
   if (status.confirmationStatus !== "finalized" || status.confirmations !== null) return { status: "pending", reason: "not_finalized" };
-  const result = await rpc.call("getTransaction", [transactionId, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+  const [result, wireValue] = await solanaReadBatch(rpc, [
+    { method: "getTransaction", params: [transactionId, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }] },
+    { method: "getTransaction", params: [transactionId, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }] },
+  ]);
   if (result === null) return { status: "unproven", reason: "finalized_transaction_unavailable" };
   const tx = rpcRecord(result); const meta = rpcRecord(tx.meta); const transaction = rpcRecord(tx.transaction); const message = rpcRecord(transaction.message);
   const slot = rpcAtomic(tx.slot);
@@ -34,7 +42,7 @@ export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, p
   });
   if (new Set(keys).size !== keys.length || keys[0] !== prepared.economics.networkFeePayer || entries[0]?.signer !== true || entries[keys.indexOf(prepared.sender)]?.signer !== true) protocolFailure();
   if (message.recentBlockhash !== railSendLifetime(prepared, send).blockReference && account.provider === "local") protocolFailure();
-  await verifyWire(rpc, transactionId, slot, account, prepared, signatures, message, entries, send);
+  await verifyWire(wireValue, transactionId, slot, account, prepared, signatures, message, entries, send);
   await verifyInstructions(message.instructions, prepared);
   const pre = rpcArray(meta.preBalances, keys.length).map(rpcAtomic); const post = rpcArray(meta.postBalances, keys.length).map(rpcAtomic);
   if (pre.length !== keys.length || post.length !== keys.length) protocolFailure();
@@ -77,8 +85,8 @@ export async function inspectSolana(rpc: SolanaRpcPort, account: ChainAccount, p
   return { status: success ? "completed" : "failed_confirmed_revert", reason: success ? "exact_finalized_effect" : "exact_finalized_error", proofClass: "solana_finalized_transaction_effect", evidence };
 }
 
-async function verifyWire(rpc: SolanaRpcPort, transactionId: string, slot: bigint, account: ChainAccount, prepared: RailPreparedTransfer, signatures: readonly unknown[], parsed: Record<string, unknown>, entries: readonly Record<string, unknown>[], send: RailSendBinding | null): Promise<void> {
-  const response = rpcRecord(await rpc.call("getTransaction", [transactionId, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }]));
+async function verifyWire(value: unknown, transactionId: string, slot: bigint, account: ChainAccount, prepared: RailPreparedTransfer, signatures: readonly unknown[], parsed: Record<string, unknown>, entries: readonly Record<string, unknown>[], send: RailSendBinding | null): Promise<void> {
+  const response = rpcRecord(value);
   if (rpcAtomic(response.slot) !== slot) protocolFailure();
   const encoded = rpcArray(response.transaction, 2);
   if (encoded.length !== 2 || encoded[1] !== "base64" || typeof encoded[0] !== "string" || encoded[0].length > 2048) protocolFailure();

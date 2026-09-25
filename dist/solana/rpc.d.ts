@@ -34,6 +34,9 @@ export interface SolanaRpcPort {
     call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
     batch?(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
 }
+/** Preserve input order for test/alternate ports that do not expose JSON-RPC batch. */
+export declare function solanaReadBatch(rpc: SolanaRpcPort, reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
+export declare function assertSolanaNetworkValue(value: unknown): string;
 export declare class SolanaRpc implements SolanaRpcPort {
     private readonly endpoint?;
     private readonly fetcher;
