@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import type { Hex } from "viem";
+import { hashObject } from "../../src/canonical.js";
 import { RELAY_ARBITRUM_USDC, validateRelayArbitrumUsdcEthereumUsdcQuote } from
   "../../src/relay/arbitrum-usdc-ethereum-quote.js";
-import { proveRelayOrderReferencedRecipientCredit, type RelayOrderReferenceEvidence } from
-  "../../src/relay/order-reference-proof.js";
+import { inspectRelayOrderReferenceCandidate, type RelayOrderReferenceEvidence } from
+  "../../src/relay/order-reference-candidate.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "../../src/relay/quote.js";
 
 const hash = (digit: string) => `0x${digit.repeat(64)}` as Hex;
@@ -29,7 +30,8 @@ async function fixture(): Promise<RelayOrderReferenceEvidence> {
       topics: [transferTopic, `0x${word(payer)}`, `0x${word(quote.recipient)}`],
       data: `0x${quantity(94065n)}`, transactionHash: destinationHash, blockNumber: 200n,
       blockHash: destinationBlockHash, removed: false, logIndex: 7n }] };
-  return { quote, sourceProof: { sourceChainId: 42161, rpcOrigin: "https://arb-rpc.example",
+  return { rawQuote: raw, quoteIntent: { payer, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 },
+    quote, sourceProof: { sourceChainId: 42161, rpcOrigin: "https://arb-rpc.example",
     deposit: { transactionHash: sourceHash, blockNumber: "100", blockHash: sourceBlockHash },
     approval: null, safeHead: { number: "105", hash: hash("e") },
     proofClass: "canonical_safe_source_receipts", destinationDeliveryProven: false,
@@ -47,16 +49,18 @@ async function fixture(): Promise<RelayOrderReferenceEvidence> {
     destinationBlock: { number: 200n, hash: destinationBlockHash, timestampSeconds: BigInt(quote.deadline) } };
 }
 
-test("matching safe receipts bind an onchain deposit event, destination calldata and recipient credit only", async () => {
+test("matching caller-supplied records produce a candidate without a proof claim", async () => {
   const f = await fixture();
-  const result = await proveRelayOrderReferencedRecipientCredit(f);
-  assert.equal(result.orderReferencedRecipientCreditProven, true);
+  const result = await inspectRelayOrderReferenceCandidate(f);
+  assert.equal(result.status, "candidate_consistent");
   assert.equal(result.relayOrderFulfillmentProven, false);
   assert.equal(result.cryptographicCausalityProven, false);
   assert.equal(result.paidAcceptance, false);
-  assert.equal(result.proof?.orderId, f.quote.orderId);
-  assert.equal(result.proof?.sourceDepositLogIndex, "4");
-  assert.equal(result.proof?.destinationTransferLogIndex, "7");
+  assert.equal(result.candidate?.orderId, f.quote.orderId);
+  assert.equal(result.candidate?.sourceDepositLogIndex, "4");
+  assert.equal(result.candidate?.destinationTransferLogIndex, "7");
+  assert.equal("orderReferencedRecipientCreditProven" in result, false);
+  assert.equal("proof" in result, false);
 });
 
 test("source event identity, ABI shape, principal and uniqueness mutations fail closed", async () => {
@@ -69,13 +73,13 @@ test("source event identity, ABI shape, principal and uniqueness mutations fail 
     { ...log, transactionHash: hash("1") }, { ...log, removed: true },
   ];
   for (const changed of bad) {
-    const result = await proveRelayOrderReferencedRecipientCredit({ ...f,
+    const result = await inspectRelayOrderReferenceCandidate({ ...f,
       sourceReceipt: { ...f.sourceReceipt, logs: [changed] } });
-    assert.equal(result.orderReferencedRecipientCreditProven, false);
+    assert.equal(result.status, "candidate_mismatch");
   }
   for (const logs of [[log, { ...log, logIndex: 5n }], [log, { ...log }]])
-    assert.equal((await proveRelayOrderReferencedRecipientCredit({ ...f,
-      sourceReceipt: { ...f.sourceReceipt, logs } })).orderReferencedRecipientCreditProven, false);
+    assert.equal((await inspectRelayOrderReferenceCandidate({ ...f,
+      sourceReceipt: { ...f.sourceReceipt, logs } })).status, "candidate_mismatch");
 });
 
 test("destination order suffix, deadline, transfer and canonical identity mutations fail closed", async () => {
@@ -95,7 +99,7 @@ test("destination order suffix, deadline, transfer and canonical identity mutati
       relayOrderFulfillmentProven: false, paidAcceptance: false } },
   ];
   for (const [index, changed] of cases.entries())
-    assert.equal((await proveRelayOrderReferencedRecipientCredit(changed)).orderReferencedRecipientCreditProven, false, String(index));
+    assert.equal((await inspectRelayOrderReferenceCandidate(changed)).status, "candidate_mismatch", String(index));
 });
 
 test("tampered quote and proof bindings never promote credit", async () => {
@@ -108,5 +112,37 @@ test("tampered quote and proof bindings never promote credit", async () => {
       orderId: hash("1") } } },
   ];
   for (const item of changed)
-    assert.equal((await proveRelayOrderReferencedRecipientCredit(item as RelayOrderReferenceEvidence)).orderReferencedRecipientCreditProven, false);
+    assert.equal((await inspectRelayOrderReferenceCandidate(item as RelayOrderReferenceEvidence)).status, "candidate_mismatch");
+});
+
+test("a wholly forged matching chain story remains only a candidate", async () => {
+  const f = await fixture(), fabricatedSource = hash("1"), fabricatedDestination = hash("2");
+  const forged: RelayOrderReferenceEvidence = {
+    ...f,
+    sourceProof: { ...f.sourceProof, deposit: { ...f.sourceProof.deposit,
+      transactionHash: fabricatedSource }, safeHead: { number: "999999", hash: hash("3") } },
+    sourceReceipt: { ...f.sourceReceipt, transactionHash: fabricatedSource,
+      logs: f.sourceReceipt.logs.map(log => ({ ...log, transactionHash: fabricatedSource })) },
+    destinationCredit: f.destinationCredit.status === "recipient_credit_proven"
+      ? { ...f.destinationCredit, proof: { ...f.destinationCredit.proof,
+        destinationTransactionHash: fabricatedDestination, safeBlockNumber: "999999",
+        safeBlockHash: hash("4") } } : f.destinationCredit,
+    destinationReceipt: { ...f.destinationReceipt, transactionHash: fabricatedDestination,
+      logs: f.destinationReceipt.logs.map(log => ({ ...log, transactionHash: fabricatedDestination })) },
+    destinationTransaction: { ...f.destinationTransaction, hash: fabricatedDestination },
+  };
+  const result = await inspectRelayOrderReferenceCandidate(forged);
+  assert.equal(result.status, "candidate_consistent");
+  assert.equal("orderReferencedRecipientCreditProven" in result, false);
+});
+
+test("signed input principal stays bound even after an unkeyed digest is recomputed", async () => {
+  const f = await fixture();
+  const orderData = { ...f.quote.orderData, inputs: [{ ...f.quote.orderData.inputs[0]!,
+    payment: { ...f.quote.orderData.inputs[0]!.payment, amount: "1" } }] };
+  const { quoteDigest: _discard, ...body } = f.quote;
+  const changed = { ...body, orderData };
+  const result = await inspectRelayOrderReferenceCandidate({ ...f,
+    quote: { ...changed, quoteDigest: hashObject(changed) } as typeof f.quote });
+  assert.equal(result.status, "candidate_mismatch");
 });
