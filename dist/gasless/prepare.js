@@ -3,6 +3,7 @@ import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
+import { gaslessPolicyChain } from "./asset-policy.js";
 import { gaslessOwner } from "./owner.js";
 import { gaslessDeployment } from "./registry.js";
 import { newGaslessOperation } from "./transitions.js";
@@ -32,7 +33,7 @@ export class GaslessPreparation {
             }
             assertGaslessExecutionChain(request.chainId);
             const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
-            const allowlist = request.chainId === 8453 ? await this.o.policy.prepare({ profile, owner: binding.owner,
+            const allowlist = gaslessPolicyChain(request.chainId) !== null ? await this.o.policy.prepare({ profile, owner: binding.owner,
                 request, token: row.token }, operationId) : undefined;
             await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, binding.owner.address);
             if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {

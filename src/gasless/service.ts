@@ -4,7 +4,7 @@ import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
 import { canonicalOperationId } from "../transfer-policy.js";
 import { GaslessExecution } from "./execution.js";
-import { GaslessAssetPolicy } from "./asset-policy.js";
+import { GaslessAssetPolicy, gaslessPolicyChain } from "./asset-policy.js";
 import type { GaslessChainId } from "./model.js";
 import type { GaslessMutable, GaslessOperationRecord } from "./operation-model.js";
 import { GaslessOperationRepository } from "./operation-repository.js";
@@ -60,7 +60,7 @@ export class GaslessService {
   async approve(operationId: string) {
     return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
       if (op.terminal || op.state !== "awaiting_approval") return publicGaslessOperation(op);
-      if (this.legacyBase(op)) return publicGaslessOperation(await this.save(op,
+      if (this.legacyPolicyOperation(op)) return publicGaslessOperation(await this.save(op,
         { state: "failed_before_effect", failure: "gasless_legacy_observation_only" }));
       const approval = this.dependencies().approval;
       const unit = gaslessIntentAsset(op.intent).symbol;
@@ -75,7 +75,7 @@ export class GaslessService {
       if (observationRpcEnv !== undefined) {
         const environmentName = gaslessObservationRpcEnv(observationRpcEnv);
         return await this.locked(operationId, async (op) => {
-          if (!op.terminal && this.legacyBase(op) && op.bootstrap.signingAttempts === 0) {
+          if (!op.terminal && this.legacyPolicyOperation(op) && op.bootstrap.signingAttempts === 0) {
             return publicGaslessOperation(await this.legacyRecovery(op));
           }
           if (op.terminal || op.bootstrap.signingAttempts === 0) return publicGaslessOperation(op);
@@ -87,7 +87,7 @@ export class GaslessService {
         });
       }
       return await this.locked(operationId, async (op) => publicGaslessOperation(
-        op.terminal ? op : this.legacyBase(op) ? await this.legacyRecovery(op)
+        op.terminal ? op : this.legacyPolicyOperation(op) ? await this.legacyRecovery(op)
           : op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
     });
   }
@@ -109,8 +109,8 @@ export class GaslessService {
     const next = transitionGasless(op, patch, this.context.clock.now().toISOString());
     await this.records.persist(next); await this.policy.reconcile(next); return next;
   }
-  private legacyBase(op: GaslessOperationRecord): boolean {
-    return op.intent.request.chainId === 8453 && op.intent.allowlist === undefined;
+  private legacyPolicyOperation(op: GaslessOperationRecord): boolean {
+    return gaslessPolicyChain(op.intent.request.chainId) !== null && op.intent.allowlist === undefined;
   }
   private async legacyRecovery(op: GaslessOperationRecord): Promise<GaslessOperationRecord> {
     if (op.bootstrap.signingAttempts === 0 && op.userOperation.signingAttempts === 0) {
