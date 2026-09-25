@@ -35,8 +35,13 @@ export function evmRpcAddress(value: unknown): Address {
 }
 
 export async function evmRpcBlock(call: EvmRpcCall, tag: string): Promise<{ readonly tag: Hex; readonly number: string; readonly hash: Hex; readonly raw: Record<string, unknown> }> {
+  return evmRpcBlockResult(await call("eth_getBlockByNumber", [tag, false]), tag);
+}
+
+/** Decode a block already fetched with other independent reads in one RPC batch. */
+export function evmRpcBlockResult(value: unknown, tag: string): { readonly tag: Hex; readonly number: string; readonly hash: Hex; readonly raw: Record<string, unknown> } {
   const blockTag = tag === "latest" || tag === "safe" || tag === "finalized" ? tag : "number";
-  const raw = evmRpcRecord(await call("eth_getBlockByNumber", [tag, false]), {
+  const raw = evmRpcRecord(value, {
     rpcMethod: "eth_getBlockByNumber", stage: "block_result", blockTag,
   });
   const number = evmRpcQuantity(raw.number);

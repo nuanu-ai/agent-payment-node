@@ -16,7 +16,7 @@ const MAX_X402_LOGS = 256;
 const MAX_RPC_BATCH_CALLS = 16;
 const BATCH_READ_METHODS = new Set([
     "eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_call",
-    "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_maxPriorityFeePerGas", "eth_estimateGas",
+    "eth_getTransactionCount", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_maxPriorityFeePerGas", "eth_estimateGas",
 ]);
 export class HttpsBaseRpc {
     evm;

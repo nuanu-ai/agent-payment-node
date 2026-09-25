@@ -15,6 +15,13 @@ export declare function evmRpcBlock(call: EvmRpcCall, tag: string): Promise<{
     readonly hash: Hex;
     readonly raw: Record<string, unknown>;
 }>;
+/** Decode a block already fetched with other independent reads in one RPC batch. */
+export declare function evmRpcBlockResult(value: unknown, tag: string): {
+    readonly tag: Hex;
+    readonly number: string;
+    readonly hash: Hex;
+    readonly raw: Record<string, unknown>;
+};
 export declare function recheckEvmBlock(call: EvmRpcCall, block: {
     readonly tag: Hex;
     readonly hash: Hex;
