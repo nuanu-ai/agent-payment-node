@@ -41,17 +41,43 @@ test("the time the owner spends reading the screen no longer consumes the sendin
   assert.equal((receipt.receipt as { send_binding: { blockReference: string } }).send_binding.blockReference, REBOUND_BLOCKHASH);
 });
 
-test("the send guard reads the fresh blockhash and height in one physical request", async (t) => {
+test("the SOL journey batches independent reads within each safety checkpoint", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare("sol");
   const before = s.rpc.physicalRequests;
+  let atApproval = -1;
+  s.approval.onApprove = () => { atApproval = s.rpc.physicalRequests; };
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  assert.deepEqual(s.rpc.batches, [["getLatestBlockhash", "getBlockHeight"]]);
-  assert.equal(s.rpc.calls.length - s.rpc.physicalRequests, 1);
-  assert.equal(before, 6);
-  assert.equal(s.rpc.physicalRequests - before, 28);
-  assert.equal(s.rpc.physicalRequests, 34);
+  assert.deepEqual(s.rpc.batches, [
+    ["getMultipleAccounts", "getLatestBlockhash"],
+    ["getGenesisHash", "getMultipleAccounts"],
+    ["getGenesisHash", "getMultipleAccounts"],
+    ["getGenesisHash", "getLatestBlockhash", "getBlockHeight", "getMultipleAccounts"],
+    ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
+    ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
+    ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
+    ["getGenesisHash", "getSignatureStatuses"],
+    ["getTransaction", "getTransaction"],
+  ]);
+  assert.equal(s.rpc.calls.length, 35);
+  assert.equal(s.rpc.physicalRequests, 21);
+  assert.equal(before, 5);
+  assert.equal(s.rpc.physicalRequests - before, 16);
+  assert.ok(atApproval > 0 && atApproval < s.rpc.physicalRequests);
+  assert.ok(s.rpc.batches.every(batch => !batch.includes("sendTransaction") && !batch.includes("simulateTransaction")));
+  assert.ok(s.rpc.calls.indexOf("simulateTransaction") < s.rpc.calls.indexOf("sendTransaction"));
+  assert.equal(s.rpc.submissions.length, 1);
+});
+
+test("the USDC journey batches rent with the fee after the account snapshot", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("usdc");
+  const result = await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  assert.equal(s.rpc.calls.length, 42);
+  assert.equal(s.rpc.physicalRequests, 23);
+  assert.equal(s.rpc.batches.filter(batch => batch.join(",") === "getFeeForMessage,getMinimumBalanceForRentExemption").length, 5);
   assert.equal(s.rpc.submissions.length, 1);
 });
 

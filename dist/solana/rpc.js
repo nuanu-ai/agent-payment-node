@@ -58,6 +58,20 @@ const READ_METHODS = new Set([
     "getGenesisHash", "getMultipleAccounts", "getAccountInfo", "getLatestBlockhash", "getBlockHeight", "getFeeForMessage",
     "getMinimumBalanceForRentExemption", "getSignatureStatuses", "getTransaction", "getBlock",
 ]);
+/** Preserve input order for test/alternate ports that do not expose JSON-RPC batch. */
+export async function solanaReadBatch(rpc, reads) {
+    if (rpc.batch !== undefined)
+        return await rpc.batch(reads);
+    const results = [];
+    for (const read of reads)
+        results.push(await rpc.call(read.method, read.params));
+    return results;
+}
+export function assertSolanaNetworkValue(value) {
+    if (value !== SOLANA_GENESIS)
+        throw new ApnError("APN_CHAIN_MISMATCH", "The RPC does not attest the expected Solana mainnet genesis.");
+    return SOLANA_GENESIS;
+}
 export class SolanaRpc {
     endpoint;
     fetcher;
@@ -164,9 +178,7 @@ function retryAfterDetails(value) {
     return Number.isFinite(milliseconds) && milliseconds >= 0 ? { retryAfterMs: Math.min(milliseconds, 86_400_000) } : undefined;
 }
 export async function assertSolanaNetwork(rpc) {
-    if (await rpc.call("getGenesisHash", []) !== SOLANA_GENESIS)
-        throw new ApnError("APN_CHAIN_MISMATCH", "The RPC does not attest the expected Solana mainnet genesis.");
-    return SOLANA_GENESIS;
+    return assertSolanaNetworkValue(await rpc.call("getGenesisHash", []));
 }
 export function solanaAddress(input) {
     try {

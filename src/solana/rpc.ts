@@ -72,6 +72,17 @@ export interface SolanaRpcPort {
   call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
   batch?(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
 }
+/** Preserve input order for test/alternate ports that do not expose JSON-RPC batch. */
+export async function solanaReadBatch(rpc: SolanaRpcPort, reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]> {
+  if (rpc.batch !== undefined) return await rpc.batch(reads);
+  const results: unknown[] = [];
+  for (const read of reads) results.push(await rpc.call(read.method, read.params));
+  return results;
+}
+export function assertSolanaNetworkValue(value: unknown): string {
+  if (value !== SOLANA_GENESIS) throw new ApnError("APN_CHAIN_MISMATCH", "The RPC does not attest the expected Solana mainnet genesis.");
+  return SOLANA_GENESIS;
+}
 export class SolanaRpc implements SolanaRpcPort {
   readonly originHash: string;
   readonly budget: SolanaRpcBudget | undefined;
@@ -145,8 +156,7 @@ function retryAfterDetails(value: string | null): { readonly retryAfterMs: numbe
   return Number.isFinite(milliseconds) && milliseconds >= 0 ? { retryAfterMs: Math.min(milliseconds, 86_400_000) } : undefined;
 }
 export async function assertSolanaNetwork(rpc: SolanaRpcPort): Promise<string> {
-  if (await rpc.call("getGenesisHash", []) !== SOLANA_GENESIS) throw new ApnError("APN_CHAIN_MISMATCH", "The RPC does not attest the expected Solana mainnet genesis.");
-  return SOLANA_GENESIS;
+  return assertSolanaNetworkValue(await rpc.call("getGenesisHash", []));
 }
 export function solanaAddress(input: string): string {
   try {
