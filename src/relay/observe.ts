@@ -33,9 +33,12 @@ export interface RelayObserveResult {
 
 /** No signer, wallet, send, journal mutation, or retry surface is reachable here. */
 export class RelayObserveService {
-  constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts,
-    private readonly bnb: RelayBnbProofPorts,
-    private readonly status = new RelayKeylessStatusService(state)) {}
+  private readonly usedBnbInvocations = new WeakSet<RelayBnbProofPorts>();
+  /** The factory must return a fresh budgeted BNB adapter for each observation. */
+  private readonly bnbInvocation: () => RelayBnbProofPorts;
+  constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, private readonly status = new RelayKeylessStatusService(state)) {
+    this.bnbInvocation = bnbInvocation;
+  }
 
   async observe(operationId: string): Promise<RelayObserveResult> {
     if (!OPERATION.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay observe requires an operation ID.");
@@ -78,8 +81,12 @@ export class RelayObserveService {
     const candidateHashes = provider.txHashes;
     if (candidateHashes.length === 0) return result("source_finalized", "provider_candidate_missing", true,
       provider.status, sourceBound);
+    const bnb = this.bnbInvocation();
+    if (this.usedBnbInvocations.has(bnb)) throw new ApnError("APN_RPC_BUDGET_EXCEEDED",
+      "Relay observe requires a fresh BNB RPC budget for each invocation.");
+    this.usedBnbInvocations.add(bnb);
     const proof = await proveRelayBnbDestination({ operation: op, sourceDeposit: {
-      transactionHash: sourceHash, observation }, candidateHashes }, this.bnb);
+      transactionHash: sourceHash, observation }, candidateHashes }, bnb);
     if (proof.status !== "recipient_credit_proven") return result("provider_candidate_unproven", proof.reason,
       true, provider.status, sourceBound, proof);
     if (provider.status !== "success" || !sourceBound) return result("recipient_credit_observed",
