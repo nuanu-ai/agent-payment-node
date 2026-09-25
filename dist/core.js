@@ -108,6 +108,14 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay preflight runtime is unavailable.");
                 return dataOutcome(await service.preflight(request), "read_only_rpc_observation");
             }
+            case "relay.execute": {
+                canonicalOperationId(request.operationId);
+                const service = this.context.relayExecute;
+                if (service === undefined || this.context.relayExecuteConfirmation === undefined) {
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay execute runtime and foreground confirmation are required.");
+                }
+                return dataOutcome(await service.execute(request.operationId), "source_effect_journal");
+            }
             case "relay.retire": {
                 const service = this.context.relayRetire;
                 if (service === undefined)

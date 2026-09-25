@@ -19,6 +19,9 @@ export type CommandRequest = {
     readonly profile: string;
     readonly operationId: string;
 } | {
+    readonly command: "relay.execute";
+    readonly operationId: string;
+} | {
     readonly command: "relay.retire";
     readonly profile: string;
     readonly operationId: string;

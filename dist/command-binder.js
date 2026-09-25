@@ -55,6 +55,8 @@ function bindParsedCatalog(parsed) {
         return { request: { command: "relay.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay preflight")
         return { request: { command: "relay.preflight", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+    if (parsed.command.path.join(" ") === "relay execute")
+        return { request: { command: "relay.execute", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay retire")
         return { request: { command: "relay.retire", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay status")
