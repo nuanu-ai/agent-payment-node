@@ -17,6 +17,8 @@ const input = { profile: "default", recipient, amountAtomic: "2500000", minOutpu
   maxApprovalNetworkFeeWei: "30000000000000", maxDepositNetworkFeeWei: "30000000000000", idempotencyKey: "relay-preflight-0001" };
 const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 const fixture = async (): Promise<unknown> => JSON.parse(await readFile("tests/core/relay-fixtures/ethereum-usdc-bnb-quote-20260925.json", "utf8"));
+const blockHash = `0x${"1".repeat(64)}`;
+const head = { number: "0x10", hash: blockHash };
 function policy(expiresAt = "2026-10-02T00:00:00.000Z") {
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2", registryVersion: "test.1",
     publishedAt: "2026-09-29T00:00:00.000Z", effectiveDate: "2026-09-29", effectiveAt: "2026-09-29T00:00:00.000Z",
@@ -40,7 +42,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
   return { state, prepared };
 }
 
-test("Relay preflight reports balances, fee sum and approval_required from one read-only batch", async t => {
+test("Relay preflight pins all reads to one block hash in exactly two read-only batches", async t => {
   const { state, prepared } = await setup(t);
   const requiredNative = BigInt(prepared.approvalNetworkFeeCeilingWei!) + BigInt(prepared.depositNetworkFeeCeilingWei!);
   let batches = 0;
@@ -48,16 +50,24 @@ test("Relay preflight reports balances, fee sum and approval_required from one r
     activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
     batch: async (calls: readonly RelayReadCall[]) => {
       batches++;
-      assert.deepEqual(calls.map(call => call.method), ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_call", "eth_call"]);
-      assert.equal((calls[4]!.params[0] as { data: string }).data.slice(0, 10), "0xdd62ed3e");
-      return ["0x1", { number: "0x10", hash: `0x${"1".repeat(64)}` }, `0x${requiredNative.toString(16)}`,
-        word(2_500_000n), word(0n)];
+      if (batches === 1) {
+        assert.deepEqual(calls.map(call => call.method), ["eth_chainId", "eth_getBlockByNumber"]);
+        return ["0x1", head];
+      }
+      assert.equal(batches, 2);
+      assert.deepEqual(calls.map(call => call.method), ["eth_getBlockByNumber", "eth_getBalance", "eth_call", "eth_call"]);
+      assert.deepEqual(calls[0]!.params, ["0x10", false]);
+      for (const call of calls.slice(1)) assert.deepEqual(call.params[1], { blockHash, requireCanonical: true });
+      assert.equal((calls[3]!.params[0] as { data: string }).data.slice(0, 10), "0xdd62ed3e");
+      return [head, `0x${requiredNative.toString(16)}`, word(2_500_000n), word(0n)];
     },
   });
   const result = await service.preflight({ profile: "default", operationId: prepared.operationId });
-  assert.equal(batches, 1); assert.equal(result.executionAdmitted, false);
+  assert.equal(batches, 2); assert.equal(result.executionAdmitted, false);
   assert.equal(result.fundingObserved, true); assert.equal(result.approvalRequired, true);
   assert.equal(result.requiredNativeWei, requiredNative.toString());
+  assert.equal(result.observationBlockHash, blockHash);
+  assert.equal(result.rpcBatches, 2);
   assert.deepEqual(result.fundingReasons, []);
   assert.deepEqual(bindArgv(["relay", "preflight", "--profile", "default", "--operation", prepared.operationId,
     "--rpc-url", "https://example.org"]).request, { command: "relay.preflight", profile: "default", operationId: prepared.operationId });
@@ -67,18 +77,49 @@ test("Relay preflight classifies insufficient USDC, native funds, and allowance 
   const { state, prepared } = await setup(t);
   const service = new RelayReadOnlyPreflightService(state, { now: () => instant }, {
     activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
-    batch: async () => ["0x1", { number: "0x10", hash: `0x${"1".repeat(64)}` }, "0x0", word(1n), word(0n)],
+    batch: async calls => calls.length === 2 ? ["0x1", head] : [head, "0x0", word(1n), word(0n)],
   });
   const result = await service.preflight({ profile: "default", operationId: prepared.operationId });
   assert.equal(result.approvalRequired, true); assert.equal(result.fundingObserved, false);
   assert.deepEqual(result.fundingReasons, ["insufficient_usdc_balance", "insufficient_native_fee_balance"]);
 });
 
+test("Relay preflight needs deposit-only gas when allowance covers principal", async t => {
+  const { state, prepared } = await setup(t);
+  const depositFee = BigInt(prepared.depositNetworkFeeCeilingWei!);
+  const service = new RelayReadOnlyPreflightService(state, { now: () => instant }, {
+    activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
+    batch: async calls => calls.length === 2 ? ["0x1", head]
+      : [head, `0x${depositFee.toString(16)}`, word(2_500_000n), word(2_500_000n)],
+  });
+  const result = await service.preflight({ profile: "default", operationId: prepared.operationId });
+  assert.equal(result.approvalRequired, false);
+  assert.equal(result.requiredNativeWei, depositFee.toString());
+  assert.equal(result.fundingObserved, true);
+  assert.deepEqual(result.fundingReasons, []);
+});
+
+test("Relay preflight rejects a changed pinned block and never mixes latest state reads", async t => {
+  const { state, prepared } = await setup(t);
+  let batches = 0;
+  const service = new RelayReadOnlyPreflightService(state, { now: () => instant }, {
+    activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
+    batch: async calls => {
+      batches++;
+      if (batches === 1) return ["0x1", head];
+      for (const call of calls.slice(1)) assert.deepEqual(call.params[1], { blockHash, requireCanonical: true });
+      return [{ number: "0x10", hash: `0x${"2".repeat(64)}` }, "0x1", word(3_000_000n), word(3_000_000n)];
+    },
+  });
+  await assert.rejects(service.preflight({ profile: "default", operationId: prepared.operationId }), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(batches, 2);
+});
+
 test("Relay preflight fails closed on wrong chain, malformed batch, expired quote and policy before RPC", async t => {
   const { state, prepared } = await setup(t);
   let batches = 0;
   const ports = { activePolicy: async () => policy(), publicAccount: async () => payer, dailyUsage: async () => "0",
-    batch: async () => { batches++; return ["0x38", { number: "0x10" }, "0x1", word(3_000_000n), word(3_000_000n)]; } };
+    batch: async () => { batches++; return ["0x38", head]; } };
   await assert.rejects(new RelayReadOnlyPreflightService(state, { now: () => instant }, ports)
     .preflight({ profile: "default", operationId: prepared.operationId }), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(batches, 1);

@@ -72,25 +72,39 @@ export class RelayReadOnlyPreflightService {
     const token = ETHEREUM_USDC;
     const balanceOf = `0x70a08231${account.slice(2).toLowerCase().padStart(64, "0")}`;
     const allowance = `0xdd62ed3e${account.slice(2).toLowerCase().padStart(64, "0")}${ETHEREUM_DEPOSITORY.slice(2).toLowerCase().padStart(64, "0")}`;
-    const calls: readonly RelayReadCall[] = [
+    const headCalls: readonly RelayReadCall[] = [
       { method: "eth_chainId", params: [] },
       { method: "eth_getBlockByNumber", params: ["latest", false] },
-      { method: "eth_getBalance", params: [account, "latest"] },
-      { method: "eth_call", params: [{ to: token, data: balanceOf }, "latest"] },
-      { method: "eth_call", params: [{ to: token, data: allowance }, "latest"] },
     ];
-    const values = await this.ports.batch(calls);
-    if (!Array.isArray(values) || values.length !== calls.length) throw new ApnError("APN_RPC_PROTOCOL", "Relay RPC batch is incomplete.");
-    if (evmRpcQuantity(values[0]) !== 1n) blocked("relay_source_chain_mismatch");
-    const head = evmRpcRecord(values[1]);
-    const blockNumber = evmRpcQuantity(head.number).toString();
+    const headValues = await this.ports.batch(headCalls);
+    if (!Array.isArray(headValues) || headValues.length !== headCalls.length) throw new ApnError("APN_RPC_PROTOCOL", "Relay RPC head batch is incomplete.");
+    if (evmRpcQuantity(headValues[0]) !== 1n) blocked("relay_source_chain_mismatch");
+    const head = evmRpcRecord(headValues[1]);
+    const block = evmRpcQuantity(head.number);
+    const blockNumber = block.toString();
     const blockHash = evmRpcHex(head.hash, 32);
     if (blockHash === `0x${"0".repeat(64)}`) throw new ApnError("APN_RPC_PROTOCOL", "Relay RPC returned a zero block hash.");
-    const nativeBalanceWei = evmRpcQuantity(values[2]);
-    const tokenBalanceAtomic = evmRpcWord(values[3]);
-    const allowanceAtomic = evmRpcWord(values[4]);
-    const requiredNativeWei = BigInt(operation.approvalNetworkFeeCeilingWei) + BigInt(operation.depositNetworkFeeCeilingWei);
+    // EIP-1898 binds all three state reads to the exact block hash. Unsupported RPCs fail closed.
+    const blockReference = { blockHash, requireCanonical: true };
+    const stateCalls: readonly RelayReadCall[] = [
+      { method: "eth_getBlockByNumber", params: [`0x${block.toString(16)}`, false] },
+      { method: "eth_getBalance", params: [account, blockReference] },
+      { method: "eth_call", params: [{ to: token, data: balanceOf }, blockReference] },
+      { method: "eth_call", params: [{ to: token, data: allowance }, blockReference] },
+    ];
+    const values = await this.ports.batch(stateCalls);
+    if (!Array.isArray(values) || values.length !== stateCalls.length) throw new ApnError("APN_RPC_PROTOCOL", "Relay RPC state batch is incomplete.");
+    const confirmedBlock = evmRpcRecord(values[0]);
+    if (evmRpcQuantity(confirmedBlock.number) !== block || evmRpcHex(confirmedBlock.hash, 32) !== blockHash) {
+      throw new ApnError("APN_RPC_PROTOCOL", "Relay source block changed during preflight.");
+    }
+    const nativeBalanceWei = evmRpcQuantity(values[1]);
+    const tokenBalanceAtomic = evmRpcWord(values[2]);
+    const allowanceAtomic = evmRpcWord(values[3]);
     const principalAtomic = BigInt(operation.amountAtomic);
+    const approvalRequired = allowanceAtomic < principalAtomic;
+    const requiredNativeWei = BigInt(operation.depositNetworkFeeCeilingWei) +
+      (approvalRequired ? BigInt(operation.approvalNetworkFeeCeilingWei) : 0n);
     const reasons = [
       ...(tokenBalanceAtomic < principalAtomic ? ["insufficient_usdc_balance"] : []),
       ...(nativeBalanceWei < requiredNativeWei ? ["insufficient_native_fee_balance"] : []),
@@ -102,12 +116,13 @@ export class RelayReadOnlyPreflightService {
     if (active.registry.expiresAt !== undefined && observedAt.toISOString() >= active.registry.expiresAt) blocked("relay_policy_expired_during_read");
     return { kind: "relay_read_only_source_preflight" as const, operationId: operation.operationId,
       profile: input.profile, sourceChainId: 1 as const, sourceAccount: account, token, spender: ETHEREUM_DEPOSITORY,
-      observedHeadBlockNumber: blockNumber, observedHeadBlockHash: blockHash, observationTag: "latest" as const,
+      observedHeadBlockNumber: blockNumber, observedHeadBlockHash: blockHash,
+      observationBlockHash: blockHash, rpcBatches: 2 as const, rpcMethods: 6 as const,
       nativeBalanceWei: nativeBalanceWei.toString(), tokenBalanceAtomic: tokenBalanceAtomic.toString(),
       allowanceAtomic: allowanceAtomic.toString(), principalAtomic: operation.amountAtomic,
       approvalNetworkFeeCeilingWei: operation.approvalNetworkFeeCeilingWei,
       depositNetworkFeeCeilingWei: operation.depositNetworkFeeCeilingWei,
-      requiredNativeWei: requiredNativeWei.toString(), approvalRequired: allowanceAtomic < principalAtomic,
+      requiredNativeWei: requiredNativeWei.toString(), approvalRequired,
       fundingReasons: reasons, fundingObserved: reasons.length === 0,
       proofClass: "read_only_rpc_observation" as const, executionAdmitted: false as const, nextActions: [] as const };
   }

@@ -29,7 +29,9 @@ export declare class RelayReadOnlyPreflightService {
         spender: string;
         observedHeadBlockNumber: string;
         observedHeadBlockHash: `0x${string}`;
-        observationTag: "latest";
+        observationBlockHash: `0x${string}`;
+        rpcBatches: 2;
+        rpcMethods: 6;
         nativeBalanceWei: string;
         tokenBalanceAtomic: string;
         allowanceAtomic: string;
