@@ -34,14 +34,14 @@ export interface UniswapTokenCommandRuntime {
 export class UniswapTokenExecution {
   constructor(private readonly journal: UniswapTokenJournal, private readonly ports: UniswapTokenExecutionPorts) {}
   async approve(id: string): Promise<UniswapTokenOperation> {
-    let op = await this.required(id); if (op.phase !== "prepared") blocked("Token swap is not prepared.", "uniswap_token_phase");
+    let op = await this.retireExpiredPrepared(await this.required(id)); if (op.phase !== "prepared") blocked("Token swap is not prepared.", "uniswap_token_phase");
     await this.ports.foregroundApprove(op); const usage = await this.ports.reserveUsage(op);
     op = await this.persist(transitionUniswapToken(op, "approved", usagePatch(usage), this.ports.now()));
     op = await this.advanceApproval(op);
     return approvalActive(op.phase) ? await this.observeApproval(await this.continueStart(op, "approval")) : op;
   }
   async execute(id: string): Promise<UniswapTokenOperation> {
-    let op = await this.syncUsage(await this.required(id)); if (["observed", "cleaned", "cleanup_required"].includes(op.phase)) return op;
+    let op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id))); if (["observed", "cleaned", "cleanup_required"].includes(op.phase)) return op;
     if (expired(op, this.ports.now()) && !swapActive(op.phase) && !cleanupActive(op.phase)) {
       if (approvalActive(op.phase) && op.approvalAttempt?.transactionHash != null) return await this.observeApproval(op);
       if (op.phase === "approval_observed" && op.approvalAttempt?.transactionHash != null) return await this.retireExpiredApproval(op);
@@ -59,7 +59,7 @@ export class UniswapTokenExecution {
     if (allowance !== "0" && allowance !== op.route.amountIn) return await this.cleanupRequired(op, "approval_allowance_drift");
     return allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval"); }
   async status(id: string): Promise<UniswapTokenOperation> {
-    const op = await this.syncUsage(await this.required(id));
+    const op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id)));
     if (approvalActive(op.phase)) return await this.observeApproval(op);
     if (op.phase === "approval_observed" && expired(op, this.ports.now()) && op.approvalAttempt?.transactionHash != null)
       return await this.retireExpiredApproval(op);
@@ -164,6 +164,17 @@ export class UniswapTokenExecution {
     preSignFailure?: import("./token-operation.js").UniswapTokenFailureDiagnostic) {
     return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
       ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }) }, this.ports.now())); }
+  private async retireExpiredPrepared(op: UniswapTokenOperation) {
+    if (op.phase !== "prepared" || !expired(op, this.ports.now())) return op;
+    if (op.approvalAttempt !== null || op.swapAttempt !== null || op.cleanupAttempt !== null ||
+        op.usageReservationId !== null || op.usageState !== null || op.accumulatedNativeDebitWei !== "0")
+      blocked("Expired prepared token operation has effects requiring review.", "uniswap_token_expired_prepared_unsafe");
+    await this.assertNoEffect(op);
+    if (await this.ports.currentAllowance(op) !== "0")
+      blocked("Expired prepared token operation has a residual allowance.", "uniswap_token_expired_prepared_allowance");
+    return await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_no_effect",
+      cleanupEvidence: cleanupEvidence("current_allowance", this.ports.now()) }, this.ports.now()));
+  }
   private async syncUsage(op: UniswapTokenOperation) { if (op.usageReservationId === null) return op;
     if (op.phase === "cleaned" && op.cleanupEvidence?.kind === "expired_approval_no_swap") {
       const current = await this.ports.currentUsage(op);

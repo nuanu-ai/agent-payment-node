@@ -22,8 +22,9 @@ async function fixture(root: string, allowance = "0") {
   const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance, currentNow = NOW,
     sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false, guardError: unknown = null, rejectSeal = false,
     currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0, failReleaseOnce = false;
-  const released: string[] = [], committed: string[] = [];
-  const ports = { now: () => currentNow, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
+  const released: string[] = [], committed: string[] = [], foregroundCalls: string[] = [];
+  const ports = { now: () => currentNow, foregroundApprove: async () => { foregroundCalls.push("approve"); },
+    foregroundCleanup: async () => { foregroundCalls.push("cleanup"); },
     withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
     releaseNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { released.push(`${kind}:${nonce}`); },
     commitNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { committed.push(`${kind}:${nonce}`); },
@@ -40,7 +41,7 @@ async function fixture(root: string, allowance = "0") {
   return { runtime: new UniswapTokenExecution(journal, ports), journal, operation, sends, observations,
     allowance: (v: string) => { currentAllowance = v; }, sendResult: (v: "accepted" | "ambiguous") => { sendResult = v; },
     rejectRevalidation: () => { rejectRevalidation = true; }, rejectGuard: (error: unknown = new Error("refused")) => { guardError = error; },
-    rejectSeal: () => { rejectSeal = true; }, usageState: (state: AssetUsageState) => { currentUsageState = state; }, released, committed,
+    rejectSeal: () => { rejectSeal = true; }, usageState: (state: AssetUsageState) => { currentUsageState = state; }, released, committed, foregroundCalls,
     revalidations: () => revalidations, rejectCapacityOn: (call: number) => { rejectCapacityAt = call; },
     now: (value: Date) => { currentNow = value; }, failNextRelease: () => { failReleaseOnce = true; } };
 }
@@ -57,6 +58,41 @@ test("expired quote retires a canonical safe approval and releases principal wit
   assert.equal(op.approvalAttempt?.transactionHash, H("1")); assert.equal(op.swapAttempt, null); assert.equal(op.accumulatedNativeDebitWei, "100");
   assert.deepEqual(f.sends, ["approval"]); assert.equal((await f.runtime.execute(op.operationId)).integrityHash, op.integrityHash);
   assert.equal((await f.runtime.status(op.operationId)).integrityHash, op.integrityHash);
+});
+test("expired prepared token swap closes without owner approval, reservation, or a transaction", async (t) => {
+  for (const command of ["status", "execute"] as const) {
+    const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+    f.now(new Date("2030-03-18T00:00:01.000Z"));
+    const op = await f.runtime[command](f.operation.operationId);
+    assert.equal(op.phase, "cleaned"); assert.equal(op.cleanupReason, "zero_allowance_no_effect");
+    assert.deepEqual(op.cleanupEvidence, { schemaVersion: "apn.uniswap-token-cleanup-evidence.v1",
+      kind: "zero_allowance_no_effect", source: "current_allowance", observedAllowanceAtomic: "0",
+      observedAt: "2030-03-18T00:00:01.000Z" });
+    assert.equal(op.usageReservationId, null); assert.equal(op.usageState, null);
+    assert.equal(op.approvalAttempt, null); assert.equal(op.swapAttempt, null); assert.equal(op.cleanupAttempt, null);
+    assert.equal(op.accumulatedNativeDebitWei, "0"); assert.deepEqual(f.sends, []);
+    assert.deepEqual(f.committed, []); assert.deepEqual(f.released, []); assert.deepEqual(f.foregroundCalls, []);
+    assert.equal((await f.runtime.status(op.operationId)).integrityHash, op.integrityHash);
+  }
+});
+test("expired prepared token swap with a residual allowance stays open for review", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root, "1000000");
+  f.now(new Date("2030-03-18T00:00:01.000Z"));
+  await assert.rejects(f.runtime.status(f.operation.operationId), (error: any) => error.code === "APN_OPERATION_BLOCKED" &&
+    error.details?.reason === "uniswap_token_expired_prepared_allowance");
+  assert.equal((await f.journal.load(f.operation.operationId))?.phase, "prepared"); assert.deepEqual(f.sends, []);
+});
+test("unreserved no-effect terminal evidence must be a current allowance read after expiry", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  f.now(new Date("2030-03-18T00:00:01.000Z"));
+  const op = await f.runtime.status(f.operation.operationId);
+  for (const patch of [{ source: "legacy_usage_reconciliation" }, { observedAt: NOW.toISOString() },
+    { observedAt: "2030-03-18T00:00:02.000Z" }]) {
+    const { integrityHash: _old, ...body } = op;
+    const changed = { ...body, cleanupEvidence: { ...op.cleanupEvidence, ...patch } };
+    assert.throws(() => validateUniswapTokenOperation({ ...changed, integrityHash: hashObject(changed) }),
+      (error: any) => error.code === "APN_STATE_CORRUPT");
+  }
 });
 test("expired approval retirement resumes after a crash between terminal journal and ledger writes", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
