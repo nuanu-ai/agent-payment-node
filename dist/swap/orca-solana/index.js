@@ -14,4 +14,5 @@ export * from "./tty.js";
 export * from "./runtime-factory.js";
 export * from "./command-catalog.js";
 export * from "./command-service.js";
+export * from "./stable-prepare.js";
 //# sourceMappingURL=index.js.map
