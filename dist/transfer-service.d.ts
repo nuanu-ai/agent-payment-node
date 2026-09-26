@@ -27,6 +27,9 @@ export declare class TransferService {
     private reserveUsage;
     /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently, after each durable write. */
     private followUsage;
+    /** Caller holds the profile lock shared by approval and prepare; all local lifecycle writers take it first.
+     * Re-read under that lock without nesting another operation lock or changing the established lock order. */
+    private retireExpiredDirectTransfers;
     private failBeforeEffect;
     private transition;
     private persist;

@@ -109,6 +109,10 @@ export class DirectAllowlistGate {
             await move("submitted", false);
         await move(target, true);
     }
+    /** Read the exact operation reservation without changing policy or usage. */
+    async hasReservation(subject) {
+        return await this.existing(subject) !== null;
+    }
     async existing(subject) {
         const id = identity(subject);
         return await this.ledger.load(id, assetUsageReservationId(id, directUsageKey(subject.operationId)));

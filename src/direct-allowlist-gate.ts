@@ -125,6 +125,11 @@ export class DirectAllowlistGate {
     await move(target, true);
   }
 
+  /** Read the exact operation reservation without changing policy or usage. */
+  async hasReservation(subject: DirectAllowlistSubject): Promise<boolean> {
+    return await this.existing(subject) !== null;
+  }
+
   private async existing(subject: DirectAllowlistSubject): Promise<AssetUsageReservation | null> {
     const id = identity(subject);
     return await this.ledger.load(id, assetUsageReservationId(id, directUsageKey(subject.operationId)));
