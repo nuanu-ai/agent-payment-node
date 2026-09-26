@@ -206,6 +206,14 @@ Exact foreground TTY approval precedes private-key access. MCP
 catalog/core. MCP direct approval returns the existing CLI handoff; it cannot
 authorize or strand the operation. Status and receipt do not resume effects.
 
+A fresh explicit EVM prepare retires expired unsigned local transfers on the
+same profile, network and sending account before checking for conflicts. It
+writes a terminal `failed_before_effect` operation and receipt with reason
+`approval_window_expired`; the same idempotency key still returns its old
+operation. A usage reservation or signed/submitted evidence keeps the operation
+blocked. Legacy Base transfers and other operation families are not retired by
+this path.
+
 ## Safety, recovery and proof
 
 - Chain, asset kind/address/decimals, amount, recipient, payer, nonce and fee

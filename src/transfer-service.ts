@@ -10,6 +10,7 @@ import { checkEvmTransferFunding, evmCustodyPayload } from "./evm-transfer-appro
 import { checkTransferApproval } from "./transfer-approval-check.js";
 import { parseAtomic, parseDecimal } from "./money.js";
 import type { Economics, Hex, OperationRecord, ReceiptRecord } from "./model.js";
+import { conflictDomainKey, evmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { OperationService } from "./operation-service.js";
 import type { RpcPort, RpcReceipt } from "./ports.js";
 import type { RuntimeContext } from "./runtime.js";
@@ -53,7 +54,8 @@ export class TransferService {
   async prepare(request: Extract<CommandRequest, { command: "transfer.prepare" }>): Promise<unknown> {
     if (request.asset !== undefined) {
       if (await this.providerDirect.canHandle(request.profile)) throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Generic EVM direct transfer is available only for the local wallet; external profiles retain their explicit Base-USDC capabilities.");
-      return await prepareEvmTransfer(this.context, this.operations, request, (operation) => this.persist(operation));
+      return await prepareEvmTransfer(this.context, this.operations, request, (operation) => this.persist(operation),
+        (profileHash, chainId, account) => this.retireExpiredDirectTransfers(profileHash, chainId, account));
     }
     if (request.maxFeeWei !== undefined) throw new ApnError("APN_INVALID_INPUT", "Generic fee budget requires explicit chain and asset selection.");
     if (await this.providerDirect.canHandle(request.profile)) return await this.providerDirect.prepare(request);
@@ -448,6 +450,31 @@ export class TransferService {
       await this.allowlist.follow(evmAllowlistSubject(operation), evmUsageTarget(operation.state), operation.transitions.at(-1)!.hash);
     }
     return operation;
+  }
+
+  /** Caller holds the profile lock shared by approval and prepare; all local lifecycle writers take it first.
+   * Re-read under that lock without nesting another operation lock or changing the established lock order. */
+  private async retireExpiredDirectTransfers(profileHash: string, chainId: number, account: string): Promise<void> {
+    const wanted = conflictDomainKey(evmConflictDomain(chainId, account));
+    const eligible = (operation: OperationRecord) => operation.profileHash === profileHash &&
+      operation.evm !== undefined && operation.providerDirect === undefined && !operation.terminal && operation.state === "awaiting_approval" &&
+      this.context.clock.now().getTime() >= Date.parse(operation.expiresAt) &&
+      storedOperationDomains({ kind: "direct_transfer", record: operation })?.some(domain => conflictDomainKey(domain) === wanted);
+    for (const candidate of await this.context.state.listOperations(profileHash)) {
+      if (!eligible(candidate)) continue;
+      const operation = requiredLocal(await this.requiredOperation(candidate.operationId));
+      if (operation.integrityHash !== candidate.integrityHash || !eligible(operation)) {
+        throw new ApnError("APN_STATE_CORRUPT", "Expired direct transfer changed while its profile was locked.");
+      }
+      if (operation.allowlistLease !== undefined || operation.transactionHash !== undefined ||
+          operation.rawTransactionHash !== undefined || operation.lastSubmissionAt !== undefined ||
+          operation.providerEffect !== undefined || operation.transitions.some(item => item.state !== "awaiting_approval") ||
+          (operation.evm !== undefined && await this.allowlist.hasReservation(evmAllowlistSubject(operation)))) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Expired direct transfer has durable effect or reservation evidence.",
+          { blockingOperationId: operation.operationId, blockingState: operation.state });
+      }
+      await this.transition(operation, "failed_before_effect", true, "approval_window_expired", "durable_pre_effect_failure");
+    }
   }
 
   private async failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never> {
