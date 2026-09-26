@@ -302,7 +302,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
   const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, undefined,
-    new SolanaRpcBudget({ maxPhysicalRequests: 24, wait: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }),
+    new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750, wait: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }),
     new SolanaRpcPacer(state));
   const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL,
     configuredTronHttpsFetch({ minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS }));

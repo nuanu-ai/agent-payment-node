@@ -172,7 +172,7 @@ export function createApnCore(bound, options = {}) {
         maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
     const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
     // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
-    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, undefined, new SolanaRpcBudget({ maxPhysicalRequests: 24, wait: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }), new SolanaRpcPacer(state));
+    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, undefined, new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750, wait: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }), new SolanaRpcPacer(state));
     const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL, configuredTronHttpsFetch({ minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS }));
     const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
         new SolanaAwalAdapter(chainAccounts, solanaRpc, undefined, undefined, () => options.clock?.now() ?? new Date()),
