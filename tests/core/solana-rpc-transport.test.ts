@@ -23,6 +23,8 @@ test("installed runtime gives each command a fresh 24 POST Solana cap", async t 
   const rightRpc = (right.context.directRails[0] as SolanaLocalAdapter).rpc as SolanaRpc;
   assert.equal(leftRpc.budget?.maxPhysicalRequests, 24);
   assert.equal(rightRpc.budget?.maxPhysicalRequests, 24);
+  assert.equal(leftRpc.budget?.minimumIntervalMs, 750);
+  assert.equal(rightRpc.hasPersistentPacer, true);
   assert.notEqual(leftRpc.budget, rightRpc.budget);
 });
 
@@ -205,4 +207,15 @@ test("Solana HTTP 429 persists cooldown and never amplifies a send", async t => 
   await assert.rejects(rpc.call("getBlockHeight", []), { code: "APN_PROVIDER_UNAVAILABLE" });
   assert.equal(posts, 1);
   assert.equal(budget.physicalRequests, 1);
+});
+
+
+test("Solana HTTP 403 ends a read after one physical POST", async () => {
+  let posts = 0;
+  const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", (async () => {
+    posts++; return json({ error: "forbidden" }, 403);
+  }) as typeof fetch, new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750 }));
+  await assert.rejects(rpc.call("getGenesisHash", []), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(posts, 1);
+  assert.equal(rpc.budget?.physicalRequests, 1);
 });

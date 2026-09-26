@@ -128,3 +128,71 @@ test("snapshot, ownership, amount, expiry and message mutations fail closed", as
   await assert.rejects(prepareOrcaStableUnsigned({ ...base, snapshot: { ...base.snapshot, owner: raw(SYSTEM_PROGRAM, Buffer.alloc(0), 4999n) } }),
     (error) => reason(error) === "orca_stable_fee_cap");
 });
+
+import { SolanaRpc, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
+import { SOLANA_GENESIS } from "../../src/chain-policy.js";
+import { readOrcaStableSnapshotAndPrepare, readOrcaStableSnapshotCore } from "../../src/swap/orca-solana/stable-snapshot.js";
+
+const wire = (account: OrcaStablePrepareInput["snapshot"]["owner"]) => ({ owner: account.owner,
+  data: [account.data.toString("base64"), "base64"], executable: account.executable,
+  lamports: account.lamports, rentEpoch: 0n, space: account.space });
+async function snapshotRpc() {
+  const source = await input();
+  const accounts = new Map<string, ReturnType<typeof wire>>([
+    [ORCA_STABLE_POOL, wire(source.snapshot.pool)],
+    [ORCA_STABLE_VAULT_A, wire(source.snapshot.vaultA)], [ORCA_STABLE_VAULT_B, wire(source.snapshot.vaultB)],
+    [source.owner, wire(source.snapshot.owner)], [source.snapshot.usdcAtaAddress, wire(source.snapshot.usdcAta!)],
+    [source.snapshot.usdtAtaAddress, wire(source.snapshot.usdtAta!)],
+  ]);
+  for (let i = 0; i < 3; i++) accounts.set(await whirlpoolTickArrayAddress(WHIRLPOOL_PROGRAM, ORCA_STABLE_POOL,
+    source.quote.tickArrayStarts[i]!), wire(source.snapshot.tickArrays[i]!));
+  const calls: SolanaMethod[] = [];
+  let firstSlot = 450_687_913n, fullSlot = 450_687_913n;
+  const rpc: SolanaRpcPort = { originHash: "a".repeat(64), call: async (method, params) => {
+    calls.push(method);
+    if (method === "getGenesisHash") return SOLANA_GENESIS;
+    if (method === "getMultipleAccounts") return { context: { slot: calls.filter((row) => row === "getMultipleAccounts").length === 1 ? firstSlot : fullSlot },
+      value: (params[0] as string[]).map((key) => accounts.get(key) ?? null) };
+    if (method === "getLatestBlockhash") return { context: { slot: fullSlot }, value: {
+      blockhash: source.lifetime.blockhash, lastValidBlockHeight: 400_000_100n } };
+    if (method === "getBlockHeight") return 400_000_000n;
+    throw new Error(`unexpected ${method}`);
+  } };
+  return { source, rpc, calls, accounts, setSlots: (first: bigint, full: bigint) => { firstSlot = first; fullSlot = full; } };
+}
+const snapshotRequest = (value: OrcaStablePrepareInput) => ({ owner: value.owner, amountAtomic: value.quote.amountInAtomic,
+  slippageBps: value.quote.slippageBps, maximumPriceImpactBps: 50, computeUnitLimit: value.computeUnitLimit,
+  computeUnitPriceMicroLamports: value.computeUnitPriceMicroLamports, createUsdtAta: false,
+  maximumTotalFeeLamports: value.maximumTotalFeeLamports });
+
+test("read-only snapshot observes market and owner in one slot before offline preview", async () => {
+  const f = await snapshotRpc(); let verified = 0;
+  const result = await readOrcaStableSnapshotCore(f.rpc, snapshotRequest(f.source), async () => { verified++; return []; });
+  assert.equal(verified, 1);
+  assert.equal(result.slot, "450687913");
+  assert.equal(result.preview.trust, "untrusted_offline_snapshot");
+  assert.equal(result.preview.signable, false); assert.equal(result.preview.executable, false);
+  assert.deepEqual(f.calls, ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts", "getLatestBlockhash", "getBlockHeight"]);
+  assert.equal(result.quote.expectedOutputAtomic, f.source.quote.expectedOutputAtomic);
+});
+
+test("snapshot reader refuses regressed slot, vault drift, terminal RPC error and unguarded transport", async () => {
+  const stale = await snapshotRpc(); stale.setSlots(450_687_914n, 450_687_913n);
+  await assert.rejects(readOrcaStableSnapshotCore(stale.rpc, snapshotRequest(stale.source), async () => []),
+    (error) => reason(error) === "orca_slot_regressed");
+  const drift = await snapshotRpc(); drift.accounts.set(ORCA_STABLE_VAULT_B, wire(token(USDC_MINT, ORCA_STABLE_POOL, 379_676_358_729n)));
+  await assert.rejects(readOrcaStableSnapshotCore(drift.rpc, snapshotRequest(drift.source), async () => []),
+    (error) => reason(error) === "orca_stable_vault_state");
+  const stopped = await snapshotRpc(); let calls = 0;
+  const terminal: SolanaRpcPort = { originHash: stopped.rpc.originHash, call: async (method, params) => {
+    calls++;
+    if (method === "getMultipleAccounts") throw new ApnError("APN_RPC_RATE_LIMITED", "terminal 429");
+    return await stopped.rpc.call(method, params);
+  } };
+  await assert.rejects(readOrcaStableSnapshotCore(terminal, snapshotRequest(stopped.source), async () => []),
+    (error) => error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED");
+  assert.equal(calls, 2);
+  const unguarded = new SolanaRpc("https://api.mainnet-beta.solana.com", async () => { throw new Error("must not fetch"); });
+  await assert.rejects(readOrcaStableSnapshotAndPrepare(unguarded, snapshotRequest(stopped.source)),
+    (error) => error instanceof ApnError && error.code === "APN_RPC_CONFIG");
+});

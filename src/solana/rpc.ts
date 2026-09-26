@@ -95,6 +95,7 @@ export class SolanaRpc implements SolanaRpcPort {
     // Stage integration passes one bounded budget through an operation, outside state locks.
     this.budget = budget;
   }
+  get hasPersistentPacer(): boolean { return this.pacer !== undefined; }
   async call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown> {
     const id = randomUUID();
     const value = await this.request({ jsonrpc: "2.0", id, method, params }, 1, method === "sendTransaction");
