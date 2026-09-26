@@ -302,6 +302,7 @@ export type CommandRequest = {
     readonly profile: string;
     readonly owner: Address;
     readonly request: GaslessCommandRequest;
+    readonly rpcMaxBatchItems?: number;
 } | {
     readonly command: "gasless.transfer.prepare";
     readonly profile: string;

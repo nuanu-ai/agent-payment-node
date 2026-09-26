@@ -359,6 +359,73 @@ test("gasless read batches bind every result ID and never fall back to sequentia
   }
 });
 
+test("invocation batch cap partitions thirty queued reads and preserves every ID", async () => {
+  const batches: Json[][] = [];
+  const transport: GaslessTransport = { request: async (endpoint, _method, body) => {
+    assert.equal(endpoint, RPC_URL);
+    const request = JSON.parse(body!) as Json[];
+    assert.ok(Array.isArray(request)); batches.push(request);
+    return { status: 200, body: JSON.stringify(request.toReversed().map(row =>
+      ({ jsonrpc: "2.0", id: row.id, result: row.params[0] }))) };
+  } };
+  const rpc = new GaslessRpc(1, RPC_URL, BUNDLER_URL, transport);
+  const read = (value: number) => (rpc as unknown as { rpcCall(method: string, params: unknown[]): Promise<unknown> })
+    .rpcCall("eth_getBalance", [String(value), "latest"]);
+  const values = await withGaslessRpcInvocation(async () => await Promise.all(Array.from({ length: 30 }, (_, n) => read(n))), 3);
+  assert.deepEqual(values, Array.from({ length: 30 }, (_, n) => String(n)));
+  assert.deepEqual(batches.map(batch => batch.length), Array(10).fill(3));
+  assert.equal(new Set(batches.flat().map(row => row.id)).size, 30);
+  batches.length = 0;
+  await withGaslessRpcInvocation(async () => await Promise.all(Array.from({ length: 30 }, (_, n) => read(n))));
+  assert.deepEqual(batches.map(batch => batch.length), [30]);
+});
+
+test("a malformed, refused or timed-out capped chunk fails all queued reads without retry", async () => {
+  for (const fault of ["duplicate", "429", "403", "timeout"] as const) {
+    let posts = 0;
+    const transport: GaslessTransport = { request: async (_endpoint, _method, body) => {
+      posts += 1;
+      const rows = JSON.parse(body!) as Json[];
+      if (posts === 2 && fault === "timeout") throw new Error("fixture timeout");
+      if (posts === 2 && fault !== "duplicate") return { status: Number(fault), body: "refused" };
+      const replies = rows.map(row => ({ jsonrpc: "2.0", id: row.id, result: row.params[0] }));
+      if (posts === 2) replies[1]!.id = replies[0]!.id;
+      return { status: 200, body: JSON.stringify(replies) };
+    } };
+    const rpc = new GaslessRpc(1, RPC_URL, BUNDLER_URL, transport);
+    const read = (value: number) => (rpc as unknown as { rpcCall(method: string, params: unknown[]): Promise<unknown> })
+      .rpcCall("eth_getBalance", [String(value), "latest"]);
+    const outcomes = await withGaslessRpcInvocation(async () => await Promise.allSettled(
+      Array.from({ length: 9 }, (_, n) => read(n))), 3);
+    assert.equal(outcomes.length, 9);
+    for (const outcome of outcomes) {
+      assert.equal(outcome.status, "rejected");
+      assert.equal((outcome as PromiseRejectedResult).reason.code,
+        fault === "429" ? "APN_RPC_RATE_LIMITED" : fault === "timeout" ? "APN_RPC_AMBIGUOUS" : "APN_RPC_PROTOCOL");
+    }
+    assert.equal(posts, 2, fault);
+  }
+});
+
+test("capped production snapshot keeps block pinning and rejects a reorg", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root);
+  await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address));
+  assert.equal(s.calls.filter(call => !call.bundler).length, 3);
+  assert.equal(s.calls.filter(call => call.bundler).length, 1);
+  s.calls.length = 0;
+  const snapshot = await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), 3);
+  assert.equal(snapshot.owner, s.account.address);
+  const rpcPosts = s.calls.filter(call => !call.bundler);
+  assert.equal(rpcPosts.length, 12);
+  assert.equal(s.calls.filter(call => call.bundler).length, 1);
+  assert.ok(rpcPosts.some(call => call.methods.length === 3));
+  assert.ok(rpcPosts.every(call => call.methods.length <= 3));
+  s.setFault("reorg");
+  await assert.rejects(withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), 3),
+    { code: "APN_RPC_PROTOCOL" });
+});
+
 test("gasless shared provider-family pacer separates physical POST starts across clients", async () => {
   let time = 10_000;
   const waits: number[] = [], starts: Array<{ family: string; at: number }> = [];

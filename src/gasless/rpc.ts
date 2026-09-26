@@ -35,6 +35,13 @@ export class GaslessRpcRequestSession {
   private terminalStatus: number | null = null;
   private readonly verifiedChains = new Set<GaslessRpc>();
   private readonly protocolAnchors = new Map<GaslessRpc, { hash: Hex; proof: Promise<void> }>();
+  readonly maxBatchItems: number;
+  constructor(maxBatchItems?: number) {
+    if (maxBatchItems !== undefined && (!Number.isSafeInteger(maxBatchItems) || maxBatchItems < 2 || maxBatchItems > 30)) {
+      gaslessFailure("APN_INVALID_INPUT", "gasless_RPC_batch_cap");
+    }
+    this.maxBatchItems = maxBatchItems ?? Number.POSITIVE_INFINITY;
+  }
   reserve(): void {
     this.assertActive();
     if (this.posts >= MAX_INVOCATION_POSTS) gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
@@ -70,8 +77,8 @@ interface PendingRead {
 }
 
 /** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
-export async function withGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T> {
-  return await invocation.run(new GaslessRpcRequestSession(), work);
+export async function withGaslessRpcInvocation<T>(work: () => Promise<T>, maxBatchItems?: number): Promise<T> {
+  return await invocation.run(new GaslessRpcRequestSession(maxBatchItems), work);
 }
 
 /** Reuse the public command's budget, or start one for a directly invoked observation port. */
@@ -353,25 +360,29 @@ export class GaslessRpc implements GaslessRpcPort {
     if (reads === undefined) return;
     this.pendingReads.delete(session);
     try {
-      session.reserve();
-      const requests = reads.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
-      const response = await this.transport.request(this.rpcEndpoint, "POST",
-        canonicalJson(requests.length === 1 ? requests[0] : requests), MAX_RESPONSE, "APN_RPC_CONFIG",
-        () => session.assertActive());
-      assertHttpStatus(response.status, session);
-      if (reads.length === 1) {
-        reads[0]!.resolve(parseRpcResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), reads[0]!.id));
-        return;
-      }
-      const rows = rpcJson(response.body, MAX_RESPONSE);
-      if (!Array.isArray(rows) || rows.length !== reads.length) gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
-      const expected = new Set(reads.map(row => row.id)), results = new Map<string, unknown>();
-      for (const value of rows) {
-        const record = rpcRecord(value), id = record.id;
-        if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
-          gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+      const results = new Map<string, unknown>();
+      for (let start = 0; start < reads.length; start += session.maxBatchItems) {
+        const chunk = reads.slice(start, start + session.maxBatchItems);
+        session.reserve();
+        const requests = chunk.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
+        const response = await this.transport.request(this.rpcEndpoint, "POST",
+          canonicalJson(requests.length === 1 ? requests[0] : requests), MAX_RESPONSE, "APN_RPC_CONFIG",
+          () => session.assertActive());
+        assertHttpStatus(response.status, session);
+        if (chunk.length === 1) {
+          results.set(chunk[0]!.id, parseRpcResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), chunk[0]!.id));
+          continue;
         }
-        results.set(id, parseRpcResult(record, id));
+        const rows = rpcJson(response.body, MAX_RESPONSE);
+        if (!Array.isArray(rows) || rows.length !== chunk.length) gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+        const expected = new Set(chunk.map(row => row.id));
+        for (const value of rows) {
+          const record = rpcRecord(value), id = record.id;
+          if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
+            gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
+          }
+          results.set(id, parseRpcResult(record, id));
+        }
       }
       for (const read of reads) read.resolve(results.get(read.id));
     } catch (error) {
