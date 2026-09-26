@@ -5,6 +5,7 @@ import type { GaslessChainId } from "./model.js";
 import { GaslessOperationRepository } from "./operation-repository.js";
 import type { GaslessApprovalPort, GaslessCustodyPort, GaslessObservationRpcFactory, GaslessRpcFactory } from "./ports.js";
 import { GaslessPreparation } from "./prepare.js";
+import type { GaslessRequest } from "./model.js";
 export interface GaslessDependencies {
     readonly rpcFor: GaslessRpcFactory;
     readonly observationRpcFor?: GaslessObservationRpcFactory;
@@ -32,6 +33,41 @@ export declare class GaslessService {
         block: import("./model.js").GaslessBlock;
         rpc_origin: string;
         proof_class: string;
+    }>;
+    quote(input: {
+        readonly profile: string;
+        readonly owner: string;
+        readonly request: GaslessRequest;
+    }): Promise<{
+        profile: string;
+        provider: string;
+        chain_id: number;
+        token: `0x${string}`;
+        symbol: string;
+        decimals: number;
+        recipient: `0x${string}`;
+        owner: `0x${string}`;
+        paymaster: `0x${string}`;
+        gross_atomic: string;
+        quote_atomic: string;
+        fee_cap_atomic: string;
+        prepared_recipient_atomic: string;
+        quote_net_atomic: string;
+        minimum_received_atomic: string;
+        status: string;
+        profile_binding_checked: boolean;
+        policy_checked: boolean;
+        usage_checked: boolean;
+        prepare_admitted: string;
+        balance_atomic: string;
+        allowance_atomic: string;
+        delegation: "empty" | "expected";
+        gas: import("./model.js").GaslessGas;
+        fee_configuration: import("./model.js").GaslessFeeConfiguration;
+        block: import("./model.js").GaslessBlock;
+        rpc_origin: string;
+        proof_class: string;
+        quote_scope: string;
     }>;
     prepare(input: Parameters<GaslessPreparation["prepare"]>[0]): Promise<{
         rpc_origin: string;

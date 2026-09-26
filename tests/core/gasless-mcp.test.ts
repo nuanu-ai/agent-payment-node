@@ -25,6 +25,7 @@ const GASLESS_TOOL_NAMES = [
   "apn_gasless_usdt_resume",
   "apn_gasless_capabilities",
   "apn_gasless_balance",
+  "apn_gasless_transfer_quote",
   "apn_gasless_transfer_prepare",
   "apn_gasless_transfer_approve",
 ] as const;
@@ -45,7 +46,7 @@ test("CLI and MCP discovery expose the terminal permission-invalidation recovery
   }
 });
 
-test("gasless CLI and MCP project the same seven strict tools and canonical inputs", () => {
+test("gasless CLI and MCP project the same eight strict tools and canonical inputs", () => {
   const tools = projectMcpTools().filter((item) => item.name.startsWith("apn_gasless_"));
   assert.deepEqual(tools.map((item) => item.name), GASLESS_TOOL_NAMES);
   assert.deepEqual(tools.map((item) => ({
@@ -60,6 +61,8 @@ test("gasless CLI and MCP project the same seven strict tools and canonical inpu
     { name: "apn_gasless_usdt_resume", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
     { name: "apn_gasless_capabilities", properties: ["profile"], required: [], additionalProperties: false },
     { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], additionalProperties: false },
+    { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"],
+      required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], additionalProperties: false },
     { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"],
       required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], additionalProperties: false },
     { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], additionalProperties: false },

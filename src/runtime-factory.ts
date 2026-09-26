@@ -216,6 +216,14 @@ export interface RuntimeFactoryOptions {
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
   const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
+  if (bound.request.command === "gasless.transfer.quote") {
+    if (bound.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "Ethereum quote requires an explicit public RPC URL.");
+    // This read path has no custody implementation, signer, journal or effect transport.
+    const unavailable = async (): Promise<never> => { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Quote is read only."); };
+    return new ApnCore({ state, gasless: { rpcFor: options.gasless?.rpcFor ??
+      gaslessRpcFactory({ APN_ETHEREUM_RPC_URL: bound.rpcUrl }),
+      custody: { load: unavailable, seal: unavailable } } });
+  }
   if (bound.request.command === "x402.permit2.status") return new ApnCore({ state });
   if (bound.request.command === "relay.arbitrum.observe") {
     const url = bound.rpcUrl ?? "";
