@@ -6,7 +6,8 @@
 Whirlpool `4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4` (tick spacing 1,
 fee rate 100 = 0.01%). `apn swap solana orca stable-quote --amount 1000000
 --slippage-bps 50 --maximum-price-impact-bps 50` reads it through
-`APN_SOLANA_RPC_URL`. Amounts are six-decimal USDC atomic units. The quote is
+`APN_SOLANA_RPC_URL`. `--amount` is `<atomic_usdc>`: six-decimal USDC atomic
+units (so `1000000` means one USDC). The quote is
 exact-input A to B and uses the Whirlpool's local integer swap math.
 
 The reader verifies mainnet genesis; exact pool owner, config, mints, vaults,
