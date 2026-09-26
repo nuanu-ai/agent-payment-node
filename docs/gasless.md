@@ -188,6 +188,10 @@ quote is above the owner's limits; a `fee_calibration` failure means no reliable
 does not read or change local state, reserve usage, create an operation, sign, or send. Profile binding,
 policy, usage, and preparation admission remain unchecked; prepare revalidates them. The explicit
 `--rpc-url` applies only to this invocation. It is an upper bound for preparation, not a live execution estimate.
+For public RPCs that accept at most three JSON-RPC items per batch, add
+`--rpc-max-batch-items 3` to the quote command. The cap applies only to this quote's Ethereum reads;
+the default keeps the existing batch size. Chunks run sequentially under the existing 750 ms provider-family
+pacing and 24 POST invocation budget, and any failed chunk rejects the whole quote.
 
 The example permits a total amount of 10 USDC, a fee no greater than 0.2 USDC
 and delivery of at least 9.8 USDC. For a local wallet, preparation checks that the current
