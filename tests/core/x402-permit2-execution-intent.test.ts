@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, lstat, readFile, writeFile, mkdir, symlink, chmod, access, rename } from "node:fs/promises";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { runCli } from "../../src/cli.js";
+import { createMcpServer } from "../../src/mcp-server.js";
+import { readPermit2IntentStatus } from "../../src/x402-permit2/status.js";
+import { StateStore } from "../../src/state.js";
+import { AssetUsageLedger as UsageLedger } from "../../src/asset-usage-ledger.js";
 import { join } from "node:path";
 import test from "node:test";
 import type { PaymentRequired } from "@x402/core/types";
@@ -385,3 +391,88 @@ test("forged prepared signing data cannot reach reservation or signer", async (t
 function readOnlyObserve(): Pick<Permit2EffectPorts, "observe"> {
   return { observe: async () => { throw new Error("settled replay must not observe"); } };
 }
+
+async function statusTree(root: string): Promise<unknown[]> {
+  const result: unknown[] = [];
+  async function visit(path: string): Promise<void> {
+    const info = await lstat(path);
+    result.push([path, info.mode, info.ino, info.size, info.mtimeMs, info.ctimeMs,
+      info.isFile() ? await readFile(path, "utf8") : null]);
+    if (info.isDirectory()) for (const name of (await readdir(path)).sort()) await visit(join(path, name));
+  }
+  await visit(root); return result;
+}
+
+test("Permit2 existing status is redacted CLI/MCP parity with no state or effect access", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const before = await statusTree(state.root);
+  const forbidden = () => { throw new Error("status attempted a forbidden effect"); };
+  t.mock.method(Permit2ExecutionIntentJournal.prototype, "load", forbidden);
+  t.mock.method(Permit2ExecutionIntentJournal.prototype, "create", forbidden);
+  t.mock.method(SecureStateStore.prototype, "initialize", forbidden);
+  t.mock.method(StateStore.prototype, "initialize", forbidden);
+  t.mock.method(UsageLedger.prototype, "reserve", forbidden);
+  t.mock.method(globalThis, "fetch", forbidden);
+  const options = { stateRoot: state.root, native: { request: async () => forbidden() },
+    wrappingSecret: { load: async () => forbidden(), create: async () => forbidden() } };
+  const cli = await runCli(["x402", "permit2", "status", "--profile", "owner", "--operation", intent.operationId], {}, options);
+  assert.equal(cli.ok, true);
+  const server = createMcpServer(options);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "permit2-status-test", version: "1" });
+  await client.connect(clientTransport);
+  try {
+    const result = await client.callTool({ name: "apn_x402_permit2_status", arguments: { profile: "owner", operation: intent.operationId } });
+    const mcp = result.structuredContent as typeof cli;
+    assert.equal(mcp?.ok, true);
+    assert.deepEqual(mcp?.data, cli.data);
+    assert.deepEqual(Object.keys(cli.data as object).sort(), ["blockerCodes", "capability", "chain", "operationId", "owner", "profile", "recipient", "state", "token"].sort());
+    assert.equal((cli.data as { state: string }).state, "execution_blocked");
+    assert.equal(JSON.stringify(cli.data).includes(intent.typedDataDigest), false);
+  } finally { await client.close(); await server.close(); }
+  await assert.rejects(readPermit2IntentStatus(state.root, "other", intent.operationId), errorCode("APN_OPERATION_BLOCKED"));
+  assert.deepEqual(await statusTree(state.root), before);
+});
+
+test("Permit2 missing roots stay absent and invalid IDs fail closed", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const missing = join(state.base, "missing-status-root");
+  const status = await readPermit2IntentStatus(missing, "owner", "a".repeat(64));
+  assert.equal(status.state, "not_found");
+  await assert.rejects(access(missing));
+  for (const id of ["../escape", "A".repeat(64), "a".repeat(63)]) {
+    await assert.rejects(readPermit2IntentStatus(missing, "owner", id), errorCode("APN_INVALID_INPUT"));
+  }
+  await assert.rejects(access(missing));
+  await mkdir(state.root, { mode: 0o700 });
+  const before = await statusTree(state.root);
+  assert.equal((await readPermit2IntentStatus(state.root, "owner", "a".repeat(64))).state, "not_found");
+  assert.deepEqual(await statusTree(state.root), before);
+});
+
+test("Permit2 status rejects malformed, corrupt, insecure and symlink records without repair", async (t) => {
+  const state = await temporaryState(); t.after(state.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(state.root).create(request, port());
+  const path = join(state.root, "permit2-intents", `${intent.operationId}.json`);
+  const { integrityHash: _hash, ...body } = intent;
+  const malformed = { ...body, owner: "secret", profileHash: 12 };
+  for (const bytes of ["{", canonicalJson({ ...intent, recipient: payer }), canonicalJson({ ...intent, unexpected: "signature" }),
+    canonicalJson({ ...malformed, integrityHash: domainHash("apn.x402-permit2.execution-intent.v1", canonicalJson(malformed)) })]) {
+    await writeFile(path, bytes, { mode: 0o600 });
+    const before = await statusTree(state.root);
+    await assert.rejects(readPermit2IntentStatus(state.root, "owner", intent.operationId), errorCode("APN_STATE_CORRUPT"));
+    assert.deepEqual(await statusTree(state.root), before);
+  }
+  await writeFile(path, canonicalJson(intent)); await chmod(path, 0o644);
+  await assert.rejects(readPermit2IntentStatus(state.root, "owner", intent.operationId), errorCode("APN_STATE_SECURITY"));
+  const other = join(state.base, "status-link-root"); await symlink(state.root, other);
+  await assert.rejects(readPermit2IntentStatus(other, "owner", intent.operationId), errorCode("APN_STATE_SECURITY"));
+  await chmod(path, 0o600);
+  const linkId = "b".repeat(64); await symlink(path, join(state.root, "permit2-intents", `${linkId}.json`));
+  await assert.rejects(readPermit2IntentStatus(state.root, "owner", linkId), errorCode("APN_STATE_SECURITY"));
+  const directory = join(state.root, "permit2-intents");
+  const moved = join(state.root, "moved-intents"); await rename(directory, moved); await symlink(moved, directory);
+  await assert.rejects(readPermit2IntentStatus(state.root, "owner", intent.operationId), errorCode("APN_STATE_SECURITY"));
+});
