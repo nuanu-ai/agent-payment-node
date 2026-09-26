@@ -66,6 +66,7 @@ export declare class UniswapTokenExecution {
     private observeCleanup;
     private cleaned;
     private cleanupRequired;
+    private retireExpiredPrepared;
     private syncUsage;
     private assertNoEffect;
     private required;
