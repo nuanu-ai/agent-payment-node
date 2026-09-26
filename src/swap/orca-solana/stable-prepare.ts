@@ -129,7 +129,14 @@ export async function validateOrcaStableUnsigned(value: OrcaStableUnsignedPrevie
       swapKeys[6] !== ORCA_STABLE_VAULT_B || swapKeys[7] !== ticks[0] || swapKeys[8] !== ticks[1] ||
       swapKeys[9] !== ticks[2] || swapKeys[10] !== oracle || new Set(swapKeys).size !== 11) blocked("Stable swap account identities changed.", "orca_stable_message_shape");
   for (const key of swapKeys.slice(7, 10)) allowedWritable.add(key!);
-  keys.forEach((key, i) => { if (writable(i) && !allowedWritable.has(key)) blocked("Unexpected writable account.", "orca_stable_message_writable"); });
+  const expectedKeys = new Set([value.owner, value.sourceAta, value.destinationAta, ORCA_STABLE_POOL,
+    ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM, COMPUTE_BUDGET_PROGRAM,
+    oracle, ...ticks, ...(value.createUsdtAta ? [ATA_PROGRAM, SYSTEM_PROGRAM, SOLANA_USDT] : [])]);
+  if (new Set(keys).size !== keys.length || keys.length !== expectedKeys.size || keys.some((key) => !expectedKeys.has(key)))
+    blocked("Stable preview has an extra or missing account.", "orca_stable_message_shape");
+  keys.forEach((key, i) => {
+    if (writable(i) !== allowedWritable.has(key)) blocked("Stable account writable role changed.", "orca_stable_message_writable");
+  });
   const programs = message.instructions.map((ix) => keys[ix.programAddressIndex]);
   const expectedPrograms = value.createUsdtAta ? [COMPUTE_BUDGET_PROGRAM, COMPUTE_BUDGET_PROGRAM, ATA_PROGRAM, WHIRLPOOL_PROGRAM] :
     [COMPUTE_BUDGET_PROGRAM, COMPUTE_BUDGET_PROGRAM, WHIRLPOOL_PROGRAM];
