@@ -152,12 +152,37 @@ follow-up commands are `apn operation status --operation <operation-id>` and
 `apn receipt get --operation <operation-id>`; do not run `approve`, `resume`,
 `execute`, or an equivalent send command in this no-money pass.
 
-## Fresh 9/9 mapping requirement
+## Current checkpoint nine-row proof matrix
 
-The historical acceptance mapping has nine rows: Ethereum ETH, USDC, and WETH;
-Base ETH, USDC, and WETH; and Arbitrum One ETH, USDC, and USDT0. The current
-report has fresh evidence for only one of those nine (Ethereum ETH). The other
-eight require fresh evidence on this source revision.
+The 9/9 mapping has nine asset rows across three networks: Ethereum ETH, USDC,
+and WETH; Base ETH, USDC, and WETH; and Arbitrum One ETH, USDC, and USD₮0.
+Source identities are present in the frozen network registry or the direct-only
+supplemental registry below. This establishes code support only.
+
+The 19 Sep owner report was cited as showing fresh evidence for Ethereum ETH,
+but the cited records do not identify that evidence's proof layer, operation,
+or receipt. The 26 Sep C1-12 checkpoint additionally records a Base ETH no-money
+prepare under buyer policy revision 20, operation prefix `fe563b15…`; it expired
+as `failed_before_effect` without a reservation, transaction hash, RPC send, or
+receipt. That is a no-effect outcome, not a paid receipt. These later notes
+supersede the unqualified “1/9 current” count; they do not establish the full
+current-source no-money or paid matrix.
+
+| Chain / asset row | Code / source | Current-source no-money proof | Paid receipt proof |
+| --- | --- | --- | --- |
+| Ethereum ETH | Present in direct network registry | Named in the 19 Sep 1/9 report; proof layer and operation ID are unspecified in the cited record | No receipt identity in the cited records |
+| Ethereum USDC | Present in direct network registry | No current-source matrix entry recorded | No current-source receipt recorded |
+| Ethereum WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
+| Base ETH | Present in direct network registry | Operation `fe563b15…` expired as `failed_before_effect`; no reservation, transaction hash, RPC send, or receipt | No paid receipt recorded |
+| Base USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical paid receipt under policy revision 11; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
+| Base WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
+| Arbitrum One ETH | Present in direct network registry | No current-source matrix entry recorded | No current-source receipt recorded |
+| Arbitrum One USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical safe-inclusion receipt under policy revision 12; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
+| Arbitrum One USD₮0 | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
+
+The Ethereum USDT receipt in the ledger is a separate asset row; it does not
+substitute for Arbitrum USD₮0. The ledger remains authoritative for exact
+historical receipt identifiers and their policy, amount, and finality evidence.
 
 WETH and USDT0 remain absent from the frozen market-cap dataset above. The
 direct-only supplemental registry pins Ethereum WETH9
