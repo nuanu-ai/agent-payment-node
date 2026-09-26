@@ -1,5 +1,35 @@
 # Solana Orca Whirlpool: keyless guarded swap
 
+## USDC to USDT market read (C2-05)
+
+`apn swap solana orca stable-inventory` lists the pinned mainnet USDC/USDT
+Whirlpool `4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4` (tick spacing 1,
+fee rate 100 = 0.01%). `apn swap solana orca stable-quote --amount 1000000
+--slippage-bps 50 --maximum-price-impact-bps 50` reads it through
+`APN_SOLANA_RPC_URL`. Amounts are six-decimal USDC atomic units. The quote is
+exact-input A to B and uses the Whirlpool's local integer swap math.
+
+The reader verifies mainnet genesis; exact pool owner, config, mints, vaults,
+spacing and fee; absent adaptive-fee oracle; and both classic SPL vault mint,
+authority and state. It derives three downward tick arrays from the first pool
+read, then verifies the pool, arrays, oracle and vaults in a single
+`getMultipleAccounts` result with one slot. It checks the output against the
+destination reserve, computes a ceiling-rounded slippage floor, and refuses
+when price impact exceeds the supplied cap. Current math supports a starting
+tick of zero or a negative tick. It refuses other positive ticks until the
+positive-tick math is separately implemented and verified.
+
+This surface returns `mode: read_only`, `signable: false`, `signed: false`,
+`broadcast: false`, and no transaction bytes. Inventory does not grant an
+asset admission. There is no prepare, approval, signer, sender or payment
+claim for this pool. Owner USDC funding, token-account existence, SOL fee
+balance and account rent are unverified. The SOL/USDC execution route below
+remains separate.
+
+The pin and vault balances were observed on mainnet on 2026-09-26 near slots
+450687682–450687913. A fresh quote re-reads the current state; those balances
+are historical evidence, not a live reserve guarantee.
+
 APN exposes `inventory`, `quote`, `prepare`, `status`, `approve`, and `execute`
 under `apn swap solana orca`. The only admitted mechanism is native SOL to
 canonical USDC, exact input, against one pinned Orca Whirlpool on Solana

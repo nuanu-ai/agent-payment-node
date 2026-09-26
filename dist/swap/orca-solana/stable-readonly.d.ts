@@ -1,0 +1,68 @@
+import { type SolanaRpcPort } from "../../solana/rpc.js";
+/** C2-05 is intentionally limited to market reads. There is no plan, transaction, signer, or operation record. */
+export declare const ORCA_STABLE_POOL: "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4";
+export declare const ORCA_STABLE_VAULT_A: "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
+export declare const ORCA_STABLE_VAULT_B: "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";
+export declare const ORCA_STABLE_FEE_RATE = 100;
+export declare function orcaStableInventory(): {
+    readonly chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+    readonly mode: "read_only";
+    readonly admitted: false;
+    readonly signable: false;
+    readonly executable: false;
+    readonly ownerBalanceVerified: false;
+    readonly tokenAccountVerified: false;
+    readonly fundingVerified: false;
+    readonly feesVerified: false;
+    readonly pool: "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4";
+    readonly program: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+    readonly config: "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ";
+    readonly sourceMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    readonly destinationMint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+    readonly vaultA: "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
+    readonly vaultB: "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";
+    readonly tickSpacing: 1;
+    readonly feeRate: 100;
+    readonly direction: "USDC_to_USDT_exact_input";
+};
+export interface OrcaStableQuoteRequest {
+    readonly amountAtomic: string;
+    readonly slippageBps: number;
+    readonly maximumPriceImpactBps: number;
+}
+export declare function quoteOrcaStableReadOnly(rpc: SolanaRpcPort, request: OrcaStableQuoteRequest): Promise<{
+    readonly slot: string;
+    readonly sourceReserveAtomic: string;
+    readonly destinationReserveAtomic: string;
+    readonly amountInAtomic: string;
+    readonly expectedOutputAtomic: string;
+    readonly minimumOutputAtomic: string;
+    readonly feeAtomic: string;
+    readonly slippageBps: number;
+    readonly priceImpactBps: number;
+    readonly spotUsdtPerUsdcAtomic: string;
+    readonly tickCurrentIndex: number;
+    readonly tickArrayStarts: number[];
+    readonly initializedTicksCrossed: number;
+    readonly signed: false;
+    readonly broadcast: false;
+    readonly chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+    readonly mode: "read_only";
+    readonly admitted: false;
+    readonly signable: false;
+    readonly executable: false;
+    readonly ownerBalanceVerified: false;
+    readonly tokenAccountVerified: false;
+    readonly fundingVerified: false;
+    readonly feesVerified: false;
+    readonly pool: "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4";
+    readonly program: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
+    readonly config: "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ";
+    readonly sourceMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+    readonly destinationMint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+    readonly vaultA: "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
+    readonly vaultB: "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";
+    readonly tickSpacing: 1;
+    readonly feeRate: 100;
+    readonly direction: "USDC_to_USDT_exact_input";
+}>;

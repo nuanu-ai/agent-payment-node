@@ -750,7 +750,7 @@ apn gasless usdt execution-status --profile-hash <hash> --operation <operation-i
 apn gasless usdt observe --profile-hash <hash> --operation <operation-id>
 apn gasless capabilities [--profile <profile>]
 apn gasless balance --profile <profile> --chain <chain-id>
-apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc>
+apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]
 apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>
 apn gasless transfer approve --operation <operation-id>
 apn allowlist inventory
@@ -785,6 +785,8 @@ apn swap solana jupiter prepare --profile <profile> --quote <string> --idempoten
 apn swap solana jupiter status --operation <operation_id>
 apn swap solana jupiter approve --operation <operation_id>
 apn swap solana jupiter execute --operation <operation_id>
+apn swap solana orca stable-inventory
+apn swap solana orca stable-quote --amount <wei> --slippage-bps <string> --maximum-price-impact-bps <string>
 apn swap solana orca inventory
 apn swap solana orca quote --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
 apn swap solana orca prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
