@@ -24,7 +24,7 @@ export async function assertDirectEvmProfile(context, profile, chainId) {
 function isSharedEvmChain(chainId) {
     return EVM_NETWORKS.some((network) => network.chainId === chainId);
 }
-export async function prepareEvmTransfer(context, operations, request, persist) {
+export async function prepareEvmTransfer(context, operations, request, persist, retireExpired) {
     if (request.asset === undefined)
         throw new ApnError("APN_INVALID_INPUT", "Explicit asset selection is missing.");
     // The frozen list is checked first: an unlisted network or an unpinned contract is refused before any RPC or custody call.
@@ -59,6 +59,7 @@ export async function prepareEvmTransfer(context, operations, request, persist) 
             const wallet = await state.loadWallet(profileHash);
             if (wallet === null)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+            await retireExpired(profileHash, selection.chainId, wallet.address);
             await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
             const amount = evmAmount(request.amount, listed.decimals);
             // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.

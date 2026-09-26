@@ -44,6 +44,8 @@ export declare class DirectAllowlistGate {
     confirm(subject: DirectAllowlistSubject, bindingValue: unknown): Promise<ActiveAssetPolicy>;
     /** Move the ledger forward to the journal's state. Idempotent, so every resume can repair a lagging ledger. */
     follow(subject: DirectAllowlistSubject, target: DirectUsageTarget, evidenceHash: string): Promise<void>;
+    /** Read the exact operation reservation without changing policy or usage. */
+    hasReservation(subject: DirectAllowlistSubject): Promise<boolean>;
     private existing;
     private active;
 }

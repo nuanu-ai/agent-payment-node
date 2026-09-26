@@ -7,4 +7,4 @@ import type { RuntimeContext } from "./runtime.js";
 export declare function assertDirectEvmProfile(context: RuntimeContext, profile: string, chainId: DirectEvmChainId | undefined): Promise<void>;
 export declare function prepareEvmTransfer(context: RuntimeContext, operations: OperationService, request: Extract<CommandRequest, {
     command: "transfer.prepare";
-}>, persist: (operation: OperationRecord) => Promise<void>): Promise<unknown>;
+}>, persist: (operation: OperationRecord) => Promise<void>, retireExpired: (profileHash: string, chainId: number, account: string) => Promise<void>): Promise<unknown>;
