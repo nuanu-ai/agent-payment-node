@@ -169,6 +169,9 @@ keyless sponsor accepts EIP-7702 there.
 ```sh
 apn gasless capabilities
 apn gasless balance --profile default --chain 8453
+apn gasless transfer quote --profile default --chain 1 --owner <local-owner-address> \
+  --to <recipient-address> --amount 0.005 --max-fee 0.004 --min-received 0.001 \
+  --rpc-url <public-ethereum-rpc>
 apn gasless transfer prepare --profile default --chain 8453 \
   --to <recipient-address> --amount 10 --max-fee 0.2 --min-received 9.8 \
   --idempotency-key <unique-key>
@@ -177,6 +180,14 @@ apn operation resume --operation <operation-id>
 apn operation status --operation <operation-id>
 apn receipt get --operation <operation-id>
 ```
+
+The Ethereum local quote command is read only. It checks one verified public RPC snapshot for the explicit
+owner, then reports the calibrated upper bound in atomic USDC, the input fee cap, the prepared recipient
+amount (`gross - cap`), gas assumptions, Circle fee configuration, paymaster, and block. `fee_exceeds_cap` means the valid
+quote is above the owner's limits; a `fee_calibration` failure means no reliable quote was produced. It
+does not read or change local state, reserve usage, create an operation, sign, or send. Profile binding,
+policy, usage, and preparation admission remain unchecked; prepare revalidates them. The explicit
+`--rpc-url` applies only to this invocation. It is an upper bound for preparation, not a live execution estimate.
 
 The example permits a total amount of 10 USDC, a fee no greater than 0.2 USDC
 and delivery of at least 9.8 USDC. For a local wallet, preparation checks that the current

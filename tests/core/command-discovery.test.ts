@@ -87,7 +87,7 @@ const EXPECTED_COMMANDS = [
   "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
   "oneclick source submit", "oneclick source status",
   "gasless usdt prepare", "gasless usdt status", "gasless usdt resume", "gasless usdt execute", "gasless usdt execution-status", "gasless usdt observe",
-  "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
+  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve",
   "allowlist inventory", "allowlist resolve", "allowlist policy prepare", "allowlist policy stage", "allowlist policy activate",
   "allowlist policy revoke", "allowlist policy status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare", "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
