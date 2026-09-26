@@ -6,6 +6,10 @@ import type { ChainProvider } from "./direct-rail-ports.js";
 import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
+    readonly command: "x402.permit2.status";
+    readonly profile: string;
+    readonly operationId: string;
+} | {
     readonly command: "relay.prepare";
     readonly profile: string;
     readonly recipient: string;

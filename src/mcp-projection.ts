@@ -49,6 +49,7 @@ const SELECTED_PATHS = [
   "pay transfer prepare-tron",
   "wallet policy show",
   "wallet policy set",
+  "x402 permit2 status",
   "x402 inspect",
   "x402 fetch prepare",
   "x402 fetch approve",

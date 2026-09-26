@@ -74,4 +74,6 @@ export declare class Permit2ExecutionIntentJournal extends SecureStateStore {
     create(input: Permit2IntentInput, port: Permit2IntentReadPort): Promise<Permit2ExecutionIntent>;
     load(operationId: string): Promise<Permit2ExecutionIntent | null>;
 }
+/** Validate a checked existing record without initialization or effects. */
+export declare function validatePermit2ExecutionIntent(value: unknown, operationId: string): Permit2ExecutionIntent;
 export {};

@@ -82,6 +82,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
   { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
   { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
+  { path: ["x402", "permit2"], summary: "Read existing blocked Permit2 intents.", kind: "group" },
   { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
   { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
   { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },
@@ -89,6 +90,11 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ] as const;
 const BASE_COMMANDS: readonly CommandDefinition[] = [
+  command(["x402", "permit2", "status"], "apn x402 permit2 status --profile <profile> --operation <operation-id>",
+    "Read one existing blocked Permit2 intent with redacted output.", [profileRequired, operationRequired],
+    "local_read", "Checks existing local state only; never initializes, repairs, reserves, signs or sends.",
+    "none", "Never.", { terminal: ["not_found"], non_terminal: ["execution_blocked"] }, [],
+    ["apn x402 permit2 status --profile default --operation <operation-id>"]),
   command(["relay", "arbitrum", "prepare"],
     "apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>",
     "Save one unsigned Arbitrum USDC to the exact Ethereum USDC recipient Relay quote.",
