@@ -91,6 +91,7 @@ export class SolanaRpc {
         // Stage integration passes one bounded budget through an operation, outside state locks.
         this.budget = budget;
     }
+    get hasPersistentPacer() { return this.pacer !== undefined; }
     async call(method, params) {
         const id = randomUUID();
         const value = await this.request({ jsonrpc: "2.0", id, method, params }, 1, method === "sendTransaction");
