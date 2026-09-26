@@ -65,9 +65,11 @@ export async function readOrcaStableSnapshotCore(rpc: SolanaRpcPort, request: Or
   const latest = rpcRecord(await rpc.call("getLatestBlockhash", [{ commitment: "confirmed", minContextSlot: Number(full.slot) }]));
   const contextSlot = rpcAtomic(rpcRecord(latest.context).slot);
   if (contextSlot < full.slot) blocked("Stable Orca blockhash read is behind the snapshot.", "orca_slot_regressed");
+  if (contextSlot > BigInt(Number.MAX_SAFE_INTEGER)) blocked("Stable blockhash context slot exceeds RPC bounds.", "orca_stable_snapshot_slot");
   const lifetime = rpcRecord(latest.value), blockhash = solanaAddress(lifetime.blockhash as string);
   const lastValidBlockHeight = rpcAtomic(lifetime.lastValidBlockHeight);
-  const currentBlockHeight = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "confirmed", minContextSlot: Number(full.slot) }]));
+  // The height must come from a node at least as current as the blockhash response.
+  const currentBlockHeight = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "confirmed", minContextSlot: Number(contextSlot) }]));
   let rent: string | undefined;
   if (usdtAta === null && request.createUsdtAta) {
     rent = rpcAtomic(await rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])).toString();

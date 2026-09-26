@@ -147,18 +147,24 @@ async function snapshotRpc() {
   for (let i = 0; i < 3; i++) accounts.set(await whirlpoolTickArrayAddress(WHIRLPOOL_PROGRAM, ORCA_STABLE_POOL,
     source.quote.tickArrayStarts[i]!), wire(source.snapshot.tickArrays[i]!));
   const calls: SolanaMethod[] = [];
-  let firstSlot = 450_687_913n, fullSlot = 450_687_913n;
+  let firstSlot = 450_687_913n, fullSlot = 450_687_913n, blockhashSlot = 450_687_913n;
+  let staleHeightTrap = false, heightMinContextSlot: number | null = null;
   const rpc: SolanaRpcPort = { originHash: "a".repeat(64), call: async (method, params) => {
     calls.push(method);
     if (method === "getGenesisHash") return SOLANA_GENESIS;
     if (method === "getMultipleAccounts") return { context: { slot: calls.filter((row) => row === "getMultipleAccounts").length === 1 ? firstSlot : fullSlot },
       value: (params[0] as string[]).map((key) => accounts.get(key) ?? null) };
-    if (method === "getLatestBlockhash") return { context: { slot: fullSlot }, value: {
+    if (method === "getLatestBlockhash") return { context: { slot: blockhashSlot }, value: {
       blockhash: source.lifetime.blockhash, lastValidBlockHeight: 400_000_100n } };
-    if (method === "getBlockHeight") return 400_000_000n;
+    if (method === "getBlockHeight") {
+      heightMinContextSlot = (params[0] as { minContextSlot: number }).minContextSlot;
+      return staleHeightTrap && BigInt(heightMinContextSlot) >= blockhashSlot ? 400_000_101n : 400_000_000n;
+    }
     throw new Error(`unexpected ${method}`);
   } };
-  return { source, rpc, calls, accounts, setSlots: (first: bigint, full: bigint) => { firstSlot = first; fullSlot = full; } };
+  return { source, rpc, calls, accounts, setSlots: (first: bigint, full: bigint) => { firstSlot = first; fullSlot = full; blockhashSlot = full; },
+    trapOutOfOrderHeight: () => { blockhashSlot = fullSlot + 10n; staleHeightTrap = true; },
+    heightMinContextSlot: () => heightMinContextSlot };
 }
 const snapshotRequest = (value: OrcaStablePrepareInput) => ({ owner: value.owner, amountAtomic: value.quote.amountInAtomic,
   slippageBps: value.quote.slippageBps, maximumPriceImpactBps: 50, computeUnitLimit: value.computeUnitLimit,
@@ -174,6 +180,15 @@ test("read-only snapshot observes market and owner in one slot before offline pr
   assert.equal(result.preview.signable, false); assert.equal(result.preview.executable, false);
   assert.deepEqual(f.calls, ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts", "getLatestBlockhash", "getBlockHeight"]);
   assert.equal(result.quote.expectedOutputAtomic, f.source.quote.expectedOutputAtomic);
+});
+
+
+test("block height is read at the blockhash context, rejecting an expired hash from an out-of-order provider", async () => {
+  const f = await snapshotRpc(); f.trapOutOfOrderHeight();
+  await assert.rejects(readOrcaStableSnapshotCore(f.rpc, snapshotRequest(f.source), async () => []),
+    (error) => reason(error) === "orca_stable_lifetime");
+  assert.equal(f.heightMinContextSlot(), 450_687_923);
+  assert.deepEqual(f.calls, ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts", "getLatestBlockhash", "getBlockHeight"]);
 });
 
 test("snapshot reader refuses regressed slot, vault drift, terminal RPC error and unguarded transport", async () => {
