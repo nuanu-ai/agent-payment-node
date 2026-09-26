@@ -1,3 +1,4 @@
+import { readPermit2IntentStatus } from "./x402-permit2/status.js";
 import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { failureEnvelope, successEnvelope } from "./output.js";
 import { dataOutcome, operationOutcome, receiptOutcome } from "./core-outcome.js";
 import { RuntimeContext, type CoreDependencies } from "./runtime.js";
@@ -162,6 +163,8 @@ export class ApnCore {
   }
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
+      case "x402.permit2.status":
+        return dataOutcome(await readPermit2IntentStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_blocked_intent");
       case "relay.prepare": {
         const service = this.context.relayPrepare;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay prepare runtime is unavailable.");

@@ -150,18 +150,7 @@ export class Permit2ExecutionIntentJournal extends SecureStateStore {
     await this.ready();
     const value = await this.readJson(this.path(operationId));
     if (value === null) return null;
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "idempotencyHash", "profileHash",
-      "requestHash", "prepareHash", "challengeHash", "merchantOrigin", "resourceUrl", "facilitatorEndpoint", "chain",
-      "token", "owner", "recipient", "amountAtomic", "permit2Contract", "exactProxy", "typedDataDigest",
-      "eip2612Digest", "nonce", "deadline", "policyDigest", "reservationId", "reservationState", "capability",
-      "createdAtUnix", "integrityHash"])) corrupt();
-    const { integrityHash, ...body } = value;
-    if (value.schemaVersion !== SCHEMA || value.operationId !== operationId ||
-        value.capability !== "execution_blocked" || value.reservationState !== "intended" ||
-        value.facilitatorEndpoint !== ENDPOINT || value.chain !== asset.chain || value.token !== asset.token ||
-        value.permit2Contract !== PERMIT2_ADDRESS || value.exactProxy !== X402_EXACT_PERMIT2_PROXY ||
-        !HASH.test(String(integrityHash)) || integrityHash !== domainHash(SCHEMA, canonicalJson(body))) corrupt();
-    return value as unknown as Permit2ExecutionIntent;
+    return validatePermit2ExecutionIntent(value, operationId);
   }
 }
 
@@ -214,3 +203,37 @@ function refuse(message: string): never {
   throw new ApnError("APN_OPERATION_BLOCKED", message, { reason: "x402_permit2_intent_mismatch" });
 }
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "Permit2 intent journal is corrupt."); }
+
+/** Validate a checked existing record without initialization or effects. */
+export function validatePermit2ExecutionIntent(value: unknown, operationId: string): Permit2ExecutionIntent {
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "idempotencyHash", "profileHash",
+    "requestHash", "prepareHash", "challengeHash", "merchantOrigin", "resourceUrl", "facilitatorEndpoint", "chain",
+    "token", "owner", "recipient", "amountAtomic", "permit2Contract", "exactProxy", "typedDataDigest",
+    "eip2612Digest", "nonce", "deadline", "policyDigest", "reservationId", "reservationState", "capability",
+    "createdAtUnix", "integrityHash"])) corrupt();
+  const { integrityHash, ...body } = value;
+  if (value.schemaVersion !== SCHEMA || value.operationId !== operationId ||
+    value.capability !== "execution_blocked" || value.reservationState !== "intended" ||
+    value.facilitatorEndpoint !== ENDPOINT || value.chain !== asset.chain || value.token !== asset.token ||
+    value.permit2Contract !== PERMIT2_ADDRESS || value.exactProxy !== X402_EXACT_PERMIT2_PROXY ||
+    !HASH.test(String(integrityHash)) || integrityHash !== domainHash(SCHEMA, canonicalJson(body))) corrupt();
+  for (const field of ["idempotencyHash", "profileHash", "requestHash", "prepareHash", "challengeHash", "policyDigest", "reservationId"]) {
+    if (typeof value[field] !== "string" || !HASH.test(value[field])) corrupt();
+  }
+  for (const field of ["owner", "recipient"]) {
+    if (typeof value[field] !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value[field]) || /^0x0{40}$/u.test(value[field])) corrupt();
+  }
+  if (!validQuantity(value.amountAtomic) || BigInt(value.amountAtomic) === 0n || !validQuantity(value.nonce) ||
+      !validQuantity(value.deadline) || BigInt(value.deadline) > BigInt(Number.MAX_SAFE_INTEGER) ||
+      typeof value.createdAtUnix !== "number" || !Number.isSafeInteger(value.createdAtUnix) || value.createdAtUnix < 1 ||
+      BigInt(value.deadline) <= BigInt(value.createdAtUnix) ||
+      typeof value.typedDataDigest !== "string" || !/^0x[a-f0-9]{64}$/u.test(value.typedDataDigest) ||
+      (value.eip2612Digest !== null && (typeof value.eip2612Digest !== "string" || !/^0x[a-f0-9]{64}$/u.test(value.eip2612Digest)))) corrupt();
+  try {
+    if (typeof value.resourceUrl !== "string" || typeof value.merchantOrigin !== "string") corrupt();
+    const url = new URL(value.resourceUrl);
+    if (url.protocol !== "https:" || url.username || url.password || url.hash || url.toString() !== value.resourceUrl ||
+        url.origin !== value.merchantOrigin) corrupt();
+  } catch { corrupt(); }
+  return value as unknown as Permit2ExecutionIntent;
+}
