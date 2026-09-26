@@ -179,7 +179,7 @@ export class TransferService {
         await this.failBeforeEffect(operation, "approval_window_expired");
       }
       const rpc = this.context.requireRpc();
-      if (operation.chainId === 8453) rpc.armEvmDirectRpcGuard?.();
+      if (operation.chainId === 8453 || operation.chainId === 42161) rpc.armEvmDirectRpcGuard?.();
       const check = async () => await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
       if (operation.evm === undefined) await check();
       else await this.context.state.withLocks([walletCustodyLock(this.context.state, profile)], check);
@@ -246,7 +246,7 @@ export class TransferService {
     const found = await this.requiredOperation(operationId);
     if (observeOnly && found.providerDirect !== undefined) throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
     if (found.providerDirect !== undefined) return await this.providerDirect.resume(operationId, waitSeconds);
-    if (found.chainId === 1 || found.chainId === 56 || found.chainId === 8453) this.context.requireRpc().armEvmDirectRpcGuard?.();
+    if (found.chainId === 1 || found.chainId === 56 || found.chainId === 8453 || found.chainId === 42161) this.context.requireRpc().armEvmDirectRpcGuard?.();
     if (waitSeconds !== undefined) {
       throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
     }
