@@ -74,6 +74,15 @@ test("CLI and MCP bind the same explicit Ethereum RPC quote input", () => {
   assert.deepEqual(bindMcpInput(tool.command, input), cli);
   assert.equal(cli.rpcUrl, input.rpc_url);
   assert.equal((cli.request as { request: { grossAtomic: string } }).request.grossAtomic, "5000");
+  const capped = parseArgv(["gasless", "transfer", "quote", "--profile", input.profile, "--chain", input.chain,
+    "--owner", input.owner, "--to", input.to, "--amount", input.amount, "--max-fee", input.max_fee,
+    "--min-received", input.min_received, "--rpc-url", input.rpc_url, "--rpc-max-batch-items", "3"]);
+  assert.equal((capped.request as { rpcMaxBatchItems: number }).rpcMaxBatchItems, 3);
+  assert.deepEqual(bindMcpInput(tool.command, { ...input, rpc_max_batch_items: "3" }), capped);
+  assert.throws(() => parseArgv(["gasless", "transfer", "quote", "--profile", input.profile, "--chain", input.chain,
+    "--owner", input.owner, "--to", input.to, "--amount", input.amount, "--max-fee", input.max_fee,
+    "--min-received", input.min_received, "--rpc-url", input.rpc_url, "--rpc-max-batch-items", "1"]),
+  { code: "APN_INVALID_INPUT" });
 });
 
 test("compiled dist CLI quote with a nonexistent state root performs one snapshot and leaves the root absent", async t => {
@@ -83,7 +92,7 @@ test("compiled dist CLI quote with a nonexistent state root performs one snapsho
   const { runCli: runBuiltCli } = await import(pathToFileURL(join(process.cwd(), "dist", "cli.js")).href) as typeof import("../../src/cli.js");
   const result = await runBuiltCli(["gasless", "transfer", "quote", "--profile", s.profile, "--chain", "1",
     "--owner", s.account.address, "--to", s.request.recipient, "--amount", "0.005", "--max-fee", "0.004",
-    "--min-received", "0.001", "--rpc-url", "https://ethereum-rpc.example"], process.env,
+    "--min-received", "0.001", "--rpc-url", "https://ethereum-rpc.example", "--rpc-max-batch-items", "3"], process.env,
     { stateRoot: absent, gasless: s.dependencies });
   assert.equal(result.ok, true, result.error?.message);
   assert.deepEqual(s.rpc.calls, ["snapshot"]);

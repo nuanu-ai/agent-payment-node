@@ -329,7 +329,8 @@ export class ApnCore {
                                 : await this.gasless.balance(request.profile, gaslessChain(request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE")), "chain_verified_public_read");
             }
             case "gasless.transfer.quote": return dataOutcome(await this.gasless.quote({ profile: request.profile, owner: request.owner,
-                request: { ...request.request, chainId: gaslessChain(request.request.chainId) } }), "chain_verified_public_read");
+                request: { ...request.request, chainId: gaslessChain(request.request.chainId) },
+                ...(request.rpcMaxBatchItems === undefined ? {} : { rpcMaxBatchItems: request.rpcMaxBatchItems }) }), "chain_verified_public_read");
             case "gasless.transfer.prepare": return operationOutcome(await this.prepareGasless(request));
             case "gasless.usdt.prepare": {
                 const service = this.context.gaslessUsdtPrepare;

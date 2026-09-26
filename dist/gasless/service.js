@@ -86,7 +86,7 @@ export class GaslessService {
                 delegation: snapshot.delegation, gas, fee_configuration: snapshot.feeConfiguration,
                 block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read",
                 quote_scope: "fee_snapshot_only_prepare_revalidates_policy_usage_and_quote" };
-        });
+        }, input.rpcMaxBatchItems);
     }
     async prepare(input) {
         return await withGaslessRpcInvocation(async () => {
