@@ -86,6 +86,7 @@ import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
 import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
 import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
+import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export function createApnCore(bound, options = {}) {
@@ -260,7 +261,8 @@ export function createApnCore(bound, options = {}) {
             foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
         : undefined);
     // Keyless Orca uses the owner-named APN_SOLANA_RPC_URL rail client and the encrypted local Solana wallet.
-    const orcaRuntime = options.orcaRuntime ?? (bound.request.command.startsWith("swap.orca.")
+    const orcaRuntime = options.orcaRuntime ?? (bound.request.command.startsWith("swap.orca.") &&
+        !bound.request.command.startsWith("swap.orca.stable-")
         ? createOrcaKeylessRuntime({ state, clock, rpc: solanaRpc, accounts: chainAccounts, verifyPins: verifyOrcaProgramPins,
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
@@ -295,6 +297,9 @@ export function createApnCore(bound, options = {}) {
         ...(uniswapTokenRuntime === undefined ? {} : { uniswapTokenRuntime }),
         ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
         ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
+        ...(bound.request.command === "swap.orca.stable-quote" ? {
+            orcaStableQuote: (request) => quoteOrcaStableReadOnly(solanaRpc, request),
+        } : {}),
         ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
         ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
         ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),

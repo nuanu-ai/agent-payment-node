@@ -14,6 +14,10 @@ export const ORCA_COMMAND_GROUPS = [
     { path: ["swap", "solana", "orca"], summary: "Keyless Orca Whirlpool native SOL to USDC exact input against the pinned SOL/USDC pool.", kind: "group" },
 ];
 export const ORCA_COMMANDS = [
+    command("stable-inventory", [], "Read the pinned USDC/USDT Whirlpool identity without admission or signing.", "none"),
+    command("stable-quote", [option("--amount", "atomic_usdc", ["positive_usdc_atomic"]),
+        option("--slippage-bps", "string", ["integer_0_through_9999"]),
+        option("--maximum-price-impact-bps", "string", ["integer_0_through_10000"])], "Read a guarded exact-input USDC to USDT quote from one Whirlpool snapshot. No transaction is built.", "network_read"),
     command("inventory", [], "Read the pinned Whirlpool program, pool and keyless mechanism pin without admitting them.", "none"),
     command("quote", [profile, option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
         option("--amount", "wei", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
@@ -37,6 +41,18 @@ export function bindOrcaCommand(path, options) {
     if (action === "inventory") {
         exact(options, []);
         return { command: "swap.orca.inventory" };
+    }
+    if (action === "stable-inventory") {
+        exact(options, []);
+        return { command: "swap.orca.stable-inventory" };
+    }
+    if (action === "stable-quote") {
+        exact(options, ["--amount", "--slippage-bps", "--maximum-price-impact-bps"]);
+        const amount = options["--amount"];
+        if (amount === undefined || !/^[1-9][0-9]{0,19}$/u.test(amount))
+            invalid("Stable Orca amount must be positive canonical USDC atomic units.");
+        return { command: "swap.orca.stable-quote", amountAtomic: amount, slippageBps: integer(options["--slippage-bps"], 9_999),
+            maximumPriceImpactBps: integer(options["--maximum-price-impact-bps"], 10_000) };
     }
     if (action === "status" || action === "approve" || action === "execute") {
         exact(options, ["--operation"]);

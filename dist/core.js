@@ -264,6 +264,8 @@ export class ApnCore {
             case "swap.jupiter.approve":
             case "swap.jupiter.execute": return await executeJupiterCommand(request, this.context);
             case "swap.orca.inventory":
+            case "swap.orca.stable-inventory":
+            case "swap.orca.stable-quote":
             case "swap.orca.quote":
             case "swap.orca.prepare":
             case "swap.orca.status":
