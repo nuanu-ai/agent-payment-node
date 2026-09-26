@@ -197,6 +197,13 @@ export type CommandRequest = {
 } | {
     readonly command: "swap.orca.inventory";
 } | {
+    readonly command: "swap.orca.stable-inventory";
+} | {
+    readonly command: "swap.orca.stable-quote";
+    readonly amountAtomic: string;
+    readonly slippageBps: number;
+    readonly maximumPriceImpactBps: number;
+} | {
     readonly command: "swap.orca.quote";
     readonly profile: string;
     readonly account: string;

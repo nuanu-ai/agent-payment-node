@@ -19,10 +19,14 @@ const NEGATIVE_TICK_FACTORS = [
     [131072, 26294789957452057n], [262144, 37481735321082n],
 ];
 const MAX_STEPS = 16;
-/** Negative ticks only: SOL/USDC in atomic units sits near -22500; a non-negative tick is outside this pinned pair. */
+/** The SOL/USDC route uses negative ticks. The separate stable-pair read-only route starts at tick zero. */
 export function sqrtPriceAtTick(tick) {
-    if (!Number.isSafeInteger(tick) || tick >= 0 || tick < MIN_TICK)
-        blocked("Whirlpool tick is outside the pinned negative range.", "orca_tick_range");
+    if (!Number.isSafeInteger(tick) || tick > 1 || tick < MIN_TICK)
+        blocked("Whirlpool tick is outside the bounded quote range.", "orca_tick_range");
+    if (tick === 0)
+        return Q64;
+    if (tick === 1)
+        return 18447666387855959850n;
     const absolute = -tick;
     let ratio = (absolute & 1) !== 0 ? 18445821805675392311n : Q64;
     for (const [bit, factor] of NEGATIVE_TICK_FACTORS)

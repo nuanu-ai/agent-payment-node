@@ -1,6 +1,7 @@
 import { ApnError } from "../../errors.js";
 import { swapMechanismDigest } from "../pin.js";
 import { SwapOperationRepository } from "../repository.js";
+import { orcaStableInventory } from "./stable-readonly.js";
 import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_POOL_FEE_RATE, ORCA_POOL_TICK_SPACING, ORCA_PROGRAM_PINS, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_SOLANA_CHAIN, ORCA_USDC_VAULT, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
 /** Inventory is the owner's source for the keyless pin and digest; nothing here admits or signs anything. */
 export function orcaInventory(runtimeInstalled) {
@@ -15,6 +16,13 @@ export async function executeOrcaCommand(request, context) {
     const runtime = context.orcaRuntime;
     if (request.command === "swap.orca.inventory")
         return data(orcaInventory(runtime !== undefined), "official_catalog_not_owner_admission");
+    if (request.command === "swap.orca.stable-inventory")
+        return data(orcaStableInventory(), "pinned_read_only_inventory");
+    if (request.command === "swap.orca.stable-quote") {
+        if (context.orcaStableQuote === undefined)
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca quote reader is unavailable.");
+        return data(await context.orcaStableQuote(request), "read_only_market_quote");
+    }
     if (request.command === "swap.orca.status" && runtime === undefined) {
         const operation = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
         if (operation === null)

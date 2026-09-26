@@ -51,6 +51,7 @@ import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapRuntime } from "./swap/runtime.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
+import type { OrcaStableQuoteRequest } from "./swap/orca-solana/stable-readonly.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
@@ -93,6 +94,7 @@ export interface CoreDependencies {
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
+  readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -156,6 +158,7 @@ export class RuntimeContext {
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
+  readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -220,6 +223,7 @@ export class RuntimeContext {
     if (dependencies.uniswapTokenRuntime !== undefined) this.uniswapTokenRuntime = dependencies.uniswapTokenRuntime;
     if (dependencies.sunswapRuntime !== undefined) this.sunswapRuntime = dependencies.sunswapRuntime;
     if (dependencies.orcaRuntime !== undefined) this.orcaRuntime = dependencies.orcaRuntime;
+    if (dependencies.orcaStableQuote !== undefined) this.orcaStableQuote = dependencies.orcaStableQuote;
     if (dependencies.uniswap !== undefined) this.uniswap = dependencies.uniswap;
     if (dependencies.sunswap !== undefined) this.sunswap = dependencies.sunswap;
     if (dependencies.jupiter !== undefined) this.jupiter = dependencies.jupiter;
