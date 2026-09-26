@@ -90,6 +90,15 @@ import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export function createApnCore(bound, options = {}) {
     const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
+    if (bound.request.command === "gasless.transfer.quote") {
+        if (bound.rpcUrl === undefined)
+            throw new ApnError("APN_RPC_CONFIG", "Ethereum quote requires an explicit public RPC URL.");
+        // This read path has no custody implementation, signer, journal or effect transport.
+        const unavailable = async () => { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Quote is read only."); };
+        return new ApnCore({ state, gasless: { rpcFor: options.gasless?.rpcFor ??
+                    gaslessRpcFactory({ APN_ETHEREUM_RPC_URL: bound.rpcUrl }),
+                custody: { load: unavailable, seal: unavailable } } });
+    }
     if (bound.request.command === "x402.permit2.status")
         return new ApnCore({ state });
     if (bound.request.command === "relay.arbitrum.observe") {

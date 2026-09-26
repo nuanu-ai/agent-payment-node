@@ -298,6 +298,11 @@ export type CommandRequest = {
     readonly profile: string;
     readonly chainId: GaslessCommandChainId;
 } | {
+    readonly command: "gasless.transfer.quote";
+    readonly profile: string;
+    readonly owner: Address;
+    readonly request: GaslessCommandRequest;
+} | {
     readonly command: "gasless.transfer.prepare";
     readonly profile: string;
     readonly request: GaslessCommandRequest;

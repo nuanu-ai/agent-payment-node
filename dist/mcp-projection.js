@@ -63,7 +63,7 @@ const SELECTED_PATHS = [
     "x402 fetch prepare-network",
     "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
     "gasless usdt prepare", "gasless usdt status", "gasless usdt resume",
-    "gasless capabilities", "gasless balance", "gasless transfer prepare", "gasless transfer approve",
+    "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve",
     "oneclick source submit", "oneclick source status",
 ];
 export function projectMcpTools(manifest = COMMAND_MANIFEST) {

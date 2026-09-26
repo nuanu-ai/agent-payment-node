@@ -116,7 +116,8 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported guarded swap command.");
   }
   if (parsed.command.path[0] === "allowlist") return { request: bindAllowlistCommand(parsed.command.path.join(" "), options) };
-  if (parsed.command.path[0] === "gasless") return { request: bindGaslessCommand(parsed.command.path.join(" "), options) };
+  if (parsed.command.path[0] === "gasless") return { request: bindGaslessCommand(parsed.command.path.join(" "), options),
+    ...(parsed.command.path.join(" ") === "gasless transfer quote" ? { rpcUrl: value(options, "--rpc-url") } : {}) };
   if (parsed.command.path[0] === "bridge") return { request: bindBridgeCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "oneclick") return { request: bindOneClickCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "circle") return { request: bindCircleCommand(parsed.command.path.join(" "), options) };

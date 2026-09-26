@@ -22,8 +22,12 @@ const GASLESS_PATHS = [
   "gasless usdt prepare",
   "gasless usdt status",
   "gasless usdt resume",
+  "gasless usdt execute",
+  "gasless usdt execution-status",
+  "gasless usdt observe",
   "gasless capabilities",
   "gasless balance",
+  "gasless transfer quote",
   "gasless transfer prepare",
   "gasless transfer approve",
 ] as const;
@@ -33,6 +37,7 @@ const GASLESS_TOOLS = [
   "apn_gasless_usdt_resume",
   "apn_gasless_capabilities",
   "apn_gasless_balance",
+  "apn_gasless_transfer_quote",
   "apn_gasless_transfer_prepare",
   "apn_gasless_transfer_approve",
 ] as const;

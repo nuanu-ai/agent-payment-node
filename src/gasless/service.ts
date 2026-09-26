@@ -12,13 +12,16 @@ import { gaslessOwner } from "./owner.js";
 import type { GaslessApprovalPort, GaslessCustodyPort, GaslessObservationRpcFactory, GaslessRpcFactory } from "./ports.js";
 import { GaslessObservationService } from "./observation.js";
 import { gaslessObservationRpcEnv } from "./observation-source.js";
+import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
 import { GaslessPreparation } from "./prepare.js";
 import { withGaslessRpcInvocation } from "./rpc.js";
 import { publicGaslessOperation } from "./receipt.js";
 import { gaslessAsset, gaslessDeployment, gaslessIntentAsset } from "./registry.js";
 import { snapshotSchema } from "./schema.js";
 import { transitionGasless } from "./transitions.js";
-import { gaslessFailure } from "./validation.js";
+import { GASLESS_ZERO_ADDRESS, assertGaslessExecutionChain, gaslessAddress, gaslessFailure, validateGaslessRequest } from "./validation.js";
+import type { GaslessRequest } from "./model.js";
+import { canonicalProfile } from "../wallet-policy.js";
 
 export interface GaslessDependencies {
   readonly rpcFor: GaslessRpcFactory;
@@ -47,6 +50,49 @@ export class GaslessService {
         address: owner.address, balance_atomic: snapshot.balanceAtomic, native_balance_wei: snapshot.nativeBalanceWei,
         paymaster_allowance_atomic: snapshot.allowanceAtomic, delegation: snapshot.delegation,
         block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read" };
+    });
+  }
+  async quote(input: { readonly profile: string; readonly owner: string; readonly request: GaslessRequest }) {
+    return await withGaslessRpcInvocation(async () => {
+      const profile = canonicalProfile(input.profile), request = validateGaslessRequest(input.request);
+      if (request.chainId !== 1) gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_quote_ethereum_only");
+      assertGaslessExecutionChain(request.chainId);
+      const row = gaslessDeployment(request.chainId), owner = gaslessAddress(input.owner, "APN_INVALID_INPUT");
+      if (owner === GASLESS_ZERO_ADDRESS) gaslessFailure("APN_INVALID_INPUT", "gasless_owner_zero");
+      if ([GASLESS_ZERO_ADDRESS, owner, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {
+        gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
+      }
+      const snapshot = await this.dependencies().rpcFor(request.chainId).snapshot(owner);
+      if (!snapshotSchema.safeParse(snapshot).success || snapshot.chainId !== request.chainId ||
+        snapshot.owner !== owner || snapshot.token !== row.token) {
+        gaslessFailure("APN_RPC_PROTOCOL", "gasless_quote_snapshot_binding");
+      }
+      let gas;
+      let quoteAtomic;
+      try {
+        gas = gaslessCalibratedGas(snapshot);
+        quoteAtomic = gaslessFee(gas, snapshot.feeConfiguration);
+      } catch (error) {
+        if (error instanceof ApnError && error.code === "APN_FEE_BUDGET_EXCEEDED") {
+          throw new ApnError("APN_PROVIDER_PROTOCOL", "Gasless fee calibration or Circle configuration is invalid.",
+            { stage: "fee_calibration", reason: "gasless_fee_configuration_invalid" });
+        }
+        throw error;
+      }
+      const gross = BigInt(request.grossAtomic), cap = [BigInt(request.maxFeeAtomic), gross - BigInt(request.minReceivedAtomic)]
+        .reduce((a, b) => a < b ? a : b);
+      const quote = BigInt(quoteAtomic), preparedNet = gross - cap, quoteNet = gross - quote;
+      return { profile, provider: "local", chain_id: 1, token: row.token, symbol: "USDC", decimals: 6,
+        recipient: request.recipient, owner, paymaster: row.paymaster, gross_atomic: request.grossAtomic,
+        quote_atomic: quoteAtomic, fee_cap_atomic: cap.toString(), prepared_recipient_atomic: preparedNet.toString(),
+        quote_net_atomic: quoteNet > 0n ? quoteNet.toString() : "0",
+        minimum_received_atomic: request.minReceivedAtomic,
+        status: quote <= cap ? "within_fee_cap" : "fee_exceeds_cap",
+        profile_binding_checked: false, policy_checked: false, usage_checked: false, prepare_admitted: "unknown",
+        balance_atomic: snapshot.balanceAtomic, allowance_atomic: snapshot.allowanceAtomic,
+        delegation: snapshot.delegation, gas, fee_configuration: snapshot.feeConfiguration,
+        block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read",
+        quote_scope: "fee_snapshot_only_prepare_revalidates_policy_usage_and_quote" };
     });
   }
   async prepare(input: Parameters<GaslessPreparation["prepare"]>[0]) {
