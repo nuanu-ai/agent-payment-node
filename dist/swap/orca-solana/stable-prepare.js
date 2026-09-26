@@ -1,14 +1,17 @@
 import { AccountRole, address, appendTransactionMessageInstructions, blockhash, compileTransaction, createNoopSigner, createTransactionMessage, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder, getTransactionDecoder, setTransactionMessageFeePayerSigner, setTransactionMessageLifetimeUsingBlockhash } from "@solana/kit";
 import { getTokenDecoder, getCreateAssociatedTokenIdempotentInstruction } from "@solana-program/token";
 import { SOLANA_USDT } from "../../chain-policy.js";
+import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { solanaAddress } from "../../solana/rpc.js";
-import { associatedTokenAddress, whirlpoolOracleAddress, whirlpoolTickArrayAddress } from "./accounts.js";
-import { tickArrayStart } from "./math.js";
-import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, ORCA_SOLANA_CHAIN, sha256Hex, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOL_SWAP_DISCRIMINATOR } from "./pins.js";
+import { associatedTokenAddress, decodeTickArray, decodeWhirlpool, whirlpoolOracleAddress, whirlpoolTickArrayAddress } from "./accounts.js";
+import { quoteWhirlpoolExactInAToB, tickArrayStart } from "./math.js";
+import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, ORCA_SOLANA_CHAIN, sha256Hex, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOL_SWAP_DISCRIMINATOR, WHIRLPOOL_ACCOUNT_DISCRIMINATOR, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, WHIRLPOOLS_CONFIG } from "./pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "./stable-readonly.js";
 const U64_MAX = (1n << 64n) - 1n;
 const MAX_COMPUTE_UNITS = 1_400_000;
+const BASE_FEE_LAMPORTS = 5000n;
+const PREVIEW_DIGEST_DOMAIN = "apn.orca-stable-untrusted-preview-manifest.v1";
 export const ORCA_STABLE_PREVIEW_SCHEMA = "apn.orca-stable-unsigned-preview.v1";
 /** Offline, unsigned preview only. It deliberately exposes no signer or send path. */
 export async function prepareOrcaStableUnsigned(input) {
@@ -26,15 +29,22 @@ export async function prepareOrcaStableUnsigned(input) {
         blocked("USDT ATA is absent and creation was not explicitly requested.", "orca_stable_destination_absent");
     if (input.createUsdtAta && input.snapshot.usdtAta !== null)
         blocked("USDT ATA already exists.", "orca_stable_destination_present");
+    let rent = 0n;
     if (input.createUsdtAta) {
-        const rent = uint(input.usdtAtaRentLamports, true), cap = uint(input.maximumAtaRentLamports, true);
-        if (rent > cap || input.snapshot.owner.lamports < rent + 5000n)
-            blocked("USDT ATA rent exceeds the explicit cap or owner funds.", "orca_stable_rent_cap");
+        rent = uint(input.usdtAtaRentLamports, true);
+        if (rent > uint(input.maximumAtaRentLamports, true))
+            blocked("USDT ATA rent exceeds the explicit cap.", "orca_stable_rent_cap");
     }
     else if (input.usdtAtaRentLamports !== undefined || input.maximumAtaRentLamports !== undefined)
         invalid("ATA rent inputs require explicit ATA creation.");
+    const priority = (BigInt(input.computeUnitLimit) * BigInt(input.computeUnitPriceMicroLamports) + 999999n) / 1000000n;
+    const total = BASE_FEE_LAMPORTS + priority + rent;
+    const feeCap = uint(input.maximumTotalFeeLamports, true);
+    if (total > U64_MAX || total > feeCap || input.snapshot.owner.lamports < total)
+        blocked("Priority fee, base fee, and rent exceed the total cap or owner SOL balance.", "orca_stable_fee_cap");
     const oracle = await whirlpoolOracleAddress(WHIRLPOOL_PROGRAM, ORCA_STABLE_POOL);
     const tickArrays = await Promise.all(input.quote.tickArrayStarts.map((start) => whirlpoolTickArrayAddress(WHIRLPOOL_PROGRAM, ORCA_STABLE_POOL, start)));
+    validateMarketSnapshot(input, tickArrays);
     const owner = createNoopSigner(address(input.owner));
     const limit = Buffer.alloc(5);
     limit[0] = 2;
@@ -65,20 +75,26 @@ export async function prepareOrcaStableUnsigned(input) {
         ] });
     const message = appendTransactionMessageInstructions(instructions, setTransactionMessageLifetimeUsingBlockhash({ blockhash: blockhash(input.lifetime.blockhash), lastValidBlockHeight: BigInt(input.lifetime.lastValidBlockHeight) }, setTransactionMessageFeePayerSigner(owner, createTransactionMessage({ version: 0 }))));
     const transaction = compileTransaction(message), bytes = new Uint8Array(transaction.messageBytes);
-    const preview = { schemaVersion: ORCA_STABLE_PREVIEW_SCHEMA, signable: false, executable: false,
+    const body = { schemaVersion: ORCA_STABLE_PREVIEW_SCHEMA, trust: "untrusted_offline_snapshot",
+        signable: false, executable: false,
         owner: input.owner, sourceAta, destinationAta, amountInAtomic: input.quote.amountInAtomic,
         minimumOutputAtomic: input.quote.minimumOutputAtomic, marketSlot: input.quote.slot, blockhash: input.lifetime.blockhash,
         lastValidBlockHeight: input.lifetime.lastValidBlockHeight, messageBase64: Buffer.from(bytes).toString("base64"),
         messageHash: sha256Hex(bytes), unsignedPayload: getBase64EncodedWireTransaction(transaction),
         createUsdtAta: input.createUsdtAta, instructionPrograms: instructions.map((instruction) => instruction.programAddress),
         tickArrayStarts: [...input.quote.tickArrayStarts], tickCurrentIndex: input.quote.tickCurrentIndex, oracle,
-        computeUnitLimit: input.computeUnitLimit, computeUnitPriceMicroLamports: input.computeUnitPriceMicroLamports };
+        computeUnitLimit: input.computeUnitLimit, computeUnitPriceMicroLamports: input.computeUnitPriceMicroLamports,
+        maximumPriorityFeeLamports: priority.toString(), ataRentLamports: rent.toString(),
+        totalFeeAndRentLamports: total.toString(),
+        maximumTotalFeeLamports: input.maximumTotalFeeLamports };
+    const preview = { ...body, manifestDigest: domainHash(PREVIEW_DIGEST_DOMAIN, canonicalJson(body)) };
     await validateOrcaStableUnsigned(preview);
     return preview;
 }
-/** Reparse material and enforce the finite message shape before any future consumer can use it. */
+/** Reparse untrusted preview material. Passing this check never authorizes signing or sending. */
 export async function validateOrcaStableUnsigned(value) {
-    if (value.schemaVersion !== ORCA_STABLE_PREVIEW_SCHEMA || value.signable !== false || value.executable !== false ||
+    if (value.schemaVersion !== ORCA_STABLE_PREVIEW_SCHEMA || value.trust !== "untrusted_offline_snapshot" ||
+        value.signable !== false || value.executable !== false ||
         typeof value.createUsdtAta !== "boolean" || !Array.isArray(value.instructionPrograms))
         invalid("Stable preview schema is invalid.");
     [value.owner, value.sourceAta, value.destinationAta, value.blockhash].forEach(solanaAddress);
@@ -86,6 +102,16 @@ export async function validateOrcaStableUnsigned(value) {
     uint(value.minimumOutputAtomic, true);
     uint(value.marketSlot, true);
     uint(value.lastValidBlockHeight, true);
+    const { manifestDigest, ...body } = value;
+    if (manifestDigest !== domainHash(PREVIEW_DIGEST_DOMAIN, canonicalJson(body)))
+        blocked("Stable preview manifest metadata changed.", "orca_stable_manifest_digest");
+    const priority = (BigInt(value.computeUnitLimit) * BigInt(value.computeUnitPriceMicroLamports) + 999999n) / 1000000n;
+    const rent = uint(value.ataRentLamports, false), total = BASE_FEE_LAMPORTS + priority + rent;
+    if ((!value.createUsdtAta && rent !== 0n) || (value.createUsdtAta && rent === 0n) ||
+        value.maximumPriorityFeeLamports !== priority.toString() ||
+        uint(value.totalFeeAndRentLamports, true) !== total ||
+        uint(value.totalFeeAndRentLamports, true) > uint(value.maximumTotalFeeLamports, true))
+        blocked("Stable preview fee bound changed.", "orca_stable_fee_cap");
     if (!Number.isSafeInteger(value.computeUnitLimit) || value.computeUnitLimit < 1 || value.computeUnitLimit > MAX_COMPUTE_UNITS ||
         uint(value.computeUnitPriceMicroLamports, false) > U64_MAX || !Number.isSafeInteger(value.tickCurrentIndex) ||
         !Array.isArray(value.tickArrayStarts) || value.tickArrayStarts.length !== 3 ||
@@ -168,12 +194,13 @@ function validateBase(input) {
     if (q.chain !== ORCA_SOLANA_CHAIN || q.pool !== ORCA_STABLE_POOL || q.program !== WHIRLPOOL_PROGRAM ||
         q.sourceMint !== USDC_MINT || q.destinationMint !== SOLANA_USDT || q.vaultA !== ORCA_STABLE_VAULT_A ||
         q.vaultB !== ORCA_STABLE_VAULT_B || q.direction !== "USDC_to_USDT_exact_input" || q.signed !== false || q.broadcast !== false ||
-        !s.programPinsVerified || !s.poolAndTickArraysVerified || !s.oracleAbsent || q.slot !== s.slot)
-        blocked("Stable quote or snapshot pins are not verified.", "orca_stable_pin_drift");
+        q.slot !== s.slot)
+        blocked("Stable quote or snapshot identity differs from pins.", "orca_stable_pin_drift");
     const amount = uint(q.amountInAtomic, true), expected = uint(q.expectedOutputAtomic, true), minimum = uint(q.minimumOutputAtomic, true);
     if (amount > U64_MAX || expected > U64_MAX || minimum > expected || minimum === 0n ||
         !Number.isSafeInteger(q.tickCurrentIndex) || !Array.isArray(q.tickArrayStarts) || q.tickArrayStarts.length !== 3 ||
-        q.tickArrayStarts.some((start, index) => start !== tickArrayStart(q.tickCurrentIndex, 1) - index * 88))
+        q.tickArrayStarts.some((start, index) => start !== tickArrayStart(q.tickCurrentIndex, 1) - index * 88) ||
+        !Number.isSafeInteger(q.slippageBps) || q.slippageBps < 0 || q.slippageBps >= 10_000)
         invalid("Stable quote amount or tick arrays are invalid.");
     if (!Number.isSafeInteger(input.computeUnitLimit) || input.computeUnitLimit < 1 || input.computeUnitLimit > MAX_COMPUTE_UNITS ||
         uint(input.computeUnitPriceMicroLamports, false) > U64_MAX)
@@ -181,8 +208,34 @@ function validateBase(input) {
     const current = uint(input.lifetime.currentBlockHeight, true), expiry = uint(input.lifetime.lastValidBlockHeight, true);
     if (current >= expiry || expiry - current > 150n)
         blocked("Stable preview blockhash lifetime is expired or implausible.", "orca_stable_lifetime");
-    if (s.owner.owner !== SYSTEM_PROGRAM || s.owner.executable || s.owner.data.length !== 0 || s.owner.lamports < 5000n)
-        blocked("Owner system account is invalid or lacks base fee.", "orca_stable_owner");
+    if (s.owner.owner !== SYSTEM_PROGRAM || s.owner.executable || s.owner.data.length !== 0)
+        blocked("Owner system account is invalid.", "orca_stable_owner");
+}
+function validateMarketSnapshot(input, tickAddresses) {
+    const s = input.snapshot, q = input.quote;
+    const pool = decodeWhirlpool(ORCA_STABLE_POOL, s.pool, WHIRLPOOL_PROGRAM, WHIRLPOOL_ACCOUNT_DISCRIMINATOR);
+    if (pool.config !== WHIRLPOOLS_CONFIG || pool.mintA !== USDC_MINT || pool.mintB !== SOLANA_USDT ||
+        pool.vaultA !== ORCA_STABLE_VAULT_A || pool.vaultB !== ORCA_STABLE_VAULT_B || pool.tickSpacing !== 1 ||
+        pool.feeTierIndexSeed !== 1 || pool.feeRate !== 100 || pool.tickCurrentIndex !== q.tickCurrentIndex ||
+        s.oracle !== null || s.tickArrays.length !== 3)
+        blocked("Caller supplied stable pool state differs from pins.", "orca_stable_pool_state");
+    const arrays = s.tickArrays.map((account, i) => decodeTickArray(tickAddresses[i], account, WHIRLPOOL_PROGRAM, TICK_ARRAY_ACCOUNT_DISCRIMINATOR));
+    if (arrays.some((array, i) => array.startTickIndex !== q.tickArrayStarts[i] || array.whirlpool !== ORCA_STABLE_POOL))
+        blocked("Caller supplied stable tick arrays differ from derived addresses.", "orca_stable_tick_state");
+    for (const [account, mint] of [[s.vaultA, USDC_MINT], [s.vaultB, SOLANA_USDT]]) {
+        if (account.owner !== TOKEN_PROGRAM || account.executable || account.data.length !== 165)
+            blocked("Caller supplied stable vault is not a classic token account.", "orca_stable_vault_state");
+        const token = getTokenDecoder().decode(account.data);
+        if (token.mint !== mint || token.owner !== ORCA_STABLE_POOL || token.state !== 1 ||
+            token.delegate.__option !== "None" || token.isNative.__option !== "None")
+            blocked("Caller supplied stable vault identity differs from pool.", "orca_stable_vault_state");
+    }
+    const swap = quoteWhirlpoolExactInAToB(pool, arrays, BigInt(q.amountInAtomic));
+    const expected = BigInt(swap.amountOutAtomic);
+    const minimum = (expected * BigInt(10_000 - q.slippageBps) + 9999n) / 10000n;
+    if (swap.amountOutAtomic !== q.expectedOutputAtomic || minimum.toString() !== q.minimumOutputAtomic ||
+        expected > getTokenDecoder().decode(s.vaultB.data).amount)
+        blocked("Stable quote does not reproduce from supplied pool state.", "orca_stable_quote_state");
 }
 function tokenAccount(account, owner, mint, role) {
     if (account === null || account.owner !== TOKEN_PROGRAM || account.executable || account.data.length !== 165)

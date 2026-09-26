@@ -1,6 +1,6 @@
 import { type RawSolanaAccount } from "./accounts.js";
 export declare const ORCA_STABLE_PREVIEW_SCHEMA: "apn.orca-stable-unsigned-preview.v1";
-/** Caller supplied account data and quote must come from a separately verified, same-slot market snapshot. This API never reads RPC. */
+/** Caller supplied account data has no chain provenance. This API only checks internal consistency and never reads RPC. */
 export interface OrcaStablePrepareInput {
     readonly owner: string;
     readonly quote: {
@@ -18,6 +18,7 @@ export interface OrcaStablePrepareInput {
         readonly minimumOutputAtomic: string;
         readonly tickCurrentIndex: number;
         readonly tickArrayStarts: readonly number[];
+        readonly slippageBps: number;
         readonly signed: boolean;
         readonly broadcast: boolean;
     };
@@ -28,9 +29,11 @@ export interface OrcaStablePrepareInput {
         readonly usdtAta: RawSolanaAccount | null;
         readonly usdcAtaAddress: string;
         readonly usdtAtaAddress: string;
-        readonly programPinsVerified: boolean;
-        readonly poolAndTickArraysVerified: boolean;
-        readonly oracleAbsent: boolean;
+        readonly pool: RawSolanaAccount;
+        readonly tickArrays: readonly RawSolanaAccount[];
+        readonly vaultA: RawSolanaAccount;
+        readonly vaultB: RawSolanaAccount;
+        readonly oracle: RawSolanaAccount | null;
     };
     readonly lifetime: {
         readonly blockhash: string;
@@ -42,11 +45,14 @@ export interface OrcaStablePrepareInput {
     readonly createUsdtAta: boolean;
     readonly usdtAtaRentLamports?: string;
     readonly maximumAtaRentLamports?: string;
+    readonly maximumTotalFeeLamports: string;
 }
 export interface OrcaStableUnsignedPreview {
     readonly schemaVersion: typeof ORCA_STABLE_PREVIEW_SCHEMA;
+    readonly trust: "untrusted_offline_snapshot";
     readonly signable: false;
     readonly executable: false;
+    readonly manifestDigest: string;
     readonly owner: string;
     readonly sourceAta: string;
     readonly destinationAta: string;
@@ -65,8 +71,12 @@ export interface OrcaStableUnsignedPreview {
     readonly oracle: string;
     readonly computeUnitLimit: number;
     readonly computeUnitPriceMicroLamports: string;
+    readonly maximumPriorityFeeLamports: string;
+    readonly ataRentLamports: string;
+    readonly totalFeeAndRentLamports: string;
+    readonly maximumTotalFeeLamports: string;
 }
 /** Offline, unsigned preview only. It deliberately exposes no signer or send path. */
 export declare function prepareOrcaStableUnsigned(input: OrcaStablePrepareInput): Promise<OrcaStableUnsignedPreview>;
-/** Reparse material and enforce the finite message shape before any future consumer can use it. */
+/** Reparse untrusted preview material. Passing this check never authorizes signing or sending. */
 export declare function validateOrcaStableUnsigned(value: OrcaStableUnsignedPreview): Promise<OrcaStableUnsignedPreview>;
