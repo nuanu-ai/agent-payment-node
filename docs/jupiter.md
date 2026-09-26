@@ -61,3 +61,11 @@ reviewed sources, and it is not a live transaction observation. No Solana
 simulation, transaction assembly, signing, delivery, or finalized swap is
 verified. The legacy assembled `decodeBuildResponse` and the `signable: false`
 guard remain separate.
+
+An offline-only `route_v2` decoder now reads the captured Quantum instruction's
+typed arguments and checks all ten fixed account identities and privileges
+against caller-supplied expectations. In this capture, the optional
+`destination_token_account` is absent and uses the read-only JUP6 sentinel at
+position eight. The decoder leaves the eleven remaining accounts opaque and
+always returns `signable: false`. Its fixture tests do not establish the Quantum
+remaining-account ABI, quoted AMM binding, or deployed executable provenance.
