@@ -32,11 +32,13 @@ export interface WhirlpoolSwapQuote {
   readonly priceImpactBps: number;
 }
 
-/** The SOL/USDC route uses negative ticks. The separate stable-pair read-only route starts at tick zero. */
+/** The SOL/USDC route uses negative ticks. The stable-pair quote also needs the upper bound for live tick one. */
 export function sqrtPriceAtTick(tick: number): bigint {
-  if (!Number.isSafeInteger(tick) || tick > 1 || tick < MIN_TICK) blocked("Whirlpool tick is outside the bounded quote range.", "orca_tick_range");
+  if (!Number.isSafeInteger(tick) || tick > 2 || tick < MIN_TICK) blocked("Whirlpool tick is outside the bounded quote range.", "orca_tick_range");
   if (tick === 0) return Q64;
   if (tick === 1) return 18447666387855959850n;
+  // Orca get_sqrt_price_positive_tick(2): 79236085330515764027303304731 >> 32.
+  if (tick === 2) return 18448588748116922571n;
   const absolute = -tick;
   let ratio = (absolute & 1) !== 0 ? 18445821805675392311n : Q64;
   for (const [bit, factor] of NEGATIVE_TICK_FACTORS) if ((absolute & bit) !== 0) ratio = (ratio * factor) >> 64n;
