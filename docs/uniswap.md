@@ -99,7 +99,11 @@ the exact input amount. The foreground `approve` path may approve only that
 amount. Successful execution proves the exact input debit, minimum output, and
 zero residual allowance. A reverted or drifted post-approval operation enters
 `cleanup_required`; only the explicit foreground `cleanup` command can send the
-zero allowance cleanup. `status` observes and never signs or broadcasts.
+zero allowance cleanup. `status` observes and may reconcile durable local state.
+For an expired `prepared` operation with no approval, swap, cleanup attempt,
+usage reservation, or native debit, it reads the current allowance and records
+terminal no-effect evidence only when that allowance is zero. It never signs or
+broadcasts.
 USDT's no-return approval behavior is accepted only when the call returns empty
 data; final allowance and finalized receipt evidence remain mandatory.
 
