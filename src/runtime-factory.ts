@@ -216,6 +216,7 @@ export interface RuntimeFactoryOptions {
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
   const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
+  if (bound.request.command === "x402.permit2.status") return new ApnCore({ state });
   if (bound.request.command === "relay.arbitrum.observe") {
     const url = bound.rpcUrl ?? "";
     // Construct only the guarded Arbitrum read path. No wallet, signer, or send transport exists here.
