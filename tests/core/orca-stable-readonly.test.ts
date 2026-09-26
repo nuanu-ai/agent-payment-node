@@ -5,7 +5,8 @@ import { getAddressEncoder, address } from "@solana/kit";
 import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { ApnError } from "../../src/errors.js";
 import { type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
-import { whirlpoolOracleAddress, whirlpoolTickArrayAddress } from "../../src/swap/orca-solana/accounts.js";
+import { whirlpoolOracleAddress, whirlpoolTickArrayAddress, type TickArrayState, type WhirlpoolState } from "../../src/swap/orca-solana/accounts.js";
+import { quoteWhirlpoolExactInAToB, sqrtPriceAtTick } from "../../src/swap/orca-solana/math.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B, orcaStableInventory,
   quoteOrcaStableReadOnly } from "../../src/swap/orca-solana/stable-readonly.js";
 import { TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG } from "../../src/swap/orca-solana/pins.js";
@@ -14,6 +15,7 @@ const encode = (key: string) => Buffer.from(getAddressEncoder().encode(address(k
 const wire = (owner: string, data: Buffer) => ({ owner, data: [data.toString("base64"), "base64"], lamports: 1n,
   executable: false, rentEpoch: 0n, space: data.length });
 const reason = (error: unknown) => error instanceof ApnError ? error.details?.reason : null;
+const input = { amountAtomic: "1000000", slippageBps: 50, maximumPriceImpactBps: 50 };
 
 async function fixture() {
   const pool = Buffer.alloc(653);
@@ -67,6 +69,49 @@ test("stable pool inventory and quote are keyless, exact and sourced from one sl
   assert.deepEqual(f.calls.map((call) => call.method), ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts"]);
   assert.deepEqual(f.calls[2]?.keys?.slice(0, 1), [ORCA_STABLE_POOL]);
   assert.equal(f.calls[2]?.keys?.[4], f.oracle);
+});
+
+test("stable quote admits live tick one with the official positive tick two upper bound", async () => {
+  const f = await fixture();
+  assert.equal(sqrtPriceAtTick(1), 18447666387855959850n);
+  assert.equal(sqrtPriceAtTick(2), 18448588748116922571n);
+  const livePrice = 18447712270019865443n;
+  f.pool.writeBigUInt64LE(livePrice & ((1n << 64n) - 1n), 65);
+  f.pool.writeBigUInt64LE(livePrice >> 64n, 73);
+  f.pool.writeInt32LE(1, 81);
+  f.accounts.set(ORCA_STABLE_POOL, wire(WHIRLPOOL_PROGRAM, f.pool));
+  const quote = await quoteOrcaStableReadOnly(f.rpc, input);
+  assert.equal(quote.tickCurrentIndex, 1);
+  assert.deepEqual(quote.tickArrayStarts, [0, -88, -176]);
+  assert.equal(quote.slot, "450687913");
+  assert.ok(BigInt(quote.expectedOutputAtomic) > 0n);
+  assert.deepEqual(f.calls.map((call) => call.method), ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts"]);
+});
+
+test("stable quote handles the tick one to zero price transition and keeps tick two outside its bound", async () => {
+  const crossing = await fixture();
+  const boundary = sqrtPriceAtTick(1);
+  crossing.pool.writeBigUInt64LE(boundary & ((1n << 64n) - 1n), 65);
+  crossing.pool.writeBigUInt64LE(boundary >> 64n, 73);
+  crossing.pool.writeInt32LE(1, 81);
+  crossing.accounts.set(ORCA_STABLE_POOL, wire(WHIRLPOOL_PROGRAM, crossing.pool));
+  const quote = await quoteOrcaStableReadOnly(crossing.rpc, input);
+  assert.equal(quote.tickCurrentIndex, 1);
+  assert.ok(BigInt(quote.expectedOutputAtomic) > 0n);
+  const pool: WhirlpoolState = { address: ORCA_STABLE_POOL, config: WHIRLPOOLS_CONFIG, tickSpacing: 1, feeTierIndexSeed: 1,
+    feeRate: 100, protocolFeeRate: 0, liquidity: 4_587_626_145_939_386n, sqrtPrice: boundary, tickCurrentIndex: 1,
+    mintA: USDC_MINT, vaultA: ORCA_STABLE_VAULT_A, mintB: SOLANA_USDT, vaultB: ORCA_STABLE_VAULT_B };
+  const arrays: TickArrayState[] = [0, -88, -176].map((startTickIndex) => ({ address: "fixture", startTickIndex,
+    whirlpool: ORCA_STABLE_POOL, ticks: Array.from({ length: 88 }, () => ({ initialized: false, liquidityNet: 0n })) }));
+  assert.equal(quoteWhirlpoolExactInAToB(pool, arrays, 1_000_000n).tickAfter, 0);
+
+  const beyond = await fixture();
+  const price = sqrtPriceAtTick(2);
+  beyond.pool.writeBigUInt64LE(price & ((1n << 64n) - 1n), 65);
+  beyond.pool.writeBigUInt64LE(price >> 64n, 73);
+  beyond.pool.writeInt32LE(2, 81);
+  beyond.accounts.set(ORCA_STABLE_POOL, wire(WHIRLPOOL_PROGRAM, beyond.pool));
+  await assert.rejects(quoteOrcaStableReadOnly(beyond.rpc, input), (error) => reason(error) === "orca_tick_range");
 });
 
 test("stable quote fails closed on pool drift, oracle state, caps and non-mainnet", async () => {
