@@ -21,7 +21,7 @@ export const ORCA_COMMAND_GROUPS: readonly CommandGroup[] = [
 
 export const ORCA_COMMANDS: readonly CommandDefinition[] = [
   command("stable-inventory", [], "Read the pinned USDC/USDT Whirlpool identity without admission or signing.", "none"),
-  command("stable-quote", [option("--amount", "wei", ["positive_usdc_atomic"]),
+  command("stable-quote", [option("--amount", "atomic_usdc", ["positive_usdc_atomic"]),
     option("--slippage-bps", "string", ["integer_0_through_9999"]),
     option("--maximum-price-impact-bps", "string", ["integer_0_through_10000"])],
     "Read a guarded exact-input USDC to USDT quote from one Whirlpool snapshot. No transaction is built.", "network_read"),
