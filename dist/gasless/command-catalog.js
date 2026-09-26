@@ -67,13 +67,14 @@ export const GASLESS_COMMANDS = [
         options: [profile, chain], effect: { class: "network_read", summary: "Uses the selected chain's explicit APN_*_RPC_URL and pinned deployment identities; never signs." },
         approval: readApproval, output, states: done, recovery: [], examples: ["apn gasless balance --profile default --chain 8453"] },
     { path: ["gasless", "transfer", "quote"],
-        synopsis: "apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc>",
+        synopsis: "apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]",
         summary: "Read the current local Ethereum USDC gasless fee snapshot and compare it with input limits.",
         options: [profile, chain, option("--owner", "address", ["explicit_local_owner_for_fee_snapshot"]), option("--to", "address", ["nonzero_distinct_recipient"]),
             option("--amount", "string", ["positive_USDC_at_most_six_decimal_places"]),
             option("--max-fee", "string", ["nonnegative_USDC_at_most_six_decimal_places"]),
             option("--min-received", "string", ["positive_USDC_at_most_six_decimal_places"]),
-            option("--rpc-url", "https_url", ["explicit_public_ethereum_RPC_for_this_invocation"])],
+            option("--rpc-url", "https_url", ["explicit_public_ethereum_RPC_for_this_invocation"]),
+            option("--rpc-max-batch-items", "string", ["optional_per_invocation_ethereum_RPC_batch_cap_2_to_30"], false)],
         effect: { class: "network_read", summary: "Reads one verified Ethereum gasless snapshot for an explicit owner; profile binding, policy, usage and operation admission are unchecked. Never creates an operation, reserves, signs or sends." },
         approval: readApproval, output, states: done, recovery: [],
         examples: ["apn gasless transfer quote --profile default --chain 1 --owner <owner> --to <recipient> --amount 0.005 --max-fee 0.004 --min-received 0.001 --rpc-url https://ethereum-rpc.example"] },
@@ -141,12 +142,18 @@ export function bindGaslessCommand(path, o) {
     if (path !== "gasless transfer prepare" && path !== "gasless transfer quote")
         gaslessFailure("APN_INVALID_INPUT", "gasless_command");
     const decimals = commandDecimals(chainId);
-    if (path === "gasless transfer quote")
+    if (path === "gasless transfer quote") {
+        const batchCap = o["--rpc-max-batch-items"];
+        if (batchCap !== undefined && !/^(?:[2-9]|[12][0-9]|30)$/u.test(batchCap)) {
+            gaslessFailure("APN_INVALID_INPUT", "gasless_RPC_batch_cap");
+        }
         return { command: "gasless.transfer.quote", profile: o["--profile"],
             owner: gaslessAddress(o["--owner"], "APN_INVALID_INPUT"),
+            ...(batchCap === undefined ? {} : { rpcMaxBatchItems: Number(batchCap) }),
             request: gaslessCommandRequest({ chainId, recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"),
                 grossAtomic: gaslessDecimal(o["--amount"], decimals, true), maxFeeAtomic: gaslessDecimal(o["--max-fee"], decimals),
                 minReceivedAtomic: gaslessDecimal(o["--min-received"], decimals, true) }) };
+    }
     return { command: "gasless.transfer.prepare", profile: o["--profile"], idempotencyKey: o["--idempotency-key"],
         request: gaslessCommandRequest({ chainId, recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"),
             grossAtomic: gaslessDecimal(o["--amount"], decimals, true), maxFeeAtomic: gaslessDecimal(o["--max-fee"], decimals),

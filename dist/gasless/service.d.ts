@@ -38,6 +38,7 @@ export declare class GaslessService {
         readonly profile: string;
         readonly owner: string;
         readonly request: GaslessRequest;
+        readonly rpcMaxBatchItems?: number;
     }): Promise<{
         profile: string;
         provider: string;

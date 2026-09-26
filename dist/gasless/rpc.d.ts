@@ -8,6 +8,8 @@ export declare class GaslessRpcRequestSession {
     private terminalStatus;
     private readonly verifiedChains;
     private readonly protocolAnchors;
+    readonly maxBatchItems: number;
+    constructor(maxBatchItems?: number);
     reserve(): void;
     assertActive(): void;
     rejectHttp(status: number): never;
@@ -16,7 +18,7 @@ export declare class GaslessRpcRequestSession {
     protocolAt(rpc: GaslessRpc, hash: Hex, verify: () => Promise<void>): Promise<void>;
 }
 /** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
-export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T>;
+export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>, maxBatchItems?: number): Promise<T>;
 /** Reuse the public command's budget, or start one for a directly invoked observation port. */
 export declare function withinGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T>;
 export declare function gaslessRpcInvocation(): GaslessRpcRequestSession;

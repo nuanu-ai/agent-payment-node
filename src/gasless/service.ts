@@ -52,7 +52,7 @@ export class GaslessService {
         block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read" };
     });
   }
-  async quote(input: { readonly profile: string; readonly owner: string; readonly request: GaslessRequest }) {
+  async quote(input: { readonly profile: string; readonly owner: string; readonly request: GaslessRequest; readonly rpcMaxBatchItems?: number }) {
     return await withGaslessRpcInvocation(async () => {
       const profile = canonicalProfile(input.profile), request = validateGaslessRequest(input.request);
       if (request.chainId !== 1) gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_quote_ethereum_only");
@@ -93,7 +93,7 @@ export class GaslessService {
         delegation: snapshot.delegation, gas, fee_configuration: snapshot.feeConfiguration,
         block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read",
         quote_scope: "fee_snapshot_only_prepare_revalidates_policy_usage_and_quote" };
-    });
+    }, input.rpcMaxBatchItems);
   }
   async prepare(input: Parameters<GaslessPreparation["prepare"]>[0]) {
     return await withGaslessRpcInvocation(async () => {
