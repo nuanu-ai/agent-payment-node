@@ -16,7 +16,7 @@ export interface WhirlpoolSwapQuote {
     readonly spotOutputPerSolAtomic: string;
     readonly priceImpactBps: number;
 }
-/** Negative ticks only: SOL/USDC in atomic units sits near -22500; a non-negative tick is outside this pinned pair. */
+/** The SOL/USDC route uses negative ticks. The separate stable-pair read-only route starts at tick zero. */
 export declare function sqrtPriceAtTick(tick: number): bigint;
 export declare function quoteWhirlpoolExactInAToB(pool: WhirlpoolState, arrays: readonly TickArrayState[], amountIn: bigint): WhirlpoolSwapQuote;
 /** Start tick of the array holding `tick`: floor(tick / (88 * spacing)) * (88 * spacing). */
