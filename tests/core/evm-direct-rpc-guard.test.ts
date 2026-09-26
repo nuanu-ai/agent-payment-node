@@ -1,9 +1,40 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { runCli } from "../../src/cli.js";
 import { EvmDirectRpcGuard } from "../../src/evm-direct-rpc-guard.js";
 import { ApnError } from "../../src/errors.js";
+import { HttpsBaseRpc } from "../../src/rpc.js";
 import { StateStore } from "../../src/state.js";
+import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
+
+test("Arbitrum CLI prepare installs durable direct RPC guard before any network request", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const setup = evmCore(temporary.root);
+  await ensureDirectWallet(setup);
+  const original = HttpsBaseRpc.prototype.armEvmDirectRpcGuard;
+  let guarded: EvmDirectRpcGuard | undefined;
+  HttpsBaseRpc.prototype.armEvmDirectRpcGuard = function () {
+    original.call(this);
+    guarded = (this as unknown as { directGuard: EvmDirectRpcGuard }).directGuard;
+    throw new ApnError("APN_RPC_PROTOCOL", "Synthetic stop before network");
+  };
+  t.after(() => { HttpsBaseRpc.prototype.armEvmDirectRpcGuard = original; });
+  const result = await runCli(["pay", "transfer", "prepare-asset", "--profile", "default",
+    "--chain", "eip155:42161", "--asset", "native", "--rpc-url", "https://arbitrum-one-rpc.publicnode.com",
+    "--to", EVM_REQUEST.recipient, "--amount", EVM_REQUEST.amount,
+    "--max-fee-wei", EVM_REQUEST.maxFeeWei, "--idempotency-key", "arbitrum-guard-state-cli-0001"], {},
+  { stateRoot: temporary.root, native: setup.local, wrappingSecret: setup.wrapping });
+  assert.equal(result.error?.code, "APN_RPC_PROTOCOL");
+  assert.ok(guarded, "the production runtime constructed a state-backed guard");
+  let starts = 0;
+  for (let index = 0; index < 24; index += 1) {
+    await guarded.post(`https://rpc.provider${index}.example`, async () => { starts += 1; });
+  }
+  await assert.rejects(guarded.post("https://arbitrum-one-rpc.publicnode.com", async () => { starts += 1; }),
+    { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(starts, 24);
+});
 
 test("direct EVM guard counts physical POSTs, caps at 24 and persists 750 ms starts", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
