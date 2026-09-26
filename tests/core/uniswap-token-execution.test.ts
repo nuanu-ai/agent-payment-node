@@ -82,6 +82,18 @@ test("expired prepared token swap with a residual allowance stays open for revie
     error.details?.reason === "uniswap_token_expired_prepared_allowance");
   assert.equal((await f.journal.load(f.operation.operationId))?.phase, "prepared"); assert.deepEqual(f.sends, []);
 });
+test("unreserved no-effect terminal evidence must be a current allowance read after expiry", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
+  f.now(new Date("2030-03-18T00:00:01.000Z"));
+  const op = await f.runtime.status(f.operation.operationId);
+  for (const patch of [{ source: "legacy_usage_reconciliation" }, { observedAt: NOW.toISOString() },
+    { observedAt: "2030-03-18T00:00:02.000Z" }]) {
+    const { integrityHash: _old, ...body } = op;
+    const changed = { ...body, cleanupEvidence: { ...op.cleanupEvidence, ...patch } };
+    assert.throws(() => validateUniswapTokenOperation({ ...changed, integrityHash: hashObject(changed) }),
+      (error: any) => error.code === "APN_STATE_CORRUPT");
+  }
+});
 test("expired approval retirement resumes after a crash between terminal journal and ledger writes", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   let op = await f.runtime.approve(f.operation.operationId);
