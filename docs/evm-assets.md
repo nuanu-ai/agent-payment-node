@@ -237,6 +237,20 @@ inspect the exact receipt and token effect; this never broadcasts again. A
 successful receipt alone is insufficient: completion still requires the exact
 Transfer log and sender/recipient balance deltas across the canonical block.
 
+The same grouped direct path now accepts only canonical Ethereum WETH9
+`0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` with the pinned 18 decimals.
+It checks the same chain, contract code, pinned WETH/native balances, block
+identities, pending nonce, gas estimate and frozen fee quote. Both approval
+funding phases use grouped reads, and a successful send remains
+`submitted_pending` until explicit observe-only receipt and exact WETH effect
+proof. A synthetic HTTPS test counted 8 + 8 + 5 + 1 = 22 physical POSTs
+through a synthetic send under the 24-POST guard; wrong token/chain, reorg and
+429 fail closed without scalar fallback. The test uses 1,000,000,000 wei of
+synthetic WETH balance and a 100,000,000 wei transfer under a synthetic
+1,000,000,000,000 wei owner cap. It does not establish live RPC acceptance,
+buyer balance, owner policy, or payment delivery. Base WETH and other tokens
+and chains keep their existing paths.
+
 A fresh explicit EVM prepare retires expired unsigned local transfers on the
 same profile, network and sending account before checking for conflicts. It
 writes a terminal `failed_before_effect` operation and receipt with reason

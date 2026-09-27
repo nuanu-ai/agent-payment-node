@@ -32,6 +32,8 @@ export class EvmRpc implements EvmRpcPort {
   ethereumNativeFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1); }
   prepareEthereumUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "usdc"); }
   ethereumUsdcFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "usdc"); }
+  prepareEthereumWeth(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "weth"); }
+  ethereumWethFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "weth"); }
   prepareBaseNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(8453); }
   prepareArbitrumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161); }
   private prepareEthereumOrBaseNative(chainId: 1 | 8453 | 42161): EvmNativePrepareReads {
@@ -129,7 +131,7 @@ export class EvmRpc implements EvmRpcPort {
   prepareEthereumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(1); }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 1 | 59144 | 130 | 137 | 56, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
+  private prepareNativeBatched(chainId: 1 | 59144 | 130 | 137 | 56, asset: "native" | "usdc" | "weth" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
@@ -155,8 +157,9 @@ export class EvmRpc implements EvmRpcPort {
       balance: async (address, selection) => {
         onlySelectedChain(selection.chainId);
         if (asset === "native" ? selection.token !== "native" :
-          selection.token === "native" || !directEvmListRows(chainId).some((row) => row.kind === "token" && row.symbol === "USDC" &&
-            row.identifier === selection.token && row.decimals === 6)) {
+          selection.token === "native" || !directEvmListRows(chainId).some((row) => row.kind === "token" &&
+            row.symbol === (asset === "weth" ? "WETH" : "USDC") && row.identifier === selection.token &&
+            row.decimals === (asset === "weth" ? 18 : 6))) {
           throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
         }
         if (selection.decimals !== undefined) evmDecimals(selection.decimals);
