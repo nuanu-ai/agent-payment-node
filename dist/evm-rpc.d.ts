@@ -16,6 +16,7 @@ export declare class EvmRpc implements EvmRpcPort {
     prepareBnbNative(): EvmNativePrepareReads;
     ethereumNativeFundingReads(): EvmNativePrepareReads;
     prepareBaseNative(): EvmNativePrepareReads;
+    prepareArbitrumNative(): EvmNativePrepareReads;
     private prepareEthereumOrBaseNative;
     prepareEthereumNative(): EvmNativePrepareReads;
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
