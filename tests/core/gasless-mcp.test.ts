@@ -61,7 +61,7 @@ test("gasless CLI and MCP project the same eight strict tools and canonical inpu
     { name: "apn_gasless_usdt_resume", properties: ["profile_hash", "operation"], required: ["profile_hash", "operation"], additionalProperties: false },
     { name: "apn_gasless_capabilities", properties: ["profile"], required: [], additionalProperties: false },
     { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], additionalProperties: false },
-    { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"],
+    { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url", "rpc_max_batch_items"],
       required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], additionalProperties: false },
     { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"],
       required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], additionalProperties: false },
