@@ -582,8 +582,10 @@ USDT route through the pinned Whirlpool. It reads and simulates one exact
 unsigned transaction, optionally including creation of the owner's USDT ATA,
 then stores the validated quote and transaction material. It needs the active
 policy revision, local owner account, exact stable guarded mechanism pin, and
-explicit fee and rent caps. `stable-status` rechecks that binding locally and
-refuses an expired preparation. These commands cannot sign or send; the native
+explicit fee and rent caps. `stable-approve` shows exact foreground consent,
+rechecks the active policy, and reserves only the USDC principal. `stable-release`
+retires an unsigned operation and releases its exact lease; `stable-status`
+reconciles the same no-effect release after quote expiry. These commands cannot sign or send; the native
 SOL to USDC `approve` and `execute` commands reject stable operations.
 
 ## Portfolio read
@@ -798,6 +800,8 @@ apn swap solana orca stable-inventory
 apn swap solana orca stable-quote --amount <atomic_usdc> --slippage-bps <string> --maximum-price-impact-bps <string>
 apn swap solana orca stable-prepare --profile <profile> --policy-revision <string> --owner <string> --amount <atomic_usdc> --slippage-bps <string> --maximum-price-impact-bps <string> --compute-unit-limit <string> --compute-unit-price <string> --create-usdt-ata <string> --maximum-ata-rent <string> --maximum-total-fee <string> --idempotency-key <idempotency_key>
 apn swap solana orca stable-status --operation <operation_id>
+apn swap solana orca stable-approve --operation <operation_id>
+apn swap solana orca stable-release --operation <operation_id>
 apn swap solana orca inventory
 apn swap solana orca quote --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
 apn swap solana orca prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
