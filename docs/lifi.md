@@ -753,6 +753,21 @@ real transactions and public release are separate actions. Existing
 direct-transfer and x402 state formats remain unchanged; this implementation
 uses separate bridge stores without a migration.
 
+On 28 Sep, the buyer's active r25 policy included a 0.00075 ETH per-operation
+and daily Across Ethereum→Arbitrum native cap (29 total admissions, expiry
+15 Oct 2026). A fresh route had an indicative minimum of about
+`743603416950766 wei`, which was not an APN reservation or delivery. An old
+expired lock was locally retired `failed_before_effect`. Subsequent archive
+capability failures and a role-swapped prepare that stopped on HTTP 525
+during primary Ethereum reads (three physical attempts including built-in 5xx
+retry; exact failing origin not recorded) created no bridge operation or effect.
+A later isolated Llama Ethereum batch returned HTTP 525; Arbitrum PublicNode
+returned chain ID 42161 and a safe block. Anonymous PublicNode historical Arbitrum code
+required a token and Llama Ethereum code returned JSON-RPC `-32602`; recent
+Ethereum PublicNode safe-block code reads did work, while official Arbitrum
+historical capability remained unverified. Arbitrum→Ethereum canonical USDC,
+WBTC and named-recipient acceptance remain open.
+
 ## Base to Solana USDC observation kernel (source only)
 
 `src/lifi/solana-destination-candidate.ts` parses a finalized successful Solana
