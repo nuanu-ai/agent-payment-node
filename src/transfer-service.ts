@@ -358,6 +358,8 @@ export class TransferService {
     if (operation.evm?.asset.chainId === 1 && (operation.evm.asset.kind === "native" ||
       operation.evm.asset.address.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" ||
       operation.evm.asset.address.toLowerCase() === "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")) return operation;
+    if (operation.evm?.asset.chainId === 8453 && operation.evm.asset.kind === "erc20" &&
+      operation.evm.asset.address.toLowerCase() === "0x4200000000000000000000000000000000000006") return operation;
     return await this.inspectReceipt(operation, rpc);
   }
 

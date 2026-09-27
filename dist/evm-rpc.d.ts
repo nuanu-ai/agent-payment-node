@@ -19,6 +19,8 @@ export declare class EvmRpc implements EvmRpcPort {
     ethereumUsdcFundingReads(): EvmNativePrepareReads;
     prepareEthereumWeth(): EvmNativePrepareReads;
     ethereumWethFundingReads(): EvmNativePrepareReads;
+    prepareBaseWeth(): EvmNativePrepareReads;
+    baseWethFundingReads(): EvmNativePrepareReads;
     prepareBaseNative(): EvmNativePrepareReads;
     prepareArbitrumNative(): EvmNativePrepareReads;
     private prepareEthereumOrBaseNative;
