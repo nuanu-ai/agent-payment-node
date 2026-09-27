@@ -58,6 +58,7 @@ export class EvmTestRpc extends TestRpc {
     ethereumNativeFundingReads: () => this.evm.prepareEthereumNative!(),
     ethereumUsdcFundingReads: () => this.evm.prepareEthereumUsdc!(),
     ethereumWethFundingReads: () => this.evm.prepareEthereumWeth!(),
+    baseWethFundingReads: () => this.evm.prepareBaseWeth!(),
     prepareEthereumUsdc: () => ({
       balance: (address, selection) => this.evm.balance(address, selection),
       nonceEstimate: async (address, transaction) => ({
@@ -71,6 +72,13 @@ export class EvmTestRpc extends TestRpc {
         nonce: await this.evm.nonce(1, address, "pending"), estimated: await this.evm.estimate(transaction),
       }),
       feeQuote: economics => this.evm.feeQuote(1, economics),
+    }),
+    prepareBaseWeth: () => ({
+      balance: (address, selection) => this.evm.balance(address, selection),
+      nonceEstimate: async (address, transaction) => ({
+        nonce: await this.evm.nonce(8453, address, "pending"), estimated: await this.evm.estimate(transaction),
+      }),
+      feeQuote: economics => this.evm.feeQuote(8453, economics),
     }),
     prepareEthereumNative: () => ({
       balance: (address, selection) => this.evm.balance(address, selection),

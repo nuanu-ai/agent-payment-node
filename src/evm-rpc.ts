@@ -34,6 +34,8 @@ export class EvmRpc implements EvmRpcPort {
   ethereumUsdcFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "usdc"); }
   prepareEthereumWeth(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "weth"); }
   ethereumWethFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "weth"); }
+  prepareBaseWeth(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "weth"); }
+  baseWethFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "weth"); }
   prepareBaseNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(8453); }
   prepareArbitrumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161); }
   private prepareEthereumOrBaseNative(chainId: 1 | 8453 | 42161): EvmNativePrepareReads {
@@ -131,7 +133,7 @@ export class EvmRpc implements EvmRpcPort {
   prepareEthereumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(1); }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 1 | 59144 | 130 | 137 | 56, asset: "native" | "usdc" | "weth" = "native"): EvmNativePrepareReads {
+  private prepareNativeBatched(chainId: 1 | 8453 | 59144 | 130 | 137 | 56, asset: "native" | "usdc" | "weth" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
@@ -163,9 +165,10 @@ export class EvmRpc implements EvmRpcPort {
           throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
         }
         if (selection.decimals !== undefined) evmDecimals(selection.decimals);
-        const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+        const balanceTag = chainId === 8453 ? "safe" : "latest";
+        const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: [balanceTag, false] }]);
         check(preChain);
-        const head = await blockFrom(rawHead, "latest");
+        const head = await blockFrom(rawHead, balanceTag);
         let nativeAtomic: string, assetAtomic: string, observedDecimals: number | undefined;
         if (asset === "native") {
           nativeAtomic = evmRpcQuantity(await attempt("eth_getBalance", [address, head.tag])).toString();
@@ -191,15 +194,20 @@ export class EvmRpc implements EvmRpcPort {
       },
       nonceEstimate: async (address, transaction) => {
         onlySelectedChain(transaction.chainId);
-        const [nonceChain, estimateChain] = await batch([chain, chain]);
-        check(nonceChain); check(estimateChain);
-        const [rawNonce, rawGas, rawPriority, rawHead] = await batch([
+        if (chainId !== 8453) {
+          const [nonceChain, estimateChain] = await batch([chain, chain]);
+          check(nonceChain); check(estimateChain);
+        }
+        const values = await batch([
+          ...(chainId === 8453 ? [chain] : []),
           { method: "eth_getTransactionCount", params: [address, "pending"] },
           { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
             value: `0x${evmUint(transaction.valueAtomic).toString(16)}` }] },
           { method: "eth_maxPriorityFeePerGas", params: [] },
           { method: "eth_getBlockByNumber", params: ["latest", false] },
         ]);
+        if (chainId === 8453) check(values[0]);
+        const [rawNonce, rawGas, rawPriority, rawHead] = chainId === 8453 ? values.slice(1) : values;
         const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas), priority = evmRpcQuantity(rawPriority);
         const head = await blockFrom(rawHead, "latest");
         const maximum = 2n * evmRpcQuantity(head.raw.baseFeePerGas) + priority;
@@ -216,7 +224,7 @@ export class EvmRpc implements EvmRpcPort {
         const head = await blockFrom(rawHead, "latest");
         const execution = evmUint(economics.maximumGasCostAtomic, true);
         let l1Fee = 0n, operatorFee = 0n;
-        if (chainId === 130) {
+        if (chainId === 130 || chainId === 8453) {
           const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
           const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
           const [rawL1Fee, rawOperatorFee] = await batch([
