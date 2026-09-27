@@ -29,7 +29,80 @@ export class EvmRpc implements EvmRpcPort {
   prepareUnichainUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(130, "usdc"); }
   preparePolygonUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(137, "usdc"); }
   prepareBnbNative(): EvmNativePrepareReads { return this.prepareNativeBatched(56); }
-  prepareEthereumNative(): EvmNativePrepareReads { return this.prepareNativeBatched(1); }
+  ethereumNativeFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1); }
+  prepareEthereumNative(): EvmNativePrepareReads {
+    if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
+    let posts = 0;
+    const started = Date.now();
+    const batch = async (phase: string, calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> => {
+      const index = ++posts;
+      if (index > 5) throw new ApnError("APN_RPC_PROTOCOL", "Ethereum native prepare RPC request ceiling exceeded.",
+        { phase, postIndex: index, elapsedMs: Date.now() - started });
+      try { return await this.batchCall!(calls); }
+      catch (error) {
+        if (error instanceof ApnError) throw new ApnError(error.code, error.message,
+          { phase, postIndex: index, elapsedMs: Date.now() - started,
+            ...(typeof error.details?.httpStatus === "number" ? { httpStatus: error.details.httpStatus } : {}) });
+        throw new ApnError("APN_RPC_AMBIGUOUS", "Ethereum native prepare RPC result is unavailable.",
+          { phase, postIndex: index, elapsedMs: Date.now() - started });
+      }
+    };
+    const chain = { method: "eth_chainId", params: [] } as const;
+    const check = (value: unknown): void => {
+      if (evmRpcQuantity(value) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+    };
+    let feeHead: Awaited<ReturnType<typeof evmRpcBlock>> | undefined;
+    return {
+      balance: async (address, selection) => {
+        if (selection.chainId !== 1 || selection.token !== "native") throw new ApnError("APN_INVALID_INPUT", "Ethereum native prepare requires ETH on Ethereum.");
+        if (selection.decimals !== undefined) evmDecimals(selection.decimals);
+        const [identity, rawHead] = await batch("balance_head", [chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+        check(identity);
+        const head = await evmRpcBlock(async () => rawHead, "latest");
+        const [rawBalance] = await batch("pinned_balance", [{ method: "eth_getBalance", params: [address, head.tag] }]);
+        const nativeAtomic = evmRpcQuantity(rawBalance).toString();
+        const [rawRecheck, postChain] = await batch("balance_recheck", [
+          { method: "eth_getBlockByNumber", params: [head.tag, false] }, chain,
+        ]);
+        await recheckEvmBlock(async () => rawRecheck, head); check(postChain);
+        return { address, asset: resolveEvmAsset(selection), assetAtomic: nativeAtomic, nativeAtomic,
+          blockNumberAtomic: head.number, blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
+      },
+      nonceEstimate: async (address, transaction) => {
+        if (transaction.chainId !== 1) throw new ApnError("APN_INVALID_INPUT", "Ethereum native prepare requires Ethereum.");
+        const [identity, rawNonce, rawGas, rawPriority, rawHead] = await batch("nonce_estimate_fee_head", [
+          chain,
+          { method: "eth_getTransactionCount", params: [address, "pending"] },
+          { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
+            value: `0x${evmUint(transaction.valueAtomic).toString(16)}` }] },
+          { method: "eth_maxPriorityFeePerGas", params: [] },
+          { method: "eth_getBlockByNumber", params: ["latest", false] },
+        ]);
+        check(identity);
+        const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas), priority = evmRpcQuantity(rawPriority);
+        const head = await evmRpcBlock(async () => rawHead, "latest");
+        const maximum = 2n * evmRpcQuantity(head.raw.baseFeePerGas) + priority;
+        if (maximum === 0n) throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC quoted a zero gas price.");
+        evmUint(maximum.toString(), true);
+        feeHead = head;
+        return { nonce, estimated: { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(),
+          maxPriorityFeePerGasAtomic: priority.toString() } };
+      },
+      feeQuote: async (economics) => {
+        if (feeHead === undefined) throw new ApnError("APN_RPC_PROTOCOL", "Ethereum native prepare fee head is unavailable.");
+        const head = feeHead;
+        const execution = evmUint(economics.maximumGasCostAtomic, true);
+        const [rawRecheck, postChain] = await batch("fee_head_recheck", [
+          { method: "eth_getBlockByNumber", params: [head.tag, false] }, chain,
+        ]);
+        await recheckEvmBlock(async () => rawRecheck, head); check(postChain);
+        feeHead = undefined;
+        return { chainId: 1, l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0", maximumExecutionFeeWei: execution.toString(),
+          totalQuoteWei: execution.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: head.number,
+          blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
+      },
+    };
+  }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
   private prepareNativeBatched(chainId: 1 | 59144 | 130 | 137 | 56, asset: "native" | "usdc" = "native"): EvmNativePrepareReads {
