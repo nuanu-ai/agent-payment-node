@@ -232,7 +232,7 @@ test("direct-transfer approval completes before the encrypted private key is loa
   assert.deepEqual(trace.slice(0, 2), ["approval", "key-load"]);
 });
 
-test("local custody persists one approved direct-transfer effect and restart resubmits byte-identical material", async (t) => {
+test("local custody persists one approved direct-transfer effect and restart observes without rebroadcast", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const wrapping = new TestWrappingSecret();
@@ -266,20 +266,20 @@ test("local custody persists one approved direct-transfer effect and restart res
   rpc.returnedHash = keccak256(raw);
   const restartedState = new StateStore(temporary.root);
   const restarted = new ApnCore({ state: restartedState, native: new LocalWalletNative(restartedState, wrapping, approval), rpc, clock });
-  const resubmitted = await restarted.execute({ command: "operation.resume", operationId });
-  assert.equal((resubmitted.operation as { state: string }).state, "submitted_pending");
-  assert.equal(rpc.submissions.length, 2);
-  assert.equal(rpc.submissions[1], raw);
+  const observed = await restarted.execute({ command: "operation.resume", operationId });
+  assert.equal((observed.operation as { state: string }).state, "unknown_finality");
+  assert.deepEqual(rpc.submissions, [raw]);
   assert.equal(approval.intents.length, 1);
 
   const transactionHash = keccak256(raw);
   rpc.receipt = exactDynamicReceipt(address, transactionHash, "1250000");
   const completed = await restarted.execute({ command: "operation.resume", operationId });
   assert.equal((completed.operation as { state: string }).state, "completed");
+  assert.deepEqual(rpc.submissions, [raw]);
   const receipt = await restarted.execute({ command: "receipt.get", operationId });
   assert.equal(receipt.ok, true);
   assert.equal((receipt.receipt as { transaction_hash: string }).transaction_hash, transactionHash);
-  const publicBytes = JSON.stringify([ambiguous, resubmitted, completed, receipt]);
+  const publicBytes = JSON.stringify([ambiguous, observed, completed, receipt]);
   assert.equal(publicBytes.includes(raw), false);
   assert.equal((await readFile(join(temporary.root, "wallets", "default.json"), "utf8")).includes(raw), false);
 });

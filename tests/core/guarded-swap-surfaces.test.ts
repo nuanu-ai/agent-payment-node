@@ -23,15 +23,18 @@ const FAMILIES = [
   { path: "swap ethereum uniswap-token", command: "swap.uniswap-token", cleanup: true },
   { path: "swap tron sunswap", command: "swap.sunswap", cleanup: false },
   { path: "swap solana jupiter", command: "swap.jupiter", cleanup: false },
-  { path: "swap solana orca", command: "swap.orca", cleanup: false },
+  { path: "swap solana orca", command: "swap.orca", cleanup: false, stableReads: true },
 ] as const;
 const ACTIONS = ["inventory", "quote", "prepare", "status", "approve", "execute"] as const;
+const STABLE_READS = ["stable-inventory", "stable-quote"] as const;
 
 test("guarded swap families expose six parity actions plus explicit token cleanup", () => {
   const catalog = COMMANDS.filter((row) => row.path[0] === "swap");
-  assert.deepEqual(catalog.map((row) => row.path.join(" ")), FAMILIES.flatMap((family) => [...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])].map((action) => `${family.path} ${action}`)));
+  assert.deepEqual(catalog.map((row) => row.path.join(" ")), FAMILIES.flatMap((family) =>
+    [...("stableReads" in family ? STABLE_READS : []), ...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])]
+      .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 31);
+  assert.equal(tools.length, 33);
   assert.deepEqual(tools.map((row) => row.command), catalog);
   for (const command of catalog) {
     const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;
@@ -142,6 +145,7 @@ function sample(option: string, chain: string): string {
   if (option === "--minimum-output") return "999000";
   if (option === "--approval-cap") return "1000000";
   if (option === "--slippage-bps") return "100";
+  if (option === "--maximum-price-impact-bps") return "200";
   if (option === "--owner-slippage-cap-bps") return "200";
   if (option === "--deadline") return "1790000600";
   if (option === "--fee-limit-sun") return "30000000";
