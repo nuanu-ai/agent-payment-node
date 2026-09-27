@@ -8,9 +8,9 @@ export interface OrcaStableCandidateRequest extends OrcaStableSnapshotRequest {
     readonly profile: string;
     readonly policyRevision: number;
     readonly idempotencyKey: string;
-    readonly now: Date;
 }
-/** A bounded production entry: all RPC reads, fee pricing and simulation precede the first operation write. */
+/** A bounded production entry: all RPC reads, fee pricing and simulation precede the first operation write.
+ * GuardedSwapService can retain a recoverable quoted/prepared record if a later transition fails. */
 export declare function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports: OrcaStableAdmissionPorts, service: GuardedSwapService, request: OrcaStableCandidateRequest): Promise<{
     schemaVersion: "apn.orca-stable-guarded-candidate.v1";
     quote: import("../quote.js").SwapQuoteSnapshot;
@@ -20,11 +20,20 @@ export declare function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports:
         marketSlot: string;
         beforeSlot: string;
         simulation: {
-            slot: string;
-            unitsConsumed: string;
+            postAccountDataSha256: {
+                owner: string;
+                source: string;
+                destination: string;
+            };
+            ownerLamportsAfter: string;
+            sourceAtomicAfter: string;
+            destinationAtomicAfter: string;
             sourceDebitedAtomic: string;
             destinationCreditedAtomic: string;
-            ownerLamportsAfter: string;
+            swapOuterInstructionIndex: number;
+            tokenTransferCount: 2;
+            slot: string;
+            unitsConsumed: string;
         };
         sourceAta: string;
         destinationAta: string;
@@ -55,7 +64,7 @@ export declare function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports:
     broadcast: false;
 }>;
 /** Injectable pin verifier permits deterministic fake-RPC tests; production always uses the pinned verifier. */
-export declare function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts, service: GuardedSwapService, request: OrcaStableCandidateRequest, verifyPins: OrcaProgramPinVerifier): Promise<{
+export declare function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts, service: GuardedSwapService, request: OrcaStableCandidateRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date): Promise<{
     schemaVersion: "apn.orca-stable-guarded-candidate.v1";
     quote: import("../quote.js").SwapQuoteSnapshot;
     operation: import("../model.js").SwapOperationRecord;
@@ -64,11 +73,20 @@ export declare function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort
         marketSlot: string;
         beforeSlot: string;
         simulation: {
-            slot: string;
-            unitsConsumed: string;
+            postAccountDataSha256: {
+                owner: string;
+                source: string;
+                destination: string;
+            };
+            ownerLamportsAfter: string;
+            sourceAtomicAfter: string;
+            destinationAtomicAfter: string;
             sourceDebitedAtomic: string;
             destinationCreditedAtomic: string;
-            ownerLamportsAfter: string;
+            swapOuterInstructionIndex: number;
+            tokenTransferCount: 2;
+            slot: string;
+            unitsConsumed: string;
         };
         sourceAta: string;
         destinationAta: string;
