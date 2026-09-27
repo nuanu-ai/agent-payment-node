@@ -181,6 +181,21 @@ for the Ethereum ETH row, without completing the other eight rows or Base
 gasless acceptance. PR #427's five-POST Ethereum native prepare count is
 source-fixture evidence only, separate from this effect.
 
+On 28 Sep, a distinct buyer→default Base ETH direct operation
+`a7f5d3ba57c27871dfae096d41b6a9799ff0f178d41324b936badffe221b12ba`
+transferred exactly `1000000000000 wei`. Read-only installed status and receipt
+show terminal `completed` / `confirmed_exact_native_transfer`, proof
+`included_native_transaction_and_receipt`: [transaction
+`0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17`](https://basescan.org/tx/0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17)
+in Base block `51872258`. Finality is `inclusion_only`; the actual total fee
+is unavailable from the saved record. First approval reached the 24-POST guard
+before submission. The exact saved signed transaction was resumed once and then
+observed, without duplicate signing or send. This proves one Base ETH direct
+effect, not the nine-row matrix or separate Base gasless receipt. Merged
+[PR #431](https://github.com/nuanu-ai/agent-payment-node/pull/431) measured six
+synthetic HTTPS POSTs for Base native prepare and six per funding phase; it did
+not measure a complete guarded approve/resume invocation end to end.
+
 A later Arbitrum One USDC no-money prepare after PR #421 created unsigned operation
 `b0ebd6812ca2e9acb15751ed6a93012fcb6f4e1632cc4542bd6340b624193de9`
 for `1000` atomic USDC. Its approval window ended at `2026-09-26T16:51:07Z`.
