@@ -181,6 +181,21 @@ for the Ethereum ETH row, without completing the other eight rows or Base
 gasless acceptance. PR #427's five-POST Ethereum native prepare count is
 source-fixture evidence only, separate from this effect.
 
+On 28 Sep, a distinct buyer→default Base ETH direct operation
+`a7f5d3ba57c27871dfae096d41b6a9799ff0f178d41324b936badffe221b12ba`
+transferred exactly `1000000000000 wei`. Read-only installed status and receipt
+show terminal `completed` / `confirmed_exact_native_transfer`, proof
+`included_native_transaction_and_receipt`: [transaction
+`0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17`](https://basescan.org/tx/0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17)
+in Base block `51872258`. Finality is `inclusion_only`; the actual total fee
+is unavailable from the saved record. First approval reached the 24-POST guard
+before submission. The exact saved signed transaction was resumed once and then
+observed, without duplicate signing or send. This proves one Base ETH direct
+effect, not the nine-row matrix or separate Base gasless receipt. Merged
+[PR #431](https://github.com/nuanu-ai/agent-payment-node/pull/431) measured six
+synthetic HTTPS POSTs for Base native prepare and six per funding phase; it did
+not measure a complete guarded approve/resume invocation end to end.
+
 A later Arbitrum One USDC no-money prepare after PR #421 created unsigned operation
 `b0ebd6812ca2e9acb15751ed6a93012fcb6f4e1632cc4542bd6340b624193de9`
 for `1000` atomic USDC. Its approval window ended at `2026-09-26T16:51:07Z`.
@@ -200,7 +215,7 @@ as a timed observation. Neither read proves an on-chain effect.
 | Ethereum ETH | Present in direct network registry | Historical 19 Sep 1/9 report lacked exact proof; later operation `7631cc91…fbde9` supplies a current-source prepare and live transfer | `7631cc91…fbde9` terminal `completed`, tx `0xb893edb0…2497d`, block 26070276, exact 0.0004 ETH; `inclusion_only`, actual gas fee unknown |
 | Ethereum USDC | Present in direct network registry | No current-source matrix entry recorded | No current-source receipt recorded |
 | Ethereum WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
-| Base ETH | Present in direct network registry | Operation `fe563b15…` expired as `failed_before_effect`; no reservation, transaction hash, RPC send, or receipt | No paid receipt recorded |
+| Base ETH | Present in direct network registry | Earlier operation `fe563b15…` expired as `failed_before_effect`; no reservation, transaction hash, RPC send, or receipt | Later distinct operation `a7f5d3ba57c27871dfae096d41b6a9799ff0f178d41324b936badffe221b12ba` completed; [tx `0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17`](https://basescan.org/tx/0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17), block 51872258, exact `1000000000000 wei`, `inclusion_only`; actual total fee unknown |
 | Base USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical paid receipt under policy revision 11; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
 | Base WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
 | Arbitrum One ETH | Present in direct network registry | No current-source matrix entry recorded | No current-source receipt recorded |
