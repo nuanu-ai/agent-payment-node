@@ -30,6 +30,8 @@ export class EvmRpc implements EvmRpcPort {
   preparePolygonUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(137, "usdc"); }
   prepareBnbNative(): EvmNativePrepareReads { return this.prepareNativeBatched(56); }
   ethereumNativeFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1); }
+  prepareEthereumUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "usdc"); }
+  ethereumUsdcFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "usdc"); }
   prepareBaseNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(8453); }
   prepareArbitrumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161); }
   private prepareEthereumOrBaseNative(chainId: 1 | 8453 | 42161): EvmNativePrepareReads {
