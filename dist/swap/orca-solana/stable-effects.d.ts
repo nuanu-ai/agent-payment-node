@@ -7,11 +7,12 @@ export interface OrcaStableTraceProof {
     readonly tokenTransferCount: 2;
 }
 /**
- * Decode the same-result classic Tokenkeg Transfer CPIs. Orca's pinned legacy swap uses
+ * Prove the same-result classic Tokenkeg Transfer CPIs. Orca's pinned legacy swap uses
  * anchor_spl::token::transfer (Orca a119d79b, util/token.rs); it has no mint CPI accounts.
  * A missing or unfamiliar trace fails closed.
- * The standalone transaction message has no address lookup tables, so compiled CPI account indices
- * resolve against its exact static account table. A missing destination permits only the
+ * The standalone transaction message has no address lookup tables, so partially decoded CPI account indices
+ * resolve against its exact static account table. Parsed CPIs must bind the same exact accounts and values.
+ * A missing destination permits only the
  * classic Tokenkeg ATA creation sequence from the pinned associated-token program.
  */
 export declare function proveOrcaStableSimulationTransfers(innerValue: unknown, preview: OrcaStableUnsignedPreview, owner: string, amountInAtomic: string, minimumOutputAtomic: string): OrcaStableTraceProof;

@@ -6,6 +6,7 @@ import { bindArgv } from "../../src/command-binder.js";
 import { ApnCore } from "../../src/core.js";
 import { StateStore } from "../../src/state.js";
 import { getBase58Decoder, getBase58Encoder, getCompiledTransactionMessageDecoder } from "@solana/kit";
+import { parseJsonWithBigInts } from "@solana/rpc-spec-types";
 import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
@@ -48,7 +49,8 @@ async function fixture(exists = true) {
     accounts: { solana: source.owner }, activationDigest: "a".repeat(64), activatedAt: "2026-09-28T00:00:00.000Z" };
   let current = active, usage = "0", fee: bigint | null = 5_000n, simulationError: unknown = null;
   let inputTransfer = BigInt(source.quote.amountInAtomic), outputTransfer = BigInt(source.quote.minimumOutputAtomic);
-  let missingTrace = false, extraCpi = false, token2022 = false, compiledTrace = false;
+  let missingTrace = false, extraCpi = false, token2022 = false, compiledTrace = false, parsedTrace = false;
+  let mutateParsed: ((groups: Array<{ index: number; instructions: Array<Record<string, unknown>> }>) => void) | null = null;
   let setupVariant: "valid" | "payer" | "mint" | "program" | "ata" | "owner" | "extra" | "rent" = "valid";
   let destinationAccount = source.snapshot.usdtAtaAddress;
   let destinationAppears = false;
@@ -121,12 +123,36 @@ async function fixture(exists = true) {
         programIdIndex: keys.indexOf(instruction.programId as never),
         accounts: instruction.accounts.map((key) => keys.indexOf(key as never)), data: instruction.data,
       })) : setup;
+      const parsedTransfers = [
+        { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "transfer", info: {
+          source: source.snapshot.usdcAtaAddress, destination: ORCA_STABLE_VAULT_A,
+          amount: inputTransfer.toString(), authority: source.owner } } },
+        { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "transfer", info: {
+          source: ORCA_STABLE_VAULT_B, destination: destinationAccount,
+          amount: outputTransfer.toString(), authority: ORCA_STABLE_POOL } } },
+      ];
+      const parsedSetup = [
+        { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "getAccountDataSize", info: {
+          mint: SOLANA_USDT, extensionTypes: ["immutableOwner"] } } },
+        { program: "system", programId: SYSTEM_PROGRAM, parsed: { type: "createAccount", info: {
+          source: source.owner, newAccount: source.snapshot.usdtAtaAddress, lamports: 2_000_000,
+          space: 165, owner: TOKEN_PROGRAM } } },
+        { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "initializeImmutableOwner", info: {
+          account: source.snapshot.usdtAtaAddress } } },
+        { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "initializeAccount3", info: {
+          account: source.snapshot.usdtAtaAddress, mint: SOLANA_USDT, owner: source.owner } } },
+      ];
+      const groups = [
+        ...(!exists ? [{ index: 2, instructions: parsedTrace ? parsedSetup : setupInstructions }] : []),
+        { index: exists ? 2 : 3, instructions: parsedTrace ? parsedTransfers : instructions },
+      ];
+      if (parsedTrace) mutateParsed?.(groups);
       const result = { context: { slot: simulationSlot }, value: { err: simulationError,
-        unitsConsumed: 200_000n, innerInstructions: missingTrace ? null : [
-          ...(!exists ? [{ index: 2, instructions: setupInstructions }] : []), { index: exists ? 2 : 3, instructions }],
+        unitsConsumed: 200_000n, innerInstructions: missingTrace ? null : groups,
         accounts: [wire(postOwner), wire(postSource), wire(postDestination)] } };
       afterSimulation?.();
-      return result;
+      return parsedTrace ? parseJsonWithBigInts(JSON.stringify(result, (_, value) =>
+        typeof value === "bigint" ? Number(value) : value)) : result;
     }
     throw new Error(`Unexpected ${method}`);
   } };
@@ -153,6 +179,7 @@ async function fixture(exists = true) {
     setSetupVariant: (value: typeof setupVariant) => { setupVariant = value; },
     setPostOwnerLamports: (value: bigint) => { postOwner = raw(SYSTEM_PROGRAM, Buffer.alloc(0), value); },
     useCompiledTrace: () => { compiledTrace = true; },
+    useParsedTrace: (mutate?: typeof mutateParsed) => { parsedTrace = true; mutateParsed = mutate ?? null; },
     setToken2022: () => { token2022 = true; }, setSimulationSlot: (value: bigint) => { simulationSlot = value; },
     clock: () => trustedTime, advanceClockAfterSimulation: () => { afterSimulation = () => {
       trustedTime = new Date(NOW.getTime() + 31_000); }; },
@@ -248,6 +275,52 @@ test("guarded candidate creates only the missing owner USDT ATA inside the atomi
   assert.equal(result.evidence.simulation.ownerLamportsAfter, "17995000");
   assert.equal(result.evidence.simulation.destinationCreditedAtomic, f.source.quote.minimumOutputAtomic);
 });
+
+test("parsed RPC JSON proves both owner ATA creation and stable swap transfers", async (t) => {
+  const f = await fixture(false); t.after(f.cleanup); f.useParsedTrace();
+  const result = await candidate(f);
+  assert.equal(result.operation.state, "awaiting_approval");
+  assert.equal(result.evidence.simulation.destinationCreditedAtomic, f.source.quote.minimumOutputAtomic);
+  assert.equal(result.evidence.simulation.swapOuterInstructionIndex, 3);
+});
+
+test("parsed RPC JSON proves stable swap when the destination ATA already exists", async (t) => {
+  const f = await fixture(); t.after(f.cleanup); f.useParsedTrace();
+  const result = await simulateOrcaStableGuardedCore(f.rpc, f.ports, f.request, async () => [], f.clock);
+  assert.equal(result.evidence.simulation.tokenTransferCount, 2);
+  await assertNoOperation(f.root);
+});
+
+const parsedMutations: Record<string, (groups: Array<{ index: number; instructions: Array<Record<string, unknown>> }>) => void> = {
+  index: (groups) => { groups[0]!.index = 1; },
+  extraGroup: (groups) => { groups.push({ index: 4, instructions: [] }); },
+  extraCpi: (groups) => { groups[1]!.instructions.push(groups[1]!.instructions[0]!); },
+  mint: (groups) => { parsedInfoForTest(groups[0]!.instructions[0]!).mint = USDC_MINT; },
+  extension: (groups) => { parsedInfoForTest(groups[0]!.instructions[0]!).extensionTypes = []; },
+  payer: (groups) => { parsedInfoForTest(groups[0]!.instructions[1]!).source = ORCA_STABLE_VAULT_A; },
+  rent: (groups) => { parsedInfoForTest(groups[0]!.instructions[1]!).lamports = 2_000_001; },
+  space: (groups) => { parsedInfoForTest(groups[0]!.instructions[1]!).space = 164; },
+  ata: (groups) => { parsedInfoForTest(groups[0]!.instructions[1]!).newAccount = ORCA_STABLE_VAULT_B; },
+  owner: (groups) => { parsedInfoForTest(groups[0]!.instructions[3]!).owner = ORCA_STABLE_POOL; },
+  program: (groups) => { groups[1]!.instructions[0]!.programId = TOKEN_2022_PROGRAM; },
+  type: (groups) => { (groups[1]!.instructions[0]!.parsed as Record<string, unknown>).type = "transferChecked"; },
+  authority: (groups) => { parsedInfoForTest(groups[1]!.instructions[0]!).authority = ORCA_STABLE_POOL; },
+  source: (groups) => { parsedInfoForTest(groups[1]!.instructions[0]!).source = ORCA_STABLE_VAULT_A; },
+  destination: (groups) => { parsedInfoForTest(groups[1]!.instructions[1]!).destination = ORCA_STABLE_VAULT_A; },
+  amount: (groups) => { parsedInfoForTest(groups[1]!.instructions[0]!).amount = "1"; },
+  multisig: (groups) => { parsedInfoForTest(groups[1]!.instructions[0]!).signers = [ORCA_STABLE_POOL]; },
+  topLevelAccounts: (groups) => { groups[1]!.instructions[0]!.accounts = [ORCA_STABLE_POOL]; },
+};
+function parsedInfoForTest(instruction: Record<string, unknown>): Record<string, unknown> {
+  return (instruction.parsed as { info: Record<string, unknown> }).info;
+}
+for (const [name, mutate] of Object.entries(parsedMutations)) {
+  test(`parsed RPC JSON rejects ${name} CPI mutation without an operation`, async (t) => {
+    const f = await fixture(false); t.after(f.cleanup); f.useParsedTrace(mutate);
+    await assert.rejects(candidate(f), (error) => reason(error) === "orca_stable_trace_invalid");
+    await assertNoOperation(f.root);
+  });
+}
 
 test("guarded candidate checks ATA rent cap before simulation", async (t) => {
   const f = await fixture(false); t.after(f.cleanup);
