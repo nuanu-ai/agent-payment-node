@@ -1,5 +1,5 @@
 import { type SolanaRpcPort } from "../../solana/rpc.js";
-/** C2-05 is intentionally limited to market reads. There is no plan, transaction, signer, or operation record. */
+/** This inventory and quote command remain market reads. Guarded preparation has a separate exact policy pin and entry. */
 export declare const ORCA_STABLE_POOL: "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4";
 export declare const ORCA_STABLE_VAULT_A: "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
 export declare const ORCA_STABLE_VAULT_B: "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";

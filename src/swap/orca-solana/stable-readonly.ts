@@ -8,7 +8,7 @@ import { quoteWhirlpoolExactInAToB, spotOutput, tickArrayStart } from "./math.js
 import { ORCA_SOLANA_CHAIN, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, TOKEN_PROGRAM, USDC_MINT,
   WHIRLPOOL_ACCOUNT_DISCRIMINATOR, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG } from "./pins.js";
 
-/** C2-05 is intentionally limited to market reads. There is no plan, transaction, signer, or operation record. */
+/** This inventory and quote command remain market reads. Guarded preparation has a separate exact policy pin and entry. */
 export const ORCA_STABLE_POOL = "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4" as const;
 export const ORCA_STABLE_VAULT_A = "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL" as const;
 export const ORCA_STABLE_VAULT_B = "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9" as const;

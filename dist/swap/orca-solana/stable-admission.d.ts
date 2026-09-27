@@ -30,7 +30,7 @@ export declare function admitOrcaStableOwner(ports: OrcaStableAdmissionPorts, re
     readonly amountInAtomic: string;
     readonly minimumOutputAtomic: string;
     readonly now: Date;
-}): Promise<OrcaStableOwnerAdmission>;
+}, expectedMechanismDigest?: string): Promise<OrcaStableOwnerAdmission>;
 /** Bind a later observed quote to the prechecked admission; caller must recheck active revision before any operation. */
 export declare function assertOrcaStableQuoteAdmission(admission: OrcaStableOwnerAdmission, quote: {
     readonly chain: string;
@@ -41,3 +41,5 @@ export declare function assertOrcaStableQuoteAdmission(admission: OrcaStableOwne
     readonly amountInAtomic: string;
     readonly minimumOutputAtomic: string;
 }): void;
+/** Recheck immediately after a snapshot; a changed activation or depleted daily cap refuses. */
+export declare function recheckOrcaStableOwner(ports: OrcaStableAdmissionPorts, admission: OrcaStableOwnerAdmission, now: Date): Promise<void>;

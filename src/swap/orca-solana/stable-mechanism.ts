@@ -19,7 +19,16 @@ export const ORCA_STABLE_MECHANISM_PIN = validateSwapMechanismPin({
 });
 export const ORCA_STABLE_MECHANISM_DIGEST = swapMechanismDigest(ORCA_STABLE_MECHANISM_PIN);
 
+/** Separate owner opt-in for a chain priced and simulated guarded candidate. The preview pin never selects it. */
+export const ORCA_STABLE_GUARDED_MECHANISM_PIN = validateSwapMechanismPin({
+  ...ORCA_STABLE_MECHANISM_PIN,
+  constructorIdentity: "apn.orca-whirlpool.stable-guarded-candidate",
+  transactionSchemaVersion: "v0.compute-budget-optional-ata-usdc-usdt-simulated.1",
+  validationPolicyIdentity: "apn.orca.solana-usdc-usdt-guarded-candidate",
+});
+export const ORCA_STABLE_GUARDED_MECHANISM_DIGEST = swapMechanismDigest(ORCA_STABLE_GUARDED_MECHANISM_PIN);
+
 /** Exact-digest selection works for both Orca mechanisms; family/chain selection is ambiguous and refuses. */
 export const ORCA_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({
-  registryVersion: "orca-whirlpool-routes.2026-09-27", pins: [ORCA_KEYLESS_MECHANISM_PIN, ORCA_STABLE_MECHANISM_PIN],
+  registryVersion: "orca-whirlpool-routes.2026-09-28", pins: [ORCA_KEYLESS_MECHANISM_PIN, ORCA_STABLE_MECHANISM_PIN, ORCA_STABLE_GUARDED_MECHANISM_PIN],
 });
