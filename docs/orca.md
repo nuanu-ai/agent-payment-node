@@ -41,6 +41,26 @@ Merged [PR #426](https://github.com/nuanu-ai/agent-payment-node/pull/426) define
 
 There is still no public CLI/MCP stable prepare route, production signer, send, current-owner USDT funding and admission, on-chain receipt, or paid USDC→USDT swap acceptance. The snapshot preview remains untrusted and non-signable; the guarded candidate is a separate internal path. C2-05 remains blocked.
 
+### Read-only guarded simulation (source surface)
+
+`simulateOrcaStableGuardedReadOnly(rpc, ports, request)` exposes the current-owner
+guarded proof as an exported TypeScript source API, not a CLI/MCP operator command. The caller supplies the
+active owner policy and usage readers, local account reader, exact policy
+revision, owner, amount, slippage, compute and fee caps, and a fresh Solana RPC
+transport. The transport must have at most 24 physical POSTs and persistent
+provider-family pacing of at least 750 ms. HTTP 429/403 are terminal. The
+existing `SolanaRpcPacer` writes only provider POST timestamp and cooldown
+metadata to maintain pacing across invocations; the simulation writes no
+operation, policy, usage reservation, wallet, or key state.
+
+It runs the same pinned program, one-slot market, policy, ATA, fee, blockhash,
+and same-simulation classic Tokenkeg CPI checks used by the guarded candidate.
+The result contains a quote and proof evidence, with `mode: read_only`,
+`signable: false`, and `executable: false`. No operation repository, signer,
+sender, or transaction bytes are reachable from this surface. A missing USDT
+ATA and any unsupported setup or CPI trace fail closed. This source proof is
+not a current-profile live simulation or a paid receipt; C2-05 remains blocked.
+
 APN exposes `inventory`, `quote`, `prepare`, `status`, `approve`, and `execute`
 under `apn swap solana orca`. The only admitted mechanism is native SOL to
 canonical USDC, exact input, against one pinned Orca Whirlpool on Solana

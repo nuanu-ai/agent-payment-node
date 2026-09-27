@@ -9,6 +9,57 @@ export interface OrcaStableCandidateRequest extends OrcaStableSnapshotRequest {
     readonly policyRevision: number;
     readonly idempotencyKey: string;
 }
+export type OrcaStableSimulationRequest = Omit<OrcaStableCandidateRequest, "idempotencyKey">;
+export declare const ORCA_STABLE_SIMULATION_SCHEMA: "apn.orca-stable-guarded-simulation.v1";
+/** Current-owner proof only. It reads active policy, accounts and RPC; it never creates an operation or exposes transaction bytes. */
+export declare function simulateOrcaStableGuardedReadOnly(rpc: SolanaRpc, ports: OrcaStableAdmissionPorts, request: OrcaStableSimulationRequest): Promise<{
+    schemaVersion: "apn.orca-stable-guarded-simulation.v1";
+    mode: "read_only";
+    quote: import("../quote.js").SwapQuoteSnapshot;
+    evidence: {
+        schemaVersion: "apn.orca-stable-guarded-candidate.v1";
+        marketSlot: string;
+        beforeSlot: string;
+        simulation: {
+            postAccountDataSha256: {
+                owner: string;
+                source: string;
+                destination: string;
+            };
+            ownerLamportsAfter: string;
+            sourceAtomicAfter: string;
+            destinationAtomicAfter: string;
+            sourceDebitedAtomic: string;
+            destinationCreditedAtomic: string;
+            swapOuterInstructionIndex: number;
+            tokenTransferCount: 2;
+            slot: string;
+            unitsConsumed: string;
+        };
+        sourceAta: string;
+        destinationAta: string;
+        pool: string;
+        program: string;
+        blockhash: string;
+        lastValidBlockHeight: string;
+        messageHash: string;
+        unsignedPayloadHash: string;
+        actualFeeLamports: string;
+        rentLamports: string;
+        policyDigest: string;
+        policyRevision: number;
+        activationDigest: string;
+        mechanismDigest: string;
+        ownerUsage: {
+            source: string;
+            destination: string;
+        };
+    };
+    signable: false;
+    executable: false;
+    signed: false;
+    broadcast: false;
+}>;
 /** A bounded production entry: all RPC reads, fee pricing and simulation precede the first operation write.
  * GuardedSwapService can retain a recoverable quoted/prepared record if a later transition fails. */
 export declare function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports: OrcaStableAdmissionPorts, service: GuardedSwapService, request: OrcaStableCandidateRequest): Promise<{
@@ -113,6 +164,55 @@ export declare function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort
         blockhash: string;
         lastValidBlockHeight: string;
     };
+    signed: false;
+    broadcast: false;
+}>;
+/** Injectable read-only proof for fake transport tests. No service or repository is reachable from this path. */
+export declare function simulateOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts, request: OrcaStableSimulationRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date): Promise<{
+    schemaVersion: "apn.orca-stable-guarded-simulation.v1";
+    mode: "read_only";
+    quote: import("../quote.js").SwapQuoteSnapshot;
+    evidence: {
+        schemaVersion: "apn.orca-stable-guarded-candidate.v1";
+        marketSlot: string;
+        beforeSlot: string;
+        simulation: {
+            postAccountDataSha256: {
+                owner: string;
+                source: string;
+                destination: string;
+            };
+            ownerLamportsAfter: string;
+            sourceAtomicAfter: string;
+            destinationAtomicAfter: string;
+            sourceDebitedAtomic: string;
+            destinationCreditedAtomic: string;
+            swapOuterInstructionIndex: number;
+            tokenTransferCount: 2;
+            slot: string;
+            unitsConsumed: string;
+        };
+        sourceAta: string;
+        destinationAta: string;
+        pool: string;
+        program: string;
+        blockhash: string;
+        lastValidBlockHeight: string;
+        messageHash: string;
+        unsignedPayloadHash: string;
+        actualFeeLamports: string;
+        rentLamports: string;
+        policyDigest: string;
+        policyRevision: number;
+        activationDigest: string;
+        mechanismDigest: string;
+        ownerUsage: {
+            source: string;
+            destination: string;
+        };
+    };
+    signable: false;
+    executable: false;
     signed: false;
     broadcast: false;
 }>;

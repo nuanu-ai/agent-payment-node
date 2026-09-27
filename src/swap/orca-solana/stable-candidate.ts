@@ -23,15 +23,28 @@ export const ORCA_STABLE_CANDIDATE_SCHEMA = "apn.orca-stable-guarded-candidate.v
 export interface OrcaStableCandidateRequest extends OrcaStableSnapshotRequest {
   readonly profile: string; readonly policyRevision: number; readonly idempotencyKey: string;
 }
+export type OrcaStableSimulationRequest = Omit<OrcaStableCandidateRequest, "idempotencyKey">;
+export const ORCA_STABLE_SIMULATION_SCHEMA = "apn.orca-stable-guarded-simulation.v1" as const;
+
+function assertFreshBoundedRpc(rpc: SolanaRpc): void {
+  if (rpc.budget === undefined || rpc.budget.physicalRequests !== 0 || rpc.budget.maxPhysicalRequests > 24 ||
+      rpc.budget.minimumIntervalMs < 750 || !rpc.hasPersistentPacer) {
+    throw new ApnError("APN_RPC_CONFIG", "Stable simulation requires a fresh 24 POST budget and persistent 750 ms pacing.");
+  }
+}
+
+/** Current-owner proof only. It reads active policy, accounts and RPC; it never creates an operation or exposes transaction bytes. */
+export async function simulateOrcaStableGuardedReadOnly(rpc: SolanaRpc, ports: OrcaStableAdmissionPorts,
+  request: OrcaStableSimulationRequest) {
+  assertFreshBoundedRpc(rpc);
+  return await simulateOrcaStableGuardedCore(rpc, ports, request, verifyOrcaProgramPins, () => new Date());
+}
 
 /** A bounded production entry: all RPC reads, fee pricing and simulation precede the first operation write.
  * GuardedSwapService can retain a recoverable quoted/prepared record if a later transition fails. */
 export async function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports: OrcaStableAdmissionPorts,
   service: GuardedSwapService, request: OrcaStableCandidateRequest) {
-  if (rpc.budget === undefined || rpc.budget.physicalRequests !== 0 || rpc.budget.maxPhysicalRequests > 24 ||
-      rpc.budget.minimumIntervalMs < 750 || !rpc.hasPersistentPacer) {
-    throw new ApnError("APN_RPC_CONFIG", "Stable candidate requires a fresh 24 POST budget and persistent 750 ms pacing.");
-  }
+  assertFreshBoundedRpc(rpc);
   return await prepareOrcaStableGuardedCandidateCore(rpc, ports, service, request, verifyOrcaProgramPins, () => new Date());
 }
 
@@ -39,6 +52,26 @@ export async function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports: O
 export async function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts,
   service: GuardedSwapService, request: OrcaStableCandidateRequest, verifyPins: OrcaProgramPinVerifier,
   clock: () => Date) {
+  const proof = await proveOrcaStableGuardedCore(rpc, ports, request, verifyPins, clock);
+  const operation = await service.prepare({ quote: proof.quoteInput, assetPolicy: proof.active.registry,
+    protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey,
+    approvalCapAtomic: "0", now: proof.commitNow });
+  return { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, quote: proof.boundQuote, operation,
+    evidence: proof.evidence, unsignedTransaction: proof.unsignedTransaction,
+    signed: false as const, broadcast: false as const };
+}
+
+/** Injectable read-only proof for fake transport tests. No service or repository is reachable from this path. */
+export async function simulateOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts,
+  request: OrcaStableSimulationRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date) {
+  const proof = await proveOrcaStableGuardedCore(rpc, ports, request, verifyPins, clock);
+  return { schemaVersion: ORCA_STABLE_SIMULATION_SCHEMA, mode: "read_only" as const,
+    quote: proof.boundQuote, evidence: proof.evidence, signable: false as const,
+    executable: false as const, signed: false as const, broadcast: false as const };
+}
+
+async function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts,
+  request: OrcaStableSimulationRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date) {
   const initialNow = trustedNow(clock);
   const initial = await admitOrcaStableOwner(ports, { profile: request.profile, owner: request.owner,
     policyRevision: request.policyRevision, amountInAtomic: request.amountAtomic,
@@ -153,13 +186,9 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort, 
       success: true as const, blockNumber: preview.marketSlot, blockHash: blockhashHex(preview.blockhash),
       headBlockNumber: simulationSlot.toString(), maxHeadDrift: Number(MAX_SLOT_DRIFT), gasEstimate: units.toString() } };
   const boundQuote = createSwapQuote(quoteInput);
-  const operation = await service.prepare({ quote: quoteInput, assetPolicy: active.registry,
-    protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey,
-    approvalCapAtomic: "0", now: commitNow });
-  return { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, quote: boundQuote, operation,
-    evidence, unsignedTransaction: { payloadBase64: preview.unsignedPayload, messageHash: preview.messageHash,
-      blockhash: preview.blockhash, lastValidBlockHeight: preview.lastValidBlockHeight },
-    signed: false as const, broadcast: false as const };
+  return { quoteInput, active, commitNow, boundQuote, evidence,
+    unsignedTransaction: { payloadBase64: preview.unsignedPayload, messageHash: preview.messageHash,
+      blockhash: preview.blockhash, lastValidBlockHeight: preview.lastValidBlockHeight } };
 }
 
 function tokenAmount(account: RawSolanaAccount | null, owner: string, mint: string): bigint {
