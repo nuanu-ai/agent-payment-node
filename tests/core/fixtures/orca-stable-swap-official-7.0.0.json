@@ -1,0 +1,25 @@
+{
+  "source": {
+    "package": "@orca-so/whirlpools-client",
+    "version": "7.0.0",
+    "repositoryCommit": "a119d79bada4e730fef791cac6adb669405a21de",
+    "tarballIntegrity": "sha512-bpWG+cXe2VqLaH9wBvtsZKdnaH0iWO/dmGCgdrntxOarsS28FTF4fh5ahZnf9gYP8DiwN/8DrOKiXWO4Jn49/A=="
+  },
+  "amountAtomic": "1000000",
+  "minimumOutputAtomic": "994901",
+  "programAddress": "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",
+  "dataHex": "f8c69e91e17587c840420f0000000000552e0f0000000000000000000000000000000000000000000101",
+  "accounts": [
+    { "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "role": 0 },
+    { "address": "4MfyR4G3NWfVRDWo6iNAHDBZqWMgwZX6FNtMqEW3a9JT", "role": 2 },
+    { "address": "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4", "role": 1 },
+    { "address": "8SmPRUTLXHJsMKYBNGTkbCiuowihVVqU7tZASuNyfCws", "role": 1 },
+    { "address": "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL", "role": 1 },
+    { "address": "HHxpxMXjwa8Ptoty9V89NN5vFQ9srU2WJEXKtjGcTYcd", "role": 1 },
+    { "address": "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9", "role": 1 },
+    { "address": "FqFkv2xNNCUyx1RYV61pGZ9AMzGfgcD8uXC9zCF5JKnR", "role": 1 },
+    { "address": "8kZSTVuV7C4GD9ZVR4wDtRSXv1SvsSQPfqUbthueRNGV", "role": 1 },
+    { "address": "2B48L1ACPvVb67UKeSMkUGdzrnhvNMm6pFt2nspGKxs4", "role": 1 },
+    { "address": "3NxDBWt55DZnEwwQ2bhQ3xWG8Jd18TdUXAG4Zdr7jDai", "role": 0 }
+  ]
+}

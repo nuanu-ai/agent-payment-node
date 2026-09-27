@@ -12,44 +12,52 @@ import { readOrcaStableSnapshotCore } from "./stable-snapshot.js";
 import { blockhashHex } from "./material.js";
 import { GuardedSwapService } from "../service.js";
 import { createSwapQuote } from "../quote.js";
+import { proveOrcaStableSimulationTransfers } from "./stable-effects.js";
 const MAX_SLOT_DRIFT = 150n;
 const MIN_BASE_FEE = 5000n;
+const MIN_REMAINING_BLOCKS = 12n;
+const MAX_PREPARATION_AGE_MS = 30_000;
 export const ORCA_STABLE_CANDIDATE_SCHEMA = "apn.orca-stable-guarded-candidate.v1";
-/** A bounded production entry: all RPC reads, fee pricing and simulation precede the first operation write. */
+/** A bounded production entry: all RPC reads, fee pricing and simulation precede the first operation write.
+ * GuardedSwapService can retain a recoverable quoted/prepared record if a later transition fails. */
 export async function prepareOrcaStableGuardedCandidate(rpc, ports, service, request) {
     if (rpc.budget === undefined || rpc.budget.physicalRequests !== 0 || rpc.budget.maxPhysicalRequests > 24 ||
         rpc.budget.minimumIntervalMs < 750 || !rpc.hasPersistentPacer) {
         throw new ApnError("APN_RPC_CONFIG", "Stable candidate requires a fresh 24 POST budget and persistent 750 ms pacing.");
     }
-    return await prepareOrcaStableGuardedCandidateCore(rpc, ports, service, request, verifyOrcaProgramPins);
+    return await prepareOrcaStableGuardedCandidateCore(rpc, ports, service, request, verifyOrcaProgramPins, () => new Date());
 }
 /** Injectable pin verifier permits deterministic fake-RPC tests; production always uses the pinned verifier. */
-export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service, request, verifyPins) {
+export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service, request, verifyPins, clock) {
+    const initialNow = trustedNow(clock);
     const initial = await admitOrcaStableOwner(ports, { profile: request.profile, owner: request.owner,
         policyRevision: request.policyRevision, amountInAtomic: request.amountAtomic,
-        minimumOutputAtomic: "1", now: request.now }, ORCA_STABLE_GUARDED_MECHANISM_DIGEST);
+        minimumOutputAtomic: "1", now: initialNow }, ORCA_STABLE_GUARDED_MECHANISM_DIGEST);
     const observed = await readOrcaStableSnapshotCore(rpc, request, verifyPins);
     const { preview, quote } = observed;
     await validateOrcaStableUnsigned(preview);
+    if (preview.createUsdtAta)
+        blocked("Guarded ATA creation needs an exact CPI setup whitelist.", "orca_stable_ata_trace_unsupported");
     // The actual minimum is known only after reading the pool; enforce its cap under the exact active policy.
     const admission = await admitOrcaStableOwner(ports, { profile: request.profile, owner: request.owner,
         policyRevision: request.policyRevision, amountInAtomic: request.amountAtomic,
-        minimumOutputAtomic: quote.minimumOutputAtomic, now: request.now }, ORCA_STABLE_GUARDED_MECHANISM_DIGEST);
+        minimumOutputAtomic: quote.minimumOutputAtomic, now: trustedNow(clock) }, ORCA_STABLE_GUARDED_MECHANISM_DIGEST);
     if (admission.policyDigest !== initial.policyDigest || admission.activationDigest !== initial.activationDigest) {
         blocked("Stable owner policy changed while reading the pool.", "orca_stable_policy_drift");
     }
     assertOrcaStableQuoteAdmission(admission, quote);
     const beforeRead = await readRawAccounts(rpc, [request.owner, preview.sourceAta, preview.destinationAta], 165);
-    if (beforeRead.slot < BigInt(preview.marketSlot) || beforeRead.slot - BigInt(preview.marketSlot) > MAX_SLOT_DRIFT) {
+    if (beforeRead.slot > BigInt(Number.MAX_SAFE_INTEGER) || beforeRead.slot < BigInt(preview.marketSlot) ||
+        beforeRead.slot - BigInt(preview.marketSlot) > MAX_SLOT_DRIFT) {
         blocked("Owner balances are outside the market slot bound.", "orca_stable_slot_drift");
     }
     const [owner = null, source = null, destination = null] = beforeRead.accounts;
     if (owner === null || owner.owner !== SYSTEM_PROGRAM || owner.executable || owner.data.length !== 0) {
         blocked("Owner system account changed.", "orca_stable_owner");
     }
-    const sourceBefore = tokenAmount(source ?? null, request.owner, USDC_MINT);
-    const destinationBefore = destination === null ? 0n : tokenAmount(destination, request.owner, SOLANA_USDT);
-    if (sourceBefore < BigInt(request.amountAtomic) || (destination === null) !== preview.createUsdtAta) {
+    const sourceBalance = tokenAmount(source ?? null, request.owner, USDC_MINT);
+    tokenAmount(destination, request.owner, SOLANA_USDT);
+    if (sourceBalance < BigInt(request.amountAtomic)) {
         blocked("Owner token accounts changed after the snapshot.", "orca_stable_ata_state");
     }
     const feeValue = rpcRecord(await rpc.call("getFeeForMessage", [preview.messageBase64, { commitment: "confirmed",
@@ -62,45 +70,41 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service,
         blocked("Exact network fee or rent exceeds owner funds or cap.", "orca_stable_fee_cap");
     }
     const params = [preview.unsignedPayload, { sigVerify: false, replaceRecentBlockhash: false,
-            commitment: "confirmed", encoding: "base64", minContextSlot: Number(beforeRead.slot),
+            commitment: "confirmed", encoding: "base64", minContextSlot: Number(beforeRead.slot), innerInstructions: true,
             accounts: { encoding: "base64", addresses: [request.owner, preview.sourceAta, preview.destinationAta] } }];
     const response = rpcRecord(await rpc.call("simulateTransaction", params));
     const simulationSlot = rpcAtomic(rpcRecord(response.context).slot), simulation = rpcRecord(response.value);
     if (simulation.err !== null)
         blocked("Exact stable transaction simulation failed.", "orca_stable_simulation_failed");
-    const units = rpcAtomic(simulation.unitsConsumed), accounts = rpcArray(simulation.accounts, 3);
-    if (units === 0n || units > BigInt(request.computeUnitLimit) || accounts.length !== 3 ||
+    const units = rpcAtomic(simulation.unitsConsumed);
+    if (units === 0n || units > BigInt(request.computeUnitLimit) || simulationSlot > BigInt(Number.MAX_SAFE_INTEGER) ||
         simulationSlot < beforeRead.slot || simulationSlot - BigInt(preview.marketSlot) > MAX_SLOT_DRIFT) {
         blocked("Stable simulation compute units, accounts, or slot are invalid.", "orca_stable_simulation_invalid");
     }
-    const ownerAfter = accounts[0] === null ? null : rawAccount(accounts[0], 0);
-    const sourceAfter = accounts[1] === null ? null : rawAccount(accounts[1], 165);
-    const destinationAfter = accounts[2] === null ? null : rawAccount(accounts[2], 165);
-    if (ownerAfter === null || ownerAfter.owner !== SYSTEM_PROGRAM || ownerAfter.executable || ownerAfter.data.length !== 0 ||
-        sourceAfter === null || destinationAfter === null) {
-        blocked("Stable simulation owner or token account is missing.", "orca_stable_simulation_invalid");
+    const transfers = proveOrcaStableSimulationTransfers(simulation.innerInstructions, preview, request.owner, quote.amountInAtomic, quote.minimumOutputAtomic);
+    // Same simulation result confirms post-state account identities. Amount effects come only from the CPI trace.
+    const postAccounts = rpcArray(simulation.accounts, 3);
+    if (postAccounts.length !== 3 || postAccounts.some((account) => account === null)) {
+        blocked("Stable simulation omitted owner token account identities.", "orca_stable_simulation_invalid");
     }
-    const sourceAtomic = tokenAmount(sourceAfter, request.owner, USDC_MINT);
-    const destinationAtomic = tokenAmount(destinationAfter, request.owner, SOLANA_USDT);
-    const debited = sourceBefore - sourceAtomic, credited = destinationAtomic - destinationBefore;
-    if (debited <= 0n || debited > BigInt(request.amountAtomic) || credited < BigInt(quote.minimumOutputAtomic)) {
-        blocked("Stable simulation exceeds source debit or misses destination minimum.", "orca_stable_simulation_delta");
+    const ownerPost = rawAccount(postAccounts[0], 0);
+    const sourcePost = rawAccount(postAccounts[1], 165);
+    const destinationPost = rawAccount(postAccounts[2], 165);
+    if (ownerPost.owner !== SYSTEM_PROGRAM || ownerPost.executable || ownerPost.data.length !== 0) {
+        blocked("Stable simulation owner account identity changed.", "orca_stable_simulation_invalid");
     }
-    if (ownerAfter.lamports > owner.lamports || owner.lamports - ownerAfter.lamports > fee + rent) {
-        blocked("Stable simulation exceeds the owner SOL fee and rent bound.", "orca_stable_simulation_sol");
-    }
-    const currentHeight = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "confirmed", minContextSlot: Number(simulationSlot) }]));
-    if (currentHeight >= BigInt(preview.lastValidBlockHeight)) {
-        throw new ApnError("APN_REPREPARE_REQUIRED", "The stable candidate blockhash expired before preparation.");
-    }
-    await recheckOrcaStableOwner(ports, admission, request.now);
+    const sourcePostAmount = tokenAmount(sourcePost, request.owner, USDC_MINT);
+    const destinationPostAmount = tokenAmount(destinationPost, request.owner, SOLANA_USDT);
+    const policyNow = trustedNow(clock);
+    await recheckOrcaStableOwner(ports, admission, policyNow);
     const active = await ports.activePolicy(request.profile);
     if (active === null || active.revision !== admission.policyRevision || active.digest !== admission.policyDigest ||
         active.activationDigest !== admission.activationDigest)
         blocked("Owner policy changed before preparation.", "orca_stable_policy_drift");
     const simulationResult = { slot: simulationSlot.toString(), unitsConsumed: units.toString(),
-        sourceDebitedAtomic: debited.toString(), destinationCreditedAtomic: credited.toString(),
-        ownerLamportsAfter: ownerAfter.lamports.toString() };
+        ...transfers, postAccountDataSha256: { owner: sha256(ownerPost.data), source: sha256(sourcePost.data),
+            destination: sha256(destinationPost.data) }, ownerLamportsAfter: ownerPost.lamports.toString(),
+        sourceAtomicAfter: sourcePostAmount.toString(), destinationAtomicAfter: destinationPostAmount.toString() };
     const evidence = { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, marketSlot: preview.marketSlot,
         beforeSlot: beforeRead.slot.toString(), simulation: simulationResult, sourceAta: preview.sourceAta,
         destinationAta: preview.destinationAta, pool: quote.pool, program: quote.program, blockhash: preview.blockhash,
@@ -108,22 +112,31 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service,
         unsignedPayloadHash: sha256(preview.unsignedPayload), actualFeeLamports: fee.toString(), rentLamports: rent.toString(),
         policyDigest: admission.policyDigest, policyRevision: admission.policyRevision,
         activationDigest: admission.activationDigest, mechanismDigest: admission.mechanismDigest,
-        ownerUsage: { source: await ports.dailyUsage(request.owner, USDC_MINT, request.now),
-            destination: await ports.dailyUsage(request.owner, SOLANA_USDT, request.now) } };
+        ownerUsage: { source: await ports.dailyUsage(request.owner, USDC_MINT, policyNow),
+            destination: await ports.dailyUsage(request.owner, SOLANA_USDT, policyNow) } };
     // Usage may change between read and write: recheck after material assembly as the final read barrier.
-    await recheckOrcaStableOwner(ports, admission, request.now);
-    const usageAfter = { source: await ports.dailyUsage(request.owner, USDC_MINT, request.now),
-        destination: await ports.dailyUsage(request.owner, SOLANA_USDT, request.now) };
+    await recheckOrcaStableOwner(ports, admission, policyNow);
+    const usageAfter = { source: await ports.dailyUsage(request.owner, USDC_MINT, policyNow),
+        destination: await ports.dailyUsage(request.owner, SOLANA_USDT, policyNow) };
     if (canonicalJson(usageAfter) !== canonicalJson(evidence.ownerUsage)) {
         blocked("Owner daily usage changed before preparation.", "orca_stable_usage_drift");
     }
-    const now = request.now.toISOString();
+    // All policy/usage reads are complete. Observe height last, then take a fresh trusted clock before persistence.
+    const currentHeight = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "confirmed", minContextSlot: Number(simulationSlot) }]));
+    const commitNow = trustedNow(clock);
+    if (commitNow.getTime() < initialNow.getTime() || commitNow.getTime() - initialNow.getTime() > MAX_PREPARATION_AGE_MS ||
+        commitNow.toISOString().slice(0, 10) !== policyNow.toISOString().slice(0, 10) ||
+        commitNow.getTime() - policyNow.getTime() > 5_000 ||
+        currentHeight + MIN_REMAINING_BLOCKS >= BigInt(preview.lastValidBlockHeight)) {
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Stable candidate clock or blockhash freshness expired before persistence.");
+    }
+    const now = commitNow.toISOString();
     const quoteInput = { profile: request.profile, account: request.owner, recipient: request.owner,
         sourceAsset: { chain: ORCA_SOLANA_CHAIN, kind: "token", identifier: USDC_MINT },
         destinationAsset: { chain: ORCA_SOLANA_CHAIN, kind: "token", identifier: SOLANA_USDT },
         inputAmountAtomic: quote.amountInAtomic, expectedOutputAtomic: quote.expectedOutputAtomic,
         minimumOutputAtomic: quote.minimumOutputAtomic, slippageBps: quote.slippageBps, effectiveAt: now,
-        expiresAt: new Date(request.now.getTime() + 60_000).toISOString(),
+        expiresAt: new Date(commitNow.getTime() + 60_000).toISOString(),
         providerResponseHash: domainHash("apn.orca-stable-candidate-evidence.v1", canonicalJson(evidence)),
         routeHash: domainHash("apn.orca-stable-candidate-route.v1", canonicalJson({ pool: quote.pool, program: quote.program,
             sourceAta: preview.sourceAta, destinationAta: preview.destinationAta, messageHash: preview.messageHash })),
@@ -135,7 +148,7 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service,
     const boundQuote = createSwapQuote(quoteInput);
     const operation = await service.prepare({ quote: quoteInput, assetPolicy: active.registry,
         protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey,
-        approvalCapAtomic: "0", now: request.now });
+        approvalCapAtomic: "0", now: commitNow });
     return { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, quote: boundQuote, operation,
         evidence, unsignedTransaction: { payloadBase64: preview.unsignedPayload, messageHash: preview.messageHash,
             blockhash: preview.blockhash, lastValidBlockHeight: preview.lastValidBlockHeight },
@@ -151,6 +164,12 @@ function tokenAmount(account, owner, mint) {
         blocked("Stable token account identity changed.", "orca_stable_ata_state");
     }
     return token.amount;
+}
+function trustedNow(clock) {
+    const value = clock();
+    if (!(value instanceof Date) || !Number.isFinite(value.getTime()))
+        throw new ApnError("APN_INVALID_INPUT", "Stable candidate clock is invalid.");
+    return value;
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=stable-candidate.js.map
