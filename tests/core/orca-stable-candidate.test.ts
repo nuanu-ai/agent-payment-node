@@ -6,11 +6,12 @@ import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { ApnError } from "../../src/errors.js";
-import { type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
+import { SolanaRpc, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
 import { GuardedSwapService } from "../../src/swap/service.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { whirlpoolTickArrayAddress } from "../../src/swap/orca-solana/accounts.js";
-import { prepareOrcaStableGuardedCandidateCore } from "../../src/swap/orca-solana/stable-candidate.js";
+import { prepareOrcaStableGuardedCandidateCore, simulateOrcaStableGuardedCore,
+  simulateOrcaStableGuardedReadOnly } from "../../src/swap/orca-solana/stable-candidate.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
 import { ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
@@ -132,6 +133,12 @@ async function assertNoOperation(root: string) {
   });
   assert.equal(entries.some((path) => path.endsWith(".json") && path.includes("swap-operations")), false);
 }
+async function stateEntries(root: string): Promise<string[]> {
+  return (await readdir(root, { recursive: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [] as string[];
+    throw error;
+  })).sort();
+}
 
 test("guarded stable candidate prepares only after same-simulation CPI transfer proof", async (t) => {
   const f = await fixture(); t.after(f.cleanup);
@@ -159,6 +166,37 @@ test("guarded stable candidate prepares only after same-simulation CPI transfer 
   assert.equal(result.evidence.simulation.destinationCreditedAtomic, f.source.quote.minimumOutputAtomic);
   assert.equal(result.quote.effectiveAt, NOW.toISOString());
   assert.ok(f.calls.includes("getFeeForMessage")); assert.ok(f.calls.includes("simulateTransaction"));
+});
+
+test("current-owner stable simulation proves the CPI trace without persisting or exposing transaction bytes", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const before = await stateEntries(f.root);
+  const result = await simulateOrcaStableGuardedCore(f.rpc, f.ports, f.request, async () => [], f.clock);
+  assert.equal(result.schemaVersion, "apn.orca-stable-guarded-simulation.v1");
+  assert.equal(result.mode, "read_only");
+  assert.equal(result.signable, false); assert.equal(result.executable, false);
+  assert.equal(result.signed, false); assert.equal(result.broadcast, false);
+  assert.equal(result.evidence.simulation.sourceDebitedAtomic, f.source.quote.amountInAtomic);
+  assert.equal(result.evidence.simulation.destinationCreditedAtomic, f.source.quote.minimumOutputAtomic);
+  assert.ok(f.calls.includes("simulateTransaction"));
+  assert.ok(!f.calls.includes("sendTransaction"));
+  assert.equal("unsignedTransaction" in result, false);
+  assert.deepEqual(await stateEntries(f.root), before);
+  await assertNoOperation(f.root);
+});
+
+test("current-owner stable simulation fails closed on an unproven CPI trace with zero state writes", async (t) => {
+  const f = await fixture(); t.after(f.cleanup); f.setMissingTrace();
+  await assert.rejects(simulateOrcaStableGuardedCore(f.rpc, f.ports, f.request, async () => [], f.clock));
+  await assertNoOperation(f.root);
+});
+
+test("read-only stable simulation entry refuses an unbounded transport before owner or RPC reads", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  await assert.rejects(simulateOrcaStableGuardedReadOnly(new SolanaRpc(), f.ports, f.request),
+    (error) => error instanceof ApnError && error.code === "APN_RPC_CONFIG");
+  assert.deepEqual(f.calls, []);
+  await assertNoOperation(f.root);
 });
 
 test("guarded candidate refuses absent destination ATA until setup CPI whitelist is proven", async (t) => {
