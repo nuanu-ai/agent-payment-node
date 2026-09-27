@@ -41,7 +41,7 @@ Merged [PR #426](https://github.com/nuanu-ai/agent-payment-node/pull/426) define
 
 The guarded candidate has CLI/MCP stable preparation and status routes. There is still no production stable signer, send, current-owner USDT funding and admission proof, on-chain receipt, or paid USDC→USDT swap acceptance. The snapshot preview remains untrusted and non-signable. C2-05 remains blocked.
 
-The source-only `stable-approve --operation` command shows the exact prepared USDC→USDT intent in a foreground terminal and reserves its USDC principal after rechecking the active owner policy, activation and daily cap. Its separate MCP route returns a CLI handoff. The approval and reserved status remain `signable: false` and `executable: false`; this phase has no stable signer or sender. The prepared quote expires after 60 seconds, and a policy replacement or expired quote requires a fresh preparation.
+The source-only `stable-approve --operation` command shows the exact prepared USDC→USDT intent in a foreground terminal and reserves its USDC principal after rechecking the active owner policy, activation and daily cap. Its separate MCP route returns a CLI handoff. The approval and reserved status remain `signable: false` and `executable: false`; this phase has no stable signer or sender. The prepared quote expires after 60 seconds, and a policy replacement or expired quote requires a fresh preparation. `stable-release --operation` retires a still unsigned operation and releases its exact lease, including an orphan left by an interrupted reservation write. `stable-status` performs that same local reconciliation after quote expiry. Both paths retain a terminal no-effect record and cannot cross a submission marker.
 
 ### Read-only guarded simulation (source surface)
 
