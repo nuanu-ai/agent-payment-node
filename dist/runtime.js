@@ -27,6 +27,8 @@ export class RuntimeContext {
     orcaStableQuote;
     orcaStablePrepare;
     orcaStableStatus;
+    orcaStableApprove;
+    orcaStableRelease;
     uniswap;
     sunswap;
     jupiter;

@@ -26,7 +26,9 @@ export const ORCA_COMMANDS = [
         option("--compute-unit-price", "string", ["micro_lamports_per_compute_unit"]),
         option("--create-usdt-ata", "string", ["true_or_false"]), option("--maximum-ata-rent", "string", ["atomic_lamports_or_zero"]),
         option("--maximum-total-fee", "string", ["positive_lamports"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])], "Simulate the exact unsigned stable transaction and persist owner-bound prepared material. Never signs or broadcasts.", "payment_prepare"),
-    command("stable-status", [operation], "Read and revalidate one locally prepared stable operation. Never signs or broadcasts.", "local_read"),
+    command("stable-status", [operation], "Read a stable operation and reconcile an expired unsigned principal lease. Never signs or broadcasts.", "local_write"),
+    command("stable-approve", [operation], "Confirm the exact stable swap in the foreground and reserve USDC principal only. Never signs or broadcasts.", "payment_prepare", { class: "foreground_tty", when: "Each stable principal reservation requires exact foreground consent." }),
+    command("stable-release", [operation], "Retire an unsigned stable preparation and release its exact principal reservation. Never signs or broadcasts.", "local_write"),
     command("inventory", [], "Read the pinned Whirlpool program, pool and keyless mechanism pin without admitting them.", "none"),
     command("quote", [profile, option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
         option("--amount", "wei", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
@@ -85,9 +87,9 @@ export function bindOrcaCommand(path, options) {
             createUsdtAta, ...(createUsdtAta ? { maximumAtaRentLamports: rent } : {}), maximumTotalFeeLamports: fee,
             idempotencyKey: options["--idempotency-key"] };
     }
-    if (action === "stable-status") {
+    if (action === "stable-status" || action === "stable-approve" || action === "stable-release") {
         exact(options, ["--operation"]);
-        return { command: "swap.orca.stable-status", operationId: hash(options["--operation"]) };
+        return { command: `swap.orca.${action}`, operationId: hash(options["--operation"]) };
     }
     if (action === "status" || action === "approve" || action === "execute") {
         exact(options, ["--operation"]);

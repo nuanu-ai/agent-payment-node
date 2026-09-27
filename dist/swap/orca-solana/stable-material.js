@@ -55,8 +55,8 @@ export async function validateOrcaStableMaterial(value, operation) {
             quote.quoteHash !== op.quote.quoteHash || canonicalJson(quote) !== canonicalJson(op.quote) ||
             value.policyDigest !== op.policyDigest || op.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
             op.protocolRegistryDigest !== ORCA_PROTOCOL_REGISTRY.registryDigest ||
-            !["quoted", "prepared", "awaiting_approval"].includes(op.state) ||
-            op.submissionMarker !== null || op.usageLease !== null)
+            !["quoted", "prepared", "awaiting_approval", "reserved"].includes(op.state) ||
+            op.submissionMarker !== null || (op.state === "reserved" ? op.usageLease === null : op.usageLease !== null))
             corrupt();
     }
     return value;

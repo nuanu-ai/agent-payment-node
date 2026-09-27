@@ -7,6 +7,7 @@ import { requireSwapProtocol, validateSwapProtocolRegistry } from "./protocol-re
 import { createSwapQuote } from "./quote.js";
 import { newSwapOperation, validateSwapOperation, validateSwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
+import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./orca-solana/stable-mechanism.js";
 export class GuardedSwapService {
     operations;
     usage;
@@ -70,6 +71,8 @@ export class GuardedSwapService {
         operation = validateSwapOperation(operation);
         if (operation.state !== "reserved")
             blocked("Swap is not reserved for submission.");
+        if (operation.mechanismDigest === ORCA_STABLE_GUARDED_MECHANISM_DIGEST)
+            blocked("The guarded stable Orca route has no submission capability.");
         const markedAt = assertLiveQuote(operation, now), markerBody = { operationId: operation.operationId, operationIntegrityHash: operation.integrityHash,
             unsignedTransactionPayloadHash: operation.quote.unsignedTransactionPayloadHash, markedAt };
         return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "submitting", {

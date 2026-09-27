@@ -268,6 +268,8 @@ export class ApnCore {
             case "swap.orca.stable-quote":
             case "swap.orca.stable-prepare":
             case "swap.orca.stable-status":
+            case "swap.orca.stable-approve":
+            case "swap.orca.stable-release":
             case "swap.orca.quote":
             case "swap.orca.prepare":
             case "swap.orca.status":
