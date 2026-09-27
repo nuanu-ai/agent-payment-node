@@ -24,3 +24,5 @@ export declare class GuardedSwapService {
     failBeforeEffect(operation: SwapOperationRecord, now: Date, failureProofHash: string): Promise<SwapOperationRecord>;
     resumeDirective(operation: SwapOperationRecord): "prepare_or_approve" | "observe_only" | "terminal";
 }
+export declare function swapIdempotencyHash(value: unknown): string;
+export declare function preparedSwapOperationId(profile: string, idempotencyKey: string): string;
