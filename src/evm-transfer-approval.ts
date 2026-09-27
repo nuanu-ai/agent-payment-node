@@ -22,7 +22,7 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
   if (binding === undefined || operation.economics === undefined) throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
   if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) rpcPort.armEvmDirectRpcGuard?.();
   const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
-  const grouped = asset.kind === "native" ? operation.chainId === 1 ? rpc.prepareEthereumNative?.() :
+  const grouped = asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
     operation.chainId === 56 ? rpc.prepareBnbNative?.() : undefined : undefined;
   if ((operation.chainId === 1 || operation.chainId === 56) && asset.kind === "native" && grouped === undefined) {
     throw new ApnError("APN_RPC_CONFIG", "Selected native approval requires batched RPC reads.");
