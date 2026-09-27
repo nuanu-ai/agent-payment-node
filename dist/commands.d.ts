@@ -221,6 +221,12 @@ export type CommandRequest = {
     readonly command: "swap.orca.stable-status";
     readonly operationId: string;
 } | {
+    readonly command: "swap.orca.stable-approve";
+    readonly operationId: string;
+} | {
+    readonly command: "swap.orca.stable-release";
+    readonly operationId: string;
+} | {
     readonly command: "swap.orca.quote";
     readonly profile: string;
     readonly account: string;
