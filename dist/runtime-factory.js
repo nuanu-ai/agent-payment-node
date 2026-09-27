@@ -87,6 +87,13 @@ import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory
 import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
 import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
+import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-candidate.js";
+import { orcaStablePreparedStatus } from "./swap/orca-solana/stable-status.js";
+import { SavedOrcaStableMaterialStore } from "./swap/orca-solana/stable-material.js";
+import { GuardedSwapService } from "./swap/service.js";
+import { SwapOperationRepository } from "./swap/repository.js";
+import { AssetUsageLedger } from "./asset-usage-ledger.js";
+import { ORCA_SOLANA_CHAIN } from "./swap/orca-solana/pins.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export function createApnCore(bound, options = {}) {
@@ -300,6 +307,27 @@ export function createApnCore(bound, options = {}) {
         ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
         ...(bound.request.command === "swap.orca.stable-quote" ? {
             orcaStableQuote: (request) => quoteOrcaStableReadOnly(solanaRpc, request),
+        } : {}),
+        ...(bound.request.command === "swap.orca.stable-prepare" || bound.request.command === "swap.orca.stable-status" ? {
+            orcaStablePrepare: async (request) => {
+                const { command: _command, ...input } = request;
+                const usage = new AssetUsageLedger(state.root);
+                return await prepareOrcaStableGuardedCandidate(solanaRpc, {
+                    activePolicy: profile => loadActiveAssetPolicyRegistry({ state, clock }, profile),
+                    localAccount: profile => chainAccounts.account(profile, "solana"),
+                    dailyUsage: async (owner, mint, now) => (await usage.usage({ account: owner, chain: ORCA_SOLANA_CHAIN,
+                        asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
+                }, new GuardedSwapService(new SwapOperationRepository(state.root), usage), input);
+            },
+            orcaStableStatus: async (operationId) => {
+                const usage = new AssetUsageLedger(state.root);
+                return await orcaStablePreparedStatus(new SwapOperationRepository(state.root), new SavedOrcaStableMaterialStore(state.root), {
+                    activePolicy: profile => loadActiveAssetPolicyRegistry({ state, clock }, profile),
+                    localAccount: profile => chainAccounts.account(profile, "solana"),
+                    dailyUsage: async (owner, mint, now) => (await usage.usage({ account: owner, chain: ORCA_SOLANA_CHAIN,
+                        asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
+                }, operationId, clock.now());
+            },
         } : {}),
         ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
         ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),

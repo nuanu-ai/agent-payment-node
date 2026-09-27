@@ -3,6 +3,7 @@ import { type OrcaProgramPinVerifier } from "./pins.js";
 import { type OrcaStableAdmissionPorts } from "./stable-admission.js";
 import { type OrcaStableSnapshotRequest } from "./stable-snapshot.js";
 import { GuardedSwapService } from "../service.js";
+import { SavedOrcaStableMaterialStore } from "./stable-material.js";
 export declare const ORCA_STABLE_CANDIDATE_SCHEMA: "apn.orca-stable-guarded-candidate.v1";
 export interface OrcaStableCandidateRequest extends OrcaStableSnapshotRequest {
     readonly profile: string;
@@ -115,7 +116,7 @@ export declare function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports:
     broadcast: false;
 }>;
 /** Injectable pin verifier permits deterministic fake-RPC tests; production always uses the pinned verifier. */
-export declare function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts, service: GuardedSwapService, request: OrcaStableCandidateRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date): Promise<{
+export declare function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts, service: GuardedSwapService, request: OrcaStableCandidateRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date, materialStore?: SavedOrcaStableMaterialStore): Promise<{
     schemaVersion: "apn.orca-stable-guarded-candidate.v1";
     quote: import("../quote.js").SwapQuoteSnapshot;
     operation: import("../model.js").SwapOperationRecord;

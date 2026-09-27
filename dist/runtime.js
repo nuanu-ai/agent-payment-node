@@ -25,6 +25,8 @@ export class RuntimeContext {
     sunswapRuntime;
     orcaRuntime;
     orcaStableQuote;
+    orcaStablePrepare;
+    orcaStableStatus;
     uniswap;
     sunswap;
     jupiter;
@@ -110,6 +112,10 @@ export class RuntimeContext {
             this.orcaRuntime = dependencies.orcaRuntime;
         if (dependencies.orcaStableQuote !== undefined)
             this.orcaStableQuote = dependencies.orcaStableQuote;
+        if (dependencies.orcaStablePrepare !== undefined)
+            this.orcaStablePrepare = dependencies.orcaStablePrepare;
+        if (dependencies.orcaStableStatus !== undefined)
+            this.orcaStableStatus = dependencies.orcaStableStatus;
         if (dependencies.uniswap !== undefined)
             this.uniswap = dependencies.uniswap;
         if (dependencies.sunswap !== undefined)

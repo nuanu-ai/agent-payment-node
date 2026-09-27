@@ -30,6 +30,20 @@ export async function executeOrcaCommand(request: Request, context: RuntimeConte
     if (context.orcaStableQuote === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca quote reader is unavailable.");
     return data(await context.orcaStableQuote(request), "read_only_market_quote");
   }
+  if (request.command === "swap.orca.stable-prepare") {
+    if (context.orcaStablePrepare === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca preparation is unavailable.");
+    return data(await context.orcaStablePrepare(request), "unsigned_simulated_stable_preparation");
+  }
+  if (request.command === "swap.orca.stable-status") {
+    if (context.orcaStableStatus === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca status is unavailable.");
+    return data(await context.orcaStableStatus(request.operationId), "local_stable_preparation_status");
+  }
+  if (request.command === "swap.orca.status" || request.command === "swap.orca.approve" || request.command === "swap.orca.execute") {
+    const operation = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
+    if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
+    if (operation.mechanismDigest !== swapMechanismDigest(ORCA_KEYLESS_MECHANISM_PIN))
+      throw new ApnError("APN_OPERATION_BLOCKED", "This operation is outside the native SOL to USDC Orca runtime.", { reason: "orca_mechanism_mismatch" });
+  }
   if (request.command === "swap.orca.status" && runtime === undefined) {
     const operation = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
