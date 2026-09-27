@@ -196,6 +196,20 @@ effect, not the nine-row matrix or separate Base gasless receipt. Merged
 synthetic HTTPS POSTs for Base native prepare and six per funding phase; it did
 not measure a complete guarded approve/resume invocation end to end.
 
+On 28 Sep, a distinct buyer→default canonical Ethereum USDC operation
+`6d2f32d642fb6ab54f32ddb9d734ed7dbd2a180c96b2fce071a7d7187253de58`
+transferred exactly `1000` atomic USDC. Installed APN status and receipt show
+terminal `completed` / `confirmed_exact_erc20_transfer`, proof
+`included_transfer_event_and_block_balance_deltas`: [transaction
+`0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00`](https://etherscan.io/tx/0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00)
+in Ethereum block `26071092`. The canonical Transfer log and adjacent-block
+balance deltas agree on the exact buyer debit and default-recipient credit.
+Finality is `inclusion_only`; actual gas fee is unknown. There was one approval
+and one observation-only follow-up, with no duplicate send. This is live
+current-source proof for the Ethereum USDC row. Merged [PR #436](https://github.com/nuanu-ai/agent-payment-node/pull/436)
+separately models 22 physical fake-HTTPS POSTs through a synthetic send under
+the 24-POST guard; the fixture is not live provider telemetry.
+
 A later Arbitrum One USDC no-money prepare after PR #421 created unsigned operation
 `b0ebd6812ca2e9acb15751ed6a93012fcb6f4e1632cc4542bd6340b624193de9`
 for `1000` atomic USDC. Its approval window ended at `2026-09-26T16:51:07Z`.
@@ -213,7 +227,7 @@ as a timed observation. Neither read proves an on-chain effect.
 | Chain / asset row | Code / source | Current-source no-money proof | Paid receipt proof |
 | --- | --- | --- | --- |
 | Ethereum ETH | Present in direct network registry | Historical 19 Sep 1/9 report lacked exact proof; later operation `7631cc91…fbde9` supplies a current-source prepare and live transfer | `7631cc91…fbde9` terminal `completed`, tx `0xb893edb0…2497d`, block 26070276, exact 0.0004 ETH; `inclusion_only`, actual gas fee unknown |
-| Ethereum USDC | Present in direct network registry | No current-source matrix entry recorded | No current-source receipt recorded |
+| Ethereum USDC | Present in direct network registry | Operation `6d2f32d642fb6ab54f32ddb9d734ed7dbd2a180c96b2fce071a7d7187253de58` prepared and completed under current source | [Tx `0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00`](https://etherscan.io/tx/0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00), block `26071092`, exact `1000` atomic USDC buyer debit/default credit by Transfer log and balance deltas; `completed` / `confirmed_exact_erc20_transfer`, `inclusion_only`; actual fee unknown |
 | Ethereum WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
 | Base ETH | Present in direct network registry | Earlier operation `fe563b15…` expired as `failed_before_effect`; no reservation, transaction hash, RPC send, or receipt | Later distinct operation `a7f5d3ba57c27871dfae096d41b6a9799ff0f178d41324b936badffe221b12ba` completed; [tx `0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17`](https://basescan.org/tx/0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17), block 51872258, exact `1000000000000 wei`, `inclusion_only`; actual total fee unknown |
 | Base USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical paid receipt under policy revision 11; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
