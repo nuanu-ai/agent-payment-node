@@ -12,17 +12,16 @@ export function compileSwapProtocolRegistry(input) {
     const records = input.pins.map((raw) => {
         const pin = validateSwapMechanismPin(raw);
         return { pin, mechanismDigest: swapMechanismDigest(pin) };
-    }).sort((a, b) => a.pin.protocolFamily.localeCompare(b.pin.protocolFamily));
-    const chains = new Set(), protocols = new Set(), routers = new Set(), constructors = new Set();
+    }).sort((a, b) => a.mechanismDigest.localeCompare(b.mechanismDigest));
+    const identities = new Set(), constructors = new Set();
     for (const { pin } of records) {
-        if (chains.has(pin.chain) || protocols.has(pin.protocolFamily) || routers.has(pin.routerProgramIdentity) ||
-            constructors.has(`${pin.constructorKind}\0${pin.constructorIdentity}`)) {
+        const identity = `${pin.chain}\0${pin.protocolFamily}\0${pin.routerProgramIdentity}\0${pin.transactionSchemaVersion}`;
+        const constructor = `${pin.constructorKind}\0${pin.constructorIdentity}\0${pin.constructorVersion}`;
+        if (identities.has(identity) || constructors.has(constructor)) {
             invalid("Swap protocol registry contains a duplicate or conflicting identity.");
         }
-        chains.add(pin.chain);
-        protocols.add(pin.protocolFamily);
-        routers.add(pin.routerProgramIdentity);
-        constructors.add(`${pin.constructorKind}\0${pin.constructorIdentity}`);
+        identities.add(identity);
+        constructors.add(constructor);
     }
     const body = { schemaVersion: SWAP_PROTOCOL_REGISTRY_SCHEMA, registryVersion: input.registryVersion, records };
     return { ...body, registryDigest: domainHash(SWAP_PROTOCOL_REGISTRY_SCHEMA, canonicalJson(body)) };
@@ -57,6 +56,13 @@ export function requireSwapProtocol(registryValue, mechanismDigest) {
     if (record === undefined)
         throw new ApnError("APN_OPERATION_BLOCKED", "The exact swap mechanism is not admitted.");
     return record;
+}
+/** A legacy family/chain lookup may select only when the identity is unambiguous. */
+export function requireUnambiguousSwapProtocol(registryValue, chain, protocolFamily) {
+    const matches = validateSwapProtocolRegistry(registryValue).records.filter(({ pin }) => pin.chain === chain && pin.protocolFamily === protocolFamily);
+    if (matches.length !== 1)
+        throw new ApnError("APN_OPERATION_BLOCKED", "An exact swap mechanism must be selected.", { reason: matches.length === 0 ? "swap_protocol_absent" : "swap_protocol_ambiguous" });
+    return matches[0];
 }
 function invalid(message) { throw new ApnError("APN_INVALID_INPUT", message); }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "Swap protocol registry integrity validation failed."); }

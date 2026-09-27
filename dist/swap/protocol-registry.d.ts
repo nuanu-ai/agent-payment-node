@@ -18,3 +18,5 @@ export declare function compileSwapProtocolRegistry(input: {
 }): SwapProtocolRegistry;
 export declare function validateSwapProtocolRegistry(value: unknown): SwapProtocolRegistry;
 export declare function requireSwapProtocol(registryValue: unknown, mechanismDigest: string): SwapProtocolRecord;
+/** A legacy family/chain lookup may select only when the identity is unambiguous. */
+export declare function requireUnambiguousSwapProtocol(registryValue: unknown, chain: string, protocolFamily: string): SwapProtocolRecord;
