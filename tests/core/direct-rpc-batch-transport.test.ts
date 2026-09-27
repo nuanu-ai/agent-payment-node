@@ -218,6 +218,35 @@ test("Ethereum native prepare refuses wrong chain and a changed pinned head befo
   assert.equal(bodies.length, 4);
 });
 
+for (const fault of ["estimate_chain", "fee_chain", "fee_reorg"] as const) {
+  test(`Ethereum native prepare refuses ${fault} without an extra POST`, async t => {
+    let post = 0;
+    const bodies = mockHttps(t, body => {
+      post++;
+      return { status: 200, raw: JSON.stringify(body.map((entry: any) => ({
+        jsonrpc: "2.0", id: entry.id,
+        result: entry.method === "eth_chainId" && (fault === "estimate_chain" && post === 4 || fault === "fee_chain" && post === 5)
+          ? "0x38" : entry.method === "eth_getBlockByNumber" && fault === "fee_reorg" && post === 5
+            ? { number: "0x10", hash: `0x${"c".repeat(64)}`, baseFeePerGas: "0x2" }
+            : entry.method === "eth_chainId" ? "0x1" : lineaRead(entry.method, entry.params),
+      })).reverse()) };
+    });
+    const grouped = new HttpsBaseRpc(endpoint).evm.prepareEthereumNative();
+    await grouped.balance(WALLET, { chainId: 1, token: "native" });
+    const transaction = { chainId: 1 as const, from: WALLET, to: RECIPIENT, valueAtomic: "100", data: "0x" as const };
+    if (fault === "estimate_chain") {
+      await assert.rejects(grouped.nonceEstimate(WALLET, transaction), { code: "APN_CHAIN_MISMATCH" });
+      assert.equal(bodies.length, 4);
+      return;
+    }
+    const { nonce, estimated } = await grouped.nonceEstimate(WALLET, transaction);
+    const economics = { nonceAtomic: nonce, ...estimated,
+      maximumGasCostAtomic: (BigInt(estimated.gasLimitAtomic) * BigInt(estimated.maxFeePerGasAtomic)).toString() };
+    await assert.rejects(grouped.feeQuote(economics), { code: fault === "fee_chain" ? "APN_CHAIN_MISMATCH" : "APN_RPC_PROTOCOL" });
+    assert.equal(bodies.length, 5);
+  });
+}
+
 test("Ethereum native prepare caps requests and reports sanitized failed phase", async (t) => {
   let failed = false;
   const bodies = mockHttps(t, body => failed ? { status: 429, raw: secret } : { status: 200, raw: JSON.stringify(body.map((entry: any) => ({
