@@ -28,7 +28,7 @@ export interface OrcaStableAdmissionPorts {
 export async function admitOrcaStableOwner(ports: OrcaStableAdmissionPorts, request: {
   readonly profile: string; readonly owner: string; readonly policyRevision: number;
   readonly amountInAtomic: string; readonly minimumOutputAtomic: string; readonly now: Date;
-}): Promise<OrcaStableOwnerAdmission> {
+}, expectedMechanismDigest: string = ORCA_STABLE_MECHANISM_DIGEST): Promise<OrcaStableOwnerAdmission> {
   if (!Number.isSafeInteger(request.policyRevision) || request.policyRevision < 1 ||
       !/^[1-9][0-9]*$/u.test(request.amountInAtomic) || !/^[1-9][0-9]*$/u.test(request.minimumOutputAtomic) ||
       BigInt(request.amountInAtomic) > (1n << 64n) - 1n || BigInt(request.minimumOutputAtomic) > (1n << 64n) - 1n ||
@@ -49,14 +49,14 @@ export async function admitOrcaStableOwner(ports: OrcaStableAdmissionPorts, requ
       asset: { kind: "token", identifier: mint }, rail: "swap", amountAtomic: amount,
       dailyUsageAtomic: await ports.dailyUsage(request.owner, mint, request.now), asOfDate: at.slice(0, 10), asOf: at });
     if (admitted.asset.mechanismPins?.swap === undefined ||
-        swapMechanismDigest(admitted.asset.mechanismPins.swap) !== ORCA_STABLE_MECHANISM_DIGEST) {
+        swapMechanismDigest(admitted.asset.mechanismPins.swap) !== expectedMechanismDigest) {
       blocked("Both stable assets require the exact USDC to USDT mechanism pin.", "orca_stable_mechanism_mismatch");
     }
   }
-  requireSwapProtocol(ORCA_PROTOCOL_REGISTRY, ORCA_STABLE_MECHANISM_DIGEST);
+  requireSwapProtocol(ORCA_PROTOCOL_REGISTRY, expectedMechanismDigest);
   return { profile: request.profile, owner: request.owner, policyDigest: active.digest,
     policyRevision: active.revision, activationDigest: active.activationDigest,
-    mechanismDigest: ORCA_STABLE_MECHANISM_DIGEST, pool: ORCA_STABLE_POOL, program: WHIRLPOOL_PROGRAM,
+    mechanismDigest: expectedMechanismDigest, pool: ORCA_STABLE_POOL, program: WHIRLPOOL_PROGRAM,
     sourceMint: USDC_MINT, destinationMint: SOLANA_USDT, amountInAtomic: request.amountInAtomic,
     minimumOutputAtomic: request.minimumOutputAtomic, signable: false, executable: false };
 }
@@ -78,7 +78,7 @@ export async function recheckOrcaStableOwner(ports: OrcaStableAdmissionPorts, ad
   now: Date): Promise<void> {
   const current = await admitOrcaStableOwner(ports, { profile: admission.profile, owner: admission.owner,
     policyRevision: admission.policyRevision, amountInAtomic: admission.amountInAtomic,
-    minimumOutputAtomic: admission.minimumOutputAtomic, now });
+    minimumOutputAtomic: admission.minimumOutputAtomic, now }, admission.mechanismDigest);
   if (current.policyDigest !== admission.policyDigest || current.activationDigest !== admission.activationDigest ||
       current.mechanismDigest !== admission.mechanismDigest) {
     blocked("The active stable owner policy changed after the snapshot.", "orca_stable_policy_drift");

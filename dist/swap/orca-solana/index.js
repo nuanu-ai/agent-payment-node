@@ -12,6 +12,7 @@ export * from "./receipt.js";
 export * from "./execution.js";
 export * from "./tty.js";
 export * from "./runtime-factory.js";
+export * from "./stable-candidate.js";
 export * from "./command-catalog.js";
 export * from "./command-service.js";
 //# sourceMappingURL=index.js.map
