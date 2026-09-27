@@ -178,7 +178,7 @@ function lineaRead(method: string, params: readonly unknown[], reorg = false): u
   throw new Error(`unexpected ${method}`);
 }
 
-test("Ethereum native prepare batches 17 logical reads into eight physical POSTs and rejects malformed batches", async (t) => {
+test("Ethereum native prepare uses five sequential POSTs and retains the fee head", async (t) => {
   const bodies = mockHttps(t, (body) => {
     const reads = Array.isArray(body) ? body : [body];
     const responses = reads.map((entry: any) => ({ jsonrpc: "2.0", id: entry.id,
@@ -194,8 +194,53 @@ test("Ethereum native prepare batches 17 logical reads into eight physical POSTs
   const quote = await grouped.feeQuote(economics);
   assert.equal(balance.assetAtomic, BigInt("0x100000000000000").toString());
   assert.equal(quote.totalQuoteWei, economics.maximumGasCostAtomic);
-  assert.equal(bodies.length, 8);
-  assert.equal(bodies.flatMap(raw => { const body = JSON.parse(raw); return Array.isArray(body) ? body : [body]; }).length, 17);
+  assert.equal(bodies.length, 5);
+  assert.deepEqual(bodies.map(raw => (JSON.parse(raw) as { method: string }[]).map(call => call.method)), [
+    ["eth_chainId", "eth_getBlockByNumber"], ["eth_getBalance"], ["eth_getBlockByNumber", "eth_chainId"],
+    ["eth_chainId", "eth_getTransactionCount", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getBlockByNumber"],
+    ["eth_getBlockByNumber", "eth_chainId"],
+  ]);
+  assert.equal(bodies.flatMap(raw => JSON.parse(raw) as unknown[]).length, 12);
+  assert.equal(quote.blockHash, LINEA_HASH);
+});
+
+test("Ethereum native prepare refuses wrong chain and a changed pinned head before later reads", async (t) => {
+  let wrongChain = true, reorg = false;
+  const bodies = mockHttps(t, body => ({ status: 200, raw: JSON.stringify(body.map((entry: any) => ({
+    jsonrpc: "2.0", id: entry.id, result: entry.method === "eth_chainId" ? wrongChain ? "0x38" : "0x1" :
+      lineaRead(entry.method, entry.params, reorg),
+  })).reverse()) }));
+  const selection = { chainId: 1 as const, token: "native" as const };
+  await assert.rejects(new HttpsBaseRpc(endpoint).evm.prepareEthereumNative().balance(WALLET, selection), { code: "APN_CHAIN_MISMATCH" });
+  assert.equal(bodies.length, 1);
+  wrongChain = false; reorg = true;
+  await assert.rejects(new HttpsBaseRpc(endpoint).evm.prepareEthereumNative().balance(WALLET, selection), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 4);
+});
+
+test("Ethereum native prepare caps requests and reports sanitized failed phase", async (t) => {
+  let failed = false;
+  const bodies = mockHttps(t, body => failed ? { status: 429, raw: secret } : { status: 200, raw: JSON.stringify(body.map((entry: any) => ({
+    jsonrpc: "2.0", id: entry.id, result: entry.method === "eth_chainId" ? "0x1" : lineaRead(entry.method, entry.params),
+  })).reverse()) });
+  const grouped = new HttpsBaseRpc(endpoint).evm.prepareEthereumNative();
+  await grouped.balance(WALLET, { chainId: 1, token: "native" });
+  failed = true;
+  const error = await grouped.nonceEstimate(WALLET,
+    { chainId: 1, from: WALLET, to: RECIPIENT, valueAtomic: "100", data: "0x" }).then(() => null, error => error) as any;
+  assert.equal(error.code, "APN_RPC_PROTOCOL");
+  assert.equal(error.details.phase, "nonce_estimate_fee_head");
+  assert.equal(error.details.postIndex, 4);
+  assert.equal(typeof error.details.elapsedMs, "number");
+  assert.ok(!JSON.stringify(error).includes(secret));
+  assert.equal(bodies.length, 4);
+  await assert.rejects(grouped.nonceEstimate(WALLET,
+    { chainId: 1, from: WALLET, to: RECIPIENT, valueAtomic: "100", data: "0x" }), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(bodies.length, 5);
+  await assert.rejects(grouped.nonceEstimate(WALLET,
+    { chainId: 1, from: WALLET, to: RECIPIENT, valueAtomic: "100", data: "0x" }), (failure: any) =>
+      failure.code === "APN_RPC_PROTOCOL" && failure.details.phase === "nonce_estimate_fee_head" && failure.details.postIndex === 6);
+  assert.equal(bodies.length, 5);
 });
 
 test("Ethereum native batch rejection stops after one physical POST", async (t) => {
@@ -203,6 +248,27 @@ test("Ethereum native batch rejection stops after one physical POST", async (t) 
   await assert.rejects(new HttpsBaseRpc(endpoint).evm.prepareEthereumNative().balance(WALLET,
     { chainId: 1, token: "native" }), { code: "APN_RPC_PROTOCOL" });
   assert.equal(bodies.length, 1);
+});
+
+test("Ethereum native timeout is terminal with sanitized phase and no retry", async t => {
+  let posts = 0;
+  t.mock.method(https, "request", () => {
+    posts++;
+    const request = new EventEmitter() as any;
+    request.setTimeout = (_milliseconds: number, onTimeout: () => void) => { request.timeout = onTimeout; return request; };
+    request.destroy = () => { queueMicrotask(() => request.emit("close")); return request; };
+    request.end = () => { queueMicrotask(() => request.timeout()); return request; };
+    return request;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const error = await new HttpsBaseRpc(endpoint).evm.prepareEthereumNative().balance(WALLET,
+    { chainId: 1, token: "native" }).then(() => null, failure => failure) as any;
+  assert.equal(error.code, "APN_RPC_AMBIGUOUS");
+  assert.equal(error.details.phase, "balance_head");
+  assert.equal(error.details.postIndex, 1);
+  assert.ok(!JSON.stringify(error).includes(secret));
+  assert.equal(posts, 1);
 });
 
 test("opted-in Linea native prepare makes 17 logical reads in eight physical POSTs and matches scalar economics", async (t) => {

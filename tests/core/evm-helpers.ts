@@ -55,6 +55,7 @@ export class EvmTestRpc extends TestRpc {
   receiptStatus: "success" | "reverted" = "success";
   broadcastCount = 0;
   readonly evm: EvmRpcPort = {
+    ethereumNativeFundingReads: () => this.evm.prepareEthereumNative!(),
     prepareEthereumNative: () => ({
       balance: (address, selection) => this.evm.balance(address, selection),
       nonceEstimate: async (address, transaction) => ({
