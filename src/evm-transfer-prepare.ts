@@ -43,11 +43,11 @@ export async function prepareEvmTransfer(
   const listed = listedEvmAsset(request.asset.chainId, request.asset.token,
     request.asset.decimals === undefined ? undefined : evmDecimals(request.asset.decimals));
   const selection: EvmAssetSelection = listed.selection;
-  if (request.batchRpcReads && !(((selection.chainId === 1 || selection.chainId === 59144 || selection.chainId === 56 || selection.chainId === 8453) && selection.token === "native") ||
+  if (request.batchRpcReads && !(((selection.chainId === 1 || selection.chainId === 59144 || selection.chainId === 56 || selection.chainId === 8453 || selection.chainId === 42161) && selection.token === "native") ||
       ((selection.chainId === 130 || selection.chainId === 137) &&
         (selection.chainId === 130 && selection.token === "native" || directEvmListRows(selection.chainId).some((row) =>
           row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6))))) {
-    throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Ethereum, Base, BNB or Linea native, Unichain native or USDC, or Polygon USDC.");
+    throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Ethereum, Base, Arbitrum, BNB or Linea native, Unichain native or USDC, or Polygon USDC.");
   }
   const maximumFeeWei = evmUint(request.maxFeeWei, true).toString();
   const priorityFeeWei = request.priorityFeeWei === undefined ? undefined : evmUint(request.priorityFeeWei).toString();
