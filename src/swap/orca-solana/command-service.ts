@@ -38,6 +38,14 @@ export async function executeOrcaCommand(request: Request, context: RuntimeConte
     if (context.orcaStableStatus === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca status is unavailable.");
     return data(await context.orcaStableStatus(request.operationId), "local_stable_preparation_status");
   }
+  if (request.command === "swap.orca.stable-approve") {
+    if (context.orcaStableApprove === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca approval is unavailable.");
+    return data(await context.orcaStableApprove(request.operationId), "stable_principal_reserved_unsigned");
+  }
+  if (request.command === "swap.orca.stable-release") {
+    if (context.orcaStableRelease === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca release is unavailable.");
+    return data(await context.orcaStableRelease(request.operationId), "stable_unsigned_principal_released");
+  }
   if (request.command === "swap.orca.status" || request.command === "swap.orca.approve" || request.command === "swap.orca.execute") {
     const operation = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
