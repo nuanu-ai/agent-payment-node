@@ -119,6 +119,25 @@ test("Polygon USDC opt-in routes through grouped token reads and refuses insuffi
   assert.equal(groupedReads, 1); assert.equal(downstreamReads, 0);
 });
 
+test("Ethereum canonical USDC uses grouped token reads for default and explicit batch prepare", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = 1; setup.rpc.assetAtomic = "1";
+  await ensureDirectWallet(setup);
+  let groupedReads = 0, downstreamReads = 0;
+  Object.assign(setup.rpc.evm, { prepareEthereumUsdc: () => ({
+    balance: async (address: Address, selection: Parameters<typeof setup.rpc.evm.balance>[1]) => {
+      groupedReads += 1; return await setup.rpc.evm.balance(address, selection);
+    },
+    nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
+    feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
+  }) });
+  for (const batchRpcReads of [undefined, true] as const) {
+    await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: EVM_USDC[1] },
+      amount: "1", ...(batchRpcReads ? { batchRpcReads } : {}) }), { code: "APN_INSUFFICIENT_ASSET" });
+  }
+  assert.equal(groupedReads, 2); assert.equal(downstreamReads, 0);
+});
+
 test("EVM amount handling preserves 0..255 decimals and uint256 without implicit metadata or rounding", () => {
   for (const decimals of [0, 6, 8, 18, 255]) {
     const decimal = decimals === 0 ? "1" : `0.${"0".repeat(decimals - 1)}1`;
@@ -151,7 +170,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.rpc.genericBalanceCalls, calls);
   await assert.rejects(setup.core.transfer.prepare({ ...request, amount: "2" }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };
-  assert.equal(approved.state, chainId === 1 && kind === "native" ? "submitted_pending" : "completed");
+  assert.equal(approved.state, chainId === 1 ? "submitted_pending" : "completed");
   const raw = setup.rpc.submissions[0]!;
   const transaction = parseTransaction(raw);
   assert.equal(transaction.chainId, chainId);
@@ -160,7 +179,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.approval.intents.length, 1);
   const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
   assert.deepEqual(await restarted.core.transfer.status(prepared.operation_id), approved);
-  if (chainId === 1 && kind === "native") {
+  if (chainId === 1) {
     assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
   }
   const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { state: string; finality: string };
@@ -496,7 +515,11 @@ for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18])
   const operation = (await setup.state.findOperation(prepared.operation_id))!;
   const atomic = decimals === 6 ? "1000001" : "1000001000000000000";
   assert.equal(operation.amountAtomic, atomic); assert.equal(operation.evm?.asset.decimals, decimals);
-  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state,
+    chainId === 1 ? "submitted_pending" : "completed");
+  if (chainId === 1) {
+    assert.equal((await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  }
   const receipt = await setup.core.transfer.receipt(prepared.operation_id) as { amount_atomic: string };
   assert.equal(receipt.amount_atomic, atomic); assert.equal(setup.rpc.submissions.length, 1);
 });

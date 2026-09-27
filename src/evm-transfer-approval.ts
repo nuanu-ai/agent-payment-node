@@ -22,11 +22,13 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
   if (binding === undefined || operation.economics === undefined) throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
   if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) rpcPort.armEvmDirectRpcGuard?.();
   const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
-  const grouped = asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
+  const ethereumUsdc = operation.chainId === 1 && asset.kind === "erc20" &&
+    asset.address.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+  const grouped = ethereumUsdc ? rpc.ethereumUsdcFundingReads?.() : asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
     operation.chainId === 56 ? rpc.prepareBnbNative?.() : operation.chainId === 8453 ? rpc.prepareBaseNative?.() :
       operation.chainId === 42161 ? rpc.prepareArbitrumNative?.() : undefined : undefined;
-  if ((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) && asset.kind === "native" && grouped === undefined) {
-    throw new ApnError("APN_RPC_CONFIG", "Selected native approval requires batched RPC reads.");
+  if (((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) && asset.kind === "native" || ethereumUsdc) && grouped === undefined) {
+    throw new ApnError("APN_RPC_CONFIG", "Selected approval requires batched RPC reads.");
   }
   // The balance reader checks the selected chain before and after its pinned reads.
   const balance = await (grouped ?? rpc).balance(operation.walletAddress, {
