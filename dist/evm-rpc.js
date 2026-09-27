@@ -30,6 +30,8 @@ export class EvmRpc {
     preparePolygonUsdc() { return this.prepareNativeBatched(137, "usdc"); }
     prepareBnbNative() { return this.prepareNativeBatched(56); }
     ethereumNativeFundingReads() { return this.prepareNativeBatched(1); }
+    prepareEthereumUsdc() { return this.prepareNativeBatched(1, "usdc"); }
+    ethereumUsdcFundingReads() { return this.prepareNativeBatched(1, "usdc"); }
     prepareBaseNative() { return this.prepareEthereumOrBaseNative(8453); }
     prepareArbitrumNative() { return this.prepareEthereumOrBaseNative(42161); }
     prepareEthereumOrBaseNative(chainId) {
