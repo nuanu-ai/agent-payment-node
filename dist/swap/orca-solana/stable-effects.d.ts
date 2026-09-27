@@ -11,7 +11,7 @@ export interface OrcaStableTraceProof {
  * anchor_spl::token::transfer (Orca a119d79b, util/token.rs); it has no mint CPI accounts.
  * A missing or unfamiliar trace fails closed.
  * The standalone transaction message has no address lookup tables, so compiled CPI account indices
- * resolve against its exact static account table. Only pre-existing destination ATAs are admitted here:
- * the optional ATA creation path needs a separate exact CPI setup whitelist.
+ * resolve against its exact static account table. A missing destination permits only the
+ * classic Tokenkeg ATA creation sequence from the pinned associated-token program.
  */
 export declare function proveOrcaStableSimulationTransfers(innerValue: unknown, preview: OrcaStableUnsignedPreview, owner: string, amountInAtomic: string, minimumOutputAtomic: string): OrcaStableTraceProof;
