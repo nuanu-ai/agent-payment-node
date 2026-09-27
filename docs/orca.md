@@ -37,6 +37,8 @@ Merged [PR #422](https://github.com/nuanu-ai/agent-payment-node/pull/422) added 
 
 This adapter is absent from the public Orca CLI/MCP inventory and quote commands above. Its result is an untrusted, non-signable preview, with no production signer, simulation, send, operation journal or receipt. The 22 focused tests used fake RPC responses; no live Solana RPC or paid USDC→USDT swap was proved. It does not fund the current profile with USDT, create an owner USDT policy admission, or close C2-05. The admitted SOL→USDC execution route below is separate.
 
+The C2-05 source foundation defines a separate USDC→USDT mechanism pin and exact digest selector. An owner admission helper checks the active sealed policy revision, local Solana account, both canonical mint rows, identical stable pin, per-transfer and daily caps, and exact pool/program/amount quote binding. A caller must recheck the active revision and usage after a snapshot. This helper has no public prepare command and creates no operation. The internal preview remains `signable: false` and `executable: false`; it cannot satisfy the guarded swap operation's simulation requirement. Signable construction, current simulation, fee and blockhash lifetime checks at the execution boundary, current-owner policy and funding, and separately authorized paid acceptance remain open.
+
 APN exposes `inventory`, `quote`, `prepare`, `status`, `approve`, and `execute`
 under `apn swap solana orca`. The only admitted mechanism is native SOL to
 canonical USDC, exact input, against one pinned Orca Whirlpool on Solana
