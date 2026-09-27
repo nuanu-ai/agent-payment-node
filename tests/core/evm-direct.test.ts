@@ -138,6 +138,32 @@ test("Ethereum canonical USDC uses grouped token reads for default and explicit 
   assert.equal(groupedReads, 2); assert.equal(downstreamReads, 0);
 });
 
+test("Ethereum canonical WETH9 signs once and completes only through exact observe-only receipt proof", async (context) => {
+  const weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as const;
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = 1; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  setup.rpc.assetAtomic = "1000000000"; setup.rpc.decimals = 18;
+  const wallet = await ensureDirectWallet(setup); setup.rpc.sender = wallet.address;
+  await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
+    admissions: [...evmDirectAdmissions(), directAdmission("eip155:1", weth,
+      { maximumPerTransferAtomic: "1000000000000", dailyLimitAtomic: "1000000000000" })], now: setup.clock.now() });
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: weth },
+    amount: "0.0000000001", batchRpcReads: true }) as { operation_id: string; state: string };
+  assert.equal(prepared.state, "awaiting_approval");
+  const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };
+  assert.equal(approved.state, "submitted_pending");
+  assert.equal(setup.rpc.submissions.length, 1);
+  const signed = parseTransaction(setup.rpc.submissions[0]!);
+  assert.equal(signed.chainId, 1); assert.equal(signed.to?.toLowerCase(), weth.toLowerCase()); assert.equal(signed.value ?? 0n, 0n);
+  assert.equal(signed.data?.slice(-64), (100_000_000n).toString(16).padStart(64, "0"));
+  const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { state: string; amount_atomic: string };
+  assert.equal(receipt.state, "completed"); assert.equal(receipt.amount_atomic, "100000000");
+  await restarted.core.transfer.resume(prepared.operation_id, undefined, true);
+  assert.equal(setup.rpc.submissions.length, 1, "observation never rebroadcasts the frozen signed transaction");
+});
+
 test("EVM amount handling preserves 0..255 decimals and uint256 without implicit metadata or rounding", () => {
   for (const decimals of [0, 6, 8, 18, 255]) {
     const decimal = decimals === 0 ? "1" : `0.${"0".repeat(decimals - 1)}1`;

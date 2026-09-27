@@ -57,7 +57,15 @@ export class EvmTestRpc extends TestRpc {
   readonly evm: EvmRpcPort = {
     ethereumNativeFundingReads: () => this.evm.prepareEthereumNative!(),
     ethereumUsdcFundingReads: () => this.evm.prepareEthereumUsdc!(),
+    ethereumWethFundingReads: () => this.evm.prepareEthereumWeth!(),
     prepareEthereumUsdc: () => ({
+      balance: (address, selection) => this.evm.balance(address, selection),
+      nonceEstimate: async (address, transaction) => ({
+        nonce: await this.evm.nonce(1, address, "pending"), estimated: await this.evm.estimate(transaction),
+      }),
+      feeQuote: economics => this.evm.feeQuote(1, economics),
+    }),
+    prepareEthereumWeth: () => ({
       balance: (address, selection) => this.evm.balance(address, selection),
       nonceEstimate: async (address, transaction) => ({
         nonce: await this.evm.nonce(1, address, "pending"), estimated: await this.evm.estimate(transaction),

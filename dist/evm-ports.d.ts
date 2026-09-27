@@ -42,10 +42,12 @@ export interface EvmRpcPort {
     prepareBnbNative?(): EvmNativePrepareReads;
     prepareEthereumNative?(): EvmNativePrepareReads;
     prepareEthereumUsdc?(): EvmNativePrepareReads;
+    prepareEthereumWeth?(): EvmNativePrepareReads;
     prepareBaseNative?(): EvmNativePrepareReads;
     prepareArbitrumNative?(): EvmNativePrepareReads;
     ethereumNativeFundingReads?(): EvmNativePrepareReads;
     ethereumUsdcFundingReads?(): EvmNativePrepareReads;
+    ethereumWethFundingReads?(): EvmNativePrepareReads;
     assertChain(chainId: DirectEvmChainId): Promise<void>;
     balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
     nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;

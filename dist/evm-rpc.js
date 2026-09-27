@@ -32,6 +32,8 @@ export class EvmRpc {
     ethereumNativeFundingReads() { return this.prepareNativeBatched(1); }
     prepareEthereumUsdc() { return this.prepareNativeBatched(1, "usdc"); }
     ethereumUsdcFundingReads() { return this.prepareNativeBatched(1, "usdc"); }
+    prepareEthereumWeth() { return this.prepareNativeBatched(1, "weth"); }
+    ethereumWethFundingReads() { return this.prepareNativeBatched(1, "weth"); }
     prepareBaseNative() { return this.prepareEthereumOrBaseNative(8453); }
     prepareArbitrumNative() { return this.prepareEthereumOrBaseNative(42161); }
     prepareEthereumOrBaseNative(chainId) {
@@ -169,8 +171,9 @@ export class EvmRpc {
             balance: async (address, selection) => {
                 onlySelectedChain(selection.chainId);
                 if (asset === "native" ? selection.token !== "native" :
-                    selection.token === "native" || !directEvmListRows(chainId).some((row) => row.kind === "token" && row.symbol === "USDC" &&
-                        row.identifier === selection.token && row.decimals === 6)) {
+                    selection.token === "native" || !directEvmListRows(chainId).some((row) => row.kind === "token" &&
+                        row.symbol === (asset === "weth" ? "WETH" : "USDC") && row.identifier === selection.token &&
+                        row.decimals === (asset === "weth" ? 18 : 6))) {
                     throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
                 }
                 if (selection.decimals !== undefined)
