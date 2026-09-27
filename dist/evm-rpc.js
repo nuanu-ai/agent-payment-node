@@ -34,6 +34,8 @@ export class EvmRpc {
     ethereumUsdcFundingReads() { return this.prepareNativeBatched(1, "usdc"); }
     prepareEthereumWeth() { return this.prepareNativeBatched(1, "weth"); }
     ethereumWethFundingReads() { return this.prepareNativeBatched(1, "weth"); }
+    prepareBaseWeth() { return this.prepareNativeBatched(8453, "weth"); }
+    baseWethFundingReads() { return this.prepareNativeBatched(8453, "weth"); }
     prepareBaseNative() { return this.prepareEthereumOrBaseNative(8453); }
     prepareArbitrumNative() { return this.prepareEthereumOrBaseNative(42161); }
     prepareEthereumOrBaseNative(chainId) {
@@ -178,9 +180,10 @@ export class EvmRpc {
                 }
                 if (selection.decimals !== undefined)
                     evmDecimals(selection.decimals);
-                const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+                const balanceTag = chainId === 8453 ? "safe" : "latest";
+                const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: [balanceTag, false] }]);
                 check(preChain);
-                const head = await blockFrom(rawHead, "latest");
+                const head = await blockFrom(rawHead, balanceTag);
                 let nativeAtomic, assetAtomic, observedDecimals;
                 if (asset === "native") {
                     nativeAtomic = evmRpcQuantity(await attempt("eth_getBalance", [address, head.tag])).toString();
@@ -210,16 +213,22 @@ export class EvmRpc {
             },
             nonceEstimate: async (address, transaction) => {
                 onlySelectedChain(transaction.chainId);
-                const [nonceChain, estimateChain] = await batch([chain, chain]);
-                check(nonceChain);
-                check(estimateChain);
-                const [rawNonce, rawGas, rawPriority, rawHead] = await batch([
+                if (chainId !== 8453) {
+                    const [nonceChain, estimateChain] = await batch([chain, chain]);
+                    check(nonceChain);
+                    check(estimateChain);
+                }
+                const values = await batch([
+                    ...(chainId === 8453 ? [chain] : []),
                     { method: "eth_getTransactionCount", params: [address, "pending"] },
                     { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
                                 value: `0x${evmUint(transaction.valueAtomic).toString(16)}` }] },
                     { method: "eth_maxPriorityFeePerGas", params: [] },
                     { method: "eth_getBlockByNumber", params: ["latest", false] },
                 ]);
+                if (chainId === 8453)
+                    check(values[0]);
+                const [rawNonce, rawGas, rawPriority, rawHead] = chainId === 8453 ? values.slice(1) : values;
                 const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas), priority = evmRpcQuantity(rawPriority);
                 const head = await blockFrom(rawHead, "latest");
                 const maximum = 2n * evmRpcQuantity(head.raw.baseFeePerGas) + priority;
@@ -238,7 +247,7 @@ export class EvmRpc {
                 const head = await blockFrom(rawHead, "latest");
                 const execution = evmUint(economics.maximumGasCostAtomic, true);
                 let l1Fee = 0n, operatorFee = 0n;
-                if (chainId === 130) {
+                if (chainId === 130 || chainId === 8453) {
                     const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
                     const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
                     const [rawL1Fee, rawOperatorFee] = await batch([

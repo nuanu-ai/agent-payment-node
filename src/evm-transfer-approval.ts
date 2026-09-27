@@ -26,10 +26,12 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
     asset.address.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
   const ethereumWeth = operation.chainId === 1 && asset.kind === "erc20" &&
     asset.address.toLowerCase() === "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
-  const grouped = ethereumUsdc ? rpc.ethereumUsdcFundingReads?.() : ethereumWeth ? rpc.ethereumWethFundingReads?.() : asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
+  const baseWeth = operation.chainId === 8453 && asset.kind === "erc20" &&
+    asset.address.toLowerCase() === "0x4200000000000000000000000000000000000006";
+  const grouped = ethereumUsdc ? rpc.ethereumUsdcFundingReads?.() : ethereumWeth ? rpc.ethereumWethFundingReads?.() : baseWeth ? rpc.baseWethFundingReads?.() : asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
     operation.chainId === 56 ? rpc.prepareBnbNative?.() : operation.chainId === 8453 ? rpc.prepareBaseNative?.() :
       operation.chainId === 42161 ? rpc.prepareArbitrumNative?.() : undefined : undefined;
-  if (((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) && asset.kind === "native" || ethereumUsdc || ethereumWeth) && grouped === undefined) {
+  if (((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) && asset.kind === "native" || ethereumUsdc || ethereumWeth || baseWeth) && grouped === undefined) {
     throw new ApnError("APN_RPC_CONFIG", "Selected approval requires batched RPC reads.");
   }
   // The balance reader checks the selected chain before and after its pinned reads.
