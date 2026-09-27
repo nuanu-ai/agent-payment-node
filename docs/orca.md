@@ -31,6 +31,12 @@ The pin and vault balances were observed on mainnet on 2026-09-26 near slots
 450687682–450687913. A fresh quote re-reads the current state; those balances
 are historical evidence, not a live reserve guarantee.
 
+### Internal USDC to USDT snapshot preview (27 Sep source checkpoint)
+
+Merged [PR #422](https://github.com/nuanu-ai/agent-payment-node/pull/422) added an offline unsigned v0 message preview from caller-supplied account data. Merged [PR #424](https://github.com/nuanu-ai/agent-payment-node/pull/424) adds an internal read-only adapter that checks Solana mainnet genesis and pinned program bytes, derives three tick arrays and the owner's classic USDC/USDT associated accounts, then reads the pool, arrays, vaults and owner accounts in one `getMultipleAccounts` slot. It recomputes the exact-input quote, price impact and output floor from those bytes and obtains a fresh blockhash and height for the preview. The adapter requires a fresh budget of at most 24 physical POSTs with persistent pacing of at least 750 ms between requests to the provider family; HTTP 429/403 remain terminal.
+
+This adapter is absent from the public Orca CLI/MCP inventory and quote commands above. Its result is an untrusted, non-signable preview, with no production signer, simulation, send, operation journal or receipt. The 22 focused tests used fake RPC responses; no live Solana RPC or paid USDC→USDT swap was proved. It does not fund the current profile with USDT, create an owner USDT policy admission, or close C2-05. The admitted SOL→USDC execution route below is separate.
+
 APN exposes `inventory`, `quote`, `prepare`, `status`, `approve`, and `execute`
 under `apn swap solana orca`. The only admitted mechanism is native SOL to
 canonical USDC, exact input, against one pinned Orca Whirlpool on Solana
