@@ -13,6 +13,7 @@ import { blockhashHex } from "./material.js";
 import { GuardedSwapService } from "../service.js";
 import { createSwapQuote } from "../quote.js";
 import { proveOrcaStableSimulationTransfers } from "./stable-effects.js";
+import { SavedOrcaStableMaterialStore, sealOrcaStableMaterial } from "./stable-material.js";
 
 const MAX_SLOT_DRIFT = 150n;
 const MIN_BASE_FEE = 5_000n;
@@ -45,17 +46,21 @@ export async function simulateOrcaStableGuardedReadOnly(rpc: SolanaRpc, ports: O
 export async function prepareOrcaStableGuardedCandidate(rpc: SolanaRpc, ports: OrcaStableAdmissionPorts,
   service: GuardedSwapService, request: OrcaStableCandidateRequest) {
   assertFreshBoundedRpc(rpc);
-  return await prepareOrcaStableGuardedCandidateCore(rpc, ports, service, request, verifyOrcaProgramPins, () => new Date());
+  return await prepareOrcaStableGuardedCandidateCore(rpc, ports, service, request, verifyOrcaProgramPins, () => new Date(),
+    new SavedOrcaStableMaterialStore(service.operations.root));
 }
 
 /** Injectable pin verifier permits deterministic fake-RPC tests; production always uses the pinned verifier. */
 export async function prepareOrcaStableGuardedCandidateCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts,
   service: GuardedSwapService, request: OrcaStableCandidateRequest, verifyPins: OrcaProgramPinVerifier,
-  clock: () => Date) {
+  clock: () => Date, materialStore?: SavedOrcaStableMaterialStore) {
   const proof = await proveOrcaStableGuardedCore(rpc, ports, request, verifyPins, clock);
   const operation = await service.prepare({ quote: proof.quoteInput, assetPolicy: proof.active.registry,
     protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey,
     approvalCapAtomic: "0", now: proof.commitNow });
+  if (materialStore !== undefined) await materialStore.save(await sealOrcaStableMaterial({ operationId: operation.operationId,
+    quote: operation.quote, policyRevision: request.policyRevision, policyDigest: proof.evidence.policyDigest,
+    activationDigest: proof.evidence.activationDigest, evidence: proof.evidence, preview: proof.preview }, operation), operation);
   return { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, quote: proof.boundQuote, operation,
     evidence: proof.evidence, unsignedTransaction: proof.unsignedTransaction,
     signed: false as const, broadcast: false as const };
@@ -195,7 +200,7 @@ async function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableA
       success: true as const, blockNumber: preview.marketSlot, blockHash: blockhashHex(preview.blockhash),
       headBlockNumber: simulationSlot.toString(), maxHeadDrift: Number(MAX_SLOT_DRIFT), gasEstimate: units.toString() } };
   const boundQuote = createSwapQuote(quoteInput);
-  return { quoteInput, active, commitNow, boundQuote, evidence,
+  return { quoteInput, active, commitNow, boundQuote, evidence, preview,
     unsignedTransaction: { payloadBase64: preview.unsignedPayload, messageHash: preview.messageHash,
       blockhash: preview.blockhash, lastValidBlockHeight: preview.lastValidBlockHeight } };
 }

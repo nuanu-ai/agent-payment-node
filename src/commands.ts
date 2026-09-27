@@ -61,6 +61,11 @@ export type CommandRequest =
   | { readonly command: "swap.orca.stable-inventory" }
   | { readonly command: "swap.orca.stable-quote"; readonly amountAtomic: string; readonly slippageBps: number;
       readonly maximumPriceImpactBps: number }
+  | { readonly command: "swap.orca.stable-prepare"; readonly profile: string; readonly policyRevision: number;
+      readonly owner: string; readonly amountAtomic: string; readonly slippageBps: number; readonly maximumPriceImpactBps: number;
+      readonly computeUnitLimit: number; readonly computeUnitPriceMicroLamports: string; readonly createUsdtAta: boolean;
+      readonly maximumAtaRentLamports?: string; readonly maximumTotalFeeLamports: string; readonly idempotencyKey: string }
+  | { readonly command: "swap.orca.stable-status"; readonly operationId: string }
   | { readonly command: "swap.orca.quote"; readonly profile: string; readonly account: string; readonly amountAtomic: string;
       readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly computeUnitLimit: number; readonly computeUnitPriceMicroLamports: string }
   | { readonly command: "swap.orca.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }

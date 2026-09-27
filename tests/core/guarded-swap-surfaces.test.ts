@@ -26,7 +26,7 @@ const FAMILIES = [
   { path: "swap solana orca", command: "swap.orca", cleanup: false, stableReads: true },
 ] as const;
 const ACTIONS = ["inventory", "quote", "prepare", "status", "approve", "execute"] as const;
-const STABLE_READS = ["stable-inventory", "stable-quote"] as const;
+const STABLE_READS = ["stable-inventory", "stable-quote", "stable-prepare", "stable-status"] as const;
 
 test("guarded swap families expose six parity actions plus explicit token cleanup", () => {
   const catalog = COMMANDS.filter((row) => row.path[0] === "swap");
@@ -34,7 +34,7 @@ test("guarded swap families expose six parity actions plus explicit token cleanu
     [...("stableReads" in family ? STABLE_READS : []), ...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])]
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 33);
+  assert.equal(tools.length, 35);
   assert.deepEqual(tools.map((row) => row.command), catalog);
   for (const command of catalog) {
     const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;
@@ -139,6 +139,11 @@ function sample(option: string, chain: string): string {
   if (option === "--profile") return "swap-test";
   if (option === "--account" || option === "--to") return chain === "tron" ? TRON_OWNER : chain === "solana" ? SOLANA_OWNER :
     "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
+  if (option === "--owner") return SOLANA_OWNER;
+  if (option === "--policy-revision") return "7";
+  if (option === "--create-usdt-ata") return "false";
+  if (option === "--maximum-ata-rent") return "0";
+  if (option === "--maximum-total-fee") return "3000000";
   if (option === "--output-token") return "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
   if (option === "--source-token") return "0xdAC17F958D2ee523a2206206994597C13D831ec7";
   if (option === "--amount") return "1000000";

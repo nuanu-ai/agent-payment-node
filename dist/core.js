@@ -266,6 +266,8 @@ export class ApnCore {
             case "swap.orca.inventory":
             case "swap.orca.stable-inventory":
             case "swap.orca.stable-quote":
+            case "swap.orca.stable-prepare":
+            case "swap.orca.stable-status":
             case "swap.orca.quote":
             case "swap.orca.prepare":
             case "swap.orca.status":
