@@ -218,6 +218,25 @@ Exact foreground TTY approval precedes private-key access. MCP
 catalog/core. MCP direct approval returns the existing CLI handoff; it cannot
 authorize or strand the operation. Status and receipt do not resume effects.
 
+Canonical Ethereum USDC direct transfers use grouped JSON-RPC reads by default,
+including with explicit `--rpc-read-mode batch`. The frozen allowlist address and
+six decimals, pinned token contract code and balance, native gas balance, chain
+identity, block rechecks, pending nonce, gas estimate and fee quote are checked
+before signing; both approval funding phases refresh grouped reads. A synthetic
+HTTPS transport test counted eight physical POSTs for prepare, eight for the
+pre-sign funding check, and five for the post-sign funding check. A successful
+raw send adds one POST, within the direct command's 24-POST guard. A rejected or
+rate-limited batch does not retry through scalar reads. This is a local test
+budget, not proof that any live provider accepts batches or that a mainnet
+payment succeeded. Direct ERC-20 transfer calls the token contract itself and
+does not use an allowance or spender approval.
+
+After the Ethereum USDC send, the durable state is `submitted_pending`. Use
+`apn operation resume --operation <id> --observe-only true --rpc-url <url>` to
+inspect the exact receipt and token effect; this never broadcasts again. A
+successful receipt alone is insufficient: completion still requires the exact
+Transfer log and sender/recipient balance deltas across the canonical block.
+
 A fresh explicit EVM prepare retires expired unsigned local transfers on the
 same profile, network and sending account before checking for conflicts. It
 writes a terminal `failed_before_effect` operation and receipt with reason
