@@ -1,18 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { bindArgv } from "../../src/command-binder.js";
+import { ApnCore } from "../../src/core.js";
+import { StateStore } from "../../src/state.js";
 import { getBase58Decoder, getBase58Encoder, getCompiledTransactionMessageDecoder } from "@solana/kit";
 import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { ApnError } from "../../src/errors.js";
 import { SolanaRpc, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
-import { GuardedSwapService } from "../../src/swap/service.js";
+import { GuardedSwapService, preparedSwapOperationId } from "../../src/swap/service.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { whirlpoolTickArrayAddress } from "../../src/swap/orca-solana/accounts.js";
 import { prepareOrcaStableGuardedCandidateCore, simulateOrcaStableGuardedCore,
   simulateOrcaStableGuardedReadOnly } from "../../src/swap/orca-solana/stable-candidate.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
+import { SavedOrcaStableMaterialStore } from "../../src/swap/orca-solana/stable-material.js";
+import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-status.js";
 import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
 import { temporaryState } from "./helpers.js";
@@ -152,6 +158,7 @@ async function fixture(exists = true) {
       trustedTime = new Date(NOW.getTime() + 31_000); }; },
     setHeight: (value: bigint) => { height = value; }, setUsage: (value: string) => { usage = value; },
     setRevision: (value: number) => { current = { ...active, revision: value }; },
+    setActivation: (value: string) => { current = { ...active, activationDigest: value }; },
     driftRevisionAfterSimulation: () => { afterSimulation = () => { current = { ...active, revision: 8 }; }; },
     rateLimitAt: (method: SolanaMethod) => { rpcRateLimitedAt = method; },
   };
@@ -310,4 +317,107 @@ for (const [name, mutate] of [
   const f = await fixture(); t.after(f.cleanup); mutate(f);
   await assert.rejects(candidate(f));
   await assertNoOperation(f.root);
+});
+
+test("stable prepare binds CLI input, persists exact unsigned material, and status survives reopening", async (t) => {
+  const f = await fixture(false); t.after(f.cleanup); f.useCompiledTrace();
+  const request = bindArgv(["swap", "solana", "orca", "stable-prepare", "--profile", f.request.profile,
+    "--policy-revision", String(f.request.policyRevision), "--owner", f.request.owner,
+    "--amount", f.request.amountAtomic, "--slippage-bps", String(f.request.slippageBps),
+    "--maximum-price-impact-bps", String(f.request.maximumPriceImpactBps),
+    "--compute-unit-limit", String(f.request.computeUnitLimit), "--compute-unit-price", f.request.computeUnitPriceMicroLamports,
+    "--create-usdt-ata", "true", "--maximum-ata-rent", f.request.maximumAtaRentLamports!,
+    "--maximum-total-fee", f.request.maximumTotalFeeLamports, "--idempotency-key", f.request.idempotencyKey]).request;
+  assert.equal(request.command, "swap.orca.stable-prepare");
+  const store = new SavedOrcaStableMaterialStore(f.root);
+  const core = new ApnCore({ state: new StateStore(f.root), clock: { now: f.clock },
+    orcaStablePrepare: async () => prepareOrcaStableGuardedCandidateCore(f.rpc, f.ports, f.service,
+      f.request, async () => [], f.clock, store),
+    orcaStableStatus: operationId => orcaStablePreparedStatus(new SwapOperationRepository(f.root),
+      new SavedOrcaStableMaterialStore(f.root), f.ports, operationId, f.clock()) });
+  const prepared = await core.execute(request);
+  assert.equal(prepared.ok, true);
+  const operation = (prepared.data as any).operation;
+  assert.equal(operation.state, "awaiting_approval");
+  const reopened = new SavedOrcaStableMaterialStore(f.root);
+  const material = await reopened.load(operation.operationId, operation);
+  assert.equal(material?.preview.messageHash, (prepared.data as any).unsignedTransaction.messageHash);
+  assert.equal(material?.preview.createUsdtAta, true);
+  const status = await core.execute(bindArgv(["swap", "solana", "orca", "stable-status", "--operation", operation.operationId]).request);
+  assert.equal(status.ok, true);
+  assert.equal((status.data as any).signable, false);
+  assert.equal((status.data as any).materialDigest, material?.materialDigest);
+  assert.ok(f.calls.includes("simulateTransaction"));
+  assert.ok(!f.calls.includes("sendTransaction"));
+  for (const command of ["status", "approve", "execute"] as const) {
+    const generic = await core.execute({ command: `swap.orca.${command}`, operationId: operation.operationId });
+    assert.equal(generic.ok, false);
+    assert.equal(generic.error?.details?.reason, "orca_mechanism_mismatch");
+  }
+});
+
+test("stable status fails closed on material tamper, expiry, and active policy drift", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const store = new SavedOrcaStableMaterialStore(f.root);
+  const prepared = await prepareOrcaStableGuardedCandidateCore(f.rpc, f.ports, f.service,
+    f.request, async () => [], f.clock, store);
+  const operationId = prepared.operation.operationId;
+  const operations = new SwapOperationRepository(f.root);
+  const fresh = () => orcaStablePreparedStatus(operations, new SavedOrcaStableMaterialStore(f.root), f.ports, operationId, f.clock());
+  assert.equal((await fresh()).operation.operationId, operationId);
+  await assert.rejects(orcaStablePreparedStatus(operations, store, { ...f.ports, localAccount: async () => null },
+    operationId, f.clock()), (error) => reason(error) === "orca_stable_owner_account");
+  f.setActivation("b".repeat(64));
+  await assert.rejects(fresh(), (error) => reason(error) === "orca_stable_policy_drift");
+  f.setActivation("a".repeat(64));
+  f.setRevision(8);
+  await assert.rejects(fresh(), (error) => reason(error) === "orca_stable_policy_drift");
+  await assert.rejects(orcaStablePreparedStatus(operations, store, f.ports, operationId,
+    new Date(NOW.getTime() + 60_000)), (error) => error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED");
+  const file = join(f.root, "orca-stable-material", `${operationId}.json`);
+  const material = JSON.parse(await readFile(file, "utf8"));
+  material.preview.unsignedPayload = "AA==";
+  await writeFile(file, JSON.stringify(material));
+  await assert.rejects(fresh());
+});
+
+test("material write failure leaves no operation and same-key retry prepares cleanly", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  class FailingMaterialStore extends SavedOrcaStableMaterialStore {
+    override async save(): Promise<never> { throw new Error("injected material write failure"); }
+  }
+  await assert.rejects(prepareOrcaStableGuardedCandidateCore(f.rpc, f.ports, f.service, f.request,
+    async () => [], f.clock, new FailingMaterialStore(f.root)), /injected material write failure/u);
+  await assertNoOperation(f.root);
+  await assert.rejects(orcaStablePreparedStatus(new SwapOperationRepository(f.root), new SavedOrcaStableMaterialStore(f.root),
+    f.ports, preparedSwapOperationId(f.request.profile, f.request.idempotencyKey), f.clock()),
+  (error) => error instanceof ApnError && error.code === "APN_OPERATION_NOT_FOUND");
+  const prepared = await prepareOrcaStableGuardedCandidateCore(f.rpc, f.ports, f.service, f.request,
+    async () => [], f.clock, new SavedOrcaStableMaterialStore(f.root));
+  assert.equal(prepared.operation.state, "awaiting_approval");
+  assert.equal((await new SavedOrcaStableMaterialStore(f.root).load(prepared.operation.operationId, prepared.operation))?.preview.messageHash,
+    prepared.unsignedTransaction.messageHash);
+});
+
+test("interrupted operation transition reopens from staged material without repeating RPC", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  class FailingTransitionRepository extends SwapOperationRepository {
+    override async transition(): Promise<never> { throw new Error("injected transition interruption"); }
+  }
+  const interrupted = new GuardedSwapService(new FailingTransitionRepository(f.root), new AssetUsageLedger(f.root));
+  await assert.rejects(prepareOrcaStableGuardedCandidateCore(f.rpc, f.ports, interrupted, f.request,
+    async () => [], f.clock, new SavedOrcaStableMaterialStore(f.root)), /injected transition interruption/u);
+  const operationId = preparedSwapOperationId(f.request.profile, f.request.idempotencyKey);
+  assert.ok(await new SavedOrcaStableMaterialStore(f.root).loadStaged(operationId));
+  const partial = await new SwapOperationRepository(f.root).loadAny(operationId);
+  assert.equal(partial?.state, "quoted");
+  const status = await orcaStablePreparedStatus(new SwapOperationRepository(f.root), new SavedOrcaStableMaterialStore(f.root),
+    f.ports, operationId, f.clock());
+  assert.equal(status.operation.state, "quoted");
+  const calls = [...f.calls];
+  const recovered = await prepareOrcaStableGuardedCandidateCore(f.rpc, f.ports, f.service, f.request,
+    async () => [], f.clock, new SavedOrcaStableMaterialStore(f.root));
+  assert.equal(recovered.operation.state, "awaiting_approval");
+  assert.equal(recovered.operation.operationId, operationId);
+  assert.deepEqual(f.calls, calls);
 });

@@ -39,8 +39,8 @@ export class GuardedSwapService {
         }
         const protocolRegistry = validateSwapProtocolRegistry(input.protocolRegistry);
         requireSwapProtocol(protocolRegistry, mechanismDigest);
-        const idempotencyHash = idempotency(input.idempotencyKey);
-        const operationId = domainHash("apn.swap-operation-id.v1", canonicalJson({ profileHash: quote.profileHash, idempotencyHash }));
+        const idempotencyHash = swapIdempotencyHash(input.idempotencyKey);
+        const operationId = preparedSwapOperationId(quote.profile, input.idempotencyKey);
         let operation = await this.operations.create(newSwapOperation({ operationId, idempotencyHash, quote,
             policyDigest: admission.policyDigest, policyVersion: admission.registryVersion, mechanismDigest,
             protocolRegistryDigest: protocolRegistry.registryDigest, protocolRegistryVersion: protocolRegistry.registryVersion,
@@ -138,8 +138,12 @@ function usageIdentity(operation) {
         asset: operation.quote.sourceAsset.kind === "native" ? { kind: "native", identifier: null } :
             { kind: "token", identifier: operation.quote.sourceAsset.identifier } };
 }
-function idempotency(value) { if (typeof value !== "string" || value.length < 8 || value.length > 256 || /[^\x21-\x7e]/u.test(value))
+export function swapIdempotencyHash(value) { if (typeof value !== "string" || value.length < 8 || value.length > 256 || /[^\x21-\x7e]/u.test(value))
     invalid("Swap idempotency key is invalid."); return sha256(`swap-idempotency\0${value}`); }
+export function preparedSwapOperationId(profile, idempotencyKey) {
+    const profileHash = domainHash("apn.swap-quote.v1", `profile\0${profile}`);
+    return domainHash("apn.swap-operation-id.v1", canonicalJson({ profileHash, idempotencyHash: swapIdempotencyHash(idempotencyKey) }));
+}
 function instant(value) { if (!(value instanceof Date) || !Number.isFinite(value.getTime()))
     invalid("Swap time is invalid."); return value.toISOString(); }
 function assertLiveQuote(operation, now) {
