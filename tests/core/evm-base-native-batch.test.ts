@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import https from "node:https";
+import { syncBuiltinESMExports } from "node:module";
 import test from "node:test";
 import { decodeFunctionData, toHex } from "viem";
 import { ApnError } from "../../src/errors.js";
 import { EvmRpc } from "../../src/evm-rpc.js";
 import type { EvmRpcBatchCall, EvmTransactionInput } from "../../src/evm-ports.js";
-import { EVM_BLOCK_HASH } from "./evm-helpers.js";
-import { RECIPIENT, WALLET } from "./helpers.js";
+import { checkEvmTransferFunding } from "../../src/evm-transfer-approval.js";
+import { HttpsBaseRpc } from "../../src/rpc.js";
+import { EVM_BLOCK_HASH, EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
+import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
 
 const ORACLE = "0x420000000000000000000000000000000000000F";
 const ABI = [
@@ -75,4 +80,66 @@ test("Base native batch failures stop without scalar fallback or another POST", 
       { code: options.rejectAt ? "APN_RPC_RATE_LIMITED" : options.chainId ? "APN_CHAIN_MISMATCH" : "APN_RPC_PROTOCOL" });
     assert.ok(posts.length <= 3);
   }
+});
+
+test("Base native production HTTPS path uses 6 prepare and 12 approval funding POSTs with reversed responses", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const setup = evmCore(temporary.root);
+  await ensureDirectWallet(setup);
+  const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
+  const operation = await setup.state.findOperation(prepared.operation_id);
+  assert.ok(operation);
+
+  const bodies: unknown[][] = [];
+  t.mock.method(https, "request", (_endpoint: URL, _options: unknown, receive: (response: unknown) => void) => {
+    const request = new EventEmitter() as any;
+    request.setTimeout = () => request;
+    request.end = (body: string) => {
+      const batch = JSON.parse(body) as { id: number; method: string; params: unknown[] }[];
+      assert.ok(Array.isArray(batch), "native reads must use a physical batch POST");
+      bodies.push(batch);
+      const answers = batch.map(item => {
+        const { method, params } = item;
+        let result: unknown;
+        if (method === "eth_chainId") result = "0x2105";
+        else if (method === "eth_getBlockByNumber") result = { number: "0x3039", hash: EVM_BLOCK_HASH,
+          baseFeePerGas: toHex(500_000_000n), transactions: [] };
+        else if (method === "eth_getBalance") { assert.equal(params[1], "0x3039"); result = toHex(10n ** 18n); }
+        else if (method === "eth_getTransactionCount") { assert.equal(params[1], "pending"); result = "0x7"; }
+        else if (method === "eth_estimateGas") result = toHex(65_000n);
+        else if (method === "eth_maxPriorityFeePerGas") result = toHex(1_000_000_000n);
+        else if (method === "eth_call") {
+          const input = params[0] as { to: string; data: `0x${string}` };
+          assert.equal(input.to, ORACLE); assert.equal(params[1], "0x3039");
+          const decoded = decodeFunctionData({ abi: ABI, data: input.data });
+          assert.deepEqual(decoded.args, decoded.functionName === "getL1FeeUpperBound" ? [512n] : [65000n]);
+          result = toHex(decoded.functionName === "getL1FeeUpperBound" ? 1000n : 100n, { size: 32 });
+        } else throw new Error(`Unexpected scalar or read method ${method}`);
+        return { jsonrpc: "2.0", id: item.id, result };
+      }).reverse();
+      queueMicrotask(() => {
+        const response = new EventEmitter() as any;
+        const raw = JSON.stringify(answers);
+        response.statusCode = 200;
+        response.headers = { "content-length": String(Buffer.byteLength(raw)) };
+        response.resume = () => { response.emit("end"); };
+        receive(response);
+        response.emit("data", Buffer.from(raw)); response.emit("end");
+      });
+      return request;
+    };
+    return request;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const rpc = new HttpsBaseRpc("https://8.8.8.8/base", { directGuardState: setup.state });
+  const grouped = rpc.evm.prepareBaseNative();
+  await grouped.balance(operation.walletAddress, { chainId: 8453, token: "native", decimals: 18 });
+  const { estimated } = await grouped.nonceEstimate(operation.walletAddress, transaction);
+  await grouped.feeQuote(economics(estimated));
+  assert.equal(bodies.length, 6, "prepare physical POSTs");
+  await checkEvmTransferFunding(rpc, operation, true, setup.state.root);
+  assert.equal(bodies.length, 12, "prepare plus pre-sign funding POSTs");
+  await checkEvmTransferFunding(rpc, operation, false, setup.state.root);
+  assert.equal(bodies.length, 18, "prepare plus both approval funding phases remain below 24 POSTs");
 });
