@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bindArgv } from "../../src/command-binder.js";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
 import { StateStore } from "../../src/state.js";
 import { getBase58Decoder, getBase58Encoder, getCompiledTransactionMessageDecoder } from "@solana/kit";
@@ -585,7 +586,15 @@ test("stable release refuses an operation with a possible-effect marker", async 
   const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
   const approved = await approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
     { confirm: async () => {} }, f.clock);
-  const marked = await f.service.markSubmitting(approved.operation, f.clock());
+  await assert.rejects(f.service.markSubmitting(approved.operation, f.clock()), { code: "APN_OPERATION_BLOCKED" });
+  // Model a future effect marker through the low-level repository to prove release and status remain observation-only.
+  const markerBody = { operationId: approved.operation.operationId,
+    operationIntegrityHash: approved.operation.integrityHash,
+    unsignedTransactionPayloadHash: approved.operation.quote.unsignedTransactionPayloadHash, markedAt: NOW.toISOString() };
+  const { operationId: _operationId, ...markerFields } = markerBody;
+  const marked = await f.service.operations.transition(approved.operation.ownerProfileHash, approved.operation.operationId,
+    approved.operation.integrityHash, "submitting", { submissionMarker: { ...markerFields,
+      markerHash: domainHash("apn.swap-submission-marker.v1", canonicalJson(markerBody)) } }, NOW);
   await assert.rejects(releaseOrcaStableNoEffect(f.service, store, prepared.operation.operationId, f.clock()),
     (error) => reason(error) === "orca_stable_effect_boundary");
   assert.equal((await f.service.usage.usage({ account: f.source.owner, chain: ORCA_SOLANA_CHAIN,

@@ -26,15 +26,15 @@ const FAMILIES = [
   { path: "swap solana orca", command: "swap.orca", cleanup: false, stableReads: true },
 ] as const;
 const ACTIONS = ["inventory", "quote", "prepare", "status", "approve", "execute"] as const;
-const STABLE_READS = ["stable-inventory", "stable-quote", "stable-prepare", "stable-status"] as const;
+const STABLE_ACTIONS = ["stable-inventory", "stable-quote", "stable-prepare", "stable-status", "stable-approve", "stable-release"] as const;
 
 test("guarded swap families expose six parity actions plus explicit token cleanup", () => {
   const catalog = COMMANDS.filter((row) => row.path[0] === "swap");
   assert.deepEqual(catalog.map((row) => row.path.join(" ")), FAMILIES.flatMap((family) =>
-    [...("stableReads" in family ? STABLE_READS : []), ...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])]
+    [...("stableReads" in family ? STABLE_ACTIONS : []), ...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])]
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 35);
+  assert.equal(tools.length, 37);
   assert.deepEqual(tools.map((row) => row.command), catalog);
   for (const command of catalog) {
     const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;
