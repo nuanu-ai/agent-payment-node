@@ -86,6 +86,83 @@ test("common LI.FI finalized usage enforces the shared daily cap before another 
   assert.equal(s.provider.materializeCalls, materializations);
 });
 
+test("LI.FI bridge options admit the selected mechanism and charge one shared daily bucket", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "base-arb", { policy: false });
+  const admission = { chain: `eip155:${s.request.fromChainId}`, kind: "token" as const, identifier: s.request.fromToken,
+    rail: "bridge" as const, dailyLimitAtomic: "15000000", mechanisms: [
+      { ...bridgeMechanism("across"), maximumPerTransferAtomic: "10000000" },
+      { ...bridgeMechanism("stargateV2"), maximumPerTransferAtomic: "10000000" },
+    ] };
+  await activateDirectPolicy(temporary.root, s.profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now: s.now,
+    admissions: [admission] });
+  const first = await s.prepare("across", "options-across-first-001");
+  assert.deepEqual(first.operation.intent.allowlist?.mechanism, bridgeMechanism("across"));
+  assert.equal((await s.core.execute({ command: "bridge.approve", operationId: first.id })).ok, true);
+  const routes = await s.core.execute({ command: "bridge.routes", profile: s.profile, request: s.request });
+  const materializations = s.provider.materializeCalls;
+  const second = await s.core.execute({ command: "bridge.prepare", profile: s.profile,
+    quote: (routes.data as any).quote_hash, route: "route-stargateV2", idempotencyKey: "options-stargate-second-001" });
+  assert.equal(second.error?.details?.reason, "allowlist_daily_cap_exceeded");
+  assert.equal(s.provider.materializeCalls, materializations);
+});
+
+test("LI.FI bridge options enforce the selected cap and exact mechanism before materialization", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "base-arb", { policy: false });
+  await activateDirectPolicy(temporary.root, s.profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now: s.now,
+    admissions: [{ chain: `eip155:${s.request.fromChainId}`, kind: "token", identifier: s.request.fromToken,
+      rail: "bridge", dailyLimitAtomic: "20000000", mechanisms: [
+        { ...bridgeMechanism("across"), maximumPerTransferAtomic: "9000000" },
+        { ...bridgeMechanism("stargateV2"), maximumPerTransferAtomic: "10000000" },
+      ] }] });
+  const routes = await s.core.execute({ command: "bridge.routes", profile: s.profile, request: s.request });
+  const capped = await s.core.execute({ command: "bridge.prepare", profile: s.profile,
+    quote: (routes.data as any).quote_hash, route: "route-across", idempotencyKey: "options-cap-001" });
+  assert.equal(capped.error?.details?.reason, "allowlist_per_transfer_cap_exceeded");
+  assert.equal(s.provider.materializeCalls, 0);
+  const gate = new BridgeAllowlistGate({ state: s.state, clock: { now: () => new Date(s.now) } });
+  await assert.rejects(gate.admit(s.profile, LIFI_SYNTHETIC_SENDER, s.request, "unknown-tool"),
+    (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "bridge_mechanism_mismatch");
+  const selected = await gate.admit(s.profile, LIFI_SYNTHETIC_SENDER, s.request, "stargateV2");
+  await assert.rejects(gate.confirm(s.profile, s.request, "across", selected),
+    (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "bridge_mechanism_mismatch");
+});
+
+test("LI.FI bridge options reject an unlisted LI.FI mechanism", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "base-arb", { policy: false });
+  await activateDirectPolicy(temporary.root, s.profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now: s.now,
+    admissions: [{ chain: `eip155:${s.request.fromChainId}`, kind: "token", identifier: s.request.fromToken,
+      rail: "bridge", dailyLimitAtomic: "20000000", mechanisms: [
+        { ...bridgeMechanism("across"), maximumPerTransferAtomic: "10000000" },
+        { provider: "relay", reference: "other-exact-bridge", maximumPerTransferAtomic: "10000000" },
+      ] }] });
+  const routes = await s.core.execute({ command: "bridge.routes", profile: s.profile, request: s.request });
+  const refused = await s.core.execute({ command: "bridge.prepare", profile: s.profile,
+    quote: (routes.data as any).quote_hash, route: "route-stargateV2", idempotencyKey: "options-unlisted-001" });
+  assert.equal(refused.error?.details?.reason, "bridge_mechanism_mismatch");
+  assert.equal(s.provider.materializeCalls, 0);
+});
+
+test("LI.FI option binding refuses a policy revision change at confirmation", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "base-arb", { policy: false });
+  const admission = { chain: `eip155:${s.request.fromChainId}`, kind: "token" as const, identifier: s.request.fromToken,
+    rail: "bridge" as const, dailyLimitAtomic: "20000000", mechanisms: [
+      { ...bridgeMechanism("across"), maximumPerTransferAtomic: "10000000" },
+      { ...bridgeMechanism("stargateV2"), maximumPerTransferAtomic: "10000000" },
+    ] };
+  await activateDirectPolicy(temporary.root, s.profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now: s.now,
+    admissions: [admission] });
+  const gate = new BridgeAllowlistGate({ state: s.state, clock: { now: () => new Date(s.now) } });
+  const binding = await gate.admit(s.profile, LIFI_SYNTHETIC_SENDER, s.request, "across");
+  await activateDirectPolicy(temporary.root, s.profile, { accounts: { evm: LIFI_SYNTHETIC_SENDER }, now: s.now,
+    admissions: [admission] });
+  await assert.rejects(gate.confirm(s.profile, s.request, "across", binding),
+    (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "allowlist_policy_changed");
+});
+
 test("allowlist source admission and durable validation share the exact reviewed source registry", async (t) => {
   assert.deepEqual([...BRIDGE_EXECUTION_SOURCE_CHAIN_IDS], [1, 8453, 42161]);
   for (const pair of ["eth-base", "base-arb", "arb-eth"] as const) {
