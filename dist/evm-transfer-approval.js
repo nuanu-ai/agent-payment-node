@@ -22,8 +22,8 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
         rpcPort.armEvmDirectRpcGuard?.();
     const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
     const grouped = asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
-        operation.chainId === 56 ? rpc.prepareBnbNative?.() : undefined : undefined;
-    if ((operation.chainId === 1 || operation.chainId === 56) && asset.kind === "native" && grouped === undefined) {
+        operation.chainId === 56 ? rpc.prepareBnbNative?.() : operation.chainId === 8453 ? rpc.prepareBaseNative?.() : undefined : undefined;
+    if ((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453) && asset.kind === "native" && grouped === undefined) {
         throw new ApnError("APN_RPC_CONFIG", "Selected native approval requires batched RPC reads.");
     }
     // The balance reader checks the selected chain before and after its pinned reads.
