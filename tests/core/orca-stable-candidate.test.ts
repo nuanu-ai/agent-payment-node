@@ -20,6 +20,7 @@ import { prepareOrcaStableGuardedCandidateCore, simulateOrcaStableGuardedCore,
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
 import { SavedOrcaStableMaterialStore } from "../../src/swap/orca-solana/stable-material.js";
 import { approveOrcaStableReservation, stableApprovalScreen } from "../../src/swap/orca-solana/stable-approval.js";
+import { releaseOrcaStableNoEffect } from "../../src/swap/orca-solana/stable-release.js";
 import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-status.js";
 import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
@@ -446,8 +447,9 @@ test("stable status fails closed on material tamper, expiry, and active policy d
   f.setActivation("a".repeat(64));
   f.setRevision(8);
   await assert.rejects(fresh(), (error) => reason(error) === "orca_stable_policy_drift");
-  await assert.rejects(orcaStablePreparedStatus(operations, store, f.ports, operationId,
-    new Date(NOW.getTime() + 60_000)), (error) => error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED");
+  const expired = await orcaStablePreparedStatus(operations, store, f.ports, operationId,
+    new Date(NOW.getTime() + 60_000));
+  assert.equal(expired.operation.state, "failed_before_effect");
   const file = join(f.root, "orca-stable-material", `${operationId}.json`);
   const material = JSON.parse(await readFile(file, "utf8"));
   material.preview.unsignedPayload = "AA==";
@@ -524,6 +526,73 @@ test("stable reserve retry after interrupted operation write reuses the principa
   const usage = await f.service.usage.usage({ account: f.source.owner, chain: ORCA_SOLANA_CHAIN,
     asset: { kind: "token", identifier: USDC_MINT } }, NOW);
   assert.equal(usage.amountAtomic, f.source.quote.amountInAtomic);
+});
+
+test("stable no-effect release reconciles an orphan lease and is idempotent", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
+  const original = f.service.operations.transition.bind(f.service.operations);
+  f.service.operations.transition = (async (...args: Parameters<typeof original>) => {
+    if (args[3] === "reserved") throw new Error("crash after lease write");
+    return await original(...args);
+  }) as typeof original;
+  await assert.rejects(approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, f.clock), /crash after lease write/u);
+  const releaseRequest = bindArgv(["swap", "solana", "orca", "stable-release", "--operation", prepared.operation.operationId]).request;
+  assert.deepEqual(releaseRequest, { command: "swap.orca.stable-release", operationId: prepared.operation.operationId });
+  const released = await releaseOrcaStableNoEffect(f.service, store, prepared.operation.operationId, f.clock());
+  assert.equal(released.operation.state, "failed_before_effect");
+  assert.equal(released.operation.usageLease?.state, "failed_before_effect");
+  assert.equal((await f.service.usage.usage({ account: f.source.owner, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, NOW)).amountAtomic, "0");
+  assert.deepEqual(await releaseOrcaStableNoEffect(f.service, store, prepared.operation.operationId, f.clock()), released);
+  assert.equal((await orcaStablePreparedStatus(f.service.operations, store, f.ports,
+    prepared.operation.operationId, f.clock())).operation.state, "failed_before_effect");
+});
+
+test("expired stable status releases a reserved lease and repeated reads remain terminal", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
+  await approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, f.clock);
+  const expiredAt = new Date(NOW.getTime() + 60_000);
+  const status = await orcaStablePreparedStatus(f.service.operations, store, f.ports,
+    prepared.operation.operationId, expiredAt);
+  assert.equal(status.operation.state, "failed_before_effect");
+  assert.equal(status.operation.usageLease?.state, "failed_before_effect");
+  assert.equal((await orcaStablePreparedStatus(f.service.operations, store, f.ports,
+    prepared.operation.operationId, expiredAt)).operation.integrityHash, status.operation.integrityHash);
+  assert.equal((await f.service.usage.usage({ account: f.source.owner, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, expiredAt)).amountAtomic, "0");
+});
+
+test("stable approval samples the clock again after awaited policy reads", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
+  let policyCalls = 0, now = NOW;
+  const ports = { ...f.ports, activePolicy: async () => {
+    const active = await f.ports.activePolicy();
+    if (++policyCalls === 4) now = new Date(NOW.getTime() + 60_000);
+    return active;
+  } };
+  await assert.rejects(approveOrcaStableReservation(f.service, store, ports, prepared.operation.operationId,
+    { confirm: async () => {} }, () => now), (error) => reason(error) === "orca_stable_approval_expired");
+  assert.equal((await f.service.operations.loadAny(prepared.operation.operationId))?.usageLease, null);
+});
+
+test("stable release refuses an operation with a possible-effect marker", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
+  const approved = await approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, f.clock);
+  const marked = await f.service.markSubmitting(approved.operation, f.clock());
+  await assert.rejects(releaseOrcaStableNoEffect(f.service, store, prepared.operation.operationId, f.clock()),
+    (error) => reason(error) === "orca_stable_effect_boundary");
+  assert.equal((await f.service.usage.usage({ account: f.source.owner, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, NOW)).amountAtomic, f.source.quote.amountInAtomic);
+  const observed = await orcaStablePreparedStatus(f.service.operations, store, f.ports,
+    prepared.operation.operationId, new Date(NOW.getTime() + 60_000));
+  assert.equal(observed.operation.integrityHash, marked.integrityHash);
 });
 
 test("material write failure leaves no operation and same-key retry prepares cleanly", async (t) => {

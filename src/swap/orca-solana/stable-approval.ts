@@ -26,6 +26,12 @@ export class TtyOrcaStableConsent implements OrcaStableConsentPort {
 /** Foreground owner consent reserves only the USDC principal. This path has no signer or sender. */
 export async function approveOrcaStableReservation(service: GuardedSwapService, materialStore: SavedOrcaStableMaterialStore,
   ports: OrcaStableAdmissionPorts, operationId: string, consent: OrcaStableConsentPort, clock: () => Date) {
+  return await service.operations.withLocks([`orca-stable-approval:${operationId}`], async () =>
+    await approveOrcaStableReservationLocked(service, materialStore, ports, operationId, consent, clock));
+}
+
+async function approveOrcaStableReservationLocked(service: GuardedSwapService, materialStore: SavedOrcaStableMaterialStore,
+  ports: OrcaStableAdmissionPorts, operationId: string, consent: OrcaStableConsentPort, clock: () => Date) {
   const operation = await service.operations.loadAny(operationId);
   if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
   if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST)
@@ -59,7 +65,11 @@ export async function approveOrcaStableReservation(service: GuardedSwapService, 
   const latest = await service.operations.loadAny(operationId);
   if (latest === null || latest.integrityHash !== operation.integrityHash || latest.state !== "awaiting_approval")
     blocked("Stable operation changed during consent.", "orca_stable_operation_drift");
-  const reserved = await service.reserve(latest, current.registry, after);
+  const commitNow = checkedNow(clock);
+  if (commitNow.getTime() < after.getTime() || commitNow.toISOString() >= deadline)
+    blocked("Stable approval window expired before reservation.", "orca_stable_approval_expired");
+  assertWindow(latest, commitNow);
+  const reserved = await service.reserve(latest, current.registry, commitNow);
   return { schemaVersion: "apn.orca-stable-reservation.v1" as const, operation: reserved,
     quoteHash: reserved.quote.quoteHash, materialDigest: material.materialDigest,
     signable: false as const, executable: false as const, signed: false as const, broadcast: false as const };

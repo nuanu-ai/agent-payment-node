@@ -136,6 +136,7 @@ import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
 import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-candidate.js";
 import { orcaStablePreparedStatus } from "./swap/orca-solana/stable-status.js";
 import { approveOrcaStableReservation, TtyOrcaStableConsent } from "./swap/orca-solana/stable-approval.js";
+import { releaseOrcaStableNoEffect } from "./swap/orca-solana/stable-release.js";
 import { SavedOrcaStableMaterialStore } from "./swap/orca-solana/stable-material.js";
 import { GuardedSwapService } from "./swap/service.js";
 import { SwapOperationRepository } from "./swap/repository.js";
@@ -480,7 +481,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(bound.request.command === "swap.orca.stable-quote" ? {
       orcaStableQuote: (request: Parameters<typeof quoteOrcaStableReadOnly>[1]) => quoteOrcaStableReadOnly(solanaRpc, request),
     } : {}),
-    ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve"].includes(bound.request.command) ? {
+    ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve", "swap.orca.stable-release"].includes(bound.request.command) ? {
       orcaStablePrepare: async (request: Extract<CommandRequest, { readonly command: "swap.orca.stable-prepare" }>) => {
         const { command: _command, ...input } = request;
         const usage = new AssetUsageLedger(state.root);
@@ -510,6 +511,9 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
               asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
           }, operationId, new TtyOrcaStableConsent(), () => clock.now());
       },
+      orcaStableRelease: async (operationId: string) => await releaseOrcaStableNoEffect(
+        new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)),
+        new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),
     } : {}),
     ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
     ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
