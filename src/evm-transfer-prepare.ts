@@ -47,8 +47,10 @@ export async function prepareEvmTransfer(
     row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6);
   const ethereumWeth = selection.chainId === 1 && directEvmListRows(1).some((row) =>
     row.kind === "token" && row.symbol === "WETH" && row.identifier === selection.token && row.decimals === 18);
+  const baseWeth = selection.chainId === 8453 && directEvmListRows(8453).some((row) =>
+    row.kind === "token" && row.symbol === "WETH" && row.identifier === selection.token && row.decimals === 18);
   if (request.batchRpcReads && !(((selection.chainId === 1 || selection.chainId === 59144 || selection.chainId === 56 || selection.chainId === 8453 || selection.chainId === 42161) && selection.token === "native") ||
-      ethereumUsdc || ethereumWeth || ((selection.chainId === 130 || selection.chainId === 137) &&
+      ethereumUsdc || ethereumWeth || baseWeth || ((selection.chainId === 130 || selection.chainId === 137) &&
         (selection.chainId === 130 && selection.token === "native" || directEvmListRows(selection.chainId).some((row) =>
           row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6))))) {
     throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Ethereum native, canonical USDC or WETH, Base, Arbitrum, BNB or Linea native, Unichain native or USDC, or Polygon USDC.");
@@ -89,10 +91,10 @@ export async function prepareEvmTransfer(
     const ethereumNative = selection.chainId === 1 && selection.token === "native";
     const baseNative = selection.chainId === 8453 && selection.token === "native";
     const arbitrumNative = selection.chainId === 42161 && selection.token === "native";
-    const grouped = request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseNative || arbitrumNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : ethereumUsdc ? rpc.prepareEthereumUsdc?.() : ethereumWeth ? rpc.prepareEthereumWeth?.() : baseNative ? rpc.prepareBaseNative?.() : arbitrumNative ? rpc.prepareArbitrumNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
+    const grouped = request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || baseNative || arbitrumNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : ethereumUsdc ? rpc.prepareEthereumUsdc?.() : ethereumWeth ? rpc.prepareEthereumWeth?.() : baseWeth ? rpc.prepareBaseWeth?.() : baseNative ? rpc.prepareBaseNative?.() : arbitrumNative ? rpc.prepareArbitrumNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
       ? (selection.token === "native" ? rpc.prepareUnichainNative?.() : rpc.prepareUnichainUsdc?.())
       : selection.chainId === 137 ? rpc.preparePolygonUsdc?.() : rpc.prepareLineaNative?.()) : undefined;
-    if ((request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseNative || arbitrumNative || selection.chainId === 56) && grouped === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
+    if ((request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || baseNative || arbitrumNative || selection.chainId === 56) && grouped === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     const balance = await (grouped ?? rpc).balance(wallet.address, { ...selection, decimals: listed.decimals });
     if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
         (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
