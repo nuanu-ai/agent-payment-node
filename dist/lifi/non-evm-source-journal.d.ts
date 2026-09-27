@@ -497,6 +497,7 @@ declare const schemaV3: z.ZodObject<{
         base_usdc_to_solana_usdc_circle_cctp_v2: "base_usdc_to_solana_usdc_circle_cctp_v2";
         base_usdc_to_tron_usdt_lifi_near_intents: "base_usdc_to_tron_usdt_lifi_near_intents";
     }>;
+    draftIntegrityHash: z.ZodString;
     signedTransaction: z.ZodNullable<z.ZodString>;
     safeSourceProof: z.ZodNullable<z.ZodUnion<readonly [z.ZodObject<{
         provenance: z.ZodLiteral<"synthetic_untrusted">;
@@ -549,7 +550,6 @@ declare const schemaV3: z.ZodObject<{
         protocolProofHash: z.ZodNullable<z.ZodString>;
         provenance: z.ZodLiteral<"rpc_observed_untrusted_near_tron_base_source_v1">;
     }, z.core.$strict>]>>;
-    draftIntegrityHash: z.ZodString;
     sourceCall: z.ZodObject<{
         chainId: z.ZodLiteral<8453>;
         from: z.ZodString;

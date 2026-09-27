@@ -94,6 +94,8 @@ export interface CoreDependencies {
         readonly command: "swap.orca.stable-prepare";
     }>) => Promise<unknown>;
     readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -165,6 +167,8 @@ export declare class RuntimeContext {
         readonly command: "swap.orca.stable-prepare";
     }>) => Promise<unknown>;
     readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
