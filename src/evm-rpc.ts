@@ -92,7 +92,7 @@ export class EvmRpc implements EvmRpcPort {
           maxPriorityFeePerGasAtomic: priority.toString() } };
       },
       feeQuote: async (economics) => {
-        // Post-sign funding has no nonce/estimate phase, so it obtains its own fee head.
+        // Base post-sign funding has no nonce/estimate phase, so it obtains its own fee head.
         if (feeHead === undefined && chainId !== 8453) throw new ApnError("APN_RPC_PROTOCOL", "Native prepare fee head is unavailable.");
         const head = feeHead ?? await (async () => {
           const [identity, rawHead] = await batch("fee_head", [chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
