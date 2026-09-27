@@ -49,6 +49,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git ls-files -z -- dist | xargs -0 rm
           npm run build:ts
           if [[ -n "$(git status --porcelain -- dist)" ]]; then
             echo "Tracked dist differs from the TypeScript build, or the build generated untracked dist files:" >&2
