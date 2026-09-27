@@ -31,6 +31,7 @@ export class EvmRpc {
     prepareBnbNative() { return this.prepareNativeBatched(56); }
     ethereumNativeFundingReads() { return this.prepareNativeBatched(1); }
     prepareBaseNative() { return this.prepareEthereumOrBaseNative(8453); }
+    prepareArbitrumNative() { return this.prepareEthereumOrBaseNative(42161); }
     prepareEthereumOrBaseNative(chainId) {
         if (this.batchCall === undefined)
             throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
@@ -78,17 +79,18 @@ export class EvmRpc {
             nonceEstimate: async (address, transaction) => {
                 if (transaction.chainId !== chainId)
                     throw new ApnError("APN_INVALID_INPUT", "Native prepare requires the selected network.");
-                const [identity, rawNonce, rawGas, rawPriority, rawHead] = await batch("nonce_estimate_fee_head", [
+                const [identity, rawNonce, rawGas, rawFourth, rawFifth] = await batch("nonce_estimate_fee_head", [
                     chain,
                     { method: "eth_getTransactionCount", params: [address, "pending"] },
                     { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
                                 value: `0x${evmUint(transaction.valueAtomic).toString(16)}` }] },
-                    { method: "eth_maxPriorityFeePerGas", params: [] },
+                    ...(chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [] }]),
                     { method: "eth_getBlockByNumber", params: ["latest", false] },
                 ]);
                 check(identity);
-                const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas), priority = evmRpcQuantity(rawPriority);
-                const head = await evmRpcBlock(async () => rawHead, "latest");
+                const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas);
+                const priority = chainId === 42161 ? 0n : evmRpcQuantity(rawFourth);
+                const head = await evmRpcBlock(async () => chainId === 42161 ? rawFourth : rawFifth, "latest");
                 const maximum = 2n * evmRpcQuantity(head.raw.baseFeePerGas) + priority;
                 if (maximum === 0n)
                     throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC quoted a zero gas price.");
@@ -98,9 +100,9 @@ export class EvmRpc {
                         maxPriorityFeePerGasAtomic: priority.toString() } };
             },
             feeQuote: async (economics) => {
-                // Post-sign funding has no nonce/estimate phase, so it obtains its own fee head.
-                if (feeHead === undefined && chainId === 1)
-                    throw new ApnError("APN_RPC_PROTOCOL", "Ethereum native prepare fee head is unavailable.");
+                // Base post-sign funding has no nonce/estimate phase, so it obtains its own fee head.
+                if (feeHead === undefined && chainId !== 8453)
+                    throw new ApnError("APN_RPC_PROTOCOL", "Native prepare fee head is unavailable.");
                 const head = feeHead ?? await (async () => {
                     const [identity, rawHead] = await batch("fee_head", [chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
                     check(identity);
@@ -125,7 +127,7 @@ export class EvmRpc {
                 await recheckEvmBlock(async () => rawRecheck, head);
                 check(postChain);
                 feeHead = undefined;
-                return { chainId,
+                return { chainId, ...(chainId === 42161 ? { feeModel: "arbitrum-inclusive" } : {}),
                     l1DataFeeUpperWei: l1Fee.toString(), operatorFeeUpperWei: operatorFee.toString(), maximumExecutionFeeWei: execution.toString(),
                     totalQuoteWei: total.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: head.number,
                     blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
