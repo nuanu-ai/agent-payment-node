@@ -153,7 +153,7 @@ test("Monad safe finality and exact native proof are required; ambiguous send st
 test("Monad admission does not change Linea or admit reverse and non Across deployment directions", async (t) => {
   assert.equal(bridgeExecutionDestination(143), true);
   assert.throws(() => bridgeDeployment(143, 1, "stargateV2", BRIDGE_ZERO_ADDRESS), /stargate_pool_asset_unreviewed/u);
-  assert.throws(() => bridgeDeployment(1, 143, "stargateV2", BRIDGE_ZERO_ADDRESS), /stargate_pool_asset_unreviewed/u);
+  assert.throws(() => bridgeDeployment(1, 143, "stargateV2", BRIDGE_ZERO_ADDRESS), /stargate_native_pair_unreviewed/u);
   assert.throws(() => bridgeDeployment(143, 8453, "across", BRIDGE_ZERO_ADDRESS), /finite_chain/u);
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const linea = await lifiFixture(temporary.root, "eth-linea");
