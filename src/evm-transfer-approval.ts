@@ -23,8 +23,9 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
   if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) rpcPort.armEvmDirectRpcGuard?.();
   const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
   const grouped = asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
-    operation.chainId === 56 ? rpc.prepareBnbNative?.() : operation.chainId === 8453 ? rpc.prepareBaseNative?.() : undefined : undefined;
-  if ((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453) && asset.kind === "native" && grouped === undefined) {
+    operation.chainId === 56 ? rpc.prepareBnbNative?.() : operation.chainId === 8453 ? rpc.prepareBaseNative?.() :
+      operation.chainId === 42161 ? rpc.prepareArbitrumNative?.() : undefined : undefined;
+  if ((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) && asset.kind === "native" && grouped === undefined) {
     throw new ApnError("APN_RPC_CONFIG", "Selected native approval requires batched RPC reads.");
   }
   // The balance reader checks the selected chain before and after its pinned reads.
@@ -51,7 +52,10 @@ export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: Opera
     }
   }
   if (!beforeSigning && directEvmNetwork(operation.chainId).feeModel === "arbitrum-inclusive") {
-    const fees = await rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic));
+    const transaction = evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic);
+    // Re-estimate after signing. The pending nonce may share the physical batch but cannot replace the frozen nonce.
+    const fees = grouped === undefined ? await rpc.estimate(transaction) :
+      (await grouped.nonceEstimate(operation.walletAddress, transaction)).estimated;
     const current = validateEconomics(operation.economics.nonceAtomic, fees);
     if (!frozenEconomicsRemainExecutable({ ...current, nonceAtomic: operation.economics.nonceAtomic }, operation.economics)) {
       throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "Current Arbitrum inclusive gas or price exceeds the frozen signed envelope; retain this operation without replacement.");

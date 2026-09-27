@@ -70,6 +70,13 @@ export class EvmTestRpc extends TestRpc {
       }),
       feeQuote: economics => this.evm.feeQuote(8453, economics),
     }),
+    prepareArbitrumNative: () => ({
+      balance: (address, selection) => this.evm.balance(address, selection),
+      nonceEstimate: async (address, transaction) => ({
+        nonce: await this.evm.nonce(42161, address, "pending"), estimated: await this.evm.estimate(transaction),
+      }),
+      feeQuote: economics => this.evm.feeQuote(42161, economics),
+    }),
     prepareBnbNative: () => ({
       balance: (address, selection) => this.evm.balance(address, selection),
       nonceEstimate: async (address, transaction) => ({
