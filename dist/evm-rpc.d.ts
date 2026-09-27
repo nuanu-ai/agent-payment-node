@@ -15,6 +15,8 @@ export declare class EvmRpc implements EvmRpcPort {
     preparePolygonUsdc(): EvmNativePrepareReads;
     prepareBnbNative(): EvmNativePrepareReads;
     ethereumNativeFundingReads(): EvmNativePrepareReads;
+    prepareBaseNative(): EvmNativePrepareReads;
+    private prepareEthereumOrBaseNative;
     prepareEthereumNative(): EvmNativePrepareReads;
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
     private prepareNativeBatched;

@@ -103,6 +103,18 @@ execution fee. The owner's `--max-fee-wei` caps the **total** quote: execution
 plus any L1 data and operator fee. The quote is rechecked before signing and
 before every submission.
 
+Base native ETH prepare groups the balance head, pinned balance and recheck,
+pending nonce, gas estimate, priority fee, fee head, both GasPriceOracle reads,
+and fee head recheck into six physical JSON-RPC batch POSTs. Approval refreshes
+funding before signing and after signing (including a resumed signed operation)
+in at most six POSTs per refresh. A synthetic HTTPS transport test measured
+six prepare POSTs and six POSTs in each funding phase; the full guarded
+approve/resume invocation has not been measured end to end against its 24 POST
+ceiling. Batch response IDs must bind all
+members; a missing, malformed, rejected or rate-limited batch ends that
+invocation without scalar fallback. Provider batch acceptance and live Base
+payment execution are separate operational checks.
+
 - **OP-stack (Base, OP Mainnet, Unichain).** The L1 data fee upper bound for
   512 signed bytes (`getL1FeeUpperBound`) and the operator fee
   (`getOperatorFee`) come from the GasPriceOracle predeploy
