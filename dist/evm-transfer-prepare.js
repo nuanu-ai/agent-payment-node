@@ -72,10 +72,11 @@ export async function prepareEvmTransfer(context, operations, request, persist, 
             const rpc = requireEvmRpc(rpcPort);
             const ethereumNative = selection.chainId === 1 && selection.token === "native";
             const baseNative = selection.chainId === 8453 && selection.token === "native";
-            const grouped = request.batchRpcReads || ethereumNative || baseNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : baseNative ? rpc.prepareBaseNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
+            const arbitrumNative = selection.chainId === 42161 && selection.token === "native";
+            const grouped = request.batchRpcReads || ethereumNative || baseNative || arbitrumNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : baseNative ? rpc.prepareBaseNative?.() : arbitrumNative ? rpc.prepareArbitrumNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
                 ? (selection.token === "native" ? rpc.prepareUnichainNative?.() : rpc.prepareUnichainUsdc?.())
                 : selection.chainId === 137 ? rpc.preparePolygonUsdc?.() : rpc.prepareLineaNative?.()) : undefined;
-            if ((request.batchRpcReads || ethereumNative || baseNative || selection.chainId === 56) && grouped === undefined)
+            if ((request.batchRpcReads || ethereumNative || baseNative || arbitrumNative || selection.chainId === 56) && grouped === undefined)
                 throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
             const balance = await (grouped ?? rpc).balance(wallet.address, { ...selection, decimals: listed.decimals });
             if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||

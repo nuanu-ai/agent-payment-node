@@ -42,6 +42,7 @@ export interface EvmRpcPort {
     prepareBnbNative?(): EvmNativePrepareReads;
     prepareEthereumNative?(): EvmNativePrepareReads;
     prepareBaseNative?(): EvmNativePrepareReads;
+    prepareArbitrumNative?(): EvmNativePrepareReads;
     ethereumNativeFundingReads?(): EvmNativePrepareReads;
     assertChain(chainId: DirectEvmChainId): Promise<void>;
     balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
