@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { bridgeAssetRow, bridgeExecutionSource, bridgeExecutionSourceCaip2, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
@@ -25,10 +25,10 @@ export class BridgeAllowlistGate {
         const mechanism = bridgeMechanism(tool);
         const subject = bridgeSubject(owner, request), active = await this.active(profile, owner);
         const usage = await this.ledger.usage(identity(subject), this.context.clock.now());
-        const evaluation = { chain: subject.chain, asset: subject.asset, rail: "bridge", amountAtomic: request.amountAtomic,
+        const evaluation = { chain: subject.chain, asset: subject.asset, rail: "bridge", mechanism, amountAtomic: request.amountAtomic,
             dailyUsageAtomic: usage.amountAtomic, asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() };
         const admission = evaluate(active.registry, evaluation);
-        exactMechanism(admission.asset.mechanismPins?.bridge, mechanism);
+        exactMechanism(admission, mechanism);
         return { schemaVersion: BRIDGE_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision,
             ...subject, mechanism };
     }
@@ -48,16 +48,17 @@ export class BridgeAllowlistGate {
         if (active.digest !== binding.policyDigest || active.revision !== binding.policyRevision) {
             refuse("allowlist_policy_changed", "The active owner allowlist policy changed after bridge preparation; prepare a new bridge operation.");
         }
-        const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", amountAtomic: binding.amountAtomic,
+        const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", mechanism, amountAtomic: binding.amountAtomic,
             dailyUsageAtomic: "0", asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() });
-        exactMechanism(admission.asset.mechanismPins?.bridge, mechanism);
+        exactMechanism(admission, mechanism);
         return active;
     }
     async reserve(op) {
         const request = op.intent.materialization.request, binding = validateBridgeAllowlistBinding(op.intent.allowlist);
         const active = await this.confirm(op.intent.profile, request, op.intent.materialization.tool, binding);
         try {
-            return await this.ledger.reserve({ ...identity(binding), registry: active.registry, rail: "bridge", amountAtomic: binding.amountAtomic,
+            return await this.ledger.reserve({ ...identity(binding), registry: active.registry, rail: "bridge", mechanism: binding.mechanism,
+                amountAtomic: binding.amountAtomic,
                 idempotencyKey: bridgeUsageKey(op.operationId), now: this.context.clock.now() });
         }
         catch (error) {
@@ -186,8 +187,8 @@ export function bridgeMechanism(tool) {
 function isBridgeMechanism(value) {
     return bridgeSame(value, LIFI_ACROSS_BRIDGE_MECHANISM) || bridgeSame(value, LIFI_STARGATE_BRIDGE_MECHANISM);
 }
-function exactMechanism(value, expected) {
-    if (!bridgeSame(value, expected))
+function exactMechanism(admission, expected) {
+    if (!bridgeMechanismAdmitted(admission, expected))
         refuse("bridge_mechanism_mismatch", "The owner policy lacks the exact LI.FI bridge mechanism pin.");
 }
 function evaluate(registry, input) {
@@ -200,6 +201,8 @@ function evaluate(registry, input) {
 }
 function mapCap(error) {
     if (error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED") {
+        if (error.message.includes("bridge mechanism"))
+            refuse("bridge_mechanism_mismatch", error.message);
         if (error.message.includes("daily cap"))
             refuse("allowlist_daily_cap_exceeded", error.message);
         if (error.message.includes("per-transfer cap"))
