@@ -168,6 +168,19 @@ receipt. That is a no-effect outcome, not a paid receipt. These later notes
 supersede the unqualified “1/9 current” count; they do not establish the full
 current-source no-money or paid matrix.
 
+On 27 Sep, a later default→buyer 0.0004 ETH Ethereum native operation
+`7631cc91878ec39b211a5c870c5abcb8d32dd836cc3b200447d7b6ecb82fbde9`
+became terminal `completed` / `confirmed_exact_native_transfer`. Its saved
+receipt proves transaction
+`0xb893edb0b5e1e3bbbb208643bb0835c98dcc56160c2be95ec1dc98d420a2497d`
+included at block `26070276`, with exact native amount `400000000000000 wei`,
+`included_native_transaction_and_receipt` and `inclusion_only` finality. The
+pre-send quote had maximum execution fee `12663215124000 wei`; actual gas fee
+remains unknown after a supplementary HTTP 403. This adds an exact live receipt
+for the Ethereum ETH row, without completing the other eight rows or Base
+gasless acceptance. PR #427's five-POST Ethereum native prepare count is
+source-fixture evidence only, separate from this effect.
+
 A later Arbitrum One USDC no-money prepare after PR #421 created unsigned operation
 `b0ebd6812ca2e9acb15751ed6a93012fcb6f4e1632cc4542bd6340b624193de9`
 for `1000` atomic USDC. Its approval window ended at `2026-09-26T16:51:07Z`.
@@ -184,7 +197,7 @@ as a timed observation. Neither read proves an on-chain effect.
 
 | Chain / asset row | Code / source | Current-source no-money proof | Paid receipt proof |
 | --- | --- | --- | --- |
-| Ethereum ETH | Present in direct network registry | Named in the 19 Sep 1/9 report; proof layer and operation ID are unspecified in the cited record | No receipt identity in the cited records |
+| Ethereum ETH | Present in direct network registry | Historical 19 Sep 1/9 report lacked exact proof; later operation `7631cc91…fbde9` supplies a current-source prepare and live transfer | `7631cc91…fbde9` terminal `completed`, tx `0xb893edb0…2497d`, block 26070276, exact 0.0004 ETH; `inclusion_only`, actual gas fee unknown |
 | Ethereum USDC | Present in direct network registry | No current-source matrix entry recorded | No current-source receipt recorded |
 | Ethereum WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
 | Base ETH | Present in direct network registry | Operation `fe563b15…` expired as `failed_before_effect`; no reservation, transaction hash, RPC send, or receipt | No paid receipt recorded |
