@@ -35,9 +35,12 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real 
   const resumed = spawnSync(process.execPath, [worker, "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(resumed.status, 0, resumed.stderr);
   const result = JSON.parse(resumed.stdout);
-  assert.equal(result.result.state, "completed"); assert.equal(result.approvals, 0); assert.equal(result.submissions, 1);
-  const replay = spawnSync(process.execPath, [worker, "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
-  assert.equal(replay.status, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).submissions, 0);
+  assert.equal(result.result.state, chainId === 1 ? "submitted_pending" : "completed");
+  assert.equal(result.approvals, 0); assert.equal(result.submissions, 1);
+  const replay = spawnSync(process.execPath, [worker, chainId === 1 ? "observe" : "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
+  assert.equal(replay.status, 0, replay.stderr);
+  const observed = JSON.parse(replay.stdout);
+  assert.equal(observed.result.state, "completed"); assert.equal(observed.approvals, 0); assert.equal(observed.submissions, 0);
 });
 
 for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "usdc"] as const) test(`MCP ${chainId}/${kind} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
@@ -67,9 +70,17 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
     stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval,
   });
   assert.equal(approved.ok, true, JSON.stringify(approved));
-  assert.equal((approved.operation as { state: string }).state, "completed");
+  const observe = chainId === 1 && kind === "native";
+  assert.equal((approved.operation as { state: string }).state, observe ? "submitted_pending" : "completed");
+  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1);
+  const completed = observe ? await runCli(["operation", "resume", "--operation", operation.operation_id, "--rpc-url", selection.rpc_url, "--observe-only", "true"], {}, {
+    stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval,
+  }) : approved;
+  assert.equal(completed.ok, true, JSON.stringify(completed));
+  assert.equal((completed.operation as { state: string }).state, "completed");
+  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1);
   const status = await invoke("apn_operation_status", { operation: operation.operation_id });
-  assert.deepEqual(status.operation, approved.operation);
+  assert.deepEqual(status.operation, completed.operation);
   assert.equal((await invoke("apn_receipt_get", { operation: operation.operation_id })).ok, true);
 });
 
