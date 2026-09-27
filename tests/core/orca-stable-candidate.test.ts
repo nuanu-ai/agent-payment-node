@@ -19,6 +19,7 @@ import { prepareOrcaStableGuardedCandidateCore, simulateOrcaStableGuardedCore,
   simulateOrcaStableGuardedReadOnly } from "../../src/swap/orca-solana/stable-candidate.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
 import { SavedOrcaStableMaterialStore } from "../../src/swap/orca-solana/stable-material.js";
+import { approveOrcaStableReservation, stableApprovalScreen } from "../../src/swap/orca-solana/stable-approval.js";
 import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-status.js";
 import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
@@ -452,6 +453,77 @@ test("stable status fails closed on material tamper, expiry, and active policy d
   material.preview.unsignedPayload = "AA==";
   await writeFile(file, JSON.stringify(material));
   await assert.rejects(fresh());
+});
+
+test("stable foreground approval binds the exact screen and reserves principal without a send", async (t) => {
+  const f = await fixture(false); t.after(f.cleanup);
+  const prepared = await candidate(f);
+  const bound = bindArgv(["swap", "solana", "orca", "stable-approve", "--operation", prepared.operation.operationId]).request;
+  assert.deepEqual(bound, { command: "swap.orca.stable-approve", operationId: prepared.operation.operationId });
+  const store = new SavedOrcaStableMaterialStore(f.root);
+  const material = (await store.load(prepared.operation.operationId, prepared.operation))!;
+  const lines = stableApprovalScreen(prepared.operation, material, prepared.operation.quote.expiresAt);
+  for (const field of [prepared.operation.operationId, f.source.owner, prepared.quote.quoteHash,
+    material.policyDigest, material.activationDigest, material.preview.maximumTotalFeeLamports,
+    material.preview.ataRentLamports, prepared.quote.minimumOutputAtomic, material.preview.lastValidBlockHeight])
+    assert.ok(lines.some((line) => line.includes(field)));
+  let prompts = 0;
+  const result = await approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async (screen, code) => { prompts++; assert.ok(screen.some((line) => line.includes("reserves the USDC principal")));
+      assert.match(code, /^[a-f0-9]{6}$/u); } }, f.clock);
+  assert.equal(prompts, 1);
+  assert.equal(result.operation.state, "reserved");
+  assert.equal(result.operation.usageLease?.amountAtomic, f.source.quote.amountInAtomic);
+  assert.equal(result.signable, false); assert.equal(result.executable, false);
+  const core = new ApnCore({ state: new StateStore(f.root), clock: { now: f.clock },
+    orcaStableApprove: operationId => approveOrcaStableReservation(f.service, store, f.ports, operationId,
+      { confirm: async () => { throw new Error("already reserved"); } }, f.clock) });
+  assert.equal((await core.execute(bound)).ok, false);
+  assert.equal((await orcaStablePreparedStatus(f.service.operations, store, f.ports,
+    prepared.operation.operationId, f.clock())).operation.state, "reserved");
+  assert.ok(!f.calls.includes("sendTransaction"));
+  await assert.rejects(approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => { throw new Error("unexpected second prompt"); } }, f.clock),
+  (error) => reason(error) === "orca_stable_already_approved");
+});
+
+test("stable approval rechecks replacement and expiry after consent before reserving", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
+  await assert.rejects(approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => { f.setActivation("b".repeat(64)); } }, f.clock),
+  (error) => reason(error) === "orca_stable_policy_drift");
+  assert.equal((await f.service.operations.loadAny(prepared.operation.operationId))?.state, "awaiting_approval");
+  f.setActivation("a".repeat(64));
+  await assert.rejects(approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => { f.setRevision(8); } }, f.clock),
+  (error) => reason(error) === "orca_stable_policy_drift");
+  f.setRevision(7);
+  await assert.rejects(approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, () => new Date(NOW.getTime() + 60_000)),
+  (error) => error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED");
+  assert.equal((await f.service.operations.loadAny(prepared.operation.operationId))?.usageLease, null);
+});
+
+test("stable reserve retry after interrupted operation write reuses the principal lease", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
+  const original = f.service.operations.transition.bind(f.service.operations);
+  let interrupted = false;
+  f.service.operations.transition = (async (...args: Parameters<typeof original>) => {
+    if (!interrupted && args[3] === "reserved") { interrupted = true; throw new Error("interrupted after lease"); }
+    return await original(...args);
+  }) as typeof original;
+  const consent = { confirm: async () => {} };
+  await assert.rejects(approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    consent, f.clock), /interrupted after lease/u);
+  assert.equal((await f.service.operations.loadAny(prepared.operation.operationId))?.state, "awaiting_approval");
+  const recovered = await approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    consent, f.clock);
+  assert.equal(recovered.operation.state, "reserved");
+  const usage = await f.service.usage.usage({ account: f.source.owner, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, NOW);
+  assert.equal(usage.amountAtomic, f.source.quote.amountInAtomic);
 });
 
 test("material write failure leaves no operation and same-key retry prepares cleanly", async (t) => {
