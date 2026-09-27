@@ -21,7 +21,7 @@ Keep these proof layers separate:
 | Layer | What it proves | Current position |
 | --- | --- | --- |
 | Code/source | The registry, allowlist identities, fee model, policy schema, and CLI exist at the pinned commit. | Complete for the eleven rows below. |
-| No-money prepare | A fresh policy-aware intent can be built, quoted, persisted, and refused safely without signing or sending. | Owner must run the fresh matrix below with current RPCs and policy. |
+| No-money prepare | A fresh policy-aware intent can be built, quoted, persisted, and refused safely without signing or sending. | The later Arbitrum USDC unsigned prepare covers one row only; the remaining matrix still needs current-policy proof. |
 | Live proof | An owner-authorized transfer is approved, signed, submitted, included, and checked at the network's required finality. | Pending for the remaining rows. |
 
 The current report records `1/9` for the repeated direct EVM mapping and `8/9`
@@ -168,6 +168,20 @@ receipt. That is a no-effect outcome, not a paid receipt. These later notes
 supersede the unqualified “1/9 current” count; they do not establish the full
 current-source no-money or paid matrix.
 
+A later Arbitrum One USDC no-money prepare after PR #421 created unsigned operation
+`b0ebd6812ca2e9acb15751ed6a93012fcb6f4e1632cc4542bd6340b624193de9`
+for `1000` atomic USDC. Its approval window ended at `2026-09-26T16:51:07Z`.
+At the exact local read at `2026-09-26T16:51:54Z`, the operation and persisted
+receipt still showed nonterminal `awaiting_approval` / `durable_pre_effect`,
+with only a prepare transition and no transaction hash. No persisted expiry
+transition or chain read was performed. This adds one unsigned no-money
+observation to the Arbitrum USDC row; it adds no paid receipt or matrix closure.
+At a later direct read-only local JSON checkpoint (`2026-09-27T15:43:15Z`), the
+operation and persisted receipt were terminal `failed_before_effect` /
+`approval_window_expired`; the recorded transition was
+`2026-09-26T17:18:56.490Z`. The earlier `awaiting_approval` result is retained
+as a timed observation. Neither read proves an on-chain effect.
+
 | Chain / asset row | Code / source | Current-source no-money proof | Paid receipt proof |
 | --- | --- | --- | --- |
 | Ethereum ETH | Present in direct network registry | Named in the 19 Sep 1/9 report; proof layer and operation ID are unspecified in the cited record | No receipt identity in the cited records |
@@ -177,7 +191,7 @@ current-source no-money or paid matrix.
 | Base USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical paid receipt under policy revision 11; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
 | Base WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
 | Arbitrum One ETH | Present in direct network registry | No current-source matrix entry recorded | No current-source receipt recorded |
-| Arbitrum One USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical safe-inclusion receipt under policy revision 12; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
+| Arbitrum One USDC | Present in direct network registry | `b0ebd681…` prepared unsigned for 1000 atomic USDC after #421; the 26 Sep 16:51:54Z local read showed `awaiting_approval`, then the later read-only JSON checkpoint found terminal `failed_before_effect` / `approval_window_expired` (transition 26 Sep 17:18:56.490Z), with no transaction hash or chain read | Historical safe-inclusion receipt under policy revision 12; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md). The later unsigned prepare adds no paid receipt |
 | Arbitrum One USD₮0 | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
 
 The Ethereum USDT receipt in the ledger is a separate asset row; it does not
