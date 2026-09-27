@@ -228,7 +228,7 @@ as a timed observation. Neither read proves an on-chain effect.
 | --- | --- | --- | --- |
 | Ethereum ETH | Present in direct network registry | The unsigned prepare was a phase of the same later-paid operation `7631cc91…fbde9`; no separate no-money-only operation is recorded. The historical 19 Sep 1/9 report lacked exact proof | `7631cc91…fbde9` terminal `completed`, tx `0xb893edb0…2497d`, block 26070276, exact 0.0004 ETH; `inclusion_only`, actual gas fee unknown |
 | Ethereum USDC | Present in direct network registry | The unsigned prepare was a phase of the same later-paid operation `6d2f32d642fb6ab54f32ddb9d734ed7dbd2a180c96b2fce071a7d7187253de58`; no separate no-money-only operation is recorded | [Tx `0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00`](https://etherscan.io/tx/0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00), block `26071092`, exact `1000` atomic USDC buyer debit/default credit by Transfer log and balance deltas; `completed` / `confirmed_exact_erc20_transfer`, `inclusion_only`; actual fee unknown |
-| Ethereum WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
+| Ethereum WETH | Present in PR #370 direct-only registry | The unsigned prepare was a phase of the same later-paid operation `950cd8bd5ae4a87cbdad8aa6e40cb31b0635925920c050cb03d84b8a7b5a2f47`; no separate no-money-only operation is recorded | [Tx `0x07e0bf307fb1fdbc05823164c66c234d9152a9350c5ea93ee4e85309e0698c8a`](https://etherscan.io/tx/0x07e0bf307fb1fdbc05823164c66c234d9152a9350c5ea93ee4e85309e0698c8a), block `26071247`, exact `100000000` atomic WETH buyer debit/default credit; `completed` / `confirmed_exact_erc20_transfer`, proof `included_transfer_event_and_block_balance_deltas`, `inclusion_only`; actual fee unknown |
 | Base ETH | Present in direct network registry | Earlier operation `fe563b15…` expired as `failed_before_effect`; no reservation, transaction hash, RPC send, or receipt | Later distinct operation `a7f5d3ba57c27871dfae096d41b6a9799ff0f178d41324b936badffe221b12ba` completed; [tx `0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17`](https://basescan.org/tx/0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17), block 51872258, exact `1000000000000 wei`, `inclusion_only`; actual total fee unknown |
 | Base USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical paid receipt under policy revision 11; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
 | Base WETH | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
@@ -247,8 +247,10 @@ direct-only supplemental registry pins Ethereum WETH9
 USD₮0 `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` (6 decimals). Their
 identities are recorded in the [direct registry](../src/evm-direct-supplemental-assets.ts),
 with deployment references in [LI.FI documentation](lifi.md) and historical
-direct acceptance in [EVM assets](evm-assets.md). They require exact direct
-owner-policy admissions and fresh no-money prepares before any live acceptance.
+direct acceptance in [EVM assets](evm-assets.md). Source registration alone
+does not admit a token for direct use. The Ethereum WETH paid operation is
+recorded above; Base WETH and Arbitrum USD₮0 still need exact owner-policy
+admission, fresh prepare and paid acceptance.
 The registry does not admit them on bridge, x402, gasless, or swap rails.
 
 ## Owner inputs required for live acceptance
