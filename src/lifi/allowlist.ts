@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import {
   AssetUsageLedger, assetUsageReservationId,
   type AssetUsageIdentity, type AssetUsageReservation,
@@ -51,10 +51,10 @@ export class BridgeAllowlistGate {
     const mechanism = bridgeMechanism(tool);
     const subject = bridgeSubject(owner, request), active = await this.active(profile, owner);
     const usage = await this.ledger.usage(identity(subject), this.context.clock.now());
-    const evaluation = { chain: subject.chain, asset: subject.asset, rail: "bridge" as const, amountAtomic: request.amountAtomic,
+    const evaluation = { chain: subject.chain, asset: subject.asset, rail: "bridge" as const, mechanism, amountAtomic: request.amountAtomic,
       dailyUsageAtomic: usage.amountAtomic, asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() };
     const admission = evaluate(active.registry, evaluation);
-    exactMechanism(admission.asset.mechanismPins?.bridge, mechanism);
+    exactMechanism(admission, mechanism);
     return { schemaVersion: BRIDGE_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision,
       ...subject, mechanism };
   }
@@ -73,9 +73,9 @@ export class BridgeAllowlistGate {
     if (active.digest !== binding.policyDigest || active.revision !== binding.policyRevision) {
       refuse("allowlist_policy_changed", "The active owner allowlist policy changed after bridge preparation; prepare a new bridge operation.");
     }
-    const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", amountAtomic: binding.amountAtomic,
+    const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", mechanism, amountAtomic: binding.amountAtomic,
       dailyUsageAtomic: "0", asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() });
-    exactMechanism(admission.asset.mechanismPins?.bridge, mechanism);
+    exactMechanism(admission, mechanism);
     return active;
   }
 
@@ -83,7 +83,8 @@ export class BridgeAllowlistGate {
     const request = op.intent.materialization.request, binding = validateBridgeAllowlistBinding(op.intent.allowlist);
     const active = await this.confirm(op.intent.profile, request, op.intent.materialization.tool, binding);
     try {
-      return await this.ledger.reserve({ ...identity(binding), registry: active.registry, rail: "bridge", amountAtomic: binding.amountAtomic,
+      return await this.ledger.reserve({ ...identity(binding), registry: active.registry, rail: "bridge", mechanism: binding.mechanism,
+        amountAtomic: binding.amountAtomic,
         idempotencyKey: bridgeUsageKey(op.operationId), now: this.context.clock.now() });
     } catch (error) { return mapCap(error); }
   }
@@ -180,14 +181,15 @@ export function bridgeMechanism(tool: string): LifiBridgeMechanism {
 function isBridgeMechanism(value: unknown): value is LifiBridgeMechanism {
   return bridgeSame(value, LIFI_ACROSS_BRIDGE_MECHANISM) || bridgeSame(value, LIFI_STARGATE_BRIDGE_MECHANISM);
 }
-function exactMechanism(value: unknown, expected: LifiBridgeMechanism): void {
-  if (!bridgeSame(value, expected)) refuse("bridge_mechanism_mismatch", "The owner policy lacks the exact LI.FI bridge mechanism pin.");
+function exactMechanism(admission: ReturnType<typeof evaluateAssetPolicy>, expected: LifiBridgeMechanism): void {
+  if (!bridgeMechanismAdmitted(admission, expected)) refuse("bridge_mechanism_mismatch", "The owner policy lacks the exact LI.FI bridge mechanism pin.");
 }
 function evaluate(registry: unknown, input: Parameters<typeof evaluateAssetPolicy>[1]) {
   try { return evaluateAssetPolicy(registry, input); } catch (error) { return mapCap(error); }
 }
 function mapCap(error: unknown): never {
   if (error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED") {
+    if (error.message.includes("bridge mechanism")) refuse("bridge_mechanism_mismatch", error.message);
     if (error.message.includes("daily cap")) refuse("allowlist_daily_cap_exceeded", error.message);
     if (error.message.includes("per-transfer cap")) refuse("allowlist_per_transfer_cap_exceeded", error.message);
   }
