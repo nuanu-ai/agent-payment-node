@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile, readdir } from "node:fs/promises";
-import { getBase58Decoder, getCompiledTransactionMessageDecoder } from "@solana/kit";
+import { getBase58Decoder, getBase58Encoder, getCompiledTransactionMessageDecoder } from "@solana/kit";
 import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
@@ -13,7 +13,7 @@ import { whirlpoolTickArrayAddress } from "../../src/swap/orca-solana/accounts.j
 import { prepareOrcaStableGuardedCandidateCore, simulateOrcaStableGuardedCore,
   simulateOrcaStableGuardedReadOnly } from "../../src/swap/orca-solana/stable-candidate.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
-import { ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
+import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
 import { temporaryState } from "./helpers.js";
 import { input, raw, token } from "./orca-stable-fixture.js";
@@ -43,10 +43,13 @@ async function fixture(exists = true) {
   let current = active, usage = "0", fee: bigint | null = 5_000n, simulationError: unknown = null;
   let inputTransfer = BigInt(source.quote.amountInAtomic), outputTransfer = BigInt(source.quote.minimumOutputAtomic);
   let missingTrace = false, extraCpi = false, token2022 = false, compiledTrace = false;
+  let setupVariant: "valid" | "payer" | "mint" | "program" | "ata" | "owner" | "extra" | "rent" = "valid";
   let destinationAccount = source.snapshot.usdtAtaAddress;
+  let destinationAppears = false;
   let postSource = token(USDC_MINT, source.owner, 1_000_000n);
   let postDestination = token(SOLANA_USDT, source.owner, BigInt(source.quote.minimumOutputAtomic));
-  const postOwner = raw(SYSTEM_PROGRAM, Buffer.alloc(0), 19_995_000n);
+  if (!exists) postDestination = raw(TOKEN_PROGRAM, postDestination.data, 2_000_000n);
+  let postOwner = raw(SYSTEM_PROGRAM, Buffer.alloc(0), exists ? 19_995_000n : 17_995_000n);
   let simulationSlot = 450_687_914n, trustedTime = NOW;
   let height = 400_000_000n, rpcRateLimitedAt: SolanaMethod | null = null;
   let afterSimulation: (() => void) | null = null;
@@ -63,8 +66,13 @@ async function fixture(exists = true) {
     calls.push(method);
     if (method === rpcRateLimitedAt) throw new ApnError("APN_RPC_RATE_LIMITED", "terminal 429");
     if (method === "getGenesisHash") return SOLANA_GENESIS;
-    if (method === "getMultipleAccounts") return { context: { slot: 450_687_913n },
+    if (method === "getMultipleAccounts") {
+      if (destinationAppears && (params[0] as string[]).length === 3) {
+        accounts.set(source.snapshot.usdtAtaAddress, wire(token(SOLANA_USDT, source.owner, 0n)));
+      }
+      return { context: { slot: 450_687_913n },
       value: (params[0] as string[]).map((key) => accounts.get(key) ?? null) };
+    }
     if (method === "getLatestBlockhash") return { context: { slot: 450_687_913n }, value: {
       blockhash: source.lifetime.blockhash, lastValidBlockHeight: 400_000_100n } };
     if (method === "getBlockHeight") return height;
@@ -85,8 +93,31 @@ async function fixture(exists = true) {
         transfer([ORCA_STABLE_VAULT_B, destinationAccount, ORCA_STABLE_POOL], outputTransfer),
         ...(extraCpi ? [transfer([source.snapshot.usdcAtaAddress, ORCA_STABLE_VAULT_A, source.owner], 1n)] : []),
       ];
+      const encode = (bytes: Buffer) => getBase58Decoder().decode(bytes);
+      const setupData = Buffer.alloc(52);
+      setupData.writeBigUInt64LE(setupVariant === "rent" ? 2_000_001n : 2_000_000n, 4);
+      setupData.writeBigUInt64LE(165n, 12);
+      Buffer.from(getBase58Encoder().encode(TOKEN_PROGRAM)).copy(setupData, 20);
+      const setup = [
+        { programId: TOKEN_PROGRAM, accounts: [setupVariant === "mint" ? USDC_MINT : SOLANA_USDT], data: encode(Buffer.from([21, 7, 0])) },
+        { programId: setupVariant === "program" ? ATA_PROGRAM : SYSTEM_PROGRAM,
+          accounts: [setupVariant === "payer" ? source.snapshot.usdcAtaAddress : source.owner,
+            setupVariant === "ata" ? source.snapshot.usdcAtaAddress : source.snapshot.usdtAtaAddress],
+          data: encode(setupData) },
+        { programId: TOKEN_PROGRAM, accounts: [source.snapshot.usdtAtaAddress], data: encode(Buffer.from([22])) },
+        { programId: TOKEN_PROGRAM, accounts: [source.snapshot.usdtAtaAddress, SOLANA_USDT],
+          data: encode(Buffer.concat([Buffer.from([18]), Buffer.from(getBase58Encoder().encode(
+            setupVariant === "owner" ? source.snapshot.usdcAtaAddress : source.owner))])) },
+        ...(setupVariant === "extra" ? [{ programId: SYSTEM_PROGRAM, accounts: [source.owner, source.snapshot.usdtAtaAddress],
+          data: encode(setupData) }] : []),
+      ];
+      const setupInstructions = compiledTrace ? setup.map((instruction) => ({
+        programIdIndex: keys.indexOf(instruction.programId as never),
+        accounts: instruction.accounts.map((key) => keys.indexOf(key as never)), data: instruction.data,
+      })) : setup;
       const result = { context: { slot: simulationSlot }, value: { err: simulationError,
-        unitsConsumed: 200_000n, innerInstructions: missingTrace ? null : [{ index: exists ? 2 : 3, instructions }],
+        unitsConsumed: 200_000n, innerInstructions: missingTrace ? null : [
+          ...(!exists ? [{ index: 2, instructions: setupInstructions }] : []), { index: exists ? 2 : 3, instructions }],
         accounts: [wire(postOwner), wire(postSource), wire(postDestination)] } };
       afterSimulation?.();
       return result;
@@ -109,9 +140,12 @@ async function fixture(exists = true) {
     setOutputTransfer: (value: bigint) => { outputTransfer = value; },
     setMalformedDestination: () => { accounts.set(source.snapshot.usdtAtaAddress,
       wire(token(USDC_MINT, source.owner, 1_000_000n))); },
+    setDestinationAppears: () => { destinationAppears = true; },
     setMalformedPostDestination: () => { postDestination = token(USDC_MINT, source.owner, 1_000_000n); },
     setWrongOutputAccount: () => { destinationAccount = source.snapshot.usdcAtaAddress; },
     setMissingTrace: () => { missingTrace = true; }, setExtraCpi: () => { extraCpi = true; },
+    setSetupVariant: (value: typeof setupVariant) => { setupVariant = value; },
+    setPostOwnerLamports: (value: bigint) => { postOwner = raw(SYSTEM_PROGRAM, Buffer.alloc(0), value); },
     useCompiledTrace: () => { compiledTrace = true; },
     setToken2022: () => { token2022 = true; }, setSimulationSlot: (value: bigint) => { simulationSlot = value; },
     clock: () => trustedTime, advanceClockAfterSimulation: () => { afterSimulation = () => {
@@ -199,17 +233,43 @@ test("read-only stable simulation entry refuses an unbounded transport before ow
   await assertNoOperation(f.root);
 });
 
-test("guarded candidate refuses absent destination ATA until setup CPI whitelist is proven", async (t) => {
+test("guarded candidate creates only the missing owner USDT ATA inside the atomic swap", async (t) => {
   const f = await fixture(false); t.after(f.cleanup);
-  await assert.rejects(candidate(f), (error) => reason(error) === "orca_stable_ata_trace_unsupported");
-  await assertNoOperation(f.root);
+  const result = await candidate(f);
+  assert.equal(result.operation.state, "awaiting_approval");
+  assert.equal(result.evidence.rentLamports, "2000000");
+  assert.equal(result.evidence.simulation.ownerLamportsAfter, "17995000");
+  assert.equal(result.evidence.simulation.destinationCreditedAtomic, f.source.quote.minimumOutputAtomic);
 });
 
-test("guarded candidate checks ATA rent cap before its explicit unsupported setup boundary", async (t) => {
+test("guarded candidate checks ATA rent cap before simulation", async (t) => {
   const f = await fixture(false); t.after(f.cleanup);
   await assert.rejects(prepareOrcaStableGuardedCandidateCore(f.rpc, f.ports, f.service,
     { ...f.request, maximumAtaRentLamports: "1000000" }, async () => [], f.clock),
   (error) => reason(error) === "orca_stable_rent_cap");
+  await assertNoOperation(f.root);
+});
+
+for (const variant of ["payer", "mint", "program", "ata", "owner", "extra", "rent"] as const) {
+  test(`guarded ATA candidate refuses forged ${variant} setup CPI with zero writes`, async (t) => {
+    const f = await fixture(false); t.after(f.cleanup); f.setSetupVariant(variant);
+    await assert.rejects(candidate(f), (error) => reason(error) === "orca_stable_trace_invalid");
+    await assertNoOperation(f.root);
+  });
+}
+
+test("guarded ATA candidate refuses surplus swap CPI and non-rent owner debit", async (t) => {
+  const extra = await fixture(false); t.after(extra.cleanup); extra.setExtraCpi();
+  await assert.rejects(candidate(extra), (error) => reason(error) === "orca_stable_trace_invalid");
+  await assertNoOperation(extra.root);
+  const debit = await fixture(false); t.after(debit.cleanup); debit.setPostOwnerLamports(17_994_999n);
+  await assert.rejects(candidate(debit), (error) => reason(error) === "orca_stable_simulation_delta");
+  await assertNoOperation(debit.root);
+});
+
+test("guarded ATA candidate rejects an ATA that appears between snapshot and final account read", async (t) => {
+  const f = await fixture(false); t.after(f.cleanup); f.setDestinationAppears();
+  await assert.rejects(candidate(f), (error) => reason(error) === "orca_stable_ata_state");
   await assertNoOperation(f.root);
 });
 
@@ -219,6 +279,12 @@ test("guarded stable candidate accepts compiled CPI account indices from the sam
   assert.equal(result.operation.state, "awaiting_approval");
   assert.equal(result.evidence.simulation.slot, "450687914");
   assert.notEqual(result.evidence.beforeSlot, result.evidence.simulation.slot);
+});
+
+test("guarded ATA candidate accepts compiled setup and swap CPI indices", async (t) => {
+  const f = await fixture(false); t.after(f.cleanup); f.useCompiledTrace();
+  const result = await candidate(f);
+  assert.equal(result.operation.state, "awaiting_approval");
 });
 
 for (const [name, mutate] of [

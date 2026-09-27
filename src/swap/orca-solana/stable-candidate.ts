@@ -79,7 +79,6 @@ async function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableA
   const observed = await readOrcaStableSnapshotCore(rpc, request, verifyPins);
   const { preview, quote } = observed;
   await validateOrcaStableUnsigned(preview);
-  if (preview.createUsdtAta) blocked("Guarded ATA creation needs an exact CPI setup whitelist.", "orca_stable_ata_trace_unsupported");
   // The actual minimum is known only after reading the pool; enforce its cap under the exact active policy.
   const admission = await admitOrcaStableOwner(ports, { profile: request.profile, owner: request.owner,
     policyRevision: request.policyRevision, amountInAtomic: request.amountAtomic,
@@ -98,7 +97,10 @@ async function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableA
     blocked("Owner system account changed.", "orca_stable_owner");
   }
   const sourceBalance = tokenAmount(source ?? null, request.owner, USDC_MINT);
-  tokenAmount(destination, request.owner, SOLANA_USDT);
+  if (preview.createUsdtAta ? destination !== null : destination === null) {
+    blocked("Destination ATA presence changed after the snapshot.", "orca_stable_ata_state");
+  }
+  const destinationBalance = destination === null ? 0n : tokenAmount(destination, request.owner, SOLANA_USDT);
   if (sourceBalance < BigInt(request.amountAtomic)) {
     blocked("Owner token accounts changed after the snapshot.", "orca_stable_ata_state");
   }
@@ -136,6 +138,13 @@ async function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableA
   }
   const sourcePostAmount = tokenAmount(sourcePost, request.owner, USDC_MINT);
   const destinationPostAmount = tokenAmount(destinationPost, request.owner, SOLANA_USDT);
+  if (sourcePostAmount !== sourceBalance - BigInt(transfers.sourceDebitedAtomic) ||
+      destinationPostAmount !== destinationBalance + BigInt(transfers.destinationCreditedAtomic) ||
+      ownerPost.lamports !== owner.lamports - fee - rent ||
+      sourcePost.lamports !== source!.lamports ||
+      destinationPost.lamports !== (destination === null ? rent : destination.lamports)) {
+    blocked("Stable simulated account effects differ from the exact transfer, fee, or ATA rent.", "orca_stable_simulation_delta");
+  }
   const policyNow = trustedNow(clock);
   await recheckOrcaStableOwner(ports, admission, policyNow);
   const active = await ports.activePolicy(request.profile);
