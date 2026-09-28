@@ -249,8 +249,10 @@ identities are recorded in the [direct registry](../src/evm-direct-supplemental-
 with deployment references in [LI.FI documentation](lifi.md) and historical
 direct acceptance in [EVM assets](evm-assets.md). Source registration alone
 does not admit a token for direct use. The Ethereum WETH paid operation is
-recorded above; Base WETH and Arbitrum USD₮0 still need exact owner-policy
-admission, fresh prepare and paid acceptance.
+recorded above. The Base WETH prepare under active buyer policy r25 demonstrates
+owner-policy admission for that operation; it expired before any submission, so a
+fresh prepare and distinct paid receipt remain open. Arbitrum USD₮0 still needs
+exact owner-policy admission, fresh prepare, and paid acceptance.
 The registry does not admit them on bridge, x402, gasless, or swap rails.
 
 ## Owner inputs required for live acceptance
