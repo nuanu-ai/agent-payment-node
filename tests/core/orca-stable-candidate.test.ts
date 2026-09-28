@@ -559,6 +559,39 @@ test("saved stable fresh preflight refuses changed pinned pool and destination A
   }
 });
 
+test("fresh preflight measures all final owner checks against its full clock and quote deadline", async (t) => {
+  for (const delayMs of [1_000, 30_001, 60_000]) {
+    const f = await fixture(); t.after(f.cleanup);
+    const prepared = await candidate(f);
+    const materials = new SavedOrcaStableMaterialStore(f.root);
+    const reserved = (await approveOrcaStableReservation(f.service, materials, f.ports,
+      prepared.operation.operationId, { confirm: async () => {} }, f.clock)).operation;
+    const material = (await materials.load(reserved.operationId, reserved))!;
+    let heightReads = 0, time = NOW;
+    const rpc: SolanaRpcPort = { originHash: f.rpc.originHash, call: async (method, params) => {
+      const result = await f.rpc.call(method, params);
+      if (method === "getBlockHeight") heightReads++;
+      return result;
+    } };
+    const ports = { ...f.ports, activePolicy: async () => {
+      const active = await f.ports.activePolicy();
+      // The second height read is the proof's final RPC. Delay an owner read after it.
+      if (heightReads >= 2) time = new Date(NOW.getTime() + delayMs);
+      return active;
+    } };
+    const run = () => freshOrcaStableExecutionPreflightCore(rpc, ports, f.service.usage,
+      reserved, material, async () => [], () => time);
+    if (delayMs === 1_000) {
+      const result = await run();
+      assert.equal(result.elapsedMs, delayMs);
+      assert.equal(result.checkedAt, time.toISOString());
+    } else {
+      await assert.rejects(run(), (error) => reason(error) === "orca_stable_freshness");
+      assert.equal((await f.service.operations.loadAny(reserved.operationId))?.state, "reserved");
+    }
+  }
+});
+
 test("stable approval rechecks replacement and expiry after consent before reserving", async (t) => {
   const f = await fixture(); t.after(f.cleanup);
   const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
