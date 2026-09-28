@@ -13,7 +13,7 @@ import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { ApnError } from "../../src/errors.js";
-import { sealChainAccount } from "../../src/chain-account-store.js";
+import { ChainAccountStore, sealChainAccount } from "../../src/chain-account-store.js";
 import { SolanaRpc, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
 import { GuardedSwapService, preparedSwapOperationId } from "../../src/swap/service.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
@@ -752,6 +752,46 @@ test("marked stable recovery refuses a saved receipt before opening custody", as
   assert.equal(submitted.receiptProof?.transactionHash, "2".repeat(88));
   s.custody.effectByOperationId = async () => { throw new Error("custody must not open"); };
   await assert.rejects(s.recover(), (error) => reason(error) === "orca_stable_effect_boundary");
+});
+
+test("wallet effect writes serialize across operations and binding-absent recovery sees the durable effect", async (t) => {
+  const s = await markedNoSendFixture(); t.after(s.f.cleanup);
+  let loads = 0, pauseNext = false, release!: () => void, entered!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const inside = new Promise<void>((resolve) => { entered = resolve; });
+  const wrapping = { create: async () => Buffer.alloc(32, 37), load: async () => {
+    loads++;
+    if (pauseNext) { pauseNext = false; entered(); await gate; }
+    return Buffer.alloc(32, 37);
+  } };
+  const firstStore = new ChainAccountStore(s.f.root, wrapping), secondStore = new ChainAccountStore(s.f.root, wrapping);
+  const account = await firstStore.ensureLocal({ profile: s.marked.quote.profile, rail: "solana",
+    create: async () => ({ address: s.marked.quote.account, seed: Buffer.alloc(32, 23) }) });
+  const stableEffect = { operationId: s.marked.operationId, fingerprint: "a".repeat(64),
+    transactionId: "2".repeat(88), rawPayload: "stable signed bytes", rawPayloadHash: sha256("stable signed bytes") };
+  const otherEffect = { ...stableEffect, operationId: "b".repeat(64), rawPayload: "other signed bytes",
+    rawPayloadHash: sha256("other signed bytes") };
+  pauseNext = true;
+  const first = firstStore.saveEffect(account, stableEffect);
+  await inside;
+  const second = secondStore.saveEffect(account, otherEffect);
+  let recoveryDone = false;
+  const recovery = recoverOrcaStableNoSend(s.f.service, s.materials, s.bindings, s.proofs,
+    secondStore, async () => account, s.marked.operationId, NOW).then((value) => {
+    recoveryDone = true; return value;
+  }, (error: unknown) => { recoveryDone = true; return error; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(loads, 1); assert.equal(recoveryDone, false);
+  release();
+  const completed = await Promise.race([Promise.all([first, second, recovery]),
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("wallet effect lock deadlocked")), 3_000))]);
+  assert.equal(reason(completed[2]), "orca_stable_signed_effect_exists");
+  assert.deepEqual(await secondStore.effectByOperationId(account, stableEffect.operationId), stableEffect);
+  assert.deepEqual(await secondStore.effectByOperationId(account, otherEffect.operationId), otherEffect);
+  assert.equal(await s.proofs.load(s.marked), null);
+  assert.equal((await s.f.service.operations.loadAny(s.marked.operationId))?.state, "submitting");
+  assert.equal((await s.f.service.usage.load({ account: s.marked.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, s.marked.usageLease!.reservationId))?.state, "reserved");
 });
 
 test("marked stable recovery reconciles a crash after lease transition and serializes competitors", async (t) => {
