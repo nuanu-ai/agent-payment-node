@@ -6,6 +6,7 @@ import { rpcArray, rpcAtomic, rpcRecord, solanaSignature } from "../../solana/rp
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
 import { proveOrcaStableSimulationTransfers } from "./stable-effects.js";
 import { validateOrcaStableMaterial, type OrcaStableMaterial } from "./stable-material.js";
+import { validateOrcaStableUnsigned, type OrcaStableUnsignedPreview } from "./stable-prepare.js";
 import { sha256Hex, TOKEN_PROGRAM, USDC_MINT } from "./pins.js";
 
 export type OrcaStableReceiptOutcome = { readonly outcome: "succeeded" | "reverted"; readonly proof: SwapReceiptProof };
@@ -13,11 +14,20 @@ export type OrcaStableReceiptOutcome = { readonly outcome: "succeeded" | "revert
 /** Pure verification for a future observation route. This does no RPC or state transition. */
 export async function verifyOrcaStableFinalizedReceipt(input: {
   readonly operation: SwapOperationRecord; readonly material: OrcaStableMaterial; readonly signature: string;
+  readonly executionPreview?: OrcaStableUnsignedPreview;
   readonly signatureStatuses: unknown; readonly transaction: unknown; readonly observedAt: Date;
 }): Promise<OrcaStableReceiptOutcome | null> {
   const operation = validateSwapOperation(input.operation);
   const material = await validateOrcaStableMaterial(input.material, operation);
-  const preview = material.preview;
+  const preview = input.executionPreview === undefined ? material.preview : await validateOrcaStableUnsigned(input.executionPreview);
+  if (preview.owner !== material.preview.owner || preview.sourceAta !== material.preview.sourceAta ||
+      preview.destinationAta !== material.preview.destinationAta || preview.amountInAtomic !== material.preview.amountInAtomic ||
+      preview.minimumOutputAtomic !== material.preview.minimumOutputAtomic ||
+      preview.createUsdtAta !== material.preview.createUsdtAta || preview.oracle !== material.preview.oracle ||
+      canonicalJson(preview.tickArrayStarts) !== canonicalJson(material.preview.tickArrayStarts) ||
+      canonicalJson(preview.instructionPrograms) !== canonicalJson(material.preview.instructionPrograms) ||
+      BigInt(preview.maximumTotalFeeLamports) > BigInt(material.preview.maximumTotalFeeLamports) ||
+      BigInt(preview.ataRentLamports) > BigInt(material.preview.ataRentLamports)) conflict();
   solanaSignature(input.signature);
   if (operation.submissionMarker === null || !["submitting", "submitted", "unknown_finality"].includes(operation.state)) conflict();
   if (!(input.observedAt instanceof Date) || !Number.isFinite(input.observedAt.getTime()) ||

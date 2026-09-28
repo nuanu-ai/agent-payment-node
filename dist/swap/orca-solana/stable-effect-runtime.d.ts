@@ -11,8 +11,21 @@ export declare class OrcaStableLocalSigner {
     constructor(custody: Pick<ChainWalletStoragePort, "withSeed">);
     sign(operation: SwapOperationRecord, binding: OrcaStableExecutionBinding, account: ChainAccount): Promise<RailSignedEffect>;
 }
+declare const SEND_CLAIM_VERSION: "apn.orca-stable-send-claim.v1";
+export type OrcaStableSendClaim = {
+    readonly schemaVersion: typeof SEND_CLAIM_VERSION;
+    readonly operationId: string;
+    readonly markerHash: string;
+    readonly bindingHash: string;
+    readonly accountIdentityHash: string;
+    readonly signature: string;
+    readonly rawPayloadHash: string;
+    readonly claimedAt: string;
+    readonly claimHash: string;
+};
 /** Recovery cannot release principal after a send right was consumed, even if custody is later unreadable. */
 export declare function hasOrcaStableSendClaim(root: string, operation: SwapOperationRecord): Promise<boolean>;
+export declare function loadOrcaStableSendClaim(root: string, operation: SwapOperationRecord): Promise<OrcaStableSendClaim | null>;
 /** Publicly importable sender: it reloads durable state and acquires the shared operation lock itself. */
 export declare class OrcaStableSingleSender {
     private readonly service;
@@ -44,3 +57,4 @@ export declare function executeOrcaStableFirstAttempt(input: {
     binding: OrcaStableExecutionBinding;
     signature: string;
 }>;
+export {};
