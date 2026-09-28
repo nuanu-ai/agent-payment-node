@@ -5,20 +5,10 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-The source tree prepares APN 0.5.27 for Apple Silicon macOS. The published
-0.5.26 release adds a
-guarded Ethereum Uniswap token-input lane for exact canonical USDC/USDT swaps,
-with durable exact approvals, explicit allowance cleanup, one-send recovery,
-cross-process operation locking, and command-scoped RPC budgets, caching and
-count telemetry. The token lane also supports a bounded public primary pool
-with cooldown, quarantine and durable provider binding. That release had source
-and CI proof plus no-effect live quote/recovery evidence. It did not claim live
-paid or effect acceptance; its live prepare preflight was blocked by public
-provider availability.
-Since that release, source changes include compatibility with saved policy
-records containing `mechanisms` and `recipient`. GitHub publication and the
-Homebrew Formula remain separate release gates. Verify the exact installed
-version before relying on those source changes.
+The source tree prepares APN 0.5.28 for Apple Silicon macOS. The published
+0.5.27 release and its Homebrew Formula are separate from this source version.
+Verify the exact installed version before relying on source changes after
+0.5.27.
 
 The current platform boundary and the required work for future Linux or
 Windows support are recorded in the [platform support matrix](docs/platform-support.md).
@@ -82,8 +72,8 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 ## Install
 
 Homebrew installation is a separate publication gate. Verify that `apn version`
-reports `0.5.27` before relying on the current source behavior. The published
-0.5.26 installation predates the saved-policy compatibility changes.
+reports `0.5.28` before relying on the current source behavior. The published
+0.5.27 installation predates this source version.
 
 ```sh
 brew install nuanu-ai/tap/apn
