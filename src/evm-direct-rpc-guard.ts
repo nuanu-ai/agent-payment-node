@@ -10,14 +10,16 @@ export class EvmDirectRpcGuard {
   constructor(state: StateStore, private readonly limit = 24,
     private readonly now: () => number = Date.now,
     private readonly wait: (milliseconds: number) => Promise<void> = milliseconds =>
-      new Promise(resolve => setTimeout(resolve, milliseconds))) {
+      new Promise(resolve => setTimeout(resolve, milliseconds)),
+    remainingWaitMs?: () => number) {
     const coordinator: RpcProviderPacingCoordinator = { coordinate: async <T>(family: string,
       work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
         saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
       const familyHash = sha256(`rpc-provider-family\0${family}`);
       return await state.withLocks([`rpc-provider-family:${familyHash}`], async () => await work(
         await state.loadRpcProviderPacing(familyHash), value => state.writeRpcProviderPacing(familyHash, value),
-        await state.loadRpcProviderCooldown(familyHash), value => state.writeRpcProviderCooldown(familyHash, value)));
+        await state.loadRpcProviderCooldown(familyHash), value => state.writeRpcProviderCooldown(familyHash, value)),
+        remainingWaitMs === undefined ? {} : { waitMs: Math.min(5_000, Math.max(0, remainingWaitMs())) });
     } };
     this.scheduler = new RpcProviderScheduler(coordinator, now, "reject", "rate_limit");
   }

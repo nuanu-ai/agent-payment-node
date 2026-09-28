@@ -63,7 +63,7 @@ export class HttpsBaseRpc {
             const onAbort = () => { clearTimeout(timer); reject(new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.")); };
             signal.addEventListener("abort", onAbort, { once: true });
         });
-        this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait);
+        this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait, () => this.remainingTimeoutMs());
     }
     async seiNativeBalance(address, selection) {
         if (selection.chainId !== 1329 || selection.token !== "native") {
