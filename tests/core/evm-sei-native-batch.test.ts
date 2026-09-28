@@ -4,7 +4,10 @@ import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
 import test from "node:test";
 import { toHex } from "viem";
+import { resolveEvmAsset } from "../../src/evm-asset.js";
 import { EvmRpc } from "../../src/evm-rpc.js";
+import { checkEvmTransferFunding } from "../../src/evm-transfer-approval.js";
+import type { OperationRecord } from "../../src/model.js";
 import { HttpsBaseRpc } from "../../src/rpc.js";
 import { StateStore } from "../../src/state.js";
 import { EVM_BLOCK_HASH } from "./evm-helpers.js";
@@ -13,6 +16,12 @@ import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
 const selection = { chainId: 1329 as const, token: "native" as const, decimals: 18 };
 const transaction = { chainId: 1329 as const, from: WALLET, to: RECIPIENT, valueAtomic: "1", data: "0x" as const };
 const block = { number: "0x3039", hash: EVM_BLOCK_HASH, baseFeePerGas: "0x7", transactions: [] };
+const fundingOperation = {
+  chainId: 1329, walletAddress: WALLET, recipient: RECIPIENT, amountAtomic: "1",
+  economics: { nonceAtomic: "7", gasLimitAtomic: "21000", maxFeePerGasAtomic: "23",
+    maxPriorityFeePerGasAtomic: "9", maximumGasCostAtomic: "483000" },
+  evm: { asset: resolveEvmAsset(selection), maxFeeWei: "1000000000000000" },
+} as unknown as OperationRecord;
 
 function answer(method: string, params: readonly unknown[], reorg = false): unknown {
   if (method === "eth_chainId") return toHex(1329);
@@ -58,6 +67,67 @@ test("Sei native prepare makes 17 logical reads in 8 HTTPS batch POSTs with reve
   assert.equal(balance.blockHash, EVM_BLOCK_HASH);
   assert.equal(estimated.maxFeePerGasAtomic, "23");
   assert.equal(quote.chainId, 1329); assert.equal(quote.l1DataFeeUpperWei, "0");
+});
+
+test("Sei approval and pre-send funding use 8 then 5 grouped HTTPS POSTs without scalar fallback", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  const bodies: { id: number; method: string; params: unknown[] }[][] = [];
+  t.mock.method(https, "request", (_endpoint: URL, _options: unknown, receive: (response: unknown) => void) => {
+    const request = new EventEmitter() as any; request.setTimeout = () => request;
+    request.end = (body: string) => {
+      const batch = JSON.parse(body) as { id: number; method: string; params: unknown[] }[];
+      assert.ok(Array.isArray(batch), "Sei funding must never issue a scalar POST");
+      bodies.push(batch);
+      const raw = JSON.stringify(batch.map(item => ({ jsonrpc: "2.0", id: item.id, result: answer(item.method, item.params) })).reverse());
+      queueMicrotask(() => {
+        const response = new EventEmitter() as any; response.statusCode = 200;
+        response.headers = { "content-length": String(Buffer.byteLength(raw)) };
+        response.resume = () => { response.emit("end"); }; receive(response);
+        response.emit("data", Buffer.from(raw)); response.emit("end");
+      });
+      return request;
+    };
+    return request;
+  });
+  syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const rpc = new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: state });
+  await checkEvmTransferFunding(rpc, fundingOperation, true);
+  assert.equal(bodies.length, 8);
+  assert.equal(bodies.flat().length, 17);
+  await checkEvmTransferFunding(rpc, fundingOperation, false);
+  assert.equal(bodies.length, 13);
+  assert.equal(bodies.slice(8).flat().length, 9);
+});
+
+test("Sei resume superseding scan stops at the guarded 24 physical HTTPS POST cap", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let posts = 0;
+  t.mock.method(https, "request", (_endpoint: URL, _options: unknown, receive: (response: unknown) => void) => {
+    const request = new EventEmitter() as any; request.setTimeout = () => request;
+    request.end = (body: string) => {
+      posts += 1;
+      const call = JSON.parse(body) as { id: string; method: string; params: unknown[] };
+      assert.ok(!Array.isArray(call));
+      const result = call.method === "eth_getBlockByNumber" && call.params[0] !== "safe"
+        ? { ...block, number: call.params[0], transactions: [] }
+        : answer(call.method, call.params);
+      const raw = JSON.stringify({ jsonrpc: "2.0", id: call.id, result });
+      queueMicrotask(() => {
+        const response = new EventEmitter() as any; response.statusCode = 200;
+        response.headers = { "content-length": String(Buffer.byteLength(raw)) };
+        response.resume = () => { response.emit("end"); }; receive(response);
+        response.emit("data", Buffer.from(raw)); response.emit("end");
+      });
+      return request;
+    };
+    return request;
+  });
+  syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const rpc = new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: state }); rpc.armEvmDirectRpcGuard();
+  await assert.rejects(rpc.evm.confirmedAtNonce(1329, WALLET, "7", "0"), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(posts, 24);
 });
 
 test("Sei grouped reads fail closed on reorg and wrong chain without scalar fallback", async () => {
