@@ -29,8 +29,8 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
         asset.address.toLowerCase() === "0x4200000000000000000000000000000000000006";
     const grouped = ethereumUsdc ? rpc.ethereumUsdcFundingReads?.() : ethereumWeth ? rpc.ethereumWethFundingReads?.() : baseWeth ? rpc.baseWethFundingReads?.() : asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
         operation.chainId === 56 ? rpc.prepareBnbNative?.() : operation.chainId === 8453 ? rpc.prepareBaseNative?.() :
-            operation.chainId === 42161 ? rpc.prepareArbitrumNative?.() : undefined : undefined;
-    if (((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) && asset.kind === "native" || ethereumUsdc || ethereumWeth || baseWeth) && grouped === undefined) {
+            operation.chainId === 42161 ? rpc.prepareArbitrumNative?.() : operation.chainId === 1329 ? rpc.prepareSeiNative?.() : undefined : undefined;
+    if (((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329) && asset.kind === "native" || ethereumUsdc || ethereumWeth || baseWeth) && grouped === undefined) {
         throw new ApnError("APN_RPC_CONFIG", "Selected approval requires batched RPC reads.");
     }
     // The balance reader checks the selected chain before and after its pinned reads.
