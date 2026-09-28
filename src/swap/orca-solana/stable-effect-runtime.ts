@@ -13,6 +13,7 @@ import type { OrcaStableAdmissionPorts } from "./stable-admission.js";
 import { freshOrcaStableExecutionPreflight } from "./stable-fresh-preflight.js";
 import { SavedOrcaStableMaterialStore } from "./stable-material.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
+import type { OrcaProgramPinVerifier } from "./pins.js";
 
 /** Signs the exact preflight message once. The caller owns the operation lock and persists the result before sending. */
 export class OrcaStableLocalSigner {
@@ -170,7 +171,7 @@ export class OrcaStableSingleSender {
   }
 }
 
-/** Internal wiring for the first attempt. The public command remains closed pending the observation route. */
+/** Production wiring for the one foreground-approved first attempt. */
 export async function executeOrcaStableFirstAttempt(input: {
   readonly service: GuardedSwapService;
   readonly materials: SavedOrcaStableMaterialStore;
@@ -180,6 +181,7 @@ export async function executeOrcaStableFirstAttempt(input: {
   readonly rpc: SolanaRpc;
   readonly operationId: string;
   readonly clock?: () => Date;
+  readonly verifyPins?: OrcaProgramPinVerifier;
 }) {
   const clock = input.clock ?? (() => new Date());
   const signer = new OrcaStableLocalSigner(input.custody);
@@ -187,7 +189,7 @@ export async function executeOrcaStableFirstAttempt(input: {
   return await beginOrcaStableExecutionAndSend(input.service, input.materials, input.bindings, {
     admission: input.admission,
     preflight: (operation, material) => freshOrcaStableExecutionPreflight(input.rpc, input.admission,
-      input.service.usage, operation, material, clock),
+      input.service.usage, operation, material, clock, input.verifyPins),
     sign: (operation, binding, account) => signer.sign(operation, binding, account),
     effects: input.custody,
     send: operationId => sender.sendOnce(operationId),

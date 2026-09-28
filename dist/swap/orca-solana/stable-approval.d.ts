@@ -18,8 +18,13 @@ export declare function approveOrcaStableReservation(service: GuardedSwapService
     quoteHash: string;
     materialDigest: string;
     signable: false;
-    executable: false;
+    executable: true;
+    executionRequiresForegroundConsent: true;
     signed: false;
     broadcast: false;
 }>;
 export declare function stableApprovalScreen(operation: SwapOperationRecord, material: OrcaStableMaterial, deadline: string): readonly string[];
+/** A second, explicit foreground decision is required after principal reservation and before fresh execution. */
+export declare function confirmOrcaStableExecution(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, operationId: string, consent: OrcaStableConsentPort, clock: () => Date): Promise<void>;
+/** Owner authorizes only the strict local proof of no send and matching principal release. */
+export declare function confirmOrcaStableNoSendRecovery(service: GuardedSwapService, operationId: string, consent: OrcaStableConsentPort, clock: () => Date): Promise<void>;

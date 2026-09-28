@@ -26,7 +26,7 @@ const FAMILIES = [
   { path: "swap solana orca", command: "swap.orca", cleanup: false, stableReads: true },
 ] as const;
 const ACTIONS = ["inventory", "quote", "prepare", "status", "approve", "execute"] as const;
-const STABLE_ACTIONS = ["stable-inventory", "stable-quote", "stable-prepare", "stable-status", "stable-approve", "stable-release", "stable-observe"] as const;
+const STABLE_ACTIONS = ["stable-inventory", "stable-quote", "stable-prepare", "stable-status", "stable-approve", "stable-execute", "stable-release", "stable-recover-no-send", "stable-observe"] as const;
 
 test("guarded swap families expose six parity actions plus explicit token cleanup", () => {
   const catalog = COMMANDS.filter((row) => row.path[0] === "swap");
@@ -34,10 +34,10 @@ test("guarded swap families expose six parity actions plus explicit token cleanu
     [...("stableReads" in family ? STABLE_ACTIONS : []), ...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])]
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 38);
-  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_execute"), false);
-  assert.throws(() => bindArgv(["swap", "solana", "orca", "stable-execute", "--operation", H("a")]),
-    { code: "APN_UNSUPPORTED_COMMAND" });
+  assert.equal(tools.length, 40);
+  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_execute"), true);
+  assert.equal(bindArgv(["swap", "solana", "orca", "stable-execute", "--operation", H("a")]).request.command,
+    "swap.orca.stable-execute");
   assert.deepEqual(tools.map((row) => row.command), catalog);
   for (const command of catalog) {
     const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;

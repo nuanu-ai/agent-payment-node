@@ -178,14 +178,14 @@ export class OrcaStableSingleSender {
         });
     }
 }
-/** Internal wiring for the first attempt. The public command remains closed pending the observation route. */
+/** Production wiring for the one foreground-approved first attempt. */
 export async function executeOrcaStableFirstAttempt(input) {
     const clock = input.clock ?? (() => new Date());
     const signer = new OrcaStableLocalSigner(input.custody);
     const sender = new OrcaStableSingleSender(input.service, input.materials, input.bindings, input.custody, input.rpc, clock);
     return await beginOrcaStableExecutionAndSend(input.service, input.materials, input.bindings, {
         admission: input.admission,
-        preflight: (operation, material) => freshOrcaStableExecutionPreflight(input.rpc, input.admission, input.service.usage, operation, material, clock),
+        preflight: (operation, material) => freshOrcaStableExecutionPreflight(input.rpc, input.admission, input.service.usage, operation, material, clock, input.verifyPins),
         sign: (operation, binding, account) => signer.sign(operation, binding, account),
         effects: input.custody,
         send: operationId => sender.sendOnce(operationId),

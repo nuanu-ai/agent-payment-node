@@ -95,6 +95,8 @@ export interface CoreDependencies {
     }>) => Promise<unknown>;
     readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
     readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableExecute?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
     readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
     readonly uniswap?: UniswapGuardedSwapBuilder;
@@ -169,6 +171,8 @@ export declare class RuntimeContext {
     }>) => Promise<unknown>;
     readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
     readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableExecute?: (operationId: string) => Promise<unknown>;
+    readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
     readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
     readonly uniswap?: UniswapGuardedSwapBuilder;

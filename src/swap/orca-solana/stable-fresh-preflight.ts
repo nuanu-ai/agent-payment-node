@@ -15,18 +15,18 @@ import type { OrcaStableExecutionPreflight } from "./stable-execution-journal.js
 const MAX_PREFLIGHT_MS = 30_000;
 
 /**
- * Internal production port only. The same budget must be retained by any later send, leaving one physical POST.
- * This function has no signer, sender, public command or operation transition.
+ * The same budget is retained by the one-shot sender, leaving one physical POST.
+ * This function itself has no signer, sender or operation transition.
  */
 export async function freshOrcaStableExecutionPreflight(rpc: SolanaRpc, admission: OrcaStableAdmissionPorts,
   usage: AssetUsageLedger, operation: SwapOperationRecord, material: OrcaStableMaterial,
-  clock: () => Date = () => new Date()): Promise<OrcaStableExecutionPreflight> {
+  clock: () => Date = () => new Date(), verifyPins: OrcaProgramPinVerifier = verifyOrcaProgramPins): Promise<OrcaStableExecutionPreflight> {
   if (rpc.budget === undefined || rpc.budget.physicalRequests !== 0 || rpc.budget.maxPhysicalRequests > 24 ||
       rpc.budget.minimumIntervalMs < 750 || !rpc.hasPersistentPacer) {
     throw new ApnError("APN_RPC_CONFIG", "Stable execution requires a fresh 24 POST budget and persistent 750 ms pacing.");
   }
   const result = await freshOrcaStableExecutionPreflightCore(rpc, admission, usage, operation, material,
-    verifyOrcaProgramPins, clock);
+    verifyPins, clock);
   if (rpc.budget.physicalRequests > 23 || rpc.budget.remainingPhysicalRequests < 1) {
     blocked("Stable preflight used the physical POST reserved for submission.", "orca_stable_rpc_budget");
   }

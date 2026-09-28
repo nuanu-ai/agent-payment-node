@@ -28,6 +28,8 @@ export class RuntimeContext {
     orcaStablePrepare;
     orcaStableStatus;
     orcaStableApprove;
+    orcaStableExecute;
+    orcaStableRecoverNoSend;
     orcaStableRelease;
     orcaStableObserve;
     uniswap;
@@ -121,6 +123,10 @@ export class RuntimeContext {
             this.orcaStableStatus = dependencies.orcaStableStatus;
         if (dependencies.orcaStableApprove !== undefined)
             this.orcaStableApprove = dependencies.orcaStableApprove;
+        if (dependencies.orcaStableExecute !== undefined)
+            this.orcaStableExecute = dependencies.orcaStableExecute;
+        if (dependencies.orcaStableRecoverNoSend !== undefined)
+            this.orcaStableRecoverNoSend = dependencies.orcaStableRecoverNoSend;
         if (dependencies.orcaStableRelease !== undefined)
             this.orcaStableRelease = dependencies.orcaStableRelease;
         if (dependencies.orcaStableObserve !== undefined)
