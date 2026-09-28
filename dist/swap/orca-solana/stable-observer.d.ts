@@ -13,7 +13,7 @@ export declare class OrcaStableFinalizedObserver {
     private readonly rpc;
     private readonly clock;
     private readonly observations;
-    constructor(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, bindings: OrcaStableExecutionBindingStore, custody: Pick<ChainWalletStoragePort, "account" | "effectByOperationId">, rpc: SolanaRpc, clock?: () => Date);
+    constructor(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, bindings: OrcaStableExecutionBindingStore, custody: Pick<ChainWalletStoragePort, "account">, rpc: SolanaRpc, clock?: () => Date);
     observe(operationId: string): Promise<SwapOperationRecord>;
     private replay;
     private verifyRpcSource;

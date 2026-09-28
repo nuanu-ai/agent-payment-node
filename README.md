@@ -584,9 +584,14 @@ then stores the validated quote and transaction material. It needs the active
 policy revision, local owner account, exact stable guarded mechanism pin, and
 explicit fee and rent caps. `stable-approve` shows exact foreground consent,
 rechecks the active policy, and reserves only the USDC principal. `stable-release`
-retires an unsigned operation and releases its exact lease; `stable-status`
-reconciles the same no-effect release after quote expiry. These commands cannot sign or send; the native
-SOL to USDC `approve` and `execute` commands reject stable operations.
+retires an unsigned operation and releases its exact lease. `stable-observe`
+reads a signature claimed by the internal execution journal and may durably
+record possible send, finalized proof, and the principal lease outcome. It
+keeps principal held while finality is unknown. Public stable execution remains
+closed pending integrated production factory acceptance.
+`stable-status` reconciles an expired unsigned lease and reports the durable
+phase. The native SOL to USDC `approve` and `execute` commands reject stable
+operations.
 
 ## Portfolio read
 
@@ -802,6 +807,7 @@ apn swap solana orca stable-prepare --profile <profile> --policy-revision <strin
 apn swap solana orca stable-status --operation <operation_id>
 apn swap solana orca stable-approve --operation <operation_id>
 apn swap solana orca stable-release --operation <operation_id>
+apn swap solana orca stable-observe --operation <operation_id>
 apn swap solana orca inventory
 apn swap solana orca quote --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
 apn swap solana orca prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>

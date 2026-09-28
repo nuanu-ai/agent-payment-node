@@ -10,8 +10,11 @@ export declare function orcaStablePreparedStatus(operations: SwapOperationReposi
     messageHash: string;
     marketSlot: string;
     expiresAt: string;
+    phase: import("../model.js").SwapOperationState;
     signable: false;
     executable: false;
-    signed: false;
-    broadcast: false;
+    signed: boolean | null;
+    broadcast: boolean | null;
+    possibleSend: boolean;
+    observeOnly: boolean;
 }>;
