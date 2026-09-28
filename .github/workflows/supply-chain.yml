@@ -90,6 +90,7 @@ jobs:
           node --test --test-concurrency=1 \
             dist-test/tests/core/orca-stable-candidate.test.js \
             dist-test/tests/core/orca-stable-readonly.test.js \
+            dist-test/tests/core/mcp.test.js \
             dist-test/tests/core/smart-account-gasless-https.test.js \
             dist-test/tests/core/metamask-gasless-rpc.test.js \
             dist-test/tests/core/jupiter-route-v2-offline.test.js \
