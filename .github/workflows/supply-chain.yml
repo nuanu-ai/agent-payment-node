@@ -91,7 +91,9 @@ jobs:
             dist-test/tests/core/orca-stable-candidate.test.js \
             dist-test/tests/core/orca-stable-readonly.test.js \
             dist-test/tests/core/smart-account-gasless-https.test.js \
-            dist-test/tests/core/metamask-gasless-rpc.test.js
+            dist-test/tests/core/metamask-gasless-rpc.test.js \
+            dist-test/tests/core/jupiter-route-v2-offline.test.js \
+            dist-test/tests/core/x402-permit2-payload.test.js
           node --test tests/packaging/evm-base-weth-installed.test.mjs
 
       - name: Upload exact candidate bytes
