@@ -1,5 +1,6 @@
 import { type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
 import { type OrcaStableMaterial } from "./stable-material.js";
+import { type OrcaStableUnsignedPreview } from "./stable-prepare.js";
 export type OrcaStableReceiptOutcome = {
     readonly outcome: "succeeded" | "reverted";
     readonly proof: SwapReceiptProof;
@@ -9,6 +10,7 @@ export declare function verifyOrcaStableFinalizedReceipt(input: {
     readonly operation: SwapOperationRecord;
     readonly material: OrcaStableMaterial;
     readonly signature: string;
+    readonly executionPreview?: OrcaStableUnsignedPreview;
     readonly signatureStatuses: unknown;
     readonly transaction: unknown;
     readonly observedAt: Date;
