@@ -55,6 +55,7 @@ export async function permit2CurrentOwnerPreflight(root, request, ports) {
         blockerCodes: ["permit2_execution_not_exposed"] };
 }
 const RPC_GAP_MS = 750;
+const RPC_CRASH_GUARD_MS = 15_000 + RPC_GAP_MS;
 /** Cross-process pacing uses APN's kernel-backed state lock and operational RPC pacing record. */
 export function permit2PublicRpc(url, stateRoot, transport) {
     const rpc = new HttpsBaseRpc(url);
@@ -62,25 +63,35 @@ export function permit2PublicRpc(url, stateRoot, transport) {
     const state = new StateStore(stateRoot);
     const endpointHash = sha256(`permit2-rpc-endpoint\0${endpoint}`);
     return { call: async (method, params, signal) => {
-            await state.withLocks([`rpc-provider-family:${endpointHash}`], async () => {
+            return await state.withLocks([`rpc-provider-family:${endpointHash}`], async () => {
                 if (signal.aborted)
                     aborted();
                 const lastStart = await state.loadRpcProviderPacing(endpointHash);
+                const cooldownUntil = await state.loadRpcProviderCooldown(endpointHash);
                 let now = Date.now();
                 if (lastStart !== null && now < lastStart) {
                     throw new ApnError("APN_RPC_CONFIG", "Permit2 RPC pacing clock moved backwards.");
                 }
-                while (lastStart !== null && now < lastStart + RPC_GAP_MS) {
-                    await pause(lastStart + RPC_GAP_MS - now, signal);
+                const nextAllowed = Math.max(lastStart === null ? 0 : lastStart + RPC_GAP_MS, cooldownUntil ?? 0);
+                while (now < nextAllowed) {
+                    await pause(nextAllowed - now, signal);
                     now = Date.now();
                 }
                 if (signal.aborted)
                     aborted();
-                await state.writeRpcProviderPacing(endpointHash, now);
+                // A crash releases the kernel lock without running finally. Reserve the whole read window before transport.
+                await state.writeRpcProviderCooldown(endpointHash, Date.now() + RPC_CRASH_GUARD_MS);
+                try {
+                    if (signal.aborted)
+                        aborted();
+                    return await (transport ?? rpc).permit2ReadCall(method, params, signal);
+                }
+                finally {
+                    const completed = Date.now();
+                    await state.writeRpcProviderPacing(endpointHash, completed);
+                    await state.writeRpcProviderCooldown(endpointHash, completed);
+                }
             }, { waitMs: 1_900 });
-            if (signal.aborted)
-                aborted();
-            return await (transport ?? rpc).permit2ReadCall(method, params, signal);
         } };
 }
 async function abortable(promise, signal) {
