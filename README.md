@@ -590,7 +590,12 @@ expiry and the exact transaction, then signs once and makes at most one
 submission attempt. One Solana RPC instance enforces 24 physical POSTs for the
 command, at least 750 ms between starts, with one POST reserved for submission.
 There is no retry after a send claim, including an ambiguous response or crash.
-MCP provides the exact CLI handoff and cannot sign or submit. `stable-release`
+If execution stops after its durable marker without a proved send, run
+`stable-recover-no-send --operation <id>` in the foreground. It releases the
+principal only after proving no send claim and no saved signed effect; if that
+proof is incomplete, the principal remains held. MCP provides the exact CLI
+handoff for both foreground commands and cannot sign, submit or recover.
+`stable-release`
 retires an unsigned operation and releases its exact lease. `stable-observe`
 reads a signature claimed by the internal execution journal and may durably
 record possible send, finalized proof, and the principal lease outcome. It
@@ -816,6 +821,7 @@ apn swap solana orca stable-status --operation <operation_id>
 apn swap solana orca stable-approve --operation <operation_id>
 apn swap solana orca stable-execute --operation <operation_id>
 apn swap solana orca stable-release --operation <operation_id>
+apn swap solana orca stable-recover-no-send --operation <operation_id>
 apn swap solana orca stable-observe --operation <operation_id>
 apn swap solana orca inventory
 apn swap solana orca quote --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>

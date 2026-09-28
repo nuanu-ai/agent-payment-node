@@ -210,6 +210,7 @@ async function fixture(exists = true) {
       trustedTime = new Date(NOW.getTime() + 31_000); }; },
     setHeight: (value: bigint) => { height = value; }, setGenesis: (value: string) => { genesis = value; },
     setUsage: (value: string) => { usage = value; },
+    setTime: (value: Date) => { trustedTime = value; },
     setRevision: (value: number) => { current = { ...active, revision: value }; },
     setActivation: (value: string) => { current = { ...active, activationDigest: value }; },
     driftRevisionAfterSimulation: () => { afterSimulation = () => { current = { ...active, revision: 8 }; }; },
@@ -922,6 +923,9 @@ test("public stable execute uses persisted owner policy, factory RPC and one phy
   const handoff = await client.callTool({ name: "apn_swap_solana_orca_stable_execute",
     arguments: { operation: prepared.operation.operationId } });
   assert.equal((handoff.structuredContent as any).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+  const recoveryHandoff = await client.callTool({ name: "apn_swap_solana_orca_stable_recover_no_send",
+    arguments: { operation: prepared.operation.operationId } });
+  assert.equal((recoveryHandoff.structuredContent as any).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.equal(posts.length, 0, "MCP handoff must never enter the RPC or signer");
   const denied = await runCli(argv, {}, { ...options,
     orcaStableExecuteConsent: { confirm: async () => { throw new ApnError("APN_OPERATION_BLOCKED", "Owner denied execution."); } } });
@@ -957,6 +961,55 @@ test("public stable execute uses persisted owner policy, factory RPC and one phy
   const replay = await runCli(argv, {}, options);
   assert.equal(replay.ok, false);
   assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, 1);
+  const prepareNext = async (key: string) => {
+    f.setTime(new Date(time));
+    const next = await prepareOrcaStableGuardedCandidateCore(f.rpc, admission, f.service,
+      { ...f.request, policyRevision: staged.revision, idempotencyKey: key }, async () => [], f.clock);
+    await approveOrcaStableReservation(f.service, new SavedOrcaStableMaterialStore(f.root), admission,
+      next.operation.operationId, { confirm: async () => {} }, f.clock);
+    return next.operation;
+  };
+  const failSign = new Proxy(custody, { get(target, property) {
+    if (property === "withSeed") return async () => { throw new Error("offline signer failure"); };
+    const value = Reflect.get(target, property, target);
+    return typeof value === "function" ? value.bind(target) : value;
+  } });
+  const unsigned = await prepareNext("stable-candidate-recovery-sign");
+  const unsignedArgv = ["swap", "solana", "orca", "stable-execute", "--operation", unsigned.operationId];
+  const sendsBeforeFailure = posts.filter(post => post.methods.includes("sendTransaction")).length;
+  const marked = await runCli(unsignedArgv, {}, { ...options, chainAccounts: failSign });
+  assert.equal(marked.ok, false);
+  assert.equal(marked.error?.details?.reason, "orca_stable_marked_no_send_unproven");
+  assert.deepEqual(marked.next_actions, [`apn swap solana orca stable-recover-no-send --operation ${unsigned.operationId}`]);
+  assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, sendsBeforeFailure);
+  const recoveryArgv = ["swap", "solana", "orca", "stable-recover-no-send", "--operation", unsigned.operationId];
+  const recoveryOptions = { ...options, orcaStableRecoveryConsent: { confirm: async (lines: readonly string[]) => {
+    assert.ok(lines.some(line => line.includes("no send claim and no signed custody effect")));
+  } } };
+  const recovered = await runCli(recoveryArgv, {}, recoveryOptions);
+  assert.equal(recovered.ok, true, JSON.stringify(recovered));
+  assert.equal((recovered.data as any).state, "failed_before_effect");
+  const recoveredAgain = await runCli(recoveryArgv, {}, recoveryOptions);
+  assert.equal(recoveredAgain.ok, true, JSON.stringify(recoveredAgain));
+  assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, sendsBeforeFailure);
+  const persisted = await prepareNext("stable-candidate-recovery-persisted-effect");
+  const failAfterSave = new Proxy(custody, { get(target, property) {
+    if (property === "saveEffect") return async (...args: Parameters<ChainAccountStore["saveEffect"]>) => {
+      await target.saveEffect(...args); throw new Error("offline crash after effect persistence");
+    };
+    const value = Reflect.get(target, property, target);
+    return typeof value === "function" ? value.bind(target) : value;
+  } });
+  const persistedArgv = ["swap", "solana", "orca", "stable-execute", "--operation", persisted.operationId];
+  const persistedMarked = await runCli(persistedArgv, {}, { ...options, chainAccounts: failAfterSave });
+  assert.equal(persistedMarked.ok, false);
+  assert.equal(persistedMarked.error?.details?.reason, "orca_stable_marked_no_send_unproven");
+  const refusedRecovery = await runCli(["swap", "solana", "orca", "stable-recover-no-send", "--operation",
+    persisted.operationId], {}, recoveryOptions);
+  assert.equal(refusedRecovery.ok, false);
+  assert.equal(refusedRecovery.error?.details?.reason, "orca_stable_signed_effect_exists");
+  assert.equal((await f.service.operations.loadAny(persisted.operationId))?.usageLease?.state, "reserved");
+  assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, sendsBeforeFailure);
 });
 
 test("stable physical transport makes one 429 attempt and persists provider cooldown", async (t) => {
@@ -1028,6 +1081,22 @@ async function privateStableSenderHarness(nearExpiry: boolean) {
     operationId: prepared.operation.operationId, staleOperation: begun.operation,
     dropEffect: () => { effect = null; } };
 }
+
+test("public stable no-send recovery refuses a persisted claim after a submitting crash", async (t) => {
+  const h = await privateStableSenderHarness(false); t.after(h.f.cleanup);
+  (h.f.service as any).recordPossibleSend = async () => { throw new Error("crash after durable send claim"); };
+  await assert.rejects(h.sender.sendOnce(h.operationId), /crash after durable send claim/u);
+  assert.equal((await h.f.service.operations.loadAny(h.operationId))?.state, "submitting");
+  const result = await runCli(["swap", "solana", "orca", "stable-recover-no-send", "--operation", h.operationId], {}, {
+    stateRoot: h.f.root, chainAccounts: h.custody, clock: { now: () => new Date(NOW.getTime() + 60_000) },
+    orcaStableRecoveryConsent: { confirm: async () => {} },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.details?.reason, "orca_stable_send_claim_exists");
+  assert.equal((await h.f.service.usage.load({ account: h.staleOperation.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, h.staleOperation.usageLease!.reservationId))?.state, "reserved");
+  assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 1);
+});
 
 test("stable direct sender persists one claim across concurrent callers and transition crash", async (t) => {
   const h = await privateStableSenderHarness(false); t.after(h.f.cleanup);

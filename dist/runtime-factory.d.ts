@@ -116,6 +116,8 @@ export interface RuntimeFactoryOptions {
     readonly orcaStablePinVerifier?: OrcaProgramPinVerifier;
     /** Offline acceptance only; production reads exact consent from the owner TTY. */
     readonly orcaStableExecuteConsent?: OrcaStableConsentPort;
+    /** Offline acceptance only; production reads separate recovery consent from the owner TTY. */
+    readonly orcaStableRecoveryConsent?: OrcaStableConsentPort;
     readonly tronRpcUrl?: string;
     readonly stateRoot?: string;
     readonly native?: NativePort;

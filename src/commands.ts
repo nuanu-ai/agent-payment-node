@@ -67,7 +67,7 @@ export type CommandRequest =
       readonly maximumAtaRentLamports?: string; readonly maximumTotalFeeLamports: string; readonly idempotencyKey: string }
   | { readonly command: "swap.orca.stable-status"; readonly operationId: string }
   | { readonly command: "swap.orca.stable-approve" | "swap.orca.stable-execute"; readonly operationId: string }
-  | { readonly command: "swap.orca.stable-release" | "swap.orca.stable-observe"; readonly operationId: string }
+  | { readonly command: "swap.orca.stable-release" | "swap.orca.stable-observe" | "swap.orca.stable-recover-no-send"; readonly operationId: string }
   | { readonly command: "swap.orca.quote"; readonly profile: string; readonly account: string; readonly amountAtomic: string;
       readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly computeUnitLimit: number; readonly computeUnitPriceMicroLamports: string }
   | { readonly command: "swap.orca.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
