@@ -6,7 +6,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { performance } from "node:perf_hooks";
 import test, { type TestContext } from "node:test";
 import { setImmediate as nextTurn } from "node:timers/promises";
-import { GaslessHttps } from "../../src/gasless/https.js";
+import { GaslessHttps, GaslessPostPacer } from "../../src/gasless/https.js";
 
 function wire(t: TestContext) {
   const requests: Array<{ options: any; body: unknown; destroyed: number;
@@ -68,11 +68,11 @@ test("actual GaslessHttps pins DNS and TLS defaults, writes one exact body, and 
   await rejectSafe(transport.request(ENDPOINT, "POST", "{}", 64, "APN_HTTP_CONFIG"));
   assert.equal(mock.requests.length, 2); assert.equal(mock.requests[1]!.destroyed, 1);
 });
-test("queued signed requests expire in their original deadline and never obtain a late slot", async t => {
-  const mock = wire(t), timer = clock(t), transport = new GaslessHttps();
-  const failures = Array.from({ length: 34 }, () => rejectSafe(transport.request(ENDPOINT, "POST", "synthetic-secret", 64, "APN_HTTP_CONFIG")));
+test("queued requests expire before a late slot and release the two-active bound", async t => {
+  const mock = wire(t), timer = clock(t), transport = new GaslessHttps(new GaslessPostPacer());
+  const failures = Array.from({ length: 34 }, () => rejectSafe(transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG")));
   await nextTurn(); assert.equal(mock.requests.length, 2); assert.equal(mock.dnsCalls, 2);
-  await rejectSafe(transport.request(ENDPOINT, "POST", "synthetic-secret", 64, "APN_HTTP_CONFIG"));
+  await rejectSafe(transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG"));
   timer.tick(14_999); await nextTurn(); assert.equal(mock.requests.length, 2);
   timer.tick(1); await Promise.all(failures); await nextTurn();
   assert.equal(mock.requests.length, 2); assert.deepEqual(mock.requests.map(r => r.destroyed), [1, 1]);
@@ -84,34 +84,65 @@ test("queued signed requests expire in their original deadline and never obtain 
   mock.requests[3]!.respond(200); mock.requests[4]!.respond(200); await Promise.all(next);
   assert.deepEqual(mock.requests.slice(0, 2).map(r => r.destroyed), [1, 1]);
 });
-test("a queued request gets only the remaining second after fourteen seconds in the queue", async t => {
-  const mock = wire(t), timer = clock(t), transport = new GaslessHttps();
+test("a paced request gets a fresh network deadline after fourteen seconds in the queue", async t => {
+  const mock = wire(t), timer = clock(t), transport = new GaslessHttps(new GaslessPostPacer());
   const first = transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG");
   const second = rejectSafe(transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG"));
-  const queued = rejectSafe(transport.request(ENDPOINT, "POST", "synthetic-secret", 64, "APN_HTTP_CONFIG"));
+  const queued = transport.request(ENDPOINT, "POST", "synthetic-secret", 64, "APN_HTTP_CONFIG");
   await nextTurn(); timer.tick(14_000); mock.requests[0]!.respond(200); await first; await nextTurn();
   assert.equal(mock.requests.length, 3); assert.equal(mock.requests[2]!.body, "synthetic-secret");
-  timer.tick(999); await nextTurn(); assert.equal(mock.requests[2]!.destroyed, 0);
-  timer.tick(1); await Promise.all([second, queued]);
-  assert.equal(mock.requests[2]!.destroyed, 1); assert.equal(mock.requests.length, 3);
+  timer.tick(1_000); await second; await nextTurn(); assert.equal(mock.requests[2]!.destroyed, 0);
+  mock.requests[2]!.respond(200); await queued;
+  assert.equal(mock.requests.length, 3);
+});
+test("paced wait can exceed fifteen seconds but a late turn cannot dispatch after sixty", async t => {
+  const mock = wire(t), timer = clock(t);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const pacer = { async run<T>(_endpoint: string, signal: AbortSignal, send: () => Promise<T>): Promise<T> {
+    await Promise.race([gate, new Promise<never>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })]);
+    if (signal.aborted) throw signal.reason;
+    return await send();
+  } } as GaslessPostPacer;
+  const transport = new GaslessHttps(pacer);
+  const completed = transport.request(ENDPOINT, "POST", "{}", 64, "APN_RPC_CONFIG");
+  await nextTurn(); timer.tick(16_000); await nextTurn(); assert.equal(mock.requests.length, 0);
+  release(); await nextTurn(); assert.equal(mock.requests.length, 1);
+  mock.requests[0]!.respond(200); await completed;
+  let lateRelease!: () => void;
+  const lateGate = new Promise<void>(resolve => { lateRelease = resolve; });
+  const latePacer = { async run<T>(_endpoint: string, signal: AbortSignal, send: () => Promise<T>): Promise<T> {
+    await Promise.race([lateGate, new Promise<never>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    })]);
+    if (signal.aborted) throw signal.reason;
+    return await send();
+  } } as GaslessPostPacer;
+  const expired = rejectSafe(new GaslessHttps(latePacer).request(ENDPOINT, "POST", "{}", 64, "APN_RPC_CONFIG"),
+    "APN_RPC_AMBIGUOUS");
+  await nextTurn(); timer.tick(60_000); await expired;
+  lateRelease(); await nextTurn(); assert.equal(mock.requests.length, 1);
 });
 test("DNS expiration discards late answers and releases slots without ever sending a signed body", async t => {
-  const mock = wire(t), timer = clock(t), transport = new GaslessHttps(); mock.delayDns();
+  const mock = wire(t), timer = clock(t), transport = new GaslessHttps(new GaslessPostPacer()); mock.delayDns();
   const pending = Array.from({ length: 3 }, () => rejectSafe(transport.request(ENDPOINT, "POST", "synthetic-secret", 64, "APN_RPC_CONFIG"), "APN_RPC_AMBIGUOUS"));
   await nextTurn(); assert.equal(mock.dnsCalls, 2); assert.equal(mock.requests.length, 0);
+  timer.tick(15_000); await nextTurn(); assert.equal(mock.dnsCalls, 3);
   timer.tick(15_000); await Promise.all(pending); mock.releaseDns(); await nextTurn();
-  assert.equal(mock.requests.length, 0); assert.equal(mock.dnsCalls, 2);
+  assert.equal(mock.requests.length, 0); assert.equal(mock.dnsCalls, 3);
   const fresh = transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG");
   await nextTurn(); assert.equal(mock.requests.length, 1); mock.requests[0]!.respond(200); await fresh;
 });
 test("deadline checks prevent dispatch after event-loop delay even before timeout callbacks run", async t => {
-  const mock = wire(t), timer = clock(t), transport = new GaslessHttps(); mock.delayDns();
+  const mock = wire(t), timer = clock(t), transport = new GaslessHttps(new GaslessPostPacer()); mock.delayDns();
   const pending = rejectSafe(transport.request(ENDPOINT, "POST", "synthetic-secret", 64, "APN_HTTP_CONFIG"));
   await nextTurn(); timer.elapseWithoutTimers(15_001); mock.releaseDns(); await pending;
   assert.equal(mock.requests.length, 0);
 });
 test("wall-clock rollback cannot extend the monotonic transport deadline", async t => {
-  const mock = wire(t), timer = clock(t), transport = new GaslessHttps();
+  const mock = wire(t), timer = clock(t), transport = new GaslessHttps(new GaslessPostPacer());
   const pending = rejectSafe(transport.request(ENDPOINT, "POST", "synthetic-secret", 64, "APN_HTTP_CONFIG"));
   await nextTurn(); t.mock.timers.setTime(0); timer.tick(15_000); await pending;
   assert.equal(mock.requests.length, 1); assert.equal(mock.requests[0]!.destroyed, 1);
@@ -127,8 +158,11 @@ test("redirects, malformed lengths, encoding, oversized streams and invalid UTF-
   ];
   for (const [status, headers, chunks, event] of cases) {
     const count = mock.requests.length;
-    const rejected = rejectSafe(transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG"));
-    await nextTurn(); mock.requests.at(-1)!.respond(status, headers, chunks, event); await rejected;
-    assert.equal(mock.requests.length, count + 1); assert.equal(mock.requests.at(-1)!.destroyed, 1);
+    const result = transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG");
+    await nextTurn(); mock.requests.at(-1)!.respond(status, headers, chunks, event);
+    if (status === 302) assert.deepEqual(await result, { status: 302, body: "" });
+    else await rejectSafe(result);
+    assert.equal(mock.requests.length, count + 1);
+    assert.equal(mock.requests.at(-1)!.destroyed, status === 302 ? 0 : 1);
   }
 });

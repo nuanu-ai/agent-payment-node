@@ -82,14 +82,16 @@ jobs:
             --sbom "$RUNNER_TEMP/apn-out/$sbom_name" \
             --manifest "$RUNNER_TEMP/apn-out/$manifest_name"
 
-      - name: Verify offline payment routes and installed Base WETH package
+      - name: Verify offline payment routes, gasless guards and installed Base WETH package
         shell: bash
         run: |
           set -euo pipefail
           npm run build:test
           node --test --test-concurrency=1 \
             dist-test/tests/core/orca-stable-candidate.test.js \
-            dist-test/tests/core/orca-stable-readonly.test.js
+            dist-test/tests/core/orca-stable-readonly.test.js \
+            dist-test/tests/core/smart-account-gasless-https.test.js \
+            dist-test/tests/core/metamask-gasless-rpc.test.js
           node --test tests/packaging/evm-base-weth-installed.test.mjs
 
       - name: Upload exact candidate bytes
