@@ -69,8 +69,10 @@ export function quoteWhirlpoolExactInAToB(pool: WhirlpoolState, arrays: readonly
       blocked("Whirlpool tick arrays are not the exact downward sequence from the current tick.", "orca_tick_array_state");
     }
   });
-  // The decoded price must lie inside the decoded tick, which also proves the tick math against the live state.
-  if (sqrtPriceAtTick(pool.tickCurrentIndex) > pool.sqrtPrice || pool.sqrtPrice >= sqrtPriceAtTick(pool.tickCurrentIndex + 1)) {
+  // The maximum tick is a single endpoint price; all lower ticks have a half-open interval.
+  if ((pool.tickCurrentIndex === MAX_TICK && pool.sqrtPrice !== sqrtPriceAtTick(MAX_TICK)) ||
+      (pool.tickCurrentIndex !== MAX_TICK &&
+        (sqrtPriceAtTick(pool.tickCurrentIndex) > pool.sqrtPrice || pool.sqrtPrice >= sqrtPriceAtTick(pool.tickCurrentIndex + 1)))) {
     blocked("Whirlpool price and current tick are inconsistent.", "orca_pool_state");
   }
   let remaining = amountIn, output = 0n, feeTotal = 0n, price = pool.sqrtPrice, tick = pool.tickCurrentIndex, liquidity = pool.liquidity;
