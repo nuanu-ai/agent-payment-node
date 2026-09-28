@@ -41,6 +41,8 @@ export async function freshOrcaStableExecutionPreflightCore(rpc: SolanaRpcPort, 
   const start = now(clock);
   const operation = validateSwapOperation(operationValue);
   const material = await validateOrcaStableMaterial(materialValue, operation);
+  if (rpc.originHash !== material.sourceBinding.rpcOriginHash)
+    blocked("Stable RPC source changed since preparation.", "orca_stable_rpc_source");
   if (material.maximumPriceImpactBps === undefined) {
     throw new ApnError("APN_REPREPARE_REQUIRED", "Stable material predates the durable owner price impact cap.");
   }
@@ -74,6 +76,8 @@ export async function freshOrcaStableExecutionPreflightCore(rpc: SolanaRpcPort, 
     maximumTotalFeeLamports: material.preview.maximumTotalFeeLamports,
   }, verifyPins, clock);
   const fresh = proof.preview, approved = material.preview;
+  if (canonicalJson(proof.evidence.sourceBinding) !== canonicalJson(material.sourceBinding))
+    blocked("Stable RPC source changed during preflight.", "orca_stable_rpc_source");
   if (fresh.owner !== approved.owner || fresh.sourceAta !== approved.sourceAta ||
       fresh.destinationAta !== approved.destinationAta || fresh.amountInAtomic !== approved.amountInAtomic ||
       fresh.minimumOutputAtomic !== approved.minimumOutputAtomic ||

@@ -1,7 +1,7 @@
 import { canonicalJson } from "../../canonical.js";
 import { validateChainAccount } from "../../chain-account-store.js";
 import { ApnError } from "../../errors.js";
-import { SolanaRpc, rpcArray, rpcRecord } from "../../solana/rpc.js";
+import { SolanaRpc, assertSolanaNetwork, rpcArray, rpcRecord } from "../../solana/rpc.js";
 import { GuardedSwapService } from "../service.js";
 import { loadOrcaStableSendClaim } from "./stable-effect-runtime.js";
 import { OrcaStableExecutionBindingStore, verifyOrcaStableSignedEffect } from "./stable-execution-journal.js";
@@ -42,6 +42,8 @@ export class OrcaStableFinalizedObserver {
             const binding = await this.bindings.load(operation, material);
             if (binding === null || binding.submissionMarkerHash !== operation.submissionMarker.markerHash)
                 corrupt("Stable observation binding is missing.");
+            if (this.rpc.originHash !== binding.sourceBinding.rpcOriginHash)
+                blocked("Stable observation RPC source changed.");
             const accountRaw = await this.custody.account(operation.quote.profile, "solana");
             if (accountRaw === null)
                 corrupt("Stable observation custody is missing.");
@@ -75,6 +77,9 @@ export class OrcaStableFinalizedObserver {
                         saved.reservedLeaseDigest !== operation.usageLease.reservationDigest) ||
                     (operation.receiptProof !== null && canonicalJson(operation.receiptProof) !== canonicalJson(saved.proof)))
                     corrupt("Stable finalized observation binding changed.");
+                if (!["finalized", "failed_confirmed_revert"].includes(operation.state) &&
+                    !await this.verifyRpcSource())
+                    return operation;
                 return await this.replay(operation, live, saved);
             }
             if (["finalized", "failed_confirmed_revert"].includes(operation.state) ||
@@ -90,9 +95,10 @@ export class OrcaStableFinalizedObserver {
             else if (operation.usageLease.state !== live.state ||
                 canonicalJson(operation.usageLease) !== canonicalJson(live))
                 corrupt("Stable principal lease drifted.");
-            if (this.rpc.budget === undefined || this.rpc.budget.remainingPhysicalRequests < 1 ||
-                this.rpc.budget.minimumIntervalMs < 750 || !this.rpc.hasPersistentPacer)
-                blocked("Stable observation requires budgeted, paced Solana RPC.");
+            if (!await this.verifyRpcSource())
+                return operation;
+            if (this.rpc.budget.remainingPhysicalRequests < 1)
+                return operation;
             let statuses, transaction = null;
             try {
                 statuses = await this.rpc.call("getSignatureStatuses", [[claim.signature], { searchTransactionHistory: true }]);
@@ -155,6 +161,20 @@ export class OrcaStableFinalizedObserver {
         const now = this.now(operation, operation.usageLease, saved.proof.observedAt);
         return terminal === "finalized" ? await this.service.finalize(operation, now, saved.proof)
             : await this.service.failConfirmedRevert(operation, now, saved.proof);
+    }
+    async verifyRpcSource() {
+        if (this.rpc.budget === undefined || this.rpc.budget.remainingPhysicalRequests < 1 ||
+            this.rpc.budget.minimumIntervalMs < 750 || !this.rpc.hasPersistentPacer)
+            blocked("Stable observation requires budgeted, paced Solana RPC.");
+        try {
+            await assertSolanaNetwork(this.rpc);
+        }
+        catch (error) {
+            if (error instanceof ApnError && error.code === "APN_CHAIN_MISMATCH")
+                throw error;
+            return false;
+        }
+        return true;
     }
     now(operation, lease, observedAt) {
         const current = this.clock();

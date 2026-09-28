@@ -9,17 +9,22 @@ import { ORCA_PROTOCOL_REGISTRY, ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./
 import { validateOrcaStableUnsigned } from "./stable-prepare.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT, WHIRLPOOL_PROGRAM } from "./pins.js";
 import { ORCA_STABLE_POOL } from "./stable-readonly.js";
-export const ORCA_STABLE_MATERIAL_SCHEMA = "apn.orca-stable-guarded-material.v1";
+import { validateStableSourceBinding } from "./stable-source-binding.js";
+export const ORCA_STABLE_MATERIAL_SCHEMA = "apn.orca-stable-guarded-material.v2";
 export async function sealOrcaStableMaterial(input, idempotencyKey) {
     const body = { schemaVersion: ORCA_STABLE_MATERIAL_SCHEMA, ...input };
-    const material = await validateOrcaStableMaterial({ ...body, materialDigest: domainHash("apn.orca-stable-guarded-material.v1", canonicalJson(body)) });
+    const material = await validateOrcaStableMaterial({ ...body, materialDigest: domainHash(ORCA_STABLE_MATERIAL_SCHEMA, canonicalJson(body)) });
     if (material.idempotencyHash !== swapIdempotencyHash(idempotencyKey) ||
         material.operationId !== preparedSwapOperationId(material.quote.profile, idempotencyKey))
         corrupt();
     return material;
 }
 export async function validateOrcaStableMaterial(value, operation) {
+    if (value.schemaVersion === "apn.orca-stable-guarded-material.v1" ||
+        value.sourceBinding === undefined)
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Stable material predates the sealed RPC source binding; prepare a fresh candidate.");
     const quote = validateSwapQuote(value.quote);
+    const sourceBinding = validateStableSourceBinding(value.sourceBinding);
     if (value.schemaVersion !== ORCA_STABLE_MATERIAL_SCHEMA || !/^[a-f0-9]{64}$/u.test(value.operationId) ||
         !/^[a-f0-9]{64}$/u.test(value.idempotencyHash) || !/^[a-f0-9]{64}$/u.test(value.requestDigest) ||
         value.operationId !== domainHash("apn.swap-operation-id.v1", canonicalJson({ profileHash: quote.profileHash,
@@ -40,6 +45,7 @@ export async function validateOrcaStableMaterial(value, operation) {
         corrupt();
     const evidence = value.evidence;
     if (evidence.policyDigest !== value.policyDigest || evidence.policyRevision !== value.policyRevision ||
+        canonicalJson(evidence.sourceBinding) !== canonicalJson(sourceBinding) ||
         evidence.activationDigest !== value.activationDigest || evidence.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
         evidence.messageHash !== preview.messageHash || evidence.unsignedPayloadHash !== sha256(preview.unsignedPayload) ||
         evidence.blockhash !== preview.blockhash || evidence.lastValidBlockHeight !== preview.lastValidBlockHeight ||
@@ -49,7 +55,7 @@ export async function validateOrcaStableMaterial(value, operation) {
             messageHash: preview.messageHash })))
         corrupt();
     const { materialDigest: _digest, ...body } = value;
-    if (value.materialDigest !== domainHash("apn.orca-stable-guarded-material.v1", canonicalJson(body)))
+    if (value.materialDigest !== domainHash(ORCA_STABLE_MATERIAL_SCHEMA, canonicalJson(body)))
         corrupt();
     if (operation !== undefined) {
         const op = validateSwapOperation(operation);
