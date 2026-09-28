@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bindArgv } from "../../src/command-binder.js";
 import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
@@ -857,8 +857,8 @@ async function privateStableSenderHarness(nearExpiry: boolean) {
     saveEffect: async (_account: unknown, saved: unknown) => { effect = saved; } } as any;
   const bindings = new OrcaStableExecutionBindingStore(f.root), signer = new OrcaStableLocalSigner(custody);
   const sender = new OrcaStableSingleSender(f.service, materials, bindings, custody, rpc, clock);
-  const competitor = new OrcaStableSingleSender(new GuardedSwapService(new SwapOperationRepository(f.root),
-    new AssetUsageLedger(f.root)), new SavedOrcaStableMaterialStore(f.root),
+  const competitorService = new GuardedSwapService(new SwapOperationRepository(f.root), new AssetUsageLedger(f.root));
+  const competitor = new OrcaStableSingleSender(competitorService, new SavedOrcaStableMaterialStore(f.root),
     new OrcaStableExecutionBindingStore(f.root), custody, rpc, clock);
   const begun = await beginOrcaStableExecution(f.service, materials, bindings, { admission: f.ports,
     preflight: async () => {
@@ -872,7 +872,7 @@ async function privateStableSenderHarness(nearExpiry: boolean) {
     }, sign: (operation, binding, account) => signer.sign(operation, binding, account), effects: custody },
   prepared.operation.operationId, clock);
   assert.equal(begun.operation.state, "submitting");
-  return { f, sender, competitor, materials, bindings, custody, physical,
+  return { f, sender, competitor, competitorService, materials, bindings, custody, physical,
     operationId: prepared.operation.operationId, staleOperation: begun.operation,
     dropEffect: () => { effect = null; } };
 }
@@ -880,6 +880,7 @@ async function privateStableSenderHarness(nearExpiry: boolean) {
 test("stable direct sender persists one claim across concurrent callers and transition crash", async (t) => {
   const h = await privateStableSenderHarness(false); t.after(h.f.cleanup);
   (h.f.service as any).recordPossibleSend = async () => { throw new Error("crash after transport"); };
+  (h.competitorService as any).recordPossibleSend = async () => { throw new Error("crash after transport"); };
   const results = await Promise.allSettled([h.sender.sendOnce(h.operationId), h.competitor.sendOnce(h.operationId)]);
   assert.equal(results.filter(result => result.status === "rejected").length, 2);
   assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 1);
@@ -906,6 +907,24 @@ test("stable claim before delayed transport stays observe-only after quote expir
   await assert.rejects(h.sender.sendOnce(h.operationId), (error) => reason(error) === "orca_stable_effect_boundary");
   assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 0);
 });
+
+for (const [label, contents] of [["canonical null", "null\n"], ["invalid object", "{}\n"]] as const) {
+  test(`occupied ${label} stable send claim blocks recovery and direct send`, async (t) => {
+    const h = await privateStableSenderHarness(false); t.after(h.f.cleanup);
+    const claimDirectory = join(h.f.root, "orca-stable-send-claims", h.staleOperation.ownerProfileHash);
+    await mkdir(claimDirectory, { recursive: true, mode: 0o700 });
+    await writeFile(join(claimDirectory, `${h.operationId}.json`), contents, { mode: 0o600 });
+    h.dropEffect();
+    await assert.rejects(recoverOrcaStableNoSend(h.f.service, h.materials, h.bindings,
+      new OrcaStableNoSendProofStore(h.f.root), h.custody, async () => await h.f.ports.localAccount(),
+      h.operationId, new Date(NOW.getTime() + 60_000)), { code: "APN_STATE_CORRUPT" });
+    await assert.rejects(h.sender.sendOnce(h.operationId), { code: "APN_STATE_CORRUPT" });
+    assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 0);
+    const lease = await h.f.service.usage.load({ account: h.staleOperation.quote.account, chain: ORCA_SOLANA_CHAIN,
+      asset: { kind: "token", identifier: USDC_MINT } }, h.staleOperation.usageLease!.reservationId);
+    assert.equal(lease?.state, "reserved");
+  });
+}
 
 test("stable journal marker-before-sign crash never signs on resume; policy drift refuses before marker", async (t) => {
   const f = await fixture(); t.after(f.cleanup);
