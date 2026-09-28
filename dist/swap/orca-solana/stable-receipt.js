@@ -6,12 +6,22 @@ import { rpcArray, rpcAtomic, rpcRecord, solanaSignature } from "../../solana/rp
 import { validateSwapOperation } from "../model.js";
 import { proveOrcaStableSimulationTransfers } from "./stable-effects.js";
 import { validateOrcaStableMaterial } from "./stable-material.js";
+import { validateOrcaStableUnsigned } from "./stable-prepare.js";
 import { sha256Hex, TOKEN_PROGRAM, USDC_MINT } from "./pins.js";
 /** Pure verification for a future observation route. This does no RPC or state transition. */
 export async function verifyOrcaStableFinalizedReceipt(input) {
     const operation = validateSwapOperation(input.operation);
     const material = await validateOrcaStableMaterial(input.material, operation);
-    const preview = material.preview;
+    const preview = input.executionPreview === undefined ? material.preview : await validateOrcaStableUnsigned(input.executionPreview);
+    if (preview.owner !== material.preview.owner || preview.sourceAta !== material.preview.sourceAta ||
+        preview.destinationAta !== material.preview.destinationAta || preview.amountInAtomic !== material.preview.amountInAtomic ||
+        preview.minimumOutputAtomic !== material.preview.minimumOutputAtomic ||
+        preview.createUsdtAta !== material.preview.createUsdtAta || preview.oracle !== material.preview.oracle ||
+        canonicalJson(preview.tickArrayStarts) !== canonicalJson(material.preview.tickArrayStarts) ||
+        canonicalJson(preview.instructionPrograms) !== canonicalJson(material.preview.instructionPrograms) ||
+        BigInt(preview.maximumTotalFeeLamports) > BigInt(material.preview.maximumTotalFeeLamports) ||
+        BigInt(preview.ataRentLamports) > BigInt(material.preview.ataRentLamports))
+        conflict();
     solanaSignature(input.signature);
     if (operation.submissionMarker === null || !["submitting", "submitted", "unknown_finality"].includes(operation.state))
         conflict();

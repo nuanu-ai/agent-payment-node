@@ -39,11 +39,14 @@ const SEND_CLAIM_VERSION = "apn.orca-stable-send-claim.v1";
 class OrcaStableSendClaimStore extends SecureStateStore {
     initialized;
     async exists(operation) {
+        return (await this.load(operation)) !== null;
+    }
+    async load(operation) {
         await this.ready();
         const directory = `orca-stable-send-claims/${operation.ownerProfileHash}`;
         const name = `${operation.operationId}.json`;
         if (!(await this.readDirectory(directory)).some(entry => entry.name === name))
-            return false;
+            return null;
         // readJson maps both an absent file and canonical JSON null to null. Directory occupancy is the
         // existence authority; an occupied but unreadable/invalid claim must never reopen a send or release.
         const raw = await this.readJson(this.path(operation));
@@ -67,7 +70,7 @@ class OrcaStableSendClaimStore extends SecureStateStore {
         catch {
             corrupt("Stable send claim signature is malformed.");
         }
-        return true;
+        return claim;
     }
     async assertUnclaimed(operation) {
         if (await this.exists(operation))
@@ -97,6 +100,9 @@ class OrcaStableSendClaimStore extends SecureStateStore {
 /** Recovery cannot release principal after a send right was consumed, even if custody is later unreadable. */
 export async function hasOrcaStableSendClaim(root, operation) {
     return await new OrcaStableSendClaimStore(root).exists(operation);
+}
+export async function loadOrcaStableSendClaim(root, operation) {
+    return await new OrcaStableSendClaimStore(root).load(operation);
 }
 /** Publicly importable sender: it reloads durable state and acquires the shared operation lock itself. */
 export class OrcaStableSingleSender {

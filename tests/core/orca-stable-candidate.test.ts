@@ -30,6 +30,8 @@ import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-stat
 import { verifyOrcaStableFinalizedReceipt } from "../../src/swap/orca-solana/stable-receipt.js";
 import { beginOrcaStableExecution, beginOrcaStableExecutionAndSend, OrcaStableExecutionBindingStore } from "../../src/swap/orca-solana/stable-execution-journal.js";
 import { OrcaStableLocalSigner, OrcaStableSingleSender } from "../../src/swap/orca-solana/stable-effect-runtime.js";
+import { OrcaStableFinalizedObserver } from "../../src/swap/orca-solana/stable-observer.js";
+import { OrcaStableFinalizedObservationStore } from "../../src/swap/orca-solana/stable-finalized-proof.js";
 import { freshOrcaStableExecutionPreflightCore } from "../../src/swap/orca-solana/stable-fresh-preflight.js";
 import { recoverOrcaStableNoSend } from "../../src/swap/orca-solana/stable-no-send-recovery.js";
 import { OrcaStableNoSendProofStore } from "../../src/swap/orca-solana/stable-no-send-proof.js";
@@ -851,7 +853,10 @@ async function privateStableSenderHarness(nearExpiry: boolean) {
     now: () => time, wait: async ms => { time += ms; } });
   const rpc = new SolanaRpc("https://stable-claim.example/rpc", fetcher, budget,
     new SolanaRpcPacer(state, () => time, async ms => { time += ms; }));
-  const custody = { account: async () => await f.ports.localAccount(),
+  const stableAccount = sealChainAccount({ schemaVersion: "apn.chain-account.v1", profile: "stable-candidate",
+    profileHash: sha256("profile\0stable-candidate"), rail: "solana", network: "mainnet",
+    provider: "local", custody: "local_software", address: f.source.owner, createdAt: NOW.toISOString() });
+  const custody = { account: async () => stableAccount,
     withSeed: async (_account: unknown, action: (seed: Buffer) => Promise<unknown>) => await action(Buffer.alloc(32, 23)),
     effect: async () => null, effectByOperationId: async () => effect,
     saveEffect: async (_account: unknown, saved: unknown) => { effect = saved; } } as any;
@@ -1167,6 +1172,172 @@ async function receiptFixture(createAta: boolean) {
   return { f, operation, material, signature, signatureStatuses, transaction,
     input: { operation, material, signature, signatureStatuses, transaction, observedAt: NOW } };
 }
+
+async function privateStableObserverHarness(revert = false, claimCrash = false) {
+  const h = await privateStableSenderHarness(false);
+  if (claimCrash) {
+    const original = h.f.service.recordPossibleSend.bind(h.f.service);
+    (h.f.service as any).recordPossibleSend = async () => { throw new Error("crash after claim"); };
+    await assert.rejects(h.sender.sendOnce(h.operationId), /crash after claim/);
+    (h.f.service as any).recordPossibleSend = original;
+  } else await h.sender.sendOnce(h.operationId);
+  const effect = await h.custody.effectByOperationId();
+  const receipt = await receiptFixture(false);
+  const error = { InstructionError: [3, { Custom: 6000 }] };
+  const metadata = receipt.transaction.meta;
+  const transaction = { ...receipt.transaction, transaction: [effect.rawPayload, "base64"], meta: revert
+    ? { ...metadata, err: error,
+      postBalances: [metadata.preBalances[0]! - 5_000n, ...metadata.preBalances.slice(1)],
+      postTokenBalances: metadata.preTokenBalances, innerInstructions: [] } : metadata };
+  const statuses = { value: [{ slot: receipt.transaction.slot, confirmationStatus: "finalized", err: revert ? error : null }] };
+  const state = new StateStore(h.f.root); await state.initialize();
+  let time = NOW.getTime() + 60_000;
+  const requests: Array<{ method: string; params: unknown[]; start: number }> = [];
+  let statusResult: unknown = statuses, transactionResult: unknown = transaction;
+  const fetcher: typeof fetch = async (_url, init) => {
+    const request = JSON.parse(init!.body as string) as { id: string; method: string; params: unknown[] };
+    requests.push({ method: request.method, params: request.params, start: time });
+    const result = request.method === "getSignatureStatuses" ? statusResult : transactionResult;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result },
+      (_key, value) => typeof value === "bigint" ? Number(value) : value),
+    { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const newObserver = (service = h.f.service) => {
+    const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 750,
+      now: () => time, wait: async ms => { time += ms; } });
+    const rpc = new SolanaRpc("https://stable-observe.example/rpc", fetcher, budget,
+      new SolanaRpcPacer(state, () => time, async ms => { time += ms; }));
+    return new OrcaStableFinalizedObserver(service, h.materials, h.bindings, h.custody, rpc, () => new Date(time));
+  };
+  return { ...h, receipt, effect, requests, statuses, transaction, newObserver,
+    setStatus: (value: unknown) => { statusResult = value; },
+    setTransaction: (value: unknown) => { transactionResult = value; } };
+}
+
+test("private stable observer finalizes exact receipt under concurrent observers and replays without RPC", async (t) => {
+  const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  const first = h.newObserver(), second = h.newObserver(h.competitorService);
+  const [a, b] = await Promise.all([first.observe(h.operationId), second.observe(h.operationId)]);
+  assert.equal(a.state, "finalized"); assert.equal(b.integrityHash, a.integrityHash);
+  assert.equal(a.receiptProof?.transactionHash, h.effect.transactionId);
+  assert.equal(a.usageLease?.outcomeDigest, a.receiptProof?.receiptHash);
+  assert.deepEqual(h.requests.map(row => row.method), ["getSignatureStatuses", "getTransaction"]);
+  assert.deepEqual(h.requests[0]?.params, [[h.effect.transactionId], { searchTransactionHistory: true }]);
+  assert.deepEqual(h.requests[1]?.params, [h.effect.transactionId,
+    { commitment: "finalized", encoding: "base64", maxSupportedTransactionVersion: 0 }]);
+  assert.ok(h.requests[1]!.start - h.requests[0]!.start >= 750);
+  assert.equal((await h.newObserver().observe(h.operationId)).integrityHash, a.integrityHash);
+  assert.equal(h.requests.length, 2);
+});
+
+test("private stable observer proves finalized revert and releases principal only with saved proof", async (t) => {
+  const h = await privateStableObserverHarness(true); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  const final = await h.newObserver().observe(h.operationId);
+  assert.equal(final.state, "failed_confirmed_revert");
+  assert.equal(final.failureProofHash, final.receiptProof?.receiptHash);
+  const saved = await new OrcaStableFinalizedObservationStore(h.f.root).load(final);
+  assert.equal(saved?.outcome, "reverted");
+  assert.deepEqual(saved?.proof, final.receiptProof);
+  assert.equal((await h.newObserver().observe(h.operationId)).integrityHash, final.integrityHash);
+});
+
+test("private stable observer repairs claimed submitting crash, then waits on null status or transaction", async (t) => {
+  const h = await privateStableObserverHarness(false, true); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  h.setStatus({ value: [null] });
+  const pending = await h.newObserver().observe(h.operationId);
+  assert.equal(pending.state, "unknown_finality"); assert.equal(pending.usageLease?.state, "unknown_finality");
+  assert.deepEqual(h.requests.map(row => row.method), ["getSignatureStatuses"]);
+  h.setStatus(h.statuses); h.setTransaction(null);
+  assert.equal((await h.newObserver().observe(h.operationId)).state, "unknown_finality");
+  assert.equal(await new OrcaStableFinalizedObservationStore(h.f.root).load(pending), null);
+  const live = await h.f.service.usage.load({ account: pending.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, pending.usageLease!.reservationId);
+  assert.equal(live?.state, "unknown_finality");
+});
+
+test("private stable observer replays proof after crashes before terminal lease and operation writes", async (t) => {
+  const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  const observer = h.newObserver();
+  const observations = (observer as any).observations;
+  const save = observations.save.bind(observations);
+  observations.save = async (...args: unknown[]) => { const value = await save(...args); throw new Error("crash after proof"); };
+  await assert.rejects(observer.observe(h.operationId), /crash after proof/);
+  const marked = await h.f.service.operations.loadAny(h.operationId);
+  assert.equal(marked?.state, "submitted");
+  assert.ok(await new OrcaStableFinalizedObservationStore(h.f.root).load(marked!));
+  const transition = h.f.service.operations.transition.bind(h.f.service.operations);
+  (h.f.service.operations as any).transition = async (...args: any[]) => {
+    if (args[3] === "finalized") throw new Error("crash after terminal lease");
+    return (transition as any)(...args);
+  };
+  await assert.rejects(h.newObserver().observe(h.operationId), /crash after terminal lease/);
+  (h.f.service.operations as any).transition = transition;
+  const live = await h.f.service.usage.load({ account: marked!.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, marked!.usageLease!.reservationId);
+  assert.equal(live?.state, "finalized");
+  const final = await h.newObserver().observe(h.operationId);
+  assert.equal(final.state, "finalized"); assert.equal(final.usageLease?.reservationDigest, live?.reservationDigest);
+  assert.deepEqual(h.requests.map(row => row.method), ["getSignatureStatuses", "getTransaction"]);
+});
+
+test("private stable observer repairs a crash between possible-send lease and operation writes", async (t) => {
+  const h = await privateStableObserverHarness(false, true); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  const transition = h.f.service.operations.transition.bind(h.f.service.operations);
+  (h.f.service.operations as any).transition = async (...args: any[]) => {
+    if (args[3] === "unknown_finality") throw new Error("crash after possible-send lease");
+    return (transition as any)(...args);
+  };
+  await assert.rejects(h.newObserver().observe(h.operationId), /crash after possible-send lease/);
+  (h.f.service.operations as any).transition = transition;
+  const submitting = (await h.f.service.operations.loadAny(h.operationId))!;
+  assert.equal(submitting.state, "submitting");
+  assert.equal((await h.f.service.usage.load({ account: submitting.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, submitting.usageLease!.reservationId))?.state, "unknown_finality");
+  assert.equal((await h.newObserver().observe(h.operationId)).state, "finalized");
+  assert.equal(h.requests.filter(row => row.method === "getTransaction").length, 1);
+});
+
+test("private stable observer keeps principal held on RPC failure and rejects malformed or conflicting evidence", async (t) => {
+  const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  h.setStatus({ value: [{ slot: h.transaction.slot, confirmationStatus: "finalized" }] });
+  await assert.rejects(h.newObserver().observe(h.operationId), { code: "APN_OPERATION_BLOCKED" });
+  h.setStatus(h.statuses);
+  h.setTransaction({ ...h.transaction, slot: h.transaction.slot + 1n });
+  await assert.rejects(h.newObserver().observe(h.operationId),
+    (error) => reason(error) === "orca_stable_receipt_conflict");
+  h.setStatus(undefined);
+  assert.equal((await h.newObserver().observe(h.operationId)).state, "submitted");
+  const op = (await h.f.service.operations.loadAny(h.operationId))!;
+  assert.equal(await new OrcaStableFinalizedObservationStore(h.f.root).load(op), null);
+  assert.equal((await h.f.service.usage.load({ account: op.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, op.usageLease!.reservationId))?.state, "submitted");
+});
+
+test("private stable observer rejects custody and send-claim mismatch before RPC", async (t) => {
+  const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  const account = await h.custody.account();
+  h.custody.account = async () => sealChainAccount({ schemaVersion: "apn.chain-account.v1",
+    profile: account.profile, profileHash: account.profileHash, rail: "solana", network: "mainnet",
+    provider: "local", custody: "local_software", address: account.address,
+    createdAt: new Date(NOW.getTime() + 1_000).toISOString() });
+  await assert.rejects(h.newObserver().observe(h.operationId), { code: "APN_STATE_CORRUPT" });
+  assert.equal(h.requests.length, 0);
+  h.custody.account = async () => account;
+  h.custody.effectByOperationId = async () => null;
+  await assert.rejects(h.newObserver().observe(h.operationId), { code: "APN_STATE_CORRUPT" });
+  assert.equal(h.requests.length, 0);
+});
+
+test("private stable observer fails closed on occupied malformed finalized proof", async (t) => {
+  const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  const op = (await h.f.service.operations.loadAny(h.operationId))!;
+  const directory = join(h.f.root, "orca-stable-finalized-observations", op.ownerProfileHash);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(join(directory, `${op.operationId}.json`), "null\n", { mode: 0o600 });
+  await assert.rejects(h.newObserver().observe(h.operationId), { code: "APN_STATE_CORRUPT" });
+  assert.equal(h.requests.length, 0);
+  assert.equal((await h.f.service.operations.loadAny(h.operationId))?.state, "submitted");
+});
 
 test("pure stable finalized receipt binds exact principal, output, fee and optional ATA rent", async (t) => {
   for (const createAta of [false, true]) {
