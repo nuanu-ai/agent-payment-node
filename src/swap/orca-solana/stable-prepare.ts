@@ -34,6 +34,7 @@ export interface OrcaStablePrepareInput {
   readonly lifetime: { readonly blockhash: string; readonly currentBlockHeight: string; readonly lastValidBlockHeight: string };
   readonly computeUnitLimit: number; readonly computeUnitPriceMicroLamports: string;
   readonly createUsdtAta: boolean; readonly usdtAtaRentLamports?: string; readonly maximumAtaRentLamports?: string;
+  readonly approvedMinimumOutputAtomic?: string;
   readonly maximumTotalFeeLamports: string;
 }
 export interface OrcaStableUnsignedPreview {
@@ -240,7 +241,11 @@ function validateMarketSnapshot(input: OrcaStablePrepareInput, tickAddresses: re
   const swap = quoteWhirlpoolExactInAToB(pool, arrays, BigInt(q.amountInAtomic));
   const expected = BigInt(swap.amountOutAtomic);
   const minimum = (expected * BigInt(10_000 - q.slippageBps) + 9_999n) / 10_000n;
-  if (swap.amountOutAtomic !== q.expectedOutputAtomic || minimum.toString() !== q.minimumOutputAtomic ||
+  const approvedMinimum = input.approvedMinimumOutputAtomic;
+  if (approvedMinimum !== undefined && (!/^[1-9][0-9]{0,19}$/u.test(approvedMinimum) ||
+      approvedMinimum !== q.minimumOutputAtomic || BigInt(approvedMinimum) > expected))
+    blocked("Approved stable minimum is outside the fresh pool output.", "orca_stable_output_floor");
+  if (swap.amountOutAtomic !== q.expectedOutputAtomic || (approvedMinimum === undefined && minimum.toString() !== q.minimumOutputAtomic) ||
       expected > getTokenDecoder().decode(s.vaultB.data).amount)
     blocked("Stable quote does not reproduce from supplied pool state.", "orca_stable_quote_state");
 }

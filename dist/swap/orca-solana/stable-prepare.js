@@ -233,7 +233,11 @@ function validateMarketSnapshot(input, tickAddresses) {
     const swap = quoteWhirlpoolExactInAToB(pool, arrays, BigInt(q.amountInAtomic));
     const expected = BigInt(swap.amountOutAtomic);
     const minimum = (expected * BigInt(10_000 - q.slippageBps) + 9999n) / 10000n;
-    if (swap.amountOutAtomic !== q.expectedOutputAtomic || minimum.toString() !== q.minimumOutputAtomic ||
+    const approvedMinimum = input.approvedMinimumOutputAtomic;
+    if (approvedMinimum !== undefined && (!/^[1-9][0-9]{0,19}$/u.test(approvedMinimum) ||
+        approvedMinimum !== q.minimumOutputAtomic || BigInt(approvedMinimum) > expected))
+        blocked("Approved stable minimum is outside the fresh pool output.", "orca_stable_output_floor");
+    if (swap.amountOutAtomic !== q.expectedOutputAtomic || (approvedMinimum === undefined && minimum.toString() !== q.minimumOutputAtomic) ||
         expected > getTokenDecoder().decode(s.vaultB.data).amount)
         blocked("Stable quote does not reproduce from supplied pool state.", "orca_stable_quote_state");
 }

@@ -141,7 +141,8 @@ export declare function simulateOrcaStableGuardedCore(rpc: SolanaRpcPort, ports:
     signed: false;
     broadcast: false;
 }>;
-declare function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts, request: OrcaStableSimulationRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date): Promise<{
+/** Internal exact-byte proof reused by the saved-operation preflight. It never persists or signs. */
+export declare function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStableAdmissionPorts, request: OrcaStableSimulationRequest, verifyPins: OrcaProgramPinVerifier, clock: () => Date): Promise<{
     quoteInput: {
         profile: string;
         account: string;
@@ -226,4 +227,3 @@ declare function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: OrcaStabl
         lastValidBlockHeight: string;
     };
 }>;
-export {};
