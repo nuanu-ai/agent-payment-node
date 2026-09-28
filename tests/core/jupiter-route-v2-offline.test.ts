@@ -87,6 +87,8 @@ test("Quantum build rejects self-consistent quote mutations and instruction mism
     "route input mint": (r) => { r.routePlan[0].swapInfo.inputMint = USDC; },
     "route output mint": (r) => { r.routePlan[0].swapInfo.outputMint = SOL; },
     "route label": (r) => { r.routePlan[0].swapInfo.label = "Other"; },
+    "quoted AMM": (r) => { r.routePlan[0].swapInfo.ammKey = SOL; },
+    "captured AMM account": (r) => { r.swapInstruction.accounts[14].pubkey = SOL; },
     "route percent": (r) => { r.routePlan[0].percent = 99; },
     "route bps": (r) => { r.routePlan[0].bps = 9999; },
     "instruction input": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeBigUInt64LE(1000001n, 8); r.swapInstruction.data = d.toString("base64"); },
