@@ -24,6 +24,9 @@ export async function verifyOrcaStableFinalizedReceipt(input) {
     if (statuses[0] === null)
         return null;
     const status = rpcRecord(statuses[0]);
+    if (!["processed", "confirmed", "finalized"].includes(status.confirmationStatus) ||
+        !Object.hasOwn(status, "err") || !transactionError(status.err))
+        conflict();
     if (status.confirmationStatus !== "finalized")
         return null;
     const slot = rpcAtomic(status.slot);
@@ -61,8 +64,9 @@ export async function verifyOrcaStableFinalizedReceipt(input) {
     if (fee > 5000n + BigInt(preview.maximumPriorityFeeLamports) ||
         fee + rent > BigInt(preview.maximumTotalFeeLamports))
         conflict();
-    const statusErr = status.err ?? null, metaErr = meta.err;
-    if (metaErr === undefined || canonicalJson(normalize(statusErr)) !== canonicalJson(normalize(metaErr)))
+    const statusErr = status.err, metaErr = meta.err;
+    if (!Object.hasOwn(meta, "err") || !transactionError(metaErr) ||
+        canonicalJson(normalize(statusErr)) !== canonicalJson(normalize(metaErr)))
         conflict();
     const sourceIndex = keys.indexOf(address(preview.sourceAta));
     const destinationIndex = keys.indexOf(address(preview.destinationAta));
@@ -117,6 +121,8 @@ function tokenBalance(value, index, mint, owner, allowMissing) {
             typeof amount.amount !== "string" || !/^(?:0|[1-9][0-9]{0,19})$/u.test(amount.amount) || found !== undefined)
             conflict();
         found = BigInt(amount.amount);
+        if (found > (1n << 64n) - 1n)
+            conflict();
     }
     if (found === undefined && !allowMissing)
         conflict();
@@ -124,6 +130,12 @@ function tokenBalance(value, index, mint, owner, allowMissing) {
 }
 function normalize(value) {
     return JSON.parse(JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry));
+}
+function transactionError(value) {
+    const entry = isPlainRecord(value) ? Object.entries(value) : [];
+    return value === null || (typeof value === "string" && value.length > 0 && value.length <= 128) ||
+        (entry.length === 1 && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(entry[0][0]) &&
+            entry[0][1] !== undefined && entry[0][1] !== null);
 }
 function conflict() {
     throw new ApnError("APN_OPERATION_BLOCKED", "Finalized stable Orca receipt conflicts with the saved operation.", { reason: "orca_stable_receipt_conflict" });
