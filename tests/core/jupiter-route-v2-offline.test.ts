@@ -107,6 +107,9 @@ test("Quantum build rejects unsupported route layouts and threshold above quote"
     "instruction side": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d[35] = 1; r.swapInstruction.data = d.toString("base64"); },
     "instruction bps": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeUInt16LE(9999, 36); r.swapInstruction.data = d.toString("base64"); },
     "instruction indices": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d[38] = 1; d[39] = 0; r.swapInstruction.data = d.toString("base64"); },
+    "platform fee": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeUInt16LE(10_000, 26); r.swapInstruction.data = d.toString("base64"); },
+    "positive slippage": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeUInt16LE(10_000, 28); r.swapInstruction.data = d.toString("base64"); },
+    "extra remaining account": (r) => { r.swapInstruction.accounts.push(structuredClone(r.swapInstruction.accounts[20])); },
     "threshold above quote": (r) => { r.otherAmountThreshold = "116604"; },
   };
   for (const [name, mutate] of Object.entries(cases)) {

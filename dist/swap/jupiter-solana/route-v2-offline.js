@@ -60,7 +60,8 @@ export function checkQuantumBuildConsistencyOffline(build, expected) {
         quotedStep.swapInfo.outputMint !== build.outputMint ||
         route.inAmount !== build.inAmount || route.inAmount !== quotedStep.swapInfo.inAmount ||
         route.quotedOutAmount !== build.outAmount || route.quotedOutAmount !== quotedStep.swapInfo.outAmount ||
-        route.slippageBps !== build.slippageBps || BigInt(build.otherAmountThreshold) > BigInt(build.outAmount)) {
+        route.slippageBps !== build.slippageBps || route.platformFeeBps !== 0 || route.positiveSlippageBps !== 0 ||
+        route.remainingAccountCount !== 11 || BigInt(build.otherAmountThreshold) > BigInt(build.outAmount)) {
         invalid("Jupiter raw build and Quantum route_v2 instruction are inconsistent or unsupported.");
     }
     return route;
