@@ -40,6 +40,8 @@ export async function verifyOrcaStableFinalizedReceipt(input: {
       !Object.hasOwn(status, "err") || !transactionError(status.err)) conflict();
   if (status.confirmationStatus !== "finalized") return null;
   const slot = rpcAtomic(status.slot);
+  const statusContext = rpcRecord(rpcRecord(input.signatureStatuses).context);
+  if (rpcAtomic(statusContext.slot) < slot) conflict();
   if (input.transaction === null) return null;
   const transaction = rpcRecord(input.transaction), meta = rpcRecord(transaction.meta);
   if (rpcAtomic(transaction.slot) !== slot || rpcAtomic(transaction.version) !== 0n) conflict();

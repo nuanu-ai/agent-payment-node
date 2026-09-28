@@ -21,6 +21,7 @@ export interface OrcaStableSnapshotRequest {
 export declare function readOrcaStableSnapshotAndPrepare(rpc: SolanaRpc, request: OrcaStableSnapshotRequest): Promise<{
     source: "rpc_observed_non_signing";
     rpcOriginHash: string;
+    genesisHash: string;
     slot: string;
     quote: {
         readonly chain: string;
@@ -49,6 +50,7 @@ export declare function readOrcaStableSnapshotAndPrepare(rpc: SolanaRpc, request
 export declare function readOrcaStableSnapshotCore(rpc: SolanaRpcPort, request: OrcaStableSnapshotRequest, verifyPins: OrcaProgramPinVerifier): Promise<{
     source: "rpc_observed_non_signing";
     rpcOriginHash: string;
+    genesisHash: string;
     slot: string;
     quote: {
         readonly chain: string;

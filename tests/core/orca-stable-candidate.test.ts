@@ -74,7 +74,7 @@ async function fixture(exists = true) {
   if (!exists) postDestination = raw(TOKEN_PROGRAM, postDestination.data, 2_000_000n);
   let postOwner = raw(SYSTEM_PROGRAM, Buffer.alloc(0), exists ? 19_995_000n : 17_995_000n);
   let simulationSlot = 450_687_914n, trustedTime = NOW;
-  let height = 400_000_000n, rpcRateLimitedAt: SolanaMethod | null = null;
+  let height = 400_000_000n, genesis = SOLANA_GENESIS, rpcRateLimitedAt: SolanaMethod | null = null;
   let afterSimulation: (() => void) | null = null;
   const accounts = new Map<string, ReturnType<typeof wire>>([
     [ORCA_STABLE_POOL, wire(source.snapshot.pool)], [ORCA_STABLE_VAULT_A, wire(source.snapshot.vaultA)],
@@ -85,10 +85,10 @@ async function fixture(exists = true) {
   for (let i = 0; i < 3; i++) accounts.set(await whirlpoolTickArrayAddress(WHIRLPOOL_PROGRAM, ORCA_STABLE_POOL,
     source.quote.tickArrayStarts[i]!), wire(source.snapshot.tickArrays[i]!));
   const calls: SolanaMethod[] = [];
-  const rpc: SolanaRpcPort = { originHash: "b".repeat(64), call: async (method, params) => {
+  const rpc: SolanaRpcPort = { originHash: sha256("https://stable-source.example/rpc"), call: async (method, params) => {
     calls.push(method);
     if (method === rpcRateLimitedAt) throw new ApnError("APN_RPC_RATE_LIMITED", "terminal 429");
-    if (method === "getGenesisHash") return SOLANA_GENESIS;
+    if (method === "getGenesisHash") return genesis;
     if (method === "getMultipleAccounts") {
       if (destinationAppears && (params[0] as string[]).length === 3) {
         accounts.set(source.snapshot.usdtAtaAddress, wire(token(SOLANA_USDT, source.owner, 0n)));
@@ -199,7 +199,8 @@ async function fixture(exists = true) {
     setToken2022: () => { token2022 = true; }, setSimulationSlot: (value: bigint) => { simulationSlot = value; },
     clock: () => trustedTime, advanceClockAfterSimulation: () => { afterSimulation = () => {
       trustedTime = new Date(NOW.getTime() + 31_000); }; },
-    setHeight: (value: bigint) => { height = value; }, setUsage: (value: string) => { usage = value; },
+    setHeight: (value: bigint) => { height = value; }, setGenesis: (value: string) => { genesis = value; },
+    setUsage: (value: string) => { usage = value; },
     setRevision: (value: number) => { current = { ...active, revision: value }; },
     setActivation: (value: string) => { current = { ...active, activationDigest: value }; },
     driftRevisionAfterSimulation: () => { afterSimulation = () => { current = { ...active, revision: 8 }; }; },
@@ -546,6 +547,34 @@ test("saved stable fresh preflight refuses policy drift, expiry, fee cap and a t
   assert.equal(f.calls.slice(before).filter((call) => call === "getLatestBlockhash").length, 1);
 });
 
+test("stable source binding seals the observed origin and mainnet genesis and rejects unbound execution", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), materials = new SavedOrcaStableMaterialStore(f.root);
+  const reserved = (await approveOrcaStableReservation(f.service, materials, f.ports,
+    prepared.operation.operationId, { confirm: async () => {} }, f.clock)).operation;
+  const material = (await materials.load(reserved.operationId, reserved))!;
+  assert.deepEqual(material.sourceBinding, { schemaVersion: "apn.orca-stable-rpc-source.v1",
+    rpcOriginHash: f.rpc.originHash, genesisHash: SOLANA_GENESIS });
+  assert.deepEqual((material.evidence as any).sourceBinding, material.sourceBinding);
+  f.calls.length = 0;
+  await assert.rejects(freshOrcaStableExecutionPreflightCore({ ...f.rpc, originHash: sha256("https://other.example/rpc") },
+    f.ports, f.service.usage, reserved, material, async () => [], f.clock),
+  (error) => reason(error) === "orca_stable_rpc_source");
+  assert.equal(f.calls.length, 0);
+  await assert.rejects(freshOrcaStableExecutionPreflightCore(f.rpc, f.ports, f.service.usage,
+    reserved, { ...material, schemaVersion: "apn.orca-stable-guarded-material.v1" } as any,
+    async () => [], f.clock), { code: "APN_REPREPARE_REQUIRED" });
+  assert.equal(f.calls.length, 0);
+  f.setGenesis("not-mainnet");
+  await assert.rejects(freshOrcaStableExecutionPreflightCore(f.rpc, f.ports, f.service.usage,
+    reserved, material, async () => [], f.clock), { code: "APN_CHAIN_MISMATCH" });
+  assert.deepEqual(f.calls, ["getGenesisHash"]);
+  assert.equal((await f.service.operations.loadAny(reserved.operationId))?.state, "reserved");
+  assert.equal((await f.service.usage.load({ account: reserved.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, reserved.usageLease!.reservationId))?.state, "reserved");
+  assert.ok(!f.calls.includes("sendTransaction"));
+});
+
 test("saved stable fresh preflight refuses changed pinned pool and destination ATA", async (t) => {
   for (const mutate of ["pool", "destination"] as const) {
     const f = await fixture(); t.after(f.cleanup);
@@ -765,7 +794,7 @@ test("private stable first attempt consumes 23 preflight POSTs and one persisted
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }),
       { status: 200, headers: { "content-type": "application/json" } });
   };
-  const endpoint = "https://stable-fake.example/rpc";
+  const endpoint = "https://stable-source.example/rpc";
   const budget = new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750,
     now: () => time, wait: async ms => { time += ms; } });
   const rpc = new SolanaRpc(endpoint, fetcher, budget,
@@ -851,7 +880,7 @@ async function privateStableSenderHarness(nearExpiry: boolean) {
   const clock = () => new Date(time);
   const budget = new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750,
     now: () => time, wait: async ms => { time += ms; } });
-  const rpc = new SolanaRpc("https://stable-claim.example/rpc", fetcher, budget,
+  const rpc = new SolanaRpc("https://stable-source.example/rpc", fetcher, budget,
     new SolanaRpcPacer(state, () => time, async ms => { time += ms; }));
   const stableAccount = sealChainAccount({ schemaVersion: "apn.chain-account.v1", profile: "stable-candidate",
     profileHash: sha256("profile\0stable-candidate"), rail: "solana", network: "mainnet",
@@ -1160,7 +1189,8 @@ async function receiptFixture(createAta: boolean) {
     { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "initializeAccount3", info: {
       account: material.preview.destinationAta, mint: SOLANA_USDT, owner: f.source.owner } } },
   ];
-  const signatureStatuses = { value: [{ slot: 450_687_920n, confirmationStatus: "finalized", err: null }] };
+  const signatureStatuses = { context: { slot: 450_687_920n },
+    value: [{ slot: 450_687_920n, confirmationStatus: "finalized", err: null }] };
   const transaction = { slot: 450_687_920n, version: 0n, transaction: [encoded, "base64"], meta: {
     err: null, fee: 5_000n, loadedAddresses: { writable: [], readonly: [] }, preBalances, postBalances,
     preTokenBalances: [balance(sourceIndex, USDC_MINT, "2000000"),
@@ -1189,29 +1219,32 @@ async function privateStableObserverHarness(revert = false, claimCrash = false) 
     ? { ...metadata, err: error,
       postBalances: [metadata.preBalances[0]! - 5_000n, ...metadata.preBalances.slice(1)],
       postTokenBalances: metadata.preTokenBalances, innerInstructions: [] } : metadata };
-  const statuses = { value: [{ slot: receipt.transaction.slot, confirmationStatus: "finalized", err: revert ? error : null }] };
+  const statuses = { context: { slot: receipt.transaction.slot },
+    value: [{ slot: receipt.transaction.slot, confirmationStatus: "finalized", err: revert ? error : null }] };
   const state = new StateStore(h.f.root); await state.initialize();
   let time = NOW.getTime() + 60_000;
   const requests: Array<{ method: string; params: unknown[]; start: number }> = [];
-  let statusResult: unknown = statuses, transactionResult: unknown = transaction;
+  let statusResult: unknown = statuses, transactionResult: unknown = transaction, genesisResult: unknown = SOLANA_GENESIS;
   const fetcher: typeof fetch = async (_url, init) => {
     const request = JSON.parse(init!.body as string) as { id: string; method: string; params: unknown[] };
     requests.push({ method: request.method, params: request.params, start: time });
-    const result = request.method === "getSignatureStatuses" ? statusResult : transactionResult;
+    const result = request.method === "getGenesisHash" ? genesisResult :
+      request.method === "getSignatureStatuses" ? statusResult : transactionResult;
     return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id, result },
       (_key, value) => typeof value === "bigint" ? Number(value) : value),
     { status: 200, headers: { "content-type": "application/json" } });
   };
-  const newObserver = (service = h.f.service) => {
-    const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 750,
+  const newObserver = (service = h.f.service, endpoint = "https://stable-source.example/rpc") => {
+    const budget = new SolanaRpcBudget({ maxPhysicalRequests: 3, minimumIntervalMs: 750,
       now: () => time, wait: async ms => { time += ms; } });
-    const rpc = new SolanaRpc("https://stable-observe.example/rpc", fetcher, budget,
+    const rpc = new SolanaRpc(endpoint, fetcher, budget,
       new SolanaRpcPacer(state, () => time, async ms => { time += ms; }));
     return new OrcaStableFinalizedObserver(service, h.materials, h.bindings, h.custody, rpc, () => new Date(time));
   };
   return { ...h, receipt, effect, requests, statuses, transaction, newObserver,
     setStatus: (value: unknown) => { statusResult = value; },
-    setTransaction: (value: unknown) => { transactionResult = value; } };
+    setTransaction: (value: unknown) => { transactionResult = value; },
+    setGenesis: (value: unknown) => { genesisResult = value; } };
 }
 
 test("private stable observer finalizes exact receipt under concurrent observers and replays without RPC", async (t) => {
@@ -1221,13 +1254,14 @@ test("private stable observer finalizes exact receipt under concurrent observers
   assert.equal(a.state, "finalized"); assert.equal(b.integrityHash, a.integrityHash);
   assert.equal(a.receiptProof?.transactionHash, h.effect.transactionId);
   assert.equal(a.usageLease?.outcomeDigest, a.receiptProof?.receiptHash);
-  assert.deepEqual(h.requests.map(row => row.method), ["getSignatureStatuses", "getTransaction"]);
-  assert.deepEqual(h.requests[0]?.params, [[h.effect.transactionId], { searchTransactionHistory: true }]);
-  assert.deepEqual(h.requests[1]?.params, [h.effect.transactionId,
+  assert.deepEqual(h.requests.map(row => row.method), ["getGenesisHash", "getSignatureStatuses", "getTransaction"]);
+  assert.deepEqual(h.requests[1]?.params, [[h.effect.transactionId], { searchTransactionHistory: true }]);
+  assert.deepEqual(h.requests[2]?.params, [h.effect.transactionId,
     { commitment: "finalized", encoding: "base64", maxSupportedTransactionVersion: 0 }]);
   assert.ok(h.requests[1]!.start - h.requests[0]!.start >= 750);
+  assert.ok(h.requests[2]!.start - h.requests[1]!.start >= 750);
   assert.equal((await h.newObserver().observe(h.operationId)).integrityHash, a.integrityHash);
-  assert.equal(h.requests.length, 2);
+  assert.equal(h.requests.length, 3);
 });
 
 test("private stable observer proves finalized revert and releases principal only with saved proof", async (t) => {
@@ -1241,12 +1275,32 @@ test("private stable observer proves finalized revert and releases principal onl
   assert.equal((await h.newObserver().observe(h.operationId)).integrityHash, final.integrityHash);
 });
 
+test("private stable observation rejects a changed source, wrong genesis and stale status context with principal held", async (t) => {
+  const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  await assert.rejects(h.newObserver(h.f.service, "https://other.example/rpc").observe(h.operationId),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(h.requests.length, 0);
+  h.setGenesis("not-mainnet");
+  await assert.rejects(h.newObserver().observe(h.operationId), { code: "APN_CHAIN_MISMATCH" });
+  assert.deepEqual(h.requests.map(row => row.method), ["getGenesisHash"]);
+  h.setGenesis(SOLANA_GENESIS);
+  h.setStatus({ ...h.statuses, context: { slot: h.transaction.slot - 1n } });
+  await assert.rejects(h.newObserver().observe(h.operationId),
+    (error) => reason(error) === "orca_stable_receipt_conflict");
+  assert.equal((await h.f.service.operations.loadAny(h.operationId))?.state, "submitted");
+  const operation = (await h.f.service.operations.loadAny(h.operationId))!;
+  assert.equal((await h.f.service.usage.load({ account: operation.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, operation.usageLease!.reservationId))?.state, "submitted");
+  assert.equal(h.requests.filter(row => row.method === "sendTransaction").length, 0);
+  assert.equal(h.requests.filter(row => row.method === "getTransaction").length, 1);
+});
+
 test("private stable observer repairs claimed submitting crash, then waits on null status or transaction", async (t) => {
   const h = await privateStableObserverHarness(false, true); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
   h.setStatus({ value: [null] });
   const pending = await h.newObserver().observe(h.operationId);
   assert.equal(pending.state, "unknown_finality"); assert.equal(pending.usageLease?.state, "unknown_finality");
-  assert.deepEqual(h.requests.map(row => row.method), ["getSignatureStatuses"]);
+  assert.deepEqual(h.requests.map(row => row.method), ["getGenesisHash", "getSignatureStatuses"]);
   h.setStatus(h.statuses); h.setTransaction(null);
   assert.equal((await h.newObserver().observe(h.operationId)).state, "unknown_finality");
   assert.equal(await new OrcaStableFinalizedObservationStore(h.f.root).load(pending), null);
@@ -1277,7 +1331,8 @@ test("private stable observer replays proof after crashes before terminal lease 
   assert.equal(live?.state, "finalized");
   const final = await h.newObserver().observe(h.operationId);
   assert.equal(final.state, "finalized"); assert.equal(final.usageLease?.reservationDigest, live?.reservationDigest);
-  assert.deepEqual(h.requests.map(row => row.method), ["getSignatureStatuses", "getTransaction"]);
+  assert.deepEqual(h.requests.map(row => row.method), ["getGenesisHash", "getSignatureStatuses", "getTransaction",
+    "getGenesisHash", "getGenesisHash"]);
 });
 
 test("private stable observer repairs a crash between possible-send lease and operation writes", async (t) => {
@@ -1351,14 +1406,14 @@ test("pure stable finalized receipt binds exact principal, output, fee and optio
 test("pure stable receipt leaves nonfinalized evidence pending and proves a finalized revert", async (t) => {
   const r = await receiptFixture(true); t.after(r.f.cleanup);
   assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input,
-    signatureStatuses: { value: [{ ...r.signatureStatuses.value[0], confirmationStatus: "confirmed" }] } }), null);
+    signatureStatuses: { context: r.signatureStatuses.context, value: [{ ...r.signatureStatuses.value[0], confirmationStatus: "confirmed" }] } }), null);
   const err = { InstructionError: [3, { Custom: 6000 }] };
   const reverted = { ...r.transaction, meta: { ...r.transaction.meta, err,
     postBalances: [...r.transaction.meta.preBalances.slice(0, 1).map((value) => value - 5_000n),
       ...r.transaction.meta.preBalances.slice(1)],
     postTokenBalances: [r.transaction.meta.preTokenBalances[0]], innerInstructions: [] } };
   const proof = await verifyOrcaStableFinalizedReceipt({ ...r.input, transaction: reverted,
-    signatureStatuses: { value: [{ ...r.signatureStatuses.value[0], err }] } });
+    signatureStatuses: { context: r.signatureStatuses.context, value: [{ ...r.signatureStatuses.value[0], err }] } });
   assert.equal(proof?.outcome, "reverted");
 });
 
@@ -1381,7 +1436,7 @@ test("pure stable receipt rejects changed token deltas, CPI, fee, slot and signe
 test("pure stable receipt treats missing evidence as pending and refuses ambiguous finality or ATA setup", async (t) => {
   const r = await receiptFixture(true); t.after(r.f.cleanup);
   const conflict = (error: unknown) => reason(error) === "orca_stable_receipt_conflict";
-  assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input, signatureStatuses: { value: [null] } }), null);
+  assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input, signatureStatuses: { context: r.signatureStatuses.context, value: [null] } }), null);
   assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input, transaction: null }), null);
   await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input, signatureStatuses: {
     value: [{ ...r.signatureStatuses.value[0], err: { InstructionError: [3, "Failure"] } }] } }), conflict);
@@ -1416,7 +1471,7 @@ test("pure stable receipt requires explicit status and transaction errors with k
     { ...status, err: { InstructionError: undefined } },
     { ...status, confirmationStatus: "unknown" }, { slot: status.slot, err: null },
   ]) await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input,
-    signatureStatuses: { value: [changed] } }), conflict);
+    signatureStatuses: { context: r.signatureStatuses.context, value: [changed] } }), conflict);
   for (const meta of [{ ...r.transaction.meta, err: undefined }, { ...r.transaction.meta, err: 0 }]) {
     await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input,
       transaction: { ...r.transaction, meta } }), conflict);
@@ -1428,7 +1483,7 @@ test("pure stable revert accepts only canonical Solana transaction error variant
   const postBalances = [...r.transaction.meta.preBalances];
   postBalances[0] = postBalances[0]! - 5_000n;
   const check = (err: unknown) => verifyOrcaStableFinalizedReceipt({ ...r.input,
-    signatureStatuses: { value: [{ ...r.signatureStatuses.value[0], err }] },
+    signatureStatuses: { context: r.signatureStatuses.context, value: [{ ...r.signatureStatuses.value[0], err }] },
     transaction: { ...r.transaction, meta: { ...r.transaction.meta, err, postBalances,
       postTokenBalances: [r.transaction.meta.preTokenBalances[0]], innerInstructions: [] } } });
   for (const valid of ["AccountInUse", { DuplicateInstruction: 2n },
