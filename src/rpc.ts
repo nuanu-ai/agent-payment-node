@@ -89,7 +89,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
       const onAbort = () => { clearTimeout(timer); reject(new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.")); };
       signal.addEventListener("abort", onAbort, { once: true });
     });
-    this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait);
+    this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait, () => this.remainingTimeoutMs());
   }
 
   async seiNativeBalance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot> {
