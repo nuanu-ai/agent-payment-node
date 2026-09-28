@@ -40,6 +40,8 @@ export const ORCA_COMMANDS: readonly CommandDefinition[] = [
   command("stable-execute", [operation], "Confirm a reserved stable swap separately, refresh preflight, sign once and make at most one send attempt.", "payment_submit",
     { class: "foreground_tty", when: "Every stable execution requires separate exact foreground consent; MCP returns the CLI handoff only." }),
   command("stable-release", [operation], "Retire an unsigned stable preparation and release its exact principal reservation. Never signs or broadcasts.", "local_write"),
+  command("stable-recover-no-send", [operation], "Prove a marked stable operation has neither send claim nor signed effect, then release only its exact principal lease.", "local_write",
+    { class: "foreground_tty", when: "A marked no-send recovery requires separate exact owner consent; MCP returns the CLI handoff only." }),
   command("stable-observe", [operation], "Read a claimed stable signature; durably record possible send, finalized proof and principal lease outcome. Never signs or sends.", "local_write"),
   command("inventory", [], "Read the pinned Whirlpool program, pool and keyless mechanism pin without admitting them.", "none"),
   command("quote", [profile, option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
@@ -96,7 +98,7 @@ export function bindOrcaCommand(path: string, options: Readonly<Record<string, s
       createUsdtAta, ...(createUsdtAta ? { maximumAtaRentLamports: rent } : {}), maximumTotalFeeLamports: fee,
       idempotencyKey: options["--idempotency-key"]! };
   }
-  if (action === "stable-status" || action === "stable-approve" || action === "stable-execute" || action === "stable-release" || action === "stable-observe") { exact(options, ["--operation"]); return { command: `swap.orca.${action}`, operationId: hash(options["--operation"]) }; }
+  if (action === "stable-status" || action === "stable-approve" || action === "stable-execute" || action === "stable-release" || action === "stable-recover-no-send" || action === "stable-observe") { exact(options, ["--operation"]); return { command: `swap.orca.${action}`, operationId: hash(options["--operation"]) }; }
   if (action === "status" || action === "approve" || action === "execute") {
     exact(options, ["--operation"]); return { command: `swap.orca.${action}`, operationId: hash(options["--operation"]) };
   }

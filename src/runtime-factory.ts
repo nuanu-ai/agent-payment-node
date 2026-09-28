@@ -135,8 +135,11 @@ import { verifyOrcaProgramPins, type OrcaProgramPinVerifier } from "./swap/orca-
 import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
 import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-candidate.js";
 import { orcaStablePreparedStatus } from "./swap/orca-solana/stable-status.js";
-import { approveOrcaStableReservation, confirmOrcaStableExecution, TtyOrcaStableConsent, type OrcaStableConsentPort } from "./swap/orca-solana/stable-approval.js";
+import { approveOrcaStableReservation, confirmOrcaStableExecution, confirmOrcaStableNoSendRecovery,
+  TtyOrcaStableConsent, type OrcaStableConsentPort } from "./swap/orca-solana/stable-approval.js";
 import { executeOrcaStableFirstAttempt } from "./swap/orca-solana/stable-effect-runtime.js";
+import { recoverOrcaStableNoSend } from "./swap/orca-solana/stable-no-send-recovery.js";
+import { OrcaStableNoSendProofStore } from "./swap/orca-solana/stable-no-send-proof.js";
 import { releaseOrcaStableNoEffect } from "./swap/orca-solana/stable-release.js";
 import { OrcaStableExecutionBindingStore } from "./swap/orca-solana/stable-execution-journal.js";
 import { OrcaStableFinalizedObserver } from "./swap/orca-solana/stable-observer.js";
@@ -211,6 +214,8 @@ export interface RuntimeFactoryOptions {
   readonly orcaStablePinVerifier?: OrcaProgramPinVerifier;
   /** Offline acceptance only; production reads exact consent from the owner TTY. */
   readonly orcaStableExecuteConsent?: OrcaStableConsentPort;
+  /** Offline acceptance only; production reads separate recovery consent from the owner TTY. */
+  readonly orcaStableRecoveryConsent?: OrcaStableConsentPort;
   readonly tronRpcUrl?: string;
   readonly stateRoot?: string;
   readonly native?: NativePort;
@@ -493,7 +498,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(bound.request.command === "swap.orca.stable-quote" ? {
       orcaStableQuote: (request: Parameters<typeof quoteOrcaStableReadOnly>[1]) => quoteOrcaStableReadOnly(solanaRpc, request),
     } : {}),
-    ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve", "swap.orca.stable-execute", "swap.orca.stable-release", "swap.orca.stable-observe"].includes(bound.request.command) ? {
+    ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve", "swap.orca.stable-execute", "swap.orca.stable-release", "swap.orca.stable-recover-no-send", "swap.orca.stable-observe"].includes(bound.request.command) ? {
       orcaStablePrepare: async (request: Extract<CommandRequest, { readonly command: "swap.orca.stable-prepare" }>) => {
         const { command: _command, ...input } = request;
         const usage = new AssetUsageLedger(state.root);
@@ -537,6 +542,14 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
               asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
           }, custody: chainAccounts, rpc: solanaRpc, operationId, clock: () => clock.now(),
           verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
+      },
+      orcaStableRecoverNoSend: async (operationId: string) => {
+        const service = new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root));
+        await confirmOrcaStableNoSendRecovery(service, operationId,
+          options.orcaStableRecoveryConsent ?? new TtyOrcaStableConsent(), () => clock.now());
+        return await recoverOrcaStableNoSend(service, new SavedOrcaStableMaterialStore(state.root),
+          new OrcaStableExecutionBindingStore(state.root), new OrcaStableNoSendProofStore(state.root),
+          chainAccounts, profile => chainAccounts.account(profile, "solana"), operationId, clock.now());
       },
       orcaStableObserve: async (operationId: string) => await new OrcaStableFinalizedObserver(
         new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)),
