@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { toHex } from "viem";
 import { resolveEvmAsset } from "../../src/evm-asset.js";
@@ -94,7 +95,7 @@ test("Sei native balance uses three paced HTTPS POSTs and pinned safe-head reche
   });
   syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   const rpc = new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: state });
-  const balance = await rpc.seiNativeBalance(WALLET, selection);
+  const balance = await rpc.seiNativeBalance(WALLET, selection, performance.now() + 20_000);
   assert.deepEqual(bodies.map(batch => batch.map(call => call.method)), [
     ["eth_chainId", "eth_getBlockByNumber"], ["eth_getBalance"], ["eth_getBlockByNumber", "eth_chainId"],
   ]);
@@ -121,7 +122,7 @@ test("Sei native balance stops at its aggregate deadline without retry", async t
   syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   const rpc = new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: state });
   const started = Date.now();
-  await assert.rejects(rpc.seiNativeBalance(WALLET, selection), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  await assert.rejects(rpc.seiNativeBalance(WALLET, selection, performance.now() + 20_000), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.ok(Date.now() - started < 20_500);
   assert.equal(posts, 1);
 });

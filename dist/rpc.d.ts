@@ -27,7 +27,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     });
     armBnbDirectRpcGuard(): void;
     armEvmDirectRpcGuard(): void;
-    seiNativeBalance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
+    seiNativeBalance(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal: AbortSignal): HttpsBaseRpc;
     /** Resolve and validate public addresses before a caller reserves a physical POST start. */

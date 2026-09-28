@@ -179,7 +179,7 @@ export interface RpcPort {
   armBnbDirectRpcGuard?(): void;
   armEvmDirectRpcGuard?(): void;
   /** Command-scoped, bounded public read for native Sei balance. */
-  seiNativeBalance?(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
+  seiNativeBalance?(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
   forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;
   readonly evm?: EvmRpcPort;
   assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }>;

@@ -92,15 +92,19 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait, () => this.remainingTimeoutMs());
   }
 
-  async seiNativeBalance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot> {
+  async seiNativeBalance(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot> {
     if (selection.chainId !== 1329 || selection.token !== "native") {
       throw new ApnError("APN_INVALID_INPUT", "Bounded Sei balance requires native SEI on Sei.");
     }
     if (this.directGuardState === undefined) throw new ApnError("APN_RPC_CONFIG", "Bounded Sei balance RPC guard state is unavailable.");
+    const remainingMs = Math.floor(deadlineAtMs - performance.now());
+    if (!Number.isFinite(remainingMs) || remainingMs < 1 || remainingMs > 20_000) {
+      throw new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate RPC deadline.");
+    }
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
+    const timeout = setTimeout(() => controller.abort(), remainingMs);
     const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
-      totalDeadlineMs: performance.now() + 20_000, abortSignal: controller.signal,
+      totalDeadlineMs: deadlineAtMs, abortSignal: controller.signal,
       directGuardState: this.directGuardState,
     });
     bounded.pinnedAddresses = this.pinnedAddresses;
