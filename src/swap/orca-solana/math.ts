@@ -11,6 +11,19 @@ const Q64 = 1n << 64n, U64_MAX = (1n << 64n) - 1n, U128_MAX = (1n << 128n) - 1n,
 const FEE_RATE_DENOMINATOR = 1_000_000n;
 export const WHIRLPOOL_MIN_SQRT_PRICE = 4_295_048_016n;
 const MIN_TICK = -443_636;
+const MAX_TICK = 443_636;
+/** Bit multipliers of sqrt(1.0001)^(2^i) in Q96, from Whirlpool get_sqrt_price_positive_tick.
+ * https://github.com/orca-so/whirlpools/blob/408c945fef4c49ab70def4303377cfaf8f0f3c99/programs/whirlpool/src/math/tick_math.rs
+ */
+const POSITIVE_TICK_FACTORS: readonly (readonly [number, bigint])[] = [
+  [2, 79236085330515764027303304731n], [4, 79244008939048815603706035061n], [8, 79259858533276714757314932305n],
+  [16, 79291567232598584799939703904n], [32, 79355022692464371645785046466n], [64, 79482085999252804386437311141n],
+  [128, 79736823300114093921829183326n], [256, 80248749790819932309965073892n], [512, 81282483887344747381513967011n],
+  [1024, 83390072131320151908154831281n], [2048, 87770609709833776024991924138n], [4096, 97234110755111693312479820773n],
+  [8192, 119332217159966728226237229890n], [16384, 179736315981702064433883588727n], [32768, 407748233172238350107850275304n],
+  [65536, 2098478828474011932436660412517n], [131072, 55581415166113811149459800483533n],
+  [262144, 38992368544603139932233054999993551n],
+];
 /** Bit multipliers of sqrt(1.0001)^-(2^i) in Q64.64, from the program's get_sqrt_price_negative_tick. */
 const NEGATIVE_TICK_FACTORS: readonly (readonly [number, bigint])[] = [
   [2, 18444899583751176498n], [4, 18443055278223354162n], [8, 18439367220385604838n], [16, 18431993317065449817n],
@@ -32,13 +45,14 @@ export interface WhirlpoolSwapQuote {
   readonly priceImpactBps: number;
 }
 
-/** The SOL/USDC route uses negative ticks. The stable-pair quote also needs the upper bound for live tick one. */
+/** Exact Whirlpool tick conversion, within the protocol's supported tick range. */
 export function sqrtPriceAtTick(tick: number): bigint {
-  if (!Number.isSafeInteger(tick) || tick > 2 || tick < MIN_TICK) blocked("Whirlpool tick is outside the bounded quote range.", "orca_tick_range");
-  if (tick === 0) return Q64;
-  if (tick === 1) return 18447666387855959850n;
-  // Orca get_sqrt_price_positive_tick(2): 79236085330515764027303304731 >> 32.
-  if (tick === 2) return 18448588748116922571n;
+  if (!Number.isSafeInteger(tick) || tick > MAX_TICK || tick < MIN_TICK) blocked("Whirlpool tick is outside the protocol range.", "orca_tick_range");
+  if (tick >= 0) {
+    let ratio = (tick & 1) !== 0 ? 79232123823359799118286999567n : 79228162514264337593543950336n;
+    for (const [bit, factor] of POSITIVE_TICK_FACTORS) if ((tick & bit) !== 0) ratio = (ratio * factor) >> 96n;
+    return ratio >> 32n;
+  }
   const absolute = -tick;
   let ratio = (absolute & 1) !== 0 ? 18445821805675392311n : Q64;
   for (const [bit, factor] of NEGATIVE_TICK_FACTORS) if ((absolute & bit) !== 0) ratio = (ratio * factor) >> 64n;
@@ -55,8 +69,10 @@ export function quoteWhirlpoolExactInAToB(pool: WhirlpoolState, arrays: readonly
       blocked("Whirlpool tick arrays are not the exact downward sequence from the current tick.", "orca_tick_array_state");
     }
   });
-  // The decoded price must lie inside the decoded tick, which also proves the tick math against the live state.
-  if (sqrtPriceAtTick(pool.tickCurrentIndex) > pool.sqrtPrice || pool.sqrtPrice >= sqrtPriceAtTick(pool.tickCurrentIndex + 1)) {
+  // The maximum tick is a single endpoint price; all lower ticks have a half-open interval.
+  if ((pool.tickCurrentIndex === MAX_TICK && pool.sqrtPrice !== sqrtPriceAtTick(MAX_TICK)) ||
+      (pool.tickCurrentIndex !== MAX_TICK &&
+        (sqrtPriceAtTick(pool.tickCurrentIndex) > pool.sqrtPrice || pool.sqrtPrice >= sqrtPriceAtTick(pool.tickCurrentIndex + 1)))) {
     blocked("Whirlpool price and current tick are inconsistent.", "orca_pool_state");
   }
   let remaining = amountIn, output = 0n, feeTotal = 0n, price = pool.sqrtPrice, tick = pool.tickCurrentIndex, liquidity = pool.liquidity;

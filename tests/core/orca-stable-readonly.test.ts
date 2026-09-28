@@ -88,7 +88,7 @@ test("stable quote admits live tick one with the official positive tick two uppe
   assert.deepEqual(f.calls.map((call) => call.method), ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts"]);
 });
 
-test("stable quote handles the tick one to zero price transition and keeps tick two outside its bound", async () => {
+test("stable quote handles the tick one to zero price transition and accepts observed tick two", async () => {
   const crossing = await fixture();
   const boundary = sqrtPriceAtTick(1);
   crossing.pool.writeBigUInt64LE(boundary & ((1n << 64n) - 1n), 65);
@@ -106,12 +106,60 @@ test("stable quote handles the tick one to zero price transition and keeps tick 
   assert.equal(quoteWhirlpoolExactInAToB(pool, arrays, 1_000_000n).tickAfter, 0);
 
   const beyond = await fixture();
-  const price = sqrtPriceAtTick(2);
+  // Pool account observed at slot 451251696: tick 2, sqrt price 18449273916518842236.
+  const price = 18449273916518842236n;
+  assert.ok(sqrtPriceAtTick(2) <= price && price < sqrtPriceAtTick(3));
   beyond.pool.writeBigUInt64LE(price & ((1n << 64n) - 1n), 65);
   beyond.pool.writeBigUInt64LE(price >> 64n, 73);
   beyond.pool.writeInt32LE(2, 81);
   beyond.accounts.set(ORCA_STABLE_POOL, wire(WHIRLPOOL_PROGRAM, beyond.pool));
-  await assert.rejects(quoteOrcaStableReadOnly(beyond.rpc, input), (error) => reason(error) === "orca_tick_range");
+  const tickTwoQuote = await quoteOrcaStableReadOnly(beyond.rpc, input);
+  assert.equal(tickTwoQuote.tickCurrentIndex, 2);
+  assert.ok(BigInt(tickTwoQuote.expectedOutputAtomic) > 0n);
+  assert.ok(tickTwoQuote.priceImpactBps <= 50);
+  assert.equal(BigInt(tickTwoQuote.minimumOutputAtomic),
+    (BigInt(tickTwoQuote.expectedOutputAtomic) * 9950n + 9999n) / 10000n);
+  const large = await fixture();
+  large.pool.writeBigUInt64LE(price & ((1n << 64n) - 1n), 65);
+  large.pool.writeBigUInt64LE(price >> 64n, 73);
+  large.pool.writeInt32LE(2, 81);
+  large.accounts.set(ORCA_STABLE_POOL, wire(WHIRLPOOL_PROGRAM, large.pool));
+  await assert.rejects(quoteOrcaStableReadOnly(large.rpc, { ...input, amountAtomic: "30000000000000" }),
+    (error) => reason(error) === "orca_price_impact");
+});
+
+test("Whirlpool tick prices match protocol vectors, rise monotonically, and reject outside bounds", () => {
+  const vectors: readonly (readonly [number, bigint])[] = [
+    [-443_636, 4_295_048_016n], [-1, 18_445_821_805_675_392_311n], [0, 18_446_744_073_709_551_616n],
+    [1, 18_447_666_387_855_959_850n], [2, 18_448_588_748_116_922_571n], [3, 18_449_511_154_494_745_446n],
+    [4, 18_450_433_606_991_734_263n], [32_768, 94_936_283_578_220_370_716n],
+    [443_635, 79_222_712_478_800_779_441_888_593_664n],
+    [443_636, 79_226_673_515_401_279_992_447_579_055n],
+  ];
+  for (const [tick, expected] of vectors) assert.equal(sqrtPriceAtTick(tick), expected);
+  for (let tick = -443_636; tick < 443_636; tick += 997) {
+    assert.ok(sqrtPriceAtTick(tick) < sqrtPriceAtTick(tick + 1), `non-monotonic tick ${tick}`);
+  }
+  for (const tick of [-443_637, 443_637, Number.NaN, 1.5]) {
+    assert.throws(() => sqrtPriceAtTick(tick), (error) => reason(error) === "orca_tick_range");
+  }
+});
+
+test("Whirlpool downward quote accepts only the exact maximum tick endpoint price", () => {
+  const maximum = sqrtPriceAtTick(443_636);
+  const pool: WhirlpoolState = { address: ORCA_STABLE_POOL, config: WHIRLPOOLS_CONFIG, tickSpacing: 1, feeTierIndexSeed: 1,
+    feeRate: 100, protocolFeeRate: 0, liquidity: 10n ** 25n, sqrtPrice: maximum, tickCurrentIndex: 443_636,
+    mintA: USDC_MINT, vaultA: ORCA_STABLE_VAULT_A, mintB: SOLANA_USDT, vaultB: ORCA_STABLE_VAULT_B };
+  const start = Math.floor(443_636 / 88) * 88;
+  const arrays: TickArrayState[] = [start, start - 88, start - 176].map((startTickIndex) => ({ address: "fixture", startTickIndex,
+    whirlpool: ORCA_STABLE_POOL, ticks: Array.from({ length: 88 }, () => ({ initialized: false, liquidityNet: 0n })) }));
+  const quote = quoteWhirlpoolExactInAToB(pool, arrays, 2n);
+  assert.ok(BigInt(quote.amountOutAtomic) > 0n);
+  assert.ok(BigInt(quote.sqrtPriceAfter) < maximum);
+  for (const sqrtPrice of [maximum - 1n, maximum + 1n]) {
+    assert.throws(() => quoteWhirlpoolExactInAToB({ ...pool, sqrtPrice }, arrays, 2n),
+      (error) => reason(error) === "orca_pool_state");
+  }
 });
 
 test("stable quote fails closed on pool drift, oracle state, caps and non-mainnet", async () => {
