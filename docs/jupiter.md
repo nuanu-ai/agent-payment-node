@@ -82,3 +82,17 @@ equal instruction account index 14; a mismatch is rejected. This observed
 equality does not establish an account-role ABI for Quantum routes. The eleven
 remaining account roles and deployed executable provenance remain unverified. The check
 returns `signable: false`; it does not enable transaction assembly or execution.
+
+## 29 Sep 2026 authoritative source audit
+
+Jupiter's [official Common Errors page](https://developers.jup.ag/docs/swap/v1/common-errors)
+links the JUP6 [IDL displayed on Solscan](https://solscan.io/account/JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4#programIdl).
+I inspected the pinned upstream
+[IDL](https://github.com/jup-ag/jupiter-amm-implementation/blob/cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39/idls/jupiter_aggregator_v6.json)
+and [`jupiter/src/lib.rs`](https://github.com/jup-ag/jupiter-amm-implementation/blob/cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39/jupiter/src/lib.rs)
+at commit `cc068c9d1df0060c62f9a8a4fc37ea13ea7b9b39`. Neither contains
+`route_v2` or `Quantum`, so these repository files do not substantiate the
+route ABI shown by the Solscan IDL. No build or executable attestation was
+found tying this source and IDL snapshot to the deployed JUP6 executable. The
+eleven route-dependent account roles remain unverified; APN remains
+`signable: false`.
