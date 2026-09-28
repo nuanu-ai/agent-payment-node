@@ -134,24 +134,41 @@ export class ChainAccountStore extends SecureStateStore {
             corrupt();
         return { ...effect };
     }
+    async effectByOperationId(account, operationId) {
+        stateIdentifier(operationId, "rail operation id");
+        // Share the whole-wallet write lock: a no-send proof must observe every completed effect save.
+        return await this.withLocks([this.effectLock(account)], async () => {
+            const secret = await this.requiredSecret(account);
+            const effect = secret.effects[operationId];
+            return effect === undefined ? null : { ...effect };
+        });
+    }
     async saveEffect(account, effect) {
         validateEffect(effect);
-        const secret = await this.requiredSecret(account);
-        const existing = secret.effects[effect.operationId];
-        if (existing !== undefined) {
-            if (canonicalJson(existing) !== canonicalJson(effect))
-                corrupt();
-            return;
-        }
-        if (Object.keys(secret.effects).length >= 512)
-            throw new ApnError("APN_OPERATION_BLOCKED", "Encrypted rail effect storage is full; existing effects were preserved.");
-        const wrapping = await this.requiredWrapping();
-        try {
-            await this.saveEncrypted(account, { ...secret, effects: { ...secret.effects, [effect.operationId]: effect } }, wrapping);
-        }
-        finally {
-            wrapping.fill(0);
-        }
+        // The encrypted wallet contains all operations for this rail and profile. Serialize its read/modify/write
+        // across direct and swap callers, including callers that do not hold the profile-level operation lock.
+        await this.withLocks([this.effectLock(account)], async () => {
+            const secret = await this.requiredSecret(account);
+            const existing = secret.effects[effect.operationId];
+            if (existing !== undefined) {
+                if (canonicalJson(existing) !== canonicalJson(effect))
+                    corrupt();
+                return;
+            }
+            if (Object.keys(secret.effects).length >= 512)
+                throw new ApnError("APN_OPERATION_BLOCKED", "Encrypted rail effect storage is full; existing effects were preserved.");
+            const wrapping = await this.requiredWrapping();
+            try {
+                await this.saveEncrypted(account, { ...secret, effects: { ...secret.effects, [effect.operationId]: effect } }, wrapping);
+            }
+            finally {
+                wrapping.fill(0);
+            }
+        });
+    }
+    effectLock(account) {
+        const validated = validateChainAccount(account);
+        return `chain-wallet-effects:${validated.rail}:${validated.profileHash}`;
     }
     async requiredSecret(account) {
         validateChainAccount(account);

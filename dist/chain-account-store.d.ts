@@ -25,7 +25,9 @@ export declare class ChainAccountStore extends SecureStateStore implements Chain
     }): Promise<ChainAccount>;
     withSeed<T>(account: ChainAccount, action: (seed: Buffer) => Promise<T>): Promise<T>;
     effect(account: ChainAccount, operationId: string, fingerprint: string): Promise<RailSignedEffect | null>;
+    effectByOperationId(account: ChainAccount, operationId: string): Promise<RailSignedEffect | null>;
     saveEffect(account: ChainAccount, effect: RailSignedEffect): Promise<void>;
+    private effectLock;
     private requiredSecret;
     private requiredWrapping;
     private decrypt;
