@@ -18,7 +18,10 @@ export async function beginOrcaStableExecution(service, materials, bindings, por
 }
 /** Private, one-shot first attempt. No CLI/MCP route is exposed until finalized observation is integrated. */
 export async function beginOrcaStableExecutionAndSend(service, materials, bindings, ports, operationId, clock) {
-    return await beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock);
+    const prepared = await beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock);
+    if (prepared.signature === null)
+        return prepared;
+    return { ...prepared, operation: await ports.send(operationId) };
 }
 async function beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock) {
     return await service.operations.withLocks([`orca-stable-operation:${operationId}`], async () => {
@@ -99,19 +102,7 @@ async function beginOrcaStableExecutionCore(service, materials, bindings, ports,
         catch {
             return { operation, binding: null, signature: null };
         }
-        const { binding, account, effect } = persisted;
-        if (ports.send === undefined)
-            return { operation, binding, signature: effect.transactionId };
-        // The sender rereads the sealed bytes under this same lock. A refused pre-send guard leaves the marker
-        // observe-only; a possible provider send is recorded as unknown finality without retrying.
-        let result;
-        try {
-            result = await ports.send(operation, binding, account, effect);
-        }
-        catch {
-            return { operation, binding, signature: effect.transactionId };
-        }
-        operation = await service.recordPossibleSend(operation, result === "submitted" ? "submitted" : "unknown_finality", checkedNow(clock));
+        const { binding, effect } = persisted;
         return { operation, binding, signature: effect.transactionId };
     });
 }

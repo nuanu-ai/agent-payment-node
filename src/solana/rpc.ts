@@ -103,6 +103,14 @@ export class SolanaRpc implements SolanaRpcPort {
     if (!exactKeys(record, ["jsonrpc", "id", "result"]) || record.jsonrpc !== "2.0" || record.id !== id) protocolFailure();
     return record.result;
   }
+  /** Guard the actual send transport start after persistent pacing has admitted the POST. */
+  async sendTransactionAtStart(params: readonly unknown[], beforePost: () => void): Promise<unknown> {
+    const id = randomUUID();
+    const value = await this.request({ jsonrpc: "2.0", id, method: "sendTransaction", params }, 1, true, beforePost);
+    const record = rpcRecord(value);
+    if (!exactKeys(record, ["jsonrpc", "id", "result"]) || record.jsonrpc !== "2.0" || record.id !== id) protocolFailure();
+    return record.result;
+  }
   /** Independent read methods share one POST; results retain input order despite unordered replies. */
   async batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]> {
     if (reads.length < 1 || reads.length > 8 || reads.some(read => !READ_METHODS.has(read.method))) protocolFailure();
@@ -122,7 +130,7 @@ export class SolanaRpc implements SolanaRpcPort {
     if (seen.size !== requests.length) protocolFailure();
     return results;
   }
-  private async request(body: unknown, logicalCalls: number, effect: boolean): Promise<unknown> {
+  private async request(body: unknown, logicalCalls: number, effect: boolean, beforePost?: () => void): Promise<unknown> {
     if (this.endpoint === undefined) configFailure();
     let url: URL;
     try { url = parsePublicHttpsUrl(this.endpoint, "APN_RPC_CONFIG", "Solana RPC endpoint", 2048); } catch { return configFailure(); }
@@ -132,18 +140,19 @@ export class SolanaRpc implements SolanaRpcPort {
     const cancelUnstarted = await this.budget?.acquire(logicalCalls);
     let started = false;
     try {
-      if (this.pacer === undefined) { started = true; return await this.post(url, payload, effect); }
-      return await this.pacer.schedule(url.toString(), () => { started = true; return this.post(url, payload, effect); });
+      if (this.pacer === undefined) { started = true; return await this.post(url, payload, effect, beforePost); }
+      return await this.pacer.schedule(url.toString(), () => { started = true; return this.post(url, payload, effect, beforePost); });
     } catch (error) {
       if (!started) cancelUnstarted?.();
       throw error;
     }
   }
-  private async post(url: URL, payload: string, effect: boolean): Promise<unknown> {
+  private async post(url: URL, payload: string, effect: boolean, beforePost?: () => void): Promise<unknown> {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 10_000); deadline.unref();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
+      beforePost?.();
       const response = await this.fetcher(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
         body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
       if (response.status === 429) throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC provider requested a cooldown.",

@@ -36,7 +36,7 @@ export interface OrcaStableExecutionPorts {
     readonly effects: Pick<ChainWalletStoragePort, "saveEffect" | "effect">;
 }
 export interface OrcaStableExecutionSendPorts extends OrcaStableExecutionPorts {
-    readonly send: (operation: SwapOperationRecord, binding: OrcaStableExecutionBinding, account: ChainAccount, persistedEffect: RailSignedEffect) => Promise<"submitted" | "possible_send">;
+    readonly send: (operationId: string) => Promise<SwapOperationRecord>;
 }
 /** Internal journal. A crash after the marker makes every later begin call observe-only. */
 export declare function beginOrcaStableExecution(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, bindings: OrcaStableExecutionBindingStore, ports: OrcaStableExecutionPorts, operationId: string, clock: () => Date): Promise<{

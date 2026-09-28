@@ -11,13 +11,19 @@ export declare class OrcaStableLocalSigner {
     constructor(custody: Pick<ChainWalletStoragePort, "withSeed">);
     sign(operation: SwapOperationRecord, binding: OrcaStableExecutionBinding, account: ChainAccount): Promise<RailSignedEffect>;
 }
-/** This port may be called only in the marker writer's lock, immediately after sealed effect persistence. */
+/** Recovery cannot release principal after a send right was consumed, even if custody is later unreadable. */
+export declare function hasOrcaStableSendClaim(root: string, operation: SwapOperationRecord): Promise<boolean>;
+/** Publicly importable sender: it reloads durable state and acquires the shared operation lock itself. */
 export declare class OrcaStableSingleSender {
-    private readonly rpc;
+    private readonly service;
+    private readonly materials;
+    private readonly bindings;
     private readonly custody;
+    private readonly rpc;
     private readonly clock;
-    constructor(rpc: SolanaRpc, custody: Pick<ChainWalletStoragePort, "effectByOperationId">, clock?: () => Date);
-    sendOnce(operation: SwapOperationRecord, binding: OrcaStableExecutionBinding, account: ChainAccount, effect: RailSignedEffect): Promise<"submitted" | "possible_send">;
+    private readonly claims;
+    constructor(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, bindings: OrcaStableExecutionBindingStore, custody: Pick<ChainWalletStoragePort, "account" | "effectByOperationId">, rpc: SolanaRpc, clock?: () => Date);
+    sendOnce(operationId: string): Promise<SwapOperationRecord>;
 }
 /** Internal wiring for the first attempt. The public command remains closed pending the observation route. */
 export declare function executeOrcaStableFirstAttempt(input: {
@@ -25,7 +31,7 @@ export declare function executeOrcaStableFirstAttempt(input: {
     readonly materials: SavedOrcaStableMaterialStore;
     readonly bindings: OrcaStableExecutionBindingStore;
     readonly admission: OrcaStableAdmissionPorts;
-    readonly custody: Pick<ChainWalletStoragePort, "withSeed" | "saveEffect" | "effect" | "effectByOperationId">;
+    readonly custody: Pick<ChainWalletStoragePort, "account" | "withSeed" | "saveEffect" | "effect" | "effectByOperationId">;
     readonly rpc: SolanaRpc;
     readonly operationId: string;
     readonly clock?: () => Date;
