@@ -12,7 +12,8 @@ export declare function orcaStablePreparedStatus(operations: SwapOperationReposi
     expiresAt: string;
     phase: import("../model.js").SwapOperationState;
     signable: false;
-    executable: false;
+    executable: boolean;
+    executionRequiresForegroundConsent: boolean;
     signed: boolean | null;
     broadcast: boolean | null;
     possibleSend: boolean;

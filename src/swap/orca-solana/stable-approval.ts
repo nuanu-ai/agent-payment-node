@@ -72,7 +72,8 @@ async function approveOrcaStableReservationLocked(service: GuardedSwapService, m
   const reserved = await service.reserve(latest, current.registry, commitNow);
   return { schemaVersion: "apn.orca-stable-reservation.v1" as const, operation: reserved,
     quoteHash: reserved.quote.quoteHash, materialDigest: material.materialDigest,
-    signable: false as const, executable: false as const, signed: false as const, broadcast: false as const };
+    signable: false as const, executable: true as const, executionRequiresForegroundConsent: true as const,
+    signed: false as const, broadcast: false as const };
 }
 
 export function stableApprovalScreen(operation: SwapOperationRecord, material: OrcaStableMaterial, deadline: string): readonly string[] {
@@ -90,6 +91,65 @@ export function stableApprovalScreen(operation: SwapOperationRecord, material: O
     `Activation: ${material.activationDigest}; mechanism: ${operation.mechanismDigest}`,
     `Approval deadline: ${deadline}; quote expiry: ${quote.expiresAt}`,
     "This approval reserves the USDC principal only. It does not sign or send a transaction."];
+}
+
+/** A second, explicit foreground decision is required after principal reservation and before fresh execution. */
+export async function confirmOrcaStableExecution(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore,
+  operationId: string, consent: OrcaStableConsentPort, clock: () => Date): Promise<void> {
+  const operation = await service.operations.loadAny(operationId);
+  if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
+  if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST || operation.state !== "reserved" ||
+      operation.submissionMarker !== null || operation.usageLease?.state !== "reserved")
+    blocked("Stable operation is not an unsigned principal reservation.", "orca_stable_observe_only");
+  const material = await materials.load(operationId, operation);
+  if (material === null) throw new ApnError("APN_STATE_CORRUPT", "Stable Orca reserved material is missing.");
+  const before = checkedNow(clock);
+  assertWindow(operation, before);
+  const deadline = new Date(Math.min(Date.parse(operation.quote.expiresAt), before.getTime() + 60_000)).toISOString();
+  const lines = [...stableApprovalScreen(operation, material, deadline).slice(0, -1),
+    "Execution consent: refresh the pool and policy, sign the exact bounded transaction, then make one send attempt.",
+    "A submission marker or send claim makes this operation observe-only; an ambiguous send is never retried."];
+  const code = approvalCode("swap", operationId,
+    domainHash("apn.orca-stable-execution-screen.v1", canonicalJson(lines)));
+  await consent.confirm(lines, code, deadline);
+  const after = checkedNow(clock);
+  if (after.getTime() < before.getTime() || after.toISOString() >= deadline)
+    blocked("Stable execution consent expired.", "orca_stable_approval_expired");
+  const latest = await service.operations.loadAny(operationId);
+  if (latest === null || latest.integrityHash !== operation.integrityHash || latest.state !== "reserved")
+    blocked("Stable operation changed during execution consent.", "orca_stable_operation_drift");
+  assertWindow(latest, after);
+}
+
+/** Owner authorizes only the strict local proof of no send and matching principal release. */
+export async function confirmOrcaStableNoSendRecovery(service: GuardedSwapService,
+  operationId: string, consent: OrcaStableConsentPort, clock: () => Date): Promise<void> {
+  const operation = await service.operations.loadAny(operationId);
+  if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
+  if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
+      !["submitting", "failed_before_effect"].includes(operation.state) ||
+      operation.submissionMarker === null || operation.usageLease === null || operation.receiptProof !== null)
+    blocked("Stable operation has no marked no-send recovery boundary.", "orca_stable_effect_boundary");
+  const before = checkedNow(clock);
+  if (before.toISOString() < operation.updatedAt)
+    blocked("Stable recovery clock precedes the operation.", "orca_stable_recovery_clock");
+  const deadline = new Date(before.getTime() + 60_000).toISOString();
+  const lines = ["Agent Payment Node Orca stable no-send recovery", `Operation: ${operationId}`,
+    `Owner: ${operation.quote.account}`, `Quote: ${operation.quote.quoteHash}`,
+    `Submission marker: ${operation.submissionMarker.markerHash}`,
+    `Reserved USDC principal: ${operation.usageLease.amountAtomic} atomic; reservation: ${operation.usageLease.reservationId}`,
+    `Policy digest: ${operation.policyDigest}`, `Recovery deadline: ${deadline}`,
+    "Release principal only after a durable marker-bound proof finds no send claim and no signed custody effect.",
+    "If either exists or proof is incomplete, keep principal held. Never sign or send during recovery."];
+  const code = approvalCode("swap", operationId,
+    domainHash("apn.orca-stable-no-send-recovery-screen.v1", canonicalJson(lines)));
+  await consent.confirm(lines, code, deadline);
+  const after = checkedNow(clock);
+  if (after.getTime() < before.getTime() || after.toISOString() >= deadline)
+    blocked("Stable recovery consent expired.", "orca_stable_approval_expired");
+  const latest = await service.operations.loadAny(operationId);
+  if (latest === null || latest.integrityHash !== operation.integrityHash)
+    blocked("Stable operation changed during recovery consent.", "orca_stable_operation_drift");
 }
 
 function assertBinding(operation: SwapOperationRecord, material: OrcaStableMaterial, policyDigest: string, activationDigest: string): void {

@@ -1,5 +1,6 @@
 import type { CommandOutcome, CommandRequest } from "../../commands.js";
 import { ApnError } from "../../errors.js";
+import { isPlainRecord } from "../../canonical.js";
 import type { RuntimeContext } from "../../runtime.js";
 import { swapMechanismDigest } from "../pin.js";
 import { SwapOperationRepository } from "../repository.js";
@@ -41,6 +42,20 @@ export async function executeOrcaCommand(request: Request, context: RuntimeConte
   if (request.command === "swap.orca.stable-approve") {
     if (context.orcaStableApprove === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca approval is unavailable.");
     return data(await context.orcaStableApprove(request.operationId), "stable_principal_reserved_unsigned");
+  }
+  if (request.command === "swap.orca.stable-execute") {
+    if (context.orcaStableExecute === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca execution is unavailable.");
+    const result = await context.orcaStableExecute(request.operationId);
+    if (isPlainRecord(result) && result.signature === null) {
+      throw new ApnError("APN_OPERATION_BLOCKED", "Stable execution stopped after its durable marker without a proved send. Principal remains held.",
+        { reason: "orca_stable_marked_no_send_unproven", nextActions: [
+          `apn swap solana orca stable-recover-no-send --operation ${request.operationId}`] });
+    }
+    return data(result, "stable_first_send_attempt");
+  }
+  if (request.command === "swap.orca.stable-recover-no-send") {
+    if (context.orcaStableRecoverNoSend === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca no-send recovery is unavailable.");
+    return data(await context.orcaStableRecoverNoSend(request.operationId), "stable_no_send_proved_principal_released");
   }
   if (request.command === "swap.orca.stable-observe") {
     if (context.orcaStableObserve === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca observation is unavailable.");
