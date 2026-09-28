@@ -10,6 +10,12 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 export interface UsdtForegroundApproval {
     approve(bound: UsdtBoundOperation): Promise<void>;
 }
+/** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
+export declare function usdtApprovalPrompt(bound: UsdtBoundOperation, now: number): {
+    readonly text: string;
+    readonly phrase: string;
+    readonly validUntil: number;
+};
 export declare class TtyUsdtApproval implements UsdtForegroundApproval {
     approve(bound: UsdtBoundOperation): Promise<void>;
 }

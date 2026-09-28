@@ -34,7 +34,8 @@ class Wrapping implements WrappingSecretPort {
   async create() { return Buffer.alloc(32, 17); }
 }
 
-async function setup(key: typeof KEY | typeof WRONG_KEY = KEY, delegation: "empty" | "expected" = "empty") {
+async function setup(key: typeof KEY | typeof WRONG_KEY = KEY, delegation: "empty" | "expected" = "empty",
+  maxFeeAtomic = 500_000n) {
   const temporary = await temporaryState();
   const state = new StateStore(temporary.root);
   await state.initialize();
@@ -62,7 +63,7 @@ async function setup(key: typeof KEY | typeof WRONG_KEY = KEY, delegation: "empt
     sponsor: { tokenQuote: async () => quote, gasPrice: async () => price,
       paymasterData: async () => ({ paymaster: USDT_GASLESS.paymaster, paymasterData: PAYMASTER_DATA }) } },
   { profile: "owner", chain: USDT_GASLESS.chain, token: USDT_GASLESS.token, sponsorUrl: USDT_GASLESS.bundlerUrl,
-    sender: OWNER, recipient: RECIPIENT, grossAtomic: 1_000_000n, maxFeeAtomic: 500_000n, minReceivedAtomic: 500_000n });
+    sender: OWNER, recipient: RECIPIENT, grossAtomic: 1_000_000n, maxFeeAtomic, minReceivedAtomic: 500_000n });
   const bound = await new UsdtBoundOperationRepository(temporary.root).create(allowlistProfileHash("owner"), prepared, "sign-001", NOW);
   const expected = { profile: "owner", profileHash: bound.profileHash, operationId: bound.operationId,
     bindingHash: bound.binding.bindingHash };
@@ -115,6 +116,48 @@ test("CLI gasless USDT execute requires approval and never exposes wallet materi
     sendTransport: { async send() { sends++; return `0x${"ab".repeat(32)}` as const; } },
   } });
   assert.equal(replay.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(sends, 1);
+});
+
+test("effective fee below requested maximum passes consent, reservation and guarded local send", async t => {
+  const f = await setup(KEY, "empty", 750_000n); t.after(f.temporary.cleanup);
+  assert.equal(f.bound.binding.plan.request.maxFeeAtomic, "750000");
+  assert.equal(f.bound.binding.plan.feeCapAtomic, "500000");
+  const journal = new UsdtExecutionJournal(f.temporary.root);
+  let approvals = 0, sends = 0;
+  for (const plan of [{ ...f.bound.binding.plan, feeCapAtomic: "750000" },
+    { ...f.bound.binding.plan, quotedFeeAtomic: "500001" }]) {
+    const tampered = { ...f.bound, binding: { ...f.bound.binding, plan } };
+    const guarded = new GuardedUsdtSendService(journal, f.signer,
+      { async send() { sends++; return `0x${"ab".repeat(32)}`; } }, f.port);
+    await assert.rejects(() => guarded.send(tampered, f.expected), { code: "APN_STATE_CORRUPT" });
+    await assert.rejects(() => f.signer.sign(tampered, f.expected), { code: "APN_STATE_CORRUPT" });
+    assert.equal(await journal.load(f.bound.operationId), null);
+    assert.equal(sends, 0);
+  }
+  const execute = new GaslessUsdtCommandExecute(new StateStore(f.temporary.root), { now: () => NOW }, new Wrapping(), {
+    approval: { async approve(bound) {
+      approvals++;
+      assert.equal(bound.binding.plan.feeCapAtomic, "500000");
+      assert.equal(bound.binding.plan.request.maxFeeAtomic, "750000");
+    } },
+    signer: f.signer, preparePort: f.port,
+    sendTransport: { async send(op) {
+      sends++;
+      assert.equal((await journal.load(f.bound.operationId))?.state, "submitting");
+      assert.equal(op.callData, f.bound.binding.callData);
+      return usdtUserOperationHash(op);
+    } },
+  });
+  const result = await execute.execute(f.bound.profileHash, f.bound.operationId);
+  assert.equal(result.state, "submitted_pending");
+  assert.equal(result.userOperationHash !== null, true);
+  assert.equal(approvals, 1); assert.equal(sends, 1);
+  assert.equal((await journal.load(f.bound.operationId))?.state, "submitted_pending");
+  const usage = await new AssetUsageLedger(f.temporary.root).usage({ account: OWNER, chain: USDT_GASLESS.chain,
+    asset: { kind: "token", identifier: USDT_GASLESS.token } }, NOW);
+  assert.equal(usage.amountAtomic, "1000000");
+  await assert.rejects(() => execute.execute(f.bound.profileHash, f.bound.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(approvals, 1); assert.equal(sends, 1);
 });
 
 test("CLI refuses policy and nonce drift before dispatch, and observation never rebroadcasts", async t => {

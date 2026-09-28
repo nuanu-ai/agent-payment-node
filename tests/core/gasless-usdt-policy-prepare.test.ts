@@ -25,6 +25,8 @@ import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { createApnCore } from "../../src/runtime-factory.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
+import { TtyUsdtApproval, usdtApprovalPrompt } from "../../src/gasless-usdt/command-execute.js";
+import { approvalCode } from "../../src/approval-code.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
@@ -51,12 +53,12 @@ function active(options: { per?: string; daily?: string; mechanism?: { provider:
   return { profile: "owner", registry, digest: registry.policyDigest, revision: 1, activationDigest: "a".repeat(64),
     accounts: { evm: options.owner ?? OWNER }, activatedAt: "2026-09-18T00:00:00.000Z" };
 }
-function fixture() {
+function fixture(delegation: "empty" | "expected" = "empty") {
   let current: ActiveAssetPolicy | null = active(), usage = "0", quote = QUOTE, price = PRICE;
   const offered: UsdtUserOperation[] = [];
   const prepare: UsdtPreparePort = { now: () => NOW, activePolicy: async () => current, dailyUsage: async () => usage,
     safeSnapshot: async () => ({ chainId: 1n, blockNumber: 26_002_950n, blockHash: `0x${"12".repeat(32)}`,
-      account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } }) };
+      account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation } }) };
   const sponsor: Pick<UsdtSponsorPort, "tokenQuote" | "gasPrice" | "paymasterData"> = { tokenQuote: async () => quote,
     gasPrice: async () => price, paymasterData: async op => { offered.push(op); return SIGNED; } };
   return { ports: { prepare, sponsor }, offered, setPolicy: (value: ActiveAssetPolicy | null) => { current = value; },
@@ -100,6 +102,40 @@ test("installed CLI and MCP prepare save the same unsigned bound operation; stat
   assert.deepEqual(status.operation, cli.operation);
   assert.equal(f.offered.length, 1);
   assert.equal(f.offered.every(op => op.signature !== "0x"), true); // estimate placeholder only; no signer is reachable
+});
+
+test("foreground USDT disclosure uses the frozen effective fee and names persistent permissions before consent", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  for (const delegation of ["empty", "expected"] as const) {
+    const f = fixture(delegation);
+    const binding = await preparePolicyBoundUsdt(f.ports, { ...request(), maxFeeAtomic: 750_000n });
+    const operation = await new UsdtBoundOperationRepository(temporary.root).create(
+      allowlistProfileHash("owner"), binding, `disclosure-${delegation}`, NOW);
+    assert.equal(operation.binding.plan.request.maxFeeAtomic, "750000");
+    assert.equal(operation.binding.plan.feeCapAtomic, "500000");
+    const disclosure = usdtApprovalPrompt(operation, NOW.getTime());
+    assert.equal(disclosure.phrase, approvalCode("gasless", "usdt", operation.binding.bindingHash));
+    assert.match(disclosure.text, /Requested maximum fee: 750000 atomic USDT/u);
+    assert.match(disclosure.text, /Effective fee cap and paymaster allowance: 500000 atomic USDT/u);
+    assert.match(disclosure.text, new RegExp(`Paymaster \\(USDT spender\\): ${USDT_GASLESS.paymaster}`, "u"));
+    assert.match(disclosure.text, new RegExp(`Fee treasury: ${operation.binding.paymaster.treasury}`, "u"));
+    assert.match(disclosure.text, /Unused USDT allowance can remain with the paymaster/u);
+    assert.match(disclosure.text, new RegExp(`Type ${disclosure.phrase} and press Enter`, "u"));
+    if (delegation === "empty") {
+      assert.match(disclosure.text, new RegExp(`First use: EIP-7702 delegates this owner address to ${USDT_GASLESS.delegate}`, "u"));
+      assert.match(disclosure.text, /delegation can persist after this transfer/u);
+    } else {
+      assert.match(disclosure.text, /Existing EIP-7702 delegation/u);
+      assert.doesNotMatch(disclosure.text, /First use:/u);
+    }
+    assert.throws(() => usdtApprovalPrompt({ ...operation, binding: { ...operation.binding,
+      plan: { ...operation.binding.plan, feeCapAtomic: "750000" } } }, NOW.getTime()),
+    { code: "APN_STATE_CORRUPT" });
+    if (process.stdin.isTTY !== true || process.stderr.isTTY !== true) {
+      await assert.rejects(() => new TtyUsdtApproval().approve(operation),
+        (error: any) => error.code === "APN_NATIVE_REJECTED" && error.details?.nativeCode === "APN_TTY_UNAVAILABLE");
+    }
+  }
 });
 
 test("command refuses inactive or changed policy before RPC or journal publication", async t => {

@@ -3,7 +3,7 @@ import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { ApnError } from "../errors.js";
 import { GaslessHttps } from "../gasless/https.js";
 import { StateStore } from "../state.js";
-import { UsdtBoundOperationRepository } from "./bound-operation.js";
+import { UsdtBoundOperationRepository, validateUsdtBoundOperation } from "./bound-operation.js";
 import { UsdtCommandReadBudget } from "./command-prepare.js";
 import { UsdtExecutionJournal } from "./execution-journal.js";
 import { LocalUsdtSigningService } from "./local-signing.js";
@@ -15,31 +15,52 @@ import { GuardedUsdtSendService } from "./send.js";
 import { createInterface } from "node:readline/promises";
 import { approvalCode } from "../approval-code.js";
 import { decodeUsdtPaymasterData } from "./paymaster-data.js";
+import { usdtEffectiveFeeCap } from "./quote.js";
+/** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
+export function usdtApprovalPrompt(bound, now) {
+    const b = validateUsdtBoundOperation(bound).binding;
+    const validity = decodeUsdtPaymasterData(b.paymasterData);
+    const validUntil = Number(validity.validUntil) * 1000;
+    if (!Number.isSafeInteger(validUntil) || !Number.isFinite(now) || now + 60_000 >= validUntil) {
+        throw new ApnError("APN_NATIVE_REJECTED", "Gasless USDT quote is too close to expiry.", { nativeCode: "APN_APPROVAL_EXPIRED" });
+    }
+    const fee = BigInt(b.plan.feeCapAtomic), request = b.plan.request;
+    if (fee !== usdtEffectiveFeeCap({ grossAtomic: BigInt(request.grossAtomic),
+        maxFeeAtomic: BigInt(request.maxFeeAtomic), minReceivedAtomic: BigInt(request.minReceivedAtomic) }) ||
+        b.unsignedOperation.paymaster !== USDT_GASLESS.paymaster || validity.treasury !== b.paymaster.treasury ||
+        validity.treasury !== USDT_GASLESS.treasury ||
+        (b.account.delegation === "empty" && b.unsignedOperation.eip7702Auth?.address !== USDT_GASLESS.delegate)) {
+        throw new ApnError("APN_STATE_CORRUPT", "Gasless USDT approval disclosure does not match the saved operation.");
+    }
+    const phrase = approvalCode("gasless", "usdt", b.bindingHash);
+    const lines = ["\nAgent Payment Node gasless USDT approval", `Operation: ${bound.operationId}`,
+        `Profile: ${b.profile}`, `Chain: Ethereum (${b.chain})`, `Owner: ${request.sender}`,
+        `Recipient: ${request.recipient}`, `Gross: ${request.grossAtomic} atomic USDT`,
+        `Recipient amount: ${b.plan.netAtomic} atomic USDT`, `Requested maximum fee: ${request.maxFeeAtomic} atomic USDT`,
+        `Effective fee cap and paymaster allowance: ${b.plan.feeCapAtomic} atomic USDT`,
+        `Quoted fee bound: ${b.plan.quotedFeeAtomic} atomic USDT`,
+        `Sponsor: Pimlico via ${b.sponsorUrl}`, `Paymaster (USDT spender): ${b.unsignedOperation.paymaster}`,
+        `Fee treasury: ${b.paymaster.treasury}`,
+        `Unused USDT allowance can remain with the paymaster after settlement (up to ${b.plan.feeCapAtomic} atomic); a later gasless USDT batch resets it.`,
+        ...(b.account.delegation === "empty" ? [`First use: EIP-7702 delegates this owner address to ${b.unsignedOperation.eip7702Auth.address}. This on-chain delegation can persist after this transfer until changed.`]
+            : [`Existing EIP-7702 delegation to ${USDT_GASLESS.delegate} will be used.`]),
+        `Policy revision: ${b.policyRevision}`, `Policy digest: ${b.policyDigest}`,
+        `Quote valid from: ${new Date(Number(validity.validAfter) * 1000).toISOString()}`,
+        `Quote valid until: ${new Date(validUntil).toISOString()}`, `Binding: ${b.bindingHash}`,
+        `Type ${phrase} and press Enter to send exactly once.`, "> "];
+    return { text: lines.join("\n"), phrase, validUntil };
+}
 export class TtyUsdtApproval {
     async approve(bound) {
         if (process.stdin.isTTY !== true || process.stderr.isTTY !== true) {
             throw new ApnError("APN_NATIVE_REJECTED", "A foreground terminal is required for gasless USDT approval.", { nativeCode: "APN_TTY_UNAVAILABLE" });
         }
-        const b = bound.binding, validity = decodeUsdtPaymasterData(b.paymasterData);
-        const now = Date.now(), validUntil = Number(validity.validUntil) * 1000;
-        if (!Number.isSafeInteger(validUntil) || now + 60_000 >= validUntil) {
-            throw new ApnError("APN_NATIVE_REJECTED", "Gasless USDT quote is too close to expiry.", { nativeCode: "APN_APPROVAL_EXPIRED" });
-        }
-        const phrase = approvalCode("gasless", "usdt", b.bindingHash);
-        const lines = ["\nAgent Payment Node gasless USDT approval", `Operation: ${bound.operationId}`,
-            `Profile: ${b.profile}`, `Chain: Ethereum (${b.chain})`, `Owner: ${b.plan.request.sender}`,
-            `Recipient: ${b.plan.request.recipient}`, `Gross: ${b.plan.request.grossAtomic} atomic USDT`,
-            `Recipient amount: ${b.plan.netAtomic} atomic USDT`, `Maximum fee: ${b.plan.request.maxFeeAtomic} atomic USDT`,
-            `Quoted fee bound: ${b.plan.quotedFeeAtomic} atomic USDT`,
-            `Policy revision: ${b.policyRevision}`, `Policy digest: ${b.policyDigest}`,
-            `Quote valid from: ${new Date(Number(validity.validAfter) * 1000).toISOString()}`,
-            `Quote valid until: ${new Date(validUntil).toISOString()}`, `Binding: ${b.bindingHash}`,
-            `Type ${phrase} and press Enter to send exactly once.`, "> "];
+        const now = Date.now(), { text, phrase, validUntil } = usdtApprovalPrompt(bound, now);
         const abort = new AbortController();
         const timer = setTimeout(() => abort.abort(), Math.min(60_000, validUntil - now - 60_000));
         const terminal = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
         try {
-            const answer = await terminal.question(lines.join("\n"), { signal: abort.signal });
+            const answer = await terminal.question(text, { signal: abort.signal });
             if (answer !== phrase)
                 throw new ApnError("APN_NATIVE_REJECTED", "Gasless USDT approval was refused.", { nativeCode: "APN_APPROVAL_REFUSED" });
             if (Date.now() + 60_000 >= validUntil)
