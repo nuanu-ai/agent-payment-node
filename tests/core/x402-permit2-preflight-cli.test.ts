@@ -3,14 +3,17 @@ import test from "node:test";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { hashObject, sha256 } from "../../src/canonical.js";
 import { runCli } from "../../src/cli.js";
 import { STATE_VERSION } from "../../src/constants.js";
+import { ApnError } from "../../src/errors.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { StateStore, sealWallet } from "../../src/state.js";
 import { encodeCanonicalBase64Json, encodePaymentRequiredHeader, type X402PaymentRequired } from "../../src/x402-codec.js";
 import { hashChallenge } from "../../src/x402-permit2/prepare.js";
 import { permit2PublicRpc } from "../../src/x402-permit2/preflight.js";
+import { createPermit2ProductionReadPort } from "../../src/x402-permit2/read-port.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
@@ -175,30 +178,44 @@ test("public RPC pacing follows physical transport completion across separate so
   assert.deepEqual(await paymentSnapshot(temp.root), before);
 });
 
-test("a second source waits through a near-timeout transport and completion gap", async t => {
+test("concurrent slow production reads fail closed before a second transport", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
+  const before = await paymentSnapshot(temp.root);
   let entered!: () => void;
   const firstEntered = new Promise<void>(resolve => { entered = resolve; });
-  let firstCompletion = 0, secondEntry = 0;
+  let firstCalls = 0, secondCalls = 0;
   const first = permit2PublicRpc("https://contended-rpc.example", temp.root, {
     permit2ReadCall: async () => {
+      firstCalls++;
       entered();
-      await new Promise(resolve => setTimeout(resolve, 1_900));
-      firstCompletion = Date.now();
-      return "0xa86a";
+      await new Promise(resolve => setTimeout(resolve, 1_750));
+      return "0x1";
     },
   });
   const second = permit2PublicRpc("https://contended-rpc.example/", temp.root, {
-    permit2ReadCall: async () => { secondEntry = Date.now(); return "0xa86a"; },
+    permit2ReadCall: async () => { secondCalls++; return "0xa86a"; },
   });
-  const signal = new AbortController().signal;
-  const active = first.call("eth_chainId", [], signal);
+  const options = { profile: "owner", stateRoot: temp.root,
+    localAccount: async () => payer,
+    usage: { usage: (identity: Parameters<AssetUsageLedger["usageReadOnly"]>[0], when: Date) =>
+      new AssetUsageLedger(temp.root).usageReadOnly(identity, when) },
+    now: () => at,
+    transport: { request: async () => { throw new Error("facilitator must not be called"); } } };
+  const firstPort = createPermit2ProductionReadPort({ ...options, rpc: first });
+  const secondPort = createPermit2ProductionReadPort({ ...options, rpc: second });
+  const request = { payer, chainId: 43114 as const, token: asset.token,
+    challengeHash: "a".repeat(64), offerHash: "b".repeat(64), amountAtomic: "10000",
+    nonceBitmapWordIndex: "0", nowSeconds: Math.floor(at.getTime() / 1000) };
+  const active = firstPort.read(request);
   await firstEntered;
-  const waiting = second.call("eth_chainId", [], signal);
-  assert.equal(await active, "0xa86a");
-  assert.equal(await waiting, "0xa86a");
-  assert.ok(secondEntry - firstCompletion >= 750,
-    `contended completion gap ${secondEntry - firstCompletion}`);
+  const waiting = secondPort.read(request);
+  const waitingRefusal = assert.rejects(waiting, (error: unknown) => error instanceof ApnError &&
+    (error.code === "APN_STATE_BUSY" || error.code === "APN_RPC_PROTOCOL"));
+  await assert.rejects(active);
+  await waitingRefusal;
+  assert.equal(firstCalls, 1);
+  assert.equal(secondCalls, 0);
+  assert.deepEqual(await paymentSnapshot(temp.root), before);
 });
 
 test("failed and aborted in-flight public RPC reads retain pacing before another source retries", async t => {

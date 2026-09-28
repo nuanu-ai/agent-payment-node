@@ -108,7 +108,7 @@ export function permit2PublicRpc(url: string, stateRoot: string,
         await state.writeRpcProviderPacing(endpointHash, completed);
         await state.writeRpcProviderCooldown(endpointHash, completed);
       }
-    }, { waitMs: 4_000 });
+    }, { waitMs: 1_900 });
   } };
 }
 
