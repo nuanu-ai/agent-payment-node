@@ -147,12 +147,17 @@ import { SavedOrcaStableMaterialStore } from "./swap/orca-solana/stable-material
 import { GuardedSwapService } from "./swap/service.js";
 import { SwapOperationRepository } from "./swap/repository.js";
 import { AssetUsageLedger } from "./asset-usage-ledger.js";
+import { permit2CurrentOwnerPreflight, permit2PublicRpc, type Permit2PreflightPorts } from "./x402-permit2/preflight.js";
+import { successEnvelope, failureEnvelope } from "./output.js";
+import { randomUUID } from "node:crypto";
 import { ORCA_SOLANA_CHAIN } from "./swap/orca-solana/pins.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
 export interface RuntimeFactoryOptions {
+  /** Synthetic read-only preflight seam; production uses the bounded HTTPS source. */
+  readonly permit2PreflightPorts?: Permit2PreflightPorts;
   /** Synthetic CLI test seam; source runtime still owns confirmation, pacing, and source effect guards. */
   readonly relayExecuteTransport?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
   readonly relayExecuteTtyOptions?: TtyTransferApprovalOptions;
@@ -654,6 +659,19 @@ export async function executeBoundCommand(
   bound: BoundCommand,
   options: RuntimeFactoryOptions = {},
 ): Promise<OutputEnvelope> {
+  if (bound.request.command === "x402.permit2.preflight") {
+    const requestId = randomUUID();
+    try {
+      if (bound.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "Avalanche RPC URL is required.");
+      // Parse the public URL even when synthetic ports are injected, matching the CLI contract.
+      new HttpsBaseRpc(bound.rpcUrl);
+      const stateRoot = options.stateRoot ?? effectiveStateRoot();
+      const data = await permit2CurrentOwnerPreflight(stateRoot, bound.request,
+        options.permit2PreflightPorts ?? { rpc: permit2PublicRpc(bound.rpcUrl, stateRoot) });
+      return successEnvelope(bound.request, requestId, { proofClass: "read_only_current_owner_preflight",
+        data, operation: null, receipt: null, nextActions: [] });
+    } catch (error) { return failureEnvelope(bound.request.command, requestId, error); }
+  }
   return await createApnCore(bound, options).execute(bound.request);
 }
 

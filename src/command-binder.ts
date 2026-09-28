@@ -67,6 +67,12 @@ export function mcpFieldName(optionName: `--${string}`): string {
 
 function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   const options = parsed.values;
+  if (parsed.command.path.join(" ") === "x402 permit2 preflight") return { request: {
+    command: "x402.permit2.preflight", profile: value(options, "--profile"),
+    paymentRequired: value(options, "--payment-required"),
+    expectedChallengeHash: value(options, "--expected-challenge-hash"),
+    expectedIndex: value(options, "--expected-index"), expectedTerms: value(options, "--expected-terms") },
+    rpcUrl: value(options, "--rpc-url") };
   if (parsed.command.path.join(" ") === "x402 permit2 status") return { request: { command: "x402.permit2.status", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
   if (parsed.command.path.join(" ") === "relay prepare") return { request: { command: "relay.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
   if (parsed.command.path.join(" ") === "relay base prepare") return { request: { command: "relay.base.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };

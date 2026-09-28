@@ -6,6 +6,13 @@ import type { ChainProvider } from "./direct-rail-ports.js";
 import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
+    readonly command: "x402.permit2.preflight";
+    readonly profile: string;
+    readonly paymentRequired: string;
+    readonly expectedChallengeHash: string;
+    readonly expectedIndex: string;
+    readonly expectedTerms: string;
+} | {
     readonly command: "x402.permit2.status";
     readonly profile: string;
     readonly operationId: string;

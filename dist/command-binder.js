@@ -51,6 +51,14 @@ export function mcpFieldName(optionName) {
 }
 function bindParsedCatalog(parsed) {
     const options = parsed.values;
+    if (parsed.command.path.join(" ") === "x402 permit2 preflight")
+        return { request: {
+                command: "x402.permit2.preflight", profile: value(options, "--profile"),
+                paymentRequired: value(options, "--payment-required"),
+                expectedChallengeHash: value(options, "--expected-challenge-hash"),
+                expectedIndex: value(options, "--expected-index"), expectedTerms: value(options, "--expected-terms")
+            },
+            rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "x402 permit2 status")
         return { request: { command: "x402.permit2.status", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay prepare")
