@@ -19,7 +19,13 @@ export async function evmWalletBalance(context, profileInput, selection) {
         const wallet = await context.state.loadWallet(profileHash);
         if (wallet === null)
             throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-        const snapshot = await requireEvmRpc(context.requireRpc()).balance(wallet.address, selection);
+        const rpc = context.requireRpc();
+        if (chainId === 1329 && selection.token === "native" && rpc.seiNativeBalance === undefined) {
+            throw new ApnError("APN_RPC_CONFIG", "Bounded Sei native balance RPC is unavailable.");
+        }
+        const snapshot = chainId === 1329 && selection.token === "native"
+            ? await rpc.seiNativeBalance(wallet.address, selection)
+            : await requireEvmRpc(rpc).balance(wallet.address, selection);
         if (snapshot.address !== wallet.address || snapshot.asset.chainId !== selection.chainId)
             throw new ApnError("APN_ASSET_MISMATCH", "Asset balance belongs to a different wallet or chain.");
         const sharedNetwork = EVM_NETWORKS.find((network) => network.chainId === chainId);

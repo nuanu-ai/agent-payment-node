@@ -69,6 +69,63 @@ test("Sei native prepare makes 17 logical reads in 8 HTTPS batch POSTs with reve
   assert.equal(quote.chainId, 1329); assert.equal(quote.l1DataFeeUpperWei, "0");
 });
 
+test("Sei native balance uses three paced HTTPS POSTs and pinned safe-head recheck", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  const bodies: { method: string; params: unknown[] }[][] = [];
+  const starts: number[] = [];
+  t.mock.method(https, "request", (_endpoint: URL, _options: unknown, receive: (response: unknown) => void) => {
+    const request = new EventEmitter() as any; request.setTimeout = () => request;
+    request.end = (body: string) => {
+      starts.push(Date.now());
+      const batch = JSON.parse(body) as { id: number; method: string; params: unknown[] }[];
+      assert.ok(Array.isArray(batch)); bodies.push(batch);
+      const raw = JSON.stringify(batch.map(item => ({ jsonrpc: "2.0", id: item.id,
+        result: answer(item.method, item.params) })).reverse());
+      queueMicrotask(() => {
+        const response = new EventEmitter() as any; response.statusCode = 200;
+        response.headers = { "content-length": String(Buffer.byteLength(raw)) };
+        response.resume = () => { response.emit("end"); }; receive(response);
+        response.emit("data", Buffer.from(raw)); response.emit("end");
+      });
+      return request;
+    };
+    return request;
+  });
+  syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const rpc = new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: state });
+  const balance = await rpc.seiNativeBalance(WALLET, selection);
+  assert.deepEqual(bodies.map(batch => batch.map(call => call.method)), [
+    ["eth_chainId", "eth_getBlockByNumber"], ["eth_getBalance"], ["eth_getBlockByNumber", "eth_chainId"],
+  ]);
+  assert.equal(bodies[0]?.[1]?.params[0], "safe");
+  assert.equal(bodies[1]?.[0]?.params[1], block.number);
+  assert.equal(bodies[2]?.[0]?.params[0], block.number);
+  assert.ok(starts[1]! - starts[0]! >= 750);
+  assert.ok(starts[2]! - starts[1]! >= 750);
+  assert.equal(balance.assetAtomic, "1000000000000000000");
+  assert.equal(balance.blockHash, EVM_BLOCK_HASH);
+});
+
+test("Sei native balance stops at its aggregate deadline without retry", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let posts = 0;
+  t.mock.method(https, "request", (_endpoint: URL, options: { signal: AbortSignal }) => {
+    posts += 1;
+    const request = new EventEmitter() as any;
+    request.setTimeout = () => request; request.end = () => request;
+    options.signal.addEventListener("abort", () => request.emit("close"), { once: true });
+    return request;
+  });
+  syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const rpc = new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: state });
+  const started = Date.now();
+  await assert.rejects(rpc.seiNativeBalance(WALLET, selection), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.ok(Date.now() - started < 20_500);
+  assert.equal(posts, 1);
+});
+
 test("Sei approval and pre-send funding use 8 then 5 grouped HTTPS POSTs without scalar fallback", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root); await state.initialize();

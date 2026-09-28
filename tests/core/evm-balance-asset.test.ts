@@ -36,6 +36,7 @@ test("core balance reads remain chain verified and read-only for all 11 direct E
   context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   await ensureDirectWallet(setup);
+  const keyLoads = setup.wrapping.loads;
 
   for (const network of DIRECT_EVM_NETWORKS) {
     setup.rpc.chainId = network.chainId;
@@ -53,4 +54,5 @@ test("core balance reads remain chain verified and read-only for all 11 direct E
     }
   }
   assert.equal(setup.rpc.broadcastCount, 0);
+  assert.equal(setup.wrapping.loads, keyLoads);
 });
