@@ -35,19 +35,28 @@ export interface OrcaStableExecutionPorts {
     readonly sign: (operation: SwapOperationRecord, binding: OrcaStableExecutionBinding, account: ChainAccount) => Promise<RailSignedEffect>;
     readonly effects: Pick<ChainWalletStoragePort, "saveEffect" | "effect">;
 }
-/**
- * Internal journal only: no network send or public command exists here. A crash after the marker makes every later
- * begin call observe-only. The present swap state model has no terminal no-send transition after a marker, so a
- * missing signed effect can strand the principal lease. Public activation requires proven no-send recovery first.
- */
+export interface OrcaStableExecutionSendPorts extends OrcaStableExecutionPorts {
+    readonly send: (operation: SwapOperationRecord, binding: OrcaStableExecutionBinding, account: ChainAccount, persistedEffect: RailSignedEffect) => Promise<"submitted" | "possible_send">;
+}
+/** Internal journal. A crash after the marker makes every later begin call observe-only. */
 export declare function beginOrcaStableExecution(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, bindings: OrcaStableExecutionBindingStore, ports: OrcaStableExecutionPorts, operationId: string, clock: () => Date): Promise<{
-    operation: SwapOperationRecord;
-    binding: OrcaStableExecutionBinding;
-    signature: string;
-} | {
     operation: SwapOperationRecord;
     binding: null;
     signature: null;
+} | {
+    operation: SwapOperationRecord;
+    binding: OrcaStableExecutionBinding;
+    signature: string;
+}>;
+/** Private, one-shot first attempt. No CLI/MCP route is exposed until finalized observation is integrated. */
+export declare function beginOrcaStableExecutionAndSend(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, bindings: OrcaStableExecutionBindingStore, ports: OrcaStableExecutionSendPorts, operationId: string, clock: () => Date): Promise<{
+    operation: SwapOperationRecord;
+    binding: null;
+    signature: null;
+} | {
+    operation: SwapOperationRecord;
+    binding: OrcaStableExecutionBinding;
+    signature: string;
 }>;
 export declare class OrcaStableExecutionBindingStore extends SecureStateStore {
     private initialized;

@@ -12,12 +12,15 @@ import { validateOrcaStableUnsigned } from "./stable-prepare.js";
 import { stableReservationAdmissionPorts } from "./stable-reservation-admission.js";
 import { sha256Hex } from "./pins.js";
 const VERSION = "apn.orca-stable-execution-binding.v1";
-/**
- * Internal journal only: no network send or public command exists here. A crash after the marker makes every later
- * begin call observe-only. The present swap state model has no terminal no-send transition after a marker, so a
- * missing signed effect can strand the principal lease. Public activation requires proven no-send recovery first.
- */
+/** Internal journal. A crash after the marker makes every later begin call observe-only. */
 export async function beginOrcaStableExecution(service, materials, bindings, ports, operationId, clock) {
+    return await beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock);
+}
+/** Private, one-shot first attempt. No CLI/MCP route is exposed until finalized observation is integrated. */
+export async function beginOrcaStableExecutionAndSend(service, materials, bindings, ports, operationId, clock) {
+    return await beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock);
+}
+async function beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock) {
     return await service.operations.withLocks([`orca-stable-operation:${operationId}`], async () => {
         let operation = await service.operations.loadAny(operationId);
         if (operation === null)
@@ -81,6 +84,7 @@ export async function beginOrcaStableExecution(service, materials, bindings, por
                 unsignedTransactionPayloadHash: markerBody.unsignedTransactionPayloadHash },
         }, markAt);
         // All failures after the marker are observe-only. Never invoke preflight or signing on this operation again.
+        let persisted = null;
         try {
             const binding = await bindings.save(operation, material, preflight);
             const account = await ports.admission.localAccount(operation.quote.profile);
@@ -90,11 +94,25 @@ export async function beginOrcaStableExecution(service, materials, bindings, por
             const effect = await ports.sign(operation, binding, account);
             await verifyOrcaStableSignedEffect(effect, binding);
             await ports.effects.saveEffect(account, effect);
-            return { operation, binding, signature: effect.transactionId };
+            persisted = { binding, account, effect };
         }
         catch {
             return { operation, binding: null, signature: null };
         }
+        const { binding, account, effect } = persisted;
+        if (ports.send === undefined)
+            return { operation, binding, signature: effect.transactionId };
+        // The sender rereads the sealed bytes under this same lock. A refused pre-send guard leaves the marker
+        // observe-only; a possible provider send is recorded as unknown finality without retrying.
+        let result;
+        try {
+            result = await ports.send(operation, binding, account, effect);
+        }
+        catch {
+            return { operation, binding, signature: effect.transactionId };
+        }
+        operation = await service.recordPossibleSend(operation, result === "submitted" ? "submitted" : "unknown_finality", checkedNow(clock));
+        return { operation, binding, signature: effect.transactionId };
     });
 }
 export class OrcaStableExecutionBindingStore extends SecureStateStore {
