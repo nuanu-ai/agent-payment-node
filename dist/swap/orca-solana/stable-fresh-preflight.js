@@ -28,12 +28,13 @@ export async function freshOrcaStableExecutionPreflight(rpc, admission, usage, o
 }
 /** Injectable, no-effect core for deterministic fake RPC and policy tests. */
 export async function freshOrcaStableExecutionPreflightCore(rpc, admission, usage, operationValue, materialValue, verifyPins, clock) {
+    // Start before any validation or storage await; the bound covers the complete adapter call.
+    const start = now(clock);
     const operation = validateSwapOperation(operationValue);
     const material = await validateOrcaStableMaterial(materialValue, operation);
     if (material.maximumPriceImpactBps === undefined) {
         throw new ApnError("APN_REPREPARE_REQUIRED", "Stable material predates the durable owner price impact cap.");
     }
-    const start = now(clock);
     if (operation.state !== "reserved" || operation.submissionMarker !== null ||
         operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
         start.toISOString() < operation.quote.effectiveAt || start.toISOString() >= operation.quote.expiresAt) {
@@ -79,12 +80,13 @@ export async function freshOrcaStableExecutionPreflightCore(rpc, admission, usag
         proof.quoteInput.destinationAsset.identifier !== SOLANA_USDT) {
         blocked("Fresh stable message differs from the owner approved bounds.", "orca_stable_freshness");
     }
-    const checked = now(clock);
-    await recheckOrcaStableOwner(admittedPorts, owner, checked);
+    await recheckOrcaStableOwner(admittedPorts, owner, now(clock));
     const active = await admission.activePolicy(operation.quote.profile);
     if (active === null || active.digest !== owner.policyDigest || active.revision !== owner.policyRevision ||
         active.activationDigest !== owner.activationDigest)
         blocked("Stable owner activation changed.", "orca_stable_policy_drift");
+    // This instant is the journal's freshness anchor, sampled only after all awaited checks complete.
+    const checked = now(clock);
     if (checked.getTime() < start.getTime() || checked.getTime() - start.getTime() > MAX_PREFLIGHT_MS ||
         checked.toISOString() >= operation.quote.expiresAt) {
         blocked("Stable preflight exceeded its clock or quote deadline.", "orca_stable_freshness");
