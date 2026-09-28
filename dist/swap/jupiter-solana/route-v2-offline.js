@@ -1,4 +1,4 @@
-import { canonicalAddress, invalid, JUPITER_V6_PROGRAM } from "./catalog.js";
+import { canonicalAddress, invalid, JUPITER_V6_PROGRAM, SOLANA_USDC_MINT, WRAPPED_SOL_MINT } from "./catalog.js";
 /** Offline decode of the captured Quantum route_v2 variant. Remaining account roles are unknown. */
 export function decodeQuantumRouteV2Offline(instruction, expected) {
     if (instruction.programId !== JUPITER_V6_PROGRAM || instruction.accounts.length < 10)
@@ -44,5 +44,26 @@ export function decodeQuantumRouteV2Offline(instruction, expected) {
     return Object.freeze({ signable: false, inAmount: data.readBigUInt64LE(8).toString(), quotedOutAmount: data.readBigUInt64LE(16).toString(),
         slippageBps: data.readUInt16LE(24), platformFeeBps: data.readUInt16LE(26), positiveSlippageBps: data.readUInt16LE(28),
         routePlan: Object.freeze(routePlan), remainingAccountCount: instruction.accounts.length - 10 });
+}
+/** Reconcile the one captured ExactIn SOL -> USDC Quantum layout, without granting signing authority. */
+export function checkQuantumBuildConsistencyOffline(build, expected) {
+    if (build.swapMode !== "ExactIn" || build.inputMint !== WRAPPED_SOL_MINT || build.outputMint !== SOLANA_USDC_MINT ||
+        expected.sourceMint !== build.inputMint || expected.destinationMint !== build.outputMint) {
+        invalid("Jupiter raw build is not the supported ExactIn SOL to USDC pair.");
+    }
+    const route = decodeQuantumRouteV2Offline(build.swapInstruction, expected);
+    const step = route.routePlan[0];
+    const quotedStep = build.routePlan[0];
+    if (route.routePlan.length !== 1 || !step || step.side !== 0 || step.bps !== 10_000 || step.inputIndex !== 0 || step.outputIndex !== 1 ||
+        build.routePlan.length !== 1 || !quotedStep || quotedStep.percent !== 100 || quotedStep.bps !== 10_000 ||
+        quotedStep.swapInfo.label !== "Quantum" || quotedStep.swapInfo.inputMint !== build.inputMint ||
+        quotedStep.swapInfo.outputMint !== build.outputMint ||
+        route.inAmount !== build.inAmount || route.inAmount !== quotedStep.swapInfo.inAmount ||
+        route.quotedOutAmount !== build.outAmount || route.quotedOutAmount !== quotedStep.swapInfo.outAmount ||
+        route.slippageBps !== build.slippageBps || route.platformFeeBps !== 0 || route.positiveSlippageBps !== 0 ||
+        route.remainingAccountCount !== 11 || BigInt(build.otherAmountThreshold) > BigInt(build.outAmount)) {
+        invalid("Jupiter raw build and Quantum route_v2 instruction are inconsistent or unsupported.");
+    }
+    return route;
 }
 //# sourceMappingURL=route-v2-offline.js.map

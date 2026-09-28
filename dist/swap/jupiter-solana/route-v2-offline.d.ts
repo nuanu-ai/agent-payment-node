@@ -1,4 +1,4 @@
-import type { JupiterRawInstruction } from "./codec.js";
+import type { JupiterRawBuildResponse, JupiterRawInstruction } from "./codec.js";
 /** Expected identities are supplied by an independent caller, never inferred from the instruction. */
 export interface RouteV2FixedAccounts {
     readonly userTransferAuthority: string;
@@ -29,3 +29,5 @@ export interface OfflineRouteV2 {
 }
 /** Offline decode of the captured Quantum route_v2 variant. Remaining account roles are unknown. */
 export declare function decodeQuantumRouteV2Offline(instruction: JupiterRawInstruction, expected: RouteV2FixedAccounts): OfflineRouteV2;
+/** Reconcile the one captured ExactIn SOL -> USDC Quantum layout, without granting signing authority. */
+export declare function checkQuantumBuildConsistencyOffline(build: JupiterRawBuildResponse, expected: RouteV2FixedAccounts): OfflineRouteV2;

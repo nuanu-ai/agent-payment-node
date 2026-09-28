@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { decodeRawBuildResponse } from "../../src/swap/jupiter-solana/codec.js";
-import { decodeQuantumRouteV2Offline, type RouteV2FixedAccounts } from "../../src/swap/jupiter-solana/route-v2-offline.js";
+import { checkQuantumBuildConsistencyOffline, decodeQuantumRouteV2Offline, type RouteV2FixedAccounts } from "../../src/swap/jupiter-solana/route-v2-offline.js";
 
 const fixture = JSON.parse(readFileSync(new URL("../../../tests/core/jupiter-fixtures/official-sol-usdc-quantum-build-20260924.json", import.meta.url), "utf8")) as {
   response: Record<string, any>;
@@ -66,4 +66,54 @@ test("route_v2 refuses changed framing, variant, side and impossible bps", () =>
   const trailing = instruction(); trailing.data = Buffer.concat([Buffer.from(trailing.data, "base64"), Buffer.from([0])]).toString("base64"); cases.push(trailing);
   const program = instruction(); program.programId = SOL; cases.push(program);
   for (const value of cases) assert.throws(() => decode(value));
+});
+
+test("captured single-step Quantum build reconciles quote, route and instruction without signing", () => {
+  const result = checkQuantumBuildConsistencyOffline(decodeRawBuildResponse(fixture.response), expected);
+  assert.equal(result.signable, false);
+  assert.equal(result.inAmount, "1000000");
+  assert.equal(result.quotedOutAmount, "116603");
+});
+
+test("Quantum build rejects self-consistent quote mutations and instruction mismatches", () => {
+  const cases: Record<string, (response: Record<string, any>) => void> = {
+    "build input": (r) => { r.inAmount = "1000001"; },
+    "build output": (r) => { r.outAmount = "116604"; },
+    "build slippage": (r) => { r.slippageBps = 51; },
+    "build input mint": (r) => { r.inputMint = USDC; },
+    "build output mint": (r) => { r.outputMint = SOL; },
+    "route input": (r) => { r.routePlan[0].swapInfo.inAmount = "1000001"; },
+    "route output": (r) => { r.routePlan[0].swapInfo.outAmount = "116604"; },
+    "route input mint": (r) => { r.routePlan[0].swapInfo.inputMint = USDC; },
+    "route output mint": (r) => { r.routePlan[0].swapInfo.outputMint = SOL; },
+    "route label": (r) => { r.routePlan[0].swapInfo.label = "Other"; },
+    "route percent": (r) => { r.routePlan[0].percent = 99; },
+    "route bps": (r) => { r.routePlan[0].bps = 9999; },
+    "instruction input": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeBigUInt64LE(1000001n, 8); r.swapInstruction.data = d.toString("base64"); },
+    "instruction output": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeBigUInt64LE(116604n, 16); r.swapInstruction.data = d.toString("base64"); },
+    "instruction slippage": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeUInt16LE(51, 24); r.swapInstruction.data = d.toString("base64"); },
+  };
+  for (const [name, mutate] of Object.entries(cases)) {
+    const response = structuredClone(fixture.response); mutate(response);
+    assert.throws(() => checkQuantumBuildConsistencyOffline(decodeRawBuildResponse(response), expected), Error, name);
+  }
+  assert.throws(() => checkQuantumBuildConsistencyOffline(decodeRawBuildResponse(fixture.response), { ...expected, userTransferAuthority: SOL }), /fixed account/);
+});
+
+test("Quantum build rejects unsupported route layouts and threshold above quote", () => {
+  const cases: Record<string, (response: Record<string, any>) => void> = {
+    "ExactOut": (r) => { r.swapMode = "ExactOut"; },
+    "two quoted steps": (r) => { r.routePlan.push(structuredClone(r.routePlan[0])); },
+    "instruction side": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d[35] = 1; r.swapInstruction.data = d.toString("base64"); },
+    "instruction bps": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeUInt16LE(9999, 36); r.swapInstruction.data = d.toString("base64"); },
+    "instruction indices": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d[38] = 1; d[39] = 0; r.swapInstruction.data = d.toString("base64"); },
+    "platform fee": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeUInt16LE(10_000, 26); r.swapInstruction.data = d.toString("base64"); },
+    "positive slippage": (r) => { const d = Buffer.from(r.swapInstruction.data, "base64"); d.writeUInt16LE(10_000, 28); r.swapInstruction.data = d.toString("base64"); },
+    "extra remaining account": (r) => { r.swapInstruction.accounts.push(structuredClone(r.swapInstruction.accounts[20])); },
+    "threshold above quote": (r) => { r.otherAmountThreshold = "116604"; },
+  };
+  for (const [name, mutate] of Object.entries(cases)) {
+    const response = structuredClone(fixture.response); mutate(response);
+    assert.throws(() => checkQuantumBuildConsistencyOffline(decodeRawBuildResponse(response), expected), Error, name);
+  }
 });
