@@ -70,7 +70,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
     stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval,
   });
   assert.equal(approved.ok, true, JSON.stringify(approved));
-  const observe = chainId === 1 && kind === "native";
+  const observe = chainId === 1;
   assert.equal((approved.operation as { state: string }).state, observe ? "submitted_pending" : "completed");
   assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1);
   const completed = observe ? await runCli(["operation", "resume", "--operation", operation.operation_id, "--rpc-url", selection.rpc_url, "--observe-only", "true"], {}, {
