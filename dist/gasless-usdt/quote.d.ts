@@ -12,6 +12,8 @@ export declare function validateUsdtGasPrice(result: unknown): {
  * the actual gas cost can never exceed the sum of the limits at the max fee.
  */
 export declare function usdtFeeBound(gas: UsdtGaslessGas, maxFeePerGas: bigint, postOpGas: bigint, exchangeRate: bigint): bigint;
+/** Effective owner fee budget, shared by preparation and frozen-operation guards. */
+export declare function usdtEffectiveFeeCap(request: Pick<UsdtTransferRequest, "grossAtomic" | "maxFeeAtomic" | "minReceivedAtomic">): bigint;
 /**
  * Prepare: F = min(max fee, gross - min received) is the whole fee budget and the exact allowance the batch grants, and
  * N = gross - F is the recipient's credit. A quote whose worst case exceeds F refuses; nothing is widened to fit it.
