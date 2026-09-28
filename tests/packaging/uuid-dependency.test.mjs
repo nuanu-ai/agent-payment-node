@@ -37,6 +37,9 @@ test("MetaMask utils UUID override and production lock closure are exact", async
   const lock = JSON.parse(lockBytes.toString("utf8"));
 
   assert.deepEqual(manifest.overrides, {
+    "@solana/web3.js": {
+      jayson: "5.0.0",
+    },
     "@metamask/utils": {
       uuid: "11.1.1",
     },
@@ -58,6 +61,12 @@ test("MetaMask utils UUID override and production lock closure are exact", async
       ws: "8.21.3",
     },
     "viem@2.52.2": {
+      ws: "8.21.3",
+    },
+    "@coral-xyz/anchor": {
+      toml: "4.2.0",
+    },
+    "viem@2.47.6": {
       ws: "8.21.3",
     },
   });
