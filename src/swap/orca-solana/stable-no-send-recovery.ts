@@ -8,6 +8,7 @@ import { SavedOrcaStableMaterialStore } from "./stable-material.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
 import { orcaStableNoSendProof, OrcaStableNoSendProofStore } from "./stable-no-send-proof.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT } from "./pins.js";
+import { hasOrcaStableSendClaim } from "./stable-effect-runtime.js";
 
 /**
  * Internal, local-only recovery. The operation lock is shared with the marker writer and must also guard any future
@@ -34,6 +35,8 @@ export async function recoverOrcaStableNoSend(service: GuardedSwapService, mater
       canonicalJson(material.quote) !== canonicalJson(operation.quote) ||
       material.policyDigest !== operation.policyDigest) corrupt("Stable recovery material changed.");
     const binding = await bindings.load(operation, material);
+    if (await hasOrcaStableSendClaim(service.operations.root, operation))
+      blocked("Stable send was already claimed; no-send cannot be proved.", "orca_stable_send_claim_exists");
     const accountRaw = await localAccount(operation.quote.profile);
     if (accountRaw === null) corrupt("Stable custody owner is missing.");
     const account = validateChainAccount(accountRaw);

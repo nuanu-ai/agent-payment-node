@@ -769,12 +769,15 @@ test("private stable first attempt consumes 23 preflight POSTs and one persisted
   const rpc = new SolanaRpc(endpoint, fetcher, budget,
     new SolanaRpcPacer(state, () => time, async ms => { time += ms; }));
   const custody = {
+    account: async () => await f.ports.localAccount(),
     withSeed: async (_account: unknown, action: (seed: Buffer) => Promise<unknown>) => await action(Buffer.alloc(32, 23)),
     effect: async () => null,
     effectByOperationId: async () => signedEffect,
     saveEffect: async (_account: unknown, effect: unknown) => { signedEffect = effect; },
   } as any;
-  const signer = new OrcaStableLocalSigner(custody), sender = new OrcaStableSingleSender(rpc, custody, f.clock);
+  const bindings = new OrcaStableExecutionBindingStore(f.root);
+  const signer = new OrcaStableLocalSigner(custody);
+  const sender = new OrcaStableSingleSender(f.service, materials, bindings, custody, rpc, f.clock);
   let signs = 0;
   const ports = { admission: f.ports, preflight: async () => {
     for (let index = 0; index < 23; index++) assert.equal(await rpc.call("getGenesisHash", []), SOLANA_GENESIS);
@@ -783,9 +786,8 @@ test("private stable first attempt consumes 23 preflight POSTs and one persisted
       simulationHash: "d".repeat(64) };
   }, sign: async (operation: any, binding: any, account: any) => {
     signs++; return await signer.sign(operation, binding, account);
-  }, effects: custody, send: async (operation: any, binding: any, account: any, effect: any) =>
-    await sender.sendOnce(operation, binding, account, effect) };
-  const result = await beginOrcaStableExecutionAndSend(f.service, materials, new OrcaStableExecutionBindingStore(f.root),
+  }, effects: custody, send: async (operationId: string) => await sender.sendOnce(operationId) };
+  const result = await beginOrcaStableExecutionAndSend(f.service, materials, bindings,
     ports, prepared.operation.operationId, f.clock);
   assert.equal(result.operation.state, "submitted");
   assert.equal(result.signature, signedEffect.transactionId);
@@ -797,9 +799,7 @@ test("private stable first attempt consumes 23 preflight POSTs and one persisted
   await assert.rejects(beginOrcaStableExecutionAndSend(f.service, materials, new OrcaStableExecutionBindingStore(f.root),
     ports, prepared.operation.operationId, f.clock), (error) => reason(error) === "orca_stable_observe_only");
   assert.equal(signs, 1); assert.equal(starts.length, 24);
-  const account = await f.ports.localAccount();
-  assert.ok(account !== null);
-  await assert.rejects(sender.sendOnce(result.operation, result.binding!, account!, signedEffect),
+  await assert.rejects(sender.sendOnce(prepared.operation.operationId),
     (error) => reason(error) === "orca_stable_effect_boundary");
   assert.equal(starts.length, 24);
   const nextBudget = new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750,
@@ -829,6 +829,82 @@ test("stable physical transport makes one 429 attempt and persists provider cool
   new SolanaRpcPacer(new StateStore(temporary.root), () => time, async ms => { time += ms; }));
   await assert.rejects(next.call("getGenesisHash", []), { code: "APN_PROVIDER_UNAVAILABLE" });
   assert.equal(posts, 1);
+});
+
+async function privateStableSenderHarness(nearExpiry: boolean) {
+  const f = await fixture();
+  const prepared = await candidate(f), materials = new SavedOrcaStableMaterialStore(f.root);
+  await approveOrcaStableReservation(f.service, materials, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, f.clock);
+  const state = new StateStore(f.root); await state.initialize();
+  let time = NOW.getTime(), effect: any = null;
+  const physical: Array<{ method: string; start: number }> = [];
+  const fetcher: typeof fetch = async (_url, init) => {
+    const request = JSON.parse(init!.body as string);
+    physical.push({ method: request.method, start: time });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "sendTransaction" ? effect.transactionId : SOLANA_GENESIS }),
+    { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const clock = () => new Date(time);
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750,
+    now: () => time, wait: async ms => { time += ms; } });
+  const rpc = new SolanaRpc("https://stable-claim.example/rpc", fetcher, budget,
+    new SolanaRpcPacer(state, () => time, async ms => { time += ms; }));
+  const custody = { account: async () => await f.ports.localAccount(),
+    withSeed: async (_account: unknown, action: (seed: Buffer) => Promise<unknown>) => await action(Buffer.alloc(32, 23)),
+    effect: async () => null, effectByOperationId: async () => effect,
+    saveEffect: async (_account: unknown, saved: unknown) => { effect = saved; } } as any;
+  const bindings = new OrcaStableExecutionBindingStore(f.root), signer = new OrcaStableLocalSigner(custody);
+  const sender = new OrcaStableSingleSender(f.service, materials, bindings, custody, rpc, clock);
+  const competitor = new OrcaStableSingleSender(new GuardedSwapService(new SwapOperationRepository(f.root),
+    new AssetUsageLedger(f.root)), new SavedOrcaStableMaterialStore(f.root),
+    new OrcaStableExecutionBindingStore(f.root), custody, rpc, clock);
+  const begun = await beginOrcaStableExecution(f.service, materials, bindings, { admission: f.ports,
+    preflight: async () => {
+      for (let index = 0; index < 23; index++) {
+        if (nearExpiry && index === 22) time = Date.parse(prepared.operation.quote.expiresAt) - 100;
+        await rpc.call("getGenesisHash", []);
+      }
+      return { preview: (await materials.loadStaged(prepared.operation.operationId))!.preview,
+        checkedAt: clock().toISOString(), elapsedMs: 17_000, physicalPostCount: budget.physicalRequests,
+        simulationHash: "d".repeat(64) };
+    }, sign: (operation, binding, account) => signer.sign(operation, binding, account), effects: custody },
+  prepared.operation.operationId, clock);
+  assert.equal(begun.operation.state, "submitting");
+  return { f, sender, competitor, materials, bindings, custody, physical,
+    operationId: prepared.operation.operationId, staleOperation: begun.operation,
+    dropEffect: () => { effect = null; } };
+}
+
+test("stable direct sender persists one claim across concurrent callers and transition crash", async (t) => {
+  const h = await privateStableSenderHarness(false); t.after(h.f.cleanup);
+  (h.f.service as any).recordPossibleSend = async () => { throw new Error("crash after transport"); };
+  const results = await Promise.allSettled([h.sender.sendOnce(h.operationId), h.competitor.sendOnce(h.operationId)]);
+  assert.equal(results.filter(result => result.status === "rejected").length, 2);
+  assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 1);
+  assert.equal((await h.f.service.operations.loadAny(h.operationId))?.state, "submitting");
+  await assert.rejects(h.sender.sendOnce(h.operationId), (error) => reason(error) === "orca_stable_effect_boundary");
+  await assert.rejects((h.competitor.sendOnce as any)(h.operationId, h.staleOperation),
+    (error) => reason(error) === "orca_stable_effect_boundary");
+  assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 1);
+  h.dropEffect();
+  await assert.rejects(recoverOrcaStableNoSend(h.f.service, h.materials, h.bindings,
+    new OrcaStableNoSendProofStore(h.f.root), h.custody, async () => await h.f.ports.localAccount(),
+    h.operationId, new Date(NOW.getTime() + 60_000)),
+  (error) => reason(error) === "orca_stable_send_claim_exists");
+  const lease = await h.f.service.usage.load({ account: h.staleOperation.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, h.staleOperation.usageLease!.reservationId);
+  assert.equal(lease?.state, "reserved");
+});
+
+test("stable claim before delayed transport stays observe-only after quote expires", async (t) => {
+  const h = await privateStableSenderHarness(true); t.after(h.f.cleanup);
+  const result = await h.sender.sendOnce(h.operationId);
+  assert.equal(result.state, "unknown_finality");
+  assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 0);
+  await assert.rejects(h.sender.sendOnce(h.operationId), (error) => reason(error) === "orca_stable_effect_boundary");
+  assert.equal(h.physical.filter(row => row.method === "sendTransaction").length, 0);
 });
 
 test("stable journal marker-before-sign crash never signs on resume; policy drift refuses before marker", async (t) => {

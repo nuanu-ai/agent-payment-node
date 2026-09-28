@@ -48,8 +48,7 @@ export interface OrcaStableExecutionPorts {
 }
 
 export interface OrcaStableExecutionSendPorts extends OrcaStableExecutionPorts {
-  readonly send: (operation: SwapOperationRecord, binding: OrcaStableExecutionBinding,
-    account: ChainAccount, persistedEffect: RailSignedEffect) => Promise<"submitted" | "possible_send">;
+  readonly send: (operationId: string) => Promise<SwapOperationRecord>;
 }
 
 /** Internal journal. A crash after the marker makes every later begin call observe-only. */
@@ -61,12 +60,13 @@ export async function beginOrcaStableExecution(service: GuardedSwapService, mate
 /** Private, one-shot first attempt. No CLI/MCP route is exposed until finalized observation is integrated. */
 export async function beginOrcaStableExecutionAndSend(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore,
   bindings: OrcaStableExecutionBindingStore, ports: OrcaStableExecutionSendPorts, operationId: string, clock: () => Date) {
-  return await beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock);
+  const prepared = await beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock);
+  if (prepared.signature === null) return prepared;
+  return { ...prepared, operation: await ports.send(operationId) };
 }
 
 async function beginOrcaStableExecutionCore(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore,
-  bindings: OrcaStableExecutionBindingStore, ports: OrcaStableExecutionPorts & { readonly send?: OrcaStableExecutionSendPorts["send"] },
-  operationId: string, clock: () => Date) {
+  bindings: OrcaStableExecutionBindingStore, ports: OrcaStableExecutionPorts, operationId: string, clock: () => Date) {
   return await service.operations.withLocks([`orca-stable-operation:${operationId}`], async () => {
     let operation = await service.operations.loadAny(operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
@@ -135,14 +135,7 @@ async function beginOrcaStableExecutionCore(service: GuardedSwapService, materia
     } catch {
       return { operation, binding: null, signature: null };
     }
-    const { binding, account, effect } = persisted;
-    if (ports.send === undefined) return { operation, binding, signature: effect.transactionId };
-    // The sender rereads the sealed bytes under this same lock. A refused pre-send guard leaves the marker
-    // observe-only; a possible provider send is recorded as unknown finality without retrying.
-    let result: "submitted" | "possible_send";
-    try { result = await ports.send(operation, binding, account, effect); }
-    catch { return { operation, binding, signature: effect.transactionId }; }
-    operation = await service.recordPossibleSend(operation, result === "submitted" ? "submitted" : "unknown_finality", checkedNow(clock));
+    const { binding, effect } = persisted;
     return { operation, binding, signature: effect.transactionId };
   });
 }
