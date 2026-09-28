@@ -291,9 +291,25 @@ function parsedRetryAfterMs(value) {
         return undefined;
     if (/^[0-9]+$/u.test(value))
         return Math.min(Number(value) * 1_000, 30_000);
-    if (!value.includes(",") || !/GMT$/iu.test(value))
-        return undefined;
-    const date = Date.parse(value);
+    const asctime = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ( [1-9]|[12][0-9]|3[01]) ([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9]) ([0-9]{4})$/u.exec(value);
+    let date;
+    if (asctime !== null) {
+        // HTTP-date is GMT even though Date.parse treats asctime as local time.
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const parsed = new Date(0);
+        parsed.setUTCFullYear(Number(asctime[7]), months.indexOf(asctime[2]), Number(asctime[3]));
+        parsed.setUTCHours(Number(asctime[4]), Number(asctime[5]), Number(asctime[6]), 0);
+        if (parsed.getUTCFullYear() !== Number(asctime[7]) || parsed.getUTCMonth() !== months.indexOf(asctime[2]) ||
+            parsed.getUTCDate() !== Number(asctime[3]) || parsed.getUTCDay() !== weekdays.indexOf(asctime[1]))
+            return undefined;
+        date = parsed.getTime();
+    }
+    else {
+        if (!value.includes(",") || !/GMT$/iu.test(value))
+            return undefined;
+        date = Date.parse(value);
+    }
     const delay = date - Date.now();
     if (!Number.isFinite(date) || delay < 0)
         return undefined;
