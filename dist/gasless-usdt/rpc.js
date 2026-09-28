@@ -1,6 +1,7 @@
 import { encodeFunctionData, keccak256, parseAbi } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { RpcHttpFailure } from "../lifi/rpc-scheduler.js";
 import { rpcAddress, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord } from "../gasless/rpc-codec.js";
 import { USDT_GASLESS, usdtFailure } from "./model.js";
 const MAX_RESPONSE = 1024 * 1024;
@@ -33,9 +34,7 @@ export class UsdtJsonRpc {
             response = await this.transport.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), MAX_RESPONSE, "APN_RPC_CONFIG");
         }
         catch (error) {
-            if (error instanceof ApnError)
-                throw error;
-            throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless USDT RPC transport is unavailable.", { reason: "gasless_usdt_rpc_unavailable" });
+            throw rpcExchangeFailure(error, "single");
         }
         if (response.status !== 200)
             usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_rpc_http_status");
@@ -50,7 +49,7 @@ export class UsdtJsonRpc {
         return record.result;
     }
     /** One physical exchange. Every response must match exactly one requested id, in any order. */
-    async batch(calls) {
+    async batch(calls, phase = "batch") {
         if (calls.length < 1 || calls.length > 12 || calls.some(call => !this.methods.has(call.method))) {
             usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_rpc_method");
         }
@@ -61,9 +60,7 @@ export class UsdtJsonRpc {
             response = await this.transport.request(this.endpoint, "POST", canonicalJson(requests), MAX_RESPONSE, "APN_RPC_CONFIG");
         }
         catch (error) {
-            if (error instanceof ApnError)
-                throw error;
-            throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless USDT RPC transport is unavailable.", { reason: "gasless_usdt_rpc_unavailable" });
+            throw rpcExchangeFailure(error, phase);
         }
         if (response.status !== 200)
             usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_rpc_http_status");
@@ -94,7 +91,7 @@ export async function usdtSafeSnapshot(transport, rpcUrl, sender) {
     const rpc = new UsdtJsonRpc(transport, rpcUrl, CHAIN_METHODS);
     const [rawChainId, rawBlock] = await rpc.batch([
         { method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["safe", false] },
-    ]);
+    ], "safe_head");
     const chainId = rpcQuantity(rawChainId);
     if (chainId !== 1n)
         usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_chain");
@@ -118,7 +115,7 @@ export async function usdtSafeSnapshot(transport, rpcUrl, sender) {
                         functionName: "getNonce", args: [sender, 0n] }) }, tag] },
         { method: "eth_getTransactionCount", params: [sender, tag] },
     ];
-    const values = await rpc.batch(calls);
+    const values = await rpc.batch(calls, "account_snapshot");
     for (const [index, expected] of [USDT_GASLESS.tokenCodeHash, USDT_GASLESS.entryPointCodeHash,
         USDT_GASLESS.delegateCodeHash, USDT_GASLESS.paymasterCodeHash].entries()) {
         if (keccak256(rpcHex(values[index])) !== expected) {
@@ -141,6 +138,26 @@ export async function usdtSafeSnapshot(transport, rpcUrl, sender) {
     const eoaNonce = rpcQuantity(values[11]);
     return { chainId, blockNumber, blockHash,
         account: { usdtBalanceAtomic, entryPointNonce, eoaNonce, delegation: code === "0x" ? "empty" : "expected" } };
+}
+function rpcExchangeFailure(error, rpcPhase) {
+    if (error instanceof RpcHttpFailure) {
+        const rateLimited = error.status === 429;
+        return new ApnError(rateLimited ? "APN_RPC_RATE_LIMITED" : "APN_RPC_AMBIGUOUS", rateLimited ? "Gasless USDT RPC rate limited the request." : "Gasless USDT RPC returned a server error.", { reason: rateLimited ? "gasless_usdt_rpc_rate_limited" : "gasless_usdt_rpc_server_error",
+            rpcPhase, httpStatus: error.status,
+            ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }) });
+    }
+    if (error instanceof ApnError && error.code === "APN_PROVIDER_UNAVAILABLE" &&
+        error.details?.reason === "rpc_provider_cooldown") {
+        return new ApnError("APN_PROVIDER_UNAVAILABLE", "Gasless USDT RPC provider is cooling down.", { reason: "rpc_provider_cooldown", rpcPhase });
+    }
+    if (error instanceof ApnError && error.code === "APN_RPC_CONFIG") {
+        const reason = error.details?.reason === "gasless_usdt_read_budget" ? "gasless_usdt_read_budget" : "gasless_usdt_rpc_config";
+        return new ApnError("APN_RPC_CONFIG", "Gasless USDT RPC request could not start.", { reason, rpcPhase });
+    }
+    if (error instanceof ApnError && error.details?.reason === "gasless_usdt_read_deadline") {
+        return new ApnError("APN_RPC_AMBIGUOUS", "Gasless USDT RPC read deadline expired.", { reason: "gasless_usdt_read_deadline", rpcPhase });
+    }
+    return new ApnError("APN_RPC_AMBIGUOUS", "Gasless USDT RPC transport is unavailable.", { reason: "gasless_usdt_rpc_transport", rpcPhase });
 }
 /**
  * The keyless sponsor is the mechanism itself: Pimlico's public endpoint for chain 1, fixed, never configurable, so the

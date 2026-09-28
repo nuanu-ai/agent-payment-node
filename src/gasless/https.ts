@@ -9,7 +9,7 @@ import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type Pinned
 export interface GaslessTransport {
   request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number,
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void):
-    Promise<{ readonly status: number; readonly body: string }>;
+    Promise<{ readonly status: number; readonly body: string; readonly retryAfterMs?: number }>;
 }
 
 /** HTTP refusal is decided from the status line before untrusted headers or body are parsed. */
@@ -68,7 +68,7 @@ export class GaslessHttps implements GaslessTransport {
 
   async request(endpointInput: string, method: "POST" | "GET", body: string | null, maximumBytes: number,
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void):
-    Promise<{ readonly status: number; readonly body: string }> {
+    Promise<{ readonly status: number; readonly body: string; readonly retryAfterMs?: number }> {
     // A paced POST can wait behind other public RPC reads for longer than its
     // network timeout. Bound the whole request separately from each I/O phase.
     const overallExpires = performance.now() + (method === "POST" ? 60_000 : 15_000);
@@ -163,14 +163,14 @@ function failure(code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", reason: string): Ap
 
 function send(endpoint: URL, method: "POST" | "GET", body: string | null, addresses: readonly PinnedAddress[],
   maximumBytes: number, deadline: Deadline, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"):
-  Promise<{ readonly status: number; readonly body: string }> {
+  Promise<{ readonly status: number; readonly body: string; readonly retryAfterMs?: number }> {
   return new Promise((resolve, reject) => {
     deadline.assert();
     const selected = addresses[0];
     if (selected === undefined) { reject(failure(code, "DNS_empty")); return; }
     let settled = false, request: ClientRequest | undefined;
     const abort = () => finish(deadline.signal.reason);
-    const finish = (error: unknown, value?: { readonly status: number; readonly body: string }) => {
+    const finish = (error: unknown, value?: { readonly status: number; readonly body: string; readonly retryAfterMs?: number }) => {
       if (settled) return;
       settled = true; deadline.signal.removeEventListener("abort", abort);
       if (error !== null) {
@@ -196,7 +196,11 @@ function send(endpoint: URL, method: "POST" | "GET", body: string | null, addres
       const status = response.statusCode ?? 0;
       const declared = response.headers["content-length"];
       const disposition = gaslessResponseDisposition(status, response.headers["content-encoding"], declared, maximumBytes);
-      if (disposition === "terminal") { finish(null, { status, body: "" }); response.destroy(); return; }
+      if (disposition === "terminal") {
+        const retryAfterMs = parsedRetryAfterMs(response.headers["retry-after"]);
+        finish(null, { status, body: "", ...(retryAfterMs === undefined ? {} : { retryAfterMs }) });
+        response.destroy(); return;
+      }
       if (disposition === "reject") { finish(failure(code, "redirect_or_encoding_or_size")); return; }
       let size = 0; const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => {
@@ -225,4 +229,15 @@ function send(endpoint: URL, method: "POST" | "GET", body: string | null, addres
     if (live()) request.end(body ?? undefined);
     } catch (error) { finish(error); }
   });
+}
+
+/** Expose only a bounded numeric delay, never the raw provider header. */
+function parsedRetryAfterMs(value: string | string[] | undefined): number | undefined {
+  if (typeof value !== "string" || value.startsWith("-")) return undefined;
+  if (/^[0-9]+$/u.test(value)) return Math.min(Number(value) * 1_000, 30_000);
+  if (!value.includes(",") || !/GMT$/iu.test(value)) return undefined;
+  const date = Date.parse(value);
+  const delay = date - Date.now();
+  if (!Number.isFinite(date) || delay < 0) return undefined;
+  return Math.min(30_000, delay);
 }
