@@ -20,6 +20,7 @@ export declare function simulateOrcaStableGuardedReadOnly(rpc: SolanaRpc, ports:
     evidence: {
         schemaVersion: "apn.orca-stable-guarded-candidate.v1";
         marketSlot: string;
+        sourceBinding: import("./stable-source-binding.js").OrcaStableSourceBinding;
         beforeSlot: string;
         simulation: {
             postAccountDataSha256: {
@@ -100,6 +101,7 @@ export declare function simulateOrcaStableGuardedCore(rpc: SolanaRpcPort, ports:
     evidence: {
         schemaVersion: "apn.orca-stable-guarded-candidate.v1";
         marketSlot: string;
+        sourceBinding: import("./stable-source-binding.js").OrcaStableSourceBinding;
         beforeSlot: string;
         simulation: {
             postAccountDataSha256: {
@@ -183,6 +185,7 @@ export declare function proveOrcaStableGuardedCore(rpc: SolanaRpcPort, ports: Or
     evidence: {
         schemaVersion: "apn.orca-stable-guarded-candidate.v1";
         marketSlot: string;
+        sourceBinding: import("./stable-source-binding.js").OrcaStableSourceBinding;
         beforeSlot: string;
         simulation: {
             postAccountDataSha256: {

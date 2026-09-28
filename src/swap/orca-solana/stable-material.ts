@@ -9,8 +9,9 @@ import { ORCA_PROTOCOL_REGISTRY, ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./
 import { validateOrcaStableUnsigned, type OrcaStableUnsignedPreview } from "./stable-prepare.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT, WHIRLPOOL_PROGRAM } from "./pins.js";
 import { ORCA_STABLE_POOL } from "./stable-readonly.js";
+import { validateStableSourceBinding, type OrcaStableSourceBinding } from "./stable-source-binding.js";
 
-export const ORCA_STABLE_MATERIAL_SCHEMA = "apn.orca-stable-guarded-material.v1" as const;
+export const ORCA_STABLE_MATERIAL_SCHEMA = "apn.orca-stable-guarded-material.v2" as const;
 export interface OrcaStableMaterial {
   readonly schemaVersion: typeof ORCA_STABLE_MATERIAL_SCHEMA;
   readonly operationId: string;
@@ -22,6 +23,7 @@ export interface OrcaStableMaterial {
   readonly maximumPriceImpactBps?: number;
   readonly policyDigest: string;
   readonly activationDigest: string;
+  readonly sourceBinding: OrcaStableSourceBinding;
   readonly evidence: unknown;
   readonly preview: OrcaStableUnsignedPreview;
   readonly materialDigest: string;
@@ -30,14 +32,18 @@ export interface OrcaStableMaterial {
 export async function sealOrcaStableMaterial(input: Omit<OrcaStableMaterial, "schemaVersion" | "materialDigest">,
   idempotencyKey: string): Promise<OrcaStableMaterial> {
   const body = { schemaVersion: ORCA_STABLE_MATERIAL_SCHEMA, ...input };
-  const material = await validateOrcaStableMaterial({ ...body, materialDigest: domainHash("apn.orca-stable-guarded-material.v1", canonicalJson(body)) });
+  const material = await validateOrcaStableMaterial({ ...body, materialDigest: domainHash(ORCA_STABLE_MATERIAL_SCHEMA, canonicalJson(body)) });
   if (material.idempotencyHash !== swapIdempotencyHash(idempotencyKey) ||
       material.operationId !== preparedSwapOperationId(material.quote.profile, idempotencyKey)) corrupt();
   return material;
 }
 
 export async function validateOrcaStableMaterial(value: OrcaStableMaterial, operation?: SwapOperationRecord): Promise<OrcaStableMaterial> {
+  if ((value as { schemaVersion: string }).schemaVersion === "apn.orca-stable-guarded-material.v1" ||
+      (value as OrcaStableMaterial).sourceBinding === undefined)
+    throw new ApnError("APN_REPREPARE_REQUIRED", "Stable material predates the sealed RPC source binding; prepare a fresh candidate.");
   const quote = validateSwapQuote(value.quote);
+  const sourceBinding = validateStableSourceBinding(value.sourceBinding);
   if (value.schemaVersion !== ORCA_STABLE_MATERIAL_SCHEMA || !/^[a-f0-9]{64}$/u.test(value.operationId) ||
       !/^[a-f0-9]{64}$/u.test(value.idempotencyHash) || !/^[a-f0-9]{64}$/u.test(value.requestDigest) ||
       value.operationId !== domainHash("apn.swap-operation-id.v1", canonicalJson({ profileHash: quote.profileHash,
@@ -56,6 +62,7 @@ export async function validateOrcaStableMaterial(value: OrcaStableMaterial, oper
       typeof value.evidence !== "object" || value.evidence === null) corrupt();
   const evidence = value.evidence as Record<string, unknown>;
   if (evidence.policyDigest !== value.policyDigest || evidence.policyRevision !== value.policyRevision ||
+      canonicalJson(evidence.sourceBinding) !== canonicalJson(sourceBinding) ||
       evidence.activationDigest !== value.activationDigest || evidence.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
       evidence.messageHash !== preview.messageHash || evidence.unsignedPayloadHash !== sha256(preview.unsignedPayload) ||
       evidence.blockhash !== preview.blockhash || evidence.lastValidBlockHeight !== preview.lastValidBlockHeight ||
@@ -64,7 +71,7 @@ export async function validateOrcaStableMaterial(value: OrcaStableMaterial, oper
         program: WHIRLPOOL_PROGRAM, sourceAta: preview.sourceAta, destinationAta: preview.destinationAta,
         messageHash: preview.messageHash }))) corrupt();
   const { materialDigest: _digest, ...body } = value;
-  if (value.materialDigest !== domainHash("apn.orca-stable-guarded-material.v1", canonicalJson(body))) corrupt();
+  if (value.materialDigest !== domainHash(ORCA_STABLE_MATERIAL_SCHEMA, canonicalJson(body))) corrupt();
   if (operation !== undefined) {
     const op = validateSwapOperation(operation);
     if (value.operationId !== op.operationId || value.idempotencyHash !== op.idempotencyHash ||

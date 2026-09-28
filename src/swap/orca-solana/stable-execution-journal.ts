@@ -13,8 +13,9 @@ import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
 import { validateOrcaStableUnsigned, type OrcaStableUnsignedPreview } from "./stable-prepare.js";
 import { stableReservationAdmissionPorts } from "./stable-reservation-admission.js";
 import { sha256Hex } from "./pins.js";
+import { validateStableSourceBinding, type OrcaStableSourceBinding } from "./stable-source-binding.js";
 
-const VERSION = "apn.orca-stable-execution-binding.v1" as const;
+const VERSION = "apn.orca-stable-execution-binding.v2" as const;
 export interface OrcaStableExecutionPreflight {
   readonly preview: OrcaStableUnsignedPreview;
   readonly checkedAt: string;
@@ -30,6 +31,7 @@ export interface OrcaStableExecutionBinding {
   readonly materialDigest: string;
   readonly policyDigest: string;
   readonly activationDigest: string;
+  readonly sourceBinding: OrcaStableSourceBinding;
   readonly preview: OrcaStableUnsignedPreview;
   readonly checkedAt: string;
   readonly elapsedMs: number;
@@ -149,7 +151,7 @@ export class OrcaStableExecutionBindingStore extends SecureStateStore {
     const body = { schemaVersion: VERSION, operationId: operation.operationId,
       operationIntegrityHash: marker.operationIntegrityHash, submissionMarkerHash: marker.markerHash,
       materialDigest: material.materialDigest, policyDigest: material.policyDigest,
-      activationDigest: material.activationDigest, preview: preflight.preview,
+      activationDigest: material.activationDigest, sourceBinding: material.sourceBinding, preview: preflight.preview,
       checkedAt: preflight.checkedAt, elapsedMs: preflight.elapsedMs,
       physicalPostCount: preflight.physicalPostCount, simulationHash: preflight.simulationHash };
     const value = { ...body, bindingHash: domainHash(VERSION, canonicalJson(body)) };
@@ -179,6 +181,7 @@ export class OrcaStableExecutionBindingStore extends SecureStateStore {
       value.submissionMarkerHash !== operation.submissionMarker?.markerHash ||
       value.materialDigest !== material.materialDigest || value.policyDigest !== material.policyDigest ||
       value.activationDigest !== material.activationDigest ||
+      canonicalJson(validateStableSourceBinding(value.sourceBinding)) !== canonicalJson(material.sourceBinding) ||
       value.preview.owner !== operation.quote.account ||
       value.preview.amountInAtomic !== operation.quote.inputAmountAtomic ||
       value.preview.minimumOutputAtomic !== operation.quote.minimumOutputAtomic) corrupt("Stable execution binding is invalid.");

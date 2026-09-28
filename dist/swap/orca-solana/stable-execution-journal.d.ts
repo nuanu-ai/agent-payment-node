@@ -5,7 +5,8 @@ import { GuardedSwapService } from "../service.js";
 import { type OrcaStableAdmissionPorts } from "./stable-admission.js";
 import { SavedOrcaStableMaterialStore, type OrcaStableMaterial } from "./stable-material.js";
 import { type OrcaStableUnsignedPreview } from "./stable-prepare.js";
-declare const VERSION: "apn.orca-stable-execution-binding.v1";
+import { type OrcaStableSourceBinding } from "./stable-source-binding.js";
+declare const VERSION: "apn.orca-stable-execution-binding.v2";
 export interface OrcaStableExecutionPreflight {
     readonly preview: OrcaStableUnsignedPreview;
     readonly checkedAt: string;
@@ -21,6 +22,7 @@ export interface OrcaStableExecutionBinding {
     readonly materialDigest: string;
     readonly policyDigest: string;
     readonly activationDigest: string;
+    readonly sourceBinding: OrcaStableSourceBinding;
     readonly preview: OrcaStableUnsignedPreview;
     readonly checkedAt: string;
     readonly elapsedMs: number;

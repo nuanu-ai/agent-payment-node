@@ -1,4 +1,4 @@
-import { SOLANA_USDT } from "../../chain-policy.js";
+import { SOLANA_GENESIS, SOLANA_USDT } from "../../chain-policy.js";
 import { ApnError } from "../../errors.js";
 import { assertSolanaNetwork, rpcAtomic, rpcRecord, solanaAddress, SolanaRpc, type SolanaRpcPort } from "../../solana/rpc.js";
 import { associatedTokenAddress, decodeTickArray, decodeWhirlpool, readRawAccounts, TICK_ARRAY_ACCOUNT_BYTES, whirlpoolOracleAddress,
@@ -87,7 +87,8 @@ export async function readOrcaStableSnapshotCore(rpc: SolanaRpcPort, request: Or
     ...(rent === undefined ? {} : { usdtAtaRentLamports: rent, maximumAtaRentLamports: request.maximumAtaRentLamports }),
   };
   const preview = await prepareOrcaStableUnsigned(input);
-  return { source: "rpc_observed_non_signing" as const, rpcOriginHash: rpc.originHash, slot: full.slot.toString(),
+  return { source: "rpc_observed_non_signing" as const, rpcOriginHash: rpc.originHash, genesisHash: SOLANA_GENESIS,
+    slot: full.slot.toString(),
     quote, preview, signed: false as const, broadcast: false as const };
 }
 

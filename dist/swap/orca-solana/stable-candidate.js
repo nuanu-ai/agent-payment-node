@@ -14,6 +14,7 @@ import { GuardedSwapService, preparedSwapOperationId, swapIdempotencyHash } from
 import { createSwapQuote } from "../quote.js";
 import { proveOrcaStableSimulationTransfers } from "./stable-effects.js";
 import { SavedOrcaStableMaterialStore, sealOrcaStableMaterial } from "./stable-material.js";
+import { stableSourceBinding } from "./stable-source-binding.js";
 const MAX_SLOT_DRIFT = 150n;
 const MIN_BASE_FEE = 5000n;
 const MIN_REMAINING_BLOCKS = 12n;
@@ -73,7 +74,8 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service,
         idempotencyHash: swapIdempotencyHash(request.idempotencyKey), requestDigest, quote: proof.boundQuote,
         policyRevision: request.policyRevision, maximumPriceImpactBps: request.maximumPriceImpactBps,
         policyDigest: proof.evidence.policyDigest,
-        activationDigest: proof.evidence.activationDigest, evidence: proof.evidence, preview: proof.preview }, request.idempotencyKey));
+        activationDigest: proof.evidence.activationDigest, sourceBinding: proof.evidence.sourceBinding,
+        evidence: proof.evidence, preview: proof.preview }, request.idempotencyKey));
     const operation = await service.prepare({ quote: proof.quoteInput, assetPolicy: proof.active.registry,
         protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey,
         approvalCapAtomic: "0", now: proof.commitNow });
@@ -97,6 +99,7 @@ export async function proveOrcaStableGuardedCore(rpc, ports, request, verifyPins
         policyRevision: request.policyRevision, amountInAtomic: request.amountAtomic,
         minimumOutputAtomic: "1", now: initialNow }, ORCA_STABLE_GUARDED_MECHANISM_DIGEST);
     const observed = await readOrcaStableSnapshotCore(rpc, request, verifyPins);
+    const sourceBinding = stableSourceBinding(observed.rpcOriginHash);
     const { preview, quote } = observed;
     await validateOrcaStableUnsigned(preview);
     // The actual minimum is known only after reading the pool; enforce its cap under the exact active policy.
@@ -177,6 +180,7 @@ export async function proveOrcaStableGuardedCore(rpc, ports, request, verifyPins
             destination: sha256(destinationPost.data) }, ownerLamportsAfter: ownerPost.lamports.toString(),
         sourceAtomicAfter: sourcePostAmount.toString(), destinationAtomicAfter: destinationPostAmount.toString() };
     const evidence = { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, marketSlot: preview.marketSlot,
+        sourceBinding,
         beforeSlot: beforeRead.slot.toString(), simulation: simulationResult, sourceAta: preview.sourceAta,
         destinationAta: preview.destinationAta, pool: quote.pool, program: quote.program, blockhash: preview.blockhash,
         lastValidBlockHeight: preview.lastValidBlockHeight, messageHash: preview.messageHash,

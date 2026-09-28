@@ -1,7 +1,8 @@
 import { SecureStateStore } from "../../secure-state-store.js";
 import { type SwapOperationRecord } from "../model.js";
 import { type OrcaStableUnsignedPreview } from "./stable-prepare.js";
-export declare const ORCA_STABLE_MATERIAL_SCHEMA: "apn.orca-stable-guarded-material.v1";
+import { type OrcaStableSourceBinding } from "./stable-source-binding.js";
+export declare const ORCA_STABLE_MATERIAL_SCHEMA: "apn.orca-stable-guarded-material.v2";
 export interface OrcaStableMaterial {
     readonly schemaVersion: typeof ORCA_STABLE_MATERIAL_SCHEMA;
     readonly operationId: string;
@@ -13,6 +14,7 @@ export interface OrcaStableMaterial {
     readonly maximumPriceImpactBps?: number;
     readonly policyDigest: string;
     readonly activationDigest: string;
+    readonly sourceBinding: OrcaStableSourceBinding;
     readonly evidence: unknown;
     readonly preview: OrcaStableUnsignedPreview;
     readonly materialDigest: string;

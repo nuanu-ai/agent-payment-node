@@ -11,7 +11,8 @@ import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
 import { validateOrcaStableUnsigned } from "./stable-prepare.js";
 import { stableReservationAdmissionPorts } from "./stable-reservation-admission.js";
 import { sha256Hex } from "./pins.js";
-const VERSION = "apn.orca-stable-execution-binding.v1";
+import { validateStableSourceBinding } from "./stable-source-binding.js";
+const VERSION = "apn.orca-stable-execution-binding.v2";
 /** Internal journal. A crash after the marker makes every later begin call observe-only. */
 export async function beginOrcaStableExecution(service, materials, bindings, ports, operationId, clock) {
     return await beginOrcaStableExecutionCore(service, materials, bindings, ports, operationId, clock);
@@ -115,7 +116,7 @@ export class OrcaStableExecutionBindingStore extends SecureStateStore {
         const body = { schemaVersion: VERSION, operationId: operation.operationId,
             operationIntegrityHash: marker.operationIntegrityHash, submissionMarkerHash: marker.markerHash,
             materialDigest: material.materialDigest, policyDigest: material.policyDigest,
-            activationDigest: material.activationDigest, preview: preflight.preview,
+            activationDigest: material.activationDigest, sourceBinding: material.sourceBinding, preview: preflight.preview,
             checkedAt: preflight.checkedAt, elapsedMs: preflight.elapsedMs,
             physicalPostCount: preflight.physicalPostCount, simulationHash: preflight.simulationHash };
         const value = { ...body, bindingHash: domainHash(VERSION, canonicalJson(body)) };
@@ -147,6 +148,7 @@ export class OrcaStableExecutionBindingStore extends SecureStateStore {
             value.submissionMarkerHash !== operation.submissionMarker?.markerHash ||
             value.materialDigest !== material.materialDigest || value.policyDigest !== material.policyDigest ||
             value.activationDigest !== material.activationDigest ||
+            canonicalJson(validateStableSourceBinding(value.sourceBinding)) !== canonicalJson(material.sourceBinding) ||
             value.preview.owner !== operation.quote.account ||
             value.preview.amountInAtomic !== operation.quote.inputAmountAtomic ||
             value.preview.minimumOutputAtomic !== operation.quote.minimumOutputAtomic)

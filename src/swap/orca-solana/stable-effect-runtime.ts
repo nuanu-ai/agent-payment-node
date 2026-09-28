@@ -133,6 +133,8 @@ export class OrcaStableSingleSender {
       const binding = await this.bindings.load(operation, material);
       if (binding === null || binding.submissionMarkerHash !== operation.submissionMarker.markerHash)
         corrupt("Stable execution binding is missing or changed.");
+      if (this.rpc.originHash !== binding.sourceBinding.rpcOriginHash)
+        blocked("Stable send RPC source changed.");
       const account = await this.custody.account(operation.quote.profile, "solana");
       if (account === null || account.address !== operation.quote.account || account.profile !== operation.quote.profile ||
           account.rail !== "solana" || account.network !== "mainnet" || account.provider !== "local" ||

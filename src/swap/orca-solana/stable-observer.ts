@@ -2,7 +2,7 @@ import { canonicalJson } from "../../canonical.js";
 import { validateChainAccount } from "../../chain-account-store.js";
 import type { ChainWalletStoragePort } from "../../direct-rail-ports.js";
 import { ApnError } from "../../errors.js";
-import { SolanaRpc, rpcArray, rpcRecord } from "../../solana/rpc.js";
+import { SolanaRpc, assertSolanaNetwork, rpcArray, rpcRecord } from "../../solana/rpc.js";
 import type { AssetUsageReservation } from "../../asset-usage-ledger.js";
 import { GuardedSwapService } from "../service.js";
 import type { SwapOperationRecord } from "../model.js";
@@ -38,6 +38,8 @@ export class OrcaStableFinalizedObserver {
       const binding = await this.bindings.load(operation, material);
       if (binding === null || binding.submissionMarkerHash !== operation.submissionMarker.markerHash)
         corrupt("Stable observation binding is missing.");
+      if (this.rpc.originHash !== binding.sourceBinding.rpcOriginHash)
+        blocked("Stable observation RPC source changed.");
       const accountRaw = await this.custody.account(operation.quote.profile, "solana");
       if (accountRaw === null) corrupt("Stable observation custody is missing.");
       const account = validateChainAccount(accountRaw);
@@ -65,6 +67,8 @@ export class OrcaStableFinalizedObserver {
               saved.reservedLeaseDigest !== operation.usageLease.reservationDigest) ||
             (operation.receiptProof !== null && canonicalJson(operation.receiptProof) !== canonicalJson(saved.proof)))
           corrupt("Stable finalized observation binding changed.");
+        if (!["finalized", "failed_confirmed_revert"].includes(operation.state) &&
+            !await this.verifyRpcSource()) return operation;
         return await this.replay(operation, live, saved);
       }
       if (["finalized", "failed_confirmed_revert"].includes(operation.state) ||
@@ -77,16 +81,15 @@ export class OrcaStableFinalizedObserver {
         operation = await this.service.recordPossibleSend(operation, "unknown_finality", this.now(operation, live, claim.claimedAt));
       } else if (operation.usageLease.state !== live.state ||
           canonicalJson(operation.usageLease) !== canonicalJson(live)) corrupt("Stable principal lease drifted.");
-      if (this.rpc.budget === undefined || this.rpc.budget.remainingPhysicalRequests < 1 ||
-          this.rpc.budget.minimumIntervalMs < 750 || !this.rpc.hasPersistentPacer)
-        blocked("Stable observation requires budgeted, paced Solana RPC.");
+      if (!await this.verifyRpcSource()) return operation;
+      if (this.rpc.budget!.remainingPhysicalRequests < 1) return operation;
       let statuses: unknown, transaction: unknown = null;
       try {
         statuses = await this.rpc.call("getSignatureStatuses", [[claim.signature], { searchTransactionHistory: true }]);
       } catch { return operation; }
       const rows = rpcArray(rpcRecord(statuses).value, 1);
       if (rows.length === 1 && rows[0] !== null && rpcRecord(rows[0]).confirmationStatus === "finalized") {
-        if (this.rpc.budget.remainingPhysicalRequests < 1) return operation;
+        if (this.rpc.budget!.remainingPhysicalRequests < 1) return operation;
         try {
           transaction = await this.rpc.call("getTransaction", [claim.signature,
             { commitment: "finalized", encoding: "base64", maxSupportedTransactionVersion: 0 }]);
@@ -131,6 +134,17 @@ export class OrcaStableFinalizedObserver {
     const now = this.now(operation, operation.usageLease!, saved.proof.observedAt);
     return terminal === "finalized" ? await this.service.finalize(operation, now, saved.proof)
       : await this.service.failConfirmedRevert(operation, now, saved.proof);
+  }
+
+  private async verifyRpcSource(): Promise<boolean> {
+    if (this.rpc.budget === undefined || this.rpc.budget.remainingPhysicalRequests < 1 ||
+        this.rpc.budget.minimumIntervalMs < 750 || !this.rpc.hasPersistentPacer)
+      blocked("Stable observation requires budgeted, paced Solana RPC.");
+    try { await assertSolanaNetwork(this.rpc); } catch (error) {
+      if (error instanceof ApnError && error.code === "APN_CHAIN_MISMATCH") throw error;
+      return false;
+    }
+    return true;
   }
 
   private now(operation: SwapOperationRecord, lease: AssetUsageReservation, observedAt?: string): Date {
