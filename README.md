@@ -583,12 +583,20 @@ unsigned transaction, optionally including creation of the owner's USDT ATA,
 then stores the validated quote and transaction material. It needs the active
 policy revision, local owner account, exact stable guarded mechanism pin, and
 explicit fee and rent caps. `stable-approve` shows exact foreground consent,
-rechecks the active policy, and reserves only the USDC principal. `stable-release`
+rechecks the active policy, and reserves only the USDC principal. A separate
+`stable-execute --operation <id>` foreground CLI command requires fresh owner
+consent for that reservation. It rechecks policy, pool, program pins, quote
+expiry and the exact transaction, then signs once and makes at most one
+submission attempt. One Solana RPC instance enforces 24 physical POSTs for the
+command, at least 750 ms between starts, with one POST reserved for submission.
+There is no retry after a send claim, including an ambiguous response or crash.
+MCP provides the exact CLI handoff and cannot sign or submit. `stable-release`
 retires an unsigned operation and releases its exact lease. `stable-observe`
 reads a signature claimed by the internal execution journal and may durably
 record possible send, finalized proof, and the principal lease outcome. It
-keeps principal held while finality is unknown. Public stable execution remains
-closed pending integrated production factory acceptance.
+keeps principal held while finality is unknown. A reserved `stable-status`
+reports whether foreground execution is available; after the submission marker
+it reports observe-only state.
 `stable-status` reconciles an expired unsigned lease and reports the durable
 phase. The native SOL to USDC `approve` and `execute` commands reject stable
 operations.
@@ -806,6 +814,7 @@ apn swap solana orca stable-quote --amount <atomic_usdc> --slippage-bps <string>
 apn swap solana orca stable-prepare --profile <profile> --policy-revision <string> --owner <string> --amount <atomic_usdc> --slippage-bps <string> --maximum-price-impact-bps <string> --compute-unit-limit <string> --compute-unit-price <string> --create-usdt-ata <string> --maximum-ata-rent <string> --maximum-total-fee <string> --idempotency-key <idempotency_key>
 apn swap solana orca stable-status --operation <operation_id>
 apn swap solana orca stable-approve --operation <operation_id>
+apn swap solana orca stable-execute --operation <operation_id>
 apn swap solana orca stable-release --operation <operation_id>
 apn swap solana orca stable-observe --operation <operation_id>
 apn swap solana orca inventory

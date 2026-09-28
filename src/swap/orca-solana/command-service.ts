@@ -42,6 +42,10 @@ export async function executeOrcaCommand(request: Request, context: RuntimeConte
     if (context.orcaStableApprove === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca approval is unavailable.");
     return data(await context.orcaStableApprove(request.operationId), "stable_principal_reserved_unsigned");
   }
+  if (request.command === "swap.orca.stable-execute") {
+    if (context.orcaStableExecute === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca execution is unavailable.");
+    return data(await context.orcaStableExecute(request.operationId), "stable_first_send_attempt");
+  }
   if (request.command === "swap.orca.stable-observe") {
     if (context.orcaStableObserve === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca observation is unavailable.");
     return data(await context.orcaStableObserve(request.operationId), "stable_observation");

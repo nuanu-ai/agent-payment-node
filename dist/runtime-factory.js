@@ -89,7 +89,8 @@ import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
 import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-candidate.js";
 import { orcaStablePreparedStatus } from "./swap/orca-solana/stable-status.js";
-import { approveOrcaStableReservation, TtyOrcaStableConsent } from "./swap/orca-solana/stable-approval.js";
+import { approveOrcaStableReservation, confirmOrcaStableExecution, TtyOrcaStableConsent } from "./swap/orca-solana/stable-approval.js";
+import { executeOrcaStableFirstAttempt } from "./swap/orca-solana/stable-effect-runtime.js";
 import { releaseOrcaStableNoEffect } from "./swap/orca-solana/stable-release.js";
 import { OrcaStableExecutionBindingStore } from "./swap/orca-solana/stable-execution-journal.js";
 import { OrcaStableFinalizedObserver } from "./swap/orca-solana/stable-observer.js";
@@ -313,7 +314,7 @@ export function createApnCore(bound, options = {}) {
         ...(bound.request.command === "swap.orca.stable-quote" ? {
             orcaStableQuote: (request) => quoteOrcaStableReadOnly(solanaRpc, request),
         } : {}),
-        ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve", "swap.orca.stable-release", "swap.orca.stable-observe"].includes(bound.request.command) ? {
+        ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve", "swap.orca.stable-execute", "swap.orca.stable-release", "swap.orca.stable-observe"].includes(bound.request.command) ? {
             orcaStablePrepare: async (request) => {
                 const { command: _command, ...input } = request;
                 const usage = new AssetUsageLedger(state.root);
@@ -341,6 +342,20 @@ export function createApnCore(bound, options = {}) {
                     dailyUsage: async (owner, mint, now) => (await usage.usage({ account: owner, chain: ORCA_SOLANA_CHAIN,
                         asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
                 }, operationId, new TtyOrcaStableConsent(), () => clock.now());
+            },
+            orcaStableExecute: async (operationId) => {
+                const service = new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root));
+                const materials = new SavedOrcaStableMaterialStore(state.root);
+                await confirmOrcaStableExecution(service, materials, operationId, options.orcaStableExecuteConsent ?? new TtyOrcaStableConsent(), () => clock.now());
+                return await executeOrcaStableFirstAttempt({ service, materials,
+                    bindings: new OrcaStableExecutionBindingStore(state.root),
+                    admission: {
+                        activePolicy: profile => loadActiveAssetPolicyRegistry({ state, clock }, profile),
+                        localAccount: profile => chainAccounts.account(profile, "solana"),
+                        dailyUsage: async (owner, mint, now) => (await service.usage.usage({ account: owner, chain: ORCA_SOLANA_CHAIN,
+                            asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
+                    }, custody: chainAccounts, rpc: solanaRpc, operationId, clock: () => clock.now(),
+                    verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
             },
             orcaStableObserve: async (operationId) => await new OrcaStableFinalizedObserver(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), new OrcaStableExecutionBindingStore(state.root), chainAccounts, solanaRpc, () => clock.now()).observe(operationId),
             orcaStableRelease: async (operationId) => await releaseOrcaStableNoEffect(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),

@@ -69,9 +69,10 @@ async function callTool(tool, input, options) {
             const handoff = createCliHandoff(["apn", "swap", "solana", "jupiter", action, "--operation", bound.request.operationId]);
             return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Guarded swap approval and execution must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
         }
-        if (bound.request.command === "swap.orca.stable-approve") {
-            const handoff = createCliHandoff(["apn", "swap", "solana", "orca", "stable-approve", "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Stable principal reservation requires foreground CLI consent.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+        if (bound.request.command === "swap.orca.stable-approve" || bound.request.command === "swap.orca.stable-execute") {
+            const action = bound.request.command === "swap.orca.stable-approve" ? "stable-approve" : "stable-execute";
+            const handoff = createCliHandoff(["apn", "swap", "solana", "orca", action, "--operation", bound.request.operationId]);
+            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Stable reservation and execution require separate foreground CLI consent.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
         }
         if (bound.request.command === "swap.orca.approve" || bound.request.command === "swap.orca.execute") {
             const handoff = createCliHandoff(["apn", "swap", "solana", "orca", bound.request.command === "swap.orca.approve" ? "approve" : "execute",
