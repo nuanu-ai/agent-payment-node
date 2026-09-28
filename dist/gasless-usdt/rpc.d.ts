@@ -15,7 +15,7 @@ export declare class UsdtJsonRpc {
     batch(calls: readonly {
         readonly method: string;
         readonly params: readonly unknown[];
-    }[]): Promise<readonly unknown[]>;
+    }[], phase?: "batch" | "safe_head" | "account_snapshot"): Promise<readonly unknown[]>;
 }
 /** Read one authenticated safe-block account view. Every contract and account read uses the same safe tag. */
 export declare function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: string, sender: Address): Promise<{

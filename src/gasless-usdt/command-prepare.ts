@@ -60,7 +60,7 @@ export class UsdtCommandReadBudget implements GaslessTransport {
       this.guard(0);
       const response = await this.transport.request(endpoint, method, body, maxBytes, code);
       if (response.status === 429 || response.status >= 500 && response.status <= 599) {
-        throw new RpcHttpFailure("gasless_usdt_read", response.status);
+        throw new RpcHttpFailure("gasless_usdt_read", response.status, response.retryAfterMs);
       }
       return response;
     }) as Awaited<ReturnType<GaslessTransport["request"]>>;
