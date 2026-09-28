@@ -6,7 +6,7 @@ export declare class EvmDirectRpcGuard {
     private readonly wait;
     private physical;
     private readonly scheduler;
-    constructor(state: StateStore, limit?: number, now?: () => number, wait?: (milliseconds: number) => Promise<void>);
+    constructor(state: StateStore, limit?: number, now?: () => number, wait?: (milliseconds: number) => Promise<void>, remainingWaitMs?: () => number);
     get physicalRequests(): number;
     post<T>(endpoint: string, task: () => Promise<T>): Promise<T>;
 }
