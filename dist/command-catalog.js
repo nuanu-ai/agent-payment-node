@@ -86,7 +86,7 @@ export const COMMAND_GROUPS = [...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_G
     { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
     { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
     { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
-    { path: ["x402", "permit2"], summary: "Read existing blocked Permit2 intents.", kind: "group" },
+    { path: ["x402", "permit2"], summary: "Read current owner admission and existing blocked Permit2 intents.", kind: "group" },
     { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
     { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
     { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },
@@ -94,6 +94,10 @@ export const COMMAND_GROUPS = [...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_G
     { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ];
 const BASE_COMMANDS = [
+    command(["x402", "permit2", "preflight"], "apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>", "Check current local owner admission for exact inspected Permit2 terms without signing or saving.", [profileRequired, option("--payment-required", "base64", true, noDefault, ["decoded_x402_v2_PAYMENT-REQUIRED"], "operator_input"),
+        option("--expected-challenge-hash", "string", true, noDefault, ["64_lowercase_hex_characters"], "public"),
+        option("--expected-index", "string", true, noDefault, ["canonical_nonnegative_integer"], "public"),
+        option("--expected-terms", "base64", true, noDefault, ["decoded_selected_requirements_json"], "operator_input"), rpcRequired], "network_read", "Reads the local owner binding, active policy, usage, one finalized Avalanche block and facilitator capability; never writes state or submits payment.", "none", "Never.", { terminal: ["admissible_unsigned"], non_terminal: [] }, [], ["apn x402 permit2 preflight --profile default --payment-required <inspected-header> --expected-challenge-hash <hash> --expected-index 0 --expected-terms <inspected-terms-base64> --rpc-url https://avalanche-rpc.example"]),
     command(["x402", "permit2", "status"], "apn x402 permit2 status --profile <profile> --operation <operation-id>", "Read one existing blocked Permit2 intent with redacted output.", [profileRequired, operationRequired], "local_read", "Checks existing local state only; never initializes, repairs, reserves, signs or sends.", "none", "Never.", { terminal: ["not_found"], non_terminal: ["execution_blocked"] }, [], ["apn x402 permit2 status --profile default --operation <operation-id>"]),
     command(["relay", "arbitrum", "prepare"], "apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>", "Save one unsigned Arbitrum USDC to the exact Ethereum USDC recipient Relay quote.", [profileRequired, option("--owner", "address", true, noDefault, ["canonical_evm_address"], "public"),
         option("--amount-atomic", "atomic_usdc", true, noDefault, ["positive_integer"], "operator_input"),

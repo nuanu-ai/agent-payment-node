@@ -47,10 +47,13 @@ import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runti
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
 import { type OrcaProgramPinVerifier } from "./swap/orca-solana/pins.js";
 import { type OrcaStableConsentPort } from "./swap/orca-solana/stable-approval.js";
+import { type Permit2PreflightPorts } from "./x402-permit2/preflight.js";
 import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RuntimeFactoryOptions {
+    /** Synthetic read-only preflight seam; production uses the bounded HTTPS source. */
+    readonly permit2PreflightPorts?: Permit2PreflightPorts;
     /** Synthetic CLI test seam; source runtime still owns confirmation, pacing, and source effect guards. */
     readonly relayExecuteTransport?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
     readonly relayExecuteTtyOptions?: TtyTransferApprovalOptions;

@@ -237,6 +237,18 @@ export class AssetUsageLedger extends SecureStateStore {
     }));
   }
 
+  /** Existing-ledger snapshot for nonpersistent preflight; never initializes, locks, or creates a bucket. */
+  async usageReadOnly(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot> {
+    const identity = validateIdentity(identityValue);
+    const at = instant(now);
+    return {
+      windowPolicy: ASSET_USAGE_WINDOW,
+      windowStart: `${at.slice(0, 10)}T00:00:00.000Z`,
+      windowEnd: new Date(Date.parse(`${at.slice(0, 10)}T00:00:00.000Z`) + 86_400_000).toISOString(),
+      amountAtomic: sumUsage(await this.loadBucket(identity, false), now),
+    };
+  }
+
   /** Read the daily total and one reservation from the same locked bucket snapshot. */
   async usageWithReservation(identityValue: AssetUsageIdentity, reservationIdValue: string, now: Date): Promise<{
     snapshot: AssetUsageSnapshot; reservation: AssetUsageReservation | null;
@@ -279,9 +291,9 @@ export class AssetUsageLedger extends SecureStateStore {
     await this.initialized;
   }
 
-  private async loadBucket(identity: AssetUsageIdentity): Promise<readonly AssetUsageReservation[]> {
+  private async loadBucket(identity: AssetUsageIdentity, create = true): Promise<readonly AssetUsageReservation[]> {
     const directory = this.bucketDirectory(identity);
-    await this.ensureDirectory(directory);
+    if (create) await this.ensureDirectory(directory);
     const entries = await this.readDirectory(directory);
     const records: AssetUsageReservation[] = [];
     for (const entry of entries) {

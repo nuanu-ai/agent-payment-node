@@ -7,6 +7,8 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 
 export type CommandRequest =
+  | { readonly command: "x402.permit2.preflight"; readonly profile: string; readonly paymentRequired: string;
+      readonly expectedChallengeHash: string; readonly expectedIndex: string; readonly expectedTerms: string }
   | { readonly command: "x402.permit2.status"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.base.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }

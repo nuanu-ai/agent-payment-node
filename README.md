@@ -693,6 +693,7 @@ returned. The signer must perform network reads outside that lock.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
+apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
 apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
 apn relay arbitrum observe --operation <operation-id> --rpc-url <arbitrum-rpc>
