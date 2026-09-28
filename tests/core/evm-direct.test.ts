@@ -14,15 +14,15 @@ import { EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ens
 import { EVM_USDC, activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
-for (const chainId of [8453, 1, 56, 42161] as const) test(`chain ${chainId} arms direct RPC guard through prepare, approval and resume`, async (context) => {
+for (const chainId of [8453, 1, 56, 42161, 1329] as const) test(`chain ${chainId} arms direct RPC guard through prepare, approval and resume`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   let armed = 0;
   Object.assign(setup.rpc, { armEvmDirectRpcGuard: () => { armed += 1; } });
   const wallet = await ensureDirectWallet(setup);
-  if (chainId === 56) await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
-    admissions: [...evmDirectAdmissions(), directAdmission("eip155:56", null)], now: setup.clock.now() });
+  if (chainId === 56 || chainId === 1329) await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
+    admissions: [...evmDirectAdmissions(), directAdmission(`eip155:${chainId}`, null)], now: setup.clock.now() });
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: "native" } }) as { operation_id: string };
   assert.equal(armed, 1);
   await setup.core.transfer.approve(prepared.operation_id);
@@ -63,14 +63,14 @@ test("generic CLI and MCP bind the same explicit core request without changing l
   assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"));
 });
 
-for (const chainId of [1, 8453, 42161, 59144, 130] as const) test(`chain ${chainId} batched native prepare refuses insufficient balance before nonce and estimate`, async (context) => {
+for (const chainId of [1, 8453, 42161, 59144, 130, 1329] as const) test(`chain ${chainId} batched native prepare refuses insufficient balance before nonce and estimate`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = chainId; setup.rpc.nativeAtomic = "1";
   const wallet = await ensureDirectWallet(setup);
   await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
     admissions: [...evmDirectAdmissions(), ...(chainId === 1 || chainId === 8453 || chainId === 42161 ? [] : [directAdmission(`eip155:${chainId}`, null)])], now: setup.clock.now() });
   let downstreamReads = 0;
-  Object.assign(setup.rpc.evm, { [chainId === 1 ? "prepareEthereumNative" : chainId === 8453 ? "prepareBaseNative" : chainId === 42161 ? "prepareArbitrumNative" : chainId === 130 ? "prepareUnichainNative" : "prepareLineaNative"]: () => ({
+  Object.assign(setup.rpc.evm, { [chainId === 1 ? "prepareEthereumNative" : chainId === 8453 ? "prepareBaseNative" : chainId === 42161 ? "prepareArbitrumNative" : chainId === 130 ? "prepareUnichainNative" : chainId === 1329 ? "prepareSeiNative" : "prepareLineaNative"]: () => ({
     balance: setup.rpc.evm.balance,
     nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
     feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },

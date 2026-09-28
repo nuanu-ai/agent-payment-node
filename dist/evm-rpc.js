@@ -25,6 +25,7 @@ export class EvmRpc {
         }
     }
     prepareLineaNative() { return this.prepareNativeBatched(59144); }
+    prepareSeiNative() { return this.prepareNativeBatched(1329); }
     prepareUnichainNative() { return this.prepareNativeBatched(130); }
     prepareUnichainUsdc() { return this.prepareNativeBatched(130, "usdc"); }
     preparePolygonUsdc() { return this.prepareNativeBatched(137, "usdc"); }
@@ -180,13 +181,17 @@ export class EvmRpc {
                 }
                 if (selection.decimals !== undefined)
                     evmDecimals(selection.decimals);
-                const balanceTag = chainId === 8453 ? "safe" : "latest";
+                const balanceTag = directEvmRequiresSafeHead(chainId) ? "safe" : "latest";
                 const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: [balanceTag, false] }]);
                 check(preChain);
                 const head = await blockFrom(rawHead, balanceTag);
                 let nativeAtomic, assetAtomic, observedDecimals;
                 if (asset === "native") {
-                    nativeAtomic = evmRpcQuantity(await attempt("eth_getBalance", [address, head.tag])).toString();
+                    // Sei's public transport requires every logical read in a grouped physical POST.
+                    const rawBalance = chainId === 1329
+                        ? (await batch([{ method: "eth_getBalance", params: [address, head.tag] }]))[0]
+                        : await attempt("eth_getBalance", [address, head.tag]);
+                    nativeAtomic = evmRpcQuantity(rawBalance).toString();
                     assetAtomic = nativeAtomic;
                 }
                 else {

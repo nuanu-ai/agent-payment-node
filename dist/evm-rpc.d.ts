@@ -10,6 +10,7 @@ export declare class EvmRpc implements EvmRpcPort {
     private readonly batchCall?;
     constructor(call: EvmRpcCall, rpcOrigin: string, maximumSignedBytes?: number, batchCall?: EvmRpcBatchCall | undefined);
     prepareLineaNative(): EvmNativePrepareReads;
+    prepareSeiNative(): EvmNativePrepareReads;
     prepareUnichainNative(): EvmNativePrepareReads;
     prepareUnichainUsdc(): EvmNativePrepareReads;
     preparePolygonUsdc(): EvmNativePrepareReads;

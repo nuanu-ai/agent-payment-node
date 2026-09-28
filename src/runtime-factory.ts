@@ -335,7 +335,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const directGuardCommand = bound.request.command === "transfer.approve" || bound.request.command === "operation.resume" ||
     bound.request.command === "transfer.prepare" && (bound.request.asset === undefined ||
       bound.request.asset.chainId === 1 || bound.request.asset.chainId === 56 || bound.request.asset.chainId === 8453 ||
-      bound.request.asset.chainId === 42161);
+      bound.request.asset.chainId === 42161 || bound.request.asset.chainId === 1329);
   const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl,
     directGuardCommand ? { directGuardState: state } : {}));
   const coinbaseRpc = options.rpc;

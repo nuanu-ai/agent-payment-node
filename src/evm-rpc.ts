@@ -25,6 +25,7 @@ export class EvmRpc implements EvmRpcPort {
   }
 
   prepareLineaNative(): EvmNativePrepareReads { return this.prepareNativeBatched(59144); }
+  prepareSeiNative(): EvmNativePrepareReads { return this.prepareNativeBatched(1329); }
   prepareUnichainNative(): EvmNativePrepareReads { return this.prepareNativeBatched(130); }
   prepareUnichainUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(130, "usdc"); }
   preparePolygonUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(137, "usdc"); }
@@ -133,7 +134,7 @@ export class EvmRpc implements EvmRpcPort {
   prepareEthereumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(1); }
 
   /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 1 | 8453 | 59144 | 130 | 137 | 56, asset: "native" | "usdc" | "weth" = "native"): EvmNativePrepareReads {
+  private prepareNativeBatched(chainId: 1 | 8453 | 59144 | 130 | 137 | 56 | 1329, asset: "native" | "usdc" | "weth" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let attempts = 0;
     const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
@@ -165,13 +166,17 @@ export class EvmRpc implements EvmRpcPort {
           throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
         }
         if (selection.decimals !== undefined) evmDecimals(selection.decimals);
-        const balanceTag = chainId === 8453 ? "safe" : "latest";
+        const balanceTag = directEvmRequiresSafeHead(chainId) ? "safe" : "latest";
         const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: [balanceTag, false] }]);
         check(preChain);
         const head = await blockFrom(rawHead, balanceTag);
         let nativeAtomic: string, assetAtomic: string, observedDecimals: number | undefined;
         if (asset === "native") {
-          nativeAtomic = evmRpcQuantity(await attempt("eth_getBalance", [address, head.tag])).toString();
+          // Sei's public transport requires every logical read in a grouped physical POST.
+          const rawBalance = chainId === 1329
+            ? (await batch([{ method: "eth_getBalance", params: [address, head.tag] }]))[0]
+            : await attempt("eth_getBalance", [address, head.tag]);
+          nativeAtomic = evmRpcQuantity(rawBalance).toString();
           assetAtomic = nativeAtomic;
         } else {
           const token = selection.token as Address;

@@ -18,7 +18,7 @@ export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning,
     const binding = operation.evm;
     if (binding === undefined || operation.economics === undefined)
         throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
-    if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161)
+    if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329)
         rpcPort.armEvmDirectRpcGuard?.();
     const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
     const ethereumUsdc = operation.chainId === 1 && asset.kind === "erc20" &&

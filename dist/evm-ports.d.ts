@@ -36,6 +36,7 @@ export interface EvmTransactionInput {
 export interface EvmRpcPort {
     /** Optional, command-scoped direct prepare read grouping. */
     prepareLineaNative?(): EvmNativePrepareReads;
+    prepareSeiNative?(): EvmNativePrepareReads;
     prepareUnichainNative?(): EvmNativePrepareReads;
     prepareUnichainUsdc?(): EvmNativePrepareReads;
     preparePolygonUsdc?(): EvmNativePrepareReads;
