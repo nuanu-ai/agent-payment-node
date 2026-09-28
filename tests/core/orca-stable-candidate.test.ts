@@ -746,6 +746,30 @@ test("pure stable receipt requires explicit status and transaction errors with k
   }
 });
 
+test("pure stable revert accepts only canonical Solana transaction error variants", async (t) => {
+  const r = await receiptFixture(true); t.after(r.f.cleanup);
+  const postBalances = [...r.transaction.meta.preBalances];
+  postBalances[0] = postBalances[0]! - 5_000n;
+  const check = (err: unknown) => verifyOrcaStableFinalizedReceipt({ ...r.input,
+    signatureStatuses: { value: [{ ...r.signatureStatuses.value[0], err }] },
+    transaction: { ...r.transaction, meta: { ...r.transaction.meta, err, postBalances,
+      postTokenBalances: [r.transaction.meta.preTokenBalances[0]], innerInstructions: [] } } });
+  for (const valid of ["AccountInUse", { DuplicateInstruction: 2n },
+    { InstructionError: [3n, "InvalidInstructionData"] }, { InstructionError: [3, { Custom: 6000n }] },
+    { InsufficientFundsForRent: { account_index: 1n } },
+    { ProgramExecutionTemporarilyRestricted: { account_index: 1 } }]) {
+    assert.equal((await check(valid))?.outcome, "reverted");
+  }
+  for (const invalid of ["InventedFailure", "", { InstructionError: [] },
+    { InstructionError: 123 }, { InstructionError: [3] }, { InstructionError: [3, "InventedFailure"] },
+    { InstructionError: [-1, "InvalidInstructionData"] }, { InstructionError: [256, "InvalidInstructionData"] },
+    { InstructionError: [3, { Custom: -1 }] }, { InstructionError: [3, { Custom: 4_294_967_296n }] },
+    { DuplicateInstruction: -1 }, { InsufficientFundsForRent: { account_index: "1" } },
+    { ProgramExecutionTemporarilyRestricted: { account_index: 1, extra: 2 } }]) {
+    await assert.rejects(check(invalid), (error) => reason(error) === "orca_stable_receipt_conflict");
+  }
+});
+
 test("material write failure leaves no operation and same-key retry prepares cleanly", async (t) => {
   const f = await fixture(); t.after(f.cleanup);
   class FailingMaterialStore extends SavedOrcaStableMaterialStore {

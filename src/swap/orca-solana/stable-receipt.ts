@@ -105,11 +105,60 @@ function normalize(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry));
 }
 function transactionError(value: unknown): boolean {
-  const entry = isPlainRecord(value) ? Object.entries(value) : [];
-  return value === null || (typeof value === "string" && value.length > 0 && value.length <= 128) ||
-    (entry.length === 1 && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(entry[0]![0]) &&
-      entry[0]![1] !== undefined && entry[0]![1] !== null);
+  if (value === null) return true;
+  if (typeof value === "string") return TRANSACTION_ERRORS.has(value);
+  if (!isPlainRecord(value) || Object.keys(value).length !== 1) return false;
+  if ("DuplicateInstruction" in value) return index(value.DuplicateInstruction);
+  if ("InstructionError" in value) {
+    const pair = value.InstructionError;
+    return Array.isArray(pair) && pair.length === 2 && index(pair[0]) && instructionError(pair[1]);
+  }
+  if ("InsufficientFundsForRent" in value || "ProgramExecutionTemporarilyRestricted" in value) {
+    const detail = value.InsufficientFundsForRent ?? value.ProgramExecutionTemporarilyRestricted;
+    return isPlainRecord(detail) && Object.keys(detail).length === 1 && index(detail.account_index);
+  }
+  return false;
 }
+function instructionError(value: unknown): boolean {
+  if (typeof value === "string") return INSTRUCTION_ERRORS.has(value);
+  return isPlainRecord(value) && Object.keys(value).length === 1 && "Custom" in value && uint32(value.Custom);
+}
+function index(value: unknown): boolean {
+  return (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 255) ||
+    (typeof value === "bigint" && value >= 0n && value <= 255n);
+}
+function uint32(value: unknown): boolean {
+  return (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff) ||
+    (typeof value === "bigint" && value >= 0n && value <= 0xffff_ffffn);
+}
+// Canonical variants from @solana/rpc-types transaction-error.d.ts. Unknown future variants fail closed.
+const TRANSACTION_ERRORS = new Set([
+  "AccountBorrowOutstanding", "AccountInUse", "AccountLoadedTwice", "AccountNotFound",
+  "AddressLookupTableNotFound", "AlreadyProcessed", "BlockhashNotFound", "CallChainTooDeep",
+  "ClusterMaintenance", "InsufficientFundsForFee", "InvalidAccountForFee", "InvalidAccountIndex",
+  "InvalidAddressLookupTableData", "InvalidAddressLookupTableIndex", "InvalidAddressLookupTableOwner",
+  "InvalidLoadedAccountsDataSizeLimit", "InvalidProgramForExecution", "InvalidRentPayingAccount",
+  "InvalidWritableAccount", "MaxLoadedAccountsDataSizeExceeded", "MissingSignatureForFee",
+  "ProgramAccountNotFound", "ResanitizationNeeded", "SanitizeFailure", "SignatureFailure",
+  "TooManyAccountLocks", "UnbalancedTransaction", "UnsupportedVersion",
+  "WouldExceedAccountDataBlockLimit", "WouldExceedAccountDataTotalLimit", "WouldExceedMaxAccountCostLimit",
+  "WouldExceedMaxBlockCostLimit", "WouldExceedMaxVoteCostLimit",
+]);
+const INSTRUCTION_ERRORS = new Set([
+  "AccountAlreadyInitialized", "AccountBorrowFailed", "AccountBorrowOutstanding", "AccountDataSizeChanged",
+  "AccountDataTooSmall", "AccountNotExecutable", "AccountNotRentExempt", "ArithmeticOverflow",
+  "BorshIoError", "BuiltinProgramsMustConsumeComputeUnits", "CallDepth", "ComputationalBudgetExceeded",
+  "DuplicateAccountIndex", "DuplicateAccountOutOfSync", "ExecutableAccountNotRentExempt",
+  "ExecutableDataModified", "ExecutableLamportChange", "ExecutableModified", "ExternalAccountDataModified",
+  "ExternalAccountLamportSpend", "GenericError", "IllegalOwner", "Immutable", "IncorrectAuthority",
+  "IncorrectProgramId", "InsufficientFunds", "InvalidAccountData", "InvalidAccountOwner", "InvalidArgument",
+  "InvalidError", "InvalidInstructionData", "InvalidRealloc", "InvalidSeeds",
+  "MaxAccountsDataAllocationsExceeded", "MaxAccountsExceeded", "MaxInstructionTraceLengthExceeded",
+  "MaxSeedLengthExceeded", "MissingAccount", "MissingRequiredSignature", "ModifiedProgramId",
+  "NotEnoughAccountKeys", "PrivilegeEscalation", "ProgramEnvironmentSetupFailure", "ProgramFailedToCompile",
+  "ProgramFailedToComplete", "ReadonlyDataModified", "ReadonlyLamportChange", "ReentrancyNotAllowed",
+  "RentEpochModified", "UnbalancedInstruction", "UninitializedAccount", "UnsupportedProgramId", "UnsupportedSysvar",
+]);
 function conflict(): never {
   throw new ApnError("APN_OPERATION_BLOCKED", "Finalized stable Orca receipt conflicts with the saved operation.",
     { reason: "orca_stable_receipt_conflict" });
