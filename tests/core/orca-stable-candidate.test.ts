@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { createMcpServer } from "../../src/mcp-server.js";
 import test from "node:test";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bindArgv } from "../../src/command-binder.js";
 import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
+import { createApnCore } from "../../src/runtime-factory.js";
 import { StateStore } from "../../src/state.js";
 import { createKeyPairSignerFromPrivateKeyBytes, getBase58Decoder, getBase58Encoder, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction, getTransactionDecoder, signTransaction } from "@solana/kit";
@@ -1246,6 +1249,65 @@ async function privateStableObserverHarness(revert = false, claimCrash = false) 
     setTransaction: (value: unknown) => { transactionResult = value; },
     setGenesis: (value: unknown) => { genesisResult = value; } };
 }
+
+test("public stable observe factory uses paced fake HTTPS, never sends, and preserves marked principal while pending", async (t) => {
+  const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  const request = bindArgv(["swap", "solana", "orca", "stable-observe", "--operation", h.operationId]);
+  const methods: string[] = [];
+  let time = NOW.getTime() + 60_000;
+  let status: unknown = { context: { slot: h.transaction.slot }, value: [null] };
+  const fetcher: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(init!.body as string) as { id: string; method: string; params: unknown[] };
+    methods.push(body.method);
+    assert.ok(["getGenesisHash", "getSignatureStatuses", "getTransaction"].includes(body.method));
+    const result = body.method === "getGenesisHash" ? SOLANA_GENESIS :
+      body.method === "getSignatureStatuses" ? status : h.transaction;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result },
+      (_key, value) => typeof value === "bigint" ? Number(value) : value),
+      { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const run = async () => await createApnCore(request, { stateRoot: h.f.root,
+    chainAccounts: h.custody, solanaRpcUrl: "https://stable-source.example/rpc", solanaRpcFetch: fetcher,
+    solanaRpcNow: () => time, solanaRpcWait: async milliseconds => { time += milliseconds; },
+    clock: { now: () => new Date(time) } }).execute(request.request);
+  const pending = await run();
+  assert.equal(pending.ok, true, JSON.stringify(pending));
+  assert.equal((pending.data as any).state, "submitted");
+  assert.deepEqual(methods, ["getGenesisHash", "getSignatureStatuses"]);
+  const statusRequest = bindArgv(["swap", "solana", "orca", "stable-status", "--operation", h.operationId]);
+  const statusResult = await createApnCore(statusRequest, { stateRoot: h.f.root, chainAccounts: h.custody,
+    clock: { now: () => new Date(time) } }).execute(statusRequest.request);
+  assert.equal(statusResult.ok, true);
+  assert.equal((statusResult.data as any).phase, "submitted");
+  assert.equal((statusResult.data as any).signable, false);
+  assert.equal((statusResult.data as any).executable, false);
+  assert.equal((statusResult.data as any).signed, null);
+  assert.equal((statusResult.data as any).broadcast, null);
+  assert.equal((await h.f.service.usage.load({ account: h.staleOperation.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT } }, h.staleOperation.usageLease!.reservationId))?.state, "submitted");
+  status = h.statuses;
+  const final = await run();
+  assert.equal(final.ok, true, JSON.stringify(final));
+  assert.equal((final.data as any).state, "finalized");
+  assert.deepEqual(methods.slice(2), ["getGenesisHash", "getSignatureStatuses", "getTransaction"]);
+  assert.equal(methods.includes("sendTransaction"), false);
+  const replay = await run();
+  assert.equal((replay.data as any).state, "finalized");
+  assert.equal(methods.length, 5);
+  const server = createMcpServer({ stateRoot: h.f.root, chainAccounts: h.custody,
+    solanaRpcUrl: "https://stable-source.example/rpc", solanaRpcFetch: fetcher,
+    solanaRpcNow: () => time, solanaRpcWait: async milliseconds => { time += milliseconds; },
+    clock: { now: () => new Date(time) } });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "stable-observe-factory", version: "1" });
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const mcp = await client.callTool({ name: "apn_swap_solana_orca_stable_observe", arguments: { operation: h.operationId } });
+  assert.equal((mcp.structuredContent as any).ok, true);
+  assert.equal((mcp.structuredContent as any).data.state, "finalized");
+  assert.equal(methods.length, 5);
+});
 
 test("private stable observer finalizes exact receipt under concurrent observers and replays without RPC", async (t) => {
   const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);

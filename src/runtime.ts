@@ -99,6 +99,7 @@ export interface CoreDependencies {
   readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
   readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
   readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
+  readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -167,6 +168,7 @@ export class RuntimeContext {
   readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
   readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
   readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
+  readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
@@ -234,6 +236,9 @@ export class RuntimeContext {
     if (dependencies.orcaStableQuote !== undefined) this.orcaStableQuote = dependencies.orcaStableQuote;
     if (dependencies.orcaStablePrepare !== undefined) this.orcaStablePrepare = dependencies.orcaStablePrepare;
     if (dependencies.orcaStableStatus !== undefined) this.orcaStableStatus = dependencies.orcaStableStatus;
+    if (dependencies.orcaStableApprove !== undefined) this.orcaStableApprove = dependencies.orcaStableApprove;
+    if (dependencies.orcaStableRelease !== undefined) this.orcaStableRelease = dependencies.orcaStableRelease;
+    if (dependencies.orcaStableObserve !== undefined) this.orcaStableObserve = dependencies.orcaStableObserve;
     if (dependencies.uniswap !== undefined) this.uniswap = dependencies.uniswap;
     if (dependencies.sunswap !== undefined) this.sunswap = dependencies.sunswap;
     if (dependencies.jupiter !== undefined) this.jupiter = dependencies.jupiter;

@@ -137,6 +137,8 @@ import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-can
 import { orcaStablePreparedStatus } from "./swap/orca-solana/stable-status.js";
 import { approveOrcaStableReservation, TtyOrcaStableConsent } from "./swap/orca-solana/stable-approval.js";
 import { releaseOrcaStableNoEffect } from "./swap/orca-solana/stable-release.js";
+import { OrcaStableExecutionBindingStore } from "./swap/orca-solana/stable-execution-journal.js";
+import { OrcaStableFinalizedObserver } from "./swap/orca-solana/stable-observer.js";
 import { SavedOrcaStableMaterialStore } from "./swap/orca-solana/stable-material.js";
 import { GuardedSwapService } from "./swap/service.js";
 import { SwapOperationRepository } from "./swap/repository.js";
@@ -200,6 +202,10 @@ export interface RuntimeFactoryOptions {
   readonly chainPolicyApproval?: ChainPolicyApprovalPort;
   readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
   readonly solanaRpcUrl?: string;
+  /** Offline transport injection; production uses the guarded Solana HTTPS fetch. */
+  readonly solanaRpcFetch?: typeof fetch;
+  readonly solanaRpcNow?: () => number;
+  readonly solanaRpcWait?: (milliseconds: number) => Promise<void>;
   readonly tronRpcUrl?: string;
   readonly stateRoot?: string;
   readonly native?: NativePort;
@@ -310,9 +316,10 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
-  const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, undefined,
-    new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750, wait: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)) }),
-    new SolanaRpcPacer(state));
+  const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, options.solanaRpcFetch,
+    new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
+      wait: options.solanaRpcWait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))) }),
+    new SolanaRpcPacer(state, options.solanaRpcNow, options.solanaRpcWait));
   const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL,
     configuredTronHttpsFetch({ minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS }));
   const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
@@ -481,7 +488,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(bound.request.command === "swap.orca.stable-quote" ? {
       orcaStableQuote: (request: Parameters<typeof quoteOrcaStableReadOnly>[1]) => quoteOrcaStableReadOnly(solanaRpc, request),
     } : {}),
-    ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve", "swap.orca.stable-release"].includes(bound.request.command) ? {
+    ...(["swap.orca.stable-prepare", "swap.orca.stable-status", "swap.orca.stable-approve", "swap.orca.stable-release", "swap.orca.stable-observe"].includes(bound.request.command) ? {
       orcaStablePrepare: async (request: Extract<CommandRequest, { readonly command: "swap.orca.stable-prepare" }>) => {
         const { command: _command, ...input } = request;
         const usage = new AssetUsageLedger(state.root);
@@ -511,6 +518,10 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
               asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
           }, operationId, new TtyOrcaStableConsent(), () => clock.now());
       },
+      orcaStableObserve: async (operationId: string) => await new OrcaStableFinalizedObserver(
+        new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)),
+        new SavedOrcaStableMaterialStore(state.root), new OrcaStableExecutionBindingStore(state.root),
+        chainAccounts, solanaRpc, () => clock.now()).observe(operationId),
       orcaStableRelease: async (operationId: string) => await releaseOrcaStableNoEffect(
         new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)),
         new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),
