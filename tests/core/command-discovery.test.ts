@@ -160,6 +160,17 @@ test("status and receipt discovery disclose possible local recovery writes in CL
   }
 });
 
+test("stable observation discovery discloses durable operation and principal writes", () => {
+  const path = ["swap", "solana", "orca", "stable-observe"];
+  const command = COMMANDS.find((entry) => entry.path.join(" ") === path.join(" "));
+  assert.equal(command?.effect.class, "local_write");
+  assert.match(command.effect.summary, /durably record possible send, finalized proof and principal lease outcome/u);
+  assert.match(renderHelp(path), /Effect: local_write/u);
+  const tool = projectMcpTools().find((entry) => entry.command.path.join(" ") === path.join(" "));
+  assert.match(tool?.description ?? "", /Effect: local_write/u);
+  assert.match(tool?.description ?? "", /principal lease outcome/u);
+});
+
 test("group help renders exact subgroup usages and complete leaf synopses", () => {
   assert.equal(renderHelp(["wallet"]), [
     "Create, inspect and configure the disposable wallet.",

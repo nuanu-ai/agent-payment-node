@@ -1,4 +1,5 @@
-import { canonicalJson } from "../../canonical.js";
+import { address, getBase58Encoder, getBase64EncodedWireTransaction, getTransactionDecoder } from "@solana/kit";
+import { canonicalJson, sha256 } from "../../canonical.js";
 import { validateChainAccount } from "../../chain-account-store.js";
 import type { ChainWalletStoragePort } from "../../direct-rail-ports.js";
 import { ApnError } from "../../errors.js";
@@ -20,7 +21,7 @@ export class OrcaStableFinalizedObserver {
   constructor(private readonly service: GuardedSwapService,
     private readonly materials: SavedOrcaStableMaterialStore,
     private readonly bindings: OrcaStableExecutionBindingStore,
-    private readonly custody: Pick<ChainWalletStoragePort, "account" | "effectByOperationId">,
+    private readonly custody: Pick<ChainWalletStoragePort, "account">,
     private readonly rpc: SolanaRpc, private readonly clock: () => Date = () => new Date()) {
     this.observations = new OrcaStableFinalizedObservationStore(service.operations.root);
   }
@@ -46,14 +47,23 @@ export class OrcaStableFinalizedObserver {
       if (account.profile !== operation.quote.profile || account.address !== operation.quote.account ||
           account.rail !== "solana" || account.network !== "mainnet" || account.provider !== "local" ||
           account.custody !== "local_software") corrupt("Stable observation custody changed.");
-      if (this.custody.effectByOperationId === undefined) corrupt("Stable operation custody lookup is unavailable.");
-      const effect = await this.custody.effectByOperationId(account, operationId);
-      if (effect === null) corrupt("Stable signed effect is missing.");
-      await verifyOrcaStableSignedEffect(effect, binding);
       const claim = await loadOrcaStableSendClaim(this.service.operations.root, operation);
       if (claim === null || claim.bindingHash !== binding.bindingHash ||
-          claim.accountIdentityHash !== account.identityHash || claim.signature !== effect.transactionId ||
-          claim.rawPayloadHash !== effect.rawPayloadHash) corrupt("Stable send claim changed.");
+          claim.accountIdentityHash !== account.identityHash) corrupt("Stable send claim changed.");
+      // The immutable execution binding has the exact unsigned message; the durable claim has its
+      // owner signature and signed-wire hash. Reconstruct and verify the signed wire from these
+      // public records. Observation must never decrypt the wallet or open its signing seed.
+      let rawPayload: string;
+      try {
+        const unsigned = getTransactionDecoder().decode(Buffer.from(binding.preview.unsignedPayload, "base64"));
+        const signed = { ...unsigned,
+          signatures: { [address(binding.preview.owner)]: getBase58Encoder().encode(claim.signature) } } as typeof unsigned;
+        rawPayload = getBase64EncodedWireTransaction(signed);
+      } catch { corrupt("Stable claimed signature cannot reconstruct the signed message."); }
+      const effect = { operationId, fingerprint: binding.bindingHash, transactionId: claim.signature,
+        rawPayload, rawPayloadHash: sha256(rawPayload) };
+      if (claim.rawPayloadHash !== effect.rawPayloadHash) corrupt("Stable send claim changed.");
+      await verifyOrcaStableSignedEffect(effect, binding);
       const identity = { account: operation.quote.account, chain: operation.quote.sourceAsset.chain,
         asset: { kind: "token" as const, identifier: operation.quote.sourceAsset.identifier! } };
       const live = await this.service.usage.load(identity, operation.usageLease.reservationId);
