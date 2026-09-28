@@ -10,6 +10,7 @@ import type { StateStore } from "../state.js";
 import { UsdtBoundOperationRepository, validateUsdtBoundOperation, type UsdtBoundOperation } from "./bound-operation.js";
 import { USDT_GASLESS, usdtFailure, type UsdtTransferPlan } from "./model.js";
 import { validateUsdtPaymasterData } from "./paymaster-data.js";
+import { usdtEffectiveFeeCap } from "./quote.js";
 import { usdtUserOperationHash, usdtUserOperationTypedData, type UsdtUserOperation } from "./userop.js";
 
 export interface UsdtSigningIdentity {
@@ -134,7 +135,10 @@ function assertReady(bound: UsdtBoundOperation, at: Date): void {
   if (b.chain !== USDT_GASLESS.chain || b.unsignedOperation.paymaster !== USDT_GASLESS.paymaster ||
     b.plan.request.sender !== b.unsignedOperation.sender ||
     b.unsignedOperation.nonce !== numberToHex(BigInt(b.account.entryPointNonce)) ||
-    BigInt(b.plan.feeCapAtomic) !== BigInt(b.plan.request.maxFeeAtomic) ||
+    BigInt(b.plan.feeCapAtomic) !== usdtEffectiveFeeCap({
+      grossAtomic: BigInt(b.plan.request.grossAtomic), maxFeeAtomic: BigInt(b.plan.request.maxFeeAtomic),
+      minReceivedAtomic: BigInt(b.plan.request.minReceivedAtomic),
+    }) ||
     BigInt(b.plan.quotedFeeAtomic) > BigInt(b.plan.feeCapAtomic)) {
     usdtFailure("APN_STATE_CORRUPT", "gasless_usdt_signing_binding");
   }
