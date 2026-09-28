@@ -43,10 +43,13 @@ test("core balance reads remain chain verified and read-only for all 11 direct E
       const result = await setup.core.execute({ command: "wallet.balance", profile: "default", asset: { chainId: network.chainId, token } });
       assert.equal(result.ok, true, JSON.stringify(result));
       if (!result.ok) continue;
-      const data = result.data as { readonly chain: string; readonly asset: { readonly chain: string; readonly kind: string } };
+      const data = result.data as { readonly chain: string; readonly asset: { readonly chain: string; readonly kind: string };
+        readonly native_gas_balance: { readonly symbol: string }; readonly funding_guidance: { readonly action: string } };
       assert.equal(data.chain, network.caip2);
       assert.equal(data.asset.chain, network.caip2);
       assert.equal(data.asset.kind, token === "native" ? "native" : "erc20");
+      assert.equal(data.native_gas_balance.symbol, network.nativeSymbol);
+      assert.match(data.funding_guidance.action, new RegExp(`native ${network.nativeSymbol} for gas\\.`));
     }
   }
   assert.equal(setup.rpc.broadcastCount, 0);
