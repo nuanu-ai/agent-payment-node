@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { networkPolicyBinding, x402Network } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import { EVM_NETWORKS, evmUint, publicEvmAsset, type EvmAssetSelection } from "./evm-asset.js";
@@ -8,39 +9,63 @@ import { policyBinding } from "./profile-policy.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalProfile } from "./wallet-policy.js";
 
-export async function evmWalletBalance(context: RuntimeContext, profileInput: string, selection: EvmAssetSelection): Promise<unknown> {
+function remainingSeiBalanceMs(deadlineAtMs: number): number {
+  const remaining = Math.floor(deadlineAtMs - performance.now());
+  if (remaining < 1) throw new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate command deadline.");
+  return remaining;
+}
+
+export async function evmWalletBalance(context: RuntimeContext, profileInput: string, selection: EvmAssetSelection,
+  seiDeadlineMs = 20_000): Promise<unknown> {
+  const seiNative = selection.chainId === 1329 && selection.token === "native";
+  if (seiNative && (!Number.isSafeInteger(seiDeadlineMs) || seiDeadlineMs < 1 || seiDeadlineMs > 20_000)) {
+    throw new ApnError("APN_RPC_CONFIG", "Sei native balance deadline is invalid.");
+  }
+  const deadlineAtMs = seiNative ? performance.now() + seiDeadlineMs : undefined;
   const profile = canonicalProfile(profileInput);
   const chainId = directEvmChain(selection.chainId);
   const nativeSymbol = directEvmNetwork(chainId).nativeSymbol;
-  await context.ready();
-  const profileHash = context.state.profileHash(profile);
-  return await context.state.withLocks([`profile:${profileHash}`], async () => {
-    const provider = await context.profileRepository?.load(profileHash);
-    if (provider !== undefined && provider !== null && provider.provider_id !== "local") throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Generic asset balance is not declared for this external wallet profile.");
-    const wallet = await context.state.loadWallet(profileHash);
-    if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-    const rpc = context.requireRpc();
-    if (chainId === 1329 && selection.token === "native" && rpc.seiNativeBalance === undefined) {
-      throw new ApnError("APN_RPC_CONFIG", "Bounded Sei native balance RPC is unavailable.");
-    }
-    const snapshot = chainId === 1329 && selection.token === "native"
-      ? await rpc.seiNativeBalance!(wallet.address, selection)
-      : await requireEvmRpc(rpc).balance(wallet.address, selection);
-    if (snapshot.address !== wallet.address || snapshot.asset.chainId !== selection.chainId) throw new ApnError("APN_ASSET_MISMATCH", "Asset balance belongs to a different wallet or chain.");
-    const sharedNetwork = EVM_NETWORKS.find((network) => network.chainId === chainId);
-    const policy = sharedNetwork === undefined ? undefined : await context.policy?.load(networkPolicyBinding(policyBinding(wallet), sharedNetwork.chainId));
-    const x402Token = sharedNetwork === undefined ? undefined : x402Network(sharedNetwork.chainId).token;
-    const limit = snapshot.asset.kind === "native" ? policy?.maxBalanceEthWei :
-      snapshot.asset.address === x402Token ? policy?.maxBalanceUsdcAtomic : undefined;
-    const atomic = evmUint(snapshot.assetAtomic), native = evmUint(snapshot.nativeAtomic);
-    return {
-      profile, funding_address: wallet.address, chain: `eip155:${snapshot.asset.chainId}`, asset: publicEvmAsset(snapshot.asset),
-      balance: { atomic: atomic.toString(), decimal: formatAtomic(atomic.toString(), snapshot.asset.decimals) },
-      native_gas_balance: { atomic: native.toString(), decimal: formatAtomic(native.toString(), 18), decimals: 18, symbol: nativeSymbol },
-      provenance: { block_number_atomic: snapshot.blockNumberAtomic, block_hash: snapshot.blockHash, observed_at: snapshot.observedAt, rpc_origin: snapshot.rpcOrigin },
-      funding_posture: { classification: limit === undefined ? "unassessed" : atomic > BigInt(limit) ? "overfunded" : "within_limit", asset_limit_atomic: limit ?? null, generic_unattended_permission_implied: false, inbound_balance_capped_by_apn: false },
-      funding_guidance: { action: `Fund this address manually on eip155:${snapshot.asset.chainId} with the exact selected asset and native ${nativeSymbol} for gas.`, warning: "Disposable local software wallet: no automatic funding, sweep, custody service or hardware backup." },
-      proof_class: "chain_verified_public_read", next_actions: ["apn pay transfer prepare-asset --help"],
-    };
-  });
+  const read = async () => {
+    await context.ready();
+    const profileHash = context.state.profileHash(profile);
+    return await context.state.withLocks([`profile:${profileHash}`], async () => {
+      const provider = await context.profileRepository?.load(profileHash);
+      if (provider !== undefined && provider !== null && provider.provider_id !== "local") throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Generic asset balance is not declared for this external wallet profile.");
+      const wallet = await context.state.loadWallet(profileHash);
+      if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+      if (deadlineAtMs !== undefined) remainingSeiBalanceMs(deadlineAtMs);
+      const rpc = context.requireRpc();
+      if (seiNative && rpc.seiNativeBalance === undefined) {
+        throw new ApnError("APN_RPC_CONFIG", "Bounded Sei native balance RPC is unavailable.");
+      }
+      const snapshot = seiNative
+        ? await rpc.seiNativeBalance!(wallet.address, selection, deadlineAtMs!)
+        : await requireEvmRpc(rpc).balance(wallet.address, selection);
+      if (deadlineAtMs !== undefined) remainingSeiBalanceMs(deadlineAtMs);
+      if (snapshot.address !== wallet.address || snapshot.asset.chainId !== selection.chainId) throw new ApnError("APN_ASSET_MISMATCH", "Asset balance belongs to a different wallet or chain.");
+      const sharedNetwork = EVM_NETWORKS.find((network) => network.chainId === chainId);
+      const policy = sharedNetwork === undefined ? undefined : await context.policy?.load(networkPolicyBinding(policyBinding(wallet), sharedNetwork.chainId));
+      const x402Token = sharedNetwork === undefined ? undefined : x402Network(sharedNetwork.chainId).token;
+      const limit = snapshot.asset.kind === "native" ? policy?.maxBalanceEthWei :
+        snapshot.asset.address === x402Token ? policy?.maxBalanceUsdcAtomic : undefined;
+      const atomic = evmUint(snapshot.assetAtomic), native = evmUint(snapshot.nativeAtomic);
+      return {
+        profile, funding_address: wallet.address, chain: `eip155:${snapshot.asset.chainId}`, asset: publicEvmAsset(snapshot.asset),
+        balance: { atomic: atomic.toString(), decimal: formatAtomic(atomic.toString(), snapshot.asset.decimals) },
+        native_gas_balance: { atomic: native.toString(), decimal: formatAtomic(native.toString(), 18), decimals: 18, symbol: nativeSymbol },
+        provenance: { block_number_atomic: snapshot.blockNumberAtomic, block_hash: snapshot.blockHash, observed_at: snapshot.observedAt, rpc_origin: snapshot.rpcOrigin },
+        funding_posture: { classification: limit === undefined ? "unassessed" : atomic > BigInt(limit) ? "overfunded" : "within_limit", asset_limit_atomic: limit ?? null, generic_unattended_permission_implied: false, inbound_balance_capped_by_apn: false },
+        funding_guidance: { action: `Fund this address manually on eip155:${snapshot.asset.chainId} with the exact selected asset and native ${nativeSymbol} for gas.`, warning: "Disposable local software wallet: no automatic funding, sweep, custody service or hardware backup." },
+        proof_class: "chain_verified_public_read", next_actions: ["apn pay transfer prepare-asset --help"],
+      };
+    }, deadlineAtMs === undefined ? {} : { waitMs: Math.min(context.state.lockWaitMs, remainingSeiBalanceMs(deadlineAtMs)) });
+  };
+  if (deadlineAtMs === undefined) return await read();
+  const timeoutMs = remainingSeiBalanceMs(deadlineAtMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([read(), new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate command deadline.")), timeoutMs);
+    })]);
+  } finally { if (timer !== undefined) clearTimeout(timer); }
 }
