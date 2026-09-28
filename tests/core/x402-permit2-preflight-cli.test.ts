@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { hashObject } from "../../src/canonical.js";
 import { runCli } from "../../src/cli.js";
 import { STATE_VERSION } from "../../src/constants.js";
@@ -9,6 +10,7 @@ import { projectMcpTools } from "../../src/mcp-projection.js";
 import { StateStore, sealWallet } from "../../src/state.js";
 import { encodeCanonicalBase64Json, encodePaymentRequiredHeader, type X402PaymentRequired } from "../../src/x402-codec.js";
 import { hashChallenge } from "../../src/x402-permit2/prepare.js";
+import { permit2PublicRpc } from "../../src/x402-permit2/preflight.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
@@ -39,12 +41,17 @@ async function setup(root: string) {
       maximumPerTransferAtomic: "20000", dailyLimitAtomic: "30000", mechanism: X402_PERMIT2_MECHANISM }] });
 }
 
-async function snapshot(root: string) {
+async function snapshot(root: string): Promise<readonly (readonly [string, string])[]> {
   const paths = (await readdir(root, { recursive: true })).sort();
   return await Promise.all(paths.map(async path => {
     const full = join(root, path), info = await stat(full);
-    return [path, info.isFile() ? (await readFile(full)).toString("hex") : "directory"];
+    return [path, info.isFile() ? (await readFile(full)).toString("hex") : "directory"] as const;
   }));
+}
+
+async function paymentSnapshot(root: string) {
+  return (await snapshot(root)).filter(([path]) => path !== "locks" && !path.startsWith("locks/") &&
+    path !== "rpc-provider-pacing" && !path.startsWith("rpc-provider-pacing/"));
 }
 
 test("CLI current-owner preflight is admissible and leaves no journal, POST, signature or send", async t => {
@@ -111,4 +118,43 @@ test("CLI current-owner preflight is admissible and leaves no journal, POST, sig
   assert.equal(stale.ok, false); assert.equal(stale.error?.details?.reason, "x402_permit2_chain_evidence_required");
   assert.deepEqual(staleCalls, ["eth_chainId", "eth_getBlockByNumber"]);
   assert.deepEqual(http, []); assert.deepEqual(await snapshot(temp.root), before);
+});
+
+test("separate RPC sources share durable 750 ms endpoint pacing and leave other endpoints independent", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
+  const before = await paymentSnapshot(temp.root);
+  const starts: number[] = [], otherStarts: number[] = [];
+  const sameTransport = { permit2ReadCall: async () => { starts.push(performance.now()); return "0xa86a"; } };
+  const otherTransport = { permit2ReadCall: async () => { otherStarts.push(performance.now()); return "0xa86a"; } };
+  const first = permit2PublicRpc("https://RPC.example:443/", temp.root, sameTransport);
+  const second = permit2PublicRpc("https://rpc.example", temp.root, sameTransport);
+  const other = permit2PublicRpc("https://other-rpc.example", temp.root, otherTransport);
+  const signal = new AbortController().signal;
+  await Promise.all([
+    first.call("eth_chainId", [], signal), second.call("eth_chainId", [], signal),
+    other.call("eth_chainId", [], signal),
+  ]);
+  assert.equal(starts.length, 2);
+  assert.ok(starts[1]! - starts[0]! >= 740, `same endpoint gap ${starts[1]! - starts[0]!}`);
+  assert.equal(otherStarts.length, 1);
+  assert.ok(Math.abs(otherStarts[0]! - starts[0]!) < 300, "another endpoint is not queued behind the first");
+  assert.equal((await readdir(join(temp.root, "rpc-provider-pacing"))).length, 2);
+  assert.deepEqual(await paymentSnapshot(temp.root), before);
+});
+
+test("cancelling a queued public RPC read removes it without a transport call", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
+  const before = await paymentSnapshot(temp.root);
+  let calls = 0;
+  const transport = { permit2ReadCall: async () => { calls++; await new Promise(resolve => setTimeout(resolve, 100)); return "0xa86a"; } };
+  const first = permit2PublicRpc("https://cancel-rpc.example", temp.root, transport);
+  const second = permit2PublicRpc("https://cancel-rpc.example/", temp.root, transport);
+  const active = first.call("eth_chainId", [], new AbortController().signal);
+  const cancelled = new AbortController();
+  const waiting = second.call("eth_chainId", [], cancelled.signal);
+  cancelled.abort();
+  await assert.rejects(waiting, /aborted/u);
+  await active;
+  assert.equal(calls, 1);
+  assert.deepEqual(await paymentSnapshot(temp.root), before);
 });

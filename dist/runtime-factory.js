@@ -468,7 +468,8 @@ export async function executeBoundCommand(bound, options = {}) {
                 throw new ApnError("APN_RPC_CONFIG", "Avalanche RPC URL is required.");
             // Parse the public URL even when synthetic ports are injected, matching the CLI contract.
             new HttpsBaseRpc(bound.rpcUrl);
-            const data = await permit2CurrentOwnerPreflight(options.stateRoot ?? effectiveStateRoot(), bound.request, options.permit2PreflightPorts ?? { rpc: permit2PublicRpc(bound.rpcUrl) });
+            const stateRoot = options.stateRoot ?? effectiveStateRoot();
+            const data = await permit2CurrentOwnerPreflight(stateRoot, bound.request, options.permit2PreflightPorts ?? { rpc: permit2PublicRpc(bound.rpcUrl, stateRoot) });
             return successEnvelope(bound.request, requestId, { proofClass: "read_only_current_owner_preflight",
                 data, operation: null, receipt: null, nextActions: [] });
         }
