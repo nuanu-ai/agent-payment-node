@@ -13,9 +13,11 @@ import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { ApnError } from "../../src/errors.js";
+import { sealChainAccount } from "../../src/chain-account-store.js";
 import { SolanaRpc, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
 import { GuardedSwapService, preparedSwapOperationId } from "../../src/swap/service.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
+import { transitionSwapOperation } from "../../src/swap/transitions.js";
 import { whirlpoolTickArrayAddress } from "../../src/swap/orca-solana/accounts.js";
 import { prepareOrcaStableGuardedCandidateCore, simulateOrcaStableGuardedCore,
   simulateOrcaStableGuardedReadOnly } from "../../src/swap/orca-solana/stable-candidate.js";
@@ -26,6 +28,8 @@ import { releaseOrcaStableNoEffect } from "../../src/swap/orca-solana/stable-rel
 import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-status.js";
 import { verifyOrcaStableFinalizedReceipt } from "../../src/swap/orca-solana/stable-receipt.js";
 import { beginOrcaStableExecution, OrcaStableExecutionBindingStore } from "../../src/swap/orca-solana/stable-execution-journal.js";
+import { recoverOrcaStableNoSend } from "../../src/swap/orca-solana/stable-no-send-recovery.js";
+import { OrcaStableNoSendProofStore } from "../../src/swap/orca-solana/stable-no-send-proof.js";
 import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
 import { temporaryState } from "./helpers.js";
@@ -673,6 +677,123 @@ test("stable journal marker-before-sign crash never signs on resume; policy drif
   assert.equal((await orcaStablePreparedStatus(f.service.operations, materials, f.ports,
     prepared.operation.operationId, new Date(NOW.getTime() + 60_000))).operation.state, "submitting");
   assert.ok(!f.calls.includes("sendTransaction"));
+});
+
+async function markedNoSendFixture() {
+  const f = await fixture();
+  const prepared = await candidate(f);
+  const materials = new SavedOrcaStableMaterialStore(f.root);
+  const reserved = (await approveOrcaStableReservation(f.service, materials, f.ports,
+    prepared.operation.operationId, { confirm: async () => {} }, f.clock)).operation;
+  const markerBody = { operationId: reserved.operationId, operationIntegrityHash: reserved.integrityHash,
+    unsignedTransactionPayloadHash: reserved.quote.unsignedTransactionPayloadHash, markedAt: NOW.toISOString() };
+  const marked = await f.service.operations.transition(reserved.ownerProfileHash, reserved.operationId,
+    reserved.integrityHash, "submitting", { submissionMarker: { markerHash: domainHash("apn.swap-submission-marker.v1",
+      canonicalJson(markerBody)), markedAt: markerBody.markedAt,
+      operationIntegrityHash: markerBody.operationIntegrityHash,
+      unsignedTransactionPayloadHash: markerBody.unsignedTransactionPayloadHash } }, NOW);
+  const account = sealChainAccount({ schemaVersion: "apn.chain-account.v1", profile: marked.quote.profile,
+    profileHash: sha256(`profile\0${marked.quote.profile}`), rail: "solana", network: "mainnet",
+    provider: "local", custody: "local_software", address: marked.quote.account, createdAt: NOW.toISOString() });
+  const bindings = new OrcaStableExecutionBindingStore(f.root);
+  const proofs = new OrcaStableNoSendProofStore(f.root);
+  const custody = { effectByOperationId: async () => null } as any;
+  const recover = async (now: Date = NOW) => await recoverOrcaStableNoSend(f.service, materials, bindings, proofs,
+    custody, async () => account, marked.operationId, now);
+  return { f, marked, materials, bindings, proofs, custody, account, recover };
+}
+
+test("marked stable recovery proves operation-ID custody absence without a binding, releases exact lease and replays", async (t) => {
+  const s = await markedNoSendFixture(); t.after(s.f.cleanup);
+  let reads = 0;
+  s.custody.effectByOperationId = async (_account: unknown, id: string) => {
+    assert.equal(id, s.marked.operationId); reads++; return null;
+  };
+  const terminal = await s.recover();
+  assert.equal(terminal.state, "failed_before_effect");
+  assert.equal(terminal.submissionMarker?.markerHash, s.marked.submissionMarker?.markerHash);
+  assert.equal(terminal.failureProofHash, terminal.usageLease?.outcomeDigest);
+  assert.equal((await s.proofs.load(terminal))?.bindingHash, null);
+  assert.equal((await s.recover()).integrityHash, terminal.integrityHash);
+  assert.equal(reads, 2);
+  assert.ok(!s.f.calls.includes("sendTransaction"));
+});
+
+test("marked stable recovery handles a persisted binding after signing failed before custody save", async (t) => {
+  const s = await markedNoSendFixture(); t.after(s.f.cleanup);
+  const material = (await s.materials.loadStaged(s.marked.operationId))!;
+  const binding = await s.bindings.save(s.marked, material, { preview: material.preview,
+    checkedAt: NOW.toISOString(), elapsedMs: 700, physicalPostCount: 24, simulationHash: "d".repeat(64) });
+  const terminal = await s.recover();
+  assert.equal(terminal.state, "failed_before_effect");
+  assert.equal((await s.proofs.load(terminal))?.bindingHash, binding.bindingHash);
+});
+
+test("marked stable recovery fails closed for durable effects, custody read errors and progressed leases", async (t) => {
+  const s = await markedNoSendFixture(); t.after(s.f.cleanup);
+  s.custody.effectByOperationId = async () => ({ operationId: s.marked.operationId });
+  await assert.rejects(s.recover(), (error) => reason(error) === "orca_stable_signed_effect_exists");
+  s.custody.effectByOperationId = async () => { throw new Error("custody unreadable"); };
+  await assert.rejects(s.recover(), /custody unreadable/);
+  assert.equal(await s.proofs.load(s.marked), null);
+  assert.equal((await s.f.service.operations.loadAny(s.marked.operationId))?.state, "submitting");
+  s.custody.effectByOperationId = async () => null;
+  await s.f.service.usage.transition({ account: s.marked.quote.account, chain: ORCA_SOLANA_CHAIN,
+    asset: { kind: "token", identifier: USDC_MINT }, reservationId: s.marked.usageLease!.reservationId,
+    policyDigest: s.marked.policyDigest, state: "unknown_finality", now: NOW });
+  await assert.rejects(s.recover(), { code: "APN_STATE_CORRUPT" });
+  assert.equal(await s.proofs.load(s.marked), null);
+});
+
+test("marked stable recovery refuses a saved receipt before opening custody", async (t) => {
+  const s = await markedNoSendFixture(); t.after(s.f.cleanup);
+  const submitted = await s.f.service.recordPossibleSend(s.marked, "submitted", NOW, {
+    receiptHash: "a".repeat(64), transactionHash: "2".repeat(88), observedAt: NOW.toISOString(), finalized: false });
+  assert.equal(submitted.receiptProof?.transactionHash, "2".repeat(88));
+  s.custody.effectByOperationId = async () => { throw new Error("custody must not open"); };
+  await assert.rejects(s.recover(), (error) => reason(error) === "orca_stable_effect_boundary");
+});
+
+test("marked stable recovery reconciles a crash after lease transition and serializes competitors", async (t) => {
+  const s = await markedNoSendFixture(); t.after(s.f.cleanup);
+  const original = s.f.service.usage.transition.bind(s.f.service.usage);
+  let crashed = false;
+  s.f.service.usage.transition = (async (input: any) => {
+    const value = await original(input);
+    if (!crashed) { crashed = true; throw new Error("injected crash after lease write"); }
+    return value;
+  }) as any;
+  await assert.rejects(s.recover(), /injected crash/);
+  assert.equal((await s.f.service.operations.loadAny(s.marked.operationId))?.state, "submitting");
+  assert.equal((await s.proofs.load(s.marked))?.proofHash,
+    (await s.f.service.usage.load({ account: s.marked.quote.account, chain: ORCA_SOLANA_CHAIN,
+      asset: { kind: "token", identifier: USDC_MINT } }, s.marked.usageLease!.reservationId))?.outcomeDigest);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let entered!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+  const locked = s.f.service.operations.withLocks([`orca-stable-operation:${s.marked.operationId}`], async () => {
+    entered(); await held;
+  });
+  await enteredPromise;
+  let done = false;
+  const pending = s.recover().then((value) => { done = true; return value; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(done, false);
+  release(); await locked;
+  assert.equal((await pending).state, "failed_before_effect");
+});
+
+test("marked recovery cannot open generic or other-mechanism pre-effect transitions", async (t) => {
+  const s = await markedNoSendFixture(); t.after(s.f.cleanup);
+  await assert.rejects(s.f.service.failBeforeEffect(s.marked, NOW, "a".repeat(64)),
+    { code: "APN_OPERATION_BLOCKED" });
+  const { integrityHash: _digest, ...body } = s.marked;
+  const changed = { ...body, mechanismDigest: "e".repeat(64) };
+  const foreign = { ...changed, integrityHash: domainHash("apn.swap-operation.v1", canonicalJson(changed)) };
+  assert.throws(() => transitionSwapOperation(foreign, "failed_before_effect", {}, NOW),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.ok(!s.f.calls.includes("sendTransaction"));
 });
 
 async function receiptFixture(createAta: boolean) {

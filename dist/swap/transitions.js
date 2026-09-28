@@ -1,6 +1,8 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SWAP_OPERATION_SCHEMA, validateSwapOperation } from "./model.js";
+import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./orca-solana/stable-mechanism.js";
+import { validateOrcaStableNoSendProof } from "./orca-solana/stable-no-send-proof.js";
 const ALLOWED = {
     quoted: ["prepared", "failed_before_effect"],
     prepared: ["awaiting_approval", "failed_before_effect"],
@@ -20,9 +22,12 @@ export function transitionSwapOperation(opValue, state, evidence, now) {
         ...(evidence.submissionMarker === undefined ? [] : ["submissionMarker"]),
         ...(evidence.receiptProof === undefined ? [] : ["receiptProof"]),
         ...(evidence.failureProofHash === undefined ? [] : ["failureProofHash"]),
+        ...(evidence.orcaStableNoSendProof === undefined ? [] : ["orcaStableNoSendProof"]),
     ]))
         invalid("Swap transition evidence is invalid.");
-    if (!ALLOWED[op.state].includes(state))
+    const stableRecovery = op.state === "submitting" && state === "failed_before_effect" &&
+        op.mechanismDigest === ORCA_STABLE_GUARDED_MECHANISM_DIGEST;
+    if (!ALLOWED[op.state].includes(state) && !stableRecovery)
         blocked("Swap operation transition is invalid.");
     const at = instant(now);
     if (at < op.updatedAt)
@@ -70,6 +75,25 @@ function transitionPatch(op, state, evidence, at) {
         return { usageLease: evidence.usageLease, receiptProof: evidence.receiptProof, failureProofHash: evidence.failureProofHash };
     }
     if (state === "failed_before_effect") {
+        if (op.state === "submitting") {
+            if (op.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST || op.submissionMarker === null ||
+                op.receiptProof !== null || op.usageLease === null || evidence.usageLease === undefined ||
+                evidence.orcaStableNoSendProof === undefined || Object.keys(evidence).length !== 3) {
+                invalid("Marked stable failure requires its exact no-send proof and released lease.");
+            }
+            const proof = validateOrcaStableNoSendProof(evidence.orcaStableNoSendProof);
+            if (proof.operationId !== op.operationId || proof.ownerProfileHash !== op.ownerProfileHash ||
+                proof.quoteHash !== op.quote.quoteHash || proof.markerHash !== op.submissionMarker.markerHash ||
+                proof.markerOperationIntegrityHash !== op.submissionMarker.operationIntegrityHash ||
+                proof.reservationId !== op.usageLease.reservationId ||
+                proof.reservedLeaseIntegrityHash !== op.usageLease.reservationDigest ||
+                evidence.failureProofHash !== proof.proofHash || evidence.usageLease.outcomeDigest !== proof.proofHash ||
+                evidence.usageLease.reservationId !== op.usageLease.reservationId ||
+                evidence.usageLease.state !== "failed_before_effect") {
+                invalid("Marked stable no-send proof does not bind the operation and lease.");
+            }
+            return { failureProofHash: proof.proofHash, usageLease: evidence.usageLease };
+        }
         if (evidence.failureProofHash === undefined || !/^[a-f0-9]{64}$/u.test(evidence.failureProofHash) ||
             (evidence.usageLease !== undefined && evidence.usageLease.state !== "failed_before_effect") ||
             Object.keys(evidence).some((key) => key !== "failureProofHash" && key !== "usageLease")) {

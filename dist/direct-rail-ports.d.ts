@@ -190,6 +190,8 @@ export interface ChainWalletStoragePort {
     }): Promise<ChainAccount>;
     withSeed<T>(account: ChainAccount, action: (seed: Buffer) => Promise<T>): Promise<T>;
     effect(account: ChainAccount, operationId: string, fingerprint: string): Promise<RailSignedEffect | null>;
+    /** Read by operation ID when a crash left the execution fingerprint unpersisted. */
+    effectByOperationId?(account: ChainAccount, operationId: string): Promise<RailSignedEffect | null>;
     saveEffect(account: ChainAccount, effect: RailSignedEffect): Promise<void>;
 }
 export interface RailApprovalPort {
