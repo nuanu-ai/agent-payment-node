@@ -148,6 +148,28 @@ outcome/reason enums, and counters.
 
 The 0.5.26 release carries source and CI proof for this token-input lane and
 retained no-effect live quote/recovery evidence. It does not record live paid
-or effect acceptance. The latest live preflight did not reach `prepare` because
-the available public providers could not satisfy the guarded read requirements;
+or effect acceptance. At that earlier checkpoint, live preflight did not reach
+`prepare` because the available public providers could not satisfy the guarded read requirements;
 no approval, swap or cleanup transaction was submitted.
+
+## Installed v0.5.27 no-effect checkpoint
+
+After merged PR #472 (source checkpoint
+`98a3308b5845caa329ab497237f1e6778d4b1fbf`), installed APN 0.5.27
+under the current owner policy quoted `1000000` atomic USDT to expected
+`999512` atomic USDC, minimum `990000`, using PublicNode primary and dRPC
+archive. Quote hash:
+`69b13284eff3507265249c0ce0caf89ef7aebb94920fdc183e3a2948fb2d2edc`.
+Observed physical HTTP POSTs were 8 for quote, 9 for prepare, and 1 for
+status. Operation
+`d1619e578034ee973ab6293b4329751faafa9048c90cdfd248d7bdc5e7b1bc16`
+reached `prepared`, then after expiry `cleaned` with zero allowance and no
+effect. The earlier operation
+`5f19c6a58912d0366d2050b8a4adc1fff4fe579359488c30e443ad1bf7f41aea`
+also became `cleaned` / `zero_allowance_no_effect`.
+
+No approval, signature, send, native debit, or paid receipt is recorded for
+this newer operation. The observation used CLI, not MCP; C3-01 paid execution
+and C3-09 installed/live MCP acceptance remain open. The v0.5.27 release tag
+points to the older `b731533b2f78d7c13f0d582b10e42d3d44213411` source;
+installed behavior and later main source are separate checkpoints.

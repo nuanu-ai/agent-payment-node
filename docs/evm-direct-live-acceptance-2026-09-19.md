@@ -21,7 +21,7 @@ Keep these proof layers separate:
 | Layer | What it proves | Current position |
 | --- | --- | --- |
 | Code/source | The registry, allowlist identities, fee model, policy schema, and CLI exist at the pinned commit. | Complete for the eleven rows below. |
-| No-money prepare | A fresh policy-aware intent can be built, quoted, persisted, and refused safely without signing or sending. | The later Arbitrum USDC unsigned prepare covers one row only; the remaining matrix still needs current-policy proof. |
+| No-money prepare | A fresh policy-aware intent can be built, quoted, persisted, and refused safely without signing or sending. | At the 28 Sep installed APN 0.5.27 checkpoint, all nine C1-12 direct rows have current-owner prepare evidence. This does not complete paid acceptance. |
 | Live proof | An owner-authorized transfer is approved, signed, submitted, included, and checked at the network's required finality. | Pending for the remaining rows. |
 
 The current report records `1/9` for the repeated direct EVM mapping and `8/9`
@@ -159,6 +159,17 @@ and WETH; Base ETH, USDC, and WETH; and Arbitrum One ETH, USDC, and USD₮0.
 Source identities are present in the frozen network registry or the direct-only
 supplemental registry below. This establishes code support only.
 
+At the 28 Sep installed APN 0.5.27 checkpoint, the five previously evidenced
+current-owner prepare rows plus the four fresh operations below cover all 9/9
+direct rows. The four fresh operations used active buyer policy r25. Their
+post-expiry local outcomes are `failed_before_effect` /
+`approval_window_expired`, with no signing, send, transaction hash, or chain
+evidence. Physical live POST counts for these prepares were not observed; the
+source guard is 24 physical POSTs per invocation with 750 ms provider-family
+pacing. The historical paid receipts below remain separate from this unsigned
+prepare coverage. Distinct paid receipts and current-policy recipient acceptance
+are still incomplete, so C1-12 remains `in_progress`.
+
 The 19 Sep owner report was cited as showing fresh evidence for Ethereum ETH,
 but the cited records do not identify that evidence's proof layer, operation,
 or receipt. The 26 Sep C1-12 checkpoint additionally records a Base ETH no-money
@@ -226,15 +237,15 @@ as a timed observation. Neither read proves an on-chain effect.
 
 | Chain / asset row | Code / source | Current-source no-money proof | Paid receipt proof |
 | --- | --- | --- | --- |
-| Ethereum ETH | Present in direct network registry | The unsigned prepare was a phase of the same later-paid operation `7631cc91…fbde9`; no separate no-money-only operation is recorded. The historical 19 Sep 1/9 report lacked exact proof | `7631cc91…fbde9` terminal `completed`, tx `0xb893edb0…2497d`, block 26070276, exact 0.0004 ETH; `inclusion_only`, actual gas fee unknown |
+| Ethereum ETH | Present in direct network registry | Earlier paid operation `7631cc91…fbde9` included a prepare phase. Distinct installed APN 0.5.27 r25 unsigned operation `eedf8a55e156760108f083a04492f1794c9753352eedc690078e07a939bcefd0` prepared `1000000000000 wei` with fee quote `14875609434000 wei` below the `100000000000000 wei` cap; expiry 11:53:40 UTC, then terminal `failed_before_effect` / `approval_window_expired` locally, with no RPC/TTY/sign/send/chain evidence after expiry | `7631cc91…fbde9` terminal `completed`, tx `0xb893edb0…2497d`, block 26070276, exact 0.0004 ETH; `inclusion_only`, actual gas fee unknown |
 | Ethereum USDC | Present in direct network registry | The unsigned prepare was a phase of the same later-paid operation `6d2f32d642fb6ab54f32ddb9d734ed7dbd2a180c96b2fce071a7d7187253de58`; no separate no-money-only operation is recorded | [Tx `0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00`](https://etherscan.io/tx/0xfa33ff8460936d62f95a3f338f7d3912f5f41cb1909f4e3216f3be05c6c30c00), block `26071092`, exact `1000` atomic USDC buyer debit/default credit by Transfer log and balance deltas; `completed` / `confirmed_exact_erc20_transfer`, `inclusion_only`; actual fee unknown |
 | Ethereum WETH | Present in PR #370 direct-only registry | The unsigned prepare was a phase of the same later-paid operation `950cd8bd5ae4a87cbdad8aa6e40cb31b0635925920c050cb03d84b8a7b5a2f47`; no separate no-money-only operation is recorded | [Tx `0x07e0bf307fb1fdbc05823164c66c234d9152a9350c5ea93ee4e85309e0698c8a`](https://etherscan.io/tx/0x07e0bf307fb1fdbc05823164c66c234d9152a9350c5ea93ee4e85309e0698c8a), block `26071247`, exact `100000000` atomic WETH buyer debit/default credit; `completed` / `confirmed_exact_erc20_transfer`, proof `included_transfer_event_and_block_balance_deltas`, `inclusion_only`; actual fee unknown |
 | Base ETH | Present in direct network registry | Earlier operation `fe563b15…` expired as `failed_before_effect`; no reservation, transaction hash, RPC send, or receipt | Later distinct operation `a7f5d3ba57c27871dfae096d41b6a9799ff0f178d41324b936badffe221b12ba` completed; [tx `0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17`](https://basescan.org/tx/0x8ac8f01f2d2b1c9ac21fea75ac1305c45e6e41a8e17f2cbf2351917f97aa2f17), block 51872258, exact `1000000000000 wei`, `inclusion_only`; actual total fee unknown |
-| Base USDC | Present in direct network registry | No separate current-source matrix entry recorded | Historical paid receipt under policy revision 11; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
+| Base USDC | Present in direct network registry | Installed APN 0.5.27 r25 operation `b423703b2c8414383197d5e896f8be82237d79d92fb5b395eee5c6edd95dc9bd` prepared `1000` atomic USDC with fee quote `499697000000 wei` below the `100000000000000 wei` cap; expiry 11:56:37 UTC, then terminal `failed_before_effect` / `approval_window_expired` locally, with no sign/send/chain evidence | Historical paid receipt under policy revision 11; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md) |
 | Base WETH | Present in PR #370 direct-only registry | Installed APN 0.5.27 prepared `8da31a2060eaef3422252b311a321da3af4eca6afe19e4dff4ad0cc15041180e` for `100000000` atomic Base WETH under active buyer policy r25; it initially reached `awaiting_approval` / `durable_pre_effect`, then a once-only local no-RPC approve after expiry returned `APN_REPREPARE_REQUIRED` and persisted `failed_before_effect` / `approval_window_expired` (`durable_pre_effect_failure`). No reservation, transaction hash, chain evidence, or paid effect is recorded | No current-source receipt recorded |
 | Arbitrum One ETH | Present in direct network registry | Installed APN 0.5.27 prepared operation `b07b2cc3b0ee2d5c9b6544f3a38b02e74243444da2eec95e5270a1ba6029d91b` on `eip155:42161` under active buyer r25 for native ETH `1000000000000 wei` to the owner-approved local recipient; fee quote `902320000000 wei` was below the `50000000000000 wei` cap. It reached `awaiting_approval` / `durable_pre_effect` and expired at 11:16:58Z. One local non-TTY/no-RPC approve at 11:19:10Z returned `APN_REPREPARE_REQUIRED`; status and receipt became terminal `failed_before_effect` / `approval_window_expired` with `durable_pre_effect_failure`. No usage reservation or on-chain receipt is recorded, and no paid effect is established. The live POST count was not observed; five is model-only | No current-source receipt recorded |
-| Arbitrum One USDC | Present in direct network registry | `b0ebd681…` prepared unsigned for 1000 atomic USDC after #421; the 26 Sep 16:51:54Z local read showed `awaiting_approval`, then the later read-only JSON checkpoint found terminal `failed_before_effect` / `approval_window_expired` (transition 26 Sep 17:18:56.490Z), with no transaction hash or chain read | Historical safe-inclusion receipt under policy revision 12; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md). The later unsigned prepare adds no paid receipt |
-| Arbitrum One USD₮0 | Present in PR #370 direct-only registry | No fresh prepare recorded; exact direct owner admission is required | No current-source receipt recorded |
+| Arbitrum One USDC | Present in direct network registry | Earlier `b0ebd681…` prepared unsigned for 1000 atomic USDC after #421 and expired without effect. Distinct installed APN 0.5.27 r25 operation `064fb55d0651469a1a34db27d58e158475cfd85c2ae2a852e64f7696da6e6d42` prepared `1000` atomic USDC with fee quote `1893092500000 wei` below the `100000000000000 wei` cap; expiry 11:57:12 UTC, then terminal `failed_before_effect` / `approval_window_expired` locally, with no sign/send/chain evidence | Historical safe-inclusion receipt under policy revision 12; see the [direct token evidence ledger](evm-direct-usdc-base-arbitrum-acceptance-2026-09-24.md). The unsigned prepares add no paid receipt |
+| Arbitrum One USD₮0 | Present in PR #370 direct-only registry | Active r25 exact direct-only admission pins `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9`, 6 decimals, `10000` atomic/day. First prepare was locally blocked by the outstanding Arbitrum USDC operation before RPC. After its expiry, installed APN 0.5.27 prepared `1000` atomic USD₮0 as operation `e47d1951e253efd0725e00a70294c774736e8afbe22892131766205b1ab21115`, fee quote `2537320968000 wei` below the `100000000000000 wei` cap; expiry 12:14:38 UTC, then terminal `failed_before_effect` / `approval_window_expired` locally, with no sign/send/chain evidence | No current-source receipt recorded |
 
 The Ethereum USDT receipt in the ledger is a separate asset row; it does not
 substitute for Arbitrum USD₮0. The ledger remains authoritative for exact
@@ -251,8 +262,10 @@ direct acceptance in [EVM assets](evm-assets.md). Source registration alone
 does not admit a token for direct use. The Ethereum WETH paid operation is
 recorded above. The Base WETH prepare under active buyer policy r25 demonstrates
 owner-policy admission for that operation; it expired before any submission, so a
-fresh prepare and distinct paid receipt remain open. Arbitrum USD₮0 still needs
-exact owner-policy admission, fresh prepare, and paid acceptance.
+distinct paid receipt remains open. Active r25 also has the exact Arbitrum USD₮0
+direct-only admission and the unsigned prepare above. Frozen-only `allowlist
+resolve` intentionally excludes USD₮0; its absence there does not imply missing
+owner admission. Paid USD₮0 acceptance remains open.
 The registry does not admit them on bridge, x402, gasless, or swap rails.
 
 ## Owner inputs required for live acceptance
