@@ -31,6 +31,7 @@ export declare class UsdtCommandReadBudget implements GaslessTransport {
     request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<{
         readonly status: number;
         readonly body: string;
+        readonly retryAfterMs?: number;
     }>;
     private guard;
 }

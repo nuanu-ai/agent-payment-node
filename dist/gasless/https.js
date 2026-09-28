@@ -231,7 +231,8 @@ function send(endpoint, method, body, addresses, maximumBytes, deadline, code) {
                 const declared = response.headers["content-length"];
                 const disposition = gaslessResponseDisposition(status, response.headers["content-encoding"], declared, maximumBytes);
                 if (disposition === "terminal") {
-                    finish(null, { status, body: "" });
+                    const retryAfterMs = parsedRetryAfterMs(response.headers["retry-after"]);
+                    finish(null, { status, body: "", ...(retryAfterMs === undefined ? {} : { retryAfterMs }) });
                     response.destroy();
                     return;
                 }
@@ -283,5 +284,19 @@ function send(endpoint, method, body, addresses, maximumBytes, deadline, code) {
             finish(error);
         }
     });
+}
+/** Expose only a bounded numeric delay, never the raw provider header. */
+function parsedRetryAfterMs(value) {
+    if (typeof value !== "string" || value.startsWith("-"))
+        return undefined;
+    if (/^[0-9]+$/u.test(value))
+        return Math.min(Number(value) * 1_000, 30_000);
+    if (!value.includes(",") || !/GMT$/iu.test(value))
+        return undefined;
+    const date = Date.parse(value);
+    const delay = date - Date.now();
+    if (!Number.isFinite(date) || delay < 0)
+        return undefined;
+    return Math.min(30_000, delay);
 }
 //# sourceMappingURL=https.js.map

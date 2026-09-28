@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getAddress, keccak256, pad, type Hex } from "viem";
 import type { GaslessTransport } from "../../src/gasless/https.js";
+import { ApnError } from "../../src/errors.js";
+import { UsdtCommandReadBudget } from "../../src/gasless-usdt/command-prepare.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
 import { UsdtJsonRpc, usdtChainPort, usdtRecoveryPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
+import { StateStore } from "../../src/state.js";
+import { temporaryState } from "./helpers.js";
 
 const OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
 const RPC_URL = "https://ethereum.example-rpc.test/";
@@ -89,6 +93,54 @@ test("safe snapshot anchors contract reads to the canonical safe block hash", as
   for (const request of batches[1]!) assert.deepEqual(request.params[1], { blockHash, requireCanonical: true });
   assert.deepEqual(batches[1]![0]!.params[0], USDT_GASLESS.token);
   assert.deepEqual(batches[1]![8]!.params[0], OWNER);
+});
+
+test("safe-head HTTP failures retain status, retry delay and phase after one physical attempt", async t => {
+  for (const status of [429, 503]) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    let attempts = 0;
+    const peer: GaslessTransport = { request: async () => {
+      attempts += 1;
+      return { status, body: "secret response body", retryAfterMs: 3_000 };
+    } };
+    const budget = new UsdtCommandReadBudget(new StateStore(temporary.root), peer, () => 1_000, async () => {});
+    await assert.rejects(usdtSafeSnapshot(budget, "https://secret.example/rpc?key=secret", OWNER), (error: unknown) => {
+      assert.ok(error instanceof ApnError);
+      assert.equal(error.code, status === 429 ? "APN_RPC_RATE_LIMITED" : "APN_RPC_AMBIGUOUS");
+      assert.deepEqual(error.details, { reason: status === 429 ? "gasless_usdt_rpc_rate_limited" : "gasless_usdt_rpc_server_error",
+        rpcPhase: "safe_head", httpStatus: status, retryAfterMs: 3_000 });
+      assert.equal(JSON.stringify(error).includes("secret"), false);
+      return true;
+    });
+    assert.equal(attempts, 1);
+    assert.equal(budget.count(), 1);
+  }
+});
+
+test("safe-head transport failure is distinct and strips untrusted error text and details", async () => {
+  let attempts = 0;
+  const peer: GaslessTransport = { request: async () => {
+    attempts += 1;
+    throw new ApnError("APN_RPC_AMBIGUOUS", "https://secret.example/rpc?key=secret", { leaked: "secret" });
+  } };
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), (error: unknown) => {
+    assert.ok(error instanceof ApnError);
+    assert.equal(error.code, "APN_RPC_AMBIGUOUS");
+    assert.deepEqual(error.details, { reason: "gasless_usdt_rpc_transport", rpcPhase: "safe_head" });
+    assert.equal(JSON.stringify(error).includes("secret"), false);
+    return true;
+  });
+  assert.equal(attempts, 1);
+});
+
+test("other HTTP 4xx remains a protocol refusal without exposing its body", async () => {
+  const peer: GaslessTransport = { request: async () => ({ status: 403, body: "secret refusal" }) };
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), (error: unknown) => {
+    assert.ok(error instanceof ApnError);
+    assert.equal(error.code, "APN_RPC_PROTOCOL");
+    assert.equal(JSON.stringify(error).includes("secret"), false);
+    return true;
+  });
 });
 
 test("safe snapshot rejects incomplete, duplicate and mismatched JSON-RPC batches without single-read fallback", async () => {
