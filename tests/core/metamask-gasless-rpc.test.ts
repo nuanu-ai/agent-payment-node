@@ -118,6 +118,21 @@ test("static runtime fixture drives fixed EIP-1898 snapshots for all eight regis
   }
 });
 
+test("snapshot shares only an identical safe and head block, retaining distinct pinned reads otherwise", async () => {
+  for (const [head, count, stateReads] of [[100n, 15, 11], [101n, 27, 22]] as const) {
+    const transport = new FakeRpcTransport(8453, { finality: 100n, head });
+    const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
+    const snapshot = await rpc.snapshot({ owner: vector.owner, delegationHash: vector.delegationHash,
+      grossAtomic: "1000000" });
+    assert.equal(transport.calls.length, count);
+    assert.equal(transport.calls.filter(call => ["eth_getCode", "eth_getStorageAt", "eth_call"].includes(call.method)).length,
+      stateReads);
+    assert.equal(snapshot.safeBlock.hash === snapshot.headBlock.hash, head === 100n);
+    assert.equal(snapshot.safeState.counterAtomic, "0");
+    assert.equal(snapshot.headState.counterAtomic, "0");
+  }
+});
+
 test("lazy factory binds exact endpoints and protocol drift fails closed", async () => {
   const environment: Record<string, string> = {};
   for (const chainId of MM_CHAINS) environment[MM_RPC_ENV[chainId]] = RPC_URL;

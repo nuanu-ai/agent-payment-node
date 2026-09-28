@@ -64,7 +64,10 @@ export class GaslessHttps {
         this.pacer = pacer;
     }
     async request(endpointInput, method, body, maximumBytes, code, beforeSend) {
-        const expires = performance.now() + 15_000;
+        // A paced POST can wait behind other public RPC reads for longer than its
+        // network timeout. Bound the whole request separately from each I/O phase.
+        const overallExpires = performance.now() + (method === "POST" ? 60_000 : 15_000);
+        let expires = overallExpires;
         const endpoint = parsePublicHttpsUrl(endpointInput, code, "Gasless endpoint", 2048);
         if (body !== null && Buffer.byteLength(body, "utf8") > 256 * 1024)
             throw failure(code, "request_size");
@@ -79,19 +82,28 @@ export class GaslessHttps {
                     throw expired;
             } };
         deadline.assert();
-        const timer = setTimeout(() => controller.abort(expired), Math.max(1, expires - performance.now()));
+        let timer;
+        const phase = (milliseconds) => {
+            expires = Math.min(overallExpires, performance.now() + milliseconds);
+            clearTimeout(timer);
+            timer = setTimeout(() => controller.abort(expired), Math.max(1, expires - performance.now()));
+            deadline.assert();
+        };
+        timer = setTimeout(() => controller.abort(expired), Math.max(1, expires - performance.now()));
         let release;
         try {
             release = await this.acquire(deadline, code);
-            deadline.assert();
+            phase(15_000); // DNS and the active socket each retain their own 15-second bound.
             const addresses = await abortable(resolvePublicAddresses(endpoint, code, "Gasless endpoint"), deadline.signal);
             deadline.assert();
-            if (method === "POST")
+            if (method === "POST") {
+                phase(overallExpires - performance.now()); // waiting for the paced turn is bounded by the whole request.
                 return await this.pacer.run(endpoint.origin, deadline.signal, async () => {
-                    deadline.assert();
+                    phase(15_000);
                     beforeSend?.();
                     return await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
                 });
+            }
             beforeSend?.();
             return await send(endpoint, method, body, addresses, maximumBytes, deadline, code);
         }
