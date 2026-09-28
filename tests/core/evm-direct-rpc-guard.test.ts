@@ -60,6 +60,25 @@ test("direct EVM guard counts physical POSTs, caps at 24 and persists 750 ms sta
   assert.equal(now - before, 1_500, "Arbitrum, Base and Ethereum share persisted publicnode family pacing");
 });
 
+test("separate direct EVM guards pace from physical completion under the shared family lock", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let entered!: () => void;
+  const firstEntered = new Promise<void>(resolve => { entered = resolve; });
+  let completed = 0, secondEntry = 0;
+  const first = new EvmDirectRpcGuard(state);
+  const second = new EvmDirectRpcGuard(state);
+  const active = first.post("https://arbitrum-one-rpc.publicnode.com", async () => {
+    entered();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    completed = Date.now();
+  });
+  await firstEntered;
+  const waiting = second.post("https://base-rpc.publicnode.com", async () => { secondEntry = Date.now(); });
+  await Promise.all([active, waiting]);
+  assert.ok(secondEntry - completed >= 750, `physical completion gap ${secondEntry - completed}`);
+});
+
 test("direct EVM guard makes a single attempt on 429 and retains provider cooldown", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root); await state.initialize();
