@@ -134,6 +134,12 @@ export class ChainAccountStore extends SecureStateStore {
             corrupt();
         return { ...effect };
     }
+    async effectByOperationId(account, operationId) {
+        stateIdentifier(operationId, "rail operation id");
+        const secret = await this.requiredSecret(account);
+        const effect = secret.effects[operationId];
+        return effect === undefined ? null : { ...effect };
+    }
     async saveEffect(account, effect) {
         validateEffect(effect);
         const secret = await this.requiredSecret(account);

@@ -127,6 +127,13 @@ export class ChainAccountStore extends SecureStateStore implements ChainWalletSt
     return { ...effect };
   }
 
+  async effectByOperationId(account: ChainAccount, operationId: string): Promise<RailSignedEffect | null> {
+    stateIdentifier(operationId, "rail operation id");
+    const secret = await this.requiredSecret(account);
+    const effect = secret.effects[operationId];
+    return effect === undefined ? null : { ...effect };
+  }
+
   async saveEffect(account: ChainAccount, effect: RailSignedEffect): Promise<void> {
     validateEffect(effect);
     const secret = await this.requiredSecret(account);
