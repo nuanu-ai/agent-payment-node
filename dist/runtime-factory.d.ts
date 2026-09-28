@@ -106,6 +106,10 @@ export interface RuntimeFactoryOptions {
     readonly chainPolicyApproval?: ChainPolicyApprovalPort;
     readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
     readonly solanaRpcUrl?: string;
+    /** Offline transport injection; production uses the guarded Solana HTTPS fetch. */
+    readonly solanaRpcFetch?: typeof fetch;
+    readonly solanaRpcNow?: () => number;
+    readonly solanaRpcWait?: (milliseconds: number) => Promise<void>;
     readonly tronRpcUrl?: string;
     readonly stateRoot?: string;
     readonly native?: NativePort;

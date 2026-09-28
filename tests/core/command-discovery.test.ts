@@ -94,7 +94,7 @@ const EXPECTED_COMMANDS = [
   "swap ethereum uniswap-token inventory", "swap ethereum uniswap-token quote", "swap ethereum uniswap-token prepare", "swap ethereum uniswap-token status", "swap ethereum uniswap-token approve", "swap ethereum uniswap-token execute", "swap ethereum uniswap-token cleanup",
   "swap tron sunswap inventory", "swap tron sunswap quote", "swap tron sunswap prepare", "swap tron sunswap status", "swap tron sunswap approve", "swap tron sunswap execute",
   "swap solana jupiter inventory", "swap solana jupiter quote", "swap solana jupiter prepare", "swap solana jupiter status", "swap solana jupiter approve", "swap solana jupiter execute",
-  "swap solana orca stable-inventory", "swap solana orca stable-quote", "swap solana orca stable-prepare", "swap solana orca stable-status", "swap solana orca stable-approve", "swap solana orca stable-release", "swap solana orca inventory", "swap solana orca quote", "swap solana orca prepare", "swap solana orca status", "swap solana orca approve", "swap solana orca execute",
+  "swap solana orca stable-inventory", "swap solana orca stable-quote", "swap solana orca stable-prepare", "swap solana orca stable-status", "swap solana orca stable-approve", "swap solana orca stable-release", "swap solana orca stable-observe", "swap solana orca inventory", "swap solana orca quote", "swap solana orca prepare", "swap solana orca status", "swap solana orca approve", "swap solana orca execute",
 ];
 
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {
@@ -158,6 +158,17 @@ test("status and receipt discovery disclose possible local recovery writes in CL
     const tool = projectMcpTools().find((entry) => entry.command.path.join(" ") === path.join(" "));
     assert.match(tool?.description ?? "", /Effect: local_write — May initialize local state and repair saved operation or receipt records/u);
   }
+});
+
+test("stable observation discovery discloses durable operation and principal writes", () => {
+  const path = ["swap", "solana", "orca", "stable-observe"];
+  const command = COMMANDS.find((entry) => entry.path.join(" ") === path.join(" "));
+  assert.equal(command?.effect.class, "local_write");
+  assert.match(command.effect.summary, /durably record possible send, finalized proof and principal lease outcome/u);
+  assert.match(renderHelp(path), /Effect: local_write/u);
+  const tool = projectMcpTools().find((entry) => entry.command.path.join(" ") === path.join(" "));
+  assert.match(tool?.description ?? "", /Effect: local_write/u);
+  assert.match(tool?.description ?? "", /principal lease outcome/u);
 });
 
 test("group help renders exact subgroup usages and complete leaf synopses", () => {
