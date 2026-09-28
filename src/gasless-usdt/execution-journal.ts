@@ -7,6 +7,7 @@ import { SecureStateStore } from "../secure-state-store.js";
 import { validateUsdtBoundOperation, type UsdtBoundOperation } from "./bound-operation.js";
 import { USDT_GASLESS } from "./model.js";
 import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-data.js";
+import { usdtEffectiveFeeCap } from "./quote.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtSettlement } from "./receipt.js";
 
@@ -202,8 +203,8 @@ export class UsdtExecutionJournal extends SecureStateStore {
       feeCapAtomic: BigInt(b.plan.feeCapAtomic), netAtomic: BigInt(b.plan.netAtomic), quotedFeeAtomic: BigInt(b.plan.quotedFeeAtomic) };
     validateUsdtPaymasterData({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, plan as never,
       BigInt(Math.floor(at.getTime() / 1000)));
-    if (BigInt(b.plan.feeCapAtomic) !== BigInt(b.plan.request.maxFeeAtomic) ||
-      BigInt(b.plan.quotedFeeAtomic) > BigInt(b.plan.request.maxFeeAtomic)) fail("fee_bound_changed");
+    if (plan.feeCapAtomic !== usdtEffectiveFeeCap(plan.request) ||
+      plan.quotedFeeAtomic > plan.feeCapAtomic) fail("fee_bound_changed");
     const active = await port.activePolicy(b.profile);
     if (active === null || active.profile !== b.profile || active.digest !== active.registry.policyDigest ||
       active.digest !== b.policyDigest || active.revision !== b.policyRevision || active.activationDigest !== b.activationDigest ||

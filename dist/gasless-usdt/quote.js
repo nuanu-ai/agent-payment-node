@@ -58,6 +58,11 @@ export function usdtFeeBound(gas, maxFeePerGas, postOpGas, exchangeRate) {
     const product = units * maxFeePerGas * exchangeRate;
     return (product + WEI - 1n) / WEI;
 }
+/** Effective owner fee budget, shared by preparation and frozen-operation guards. */
+export function usdtEffectiveFeeCap(request) {
+    const available = request.grossAtomic - request.minReceivedAtomic;
+    return request.maxFeeAtomic < available ? request.maxFeeAtomic : available;
+}
 /**
  * Prepare: F = min(max fee, gross - min received) is the whole fee budget and the exact allowance the batch grants, and
  * N = gross - F is the recipient's credit. A quote whose worst case exceeds F refuses; nothing is widened to fit it.
@@ -68,7 +73,7 @@ export function planUsdtTransfer(request, quote, price) {
         usdtFailure("APN_INVALID_INPUT", "gasless_amount_bounds");
     if (request.recipient === request.sender)
         usdtFailure("APN_INVALID_INPUT", "gasless_usdt_self_transfer");
-    const feeCapAtomic = maxFee < gross - minimum ? maxFee : gross - minimum;
+    const feeCapAtomic = usdtEffectiveFeeCap(request);
     if (feeCapAtomic === 0n) {
         usdtFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_usdt_fee_budget_zero", "The sponsor charges its fee in USDT; --max-fee and --min-received must leave a positive fee budget.");
     }

@@ -7,6 +7,7 @@ import { SecureStateStore } from "../secure-state-store.js";
 import { validateUsdtBoundOperation } from "./bound-operation.js";
 import { USDT_GASLESS } from "./model.js";
 import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-data.js";
+import { usdtEffectiveFeeCap } from "./quote.js";
 export const USDT_EXECUTION_SCHEMA = "apn.gasless-usdt-execution.v1";
 const HASH = /^[a-f0-9]{64}$/u;
 const DECIMAL = /^(0|[1-9][0-9]*)$/u;
@@ -192,8 +193,8 @@ export class UsdtExecutionJournal extends SecureStateStore {
             gas: Object.fromEntries(Object.entries(b.plan.gas).map(([key, value]) => [key, BigInt(value)])),
             feeCapAtomic: BigInt(b.plan.feeCapAtomic), netAtomic: BigInt(b.plan.netAtomic), quotedFeeAtomic: BigInt(b.plan.quotedFeeAtomic) };
         validateUsdtPaymasterData({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, plan, BigInt(Math.floor(at.getTime() / 1000)));
-        if (BigInt(b.plan.feeCapAtomic) !== BigInt(b.plan.request.maxFeeAtomic) ||
-            BigInt(b.plan.quotedFeeAtomic) > BigInt(b.plan.request.maxFeeAtomic))
+        if (plan.feeCapAtomic !== usdtEffectiveFeeCap(plan.request) ||
+            plan.quotedFeeAtomic > plan.feeCapAtomic)
             fail("fee_bound_changed");
         const active = await port.activePolicy(b.profile);
         if (active === null || active.profile !== b.profile || active.digest !== active.registry.policyDigest ||

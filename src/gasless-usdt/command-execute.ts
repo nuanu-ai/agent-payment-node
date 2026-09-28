@@ -19,6 +19,7 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 import { createInterface } from "node:readline/promises";
 import { approvalCode } from "../approval-code.js";
 import { decodeUsdtPaymasterData } from "./paymaster-data.js";
+import { usdtEffectiveFeeCap } from "./quote.js";
 
 export interface UsdtForegroundApproval { approve(bound: UsdtBoundOperation): Promise<void> }
 /** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
@@ -30,8 +31,8 @@ export function usdtApprovalPrompt(bound: UsdtBoundOperation, now: number): { re
     throw new ApnError("APN_NATIVE_REJECTED", "Gasless USDT quote is too close to expiry.", { nativeCode: "APN_APPROVAL_EXPIRED" });
   }
   const fee = BigInt(b.plan.feeCapAtomic), request = b.plan.request;
-  if (fee !== (BigInt(request.maxFeeAtomic) < BigInt(request.grossAtomic) - BigInt(request.minReceivedAtomic)
-    ? BigInt(request.maxFeeAtomic) : BigInt(request.grossAtomic) - BigInt(request.minReceivedAtomic)) ||
+  if (fee !== usdtEffectiveFeeCap({ grossAtomic: BigInt(request.grossAtomic),
+    maxFeeAtomic: BigInt(request.maxFeeAtomic), minReceivedAtomic: BigInt(request.minReceivedAtomic) }) ||
     b.unsignedOperation.paymaster !== USDT_GASLESS.paymaster || validity.treasury !== b.paymaster.treasury ||
     validity.treasury !== USDT_GASLESS.treasury ||
     (b.account.delegation === "empty" && b.unsignedOperation.eip7702Auth?.address !== USDT_GASLESS.delegate)) {
