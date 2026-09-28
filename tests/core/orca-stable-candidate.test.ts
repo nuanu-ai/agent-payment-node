@@ -15,6 +15,11 @@ import { parseJsonWithBigInts } from "@solana/rpc-spec-types";
 import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
+import { allowlistDecisionFingerprint } from "../../src/allowlist-policy-activation.js";
+import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
+import { loadActiveAssetPolicyRegistry } from "../../src/allowlist-active-policy.js";
+import { runCli } from "../../src/cli.js";
 import { ApnError } from "../../src/errors.js";
 import { ChainAccountStore, sealChainAccount } from "../../src/chain-account-store.js";
 import { SolanaRpc, SolanaRpcBudget, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
@@ -185,6 +190,7 @@ async function fixture(exists = true) {
     createUsdtAta: !exists, ...(exists ? {} : { maximumAtaRentLamports: "2500000" }),
     maximumTotalFeeLamports: "3000000", idempotencyKey: "stable-candidate-key", now: new Date("2000-01-01T00:00:00.000Z") };
   return { source, rpc, ports, service, request, calls, cleanup: temporary.cleanup, root: temporary.root,
+    setPolicy: (value: typeof active) => { current = value; },
     removeAccount: (key: string) => { accounts.delete(key); },
     setFee: (value: bigint | null) => { fee = value; }, setError: (value: unknown) => { simulationError = value; },
     setInputTransfer: (value: bigint) => { inputTransfer = value; },
@@ -494,7 +500,8 @@ test("stable foreground approval binds the exact screen and reserves principal w
   assert.equal(prompts, 1);
   assert.equal(result.operation.state, "reserved");
   assert.equal(result.operation.usageLease?.amountAtomic, f.source.quote.amountInAtomic);
-  assert.equal(result.signable, false); assert.equal(result.executable, false);
+  assert.equal(result.signable, false); assert.equal(result.executable, true);
+  assert.equal(result.executionRequiresForegroundConsent, true);
   const core = new ApnCore({ state: new StateStore(f.root), clock: { now: f.clock },
     orcaStableApprove: operationId => approveOrcaStableReservation(f.service, store, f.ports, operationId,
       { confirm: async () => { throw new Error("already reserved"); } }, f.clock) });
@@ -842,6 +849,114 @@ test("private stable first attempt consumes 23 preflight POSTs and one persisted
     new SolanaRpcPacer(new StateStore(f.root), () => time, async ms => { time += ms; }));
   await nextRpc.call("getGenesisHash", []);
   assert.equal(starts[24]! - starts[23]!, 750);
+});
+
+test("public stable execute uses persisted owner policy, factory RPC and one physical send", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const wrapping = { load: async () => Buffer.alloc(32, 19), create: async () => Buffer.alloc(32, 19) };
+  const custody = new ChainAccountStore(f.root, wrapping);
+  const account = await custody.ensureLocal({ profile: "stable-candidate", rail: "solana",
+    create: async () => ({ seed: Buffer.alloc(32, 23), address: f.source.owner }) });
+  const policyStore = new AllowlistPolicyStore(f.root);
+  const staged = await policyStore.stage({ profile: "stable-candidate", now: NOW, policy: {
+    schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "stable-factory.1",
+    accounts: { solana: f.source.owner }, effectiveAt: "2026-09-28T00:00:00.000Z",
+    expiresAt: "2026-09-29T00:00:00.000Z", admissions: [USDC_MINT, SOLANA_USDT].map(identifier => ({
+      chain: ORCA_SOLANA_CHAIN, kind: "token" as const, identifier, rail: "swap" as const,
+      maximumPerTransferAtomic: "2000000", dailyLimitAtomic: "3000000", mechanism: ORCA_STABLE_GUARDED_MECHANISM_PIN,
+    })) } });
+  await policyStore.appendDecision("stable-candidate", null, { status: "active", revision: staged.revision,
+    stagedRecordDigest: staged.recordDigest, policyDigest: staged.registry.policyDigest, registry: staged.registry,
+    approvalFingerprint: allowlistDecisionFingerprint({ action: "activate", profileHash: allowlistProfileHash("stable-candidate"),
+      revision: staged.revision, stagedRecordDigest: staged.recordDigest, policyDigest: staged.registry.policyDigest,
+      headEntryDigest: null }), decidedAt: NOW.toISOString() });
+  const active = (await loadActiveAssetPolicyRegistry(f.root, "stable-candidate", NOW))!;
+  f.setPolicy({ ...active, accounts: { solana: f.source.owner } });
+  const admission = { ...f.ports, localAccount: async () => account };
+  const prepared = await prepareOrcaStableGuardedCandidateCore(f.rpc, admission, f.service,
+    { ...f.request, policyRevision: staged.revision }, async () => [], f.clock);
+  await approveOrcaStableReservation(f.service, new SavedOrcaStableMaterialStore(f.root), admission,
+    prepared.operation.operationId, { confirm: async () => {} }, f.clock);
+  let time = NOW.getTime();
+  let rateLimit = true;
+  let observedStatus: unknown = { context: { slot: 450_687_914n }, value: [null] };
+  let observedTransaction: unknown = null;
+  const posts: Array<{ start: number; methods: string[] }> = [];
+  const fetcher: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(init!.body as string) as { id: string; method: SolanaMethod; params: unknown[] } |
+      Array<{ id: string; method: SolanaMethod; params: unknown[] }>;
+    const requests = Array.isArray(body) ? body : [body];
+    posts.push({ start: time, methods: requests.map(request => request.method) });
+    if (rateLimit) return new Response("", { status: 429, headers: { "retry-after": "3" } });
+    const responses = await Promise.all(requests.map(async request => ({ jsonrpc: "2.0", id: request.id,
+      result: request.method === "sendTransaction"
+        ? getSignatureFromTransaction(getTransactionDecoder().decode(Buffer.from(request.params[0] as string, "base64")))
+        : request.method === "getSignatureStatuses" ? observedStatus
+        : request.method === "getTransaction" ? observedTransaction
+        : await f.rpc.call(request.method, request.params) })));
+    return new Response(JSON.stringify(Array.isArray(body) ? responses : responses[0],
+      (_key, value) => typeof value === "bigint" ? Number(value) : value),
+    { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const options = { stateRoot: f.root, chainAccounts: custody, wrappingSecret: wrapping,
+    solanaRpcUrl: "https://stable-source.example/rpc", solanaRpcFetch: fetcher,
+    solanaRpcNow: () => time, solanaRpcWait: async (milliseconds: number) => { time += milliseconds; },
+    clock: { now: () => new Date(time) }, orcaStablePinVerifier: async () => [],
+    orcaStableExecuteConsent: { confirm: async (lines: readonly string[], code: string) => {
+      assert.ok(lines.some(line => line.includes("Execution consent:")));
+      assert.match(code, /^[a-f0-9]{6}$/u);
+    } } };
+  const argv = ["swap", "solana", "orca", "stable-execute", "--operation", prepared.operation.operationId];
+  const reservedStatus = await runCli(["swap", "solana", "orca", "stable-status", "--operation",
+    prepared.operation.operationId], {}, options);
+  assert.equal(reservedStatus.ok, true, JSON.stringify(reservedStatus));
+  assert.equal((reservedStatus.data as any).executable, true);
+  assert.equal((reservedStatus.data as any).executionRequiresForegroundConsent, true);
+  assert.equal(posts.length, 0);
+  const server = createMcpServer(options);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "stable-execute-handoff", version: "1" });
+  await client.connect(clientTransport);
+  t.after(async () => { await client.close(); await server.close(); });
+  const handoff = await client.callTool({ name: "apn_swap_solana_orca_stable_execute",
+    arguments: { operation: prepared.operation.operationId } });
+  assert.equal((handoff.structuredContent as any).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+  assert.equal(posts.length, 0, "MCP handoff must never enter the RPC or signer");
+  const denied = await runCli(argv, {}, { ...options,
+    orcaStableExecuteConsent: { confirm: async () => { throw new ApnError("APN_OPERATION_BLOCKED", "Owner denied execution."); } } });
+  assert.equal(denied.ok, false);
+  assert.equal(posts.length, 0, "denied owner TTY must make zero RPC calls");
+  const limited = await runCli(argv, {}, options);
+  assert.equal(limited.ok, false);
+  assert.equal(posts.length, 1, "a preflight 429 must have no automatic retry");
+  assert.equal(posts[0]!.methods.includes("sendTransaction"), false);
+  rateLimit = false;
+  time += 3_000;
+  const result = await runCli(argv, {}, options);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal((result.data as any).operation.state, "submitted");
+  assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, 1);
+  assert.ok(posts.length - 1 <= 24, `execution physical POST count ${posts.length - 1}`);
+  assert.ok(posts.every((post, index) => index === 0 || post.start - posts[index - 1]!.start >= 750));
+  const effect = await custody.effectByOperationId(account, prepared.operation.operationId);
+  assert.ok(effect?.rawPayloadHash);
+  const claim = await readFile(join(f.root, "orca-stable-send-claims", prepared.operation.ownerProfileHash,
+    `${prepared.operation.operationId}.json`), "utf8");
+  assert.equal(JSON.parse(claim).signature, effect.transactionId);
+  const pending = await runCli(["swap", "solana", "orca", "stable-observe", "--operation", prepared.operation.operationId], {}, options);
+  assert.equal(pending.ok, true, JSON.stringify(pending));
+  assert.equal((pending.data as any).state, "submitted");
+  const receipt = await receiptFixture(false); t.after(receipt.f.cleanup);
+  observedStatus = { context: { slot: receipt.transaction.slot },
+    value: [{ slot: receipt.transaction.slot, confirmationStatus: "finalized", err: null }] };
+  observedTransaction = { ...receipt.transaction, transaction: [effect.rawPayload, "base64"] };
+  const finalized = await runCli(["swap", "solana", "orca", "stable-observe", "--operation", prepared.operation.operationId], {}, options);
+  assert.equal(finalized.ok, true, JSON.stringify(finalized));
+  assert.equal((finalized.data as any).state, "finalized");
+  const replay = await runCli(argv, {}, options);
+  assert.equal(replay.ok, false);
+  assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, 1);
 });
 
 test("stable physical transport makes one 429 attempt and persists provider cooldown", async (t) => {

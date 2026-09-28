@@ -5,6 +5,7 @@ import type { SwapOperationRecord } from "../model.js";
 import { OrcaStableExecutionBindingStore, type OrcaStableExecutionBinding } from "./stable-execution-journal.js";
 import type { OrcaStableAdmissionPorts } from "./stable-admission.js";
 import { SavedOrcaStableMaterialStore } from "./stable-material.js";
+import type { OrcaProgramPinVerifier } from "./pins.js";
 /** Signs the exact preflight message once. The caller owns the operation lock and persists the result before sending. */
 export declare class OrcaStableLocalSigner {
     private readonly custody;
@@ -38,7 +39,7 @@ export declare class OrcaStableSingleSender {
     constructor(service: GuardedSwapService, materials: SavedOrcaStableMaterialStore, bindings: OrcaStableExecutionBindingStore, custody: Pick<ChainWalletStoragePort, "account" | "effectByOperationId">, rpc: SolanaRpc, clock?: () => Date);
     sendOnce(operationId: string): Promise<SwapOperationRecord>;
 }
-/** Internal wiring for the first attempt. The public command remains closed pending the observation route. */
+/** Production wiring for the one foreground-approved first attempt. */
 export declare function executeOrcaStableFirstAttempt(input: {
     readonly service: GuardedSwapService;
     readonly materials: SavedOrcaStableMaterialStore;
@@ -48,6 +49,7 @@ export declare function executeOrcaStableFirstAttempt(input: {
     readonly rpc: SolanaRpc;
     readonly operationId: string;
     readonly clock?: () => Date;
+    readonly verifyPins?: OrcaProgramPinVerifier;
 }): Promise<{
     operation: SwapOperationRecord;
     binding: null;
