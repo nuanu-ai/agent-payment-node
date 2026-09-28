@@ -6,7 +6,8 @@ import { bindArgv } from "../../src/command-binder.js";
 import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
 import { StateStore } from "../../src/state.js";
-import { getBase58Decoder, getBase58Encoder, getCompiledTransactionMessageDecoder } from "@solana/kit";
+import { getBase58Decoder, getBase58Encoder, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder,
+  getTransactionDecoder } from "@solana/kit";
 import { parseJsonWithBigInts } from "@solana/rpc-spec-types";
 import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
@@ -23,6 +24,7 @@ import { SavedOrcaStableMaterialStore } from "../../src/swap/orca-solana/stable-
 import { approveOrcaStableReservation, stableApprovalScreen } from "../../src/swap/orca-solana/stable-approval.js";
 import { releaseOrcaStableNoEffect } from "../../src/swap/orca-solana/stable-release.js";
 import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-status.js";
+import { verifyOrcaStableFinalizedReceipt } from "../../src/swap/orca-solana/stable-receipt.js";
 import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
 import { temporaryState } from "./helpers.js";
@@ -602,6 +604,116 @@ test("stable release refuses an operation with a possible-effect marker", async 
   const observed = await orcaStablePreparedStatus(f.service.operations, store, f.ports,
     prepared.operation.operationId, new Date(NOW.getTime() + 60_000));
   assert.equal(observed.operation.integrityHash, marked.integrityHash);
+});
+
+async function receiptFixture(createAta: boolean) {
+  const f = await fixture(!createAta);
+  const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
+  const approved = await approveOrcaStableReservation(f.service, store, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, f.clock);
+  const markerBody = { operationId: approved.operation.operationId,
+    operationIntegrityHash: approved.operation.integrityHash,
+    unsignedTransactionPayloadHash: approved.operation.quote.unsignedTransactionPayloadHash, markedAt: NOW.toISOString() };
+  const { operationId: _operationId, ...markerFields } = markerBody;
+  const operation = await f.service.operations.transition(approved.operation.ownerProfileHash, approved.operation.operationId,
+    approved.operation.integrityHash, "submitting", { submissionMarker: { ...markerFields,
+      markerHash: domainHash("apn.swap-submission-marker.v1", canonicalJson(markerBody)) } }, NOW);
+  const material = (await store.load(operation.operationId, operation))!;
+  const unsigned = getTransactionDecoder().decode(Buffer.from(material.preview.unsignedPayload, "base64"));
+  const signature = "2".repeat(88);
+  const signed = { ...unsigned, signatures: { [f.source.owner]: getBase58Encoder().encode(signature) } } as typeof unsigned;
+  const encoded = getBase64EncodedWireTransaction(signed);
+  const keys = getCompiledTransactionMessageDecoder().decode(unsigned.messageBytes).staticAccounts;
+  const sourceIndex = keys.indexOf(material.preview.sourceAta as never);
+  const destinationIndex = keys.indexOf(material.preview.destinationAta as never);
+  const preBalances = keys.map(() => 1_000n), postBalances = [...preBalances];
+  preBalances[0] = 20_000_000n; postBalances[0] = 20_000_000n - 5_000n - (createAta ? 2_000_000n : 0n);
+  const balance = (index: number, mint: string, amount: string) => ({ accountIndex: index, mint, owner: f.source.owner,
+    uiTokenAmount: { amount, decimals: 6n } });
+  const output = f.source.quote.minimumOutputAtomic;
+  const transfers = [
+    { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "transfer", info: {
+      source: material.preview.sourceAta, destination: ORCA_STABLE_VAULT_A, amount: "1000000", authority: f.source.owner } } },
+    { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "transfer", info: {
+      source: ORCA_STABLE_VAULT_B, destination: material.preview.destinationAta, amount: output,
+      authority: ORCA_STABLE_POOL } } },
+  ];
+  const setup = [
+    { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "getAccountDataSize", info: {
+      mint: SOLANA_USDT, extensionTypes: ["immutableOwner"] } } },
+    { program: "system", programId: SYSTEM_PROGRAM, parsed: { type: "createAccount", info: {
+      source: f.source.owner, newAccount: material.preview.destinationAta, lamports: 2_000_000n,
+      space: 165n, owner: TOKEN_PROGRAM } } },
+    { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "initializeImmutableOwner", info: {
+      account: material.preview.destinationAta } } },
+    { program: "spl-token", programId: TOKEN_PROGRAM, parsed: { type: "initializeAccount3", info: {
+      account: material.preview.destinationAta, mint: SOLANA_USDT, owner: f.source.owner } } },
+  ];
+  const signatureStatuses = { value: [{ slot: 450_687_920n, confirmationStatus: "finalized", err: null }] };
+  const transaction = { slot: 450_687_920n, version: 0n, transaction: [encoded, "base64"], meta: {
+    err: null, fee: 5_000n, loadedAddresses: { writable: [], readonly: [] }, preBalances, postBalances,
+    preTokenBalances: [balance(sourceIndex, USDC_MINT, "2000000"),
+      ...createAta ? [] : [balance(destinationIndex, SOLANA_USDT, "0")]],
+    postTokenBalances: [balance(sourceIndex, USDC_MINT, "1000000"), balance(destinationIndex, SOLANA_USDT, output)],
+    innerInstructions: [...createAta ? [{ index: 2, instructions: setup }] : [],
+      { index: createAta ? 3 : 2, instructions: transfers }],
+  } };
+  return { f, operation, material, signature, signatureStatuses, transaction,
+    input: { operation, material, signature, signatureStatuses, transaction, observedAt: NOW } };
+}
+
+test("pure stable finalized receipt binds exact principal, output, fee and optional ATA rent", async (t) => {
+  for (const createAta of [false, true]) {
+    const r = await receiptFixture(createAta); t.after(r.f.cleanup);
+    const outcome = await verifyOrcaStableFinalizedReceipt(r.input);
+    assert.equal(outcome?.outcome, "succeeded");
+    assert.equal(outcome.proof.transactionHash, r.signature);
+  }
+});
+
+test("pure stable receipt leaves nonfinalized evidence pending and proves a finalized revert", async (t) => {
+  const r = await receiptFixture(true); t.after(r.f.cleanup);
+  assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input,
+    signatureStatuses: { value: [{ ...r.signatureStatuses.value[0], confirmationStatus: "confirmed" }] } }), null);
+  const err = { InstructionError: [3, { Custom: 6000 }] };
+  const reverted = { ...r.transaction, meta: { ...r.transaction.meta, err,
+    postBalances: [...r.transaction.meta.preBalances.slice(0, 1).map((value) => value - 5_000n),
+      ...r.transaction.meta.preBalances.slice(1)],
+    postTokenBalances: [r.transaction.meta.preTokenBalances[0]], innerInstructions: [] } };
+  const proof = await verifyOrcaStableFinalizedReceipt({ ...r.input, transaction: reverted,
+    signatureStatuses: { value: [{ ...r.signatureStatuses.value[0], err }] } });
+  assert.equal(proof?.outcome, "reverted");
+});
+
+test("pure stable receipt rejects changed token deltas, CPI, fee, slot and signed message", async (t) => {
+  const r = await receiptFixture(false); t.after(r.f.cleanup);
+  const conflict = (error: unknown) => reason(error) === "orca_stable_receipt_conflict";
+  const base = r.transaction.meta;
+  const changes = [
+    { transaction: { ...r.transaction, meta: { ...base, postTokenBalances: [
+      { ...base.postTokenBalances[0], uiTokenAmount: { amount: "1000001", decimals: 6n } }, base.postTokenBalances[1]] } } },
+    { transaction: { ...r.transaction, meta: { ...base, innerInstructions: [
+      { index: 2, instructions: [base.innerInstructions[0]!.instructions[0]] }] } } },
+    { transaction: { ...r.transaction, meta: { ...base, fee: 5_001n } } },
+    { transaction: { ...r.transaction, slot: 450_687_921n } },
+    { signature: "3".repeat(88) },
+  ];
+  for (const change of changes) await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input, ...change }), conflict);
+});
+
+test("pure stable receipt treats missing evidence as pending and refuses ambiguous finality or ATA setup", async (t) => {
+  const r = await receiptFixture(true); t.after(r.f.cleanup);
+  const conflict = (error: unknown) => reason(error) === "orca_stable_receipt_conflict";
+  assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input, signatureStatuses: { value: [null] } }), null);
+  assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input, transaction: null }), null);
+  await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input, signatureStatuses: {
+    value: [{ ...r.signatureStatuses.value[0], err: { InstructionError: [3, "Failure"] } }] } }), conflict);
+  await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input, transaction: { ...r.transaction,
+    meta: { ...r.transaction.meta, innerInstructions: [{ ...r.transaction.meta.innerInstructions[0],
+      instructions: [r.transaction.meta.innerInstructions[0]!.instructions[0]] },
+      r.transaction.meta.innerInstructions[1]] } } }), conflict);
+  await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input, transaction: { ...r.transaction,
+    meta: { ...r.transaction.meta, postBalances: r.transaction.meta.preBalances } } }), conflict);
 });
 
 test("material write failure leaves no operation and same-key retry prepares cleanly", async (t) => {
