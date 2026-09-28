@@ -28,6 +28,7 @@ import { releaseOrcaStableNoEffect } from "../../src/swap/orca-solana/stable-rel
 import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-status.js";
 import { verifyOrcaStableFinalizedReceipt } from "../../src/swap/orca-solana/stable-receipt.js";
 import { beginOrcaStableExecution, OrcaStableExecutionBindingStore } from "../../src/swap/orca-solana/stable-execution-journal.js";
+import { freshOrcaStableExecutionPreflightCore } from "../../src/swap/orca-solana/stable-fresh-preflight.js";
 import { recoverOrcaStableNoSend } from "../../src/swap/orca-solana/stable-no-send-recovery.js";
 import { OrcaStableNoSendProofStore } from "../../src/swap/orca-solana/stable-no-send-proof.js";
 import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
@@ -177,6 +178,7 @@ async function fixture(exists = true) {
     createUsdtAta: !exists, ...(exists ? {} : { maximumAtaRentLamports: "2500000" }),
     maximumTotalFeeLamports: "3000000", idempotencyKey: "stable-candidate-key", now: new Date("2000-01-01T00:00:00.000Z") };
   return { source, rpc, ports, service, request, calls, cleanup: temporary.cleanup, root: temporary.root,
+    removeAccount: (key: string) => { accounts.delete(key); },
     setFee: (value: bigint | null) => { fee = value; }, setError: (value: unknown) => { simulationError = value; },
     setInputTransfer: (value: bigint) => { inputTransfer = value; },
     setOutputTransfer: (value: bigint) => { outputTransfer = value; },
@@ -497,6 +499,99 @@ test("stable foreground approval binds the exact screen and reserves principal w
   (error) => reason(error) === "orca_stable_already_approved");
 });
 
+test("saved stable reservation rebuilds and simulates fresh exact bytes without a signing or send route", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f);
+  const materials = new SavedOrcaStableMaterialStore(f.root);
+  const reserved = (await approveOrcaStableReservation(f.service, materials, f.ports,
+    prepared.operation.operationId, { confirm: async () => {} }, f.clock)).operation;
+  const material = (await materials.load(reserved.operationId, reserved))!;
+  assert.equal(material.maximumPriceImpactBps, f.request.maximumPriceImpactBps);
+  f.calls.length = 0;
+  const preflight = await freshOrcaStableExecutionPreflightCore(f.rpc, f.ports, f.service.usage,
+    reserved, material, async () => [], f.clock);
+  assert.equal(preflight.preview.minimumOutputAtomic, reserved.quote.minimumOutputAtomic);
+  assert.equal(preflight.preview.owner, reserved.quote.account);
+  assert.match(preflight.simulationHash, /^[a-f0-9]{64}$/u);
+  assert.ok(f.calls.includes("getLatestBlockhash"));
+  assert.ok(f.calls.includes("getFeeForMessage"));
+  assert.ok(f.calls.includes("simulateTransaction"));
+  assert.ok(!f.calls.includes("sendTransaction"));
+});
+
+test("saved stable fresh preflight refuses policy drift, expiry, fee cap and a terminal 429", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f);
+  const materials = new SavedOrcaStableMaterialStore(f.root);
+  const reserved = (await approveOrcaStableReservation(f.service, materials, f.ports,
+    prepared.operation.operationId, { confirm: async () => {} }, f.clock)).operation;
+  const material = (await materials.load(reserved.operationId, reserved))!;
+  const run = (clock = f.clock) => freshOrcaStableExecutionPreflightCore(f.rpc, f.ports, f.service.usage,
+    reserved, material, async () => [], clock);
+  f.setRevision(8);
+  await assert.rejects(run(), (error) => reason(error) === "orca_stable_policy_drift");
+  f.setRevision(7);
+  await assert.rejects(run(() => new Date(Date.parse(reserved.quote.expiresAt))),
+    (error) => reason(error) === "orca_stable_deadline");
+  f.setFee(3_000_001n);
+  await assert.rejects(run(), (error) => reason(error) === "orca_stable_fee_cap");
+  f.setFee(5_000n);
+  f.rateLimitAt("getLatestBlockhash");
+  const before = f.calls.length;
+  await assert.rejects(run(), (error) => error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED");
+  assert.equal(f.calls.slice(before).filter((call) => call === "getLatestBlockhash").length, 1);
+});
+
+test("saved stable fresh preflight refuses changed pinned pool and destination ATA", async (t) => {
+  for (const mutate of ["pool", "destination"] as const) {
+    const f = await fixture(); t.after(f.cleanup);
+    const prepared = await candidate(f);
+    const materials = new SavedOrcaStableMaterialStore(f.root);
+    const reserved = (await approveOrcaStableReservation(f.service, materials, f.ports,
+      prepared.operation.operationId, { confirm: async () => {} }, f.clock)).operation;
+    const material = (await materials.load(reserved.operationId, reserved))!;
+    if (mutate === "pool") f.removeAccount(ORCA_STABLE_POOL);
+    else f.setMalformedDestination();
+    await assert.rejects(freshOrcaStableExecutionPreflightCore(f.rpc, f.ports, f.service.usage,
+      reserved, material, async () => [], f.clock));
+    assert.equal((await f.service.operations.loadAny(reserved.operationId))?.state, "reserved");
+    assert.ok(!f.calls.includes("sendTransaction"));
+  }
+});
+
+test("fresh preflight measures all final owner checks against its full clock and quote deadline", async (t) => {
+  for (const delayMs of [1_000, 30_001, 60_000]) {
+    const f = await fixture(); t.after(f.cleanup);
+    const prepared = await candidate(f);
+    const materials = new SavedOrcaStableMaterialStore(f.root);
+    const reserved = (await approveOrcaStableReservation(f.service, materials, f.ports,
+      prepared.operation.operationId, { confirm: async () => {} }, f.clock)).operation;
+    const material = (await materials.load(reserved.operationId, reserved))!;
+    let heightReads = 0, time = NOW;
+    const rpc: SolanaRpcPort = { originHash: f.rpc.originHash, call: async (method, params) => {
+      const result = await f.rpc.call(method, params);
+      if (method === "getBlockHeight") heightReads++;
+      return result;
+    } };
+    const ports = { ...f.ports, activePolicy: async () => {
+      const active = await f.ports.activePolicy();
+      // The second height read is the proof's final RPC. Delay an owner read after it.
+      if (heightReads >= 2) time = new Date(NOW.getTime() + delayMs);
+      return active;
+    } };
+    const run = () => freshOrcaStableExecutionPreflightCore(rpc, ports, f.service.usage,
+      reserved, material, async () => [], () => time);
+    if (delayMs === 1_000) {
+      const result = await run();
+      assert.equal(result.elapsedMs, delayMs);
+      assert.equal(result.checkedAt, time.toISOString());
+    } else {
+      await assert.rejects(run(), (error) => reason(error) === "orca_stable_freshness");
+      assert.equal((await f.service.operations.loadAny(reserved.operationId))?.state, "reserved");
+    }
+  }
+});
+
 test("stable approval rechecks replacement and expiry after consent before reserving", async (t) => {
   const f = await fixture(); t.after(f.cleanup);
   const prepared = await candidate(f), store = new SavedOrcaStableMaterialStore(f.root);
@@ -622,7 +717,7 @@ test("internal stable journal persists marker, binding and sealed signed bytes o
   const ports = { admission: f.ports, preflight: async () => {
     preflights++;
     const material = (await materials.loadStaged(prepared.operation.operationId))!;
-    return { preview: material.preview, checkedAt: NOW.toISOString(), elapsedMs: 620,
+    return { preview: material.preview, checkedAt: NOW.toISOString(), elapsedMs: 14_000,
       physicalPostCount: 18, simulationHash: "d".repeat(64) };
   }, sign: async (operation: any, binding: any) => {
     signs++;
@@ -659,7 +754,7 @@ test("stable journal marker-before-sign crash never signs on resume; policy drif
   let signs = 0;
   const ports = { admission: f.ports, preflight: async () => ({
     preview: (await materials.loadStaged(prepared.operation.operationId))!.preview,
-    checkedAt: NOW.toISOString(), elapsedMs: 700, physicalPostCount: 24, simulationHash: "d".repeat(64) }),
+    checkedAt: NOW.toISOString(), elapsedMs: 700, physicalPostCount: 23, simulationHash: "d".repeat(64) }),
     sign: async () => { signs++; throw new Error("simulated crash before signed-effect persistence"); },
     effects: { saveEffect: async () => { throw new Error("must not save"); }, effect: async () => null } } as any;
   f.setActivation("b".repeat(64));

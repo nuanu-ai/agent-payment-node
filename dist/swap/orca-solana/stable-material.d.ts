@@ -9,6 +9,8 @@ export interface OrcaStableMaterial {
     readonly requestDigest: string;
     readonly quote: SwapOperationRecord["quote"];
     readonly policyRevision: number;
+    /** Owner's original market impact cap. Older material without it cannot enter fresh execution. */
+    readonly maximumPriceImpactBps?: number;
     readonly policyDigest: string;
     readonly activationDigest: string;
     readonly evidence: unknown;

@@ -45,6 +45,7 @@ export interface OrcaStablePrepareInput {
     readonly createUsdtAta: boolean;
     readonly usdtAtaRentLamports?: string;
     readonly maximumAtaRentLamports?: string;
+    readonly approvedMinimumOutputAtomic?: string;
     readonly maximumTotalFeeLamports: string;
 }
 export interface OrcaStableUnsignedPreview {

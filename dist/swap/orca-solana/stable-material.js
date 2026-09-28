@@ -25,6 +25,8 @@ export async function validateOrcaStableMaterial(value, operation) {
         value.operationId !== domainHash("apn.swap-operation-id.v1", canonicalJson({ profileHash: quote.profileHash,
             idempotencyHash: value.idempotencyHash })) ||
         !/^[a-f0-9]{64}$/u.test(value.policyDigest) || value.policyRevision < 1 || !Number.isSafeInteger(value.policyRevision) ||
+        (value.maximumPriceImpactBps !== undefined && (!Number.isSafeInteger(value.maximumPriceImpactBps) ||
+            value.maximumPriceImpactBps < quote.slippageBps || value.maximumPriceImpactBps > 10_000)) ||
         !/^[a-f0-9]{64}$/u.test(value.activationDigest) ||
         quote.sourceAsset.chain !== ORCA_SOLANA_CHAIN || quote.destinationAsset.chain !== ORCA_SOLANA_CHAIN ||
         quote.sourceAsset.kind !== "token" || quote.sourceAsset.identifier !== USDC_MINT ||

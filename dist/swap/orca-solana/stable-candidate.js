@@ -71,7 +71,8 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service,
     const proof = await proveOrcaStableGuardedCore(rpc, ports, request, verifyPins, clock);
     await materialStore.save(await sealOrcaStableMaterial({ operationId,
         idempotencyHash: swapIdempotencyHash(request.idempotencyKey), requestDigest, quote: proof.boundQuote,
-        policyRevision: request.policyRevision, policyDigest: proof.evidence.policyDigest,
+        policyRevision: request.policyRevision, maximumPriceImpactBps: request.maximumPriceImpactBps,
+        policyDigest: proof.evidence.policyDigest,
         activationDigest: proof.evidence.activationDigest, evidence: proof.evidence, preview: proof.preview }, request.idempotencyKey));
     const operation = await service.prepare({ quote: proof.quoteInput, assetPolicy: proof.active.registry,
         protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey,
@@ -89,7 +90,8 @@ export async function simulateOrcaStableGuardedCore(rpc, ports, request, verifyP
         quote: proof.boundQuote, evidence: proof.evidence, signable: false,
         executable: false, signed: false, broadcast: false };
 }
-async function proveOrcaStableGuardedCore(rpc, ports, request, verifyPins, clock) {
+/** Internal exact-byte proof reused by the saved-operation preflight. It never persists or signs. */
+export async function proveOrcaStableGuardedCore(rpc, ports, request, verifyPins, clock) {
     const initialNow = trustedNow(clock);
     const initial = await admitOrcaStableOwner(ports, { profile: request.profile, owner: request.owner,
         policyRevision: request.policyRevision, amountInAtomic: request.amountAtomic,
