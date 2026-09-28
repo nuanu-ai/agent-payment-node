@@ -1,6 +1,6 @@
 import { createKeyPairSignerFromPrivateKeyBytes, getBase64EncodedWireTransaction,
   getSignatureFromTransaction, getTransactionDecoder, signTransaction } from "@solana/kit";
-import { canonicalJson, domainHash, sha256 } from "../../canonical.js";
+import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import type { ChainAccount, ChainWalletStoragePort, RailSignedEffect } from "../../direct-rail-ports.js";
 import { ApnError } from "../../errors.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
@@ -48,7 +48,28 @@ class OrcaStableSendClaimStore extends SecureStateStore {
   private initialized: Promise<void> | undefined;
   async exists(operation: SwapOperationRecord): Promise<boolean> {
     await this.ready();
-    return await this.readJson(this.path(operation)) !== null;
+    const directory = `orca-stable-send-claims/${operation.ownerProfileHash}`;
+    const name = `${operation.operationId}.json`;
+    if (!(await this.readDirectory(directory)).some(entry => entry.name === name)) return false;
+    // readJson maps both an absent file and canonical JSON null to null. Directory occupancy is the
+    // existence authority; an occupied but unreadable/invalid claim must never reopen a send or release.
+    const raw = await this.readJson(this.path(operation));
+    if (!isPlainRecord(raw) || !exactKeys(raw, ["schemaVersion", "operationId", "markerHash",
+      "bindingHash", "accountIdentityHash", "signature", "rawPayloadHash", "claimedAt", "claimHash"]))
+      corrupt("Stable send claim is malformed.");
+    const claim = raw as unknown as SendClaim;
+    const { claimHash, ...body } = claim;
+    if (claim.schemaVersion !== SEND_CLAIM_VERSION || claim.operationId !== operation.operationId ||
+        claim.markerHash !== operation.submissionMarker?.markerHash ||
+        ![claim.bindingHash, claim.accountIdentityHash, claim.rawPayloadHash, claimHash]
+          .every(value => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value)) ||
+        typeof claim.claimedAt !== "string" || !Number.isFinite(Date.parse(claim.claimedAt)) ||
+        new Date(claim.claimedAt).toISOString() !== claim.claimedAt ||
+        claim.claimedAt < operation.submissionMarker.markedAt ||
+        claimHash !== domainHash(SEND_CLAIM_VERSION, canonicalJson(body)))
+      corrupt("Stable send claim binding changed.");
+    try { solanaSignature(claim.signature); } catch { corrupt("Stable send claim signature is malformed."); }
+    return true;
   }
   async assertUnclaimed(operation: SwapOperationRecord): Promise<void> {
     if (await this.exists(operation)) blocked("Stable send was already claimed.");
