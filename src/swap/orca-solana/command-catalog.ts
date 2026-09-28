@@ -38,7 +38,7 @@ export const ORCA_COMMANDS: readonly CommandDefinition[] = [
   command("stable-approve", [operation], "Confirm the exact stable swap in the foreground and reserve USDC principal only. Never signs or broadcasts.", "payment_prepare",
     { class: "foreground_tty", when: "Each stable principal reservation requires exact foreground consent." }),
   command("stable-release", [operation], "Retire an unsigned stable preparation and release its exact principal reservation. Never signs or broadcasts.", "local_write"),
-  command("stable-observe", [operation], "Observe a claimed stable signature and reconcile finalized proof. Never signs or sends.", "network_read"),
+  command("stable-observe", [operation], "Read a claimed stable signature; durably record possible send, finalized proof and principal lease outcome. Never signs or sends.", "local_write"),
   command("inventory", [], "Read the pinned Whirlpool program, pool and keyless mechanism pin without admitting them.", "none"),
   command("quote", [profile, option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
     option("--amount", "wei", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),

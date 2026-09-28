@@ -585,9 +585,10 @@ policy revision, local owner account, exact stable guarded mechanism pin, and
 explicit fee and rent caps. `stable-approve` shows exact foreground consent,
 rechecks the active policy, and reserves only the USDC principal. `stable-release`
 retires an unsigned operation and releases its exact lease. `stable-observe`
-reads a signature claimed by the internal execution journal and reconciles a
-finalized receipt, or keeps principal held while finality is unknown. Public
-stable execution remains closed pending integrated production factory acceptance.
+reads a signature claimed by the internal execution journal and may durably
+record possible send, finalized proof, and the principal lease outcome. It
+keeps principal held while finality is unknown. Public stable execution remains
+closed pending integrated production factory acceptance.
 `stable-status` reconciles an expired unsigned lease and reports the durable
 phase. The native SOL to USDC `approve` and `execute` commands reject stable
 operations.

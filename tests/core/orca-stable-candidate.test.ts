@@ -1252,6 +1252,22 @@ async function privateStableObserverHarness(revert = false, claimCrash = false) 
 
 test("public stable observe factory uses paced fake HTTPS, never sends, and preserves marked principal while pending", async (t) => {
   const h = await privateStableObserverHarness(); t.after(h.f.cleanup); t.after(h.receipt.f.cleanup);
+  // Move the fixture into the real encrypted chain-wallet store, then make its
+  // wrapping secret unavailable. Observation must use only public account metadata.
+  const wrapping = { load: async () => Buffer.alloc(32, 19), create: async () => Buffer.alloc(32, 19) };
+  const persisted = new ChainAccountStore(h.f.root, wrapping);
+  const account = await persisted.ensureLocal({ profile: "stable-candidate", rail: "solana",
+    create: async () => ({ address: h.f.source.owner, seed: Buffer.alloc(32, 23) }) });
+  const claimPath = join(h.f.root, "orca-stable-send-claims", h.staleOperation.ownerProfileHash, `${h.operationId}.json`);
+  const originalClaim = JSON.parse(await readFile(claimPath, "utf8"));
+  const { claimHash: _claimHash, ...claimBody } = originalClaim;
+  const movedClaim = { ...claimBody, accountIdentityHash: account.identityHash };
+  await writeFile(claimPath, `${canonicalJson({ ...movedClaim,
+    claimHash: domainHash("apn.orca-stable-send-claim.v1", canonicalJson(movedClaim)) })}\n`);
+  let secretReads = 0;
+  const unavailable = { load: async (): Promise<Buffer> => { secretReads++; throw new Error("Keychain unavailable"); },
+    create: async (): Promise<Buffer> => { secretReads++; throw new Error("Keychain unavailable"); } };
+  const keylessAccount = new ChainAccountStore(h.f.root, unavailable);
   const request = bindArgv(["swap", "solana", "orca", "stable-observe", "--operation", h.operationId]);
   const methods: string[] = [];
   let time = NOW.getTime() + 60_000;
@@ -1267,7 +1283,7 @@ test("public stable observe factory uses paced fake HTTPS, never sends, and pres
       { status: 200, headers: { "content-type": "application/json" } });
   };
   const run = async () => await createApnCore(request, { stateRoot: h.f.root,
-    chainAccounts: h.custody, solanaRpcUrl: "https://stable-source.example/rpc", solanaRpcFetch: fetcher,
+    chainAccounts: keylessAccount, solanaRpcUrl: "https://stable-source.example/rpc", solanaRpcFetch: fetcher,
     solanaRpcNow: () => time, solanaRpcWait: async milliseconds => { time += milliseconds; },
     clock: { now: () => new Date(time) } }).execute(request.request);
   const pending = await run();
@@ -1275,7 +1291,7 @@ test("public stable observe factory uses paced fake HTTPS, never sends, and pres
   assert.equal((pending.data as any).state, "submitted");
   assert.deepEqual(methods, ["getGenesisHash", "getSignatureStatuses"]);
   const statusRequest = bindArgv(["swap", "solana", "orca", "stable-status", "--operation", h.operationId]);
-  const statusResult = await createApnCore(statusRequest, { stateRoot: h.f.root, chainAccounts: h.custody,
+  const statusResult = await createApnCore(statusRequest, { stateRoot: h.f.root, chainAccounts: keylessAccount,
     clock: { now: () => new Date(time) } }).execute(statusRequest.request);
   assert.equal(statusResult.ok, true);
   assert.equal((statusResult.data as any).phase, "submitted");
@@ -1294,7 +1310,7 @@ test("public stable observe factory uses paced fake HTTPS, never sends, and pres
   const replay = await run();
   assert.equal((replay.data as any).state, "finalized");
   assert.equal(methods.length, 5);
-  const server = createMcpServer({ stateRoot: h.f.root, chainAccounts: h.custody,
+  const server = createMcpServer({ stateRoot: h.f.root, chainAccounts: keylessAccount,
     solanaRpcUrl: "https://stable-source.example/rpc", solanaRpcFetch: fetcher,
     solanaRpcNow: () => time, solanaRpcWait: async milliseconds => { time += milliseconds; },
     clock: { now: () => new Date(time) } });
@@ -1307,6 +1323,7 @@ test("public stable observe factory uses paced fake HTTPS, never sends, and pres
   assert.equal((mcp.structuredContent as any).ok, true);
   assert.equal((mcp.structuredContent as any).data.state, "finalized");
   assert.equal(methods.length, 5);
+  assert.equal(secretReads, 0);
 });
 
 test("private stable observer finalizes exact receipt under concurrent observers and replays without RPC", async (t) => {
@@ -1440,9 +1457,17 @@ test("private stable observer rejects custody and send-claim mismatch before RPC
   await assert.rejects(h.newObserver().observe(h.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(h.requests.length, 0);
   h.custody.account = async () => account;
-  h.custody.effectByOperationId = async () => null;
+  h.custody.effectByOperationId = async () => assert.fail("Observation must not decrypt wallet effects.");
+  assert.equal((await h.newObserver().observe(h.operationId)).state, "finalized");
+  const operation = (await h.f.service.operations.loadAny(h.operationId))!;
+  const claimPath = join(h.f.root, "orca-stable-send-claims", operation.ownerProfileHash, `${h.operationId}.json`);
+  const claim = JSON.parse(await readFile(claimPath, "utf8"));
+  const { claimHash: _claimHash, ...body } = claim;
+  const changed = { ...body, rawPayloadHash: "f".repeat(64) };
+  await writeFile(claimPath, `${canonicalJson({ ...changed,
+    claimHash: domainHash("apn.orca-stable-send-claim.v1", canonicalJson(changed)) })}\n`);
   await assert.rejects(h.newObserver().observe(h.operationId), { code: "APN_STATE_CORRUPT" });
-  assert.equal(h.requests.length, 0);
+  assert.equal(h.requests.length, 3);
 });
 
 test("private stable observer fails closed on occupied malformed finalized proof", async (t) => {
