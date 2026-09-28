@@ -89,6 +89,8 @@ export function checkQuantumBuildConsistencyOffline(build: JupiterRawBuildRespon
       build.routePlan.length !== 1 || !quotedStep || quotedStep.percent !== 100 || quotedStep.bps !== 10_000 ||
       quotedStep.swapInfo.label !== "Quantum" || quotedStep.swapInfo.inputMint !== build.inputMint ||
       quotedStep.swapInfo.outputMint !== build.outputMint ||
+      // In this captured layout, account 14 equals the quoted AMM. This does not establish an account-role ABI.
+      quotedStep.swapInfo.ammKey !== build.swapInstruction.accounts[14]?.pubkey ||
       route.inAmount !== build.inAmount || route.inAmount !== quotedStep.swapInfo.inAmount ||
       route.quotedOutAmount !== build.outAmount || route.quotedOutAmount !== quotedStep.swapInfo.outAmount ||
       route.slippageBps !== build.slippageBps || route.platformFeeBps !== 0 || route.positiveSlippageBps !== 0 ||
