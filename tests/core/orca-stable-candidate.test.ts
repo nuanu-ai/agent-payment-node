@@ -716,6 +716,36 @@ test("pure stable receipt treats missing evidence as pending and refuses ambiguo
     meta: { ...r.transaction.meta, postBalances: r.transaction.meta.preBalances } } }), conflict);
 });
 
+test("pure stable receipt rejects out-of-range or noncanonical token balances", async (t) => {
+  const r = await receiptFixture(false); t.after(r.f.cleanup);
+  const conflict = (error: unknown) => reason(error) === "orca_stable_receipt_conflict";
+  for (const amount of ["18446744073709551616", "-1", "1e6", "01000000"]) {
+    for (const field of ["preTokenBalances", "postTokenBalances"] as const) {
+      const balances = r.transaction.meta[field];
+      const changed = [{ ...balances[0], uiTokenAmount: { amount, decimals: 6n } }, ...balances.slice(1)];
+      await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input,
+        transaction: { ...r.transaction, meta: { ...r.transaction.meta, [field]: changed } } }), conflict);
+    }
+  }
+});
+
+test("pure stable receipt requires explicit status and transaction errors with known finality", async (t) => {
+  const r = await receiptFixture(false); t.after(r.f.cleanup);
+  const conflict = (error: unknown) => reason(error) === "orca_stable_receipt_conflict";
+  const status = r.signatureStatuses.value[0]!;
+  for (const changed of [
+    { slot: status.slot, confirmationStatus: "finalized" },
+    { ...status, err: undefined }, { ...status, err: 0 }, { ...status, err: {} },
+    { ...status, err: { InstructionError: undefined } },
+    { ...status, confirmationStatus: "unknown" }, { slot: status.slot, err: null },
+  ]) await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input,
+    signatureStatuses: { value: [changed] } }), conflict);
+  for (const meta of [{ ...r.transaction.meta, err: undefined }, { ...r.transaction.meta, err: 0 }]) {
+    await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input,
+      transaction: { ...r.transaction, meta } }), conflict);
+  }
+});
+
 test("material write failure leaves no operation and same-key retry prepares cleanly", async (t) => {
   const f = await fixture(); t.after(f.cleanup);
   class FailingMaterialStore extends SavedOrcaStableMaterialStore {

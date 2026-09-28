@@ -26,6 +26,8 @@ export async function verifyOrcaStableFinalizedReceipt(input: {
   if (statuses.length !== 1) conflict();
   if (statuses[0] === null) return null;
   const status = rpcRecord(statuses[0]);
+  if (!["processed", "confirmed", "finalized"].includes(status.confirmationStatus as string) ||
+      !Object.hasOwn(status, "err") || !transactionError(status.err)) conflict();
   if (status.confirmationStatus !== "finalized") return null;
   const slot = rpcAtomic(status.slot);
   if (input.transaction === null) return null;
@@ -49,8 +51,9 @@ export async function verifyOrcaStableFinalizedReceipt(input: {
   const fee = rpcAtomic(meta.fee), rent = BigInt(preview.ataRentLamports);
   if (fee > 5000n + BigInt(preview.maximumPriorityFeeLamports) ||
       fee + rent > BigInt(preview.maximumTotalFeeLamports)) conflict();
-  const statusErr = status.err ?? null, metaErr = meta.err;
-  if (metaErr === undefined || canonicalJson(normalize(statusErr)) !== canonicalJson(normalize(metaErr))) conflict();
+  const statusErr = status.err, metaErr = meta.err;
+  if (!Object.hasOwn(meta, "err") || !transactionError(metaErr) ||
+      canonicalJson(normalize(statusErr)) !== canonicalJson(normalize(metaErr))) conflict();
   const sourceIndex = keys.indexOf(address(preview.sourceAta));
   const destinationIndex = keys.indexOf(address(preview.destinationAta));
   if (sourceIndex < 0 || destinationIndex < 0 || sourceIndex === destinationIndex) conflict();
@@ -93,12 +96,19 @@ function tokenBalance(value: unknown, index: number, mint: string, owner: string
         (balance.programId !== undefined && balance.programId !== TOKEN_PROGRAM) || rpcAtomic(amount.decimals) !== 6n ||
         typeof amount.amount !== "string" || !/^(?:0|[1-9][0-9]{0,19})$/u.test(amount.amount) || found !== undefined) conflict();
     found = BigInt(amount.amount);
+    if (found > (1n << 64n) - 1n) conflict();
   }
   if (found === undefined && !allowMissing) conflict();
   return found ?? 0n;
 }
 function normalize(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry));
+}
+function transactionError(value: unknown): boolean {
+  const entry = isPlainRecord(value) ? Object.entries(value) : [];
+  return value === null || (typeof value === "string" && value.length > 0 && value.length <= 128) ||
+    (entry.length === 1 && /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(entry[0]![0]) &&
+      entry[0]![1] !== undefined && entry[0]![1] !== null);
 }
 function conflict(): never {
   throw new ApnError("APN_OPERATION_BLOCKED", "Finalized stable Orca receipt conflicts with the saved operation.",
