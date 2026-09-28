@@ -10,6 +10,8 @@ export interface OrcaStableSnapshotRequest {
     readonly createUsdtAta: boolean;
     readonly maximumAtaRentLamports?: string;
     readonly maximumTotalFeeLamports: string;
+    /** Internal execution rebuild only: preserve the owner's exact approved floor against a fresh pool quote. */
+    readonly approvedMinimumOutputAtomic?: string;
 }
 /**
  * Read-only entry. The transport must have a fresh invocation cap and persistent 750 ms provider pacing.
