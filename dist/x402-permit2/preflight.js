@@ -1,6 +1,5 @@
-import { performance } from "node:perf_hooks";
 import { getAddress } from "viem";
-import { isPlainRecord } from "../canonical.js";
+import { isPlainRecord, sha256 } from "../canonical.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { HttpsBaseRpc } from "../rpc.js";
@@ -10,7 +9,7 @@ import { walletEnvelopeIdentity } from "../encrypted-wallet-store.js";
 import { decodeCanonicalBase64Json, decodePaymentRequiredHeader } from "../x402-codec.js";
 import { createPermit2ProductionReadPort } from "./read-port.js";
 import { preparePermit2WithPort } from "./prepare.js";
-/** An unsigned, nonpersistent CLI read. Prepared typed data never crosses this output boundary. */
+/** An unsigned CLI read with no payment-state persistence; only RPC pacing metadata may be written. */
 export async function permit2CurrentOwnerPreflight(root, request, ports) {
     const profile = canonicalProfile(request.profile);
     if (!/^[a-f0-9]{64}$/u.test(request.expectedChallengeHash) ||
@@ -55,22 +54,59 @@ export async function permit2CurrentOwnerPreflight(root, request, ports) {
         policyDigest: prepared.policyDigest, prepareHash: prepared.prepareHash,
         blockerCodes: ["permit2_execution_not_exposed"] };
 }
-/** Sequential public HTTPS source, with a per-process gap and no retry or send method. */
-export function permit2PublicRpc(url) {
+const RPC_GAP_MS = 750;
+/** Cross-process pacing uses APN's kernel-backed state lock and operational RPC pacing record. */
+export function permit2PublicRpc(url, stateRoot, transport) {
     const rpc = new HttpsBaseRpc(url);
-    let lastStart = 0;
-    return { async call(method, params, signal) {
-            const wait = Math.max(0, lastStart + 250 - performance.now());
-            if (wait > 0)
-                await new Promise((resolve, reject) => {
-                    const timer = setTimeout(resolve, wait);
-                    signal.addEventListener("abort", () => { clearTimeout(timer); reject(new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted.")); }, { once: true });
-                });
+    const endpoint = rpc.endpoint.toString();
+    const state = new StateStore(stateRoot);
+    const endpointHash = sha256(`permit2-rpc-endpoint\0${endpoint}`);
+    return { call: async (method, params, signal) => {
+            await state.withLocks([`rpc-provider-family:${endpointHash}`], async () => {
+                if (signal.aborted)
+                    aborted();
+                const lastStart = await state.loadRpcProviderPacing(endpointHash);
+                let now = Date.now();
+                if (lastStart !== null && now < lastStart) {
+                    throw new ApnError("APN_RPC_CONFIG", "Permit2 RPC pacing clock moved backwards.");
+                }
+                while (lastStart !== null && now < lastStart + RPC_GAP_MS) {
+                    await pause(lastStart + RPC_GAP_MS - now, signal);
+                    now = Date.now();
+                }
+                if (signal.aborted)
+                    aborted();
+                await state.writeRpcProviderPacing(endpointHash, now);
+            }, { waitMs: 1_900 });
             if (signal.aborted)
-                throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted.");
-            lastStart = performance.now();
-            return await rpc.permit2ReadCall(method, params, signal);
+                aborted();
+            return await (transport ?? rpc).permit2ReadCall(method, params, signal);
         } };
 }
+async function abortable(promise, signal) {
+    if (signal.aborted)
+        aborted();
+    let onAbort;
+    const rejection = new Promise((_resolve, reject) => {
+        onAbort = () => reject(new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted."));
+        signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+        return await Promise.race([promise, rejection]);
+    }
+    finally {
+        signal.removeEventListener("abort", onAbort);
+    }
+}
+async function pause(milliseconds, signal) {
+    let timer;
+    try {
+        await abortable(new Promise(resolve => { timer = setTimeout(resolve, milliseconds); }), signal);
+    }
+    finally {
+        clearTimeout(timer);
+    }
+}
+function aborted() { throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted."); }
 function invalid() { throw new ApnError("APN_INVALID_INPUT", "Expected Permit2 selection is invalid."); }
 //# sourceMappingURL=preflight.js.map

@@ -1,3 +1,4 @@
+import { HttpsBaseRpc } from "../rpc.js";
 import { type Permit2ReadRpcSource, type Permit2UsageReader } from "./read-port.js";
 import type { GaslessTransport } from "../gasless/https.js";
 export interface Permit2PreflightRequest {
@@ -13,7 +14,7 @@ export interface Permit2PreflightPorts {
     readonly now?: () => Date;
     readonly usage?: Permit2UsageReader;
 }
-/** An unsigned, nonpersistent CLI read. Prepared typed data never crosses this output boundary. */
+/** An unsigned CLI read with no payment-state persistence; only RPC pacing metadata may be written. */
 export declare function permit2CurrentOwnerPreflight(root: string, request: Permit2PreflightRequest, ports: Permit2PreflightPorts): Promise<unknown>;
-/** Sequential public HTTPS source, with a per-process gap and no retry or send method. */
-export declare function permit2PublicRpc(url: string): Permit2ReadRpcSource;
+/** Cross-process pacing uses APN's kernel-backed state lock and operational RPC pacing record. */
+export declare function permit2PublicRpc(url: string, stateRoot: string, transport?: Pick<HttpsBaseRpc, "permit2ReadCall">): Permit2ReadRpcSource;
