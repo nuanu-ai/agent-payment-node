@@ -69,3 +69,14 @@ against caller-supplied expectations. In this capture, the optional
 position eight. The decoder leaves the eleven remaining accounts opaque and
 always returns `signable: false`. Its fixture tests do not establish the Quantum
 remaining-account ABI, quoted AMM binding, or deployed executable provenance.
+
+The offline `checkQuantumBuildConsistencyOffline` check now reconciles that
+decoded instruction with the raw `/build` fields for the captured single-step
+ExactIn SOL to USDC layout. It requires matching input and quoted output
+amounts, slippage, pair mints, caller-supplied fixed accounts, and the Quantum
+side 0 / 10,000 bps / index 0 to 1 step against one 100% route leg. It rejects
+nonzero platform fees or positive slippage, a remaining-account count other
+than eleven, other unsupported route layouts, and a minimum output above the
+quote. The quoted `ammKey` is still not bound by the IDL's route step. The eleven
+remaining account roles and deployed executable provenance remain unverified. The check
+returns `signable: false`; it does not enable transaction assembly or execution.
