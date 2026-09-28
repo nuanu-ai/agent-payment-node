@@ -75,6 +75,7 @@ export async function readOrcaStableSnapshotCore(rpc, request, verifyPins) {
         lifetime: { blockhash, currentBlockHeight: currentBlockHeight.toString(), lastValidBlockHeight: lastValidBlockHeight.toString() },
         computeUnitLimit: request.computeUnitLimit, computeUnitPriceMicroLamports: request.computeUnitPriceMicroLamports,
         createUsdtAta: request.createUsdtAta, maximumTotalFeeLamports: request.maximumTotalFeeLamports,
+        ...(request.approvedMinimumOutputAtomic === undefined ? {} : { approvedMinimumOutputAtomic: request.approvedMinimumOutputAtomic }),
         ...(rent === undefined ? {} : { usdtAtaRentLamports: rent, maximumAtaRentLamports: request.maximumAtaRentLamports }), };
     const preview = await prepareOrcaStableUnsigned(input);
     return { source: "rpc_observed_non_signing", rpcOriginHash: rpc.originHash, slot: full.slot.toString(),
@@ -88,7 +89,12 @@ function quoteFromRaw(pool, rows, addresses, request, slot) {
     const swap = quoteWhirlpoolExactInAToB(pool, ticks, BigInt(request.amountAtomic));
     if (swap.priceImpactBps > request.maximumPriceImpactBps)
         blocked("Stable Orca price impact exceeds owner cap.", "orca_price_impact");
-    const minimum = (BigInt(swap.amountOutAtomic) * BigInt(10_000 - request.slippageBps) + 9999n) / 10000n;
+    const quotedMinimum = (BigInt(swap.amountOutAtomic) * BigInt(10_000 - request.slippageBps) + 9999n) / 10000n;
+    if (request.approvedMinimumOutputAtomic !== undefined && !/^[1-9][0-9]{0,19}$/u.test(request.approvedMinimumOutputAtomic))
+        blocked("Approved stable minimum is malformed.", "orca_stable_output_floor");
+    const minimum = request.approvedMinimumOutputAtomic === undefined ? quotedMinimum : BigInt(request.approvedMinimumOutputAtomic);
+    if (request.approvedMinimumOutputAtomic !== undefined && minimum > BigInt(swap.amountOutAtomic))
+        blocked("Approved stable minimum exceeds the fresh pool output.", "orca_stable_output_floor");
     if (minimum <= 0n)
         blocked("Stable Orca minimum output is zero.", "orca_output_floor");
     return { chain: ORCA_SOLANA_CHAIN, pool: ORCA_STABLE_POOL, program: WHIRLPOOL_PROGRAM,

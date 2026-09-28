@@ -81,8 +81,8 @@ export async function beginOrcaStableExecution(service: GuardedSwapService, mate
     const preflight = await ports.preflight(operation, material);
     const preview = await validateOrcaStableUnsigned(preflight.preview);
     const checkedAt = checkedInstant(preflight.checkedAt);
-    if (!Number.isSafeInteger(preflight.physicalPostCount) || preflight.physicalPostCount < 1 || preflight.physicalPostCount > 24 ||
-      !Number.isSafeInteger(preflight.elapsedMs) || preflight.elapsedMs < 0 || preflight.elapsedMs > 750 ||
+    if (!Number.isSafeInteger(preflight.physicalPostCount) || preflight.physicalPostCount < 1 || preflight.physicalPostCount > 23 ||
+      !Number.isSafeInteger(preflight.elapsedMs) || preflight.elapsedMs < 0 || preflight.elapsedMs > 30_000 ||
       !/^[a-f0-9]{64}$/u.test(preflight.simulationHash) ||
       checkedAt < now.toISOString() || checkedAt >= operation.quote.expiresAt ||
       preview.owner !== material.preview.owner || preview.sourceAta !== material.preview.sourceAta ||
