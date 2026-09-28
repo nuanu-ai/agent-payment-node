@@ -1,6 +1,6 @@
-import type { EvmChainId } from "./evm-asset.js";
+import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import type { Address, Hex } from "./model.js";
-import type { EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
+import type { EvmBalanceSnapshot, EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
 export type { HttpGetRequest, HttpObservation, HttpPort } from "./x402-model.js";
 export interface ClockPort {
     now(): Date;
@@ -161,6 +161,8 @@ export interface RpcPort {
     /** Arm the command-scoped public BNB transport cap before any direct BNB network read. */
     armBnbDirectRpcGuard?(): void;
     armEvmDirectRpcGuard?(): void;
+    /** Command-scoped, bounded public read for native Sei balance. */
+    seiNativeBalance?(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
     forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;
     readonly evm?: EvmRpcPort;
     assertBaseChain(): Promise<{
