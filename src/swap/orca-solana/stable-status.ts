@@ -43,6 +43,10 @@ function status(operation: Awaited<ReturnType<SwapOperationRepository["loadAny"]
   messageHash: string, marketSlot: string) {
   return { schemaVersion: "apn.orca-stable-guarded-status.v1" as const, operation,
     quoteHash: operation.quote.quoteHash, materialDigest, messageHash, marketSlot,
-    expiresAt: operation.quote.expiresAt, signable: false as const, executable: false as const,
-    signed: false as const, broadcast: false as const };
+    expiresAt: operation.quote.expiresAt, phase: operation.state,
+    signable: false as const, executable: false as const,
+    signed: operation.submissionMarker === null ? false : operation.state === "finalized" || operation.state === "failed_confirmed_revert" ? true : null,
+    broadcast: operation.submissionMarker === null ? false : operation.state === "finalized" || operation.state === "failed_confirmed_revert" ? true : null,
+    possibleSend: operation.submissionMarker !== null,
+    observeOnly: operation.submissionMarker !== null };
 }

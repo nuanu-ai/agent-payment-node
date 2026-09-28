@@ -39,7 +39,11 @@ export async function orcaStablePreparedStatus(operations, materialStore, ports,
 function status(operation, materialDigest, messageHash, marketSlot) {
     return { schemaVersion: "apn.orca-stable-guarded-status.v1", operation,
         quoteHash: operation.quote.quoteHash, materialDigest, messageHash, marketSlot,
-        expiresAt: operation.quote.expiresAt, signable: false, executable: false,
-        signed: false, broadcast: false };
+        expiresAt: operation.quote.expiresAt, phase: operation.state,
+        signable: false, executable: false,
+        signed: operation.submissionMarker === null ? false : operation.state === "finalized" || operation.state === "failed_confirmed_revert" ? true : null,
+        broadcast: operation.submissionMarker === null ? false : operation.state === "finalized" || operation.state === "failed_confirmed_revert" ? true : null,
+        possibleSend: operation.submissionMarker !== null,
+        observeOnly: operation.submissionMarker !== null };
 }
 //# sourceMappingURL=stable-status.js.map
