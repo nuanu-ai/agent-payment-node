@@ -100,6 +100,15 @@ export class SolanaRpc {
             protocolFailure();
         return record.result;
     }
+    /** Guard the actual send transport start after persistent pacing has admitted the POST. */
+    async sendTransactionAtStart(params, beforePost) {
+        const id = randomUUID();
+        const value = await this.request({ jsonrpc: "2.0", id, method: "sendTransaction", params }, 1, true, beforePost);
+        const record = rpcRecord(value);
+        if (!exactKeys(record, ["jsonrpc", "id", "result"]) || record.jsonrpc !== "2.0" || record.id !== id)
+            protocolFailure();
+        return record.result;
+    }
     /** Independent read methods share one POST; results retain input order despite unordered replies. */
     async batch(reads) {
         if (reads.length < 1 || reads.length > 8 || reads.some(read => !READ_METHODS.has(read.method)))
@@ -123,7 +132,7 @@ export class SolanaRpc {
             protocolFailure();
         return results;
     }
-    async request(body, logicalCalls, effect) {
+    async request(body, logicalCalls, effect, beforePost) {
         if (this.endpoint === undefined)
             configFailure();
         let url;
@@ -147,9 +156,9 @@ export class SolanaRpc {
         try {
             if (this.pacer === undefined) {
                 started = true;
-                return await this.post(url, payload, effect);
+                return await this.post(url, payload, effect, beforePost);
             }
-            return await this.pacer.schedule(url.toString(), () => { started = true; return this.post(url, payload, effect); });
+            return await this.pacer.schedule(url.toString(), () => { started = true; return this.post(url, payload, effect, beforePost); });
         }
         catch (error) {
             if (!started)
@@ -157,12 +166,13 @@ export class SolanaRpc {
             throw error;
         }
     }
-    async post(url, payload, effect) {
+    async post(url, payload, effect, beforePost) {
         const controller = new AbortController();
         const deadline = setTimeout(() => controller.abort(), 10_000);
         deadline.unref();
         let reader;
         try {
+            beforePost?.();
             const response = await this.fetcher(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
                 body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
             if (response.status === 429)

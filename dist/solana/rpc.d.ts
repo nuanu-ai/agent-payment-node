@@ -47,6 +47,8 @@ export declare class SolanaRpc implements SolanaRpcPort {
     constructor(endpoint?: string | undefined, fetcher?: typeof fetch, budget?: SolanaRpcBudget, pacer?: Pick<SolanaRpcPacer, "schedule"> | undefined);
     get hasPersistentPacer(): boolean;
     call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
+    /** Guard the actual send transport start after persistent pacing has admitted the POST. */
+    sendTransactionAtStart(params: readonly unknown[], beforePost: () => void): Promise<unknown>;
     /** Independent read methods share one POST; results retain input order despite unordered replies. */
     batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
     private request;
