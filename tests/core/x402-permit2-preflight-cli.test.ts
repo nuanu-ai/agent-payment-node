@@ -175,6 +175,32 @@ test("public RPC pacing follows physical transport completion across separate so
   assert.deepEqual(await paymentSnapshot(temp.root), before);
 });
 
+test("a second source waits through a near-timeout transport and completion gap", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
+  let entered!: () => void;
+  const firstEntered = new Promise<void>(resolve => { entered = resolve; });
+  let firstCompletion = 0, secondEntry = 0;
+  const first = permit2PublicRpc("https://contended-rpc.example", temp.root, {
+    permit2ReadCall: async () => {
+      entered();
+      await new Promise(resolve => setTimeout(resolve, 1_900));
+      firstCompletion = Date.now();
+      return "0xa86a";
+    },
+  });
+  const second = permit2PublicRpc("https://contended-rpc.example/", temp.root, {
+    permit2ReadCall: async () => { secondEntry = Date.now(); return "0xa86a"; },
+  });
+  const signal = new AbortController().signal;
+  const active = first.call("eth_chainId", [], signal);
+  await firstEntered;
+  const waiting = second.call("eth_chainId", [], signal);
+  assert.equal(await active, "0xa86a");
+  assert.equal(await waiting, "0xa86a");
+  assert.ok(secondEntry - firstCompletion >= 750,
+    `contended completion gap ${secondEntry - firstCompletion}`);
+});
+
 test("failed and aborted in-flight public RPC reads retain pacing before another source retries", async t => {
   for (const mode of ["failed", "aborted"] as const) {
     const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
