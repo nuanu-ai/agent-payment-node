@@ -106,13 +106,18 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     await this.assertChain();
     const safe = await rpcBlock(this.callRpc, this.deployment.row.finalityTag);
     const head = await rpcBlock(this.callRpc, "latest");
-    const [safeState, headState] = await Promise.all([
-      readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash),
-      readMetaMaskChainState(this.callRpc, this.deployment.row, owner, head.block, delegationHash),
-    ]);
+    const sameBlock = safe.block.numberAtomic === head.block.numberAtomic &&
+      safe.block.hash === head.block.hash && safe.block.timestampAtomic === head.block.timestampAtomic;
+    const [safeState, headState] = sameBlock
+      ? await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash)
+        .then(state => [state, state] as const)
+      : await Promise.all([
+        readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash),
+        readMetaMaskChainState(this.callRpc, this.deployment.row, owner, head.block, delegationHash),
+      ]);
     if (!("counterAtomic" in safeState) || !("counterAtomic" in headState)) mmFail("mm_gasless_internal");
     await recheckBlock(this.callRpc, safe.block, "mm_gasless_evidence_invalid");
-    await recheckBlock(this.callRpc, head.block, "mm_gasless_evidence_invalid");
+    if (!sameBlock) await recheckBlock(this.callRpc, head.block, "mm_gasless_evidence_invalid");
     const snapshot = { chainId: this.chainId, endpointHash: this.endpointHash,
       endpointOrigin: this.endpointOrigin, observedAt: this.clock.now().toISOString(),
       safeBlock: safe.block, headBlock: head.block, safeState, headState };
