@@ -68,6 +68,17 @@ test("actual GaslessHttps pins DNS and TLS defaults, writes one exact body, and 
   await rejectSafe(transport.request(ENDPOINT, "POST", "{}", 64, "APN_HTTP_CONFIG"));
   assert.equal(mock.requests.length, 2); assert.equal(mock.requests[1]!.destroyed, 1);
 });
+test("terminal 429 preserves bounded asctime Retry-After without exposing the header", async t => {
+  const mock = wire(t); clock(t);
+  t.mock.timers.setTime(Date.parse("Sun, 06 Nov 1994 08:49:32 GMT"));
+  const transport = new GaslessHttps();
+  const pending = transport.request(ENDPOINT, "GET", null, 64, "APN_RPC_CONFIG");
+  await nextTurn(); assert.equal(mock.requests.length, 1);
+  mock.requests[0]!.respond(429, { "retry-after": "Sun Nov  6 08:49:37 1994", "x-secret": "synthetic-secret" }, []);
+  const response = await pending;
+  assert.deepEqual(response, { status: 429, body: "", retryAfterMs: 5_000 });
+  assert.equal(JSON.stringify(response).includes("synthetic-secret"), false);
+});
 test("queued requests expire before a late slot and release the two-active bound", async t => {
   const mock = wire(t), timer = clock(t), transport = new GaslessHttps(new GaslessPostPacer());
   const failures = Array.from({ length: 34 }, () => rejectSafe(transport.request(ENDPOINT, "GET", null, 64, "APN_HTTP_CONFIG")));
