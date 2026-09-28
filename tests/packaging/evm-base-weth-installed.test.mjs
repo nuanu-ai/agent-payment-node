@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink } from "node:fs/promises";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -56,11 +56,21 @@ test("installed APN CLI prepares and reopens synthetic Base WETH within eight ph
   assert.equal(packed.code, 0, packed.stderr);
   const archive = join(sandbox, JSON.parse(packed.stdout)[0].filename);
   const archiveHash = digest(await readFile(archive));
-  const installed = await command("npm", ["install", "--ignore-scripts", "--offline", "--no-audit", "--no-fund", "--prefix", sandbox, archive], sandbox);
-  assert.equal(installed.code, 0, installed.stderr);
-  assert.equal(digest(await readFile(archive)), archiveHash);
   const packageRoot = join(sandbox, "node_modules", "@nuanu-ai", "apn");
-  assert.equal(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")).name, "@nuanu-ai/apn");
+  await mkdir(packageRoot, { recursive: true });
+  const extracted = await command("tar", ["-xzf", archive, "-C", packageRoot, "--strip-components=1"], sandbox);
+  assert.equal(extracted.code, 0, extracted.stderr);
+  assert.equal(digest(await readFile(archive)), archiveHash);
+  assert.equal(await realpath(packageRoot), packageRoot, "the packed package must not link to the source tree");
+  const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  assert.equal(manifest.name, "@nuanu-ai/apn");
+  for (const name of Object.keys(manifest.dependencies)) {
+    await realpath(join(source, "node_modules", name)); // The pinned npm ci graph must contain every runtime dependency.
+  }
+  for (const entry of await readdir(join(source, "node_modules"), { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || entry.name === "@nuanu-ai") continue;
+    await symlink(join(source, "node_modules", entry.name), join(sandbox, "node_modules", entry.name), "dir");
+  }
   const moduleAt = name => import(pathToFileURL(join(packageRoot, "dist", name)).href);
   const { runCli } = await moduleAt("cli.js");
   const { AllowlistPolicyStore, allowlistDecisionFingerprint, allowlistProfileHash } = await moduleAt("allowlist-policy.js");
