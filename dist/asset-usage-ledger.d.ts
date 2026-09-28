@@ -81,6 +81,8 @@ export declare class AssetUsageLedger extends SecureStateStore {
     reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
     usage(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;
+    /** Existing-ledger snapshot for nonpersistent preflight; never initializes, locks, or creates a bucket. */
+    usageReadOnly(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;
     /** Read the daily total and one reservation from the same locked bucket snapshot. */
     usageWithReservation(identityValue: AssetUsageIdentity, reservationIdValue: string, now: Date): Promise<{
         snapshot: AssetUsageSnapshot;
