@@ -223,6 +223,67 @@ test("provider-family pacing survives scheduler restart through its coordinator"
   assert.equal(calls, 2); assert.deepEqual(waits, [750]); assert.equal(persisted, 10_750);
 });
 
+test("provider-family pacing follows physical completion despite a delayed durable write", async () => {
+  let now = 1_000, persisted: number | null = null, cooldown: number | null = null;
+  let firstEntry = 0, firstCompletion = 0, secondEntry = 0;
+  const coordinator = { coordinate: async <T>(_family: string,
+    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
+      saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) =>
+    await work(persisted, async value => { now += 80; persisted = value; }, cooldown, async value => { cooldown = value; }) };
+  const scheduler = () => new RpcProviderScheduler(coordinator, () => now);
+  const wait = async (milliseconds: number) => { now += milliseconds; };
+  await scheduler().schedule("https://base-rpc.publicnode.com", () => now, wait, () => {}, async () => {
+    firstEntry = now; now += 100; firstCompletion = now; return "first";
+  });
+  await scheduler().schedule("https://arbitrum-one-rpc.publicnode.com", () => now, wait, () => {}, async () => {
+    secondEntry = now; return "second";
+  });
+  assert.equal(firstCompletion - firstEntry, 100);
+  assert.ok(secondEntry - firstCompletion >= 750,
+    `physical completion gap ${secondEntry - firstCompletion}`);
+  assert.equal(persisted, secondEntry);
+});
+
+test("failed and aborted transports retain a physical completion gap", async () => {
+  for (const failure of [new Error("failed"), new ApnError("APN_RPC_BUDGET_EXCEEDED", "aborted")]) {
+    let now = 2_000, persisted: number | null = null, cooldown: number | null = null;
+    let completed = 0, retryEntry = 0;
+    const coordinator = { coordinate: async <T>(_family: string,
+      work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
+        saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) =>
+      await work(persisted, async value => { persisted = value; }, cooldown, async value => { cooldown = value; }) };
+    const scheduler = () => new RpcProviderScheduler(coordinator, () => now);
+    const wait = async (milliseconds: number) => { now += milliseconds; };
+    await assert.rejects(scheduler().schedule("https://base.drpc.org", () => now, wait, () => {}, async () => {
+      now += 25; completed = now; throw failure;
+    }), failure);
+    assert.equal(cooldown, completed, "ordinary failure or abort clears the crash reserve");
+    await scheduler().schedule("https://arbitrum.drpc.org", () => now, wait, () => {}, async () => {
+      retryEntry = now;
+    });
+    assert.ok(retryEntry - completed >= 750, `retry gap ${retryEntry - completed}`);
+  }
+});
+
+test("failed completion persistence retains the pre-transport crash guard", async () => {
+  let now = 3_000, persisted: number | null = null, cooldown: number | null = null, posts = 0;
+  const coordinator = { coordinate: async <T>(_family: string,
+    work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
+      saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) =>
+    await work(persisted, async value => { persisted = value; throw new Error("completion write failed"); },
+      cooldown, async value => { cooldown = value; }) };
+  const scheduler = () => new RpcProviderScheduler(coordinator, () => now, "reject", "rate_limit");
+  await assert.rejects(scheduler().schedule("https://base.drpc.org", () => now, async () => {}, () => {}, async () => {
+    posts += 1; now += 10;
+  }), /completion write failed/u);
+  assert.equal(posts, 1);
+  assert.equal(cooldown, 26_000, "failed completion write retains the 23 s pre-transport reserve");
+  await assert.rejects(scheduler().schedule("https://arbitrum.drpc.org", () => now, async () => {}, () => {}, async () => {
+    posts += 1;
+  }), { code: "APN_PROVIDER_UNAVAILABLE" });
+  assert.equal(posts, 1);
+});
+
 test("provider-family scheduler rejects a persisted wall-clock rollback before transport", async () => {
   let calls = 0;
   const coordinator = { coordinate: async <T>(_family: string,

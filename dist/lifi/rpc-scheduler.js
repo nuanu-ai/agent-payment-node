@@ -1,6 +1,9 @@
 import { ApnError } from "../errors.js";
 const RPC_ORIGIN_GAP_MS = 750;
 const PIMLICO_PUBLIC_GAP_MS = 3_000;
+// One physical request is bounded by direct EVM HTTPS at 20 s (LI.FI HTTPS is 15 s).
+// Add the largest provider gap so a crash or failed completion write cannot cause a rapid retry.
+const RPC_CRASH_GUARD_MS = 20_000 + PIMLICO_PUBLIC_GAP_MS;
 export const RPC_RETRY_DELAY_MS = 2_000;
 export class RpcHttpFailure extends Error {
     method;
@@ -78,33 +81,39 @@ export class RpcProviderScheduler {
                         throw schedulerClockRollback(entry.family);
                     current = rechecked;
                 }
-                // The physical gate may wait for a POST on another provider family. Persist the
-                // actual admitted start, so a sibling process cannot start inside its 750 ms gap.
+                // The physical gate may wait for a POST on another provider family.
                 if (entry.beforeStart !== undefined) {
                     await entry.beforeStart();
                     current = clock();
                     if (current < nextAllowed)
                         throw schedulerClockRollback(entry.family);
                 }
-                state.lastStart = current;
-                await saveStart(state.lastStart);
+                // The family lock covers transport. A crash releases that lock without running completion cleanup.
+                // Reserve a conservative window before transport; a failed completion write leaves it durable.
+                await saveCooldownUntil(current + RPC_CRASH_GUARD_MS);
+                let result, failure, failed = false;
                 try {
-                    return await entry.task();
+                    result = await entry.task();
                 }
                 catch (error) {
-                    const transportCooldown = this.cooldownFailures === "transient" && transientTransport(error), httpCooldown = error instanceof RpcHttpFailure &&
-                        (error.status === 429 || this.cooldownFailures === "transient" && error.status >= 500 && error.status <= 599);
-                    if (httpCooldown || transportCooldown) {
-                        const observed = clock();
-                        if (observed < current)
-                            throw schedulerClockRollback(entry.family);
-                        const effectiveCooldown = error instanceof RpcHttpFailure && error.status === 429
-                            ? Math.min(30_000, Math.max(RPC_RETRY_DELAY_MS, error.retryAfterMs ?? 0)) : 5_000;
-                        state.cooldownUntil = Math.max(state.cooldownUntil, observed + effectiveCooldown);
-                        await saveCooldownUntil(state.cooldownUntil);
-                    }
-                    throw error;
+                    failure = error;
+                    failed = true;
                 }
+                const completed = clock();
+                if (completed < current)
+                    throw schedulerClockRollback(entry.family);
+                // The existing lastStartMs record now anchors pacing at the later transport completion.
+                state.lastStart = completed;
+                await saveStart(completed);
+                const transportCooldown = this.cooldownFailures === "transient" && transientTransport(failure), httpCooldown = failure instanceof RpcHttpFailure &&
+                    (failure.status === 429 || this.cooldownFailures === "transient" && failure.status >= 500 && failure.status <= 599);
+                const effectiveCooldown = failure instanceof RpcHttpFailure && failure.status === 429
+                    ? Math.min(30_000, Math.max(RPC_RETRY_DELAY_MS, failure.retryAfterMs ?? 0)) : 5_000;
+                state.cooldownUntil = httpCooldown || transportCooldown ? completed + effectiveCooldown : completed;
+                await saveCooldownUntil(state.cooldownUntil);
+                if (failed)
+                    throw failure;
+                return result;
             };
             entry.resolve(this.coordinator === undefined ? await execute(null, async () => { }, null, async () => { }) :
                 await this.coordinator.coordinate(entry.family, execute));
