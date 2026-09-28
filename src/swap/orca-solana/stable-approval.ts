@@ -26,7 +26,7 @@ export class TtyOrcaStableConsent implements OrcaStableConsentPort {
 /** Foreground owner consent reserves only the USDC principal. This path has no signer or sender. */
 export async function approveOrcaStableReservation(service: GuardedSwapService, materialStore: SavedOrcaStableMaterialStore,
   ports: OrcaStableAdmissionPorts, operationId: string, consent: OrcaStableConsentPort, clock: () => Date) {
-  return await service.operations.withLocks([`orca-stable-approval:${operationId}`], async () =>
+  return await service.operations.withLocks([`orca-stable-operation:${operationId}`], async () =>
     await approveOrcaStableReservationLocked(service, materialStore, ports, operationId, consent, clock));
 }
 
