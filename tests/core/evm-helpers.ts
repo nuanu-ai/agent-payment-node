@@ -108,6 +108,13 @@ export class EvmTestRpc extends TestRpc {
       }),
       feeQuote: economics => this.evm.feeQuote(56, economics),
     }),
+    prepareSeiNative: () => ({
+      balance: (address, selection) => this.evm.balance(address, selection),
+      nonceEstimate: async (address, transaction) => ({
+        nonce: await this.evm.nonce(1329, address, "pending"), estimated: await this.evm.estimate(transaction),
+      }),
+      feeQuote: economics => this.evm.feeQuote(1329, economics),
+    }),
     assertChain: async (chainId) => { if (chainId !== this.chainId) throw new ApnError("APN_CHAIN_MISMATCH", "Wrong selected chain."); },
     balance: async (address, selection) => {
       this.genericBalanceCalls += 1;

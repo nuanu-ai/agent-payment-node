@@ -20,7 +20,7 @@ function frozenEconomicsRemainExecutable(current: Economics, frozen: Economics):
 export async function checkEvmTransferFunding(rpcPort: RpcPort, operation: OperationRecord, beforeSigning: boolean, stateRoot?: string): Promise<void> {
   const binding = operation.evm;
   if (binding === undefined || operation.economics === undefined) throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
-  if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161) rpcPort.armEvmDirectRpcGuard?.();
+  if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329) rpcPort.armEvmDirectRpcGuard?.();
   const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
   const ethereumUsdc = operation.chainId === 1 && asset.kind === "erc20" &&
     asset.address.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
