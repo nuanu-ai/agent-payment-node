@@ -75,6 +75,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown>;
     coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]>;
     private call;
+    /** Permit2 preflight's narrow abortable observation surface. */
+    permit2ReadCall(method: "eth_chainId" | "eth_getBlockByNumber" | "eth_call" | "eth_getProof", params: readonly unknown[], signal: AbortSignal): Promise<unknown>;
     batchCall(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]>;
     private callX402Logs;
     private resolvePublicAddresses;

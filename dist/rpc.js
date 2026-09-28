@@ -362,6 +362,15 @@ export class HttpsBaseRpc {
         const raw = await this.postDirectGuarded(body, addresses, method);
         return parseRpcResultEnvelope(raw, id, method);
     }
+    /** Permit2 preflight's narrow abortable observation surface. */
+    async permit2ReadCall(method, params, signal) {
+        if (!["eth_chainId", "eth_getBlockByNumber", "eth_call", "eth_getProof"].includes(method)) {
+            throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC method is not a read.");
+        }
+        if (signal.aborted)
+            throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted.");
+        return await this.withAbortSignal(signal).call(method, params);
+    }
     async batchCall(calls) {
         if (!Array.isArray(calls) || calls.length < 1 || calls.length > MAX_RPC_BATCH_CALLS ||
             calls.some((call) => call === null || typeof call !== "object" ||
