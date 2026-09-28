@@ -49,7 +49,58 @@ export class HttpsBaseRpc {
     armEvmDirectRpcGuard() {
         if (this.directGuardState === undefined)
             throw new ApnError("APN_RPC_CONFIG", "Direct EVM RPC guard state is unavailable.");
-        this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState);
+        if (this.abortSignal === undefined) {
+            this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState);
+            return;
+        }
+        const signal = this.abortSignal;
+        const wait = async (milliseconds) => await new Promise((resolve, reject) => {
+            if (signal.aborted) {
+                reject(new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline."));
+                return;
+            }
+            const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, milliseconds);
+            const onAbort = () => { clearTimeout(timer); reject(new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.")); };
+            signal.addEventListener("abort", onAbort, { once: true });
+        });
+        this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait, () => this.remainingTimeoutMs());
+    }
+    async seiNativeBalance(address, selection, deadlineAtMs) {
+        if (selection.chainId !== 1329 || selection.token !== "native") {
+            throw new ApnError("APN_INVALID_INPUT", "Bounded Sei balance requires native SEI on Sei.");
+        }
+        if (this.directGuardState === undefined)
+            throw new ApnError("APN_RPC_CONFIG", "Bounded Sei balance RPC guard state is unavailable.");
+        const remainingMs = Math.floor(deadlineAtMs - performance.now());
+        if (!Number.isFinite(remainingMs) || remainingMs < 1 || remainingMs > 20_000) {
+            throw new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate RPC deadline.");
+        }
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), remainingMs);
+        const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
+            totalDeadlineMs: deadlineAtMs, abortSignal: controller.signal,
+            directGuardState: this.directGuardState,
+        });
+        bounded.pinnedAddresses = this.pinnedAddresses;
+        try {
+            // DNS validation precedes the first POST and must share the same deadline.
+            let onAbort;
+            try {
+                await Promise.race([bounded.primePublicAddresses(), new Promise((_, reject) => {
+                        onAbort = () => reject(new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate RPC deadline."));
+                        controller.signal.addEventListener("abort", onAbort, { once: true });
+                    })]);
+            }
+            finally {
+                if (onAbort !== undefined)
+                    controller.signal.removeEventListener("abort", onAbort);
+            }
+            bounded.armEvmDirectRpcGuard();
+            return await bounded.evm.prepareSeiNative().balance(address, selection);
+        }
+        finally {
+            clearTimeout(timeout);
+        }
     }
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal) {
@@ -405,7 +456,11 @@ export class HttpsBaseRpc {
         return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     }
     async postDirectGuarded(body, addresses, method) {
-        const post = () => postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal);
+        const post = () => {
+            if (this.abortSignal?.aborted)
+                throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.");
+            return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal);
+        };
         return this.directGuard === undefined ? await post() : await this.directGuard.post(this.endpoint.toString(), post);
     }
     remainingTimeoutMs() {
