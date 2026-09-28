@@ -3,11 +3,11 @@ import test from "node:test";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bindArgv } from "../../src/command-binder.js";
-import { canonicalJson, domainHash } from "../../src/canonical.js";
+import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
 import { StateStore } from "../../src/state.js";
-import { getBase58Decoder, getBase58Encoder, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder,
-  getTransactionDecoder } from "@solana/kit";
+import { createKeyPairSignerFromPrivateKeyBytes, getBase58Decoder, getBase58Encoder, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder,
+  getSignatureFromTransaction, getTransactionDecoder, signTransaction } from "@solana/kit";
 import { parseJsonWithBigInts } from "@solana/rpc-spec-types";
 import { SOLANA_GENESIS, SOLANA_USDT } from "../../src/chain-policy.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
@@ -25,6 +25,7 @@ import { approveOrcaStableReservation, stableApprovalScreen } from "../../src/sw
 import { releaseOrcaStableNoEffect } from "../../src/swap/orca-solana/stable-release.js";
 import { orcaStablePreparedStatus } from "../../src/swap/orca-solana/stable-status.js";
 import { verifyOrcaStableFinalizedReceipt } from "../../src/swap/orca-solana/stable-receipt.js";
+import { beginOrcaStableExecution, OrcaStableExecutionBindingStore } from "../../src/swap/orca-solana/stable-execution-journal.js";
 import { ATA_PROGRAM, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
 import { temporaryState } from "./helpers.js";
@@ -604,6 +605,74 @@ test("stable release refuses an operation with a possible-effect marker", async 
   const observed = await orcaStablePreparedStatus(f.service.operations, store, f.ports,
     prepared.operation.operationId, new Date(NOW.getTime() + 60_000));
   assert.equal(observed.operation.integrityHash, marked.integrityHash);
+});
+
+test("internal stable journal persists marker, binding and sealed signed bytes once", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), materials = new SavedOrcaStableMaterialStore(f.root);
+  await approveOrcaStableReservation(f.service, materials, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, f.clock);
+  const bindings = new OrcaStableExecutionBindingStore(f.root);
+  const signed = new Map<string, unknown>();
+  let preflights = 0, signs = 0;
+  const ports = { admission: f.ports, preflight: async () => {
+    preflights++;
+    const material = (await materials.loadStaged(prepared.operation.operationId))!;
+    return { preview: material.preview, checkedAt: NOW.toISOString(), elapsedMs: 620,
+      physicalPostCount: 18, simulationHash: "d".repeat(64) };
+  }, sign: async (operation: any, binding: any) => {
+    signs++;
+    const signer = await createKeyPairSignerFromPrivateKeyBytes(Buffer.alloc(32, 23));
+    const unsigned = getTransactionDecoder().decode(Buffer.from(binding.preview.unsignedPayload, "base64"));
+    const transaction = await signTransaction([signer.keyPair], unsigned);
+    const rawPayload = getBase64EncodedWireTransaction(transaction);
+    return { operationId: operation.operationId, fingerprint: binding.bindingHash,
+      transactionId: getSignatureFromTransaction(transaction), rawPayload, rawPayloadHash: sha256(rawPayload) };
+  }, effects: { saveEffect: async (_account: unknown, effect: any) => { signed.set(effect.operationId, effect); return effect; },
+    effect: async () => null } } as any;
+  const first = await beginOrcaStableExecution(f.service, materials, bindings, ports,
+    prepared.operation.operationId, f.clock);
+  assert.equal(first.operation.state, "submitting");
+  assert.equal(first.binding?.preview.messageHash, (await materials.loadStaged(prepared.operation.operationId))!.preview.messageHash);
+  assert.equal(first.signature, (signed.get(prepared.operation.operationId) as any).transactionId);
+  assert.equal(preflights, 1); assert.equal(signs, 1);
+  assert.equal((await new OrcaStableExecutionBindingStore(f.root).load(first.operation,
+    (await materials.loadStaged(prepared.operation.operationId))!))?.bindingHash, first.binding?.bindingHash);
+  await assert.rejects(beginOrcaStableExecution(f.service, materials, bindings, ports,
+    prepared.operation.operationId, f.clock), (error) => reason(error) === "orca_stable_observe_only");
+  assert.equal(preflights, 1); assert.equal(signs, 1);
+  await assert.rejects(releaseOrcaStableNoEffect(f.service, materials, prepared.operation.operationId, f.clock()),
+    (error) => reason(error) === "orca_stable_effect_boundary");
+  assert.ok(!f.calls.includes("sendTransaction"));
+});
+
+test("stable journal marker-before-sign crash never signs on resume; policy drift refuses before marker", async (t) => {
+  const f = await fixture(); t.after(f.cleanup);
+  const prepared = await candidate(f), materials = new SavedOrcaStableMaterialStore(f.root);
+  await approveOrcaStableReservation(f.service, materials, f.ports, prepared.operation.operationId,
+    { confirm: async () => {} }, f.clock);
+  const bindings = new OrcaStableExecutionBindingStore(f.root);
+  let signs = 0;
+  const ports = { admission: f.ports, preflight: async () => ({
+    preview: (await materials.loadStaged(prepared.operation.operationId))!.preview,
+    checkedAt: NOW.toISOString(), elapsedMs: 700, physicalPostCount: 24, simulationHash: "d".repeat(64) }),
+    sign: async () => { signs++; throw new Error("simulated crash before signed-effect persistence"); },
+    effects: { saveEffect: async () => { throw new Error("must not save"); }, effect: async () => null } } as any;
+  f.setActivation("b".repeat(64));
+  await assert.rejects(beginOrcaStableExecution(f.service, materials, bindings, ports,
+    prepared.operation.operationId, f.clock), (error) => reason(error) === "orca_stable_policy_drift");
+  assert.equal((await f.service.operations.loadAny(prepared.operation.operationId))?.submissionMarker, null);
+  f.setActivation("a".repeat(64));
+  const first = await beginOrcaStableExecution(f.service, materials, bindings, ports,
+    prepared.operation.operationId, f.clock);
+  assert.equal(first.operation.state, "submitting"); assert.equal(first.signature, null); assert.equal(signs, 1);
+  f.setActivation("b".repeat(64));
+  await assert.rejects(beginOrcaStableExecution(f.service, materials, bindings, ports,
+    prepared.operation.operationId, f.clock), (error) => reason(error) === "orca_stable_observe_only");
+  assert.equal(signs, 1);
+  assert.equal((await orcaStablePreparedStatus(f.service.operations, materials, f.ports,
+    prepared.operation.operationId, new Date(NOW.getTime() + 60_000))).operation.state, "submitting");
+  assert.ok(!f.calls.includes("sendTransaction"));
 });
 
 async function receiptFixture(createAta: boolean) {

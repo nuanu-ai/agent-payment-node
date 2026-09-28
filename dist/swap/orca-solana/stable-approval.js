@@ -22,7 +22,7 @@ export class TtyOrcaStableConsent {
 }
 /** Foreground owner consent reserves only the USDC principal. This path has no signer or sender. */
 export async function approveOrcaStableReservation(service, materialStore, ports, operationId, consent, clock) {
-    return await service.operations.withLocks([`orca-stable-approval:${operationId}`], async () => await approveOrcaStableReservationLocked(service, materialStore, ports, operationId, consent, clock));
+    return await service.operations.withLocks([`orca-stable-operation:${operationId}`], async () => await approveOrcaStableReservationLocked(service, materialStore, ports, operationId, consent, clock));
 }
 async function approveOrcaStableReservationLocked(service, materialStore, ports, operationId, consent, clock) {
     const operation = await service.operations.loadAny(operationId);
