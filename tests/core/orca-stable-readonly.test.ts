@@ -145,6 +145,23 @@ test("Whirlpool tick prices match protocol vectors, rise monotonically, and reje
   }
 });
 
+test("Whirlpool downward quote accepts only the exact maximum tick endpoint price", () => {
+  const maximum = sqrtPriceAtTick(443_636);
+  const pool: WhirlpoolState = { address: ORCA_STABLE_POOL, config: WHIRLPOOLS_CONFIG, tickSpacing: 1, feeTierIndexSeed: 1,
+    feeRate: 100, protocolFeeRate: 0, liquidity: 10n ** 25n, sqrtPrice: maximum, tickCurrentIndex: 443_636,
+    mintA: USDC_MINT, vaultA: ORCA_STABLE_VAULT_A, mintB: SOLANA_USDT, vaultB: ORCA_STABLE_VAULT_B };
+  const start = Math.floor(443_636 / 88) * 88;
+  const arrays: TickArrayState[] = [start, start - 88, start - 176].map((startTickIndex) => ({ address: "fixture", startTickIndex,
+    whirlpool: ORCA_STABLE_POOL, ticks: Array.from({ length: 88 }, () => ({ initialized: false, liquidityNet: 0n })) }));
+  const quote = quoteWhirlpoolExactInAToB(pool, arrays, 2n);
+  assert.ok(BigInt(quote.amountOutAtomic) > 0n);
+  assert.ok(BigInt(quote.sqrtPriceAfter) < maximum);
+  for (const sqrtPrice of [maximum - 1n, maximum + 1n]) {
+    assert.throws(() => quoteWhirlpoolExactInAToB({ ...pool, sqrtPrice }, arrays, 2n),
+      (error) => reason(error) === "orca_pool_state");
+  }
+});
+
 test("stable quote fails closed on pool drift, oracle state, caps and non-mainnet", async () => {
   const f = await fixture();
   await assert.rejects(quoteOrcaStableReadOnly(f.rpc, { amountAtomic: "1000000", slippageBps: 51,
