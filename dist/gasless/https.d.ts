@@ -2,6 +2,7 @@ export interface GaslessTransport {
     request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void): Promise<{
         readonly status: number;
         readonly body: string;
+        readonly retryAfterMs?: number;
     }>;
 }
 /** HTTP refusal is decided from the status line before untrusted headers or body are parsed. */
@@ -23,6 +24,7 @@ export declare class GaslessHttps implements GaslessTransport {
     request(endpointInput: string, method: "POST" | "GET", body: string | null, maximumBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void): Promise<{
         readonly status: number;
         readonly body: string;
+        readonly retryAfterMs?: number;
     }>;
     private acquire;
     private releaser;
