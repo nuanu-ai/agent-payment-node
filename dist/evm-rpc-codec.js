@@ -45,13 +45,13 @@ export function evmRpcBlockResult(value, tag) {
     const number = evmRpcQuantity(raw.number);
     const hash = evmRpcHex(raw.hash, 32);
     if (hash === `0x${"0".repeat(64)}` || (tag.startsWith("0x") && number !== evmRpcQuantity(tag))) {
-        throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC block identity is inconsistent.");
+        throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC block identity is inconsistent.", { reason: "evm_block_identity_changed" });
     }
     return { tag: `0x${number.toString(16)}`, number: number.toString(), hash, raw };
 }
 export async function recheckEvmBlock(call, block) {
     if ((await evmRpcBlock(call, block.tag)).hash !== block.hash)
-        throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");
+        throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.", { reason: "evm_block_identity_changed" });
 }
 export async function evmTokenBalance(call, token, address, tag) {
     const data = `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}`;
