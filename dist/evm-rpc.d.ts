@@ -22,10 +22,14 @@ export declare class EvmRpc implements EvmRpcPort {
     ethereumWethFundingReads(): EvmNativePrepareReads;
     prepareBaseWeth(): EvmNativePrepareReads;
     baseWethFundingReads(): EvmNativePrepareReads;
+    prepareBaseUsdc(): EvmNativePrepareReads;
+    baseUsdcFundingReads(): EvmNativePrepareReads;
     prepareBaseNative(): EvmNativePrepareReads;
     prepareArbitrumNative(): EvmNativePrepareReads;
     prepareArbitrumUsdt0(): EvmNativePrepareReads;
     arbitrumUsdt0FundingReads(): EvmNativePrepareReads;
+    prepareArbitrumUsdc(): EvmNativePrepareReads;
+    arbitrumUsdcFundingReads(): EvmNativePrepareReads;
     private prepareEthereumOrBaseNative;
     prepareEthereumNative(): EvmNativePrepareReads;
     /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */

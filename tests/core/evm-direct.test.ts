@@ -196,7 +196,8 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.rpc.genericBalanceCalls, calls);
   await assert.rejects(setup.core.transfer.prepare({ ...request, amount: "2" }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };
-  assert.equal(approved.state, chainId === 1 ? "submitted_pending" : "completed");
+  const deferredReceipt = chainId === 1 || (asset !== "native" && (chainId === 8453 || chainId === 42161));
+  assert.equal(approved.state, deferredReceipt ? "submitted_pending" : "completed");
   const raw = setup.rpc.submissions[0]!;
   const transaction = parseTransaction(raw);
   assert.equal(transaction.chainId, chainId);
@@ -205,7 +206,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.approval.intents.length, 1);
   const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
   assert.deepEqual(await restarted.core.transfer.status(prepared.operation_id), approved);
-  if (chainId === 1) {
+  if (deferredReceipt) {
     assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
   }
   const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { state: string; finality: string };
@@ -417,7 +418,8 @@ test("ERC-20 receipt success is insufficient without exact log AND balance delta
   const wallet = await ensureDirectWallet(setup); setup.rpc.sender = wallet.address;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_USDC[8453] }, amount: "1" }) as { operation_id: string };
   setup.rpc.deltasVerified = false;
-  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "unknown_finality");
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  assert.equal((await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "unknown_finality");
   setup.rpc.deltasVerified = true; setup.rpc.transferLogEnabled = false;
   assert.equal((await setup.core.transfer.resume(prepared.operation_id) as { state: string }).state, "unknown_finality");
   setup.rpc.transferLogEnabled = true;
@@ -542,8 +544,8 @@ for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18])
   const atomic = decimals === 6 ? "1000001" : "1000001000000000000";
   assert.equal(operation.amountAtomic, atomic); assert.equal(operation.evm?.asset.decimals, decimals);
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state,
-    chainId === 1 ? "submitted_pending" : "completed");
-  if (chainId === 1) {
+    "submitted_pending");
+  {
     assert.equal((await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
   }
   const receipt = await setup.core.transfer.receipt(prepared.operation_id) as { amount_atomic: string };
