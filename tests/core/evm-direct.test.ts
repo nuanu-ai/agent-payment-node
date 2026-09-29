@@ -6,11 +6,12 @@ import { keccak256, parseTransaction } from "viem";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import { evmAmount, MAX_EVM_UINT, resolveEvmAsset } from "../../src/evm-asset.js";
+import { observeEvmTransfer } from "../../src/evm-transfer-evidence.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import type { Address } from "../../src/model.js";
 import { sealReceipt } from "../../src/state-integrity.js";
 import { publicReceipt } from "../../src/transfer-policy.js";
-import { EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
+import { EVM_BLOCK_HASH, EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { EVM_USDC, activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
@@ -503,6 +504,37 @@ for (const scenario of [
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
   assert.equal(setup.rpc.broadcastCount, 1); assert.equal(setup.rpc.submissions.length, 1);
   assert.equal(restarted.approval.intents.length, 0);
+});
+
+for (const scenario of [
+  { name: "safe head below receipt", safeNumber: "0x3039", reason: "evm_effect_safe_head_lag" },
+  { name: "safe head at receipt height with another hash", safeNumber: "0x303a", reason: "evm_effect_block_changed" },
+] as const) test(`Arbitrum ${scenario.name} persists its distinct sanitized observer reason`, async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  setup.rpc.sender = (await ensureDirectWallet(setup)).address;
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: EVM_USDC[42161] }, amount: "1" }) as { operation_id: string };
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  const originalEvidence = setup.rpc.evm.evidence;
+  let blockReads = 0;
+  setup.rpc.evm.evidence = async (operation, receipt) => await observeEvmTransfer(async (method, params) => {
+    assert.equal(method, "eth_getBlockByNumber");
+    blockReads += 1;
+    if (params[0] === "safe") return { number: scenario.safeNumber, hash: `0x${"a".repeat(64)}` };
+    assert.equal(params[0], "0x303a");
+    return { number: "0x303a", hash: EVM_BLOCK_HASH };
+  }, operation, receipt);
+  const observed = await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string; reason: string; proof_class: string };
+  const status = await setup.core.transfer.status(prepared.operation_id) as { state: string; reason: string; proof_class: string };
+  const receipt = await setup.core.transfer.receipt(prepared.operation_id) as { state: string; reason: string; proof_class: string };
+  for (const row of [observed, status, receipt]) assert.deepEqual(
+    { state: row.state, reason: row.reason, proofClass: row.proof_class },
+    { state: "unknown_finality", reason: scenario.reason, proofClass: "inclusion_effect_unproven" });
+  assert.equal(blockReads, 2); assert.equal(setup.rpc.broadcastCount, 1);
+  setup.rpc.evm.evidence = originalEvidence;
+  const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  assert.equal(setup.rpc.broadcastCount, 1); assert.equal(restarted.approval.intents.length, 0);
 });
 
 test("Arbitrum increasing inclusive gas after signing prevents first submission and retains the exact signed operation", async (context) => {
