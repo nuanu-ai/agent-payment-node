@@ -237,6 +237,16 @@ inspect the exact receipt and token effect; this never broadcasts again. A
 successful receipt alone is insufficient: completion still requires the exact
 Transfer log and sender/recipient balance deltas across the canonical block.
 
+Listed Arbitrum USD₮0 direct transfers use five grouped JSON-RPC POSTs for
+prepare and five for each approval funding check. The pinned balance read
+includes native gas balance, token contract code, token balance and decimals;
+chain identity and block hash are rechecked. The inclusive fee quote uses zero
+priority fee. Two approval checks plus the raw send use eleven physical POSTs
+within the 24-POST guard. A rejected batch ends the invocation without scalar
+fallback. A successful send remains `submitted_pending` for explicit
+observe-only receipt and safe-head effect verification in another invocation.
+These counts are from mocked HTTPS, not a live provider acceptance check.
+
 The same grouped direct path now accepts only canonical Ethereum WETH9
 `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` with the pinned 18 decimals.
 It checks the same chain, contract code, pinned WETH/native balances, block
