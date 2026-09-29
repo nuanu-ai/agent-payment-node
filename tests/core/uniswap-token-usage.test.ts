@@ -54,8 +54,8 @@ function sameAddressProfile(state: StateStore, account: Hex, profile: string, de
     drift: { state: "bound" as const, reason: "none" as const } };
 }
 
-function grant(state: StateStore, account: string, profile: string): GrantedSmartAccountPermissionRecord {
-  const at = Math.floor(NOW.getTime() / 1000);
+function grant(state: StateStore, account: string, profile: string, now = NOW): GrantedSmartAccountPermissionRecord {
+  const at = Math.floor(now.getTime() / 1000);
   const sessionKey = `0x${"2".repeat(64)}` as Hex, session = privateKeyToAccount(sessionKey).address;
   const environment = smartAccountEnvironment(), enforcers = environment.caveatEnforcers;
   const required = (value: Hex | undefined): Hex => { assert.ok(value !== undefined); return value; };
@@ -81,7 +81,7 @@ function grant(state: StateStore, account: string, profile: string): GrantedSmar
     provider_id: METAMASK_SMART_ACCOUNT_PROVIDER_ID, idempotency_hash: "a".repeat(64), intent_fingerprint: "b".repeat(64),
     phase: "active", revision: 1, requested_cap_atomic: "1000000", requested_expires_at_unix: at + 3600,
     starts_at_unix: at, session_address: session,
-    session_private_key: sessionKey, created_at: NOW.toISOString(), updated_at: NOW.toISOString(),
+    session_private_key: sessionKey, created_at: now.toISOString(), updated_at: now.toISOString(),
     max_observed_unix: at, revocation_freshness: "never_synced", owner_address: observed.ownerAddress,
     granted_cap_atomic: observed.grantedCapAtomic, granted_expires_at_unix: observed.grantedExpiresAtUnix,
     grant_context: observed.context, grant_fingerprint: observed.grantFingerprint,
@@ -423,7 +423,7 @@ test("four Base Smart Account profiles and grants coexist with a prepared Ethere
   const permissions = new EncryptedSmartAccountPermissionStore(p.state, p.wrapping);
   for (const profile of ["base-delegated-buyer-1", "base-delegated-buyer-2", "base-delegated-buyer-3", "base-delegated-buyer-4"]) {
     await p.state.writeProviderProfile(sameAddressProfile(p.state, account, profile));
-    await permissions.save(grant(p.state, account, profile));
+    await permissions.save(grant(p.state, account, profile, at));
   }
   await assert.rejects(assertExclusiveRelayExecutionOwner(p.state, permissions, account, p.state.profileHash("token-swap")),
     { code: "APN_OPERATION_BLOCKED" });
