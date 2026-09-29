@@ -471,6 +471,40 @@ for (const [chainId, feeModel] of [[42161, "arbitrum-inclusive"], [56, undefined
   }
 });
 
+for (const scenario of [
+  { name: "HTTP 403", error: new ApnError("APN_RPC_PROTOCOL", "private URL https://rpc.example/secret?key=raw", { httpStatus: 403 }), reason: "evm_effect_rpc_forbidden" },
+  { name: "HTTP 429", error: new ApnError("APN_RPC_RATE_LIMITED", "private URL https://rpc.example/secret?key=raw", { httpStatus: 429 }), reason: "evm_effect_rpc_rate_limited" },
+  { name: "request budget", error: new ApnError("APN_RPC_BUDGET_EXCEEDED", "private URL https://rpc.example/secret?key=raw"), reason: "evm_effect_rpc_budget_exceeded" },
+  { name: "request deadline", error: new ApnError("APN_RPC_AMBIGUOUS", "private URL https://rpc.example/secret?key=raw", { reason: "request_deadline" }), reason: "evm_effect_rpc_deadline" },
+  { name: "safe-head lag", error: new ApnError("APN_RPC_PROTOCOL", "private URL https://rpc.example/secret?key=raw", { reason: "evm_safe_head_lag" }), reason: "evm_effect_safe_head_lag" },
+  { name: "block identity change", error: new ApnError("APN_RPC_PROTOCOL", "private URL https://rpc.example/secret?key=raw", { reason: "evm_block_identity_changed" }), reason: "evm_effect_block_changed" },
+  { name: "unknown provider error", error: new Error("private URL https://rpc.example/secret?key=raw"), reason: "evm_effect_evidence_unavailable" },
+] as const) test(`EVM observer exposes only sanitized ${scenario.name} reason and recovers the same operation`, async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  setup.rpc.sender = (await ensureDirectWallet(setup)).address;
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: EVM_USDC[42161] }, amount: "1" }) as { operation_id: string };
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  const evidence = setup.rpc.evm.evidence;
+  let evidenceCalls = 0;
+  setup.rpc.evm.evidence = async () => { evidenceCalls += 1; throw scenario.error; };
+  const observed = await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string; reason: string; proof_class: string };
+  const status = await setup.core.transfer.status(prepared.operation_id) as { state: string; reason: string; proof_class: string };
+  const receipt = await setup.core.transfer.receipt(prepared.operation_id) as { state: string; reason: string; proof_class: string };
+  for (const publicResult of [observed, status, receipt]) {
+    assert.equal(publicResult.state, "unknown_finality");
+    assert.equal(publicResult.reason, scenario.reason);
+    assert.equal(publicResult.proof_class, "inclusion_effect_unproven");
+    assert.doesNotMatch(JSON.stringify(publicResult), /secret|key=raw/u);
+  }
+  assert.equal(evidenceCalls, 1); assert.equal(setup.rpc.broadcastCount, 1); assert.equal(setup.rpc.submissions.length, 1);
+  setup.rpc.evm.evidence = evidence;
+  const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  assert.equal(setup.rpc.broadcastCount, 1); assert.equal(setup.rpc.submissions.length, 1);
+  assert.equal(restarted.approval.intents.length, 0);
+});
+
 test("Arbitrum increasing inclusive gas after signing prevents first submission and retains the exact signed operation", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root, undefined, undefined, undefined, (native) => ({ request: async (request) => {

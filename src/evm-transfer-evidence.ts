@@ -11,10 +11,10 @@ export async function observeEvmTransfer(call: EvmRpcCall, operation: OperationR
     throw new ApnError("APN_RPC_PROTOCOL", "Generic transfer evidence requires its frozen transaction and receipt block.");
   }
   const block = await evmRpcBlock(call, `0x${BigInt(receipt.blockNumberAtomic).toString(16)}`);
-  if (block.hash !== receipt.blockHash) throw new ApnError("APN_RPC_PROTOCOL", "Transfer receipt is not on the observed canonical block.");
+  if (block.hash !== receipt.blockHash) throw new ApnError("APN_RPC_PROTOCOL", "Transfer receipt is not on the observed canonical block.", { reason: "evm_block_identity_changed" });
   const safe = directEvmRequiresSafeHead(operation.chainId) ? await evmRpcBlock(call, "safe") : undefined;
   if (safe !== undefined && (BigInt(safe.number) < BigInt(block.number) || (safe.number === block.number && safe.hash !== block.hash))) {
-    throw new ApnError("APN_RPC_PROTOCOL", "The receipt has not reached the selected RPC canonical safe head.");
+    throw new ApnError("APN_RPC_PROTOCOL", "The receipt has not reached the selected RPC canonical safe head.", { reason: "evm_safe_head_lag" });
   }
   const safeEvidence = safe === undefined ? {} : { safeBlockNumberAtomic: safe.number, safeBlockHash: safe.hash };
   const recheck = async () => {
@@ -23,7 +23,7 @@ export async function observeEvmTransfer(call: EvmRpcCall, operation: OperationR
       await recheckEvmBlock(call, safe);
       const current = await evmRpcBlock(call, "safe");
       if (BigInt(current.number) < BigInt(safe.number) || (current.number === safe.number && current.hash !== safe.hash)) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Safe-head evidence changed during receipt verification.");
+        throw new ApnError("APN_RPC_PROTOCOL", "Safe-head evidence changed during receipt verification.", { reason: "evm_block_identity_changed" });
       }
     }
   };
@@ -47,7 +47,7 @@ export async function observeEvmTransfer(call: EvmRpcCall, operation: OperationR
     return { ...safeEvidence, blockHash: block.hash, transactionVerified, tokenBalanceDeltasVerified: false };
   }
   const previous = await evmRpcBlock(call, `0x${(BigInt(block.number) - 1n).toString(16)}`);
-  if (evmRpcHex(block.raw.parentHash, 32) !== previous.hash) throw new ApnError("APN_RPC_PROTOCOL", "Receipt balance blocks are not contiguous.");
+  if (evmRpcHex(block.raw.parentHash, 32) !== previous.hash) throw new ApnError("APN_RPC_PROTOCOL", "Receipt balance blocks are not contiguous.", { reason: "evm_block_identity_changed" });
   const [senderBefore, senderAfter, recipientBefore, recipientAfter] = await Promise.all([
     evmTokenBalance(call, binding.asset.address, operation.walletAddress, previous.tag),
     evmTokenBalance(call, binding.asset.address, operation.walletAddress, block.tag),
