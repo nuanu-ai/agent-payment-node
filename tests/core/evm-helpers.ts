@@ -59,7 +59,9 @@ export class EvmTestRpc extends TestRpc {
     ethereumUsdcFundingReads: () => this.evm.prepareEthereumUsdc!(),
     ethereumWethFundingReads: () => this.evm.prepareEthereumWeth!(),
     baseWethFundingReads: () => this.evm.prepareBaseWeth!(),
+    baseUsdcFundingReads: () => this.evm.prepareBaseUsdc!(),
     arbitrumUsdt0FundingReads: () => this.evm.prepareArbitrumUsdt0!(),
+    arbitrumUsdcFundingReads: () => this.evm.prepareArbitrumUsdc!(),
     prepareEthereumUsdc: () => ({
       balance: (address, selection) => this.evm.balance(address, selection),
       nonceEstimate: async (address, transaction) => ({
@@ -81,7 +83,21 @@ export class EvmTestRpc extends TestRpc {
       }),
       feeQuote: economics => this.evm.feeQuote(8453, economics),
     }),
+    prepareBaseUsdc: () => ({
+      balance: (address, selection) => this.evm.balance(address, selection),
+      nonceEstimate: async (address, transaction) => ({
+        nonce: await this.evm.nonce(8453, address, "pending"), estimated: await this.evm.estimate(transaction),
+      }),
+      feeQuote: economics => this.evm.feeQuote(8453, economics),
+    }),
     prepareArbitrumUsdt0: () => ({
+      balance: (address, selection) => this.evm.balance(address, selection),
+      nonceEstimate: async (address, transaction) => ({
+        nonce: await this.evm.nonce(42161, address, "pending"), estimated: await this.evm.estimate(transaction),
+      }),
+      feeQuote: economics => this.evm.feeQuote(42161, economics),
+    }),
+    prepareArbitrumUsdc: () => ({
       balance: (address, selection) => this.evm.balance(address, selection),
       nonceEstimate: async (address, transaction) => ({
         nonce: await this.evm.nonce(42161, address, "pending"), estimated: await this.evm.estimate(transaction),
