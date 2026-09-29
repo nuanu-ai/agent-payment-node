@@ -23,7 +23,6 @@ export declare class UniswapTokenCustody {
     private readonly now;
     private readonly effects;
     private readonly wallets;
-    private readonly permissions;
     private readonly nonces;
     private readonly operations;
     constructor(state: StateStore, wrapping: WrappingSecretPort, call: EvmRpcCall, now: () => Date, effects?: UniswapTokenEffectJournal);
