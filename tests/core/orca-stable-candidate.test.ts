@@ -1674,6 +1674,35 @@ test("pure stable finalized receipt binds exact principal, output, fee and optio
   }
 });
 
+test("pure stable receipt accepts BigInt-parsed compiled CPI indices and rejects invalid indices", async (t) => {
+  const r = await receiptFixture(false); t.after(r.f.cleanup);
+  const keys = getCompiledTransactionMessageDecoder().decode(Buffer.from(r.material.preview.messageBase64, "base64")).staticAccounts;
+  const index = (key: string) => { const found = keys.indexOf(key as never); assert.ok(found >= 0); return found; };
+  const transfer = (accounts: string[], amount: bigint) => {
+    const data = Buffer.alloc(9); data[0] = 3; data.writeBigUInt64LE(amount, 1);
+    return { programIdIndex: index(TOKEN_PROGRAM), accounts: accounts.map(index), data: getBase58Decoder().decode(data) };
+  };
+  const instructions = [
+    transfer([r.material.preview.sourceAta, ORCA_STABLE_VAULT_A, r.material.preview.owner], 1_000_000n),
+    transfer([ORCA_STABLE_VAULT_B, r.material.preview.destinationAta, ORCA_STABLE_POOL],
+      BigInt(r.f.source.quote.minimumOutputAtomic)),
+  ];
+  const transaction = parseJsonWithBigInts(JSON.stringify({ ...r.transaction, meta: { ...r.transaction.meta,
+    innerInstructions: [{ index: 2, instructions }] } }, (_key, value) => typeof value === "bigint" ? Number(value) : value));
+  const outcome = await verifyOrcaStableFinalizedReceipt({ ...r.input, transaction });
+  assert.equal(outcome?.outcome, "succeeded");
+  const conflict = (error: unknown) => reason(error) === "orca_stable_receipt_conflict";
+  for (const invalidIndex of [-1n, BigInt(keys.length), BigInt(Number.MAX_SAFE_INTEGER) + 1n]) {
+    for (const field of ["programIdIndex", "accounts"] as const) {
+      const altered = field === "programIdIndex" ? { ...instructions[0], programIdIndex: invalidIndex } :
+        { ...instructions[0], accounts: [invalidIndex, ...instructions[0]!.accounts.slice(1)] };
+      const bad = { ...r.transaction, meta: { ...r.transaction.meta, innerInstructions: [
+        { index: 2n, instructions: [altered, instructions[1]] }] } };
+      await assert.rejects(verifyOrcaStableFinalizedReceipt({ ...r.input, transaction: bad }), conflict);
+    }
+  }
+});
+
 test("pure stable receipt leaves nonfinalized evidence pending and proves a finalized revert", async (t) => {
   const r = await receiptFixture(true); t.after(r.f.cleanup);
   assert.equal(await verifyOrcaStableFinalizedReceipt({ ...r.input,
