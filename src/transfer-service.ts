@@ -385,7 +385,7 @@ export class TransferService {
           throw new ApnError("APN_RPC_PROTOCOL", "The receipt lacks selected RPC safe inclusion evidence.");
         }
       }
-      catch { return await this.transition(operation, "unknown_finality", false, "evm_effect_evidence_unavailable", "inclusion_effect_unproven"); }
+      catch (error) { return await this.transition(operation, "unknown_finality", false, evmEffectFailureReason(error), "inclusion_effect_unproven"); }
       if (receipt.evmEvidence?.transactionVerified !== true) return await this.transition(operation, "unknown_finality", false, "evm_transaction_mismatch", "invalid_receipt");
     }
     if (receipt.status === "reverted") {
@@ -527,6 +527,17 @@ export class TransferService {
     await this.context.state.writeReceipt(operation.profileHash, sealReceipt(receiptBase));
     if (operation.evm !== undefined) await this.context.state.writeOperation(operation);
   }
+}
+
+function evmEffectFailureReason(error: unknown): string {
+  if (!(error instanceof ApnError)) return "evm_effect_evidence_unavailable";
+  if (error.details?.httpStatus === 403) return "evm_effect_rpc_forbidden";
+  if (error.code === "APN_RPC_RATE_LIMITED" || error.details?.httpStatus === 429) return "evm_effect_rpc_rate_limited";
+  if (error.code === "APN_RPC_BUDGET_EXCEEDED") return "evm_effect_rpc_budget_exceeded";
+  if (error.code === "APN_RPC_AMBIGUOUS" && error.details?.reason === "request_deadline") return "evm_effect_rpc_deadline";
+  if (error.code === "APN_RPC_PROTOCOL" && error.details?.reason === "evm_safe_head_lag") return "evm_effect_safe_head_lag";
+  if (error.code === "APN_RPC_PROTOCOL" && error.details?.reason === "evm_block_identity_changed") return "evm_effect_block_changed";
+  return "evm_effect_evidence_unavailable";
 }
 
 type LocalOperationRecord = OperationRecord & {

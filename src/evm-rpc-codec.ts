@@ -47,13 +47,13 @@ export function evmRpcBlockResult(value: unknown, tag: string): { readonly tag: 
   const number = evmRpcQuantity(raw.number);
   const hash = evmRpcHex(raw.hash, 32);
   if (hash === `0x${"0".repeat(64)}` || (tag.startsWith("0x") && number !== evmRpcQuantity(tag))) {
-    throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC block identity is inconsistent.");
+    throw new ApnError("APN_RPC_PROTOCOL", "EVM RPC block identity is inconsistent.", { reason: "evm_block_identity_changed" });
   }
   return { tag: `0x${number.toString(16)}`, number: number.toString(), hash, raw };
 }
 
 export async function recheckEvmBlock(call: EvmRpcCall, block: { readonly tag: Hex; readonly hash: Hex }): Promise<void> {
-  if ((await evmRpcBlock(call, block.tag)).hash !== block.hash) throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");
+  if ((await evmRpcBlock(call, block.tag)).hash !== block.hash) throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.", { reason: "evm_block_identity_changed" });
 }
 
 export async function evmTokenBalance(call: EvmRpcCall, token: Address, address: Address, tag: Hex): Promise<bigint> {
