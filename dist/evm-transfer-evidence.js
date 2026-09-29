@@ -10,8 +10,11 @@ export async function observeEvmTransfer(call, operation, receipt) {
     if (block.hash !== receipt.blockHash)
         throw new ApnError("APN_RPC_PROTOCOL", "Transfer receipt is not on the observed canonical block.", { reason: "evm_block_identity_changed" });
     const safe = directEvmRequiresSafeHead(operation.chainId) ? await evmRpcBlock(call, "safe") : undefined;
-    if (safe !== undefined && (BigInt(safe.number) < BigInt(block.number) || (safe.number === block.number && safe.hash !== block.hash))) {
+    if (safe !== undefined && BigInt(safe.number) < BigInt(block.number)) {
         throw new ApnError("APN_RPC_PROTOCOL", "The receipt has not reached the selected RPC canonical safe head.", { reason: "evm_safe_head_lag" });
+    }
+    if (safe !== undefined && safe.number === block.number && safe.hash !== block.hash) {
+        throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC safe head conflicts with the receipt block.", { reason: "evm_block_identity_changed" });
     }
     const safeEvidence = safe === undefined ? {} : { safeBlockNumberAtomic: safe.number, safeBlockHash: safe.hash };
     const recheck = async () => {
