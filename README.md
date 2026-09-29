@@ -5,10 +5,10 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-The source tree prepares unreleased APN 0.5.33 for Apple Silicon macOS. The
-published 0.5.32 release and its Homebrew Formula are separate from this source
+The source tree prepares unreleased APN 0.5.34 for Apple Silicon macOS. The
+published 0.5.33 release and its Homebrew Formula are separate from this source
 version. Verify the exact installed version before relying on source changes
-after 0.5.32.
+after 0.5.33.
 
 The current platform boundary and the required work for future Linux or
 Windows support are recorded in the [platform support matrix](docs/platform-support.md).
@@ -72,8 +72,8 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 ## Install
 
 Homebrew installation is a separate publication gate. Verify that `apn --version`
-reports `0.5.33` before relying on the current source behavior. The published
-0.5.32 installation predates this unreleased source version.
+reports `0.5.34` before relying on the current source behavior. The published
+0.5.33 installation predates this unreleased source version.
 
 ```sh
 brew install nuanu-ai/tap/apn
