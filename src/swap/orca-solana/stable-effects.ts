@@ -176,17 +176,22 @@ function createAccountData(rent: string): Buffer {
 
 function programAddress(instruction: Record<string, unknown>, keys: readonly string[]): string {
   if (typeof instruction.programId === "string") return instruction.programId;
-  const index = instruction.programIdIndex;
-  if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= keys.length) invalid();
-  return keys[index]!;
+  return keys[accountIndex(instruction.programIdIndex, keys.length)]!;
 }
 function accountAddresses(instruction: Record<string, unknown>, keys: readonly string[]): string[] {
   const accounts = rpcArray(instruction.accounts, 32);
   return accounts.map((account) => {
     if (typeof account === "string") return account;
-    if (typeof account !== "number" || !Number.isSafeInteger(account) || account < 0 || account >= keys.length) invalid();
-    return keys[account]!;
+    return keys[accountIndex(account, keys.length)]!;
   });
+}
+function accountIndex(value: unknown, length: number): number {
+  if (typeof value === "bigint") {
+    if (value < 0n || value >= BigInt(length)) invalid();
+    return Number(value);
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value >= length) invalid();
+  return value;
 }
 function invalid(): never { return blocked("Simulation contains an unexpected or malformed CPI transfer.", "orca_stable_trace_invalid"); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
