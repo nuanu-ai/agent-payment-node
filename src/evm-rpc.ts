@@ -37,11 +37,15 @@ export class EvmRpc implements EvmRpcPort {
   ethereumWethFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "weth"); }
   prepareBaseWeth(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "weth"); }
   baseWethFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "weth"); }
+  prepareBaseUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "usdc"); }
+  baseUsdcFundingReads(): EvmNativePrepareReads { return this.prepareBaseUsdc(); }
   prepareBaseNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(8453); }
   prepareArbitrumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161); }
   prepareArbitrumUsdt0(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161, "usdt0"); }
   arbitrumUsdt0FundingReads(): EvmNativePrepareReads { return this.prepareArbitrumUsdt0(); }
-  private prepareEthereumOrBaseNative(chainId: 1 | 8453 | 42161, asset: "native" | "usdt0" = "native"): EvmNativePrepareReads {
+  prepareArbitrumUsdc(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161, "usdc"); }
+  arbitrumUsdcFundingReads(): EvmNativePrepareReads { return this.prepareArbitrumUsdc(); }
+  private prepareEthereumOrBaseNative(chainId: 1 | 8453 | 42161, asset: "native" | "usdt0" | "usdc" = "native"): EvmNativePrepareReads {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
     let posts = 0;
     const started = Date.now();
@@ -65,8 +69,8 @@ export class EvmRpc implements EvmRpcPort {
     let feeHead: Awaited<ReturnType<typeof evmRpcBlock>> | undefined;
     return {
       balance: async (address, selection) => {
-        const listedToken = asset === "usdt0" && chainId === 42161 && directEvmListRows(42161).some(row =>
-          row.kind === "token" && row.symbol === "USDT0" && row.identifier === selection.token && row.decimals === 6);
+        const listedToken = asset !== "native" && chainId === 42161 && directEvmListRows(42161).some(row =>
+          row.kind === "token" && row.symbol === (asset === "usdt0" ? "USDT0" : "USDC") && row.identifier === selection.token && row.decimals === 6);
         if (selection.chainId !== chainId || (asset === "native" ? selection.token !== "native" : !listedToken))
           throw new ApnError("APN_INVALID_INPUT", "Grouped prepare requires the listed asset on the selected network.");
         if (selection.decimals !== undefined) evmDecimals(selection.decimals);
@@ -81,8 +85,8 @@ export class EvmRpc implements EvmRpcPort {
             { method: "eth_call", params: [{ to: token, data: `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}` }, head.tag] },
             { method: "eth_call", params: [{ to: token, data: "0x313ce567" }, head.tag] }]);
         const nativeAtomic = evmRpcQuantity(rawBalance).toString();
-        if (asset === "usdt0" && evmRpcHex(rawCode) === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token address has no contract on this chain.");
-        if (asset === "usdt0" && rawDecimals === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token contract did not report decimals.");
+        if (asset !== "native" && evmRpcHex(rawCode) === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token address has no contract on this chain.");
+        if (asset !== "native" && rawDecimals === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token contract did not report decimals.");
         const assetAtomic = asset === "native" ? nativeAtomic : evmRpcWord(rawToken).toString();
         const observedDecimals = asset === "native" || rawDecimals === "0x" ? undefined : evmDecimals(Number(evmRpcWord(rawDecimals)));
         const [rawRecheck, postChain] = await batch("balance_recheck", [
