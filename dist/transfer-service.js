@@ -346,10 +346,10 @@ export class TransferService {
             operation.evm.asset.address.toLowerCase() === "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"))
             return operation;
         if (operation.evm?.asset.chainId === 8453 && operation.evm.asset.kind === "erc20" &&
-            operation.evm.asset.address.toLowerCase() === "0x4200000000000000000000000000000000000006")
+            ["0x4200000000000000000000000000000000000006", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"].includes(operation.evm.asset.address.toLowerCase()))
             return operation;
         if (operation.evm?.asset.chainId === 42161 && operation.evm.asset.kind === "erc20" &&
-            operation.evm.asset.address.toLowerCase() === "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9")
+            ["0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "0xaf88d065e77c8cc2239327c5edb3a432268e5831"].includes(operation.evm.asset.address.toLowerCase()))
             return operation;
         return await this.inspectReceipt(operation, rpc);
     }

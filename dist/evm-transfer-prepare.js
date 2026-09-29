@@ -33,11 +33,13 @@ export async function prepareEvmTransfer(context, operations, request, persist, 
     const ethereumUsdc = selection.chainId === 1 && directEvmListRows(1).some((row) => row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6);
     const ethereumWeth = selection.chainId === 1 && directEvmListRows(1).some((row) => row.kind === "token" && row.symbol === "WETH" && row.identifier === selection.token && row.decimals === 18);
     const baseWeth = selection.chainId === 8453 && directEvmListRows(8453).some((row) => row.kind === "token" && row.symbol === "WETH" && row.identifier === selection.token && row.decimals === 18);
+    const baseUsdc = selection.chainId === 8453 && directEvmListRows(8453).some((row) => row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6);
     const arbitrumUsdt0 = selection.chainId === 42161 && directEvmListRows(42161).some((row) => row.kind === "token" && row.symbol === "USDT0" && row.identifier === selection.token && row.decimals === 6);
+    const arbitrumUsdc = selection.chainId === 42161 && directEvmListRows(42161).some((row) => row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6);
     if (request.batchRpcReads && !(((selection.chainId === 1 || selection.chainId === 59144 || selection.chainId === 56 || selection.chainId === 8453 || selection.chainId === 42161 || selection.chainId === 1329) && selection.token === "native") ||
-        ethereumUsdc || ethereumWeth || baseWeth || arbitrumUsdt0 || ((selection.chainId === 130 || selection.chainId === 137) &&
+        ethereumUsdc || ethereumWeth || baseWeth || baseUsdc || arbitrumUsdt0 || arbitrumUsdc || ((selection.chainId === 130 || selection.chainId === 137) &&
         (selection.chainId === 130 && selection.token === "native" || directEvmListRows(selection.chainId).some((row) => row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6))))) {
-        throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Ethereum native, canonical USDC or WETH, Base WETH or native, Arbitrum USD₮0 or native, BNB, Linea or Sei native, Unichain native or USDC, or Polygon USDC.");
+        throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Ethereum native, canonical USDC or WETH, Base USDC, WETH or native, Arbitrum USDC, USD₮0 or native, BNB, Linea or Sei native, Unichain native or USDC, or Polygon USDC.");
     }
     const maximumFeeWei = evmUint(request.maxFeeWei, true).toString();
     const priorityFeeWei = request.priorityFeeWei === undefined ? undefined : evmUint(request.priorityFeeWei).toString();
@@ -78,10 +80,10 @@ export async function prepareEvmTransfer(context, operations, request, persist, 
             const baseNative = selection.chainId === 8453 && selection.token === "native";
             const arbitrumNative = selection.chainId === 42161 && selection.token === "native";
             const seiNative = selection.chainId === 1329 && selection.token === "native";
-            const grouped = request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || arbitrumUsdt0 || baseNative || arbitrumNative || seiNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : ethereumUsdc ? rpc.prepareEthereumUsdc?.() : ethereumWeth ? rpc.prepareEthereumWeth?.() : baseWeth ? rpc.prepareBaseWeth?.() : arbitrumUsdt0 ? rpc.prepareArbitrumUsdt0?.() : baseNative ? rpc.prepareBaseNative?.() : arbitrumNative ? rpc.prepareArbitrumNative?.() : seiNative ? rpc.prepareSeiNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
+            const grouped = request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || baseUsdc || arbitrumUsdt0 || arbitrumUsdc || baseNative || arbitrumNative || seiNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : ethereumUsdc ? rpc.prepareEthereumUsdc?.() : ethereumWeth ? rpc.prepareEthereumWeth?.() : baseWeth ? rpc.prepareBaseWeth?.() : baseUsdc ? rpc.prepareBaseUsdc?.() : arbitrumUsdt0 ? rpc.prepareArbitrumUsdt0?.() : arbitrumUsdc ? rpc.prepareArbitrumUsdc?.() : baseNative ? rpc.prepareBaseNative?.() : arbitrumNative ? rpc.prepareArbitrumNative?.() : seiNative ? rpc.prepareSeiNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
                 ? (selection.token === "native" ? rpc.prepareUnichainNative?.() : rpc.prepareUnichainUsdc?.())
                 : selection.chainId === 137 ? rpc.preparePolygonUsdc?.() : rpc.prepareLineaNative?.()) : undefined;
-            if ((request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || arbitrumUsdt0 || baseNative || arbitrumNative || seiNative || selection.chainId === 56) && grouped === undefined)
+            if ((request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || baseUsdc || arbitrumUsdt0 || arbitrumUsdc || baseNative || arbitrumNative || seiNative || selection.chainId === 56) && grouped === undefined)
                 throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
             const balance = await (grouped ?? rpc).balance(wallet.address, { ...selection, decimals: listed.decimals });
             if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
