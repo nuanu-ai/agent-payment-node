@@ -12,10 +12,12 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { EncryptedSmartAccountPermissionStore } from "../../src/encrypted-smart-account-permission-store.js";
-import { assertExclusiveRelayExecutionOwner } from "../../src/evm-address-ownership.js";
+import { assertExclusiveRelayExecutionOwner, assertExclusiveUniswapTokenSigner } from "../../src/evm-address-ownership.js";
 import { METAMASK_SMART_ACCOUNT_PROVIDER_ID, SMART_ACCOUNT_PERMISSION_RECORD_VERSION, type GrantedSmartAccountPermissionRecord } from "../../src/metamask-smart-account-record.js";
 import { smartAccountEnvironment, validateSmartAccountObservation } from "../../src/metamask-smart-account-grant.js";
 import { BASE_USDC } from "../../src/constants.js";
+import { accountBindingHash, capabilityHash, localCapabilitySnapshot, metamaskSmartAccountX402CapabilitySnapshot,
+  PROVIDER_PROFILE_VERSION } from "../../src/provider-profile.js";
 import { ApnError } from "../../src/errors.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { envelopeOf, UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js";
@@ -41,6 +43,16 @@ import { temporaryState } from "./helpers.js";
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
 const NOW = new Date("2026-09-22T00:00:00.000Z");
 const clock = { now: () => NOW };
+
+function sameAddressProfile(state: StateStore, account: Hex, profile: string, delegated = true) {
+  const capability = delegated ? metamaskSmartAccountX402CapabilitySnapshot() : localCapabilitySnapshot();
+  const providerId = delegated ? METAMASK_SMART_ACCOUNT_PROVIDER_ID : "local";
+  return { schema_version: PROVIDER_PROFILE_VERSION, profile, profile_hash: state.profileHash(profile),
+    provider_id: providerId, public_address: account, account_binding_hash: accountBindingHash(providerId, account),
+    trust_class: delegated ? "external_owner_delegated_local_session" as const : "local_software_wallet" as const,
+    revision: 1, capability_snapshot: capability, capability_hash: capabilityHash(capability), observed_at: NOW.toISOString(),
+    drift: { state: "bound" as const, reason: "none" as const } };
+}
 
 function grant(state: StateStore, account: string, profile: string): GrantedSmartAccountPermissionRecord {
   const at = Math.floor(NOW.getTime() / 1000);
@@ -396,25 +408,32 @@ test("production token RPC phases stay within exact physical budgets through fin
   assert.equal(cleanup.phase, "cleanup_submitted"); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [14, 24]);
 });
 
-test("foreign Base Smart Account grant blocks token approval after no-money quote and prepare", async (t) => {
+test("four Base Smart Account profiles and grants coexist with a prepared Ethereum token approval", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const key = `0x${"0".repeat(63)}1` as Hex, account = privateKeyToAccount(key).address;
   await setup(temporary.root, "3000000", account);
-  const p = await production(temporary.root, NOW, account, key, "0");
+  const at = new Date(), p = await production(temporary.root, at, account, key, "0");
   const runtime = (call: TokenRpcCall) => createUniswapTokenRuntime({ state: p.state, wrapping: p.wrapping,
-    clock, call, foreground: "approve", tty: p.tty, verifyPins: async () => undefined });
+    clock: { now: () => at }, call, foreground: "approve", tty: p.tty, verifyPins: async () => undefined });
   const quote = await runtime(p.sessionCall(8)).quote({ ...quoteRequest(), account, recipient: account,
-    deadline: Math.floor(NOW.getTime() / 1000) + 600 }) as { quoteHash: string };
+    deadline: Math.floor(at.getTime() / 1000) + 600 }) as { quoteHash: string };
   const op = await runtime(p.sessionCall(9)).prepare({ command: "swap.uniswap-token.prepare", profile: "token-swap",
     quoteHash: quote.quoteHash, idempotencyKey: "owner-grant-before-approval" });
   assert.equal(op.phase, "prepared");
-  await new EncryptedSmartAccountPermissionStore(p.state, p.wrapping).save(grant(p.state, account, "base-delegated-buyer"));
-  await assert.rejects(runtime(p.sessionCall(14)).approve(op.operationId), { code: "APN_OPERATION_BLOCKED" });
-  assert.equal((await new UniswapTokenJournal(temporary.root).load(op.operationId))?.phase, "prepared");
-  assert.deepEqual(p.sends, []);
+  const permissions = new EncryptedSmartAccountPermissionStore(p.state, p.wrapping);
+  for (const profile of ["base-delegated-buyer-1", "base-delegated-buyer-2", "base-delegated-buyer-3", "base-delegated-buyer-4"]) {
+    await p.state.writeProviderProfile(sameAddressProfile(p.state, account, profile));
+    await permissions.save(grant(p.state, account, profile));
+  }
+  await assert.rejects(assertExclusiveRelayExecutionOwner(p.state, permissions, account, p.state.profileHash("token-swap")),
+    { code: "APN_OPERATION_BLOCKED" });
+  const approved = await runtime(p.sessionCall(14)).approve(op.operationId);
+  assert.equal(approved.phase, "approval_submitted");
+  assert.equal(p.sends.length, 1);
+  assert.equal((await new UniswapTokenJournal(temporary.root).load(op.operationId))?.phase, "approval_submitted");
 });
 
-test("shared owner lock serializes a new grant before token effect signing", async (t) => {
+test("shared owner lock serializes a new Base grant without stealing the Ethereum raw signer", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const key = `0x${"0".repeat(63)}1` as Hex, account = privateKeyToAccount(key).address;
   const p = await production(temporary.root, NOW, account, key, "0");
@@ -436,9 +455,31 @@ test("shared owner lock serializes a new grant before token effect signing", asy
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(effectEntered, false);
   release(); await writer;
-  await assert.rejects(effect, { code: "APN_OPERATION_BLOCKED" });
-  assert.equal(effectEntered, false);
+  await effect;
+  assert.equal(effectEntered, true);
   assert.deepEqual(p.sends, []);
+});
+
+test("foreign local signer and malformed profile still block a prepared token operation before TTY", async (t) => {
+  for (const malformed of [false, true]) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const key = `0x${"0".repeat(63)}1` as Hex, account = privateKeyToAccount(key).address;
+    await setup(temporary.root, "3000000", account);
+    const p = await production(temporary.root, NOW, account, key, "0");
+    const runtime = (call: TokenRpcCall) => createUniswapTokenRuntime({ state: p.state, wrapping: p.wrapping,
+      clock, call, foreground: "approve", tty: p.tty, verifyPins: async () => undefined });
+    const quote = await runtime(p.sessionCall(8)).quote({ ...quoteRequest(), account, recipient: account,
+      deadline: Math.floor(NOW.getTime() / 1000) + 600 }) as { quoteHash: string };
+    const op = await runtime(p.sessionCall(9)).prepare({ command: "swap.uniswap-token.prepare", profile: "token-swap",
+      quoteHash: quote.quoteHash, idempotencyKey: malformed ? "malformed-foreign-owner" : "local-foreign-owner" });
+    const foreign = sameAddressProfile(p.state, account, "foreign-owner", malformed);
+    await p.state.writeProviderProfile(foreign);
+    if (malformed) await writeFile(join(temporary.root, "profiles", foreign.profile_hash, "profile.json"), "{broken", { mode: 0o600 });
+    await assert.rejects(runtime(p.sessionCall(14)).approve(op.operationId),
+      { code: malformed ? "APN_STATE_CORRUPT" : "APN_OPERATION_BLOCKED" });
+    assert.equal((await new UniswapTokenJournal(temporary.root).load(op.operationId))?.phase, "prepared");
+    assert.deepEqual(p.sends, []);
+  }
 });
 
 test("default profile with no wallet or Smart Account grant passes owner check", async (t) => {
