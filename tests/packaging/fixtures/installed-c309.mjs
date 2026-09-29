@@ -109,7 +109,7 @@ async function embeddedSession() {
 
 try {
   const pkg = JSON.parse(await readFile(new URL('package.json', installed), 'utf8'));
-  assert.equal(pkg.version, '0.5.31');
+  assert.equal(pkg.version, '0.5.32');
   const config = spawnSync(process.execPath, [binary, 'mcp', 'config'], { encoding: 'utf8' });
   assert.equal(config.status, 0, config.stderr);
   assert.deepEqual(JSON.parse(config.stdout), { schema_version: 'apn.mcp-launch.v1', transport: 'stdio', command: 'apn', args: ['mcp','serve'] });

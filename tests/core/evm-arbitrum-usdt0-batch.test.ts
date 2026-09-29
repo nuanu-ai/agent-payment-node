@@ -3,12 +3,14 @@ import { EventEmitter } from "node:events";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
 import test from "node:test";
-import { toHex } from "viem";
+import { keccak256, toHex } from "viem";
+import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { requireEvmFunding } from "../../src/evm-direct.js";
 import { EvmRpc } from "../../src/evm-rpc.js";
 import { checkEvmTransferFunding } from "../../src/evm-transfer-approval.js";
 import { HttpsBaseRpc } from "../../src/rpc.js";
+import { StateStore } from "../../src/state.js";
 import { EVM_BLOCK_HASH, EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 import { RECIPIENT, WALLET, temporaryState } from "./helpers.js";
@@ -133,4 +135,78 @@ test("Arbitrum USD₮0 approval signs once and leaves fast receipt for explicit 
   assert.equal(approved.state, "submitted_pending"); assert.equal(setup.rpc.broadcastCount, 1);
   const observed = await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string };
   assert.equal(observed.state, "completed"); assert.equal(setup.rpc.broadcastCount, 1);
+});
+
+test("v0.5.31-compatible signed Arbitrum USD₮0 operation resumes through grouped HTTPS reads without signing again", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  let signedRaw: `0x${string}` | undefined;
+  const setup = evmCore(temporary.root, undefined, undefined, undefined, native => ({ request: async request => {
+    const result = await native.request(request);
+    if (request.operation === "directTransfer.approveAndSign") {
+      signedRaw = (result as { rawTransaction: `0x${string}` }).rawTransaction;
+      setup.rpc.fees = { ...setup.rpc.fees, gasLimitAtomic: "99999" };
+    }
+    return result;
+  } }));
+  setup.rpc.chainId = 42161; setup.rpc.decimals = 6; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
+  setup.rpc.fees = { ...setup.rpc.fees, maxPriorityFeePerGasAtomic: "0" };
+  const wallet = await ensureDirectWallet(setup); setup.rpc.assetAtomic = "1000000";
+  await activateDirectPolicy(temporary.root, "default", { accounts: { evm: wallet.address },
+    admissions: [...evmDirectAdmissions(), directAdmission("eip155:42161", token,
+      { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "1000000" })], now: setup.clock.now() });
+  const frozenFees = setup.rpc.fees;
+  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: selection, amount: "0.1" }) as { operation_id: string };
+  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  const saved = await setup.state.findOperation(prepared.operation_id);
+  assert.ok(saved); assert.ok(signedRaw);
+  assert.equal(saved.schemaVersion, "apn.state.v1");
+  assert.equal(saved.state, "signed_not_submitted");
+  assert.equal(saved.rawTransactionHash, keccak256(signedRaw));
+  assert.equal(setup.rpc.broadcastCount, 0);
+
+  const posts: string[][] = []; let sends = 0, newSigns = 0, latestNonceReads = 0;
+  t.mock.method(https, "request", (_endpoint: URL, _options: unknown, receive: (response: unknown) => void) => {
+    const request = new EventEmitter() as any; request.setTimeout = () => request;
+    request.end = (body: string) => {
+      const envelope = JSON.parse(body) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];
+      const calls = Array.isArray(envelope) ? envelope : [envelope];
+      posts.push(calls.map(call => call.method));
+      const replies = calls.map(call => {
+        if (call.method === "eth_getTransactionReceipt") return { jsonrpc: "2.0", id: call.id, result: null };
+        if (call.method === "eth_sendRawTransaction") {
+          sends++;
+          assert.deepEqual(call.params, [signedRaw], "resume must send the sealed v0.5.31 raw effect unchanged");
+          return { jsonrpc: "2.0", id: call.id, result: keccak256(signedRaw!) };
+        }
+        if (call.method === "eth_getTransactionCount" && call.params[1] === "latest") latestNonceReads++;
+        return { jsonrpc: "2.0", id: call.id, result: answer(call.method, call.params) };
+      });
+      const raw = JSON.stringify(Array.isArray(envelope) ? replies.reverse() : replies[0]);
+      queueMicrotask(() => {
+        const response = new EventEmitter() as any; response.statusCode = 200;
+        response.headers = { "content-length": String(Buffer.byteLength(raw)) };
+        response.resume = () => { response.emit("end"); }; receive(response);
+        response.emit("data", Buffer.from(raw)); response.emit("end");
+      });
+      return request;
+    };
+    return request;
+  });
+  syncBuiltinESMExports(); t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+
+  const state = new StateStore(temporary.root);
+  const rpc = new HttpsBaseRpc("https://8.8.8.8/arbitrum", { directGuardState: state });
+  const core = new ApnCore({ state, rpc, clock: setup.clock, native: { request: async request => {
+    if (request.operation === "directTransfer.approveAndSign") newSigns++;
+    return await setup.local.request(request);
+  } } });
+  const resumed = await core.transfer.resume(prepared.operation_id) as { state: string };
+  assert.equal(resumed.state, "submitted_pending", "a missing receipt cannot establish paid completion");
+  assert.equal(newSigns, 0); assert.equal(sends, 1); assert.equal(latestNonceReads, 1);
+  assert.equal(posts.length, 12, "grouped recovery uses twelve physical POSTs");
+  assert.ok(posts.length <= 24);
+  assert.ok(posts.some(methods => methods.length > 1), "funding rereads must use HTTPS batches");
+  const retained = await state.findOperation(prepared.operation_id);
+  assert.equal(retained?.rawTransactionHash, saved.rawTransactionHash);
+  assert.equal(retained?.transactionHash, saved.transactionHash);
 });
