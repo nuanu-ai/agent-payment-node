@@ -348,6 +348,9 @@ export class TransferService {
         if (operation.evm?.asset.chainId === 8453 && operation.evm.asset.kind === "erc20" &&
             operation.evm.asset.address.toLowerCase() === "0x4200000000000000000000000000000000000006")
             return operation;
+        if (operation.evm?.asset.chainId === 42161 && operation.evm.asset.kind === "erc20" &&
+            operation.evm.asset.address.toLowerCase() === "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9")
+            return operation;
         return await this.inspectReceipt(operation, rpc);
     }
     async inspectReceipt(operation, rpc) {
