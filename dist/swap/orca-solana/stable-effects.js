@@ -203,20 +203,25 @@ function createAccountData(rent) {
 function programAddress(instruction, keys) {
     if (typeof instruction.programId === "string")
         return instruction.programId;
-    const index = instruction.programIdIndex;
-    if (typeof index !== "number" || !Number.isSafeInteger(index) || index < 0 || index >= keys.length)
-        invalid();
-    return keys[index];
+    return keys[accountIndex(instruction.programIdIndex, keys.length)];
 }
 function accountAddresses(instruction, keys) {
     const accounts = rpcArray(instruction.accounts, 32);
     return accounts.map((account) => {
         if (typeof account === "string")
             return account;
-        if (typeof account !== "number" || !Number.isSafeInteger(account) || account < 0 || account >= keys.length)
-            invalid();
-        return keys[account];
+        return keys[accountIndex(account, keys.length)];
     });
+}
+function accountIndex(value, length) {
+    if (typeof value === "bigint") {
+        if (value < 0n || value >= BigInt(length))
+            invalid();
+        return Number(value);
+    }
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value >= length)
+        invalid();
+    return value;
 }
 function invalid() { return blocked("Simulation contains an unexpected or malformed CPI transfer.", "orca_stable_trace_invalid"); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
