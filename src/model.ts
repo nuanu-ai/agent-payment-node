@@ -3,6 +3,7 @@ import type { EvmDirectBinding } from "./evm-direct.js";
 import type { EvmTransferEvidence } from "./evm-ports.js";
 import type { DirectAllowlistBinding } from "./direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
+import type { CoinbaseGaslessAllowlistBinding } from "./coinbase-gasless-policy.js";
 
 export type Address = `0x${string}`;
 export type Hex = `0x${string}`;
@@ -71,6 +72,8 @@ export interface CoinbaseGaslessBinding {
   readonly minReceivedAtomic: string;
   readonly senderNativeDebitWei: "0";
   readonly sponsorship: "coinbase_cdp_paymaster";
+  /** Absent only on historical operations, which are observation-only. */
+  readonly allowlist?: CoinbaseGaslessAllowlistBinding;
   readonly exclusiveAccountUseRequired: true;
   readonly awalPackage: "awal";
   readonly awalVersion: "2.12.1";
