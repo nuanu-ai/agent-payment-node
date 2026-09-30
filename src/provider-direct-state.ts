@@ -5,6 +5,7 @@ import type { RpcReceipt } from "./ports.js";
 import type { RuntimeContext } from "./runtime.js";
 import { appendTransition, sealOperation } from "./state.js";
 import { hasExactTransfer } from "./transfer-policy.js";
+import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 
 export class ProviderDirectState {
   constructor(private readonly context: RuntimeContext) {}
@@ -12,8 +13,12 @@ export class ProviderDirectState {
   async recoverOrphanTerminal(operation: OperationRecord): Promise<OperationRecord> {
     const receipt = await this.context.state.loadReceipt(operation.profileHash, operation.operationId);
     const recovered = recoverProviderTerminalOperation(operation, receipt);
-    if (recovered === null) return operation;
+    if (recovered === null) {
+      if (operation.providerDirect?.coinbaseGasless?.allowlist !== undefined) await new CoinbaseGaslessPolicy(this.context).reconcile(operation, true);
+      return operation;
+    }
     await this.context.state.writeOperation(recovered);
+    if (recovered.providerDirect?.coinbaseGasless?.allowlist !== undefined) await new CoinbaseGaslessPolicy(this.context).reconcile(recovered);
     return recovered;
   }
 
@@ -72,10 +77,12 @@ export class ProviderDirectState {
     if (operation.terminal) {
       await this.context.state.writeReceipt(operation.profileHash, receipt);
       await this.context.state.writeOperation(operation);
+      if (operation.providerDirect?.coinbaseGasless?.allowlist !== undefined) await new CoinbaseGaslessPolicy(this.context).reconcile(operation);
       return;
     }
     await this.context.state.writeOperation(operation);
     await this.context.state.writeReceipt(operation.profileHash, receipt);
+    if (operation.providerDirect?.coinbaseGasless?.allowlist !== undefined) await new CoinbaseGaslessPolicy(this.context).reconcile(operation);
   }
 
   private async receiptPending(operation: OperationRecord, reason: string): Promise<OperationRecord> {

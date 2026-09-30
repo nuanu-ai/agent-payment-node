@@ -22,6 +22,10 @@ import { sha256 } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
 import { accountBindingHash } from "../../src/provider-profile.js";
 import { HttpsBaseRpc } from "../../src/rpc.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { COINBASE_GASLESS_MECHANISM } from "../../src/coinbase-gasless-policy.js";
+import { hashObject } from "../../src/canonical.js";
 
 const SENDER = getAddress("0xfa4ec96026e3ddbb90e7adc4ccd5ba08353eccd8") as Address;
 const RECIPIENT = getAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd") as Address;
@@ -39,6 +43,26 @@ const deployment = JSON.parse(readFileSync("tests/core/fixtures/coinbase-base-de
 };
 const ACCOUNT_CODE = deployment.accountCode, IMPLEMENTATION_CODE = deployment.implementationCode;
 const ENTRY_POINT_CODE = deployment.entryPointCode, PAYMASTER_CODE = "0x60046000" as Hex;
+const POLICY_NOW = new Date("2026-09-12T00:00:00.000Z");
+
+async function activateCoinbasePolicy(root: string, profile: string, options: {
+  account?: Address; recipient?: Address; per?: string; daily?: string; expiresAt?: string;
+  mechanism?: { provider: string; reference: string };
+} = {}) {
+  const store = new AllowlistPolicyStore(root), before = await store.read(profile);
+  const record = await store.stage({ profile, now: POLICY_NOW,
+    ...(before.records.length === 0 ? {} : { expectedRevision: before.records.at(-1)!.revision }),
+    policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: `coinbase.${before.records.length + 1}`,
+      accounts: { evm: options.account ?? SENDER }, effectiveAt: "2026-09-11T00:00:00.000Z",
+      ...(options.expiresAt === undefined ? {} : { expiresAt: options.expiresAt }),
+      admissions: [{ chain: "eip155:8453", kind: "token", identifier: BASE_USDC, rail: "gasless",
+        maximumPerTransferAtomic: options.per ?? "10000", dailyLimitAtomic: options.daily ?? "20000",
+        mechanism: options.mechanism ?? COINBASE_GASLESS_MECHANISM, recipient: options.recipient ?? RECIPIENT }] } });
+  await store.appendDecision(profile, before.entries.at(-1)?.entryDigest ?? null, { status: "active", revision: record.revision,
+    stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest, registry: record.registry,
+    approvalFingerprint: hashObject(`coinbase-${profile}-${record.revision}`), decidedAt: POLICY_NOW.toISOString() });
+  return record;
+}
 const ENTRY_POINT_ABI = parseAbi(["function handleOps((address sender,uint256 nonce,bytes initCode,bytes callData,uint256 callGasLimit,uint256 verificationGasLimit,uint256 preVerificationGas,uint256 maxFeePerGas,uint256 maxPriorityFeePerGas,bytes paymasterAndData,bytes signature)[] ops,address beneficiary)"]);
 const ACCOUNT_ABI = parseAbi(["function executeBatch((address target,uint256 value,bytes data)[] calls)"]);
 const TOKEN_ABI = parseAbi(["function transfer(address to,uint256 value) returns (bool)"]);
@@ -122,6 +146,132 @@ class CoinbaseRpcFixture implements RpcPort {
   async getReceipt(): Promise<null> { return null; } async getLatestConfirmedNonce(): Promise<never> { throw new Error(); }
   async getConfirmedTransactionAtNonce(): Promise<null> { return null; }
 }
+
+async function policyFixture(t: test.TestContext, outcome: "not_started" | "ambiguous" = "not_started") {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const rpc = new CoinbaseRpcFixture(), state = new StateStore(temporary.root);
+  let providerCalls = 0, now = POLICY_NOW, approvalHook = async () => {};
+  const runner: AwalProcessRunnerPort = { run: async (argv) => argv[0] === "address"
+    ? { exitCode: 0, stdout: Buffer.from(SENDER) }
+    : argv[0] === "balance" ? { exitCode: 0, stdout: Buffer.from(JSON.stringify({ address: SENDER, chain: "Base",
+      balances: { USDC: { raw: "1000000", formatted: "1 USDC", decimals: 6 } }, timestamp: POLICY_NOW.toISOString() })) }
+      : { exitCode: 0, stdout: Buffer.alloc(0) } };
+  const direct: DirectExecutionPort = { mode: "provider_atomic_send", assertCompatibleIntent: () => {},
+    execute: async () => { providerCalls += 1; return outcome === "ambiguous"
+      ? { disposition: "ambiguous", reason: "provider_result_unknown" }
+      : { disposition: "not_started", reason: "provider_child_not_created" }; } };
+  const registry = new ProviderRegistry([{ provider_id: AWAL_PROVIDER_ID,
+    create: () => new AwalProcessAdapter(runner, direct).bundle() }]);
+  const foreground: ForegroundAuthenticationPort = { readIdentity: async () => "safe@example.invalid",
+    readChallengeResponse: async () => "123456", confirmRebind: async () => true };
+  assert.equal((await runCli(["wallet", "connect", "--profile", "coinbase-policy", "--provider", AWAL_PROVIDER_ID], {},
+    { stateRoot: temporary.root, providerRegistry: registry, foregroundAuthentication: foreground })).ok, true);
+  const core = new ApnCore({ state, profileRepository: new StateProfileRepository(state), providerRegistry: registry,
+    rpc, rpcUrl: "https://rpc.example/", clock: { now: () => now },
+    gasless: { rpcFor: () => { throw new Error("local gasless must not run"); }, custody: {} as never,
+      approval: { confirm: async () => { await approvalHook(); return true; } } } });
+  const request = (key: string, recipient: Address = RECIPIENT) => ({ command: "gasless.transfer.prepare" as const,
+    profile: "coinbase-policy", request: { chainId: 8453 as const, recipient, grossAtomic: "1000",
+      maxFeeAtomic: "0", minReceivedAtomic: "1000" }, idempotencyKey: key });
+  return { root: temporary.root, rpc, state, core, request, setNow: (value: Date) => { now = value; },
+    onApproval: (action: () => Promise<void>) => { approvalHook = action; },
+    providerCalls: () => providerCalls };
+}
+
+test("Coinbase prepare refuses absent or mismatched policy, caps, and expiry before RPC", async t => {
+  for (const kind of ["missing", "account", "mechanism", "recipient", "per_cap", "daily_cap", "expired"] as const) {
+    const s = await policyFixture(t);
+    if (kind !== "missing") {
+      const record = await activateCoinbasePolicy(s.root, "coinbase-policy", {
+        ...(kind === "account" ? { account: OUTER } : {}),
+        ...(kind === "mechanism" ? { mechanism: { provider: "local", reference: "different-paymaster" } } : {}),
+        ...(kind === "recipient" ? { recipient: OUTER } : {}),
+        ...(kind === "per_cap" ? { per: "999" } : {}),
+        ...(kind === "daily_cap" ? { per: "1000", daily: "1000" } : {}),
+        ...(kind === "expired" ? { expiresAt: "2026-09-12T00:00:01.000Z" } : {}),
+      });
+      if (kind === "daily_cap") await new AssetUsageLedger(s.root).reserve({ account: SENDER, chain: "eip155:8453",
+        asset: { kind: "token", identifier: BASE_USDC }, registry: record.registry, rail: "gasless",
+        mechanism: COINBASE_GASLESS_MECHANISM, amountAtomic: "1", idempotencyKey: "other-policy-operation", now: POLICY_NOW });
+      if (kind === "expired") s.setNow(new Date("2026-09-12T00:00:01.000Z"));
+    }
+    const denied = await s.core.execute(s.request(`denied-${kind}`));
+    assert.equal(denied.error?.code, "APN_ALLOWLIST_REFUSED", kind);
+    assert.equal(s.rpc.callLog.length, 0, kind);
+    assert.equal(s.providerCalls(), 0, kind);
+    assert.equal(await s.state.findOperation(s.state.operationId("coinbase-policy", `denied-${kind}`)), null, kind);
+  }
+});
+
+test("Coinbase policy pin is frozen at prepare, rechecked on saved replay and after approval before AWAL", async t => {
+  const s = await policyFixture(t);
+  const first = await activateCoinbasePolicy(s.root, "coinbase-policy");
+  const prepared = await s.core.execute(s.request("policy-change"));
+  assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  const id = s.state.operationId("coinbase-policy", "policy-change");
+  const stored = await s.state.findOperation(id);
+  assert.equal(stored?.providerDirect?.coinbaseGasless?.allowlist?.policyDigest, first.registry.policyDigest);
+  await activateCoinbasePolicy(s.root, "coinbase-policy", { recipient: OUTER });
+  const rpcBefore = s.rpc.callLog.length;
+  assert.equal((await s.core.execute(s.request("policy-change"))).error?.code, "APN_ALLOWLIST_REFUSED");
+  assert.equal(s.rpc.callLog.length, rpcBefore, "saved prepare cannot bypass the changed policy");
+  assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).error?.code,
+    "APN_ALLOWLIST_REFUSED");
+  assert.equal((await s.state.findOperation(id))?.state, "failed_before_effect");
+  assert.equal(s.providerCalls(), 0);
+});
+
+test("policy expiry during the foreground Coinbase decision blocks before reservation or provider effect", async t => {
+  const s = await policyFixture(t);
+  await activateCoinbasePolicy(s.root, "coinbase-policy", { expiresAt: "2026-09-12T00:00:01.000Z" });
+  assert.equal((await s.core.execute(s.request("prompt-policy-drift"))).ok, true);
+  const id = s.state.operationId("coinbase-policy", "prompt-policy-drift");
+  const prepared = (await s.state.findOperation(id))!;
+  s.onApproval(async () => { s.setNow(new Date("2026-09-12T00:00:01.000Z")); });
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.error?.code, "APN_ALLOWLIST_REFUSED");
+  assert.equal((await s.state.findOperation(id))?.state, "failed_before_effect");
+  assert.equal(s.providerCalls(), 0);
+  const lease = await new AssetUsageLedger(s.root).load({ account: SENDER, chain: "eip155:8453",
+    asset: { kind: "token", identifier: BASE_USDC } }, prepared.providerDirect!.coinbaseGasless!.allowlist!.reservationId);
+  assert.equal(lease, null);
+});
+
+test("Coinbase approval reserves shared gasless usage before provider invocation and releases a proven no-start", async t => {
+  const s = await policyFixture(t);
+  await activateCoinbasePolicy(s.root, "coinbase-policy");
+  assert.equal((await s.core.execute(s.request("reserve-before-awal"))).ok, true);
+  const id = s.state.operationId("coinbase-policy", "reserve-before-awal");
+  const prepared = (await s.state.findOperation(id))!;
+  const binding = prepared.providerDirect!.coinbaseGasless!.allowlist!;
+  const ledger = new AssetUsageLedger(s.root), identity = { account: SENDER, chain: "eip155:8453",
+    asset: { kind: "token" as const, identifier: BASE_USDC } };
+  assert.equal(await ledger.load(identity, binding.reservationId), null);
+  const approved = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(approved.ok, true, JSON.stringify(approved));
+  assert.equal(s.providerCalls(), 1);
+  assert.equal((await s.state.findOperation(id))?.state, "failed_before_effect");
+  assert.equal((await ledger.load(identity, binding.reservationId))?.state, "failed_before_effect");
+});
+
+test("an uncertain Coinbase provider result retains one usage reservation and never invokes AWAL twice", async t => {
+  const s = await policyFixture(t, "ambiguous");
+  s.rpc.noCandidate = true;
+  await activateCoinbasePolicy(s.root, "coinbase-policy");
+  assert.equal((await s.core.execute(s.request("uncertain-effect"))).ok, true);
+  const id = s.state.operationId("coinbase-policy", "uncertain-effect");
+  const prepared = (await s.state.findOperation(id))!;
+  const binding = prepared.providerDirect!.coinbaseGasless!.allowlist!;
+  const ledger = new AssetUsageLedger(s.root), identity = { account: SENDER, chain: "eip155:8453",
+    asset: { kind: "token" as const, identifier: BASE_USDC } };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal((await s.state.findOperation(id))?.state, "ambiguous_effect");
+  assert.equal((await ledger.load(identity, binding.reservationId))?.state, "unknown_finality");
+  assert.equal(s.providerCalls(), 1);
+  await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(s.providerCalls(), 1);
+});
 
 test("Coinbase gasless snapshot freezes safe account, implementation, EntryPoint and balance identity", async () => {
   const rpc = new CoinbaseRpcFixture(); const snapshot = await coinbaseGaslessSnapshot(rpc, SENDER);
@@ -298,6 +448,8 @@ test("gasless and ordinary Coinbase alias routes exclude both orders and concurr
     assert.equal((await runCli(["wallet", "connect", "--profile", "distinct", "--provider", AWAL_PROVIDER_ID], {},
       { stateRoot: temporary.root, providerRegistry: registry, foregroundAuthentication: foreground })).ok, true);
     address = SENDER;
+    await activateCoinbasePolicy(temporary.root, "alias-a");
+    await activateCoinbasePolicy(temporary.root, "alias-b");
     const state = new StateStore(temporary.root);
     const core = new ApnCore({ state, profileRepository: new StateProfileRepository(state), providerRegistry: registry,
       rpc: new CoinbaseRpcFixture(), rpcUrl: "https://rpc.example/", clock: { now: () => new Date("2026-09-12T00:00:00.000Z") },
@@ -384,6 +536,7 @@ test("common gasless prepare/approve/status/resume/receipt uses the provider-dir
   const connected = await runCli(["wallet", "connect", "--profile", "coinbase-gasless", "--provider", AWAL_PROVIDER_ID], {},
     { stateRoot: temporary.root, providerRegistry: registry, foregroundAuthentication: foreground });
   assert.equal(connected.ok, true, JSON.stringify(connected));
+  await activateCoinbasePolicy(temporary.root, "coinbase-gasless");
   const state = new StateStore(temporary.root), approvalCalls: unknown[] = [];
   const core = new ApnCore({ state, profileRepository: new StateProfileRepository(state), providerRegistry: registry,
     rpc, rpcUrl: "https://rpc.example/", clock: { now: () => new Date("2026-09-12T00:00:00.000Z") },

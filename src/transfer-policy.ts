@@ -161,6 +161,13 @@ export function publicOperation(operation: OperationRecord): unknown {
       quoted_fee_budget_atomic: coinbaseGasless.feeAtomic, user_max_fee_atomic: coinbaseGasless.maxFeeAtomic,
       minimum_received_atomic: coinbaseGasless.minReceivedAtomic, sender_native_debit_wei: coinbaseGasless.senderNativeDebitWei,
     }, sponsorship: { mechanism: coinbaseGasless.sponsorship, gas_payer: "external_cdp_account", token_fee_atomic: "0" },
+    ...(coinbaseGasless.allowlist === undefined ? {} : { asset_allowlist: {
+      rail: "gasless", policy_digest: coinbaseGasless.allowlist.policyDigest,
+      policy_revision: coinbaseGasless.allowlist.policyRevision,
+      activation_digest: coinbaseGasless.allowlist.activationDigest,
+      mechanism: coinbaseGasless.allowlist.mechanism,
+      reservation_id: coinbaseGasless.allowlist.reservationId,
+    } }),
     dispatch: { maximum_invocations: 1, retry_after_started: false, ambiguous_guard_retained: true,
       exclusive_account_use_required: true }, rpc_origin: coinbaseGasless.rpcOrigin,
     safe_anchor: coinbaseGasless.safeBlock, entry_point: coinbaseGasless.entryPoint,
