@@ -4,6 +4,7 @@ import { ApnError } from "./errors.js";
 import { validateEvmTransferEvidence } from "./direct-terminal-receipt.js";
 import { validateEvmDirectBinding, validateEvmOperation } from "./evm-direct.js";
 import { evmUint } from "./evm-asset.js";
+import { validateCoinbaseGaslessAllowlist } from "./coinbase-gasless-policy.js";
 import { formatAtomic, parseAtomic } from "./money.js";
 const ZERO_HASH = "0".repeat(64);
 export function appendTransition(previous, input) {
@@ -243,7 +244,8 @@ function validateCoinbaseGasless(operation, value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "chainId", "token", "grossAtomic", "netAtomic", "feeAtomic",
         "maxFeeAtomic", "minReceivedAtomic", "senderNativeDebitWei", "sponsorship", "exclusiveAccountUseRequired", "awalPackage",
         "awalVersion", "awalCommand", "rpcOrigin", "safeBlock", "entryPoint", "entryPointCodeHash", "accountCodeHash",
-        "accountImplementation", "accountImplementationCodeHash"]) || value.schemaVersion !== "apn.coinbase-gasless.v1" ||
+        "accountImplementation", "accountImplementationCodeHash", ...(value.allowlist === undefined ? [] : ["allowlist"])]) ||
+        value.schemaVersion !== "apn.coinbase-gasless.v1" ||
         value.chainId !== CHAIN_ID || value.token !== BASE_USDC || value.grossAtomic !== operation.amountAtomic ||
         value.netAtomic !== operation.amountAtomic || value.feeAtomic !== "0" || value.senderNativeDebitWei !== "0" ||
         value.sponsorship !== "coinbase_cdp_paymaster" || value.exclusiveAccountUseRequired !== true ||
@@ -256,6 +258,8 @@ function validateCoinbaseGasless(operation, value) {
         stateCorrupt("Coinbase gasless immutable binding is invalid.");
     }
     const gross = parseAtomic(value.grossAtomic, { positive: true }), minimum = parseAtomic(value.minReceivedAtomic, { positive: true });
+    if (value.allowlist !== undefined)
+        validateCoinbaseGaslessAllowlist(operation);
     parseAtomic(value.maxFeeAtomic);
     if (minimum > gross)
         stateCorrupt("Coinbase gasless amount bounds are invalid.");

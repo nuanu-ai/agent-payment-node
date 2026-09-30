@@ -158,7 +158,11 @@ function validateChain(value, schema) {
     for (const asset of value.assets) {
         validateAsset(value.family, asset, schema);
         if (asset.gaslessRecipient !== undefined && value.chain !== "eip155:1" && value.chain !== "eip155:8453") {
-            invalid("A local gasless recipient pin requires Ethereum or Base.");
+            invalid("A gasless recipient pin requires Ethereum or Base.");
+        }
+        if (asset.mechanismPins?.gasless?.provider === "coinbase-agentic-wallet" &&
+            (value.chain !== "eip155:8453" || asset.gaslessRecipient === undefined)) {
+            invalid("Coinbase gasless admission requires Base and one exact recipient.");
         }
         const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
         if (identities.has(identity))
@@ -192,10 +196,11 @@ function validateAsset(family, value, schema) {
     if (value.mechanismPins !== undefined)
         validateMechanismPins(value.mechanismPins);
     if (value.gaslessRecipient !== undefined) {
+        const provider = value.mechanismPins?.gasless?.provider;
         if (family !== "evm" || !value.rails.gasless ||
-            value.mechanismPins?.gasless?.provider !== "local" ||
+            (provider !== "local" && provider !== "coinbase-agentic-wallet") ||
             typeof value.gaslessRecipient !== "string" || canonicalEvmRecipient(value.gaslessRecipient) !== value.gaslessRecipient) {
-            invalid("A local gasless recipient pin must be one canonical EVM address.");
+            invalid("A gasless recipient pin must be one canonical EVM address.");
         }
     }
     if (value.mechanismOptions !== undefined) {
