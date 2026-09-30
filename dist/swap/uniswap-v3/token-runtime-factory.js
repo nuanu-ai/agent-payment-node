@@ -1,8 +1,7 @@
 import { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import { approvalCode } from "../../approval-code.js";
 import { ApnError } from "../../errors.js";
-import { assertExclusiveRelayExecutionOwner } from "../../evm-address-ownership.js";
-import { EncryptedSmartAccountPermissionStore } from "../../encrypted-smart-account-permission-store.js";
+import { assertExclusiveUniswapTokenSigner } from "../../evm-address-ownership.js";
 import { exactChainConsent } from "../../tty-approval.js";
 import { UniswapTokenQuoteBuilder } from "./token-builder.js";
 import { UniswapTokenCustody } from "./token-custody.js";
@@ -15,8 +14,8 @@ import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
 export function createUniswapTokenRuntime(input) {
-    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call, input.verifyPins), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins), permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
-    const approveOwner = async (op) => await assertExclusiveRelayExecutionOwner(state, permissions, op.account, state.profileHash(op.profile));
+    const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call, input.verifyPins), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
+    const approveOwner = async (op) => await assertExclusiveUniswapTokenSigner(state, op.account, state.profileHash(op.profile));
     const ports = {
         now: () => clock.now(), withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
         allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),

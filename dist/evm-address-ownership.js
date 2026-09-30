@@ -2,7 +2,7 @@ import { ApnError } from "./errors.js";
 import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
 import { listEncryptedWalletEnvelopes, listLocalWallets } from "./wallet-import-collision.js";
 import { stateCorrupt, stateSecurity } from "./secure-state-store.js";
-import { isGrantedPermissionRecord } from "./metamask-smart-account-record.js";
+import { isGrantedPermissionRecord, METAMASK_SMART_ACCOUNT_PROVIDER_ID } from "./metamask-smart-account-record.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const PROFILE_HASH = /^[a-f0-9]{64}$/u;
 /** All callers that inspect or change an EVM owner must share this kernel lock. */
@@ -14,6 +14,21 @@ export function evmAddressLock(address) {
 /** Caller holds evmAddressLock(address). Future Relay execution must repeat this check
  * while holding that lock before signing and again before the first submission. */
 export async function assertExclusiveEvmOwner(state, address, ownProfileHash) {
+    await assertExclusiveEvmOwnerWithProfileFilter(state, address, ownProfileHash, () => false);
+}
+/** Ethereum raw signing owns the local key and nonce. A Base Smart Account
+ * delegation for the same EOA does not own that raw signer. Caller holds evmAddressLock. */
+export async function assertExclusiveEvmRawSigner(state, address, ownProfileHash) {
+    await assertExclusiveEvmOwnerWithProfileFilter(state, address, ownProfileHash, (profile) => profile.provider_id === METAMASK_SMART_ACCOUNT_PROVIDER_ID &&
+        profile.trust_class === "external_owner_delegated_local_session");
+}
+/** Check a prepared token operation before and after foreground consent. */
+export async function assertExclusiveUniswapTokenSigner(state, address, ownProfileHash) {
+    await state.withLocks([evmAddressLock(address)], async () => {
+        await assertExclusiveEvmRawSigner(state, address, ownProfileHash);
+    });
+}
+async function assertExclusiveEvmOwnerWithProfileFilter(state, address, ownProfileHash, exemptProfile) {
     const target = address.toLowerCase();
     if (!ADDRESS.test(address) || !PROFILE_HASH.test(ownProfileHash)) {
         throw new ApnError("APN_INVALID_INPUT", "EVM ownership check identity is invalid.");
@@ -30,7 +45,8 @@ export async function assertExclusiveEvmOwner(state, address, ownProfileHash) {
         const profile = await state.loadProviderProfile(entry.name);
         if (profile === null)
             stateCorrupt("Provider profile disappeared during ownership check.");
-        check(entry.name, profile.public_address);
+        if (!exemptProfile(profile))
+            check(entry.name, profile.public_address);
     }
     for (const wallet of await listLocalWallets(state))
         check(wallet.profileHash, wallet.address);

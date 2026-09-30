@@ -100,6 +100,10 @@ amount. Successful execution proves the exact input debit, minimum output, and
 zero residual allowance. A reverted or drifted post-approval operation enters
 `cleanup_required`; only the explicit foreground `cleanup` command can send the
 zero allowance cleanup. `status` observes and may reconcile durable local state.
+The Ethereum raw signer may coexist with same-address MetaMask Smart Account
+profiles and their Base delegation grants. Approval and token effects still
+reject a second local signing profile or wallet for that address under the
+shared EVM owner lock.
 For an expired `prepared` operation with no approval, swap, cleanup attempt,
 usage reservation, or native debit, it reads the current allowance and records
 terminal no-effect evidence only when that allowance is zero. It never signs or
