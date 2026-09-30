@@ -54,7 +54,7 @@ export interface AssetPolicyRow {
     swap: SwapMechanismPin;
   }>>;
   readonly mechanismOptions?: Readonly<{ bridge: readonly AssetMechanismOption[] }>;
-  /** Optional canonical recipient bound only to Ethereum or Base local gasless admission. */
+  /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
   readonly gaslessRecipient?: string;
 }
 
@@ -249,7 +249,11 @@ function validateChain(value: unknown, schema: AssetPolicyRegistrySchema): asser
   for (const asset of value.assets) {
     validateAsset(value.family, asset, schema);
     if (asset.gaslessRecipient !== undefined && value.chain !== "eip155:1" && value.chain !== "eip155:8453") {
-      invalid("A local gasless recipient pin requires Ethereum or Base.");
+      invalid("A gasless recipient pin requires Ethereum or Base.");
+    }
+    if (asset.mechanismPins?.gasless?.provider === "coinbase-agentic-wallet" &&
+      (value.chain !== "eip155:8453" || asset.gaslessRecipient === undefined)) {
+      invalid("Coinbase gasless admission requires Base and one exact recipient.");
     }
     const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
     if (identities.has(identity)) invalid("An asset policy chain contains a duplicate asset identity.");
@@ -278,10 +282,11 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
   else validateCaps(value.caps);
   if (value.mechanismPins !== undefined) validateMechanismPins(value.mechanismPins);
   if (value.gaslessRecipient !== undefined) {
+    const provider = (value.mechanismPins as AssetPolicyRow["mechanismPins"])?.gasless?.provider;
     if (family !== "evm" || !value.rails.gasless ||
-        (value.mechanismPins as AssetPolicyRow["mechanismPins"])?.gasless?.provider !== "local" ||
+        (provider !== "local" && provider !== "coinbase-agentic-wallet") ||
         typeof value.gaslessRecipient !== "string" || canonicalEvmRecipient(value.gaslessRecipient) !== value.gaslessRecipient) {
-      invalid("A local gasless recipient pin must be one canonical EVM address.");
+      invalid("A gasless recipient pin must be one canonical EVM address.");
     }
   }
   if (value.mechanismOptions !== undefined) {

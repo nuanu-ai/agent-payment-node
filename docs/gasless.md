@@ -227,6 +227,18 @@ prepare, approve and resume. APN rechecks the provider address and the frozen
 smart-account proxy, implementation and EntryPoint deployment before the one
 provider invocation.
 
+The owner must first activate a Base canonical-USDC `gasless` allowlist
+admission for the same Coinbase account, with positive per-transfer and daily
+atomic caps, an exact recipient, and mechanism
+`{ "provider": "coinbase-agentic-wallet", "reference": "awal@2.12.1:send_base_usdc:eip155:8453" }`.
+Prepare checks the active policy and combined daily USDC usage before RPC and
+freezes its revision and activation. Approval rechecks them after the foreground
+decision, reserves the gross amount in the shared usage ledger, and checks the
+policy again before the single provider invocation. A revoked, expired, changed
+or mismatched policy denies a prepared operation. An uncertain provider effect
+retains the reservation until positive terminal settlement; a proven no-start
+releases it. Activating the policy does not send a transfer.
+
 ```sh
 export APN_BASE_RPC_URL='<https-base-rpc-url>'
 apn gasless balance --profile coinbase --chain 8453

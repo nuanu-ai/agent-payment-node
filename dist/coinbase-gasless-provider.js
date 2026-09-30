@@ -7,6 +7,8 @@ import { appendTransition, sealOperation } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, publicOperation } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { COINBASE_ENTRY_POINT, coinbaseGaslessSnapshot, observeCoinbaseGasless } from "./coinbase-gasless-observer.js";
+import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
+import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
     verdict: "foreground_approval_required",
@@ -26,7 +28,7 @@ export async function prepareCoinbaseGasless(context, operations, durable, loadP
     const initialBound = await loadProfile(profileHash);
     assertCoinbaseProfile(initialBound);
     return await state.withLocks([`profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
-        `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
+        `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, `profile:${allowlistProfileHash(profile)}`], async () => {
         const bound = await loadProfile(profileHash);
         assertCoinbaseProfile(bound);
         if (bound.account_binding_hash !== initialBound.account_binding_hash ||
@@ -43,8 +45,14 @@ export async function prepareCoinbaseGasless(context, operations, durable, loadP
             senderNativeDebitWei: "0", sponsorship: "coinbase_cdp_paymaster", rpcBindingHash };
         const requestHash = hashObject(materialRequest);
         const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
-        if (existing !== null)
+        const policy = new CoinbaseGaslessPolicy(context);
+        if (existing !== null) {
+            if (existing.record.state === "awaiting_approval")
+                await policy.assert(existing.record);
             return publicOperation(existing.record);
+        }
+        const allowlist = await policy.prepare({ profile, walletAddress: bound.public_address, recipient,
+            amountAtomic: gross.toString(), operationId });
         await operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
         await operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
         const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), bound.public_address);
@@ -57,7 +65,7 @@ export async function prepareCoinbaseGasless(context, operations, durable, loadP
             rpcBindingHash, rpcOriginHash: sha256(`direct-rpc-origin\0${snapshot.rpcOrigin}`), policy: DIRECT_POLICY,
             executionMode: "provider_atomic_send", executionOwner: "provider", retryOwner: "apn_outer_no_replay_journal",
             coinbaseGasless: { schemaVersion: "apn.coinbase-gasless.v1", chainId: CHAIN_ID, token: BASE_USDC,
-                grossAtomic: gross.toString(), netAtomic: gross.toString(), feeAtomic: "0", maxFeeAtomic: maximumFee.toString(),
+                grossAtomic: gross.toString(), netAtomic: gross.toString(), feeAtomic: "0", maxFeeAtomic: maximumFee.toString(), allowlist,
                 minReceivedAtomic: minimum.toString(), senderNativeDebitWei: "0", sponsorship: "coinbase_cdp_paymaster",
                 exclusiveAccountUseRequired: true, awalPackage: "awal", awalVersion: "2.12.1", awalCommand: "send_base_usdc",
                 rpcOrigin: snapshot.rpcOrigin, safeBlock: snapshot.safeBlock, entryPoint: COINBASE_ENTRY_POINT,

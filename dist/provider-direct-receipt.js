@@ -24,6 +24,7 @@ const DURABLE_PRE_EFFECT_REASONS = new Set([
     "delegated_apn_chain_mismatch",
     "coinbase_gasless_approval_rejected",
     "coinbase_gasless_deployment_or_balance_changed",
+    "coinbase_gasless_policy_denied",
 ]);
 const CHILD_NOT_CREATED_REASONS = new Set([
     "provider_binary_unavailable",
