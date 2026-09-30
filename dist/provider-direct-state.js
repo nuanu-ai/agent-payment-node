@@ -2,6 +2,7 @@ import { sha256 } from "./canonical.js";
 import { providerDirectReceipt, recoverProviderTerminalOperation } from "./provider-direct-receipt.js";
 import { appendTransition, sealOperation } from "./state.js";
 import { hasExactTransfer } from "./transfer-policy.js";
+import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 export class ProviderDirectState {
     context;
     constructor(context) {
@@ -10,9 +11,14 @@ export class ProviderDirectState {
     async recoverOrphanTerminal(operation) {
         const receipt = await this.context.state.loadReceipt(operation.profileHash, operation.operationId);
         const recovered = recoverProviderTerminalOperation(operation, receipt);
-        if (recovered === null)
+        if (recovered === null) {
+            if (operation.providerDirect?.coinbaseGasless?.allowlist !== undefined)
+                await new CoinbaseGaslessPolicy(this.context).reconcile(operation, true);
             return operation;
+        }
         await this.context.state.writeOperation(recovered);
+        if (recovered.providerDirect?.coinbaseGasless?.allowlist !== undefined)
+            await new CoinbaseGaslessPolicy(this.context).reconcile(recovered);
         return recovered;
     }
     async inspectReceipt(operation) {
@@ -62,10 +68,14 @@ export class ProviderDirectState {
         if (operation.terminal) {
             await this.context.state.writeReceipt(operation.profileHash, receipt);
             await this.context.state.writeOperation(operation);
+            if (operation.providerDirect?.coinbaseGasless?.allowlist !== undefined)
+                await new CoinbaseGaslessPolicy(this.context).reconcile(operation);
             return;
         }
         await this.context.state.writeOperation(operation);
         await this.context.state.writeReceipt(operation.profileHash, receipt);
+        if (operation.providerDirect?.coinbaseGasless?.allowlist !== undefined)
+            await new CoinbaseGaslessPolicy(this.context).reconcile(operation);
     }
     async receiptPending(operation, reason) {
         if (operation.state === "evidence_pending" || operation.state === "ambiguous_effect")

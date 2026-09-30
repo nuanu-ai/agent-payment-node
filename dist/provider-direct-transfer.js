@@ -15,6 +15,8 @@ import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, public
 import { canonicalProfile } from "./wallet-policy.js";
 import { coinbaseGaslessPreconditionsMatch, prepareCoinbaseGasless, reobserveCoinbaseGasless } from "./coinbase-gasless-provider.js";
 import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfile } from "./provider-direct-guards.js";
+import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
+import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
     verdict: "foreground_approval_required",
@@ -176,7 +178,8 @@ export class ProviderDirectTransferService {
         const found = await this.requiredOperation(operationId);
         const foundBinding = requiredBinding(found);
         return await this.context.state.withLocks([`profile:${found.profileHash}`,
-            `provider-account:${foundBinding.providerId}:${foundBinding.accountBindingHash}`, `operation:${operationId}`], async () => {
+            `provider-account:${foundBinding.providerId}:${foundBinding.accountBindingHash}`, `operation:${operationId}`,
+            ...(foundBinding.coinbaseGasless === undefined ? [] : [`profile:${allowlistProfileHash(found.profile)}`])], async () => {
             let operation = await this.requiredOperation(operationId);
             operation = await this.durable.recoverOrphanTerminal(operation);
             if (operation.terminal || operation.state !== "awaiting_approval")
@@ -188,6 +191,12 @@ export class ProviderDirectTransferService {
             await this.operations.assertProviderAccountAvailable(binding.providerId, binding.accountBindingHash, operation.walletAddress, operation.operationId);
             await this.assertFrozenPreconditions(operation, binding);
             if (binding.coinbaseGasless !== undefined) {
+                try {
+                    await new CoinbaseGaslessPolicy(this.context).assert(operation);
+                }
+                catch (error) {
+                    await this.failBeforeEffect(operation, "coinbase_gasless_policy_denied", error instanceof ApnError ? error : undefined);
+                }
                 const approval = this.context.gasless?.approval;
                 if (approval === undefined)
                     throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this Coinbase gasless transfer in a foreground terminal.", {
@@ -225,6 +234,14 @@ export class ProviderDirectTransferService {
             }
             if (binding.executionMode === "provider_atomic_send")
                 await this.reobserveProvider(operation, binding, adapter);
+            if (binding.coinbaseGasless !== undefined) {
+                try {
+                    await new CoinbaseGaslessPolicy(this.context).reserve(operation);
+                }
+                catch (error) {
+                    await this.failBeforeEffect(operation, "coinbase_gasless_policy_denied", error instanceof ApnError ? error : undefined);
+                }
+            }
             operation = await this.durable.transition(operation, "started", false, "provider_effect_started", "durable_provider_no_replay");
             let result;
             try {

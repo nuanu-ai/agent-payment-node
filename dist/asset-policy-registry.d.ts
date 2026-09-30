@@ -50,7 +50,7 @@ export interface AssetPolicyRow {
     readonly mechanismOptions?: Readonly<{
         bridge: readonly AssetMechanismOption[];
     }>;
-    /** Optional canonical recipient bound only to Ethereum or Base local gasless admission. */
+    /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
     readonly gaslessRecipient?: string;
 }
 export interface AssetPolicyChain {
