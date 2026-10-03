@@ -70,7 +70,7 @@
     "@solana-program/token": "0.16.1",
     "@solana/kit": "8.2.0",
     "@toruslabs/ethereum-controllers": "9.12.0",
-    "@x402/core": "2.23.0",
+    "@x402/core": "2.25.0",
     "@x402/evm": "2.23.0",
     "awal": "2.12.1",
     "tronweb": "6.5.0",
