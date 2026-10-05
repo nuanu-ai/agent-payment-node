@@ -83,6 +83,7 @@ export class UsdtJsonRpc {
 /** Read one authenticated safe-block account view. Every contract and account read uses the same safe tag. */
 export async function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: string, sender: Address): Promise<{
   readonly chainId: bigint; readonly blockNumber: bigint; readonly blockHash: Hex; readonly account: UsdtAccountState;
+  readonly pins: import("./sponsor-auth.js").UsdtSponsorSnapshot["pins"];
 }> {
   const rpc = new UsdtJsonRpc(transport, rpcUrl, CHAIN_METHODS);
   const [rawChainId, rawBlock] = await rpc.batch([
@@ -130,6 +131,8 @@ export async function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: stri
   const entryPointNonce = rpcWord(values[10]);
   const eoaNonce = rpcQuantity(values[11]);
   return { chainId, blockNumber, blockHash,
+    pins: { token: keccak256(rpcHex(values[0])), entryPoint: keccak256(rpcHex(values[1])),
+      delegate: keccak256(rpcHex(values[2])), paymaster: keccak256(rpcHex(values[3])), paymasterEntryPoint: rpcAddress(`0x${rpcHex(values[7]).slice(26)}`) },
     account: { usdtBalanceAtomic, entryPointNonce, eoaNonce, delegation: code === "0x" ? "empty" : "expected" } };
 }
 
