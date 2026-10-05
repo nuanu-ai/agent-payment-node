@@ -23,6 +23,8 @@ export class Permit2ObserverRpc {
     this.rpc.armEvmDirectRpcGuard();
     this.timeout = setTimeout(() => this.controller.abort(), 20_000);
   }
+  /** Read-only cancellation identity; controller and original shared timer remain owned here. */
+  get signal(): AbortSignal { return this.controller.signal; }
   async batch(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
     if (calls.length < 1 || calls.length > 5 || ++this.batches > 5 || this.logicalReads + calls.length > 20 ||
         calls.some(call => !["eth_chainId", "eth_getBlockByNumber", "eth_getCode", "eth_call",

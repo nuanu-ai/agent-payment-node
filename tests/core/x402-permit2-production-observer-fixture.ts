@@ -39,6 +39,7 @@ export async function observerFixture(t: TestContext, sponsor = false) {
   let blockReads = 0;
   const batches: any[][] = [], endpoints: string[] = [];
   const wire = { chain: "0xa86a", bitmap: word(0n), tokenNonce: word(9n), proxyCode, permit2Code,
+    payerCode: "0x" as Hex, balance: word(20000n), allowance: word(10000n), beforeBatch: undefined as undefined | ((calls: any[]) => Promise<void>),
     domain: X402_PERMIT2_ASSETS[0]!.tokenDomainSeparator, reorg: false, unsupportedCanonical: false, httpStatus: 200,
     missing: false, headReorg: false, tx, receipt, block, finalized };
   t.mock.method(https, "request", (endpoint: URL, _options: unknown, receive: (response: unknown) => void) => {
@@ -46,7 +47,8 @@ export async function observerFixture(t: TestContext, sponsor = false) {
     const request = new EventEmitter() as any; request.setTimeout = () => request;
     request.end = (body: string) => {
       const calls = JSON.parse(body); assert.ok(Array.isArray(calls)); assert.ok(calls.length <= 5); batches.push(calls);
-      queueMicrotask(() => {
+      queueMicrotask(async () => {
+        if (wire.beforeBatch !== undefined) await wire.beforeBatch(calls);
         const responses = calls.map((call: any) => {
           let result: unknown;
           if (call.method === "eth_chainId") result = wire.chain;
@@ -59,10 +61,10 @@ export async function observerFixture(t: TestContext, sponsor = false) {
           else {
             assert.deepEqual(call.params[1], { blockHash: input.mode === "settlement" ? wire.block.hash : wire.finalized.hash, requireCanonical: true });
             if (wire.unsupportedCanonical) return { jsonrpc: "2.0", id: call.id, error: { code: -32602, message: "private-provider-error" } };
-            if (call.method === "eth_getCode") result = call.params[0] === X402_EXACT_PERMIT2_PROXY ? wire.proxyCode : wire.permit2Code;
+            if (call.method === "eth_getCode") result = call.params[0] === X402_EXACT_PERMIT2_PROXY ? wire.proxyCode : call.params[0] === f.prepared.payer ? wire.payerCode : wire.permit2Code;
             else {
               assert.equal(call.method, "eth_call"); const data = call.params[0].data as string;
-              result = call.params[0].to === PERMIT2_ADDRESS ? wire.bitmap : data.startsWith("0x7ecebe00") ? wire.tokenNonce : wire.domain;
+              result = call.params[0].to === PERMIT2_ADDRESS ? wire.bitmap : data.startsWith("0x7ecebe00") ? wire.tokenNonce : data.startsWith("0x70a08231") ? wire.balance : data.startsWith("0xdd62ed3e") ? wire.allowance : wire.domain;
             }
           }
           return { jsonrpc: "2.0", id: call.id, result };

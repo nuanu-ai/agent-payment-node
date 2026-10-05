@@ -18,6 +18,8 @@ export declare class Permit2ObserverRpc {
     private readonly methods;
     private batches;
     constructor(endpoint: string, state: StateStore);
+    /** Read-only cancellation identity; controller and original shared timer remain owned here. */
+    get signal(): AbortSignal;
     batch(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]>;
     metrics(): Permit2ObservationMetrics;
     close(): void;
