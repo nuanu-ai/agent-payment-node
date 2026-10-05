@@ -50,7 +50,9 @@ export function observerTransaction(value, locator) {
 }
 export function observerReceipt(value, transaction) {
     const receipt = evmRpcRecord(value), tx = evmRpcRecord(transaction);
-    if (!Array.isArray(receipt.logs) || receipt.logs.length > 4096 || receipt.transactionIndex !== tx.transactionIndex)
+    if (!Array.isArray(receipt.logs) || receipt.logs.length > 4096 || receipt.transactionIndex !== tx.transactionIndex ||
+        typeof receipt.from !== "string" || typeof receipt.to !== "string" ||
+        receipt.from.toLowerCase() !== String(tx.from).toLowerCase() || receipt.to.toLowerCase() !== String(tx.to).toLowerCase())
         mismatch();
     return { transactionHash: receipt.transactionHash,
         blockHash: receipt.blockHash, blockNumber: receipt.blockNumber,

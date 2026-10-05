@@ -32,7 +32,6 @@ export declare class Permit2ProductionPreparation {
     private required;
     /** Concrete active-policy admission; ledger snapshot is acquired without profile/operation locks. */
     assertCurrentOwner(id: string): Promise<Permit2ProductionRecord>;
-    private ownerLocked;
     reserve(id: string): Promise<Permit2ProductionRecord>;
     /** Expiry only releases proven unsigned material. No caller proof digest or exposed-release API exists. */
     releaseExpired(id: string): Promise<Permit2ProductionRecord>;

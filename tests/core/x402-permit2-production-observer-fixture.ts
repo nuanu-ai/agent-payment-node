@@ -29,7 +29,7 @@ export async function observerFixture(t: TestContext, sponsor = false) {
     blockHash: block.hash, blockNumber: block.number, transactionIndex: "0x1" };
   const identity = { transactionHash: tx.hash, blockHash: tx.blockHash, blockNumber: tx.blockNumber,
     transactionIndex: tx.transactionIndex, removed: false };
-  const receipt = { transactionHash: tx.hash, blockHash: tx.blockHash, blockNumber: tx.blockNumber,
+  const receipt = { from: tx.from, to: tx.to, transactionHash: tx.hash, blockHash: tx.blockHash, blockNumber: tx.blockNumber,
     transactionIndex: tx.transactionIndex, status: "0x1", logs: [
     { ...identity, address: f.prepared.token, logIndex: "0x2", topics: [ERC20_TRANSFER_TOPIC, topic(f.prepared.payer), topic(f.prepared.payTo)], data: word(BigInt(f.prepared.amountAtomic)) },
     { ...identity, address: X402_EXACT_PERMIT2_PROXY, logIndex: "0x3", topics: [sponsor ? PROXY_SETTLED_WITH_PERMIT_TOPIC : PROXY_SETTLED_TOPIC], data: "0x" },

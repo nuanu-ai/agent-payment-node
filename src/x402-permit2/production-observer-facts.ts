@@ -51,7 +51,9 @@ export function observerTransaction(value: unknown, locator: string): Permit2Dir
 }
 export function observerReceipt(value: unknown, transaction: unknown): Permit2ReceiptInput {
   const receipt = evmRpcRecord(value), tx = evmRpcRecord(transaction);
-  if (!Array.isArray(receipt.logs) || receipt.logs.length > 4096 || receipt.transactionIndex !== tx.transactionIndex) mismatch();
+  if (!Array.isArray(receipt.logs) || receipt.logs.length > 4096 || receipt.transactionIndex !== tx.transactionIndex ||
+      typeof receipt.from !== "string" || typeof receipt.to !== "string" ||
+      receipt.from.toLowerCase() !== String(tx.from).toLowerCase() || receipt.to.toLowerCase() !== String(tx.to).toLowerCase()) mismatch();
   return { transactionHash: receipt.transactionHash as Permit2ReceiptInput["transactionHash"],
     blockHash: receipt.blockHash as Permit2ReceiptInput["blockHash"], blockNumber: receipt.blockNumber as string,
     status: receipt.status as "0x0" | "0x1", logs: receipt.logs.map(value => {
