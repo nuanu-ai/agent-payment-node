@@ -99,7 +99,7 @@ export function classifyX402LogAvailabilityMessage(message) {
     const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most|up to)\b/u.test(text);
     return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
-export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false, abortSignal) {
+export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false, abortSignal, counters) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -107,6 +107,8 @@ export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, 
             return;
         }
         let requestTimedOut = false;
+        if (counters !== undefined)
+            counters.physicalDispatches += 1;
         const request = httpsRequest(endpoint, {
             method: "POST",
             signal: abortSignal,

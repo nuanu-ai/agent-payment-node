@@ -1,3 +1,4 @@
+import type { RpcObservationCounters } from "./rpc-observation-metrics.js";
 import { request as httpsRequest } from "node:https";
 import { isDeepStrictEqual } from "node:util";
 import { record } from "./base-rpc-codec.js";
@@ -109,11 +110,13 @@ export async function postJson(
   rpcMethod: string,
   allowJsonRpcClientError = false,
   abortSignal?: AbortSignal,
+  counters?: RpcObservationCounters,
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const selected = addresses[0];
     if (selected === undefined) { reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address.")); return; }
     let requestTimedOut = false;
+    if (counters !== undefined) counters.physicalDispatches += 1;
     const request = httpsRequest(endpoint, {
       method: "POST",
       signal: abortSignal,
