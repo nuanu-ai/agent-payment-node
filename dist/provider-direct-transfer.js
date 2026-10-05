@@ -14,7 +14,7 @@ import { appendTransition, sealOperation } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, publicOperation, publicReceipt, } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { coinbaseGaslessPreconditionsMatch, prepareCoinbaseGasless, reobserveCoinbaseGasless } from "./coinbase-gasless-provider.js";
-import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfile } from "./provider-direct-guards.js";
+import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfile, requiredProviderDirectAdapter } from "./provider-direct-guards.js";
 import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 const DIRECT_POLICY = {
@@ -368,13 +368,7 @@ export class ProviderDirectTransferService {
         }
     }
     requiredAdapter(binding) {
-        const adapter = this.context.requireProviderRegistry().resolve(binding.providerId);
-        if (adapter.direct?.mode !== binding.executionMode || adapter.direct.execute === undefined ||
-            capabilityHash(adapter.capabilities) !== binding.capabilityHash ||
-            adapter.capabilities.direct.available !== true || adapter.capabilities.direct.mode !== binding.executionMode ||
-            adapter.capabilities.evidence.available !== true || adapter.capabilities.evidence.owner !== "apn")
-            throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The bound provider direct effect is unavailable.");
-        return adapter;
+        return requiredProviderDirectAdapter(this.context, binding);
     }
     async reobserveProvider(operation, binding, adapter) {
         await adapter.lifecycle.probeStatus();
