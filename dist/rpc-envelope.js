@@ -107,8 +107,6 @@ export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, 
             return;
         }
         let requestTimedOut = false;
-        if (counters !== undefined)
-            counters.physicalDispatches += 1;
         const request = httpsRequest(endpoint, {
             method: "POST",
             signal: abortSignal,
@@ -149,6 +147,8 @@ export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, 
             response.on("error", () => { if (!abortSignal?.aborted && !requestTimedOut)
                 reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC response failed safely.")); });
         });
+        if (counters !== undefined)
+            counters.physicalDispatches += 1;
         request.setTimeout(timeoutMs, () => { requestTimedOut = true; request.destroy(); });
         request.on("error", (error) => {
             // Abort rejects only after close, when the underlying HTTPS request has stopped.
