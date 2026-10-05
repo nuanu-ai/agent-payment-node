@@ -25,7 +25,7 @@ type OwnedSigningContext = Awaited<ReturnType<typeof signingOwnerFence>>;
 export class Permit2ProductionSigningFence {
   private readonly state: StateStore;
   private readonly records: Permit2ProductionRepository;
-  private readonly facts = new WeakMap<Permit2SigningFact, { readonly context: OwnedSigningContext; readonly projection: Permit2SigningProjection }>();
+  readonly #facts = new WeakMap<Permit2SigningFact, { readonly context: OwnedSigningContext; readonly projection: Permit2SigningProjection }>();
   constructor(root: string, private readonly endpoint: string, private readonly clock: () => Date = () => new Date()) {
     if (typeof root !== "string" || typeof endpoint !== "string") invalid();
     this.state = new StateStore(root); this.records = new Permit2ProductionRepository(root);
@@ -66,7 +66,7 @@ export class Permit2ProductionSigningFence {
         currentLeaseDigest: lease.reservationDigest, capturedAt: checked.captured.toISOString(), blockNumber: checked.block.number,
         blockHash: checked.block.hash, rpc: rpc.metrics() });
       const fact = Object.freeze({ kind: "checked-permit2-signing-observation" as const });
-      this.facts.set(fact, { context: checked.context, projection });
+      this.#facts.set(fact, { context: checked.context, projection });
       return Object.freeze({ projection, fact });
     } catch {
       return Object.freeze({ projection: Object.freeze({ operationId: id, mode: selected, outcome: "hold", operationDigest: null,
@@ -77,7 +77,7 @@ export class Permit2ProductionSigningFence {
   /** Single-use private provenance; owned lifecycle/lease/owner and trusted age are rechecked, never caller facts. */
   async consume(fact: Permit2SigningFact, operationId: string, mode: Permit2SigningMode): Promise<Permit2SigningProjection> {
     const id = operationId, selected = mode; identity(id, selected);
-    const saved = this.facts.get(fact);
+    const saved = this.#facts.get(fact);
     if (saved === undefined || saved.projection.operationId !== id || saved.projection.mode !== selected) invalid();
     const assertAge = () => {
       const now = this.now(), at = Date.parse(saved.projection.capturedAt!);
@@ -85,7 +85,7 @@ export class Permit2ProductionSigningFence {
       assertSigningTime(saved.context.record, now);
     };
     assertAge(); await signingOwnerFence(this.state, this.records, id, selected, this.now, saved.context); assertAge();
-    if (this.facts.get(fact) !== saved) invalid(); this.facts.delete(fact); return saved.projection;
+    if (this.#facts.get(fact) !== saved) invalid(); this.#facts.delete(fact); return saved.projection;
   }
 }
 function identity(id: string, mode: Permit2SigningMode): void { if (typeof id !== "string" || !/^[a-f0-9]{64}$/u.test(id) || !["reserved", "exposed"].includes(mode)) invalid(); }

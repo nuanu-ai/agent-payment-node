@@ -23,11 +23,11 @@ export interface Permit2SigningProjection {
 }
 /** Actual read-only observation only. Never human approval, custody permission, or transport authority. */
 export declare class Permit2ProductionSigningFence {
+    #private;
     private readonly endpoint;
     private readonly clock;
     private readonly state;
     private readonly records;
-    private readonly facts;
     constructor(root: string, endpoint: string, clock?: () => Date);
     private now;
     check(operationId: string, mode: Permit2SigningMode): Promise<{
