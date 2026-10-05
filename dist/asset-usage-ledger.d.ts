@@ -1,8 +1,7 @@
 import { type AssetPolicyRail } from "./asset-policy-registry.js";
 import { SecureStateStore } from "./secure-state-store.js";
-export declare const ASSET_USAGE_RESERVATION_SCHEMA: "apn.asset-usage-reservation.v1";
-/** Existing chain-policy convention: [00:00:00.000Z, next 00:00:00.000Z). */
-export declare const ASSET_USAGE_WINDOW: "utc-calendar-day";
+import { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW } from "./asset-usage-ledger-record.js";
+export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, assetUsageReservationId, validateAssetUsageReservation } from "./asset-usage-ledger-record.js";
 export type AssetUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect"
 /** Payment was never submitted and a terminal proof closes any earlier authorization exposure. */
  | "released_unsubmitted"
@@ -95,6 +94,3 @@ export declare class AssetUsageLedger extends SecureStateStore {
     private recordPath;
     private bucketLock;
 }
-/** The reservation id that `reserve` creates or replays for this exact identity and idempotency key. */
-export declare function assetUsageReservationId(identityValue: AssetUsageIdentity, idempotencyKey: string): string;
-export declare function validateAssetUsageReservation(value: unknown): AssetUsageReservation;

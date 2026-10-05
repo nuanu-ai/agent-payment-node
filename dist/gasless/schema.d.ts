@@ -508,9 +508,9 @@ export declare const consentSchema: z.ZodObject<{
     expiresAt: z.ZodString;
 }, z.core.$strict>;
 export declare const stateSchema: z.ZodEnum<{
+    failed_confirmed_revert: "failed_confirmed_revert";
     unknown_finality: "unknown_finality";
     failed_before_effect: "failed_before_effect";
-    failed_confirmed_revert: "failed_confirmed_revert";
     awaiting_approval: "awaiting_approval";
     completed: "completed";
     submitted_pending: "submitted_pending";
@@ -579,9 +579,9 @@ export declare const transitionSchema: z.ZodObject<{
     previousHash: z.ZodString;
     transitionHash: z.ZodString;
     state: z.ZodEnum<{
+        failed_confirmed_revert: "failed_confirmed_revert";
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
-        failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         completed: "completed";
         submitted_pending: "submitted_pending";
@@ -1012,9 +1012,9 @@ export declare const operationSchema: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         state: z.ZodEnum<{
+            failed_confirmed_revert: "failed_confirmed_revert";
             unknown_finality: "unknown_finality";
             failed_before_effect: "failed_before_effect";
-            failed_confirmed_revert: "failed_confirmed_revert";
             awaiting_approval: "awaiting_approval";
             completed: "completed";
             submitted_pending: "submitted_pending";
@@ -1327,9 +1327,9 @@ export declare const operationSchema: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
+        failed_confirmed_revert: "failed_confirmed_revert";
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
-        failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         completed: "completed";
         submitted_pending: "submitted_pending";
