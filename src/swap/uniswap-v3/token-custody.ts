@@ -3,8 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
-import { assertExclusiveEvmOwnerIncludingGrants, evmAddressLock } from "../../evm-address-ownership.js";
-import { EncryptedSmartAccountPermissionStore } from "../../encrypted-smart-account-permission-store.js";
+import { assertExclusiveEvmRawSigner, evmAddressLock } from "../../evm-address-ownership.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
 import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
@@ -23,12 +22,10 @@ export interface TokenTransactionEnvelope { readonly chainId: 1; readonly from: 
 /** Local encrypted-wallet custody plus the durable one-way broadcast boundary. */
 export class UniswapTokenCustody {
   private readonly wallets: EncryptedWalletStore;
-  private readonly permissions: EncryptedSmartAccountPermissionStore;
   private readonly nonces: UniswapTokenNonceStore;
   private readonly operations: UniswapTokenJournal;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
     private readonly now: () => Date, private readonly effects = new UniswapTokenEffectJournal(state.root)) { this.wallets = new EncryptedWalletStore(state, wrapping);
-    this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
     this.nonces = new UniswapTokenNonceStore(state.root); this.operations = new UniswapTokenJournal(state.root); }
 
   async withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T> {
@@ -36,7 +33,7 @@ export class UniswapTokenCustody {
       evmAddressLock(op.account)], async () => { await this.assertOwner(op); return await work(); });
   }
   private async assertOwner(op: UniswapTokenOperation): Promise<void> {
-    await assertExclusiveEvmOwnerIncludingGrants(this.state, this.permissions, op.account, this.state.profileHash(op.profile));
+    await assertExclusiveEvmRawSigner(this.state, op.account, this.state.profileHash(op.profile));
   }
   async allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind) {
     await this.reconcileNonceReservations(op.account);
