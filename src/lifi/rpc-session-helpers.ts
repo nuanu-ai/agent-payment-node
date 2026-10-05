@@ -1,6 +1,8 @@
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import type { RpcDecoder, RpcReadTelemetry } from "./rpc-session.js";
+import type { RpcReadTelemetry } from "./rpc-session.js";
+
+export type RpcDecoder<T = unknown> = (value: unknown) => T;
 
 export const MAX_READ_ATTEMPTS = 2;
 export const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;

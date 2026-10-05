@@ -1,3 +1,4 @@
+import type { RpcDecoder } from "./rpc-session-helpers.js";
 import {
   BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS,
   RPC_DEFAULT_LOGICAL_ITEMS, RPC_DEFAULT_HTTP_REQUESTS, RPC_DEFAULT_HTTP_ATTEMPTS, RPC_DEFAULT_DEADLINE_MS,
@@ -70,7 +71,6 @@ export interface RpcReadTelemetry {
   readonly perMethod: Readonly<Record<string, number>>;
   readonly remainingUniqueCalls: number;
 }
-export type RpcDecoder<T = unknown> = (value: unknown) => T;
 interface BatchExecution {
   readonly raw: readonly unknown[];
   readonly decoded: readonly unknown[];

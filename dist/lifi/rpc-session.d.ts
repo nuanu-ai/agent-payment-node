@@ -1,3 +1,4 @@
+import type { RpcDecoder } from "./rpc-session-helpers.js";
 import { BridgeRpcPhysicalBudget } from "./rpc-session-helpers.js";
 export { BridgeRpcPhysicalBudget, BRIDGE_INVOCATION_RPC_POST_LIMIT, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
 export type { RpcReadMethod } from "./rpc-session-helpers.js";
@@ -60,7 +61,6 @@ export interface RpcReadTelemetry {
     readonly perMethod: Readonly<Record<string, number>>;
     readonly remainingUniqueCalls: number;
 }
-export type RpcDecoder<T = unknown> = (value: unknown) => T;
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export declare class RpcReadSession {
     readonly physicalBudget: BridgeRpcPhysicalBudget | undefined;
