@@ -483,6 +483,7 @@ export type CommandRequest = {
 } | {
     readonly command: "wallet.portfolio";
     readonly profile: string;
+    readonly refresh?: boolean;
 } | {
     readonly command: "wallet.policy.show";
     readonly profile: string;

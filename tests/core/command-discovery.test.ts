@@ -196,7 +196,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet ensure-tron --profile <profile> --provider local --accept-risk true — Ensure a separate encrypted local secp256k1 TRON wallet without funding or activation.",
     "  apn wallet balance-tron --profile <profile> --asset <trx-or-usdt> — Read solidified TRX or canonical USDT and the separate TRX fee balance through APN_TRON_RPC_URL.",
     "  apn wallet capabilities-tron [--profile <profile>] — Inspect all four provider capabilities and unavailable TRON x402, sponsorship and bridge execution.",
-    "  apn wallet portfolio [--profile <profile>] — Read every native coin and list token on all frozen-list networks in one batched, read-only pass.",
+    "  apn wallet portfolio [--profile <profile>] [--refresh] — Read every native coin and list token on all frozen-list networks in one batched, read-only pass.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet <child>",
@@ -612,6 +612,7 @@ function validArgv(command: CommandDefinition, includeOptional: boolean): string
 
 function validValue(type: ScalarType): string {
   switch (type) {
+    case "boolean": return "true";
     case "base64": return "e30=";
     case "string": return "value";
     case "profile": return "agent_1";

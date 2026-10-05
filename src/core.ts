@@ -338,7 +338,7 @@ export class ApnCore {
           await evmWalletBalance(this.context, request.profile, request.asset),
         "chain_verified_public_read",
       );
-      case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile), "chain_verified_public_read");
+      case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile, request.refresh), "chain_verified_public_read");
       case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId), "encrypted_profile_policy_status");
       case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
       case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId, request.payer), "seller_challenge_static");

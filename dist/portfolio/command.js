@@ -1,3 +1,4 @@
+import { hashObject } from "../canonical.js";
 import { loadAllowlistInventory } from "../allowlist-inventory.js";
 import { AssetPortfolioReader } from "../asset-portfolio-reader.js";
 import { ApnError } from "../errors.js";
@@ -11,7 +12,7 @@ export async function portfolioPause(milliseconds) {
     return "elapsed";
 }
 /** Read-only: resolves public profile accounts under the profile lock, then reads every list network without holding it. */
-export async function readProfilePortfolio(context, profileInput) {
+export async function readProfilePortfolio(context, profileInput, refresh = false) {
     const profile = canonicalProfile(profileInput);
     const dependencies = context.portfolio;
     if (dependencies === undefined)
@@ -22,10 +23,10 @@ export async function readProfilePortfolio(context, profileInput) {
     }
     await context.ready();
     const profileHash = context.state.profileHash(profile);
-    const accounts = await context.state.withLocks([`profile:${profileHash}`], async () => await profileAccounts(context, profile, profileHash));
+    const snapshot = await context.state.withLocks([`profile:${profileHash}`], async () => await profileAccounts(context, profile, profileHash));
     const reader = new AssetPortfolioReader({ evm: new EvmPortfolioPort(dependencies.http), solana: new SolanaPortfolioPort(dependencies.http),
         tron: new TronPortfolioPort(dependencies.http) }, () => context.clock.now(), dependencies.wait);
-    const portfolio = await reader.read({ inventory, accounts,
+    const portfolio = await reader.read({ inventory, accounts: snapshot.accounts, cache: { state: context.state, profileHash, profileIdentity: snapshot.identity, refresh },
         endpoint: (chain) => portfolioEndpoint(chain, dependencies.environment) });
     return publicPortfolio(profile, portfolio);
 }
@@ -40,8 +41,8 @@ async function profileAccounts(context, profile, profileHash) {
         ? { kind: "unsupported", reason: "external_provider_profile" }
         : wallet === null ? { kind: "none" } : { kind: "account", address: wallet.address };
     const [solana, tron] = await Promise.all([chainAccounts.account(profile, "solana"), chainAccounts.account(profile, "tron")]);
-    return { evm, solana: solana === null ? { kind: "none" } : { kind: "account", address: solana.address },
-        tron: tron === null ? { kind: "none" } : { kind: "account", address: tron.address } };
+    return { identity: hashObject({ profile, profileHash, provider, wallet, solana, tron }), accounts: { evm, solana: solana === null ? { kind: "none" } : { kind: "account", address: solana.address },
+            tron: tron === null ? { kind: "none" } : { kind: "account", address: tron.address } } };
 }
 function publicPortfolio(profile, portfolio) {
     const rows = portfolio.networks.flatMap((network) => network.rows);
@@ -56,6 +57,10 @@ function publicPortfolio(profile, portfolio) {
             chain: network.chain, name: network.name, family: network.family, account: network.account,
             endpoint: network.endpoint,
             rpc: { mode: network.mode, calls: network.rpcCalls, attempts: network.attempts, methods: network.methods, retried: network.retried },
+            ...(network.cache === undefined ? {} : { cache: { hit: network.cache.hit, age_ms: network.cache.ageMs,
+                    captured_at: network.cache.capturedAt, expires_at: network.cache.expiresAt,
+                    source_rpc: { mode: network.cache.sourceRpc.mode, calls: network.cache.sourceRpc.rpcCalls, attempts: network.cache.sourceRpc.attempts,
+                        methods: network.cache.sourceRpc.methods, retried: network.cache.sourceRpc.retried } } }),
             provenance: { block: network.block, slot: network.slot, observed_at: network.observedAt },
             rows: network.rows.map((row) => ({ symbol: row.symbol, kind: row.kind, contract: row.contract, decimals: row.decimals,
                 status: row.status, atomic: row.atomic, display: row.display,

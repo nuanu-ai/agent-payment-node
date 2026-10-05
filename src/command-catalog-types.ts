@@ -1,4 +1,5 @@
 export type ScalarType =
+  | "boolean"
   | "string"
   | "base64"
   | "profile"
