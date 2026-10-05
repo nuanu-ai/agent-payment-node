@@ -33,6 +33,8 @@ export interface Permit2DirectAttribution {
     readonly tokenPermitOutcome: "not_requested" | "not_proven";
 }
 export declare function encodePermit2ProductionProxyCall(record: Permit2ProductionRecord, value: unknown): Promise<Hex>;
+/** Own the complete flat projection before any asynchronous signature recovery. */
+export declare function snapshotPermit2DirectTransaction(value: unknown): Permit2DirectTransactionInput;
 /** Binds all calldata bytes to the saved signatures/plan. Unknown batchers and builder suffixes refuse. */
 export declare function attributePermit2DirectTransaction(record: Permit2ProductionRecord, signed: Permit2ProductionSigned, value: unknown): Promise<Permit2DirectAttribution>;
 export declare function permit2FactHash(value: unknown): value is Hex;

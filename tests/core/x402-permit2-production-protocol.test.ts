@@ -102,6 +102,41 @@ test("async recovery snapshots mutable supplied bearer material instead of publi
   assert.deepEqual(await validation, f.signed);
 });
 
+test("async projection snapshot rejects entry-time invalid direct transaction despite repair during recovery", async () => {
+  const f = await factsFixture();
+  for (const change of [{ value: "0x1" }, { to: f.prepared.token }, { input: `${f.tx.input}00` }]) {
+    const supplied = { ...f.tx, ...change };
+    const pending = attributePermit2DirectTransaction(f.record, f.signed, supplied);
+    Object.assign(supplied, f.tx);
+    await assert.rejects(pending);
+  }
+  const supplied = { ...f.tx }, pending = attributePermit2DirectTransaction(f.record, f.signed, supplied);
+  supplied.hash = hash("c"); supplied.blockHash = hash("d"); supplied.blockNumber = "0x2b";
+  const result = await pending;
+  assert.equal(result.transactionHash, f.tx.hash); assert.equal(result.blockHash, f.tx.blockHash); assert.equal(result.blockNumber, "42");
+});
+
+test("async projection snapshot deeply binds entry-time receipt/log/topic/block fields before attribution", async () => {
+  const f = await factsFixture();
+  const invalid = structuredClone(f.receipt), originalData = invalid.logs[0]!.data;
+  invalid.logs[0]!.data = `0x${"0".repeat(64)}`;
+  const invalidPending = inspectPermit2ProductionReceipt(f.record, f.signed, f.tx, invalid);
+  invalid.logs[0]!.data = originalData;
+  await assert.rejects(invalidPending);
+
+  const supplied = structuredClone(f.receipt), tx = { ...f.tx };
+  const pending = inspectPermit2ProductionReceipt(f.record, f.signed, tx, supplied);
+  tx.hash = hash("c"); tx.blockHash = hash("d"); tx.blockNumber = "0x2b";
+  supplied.transactionHash = hash("c"); supplied.blockHash = hash("d"); supplied.blockNumber = "0x2b";
+  for (const log of supplied.logs) { log.transactionHash = hash("c"); log.blockHash = hash("d"); log.blockNumber = "0x2b"; }
+  supplied.logs[0]!.data = `0x${"0".repeat(64)}`; supplied.logs[0]!.topics[1] = topic(f.prepared.payTo);
+  supplied.logs[1]!.logIndex = "0x9";
+  const result = await pending;
+  assert.equal(result.attribution.transactionHash, f.tx.hash); assert.equal(result.attribution.blockHash, f.tx.blockHash);
+  assert.equal(result.attribution.blockNumber, "42"); assert.equal(result.transferLogIndex, "2"); assert.equal(result.settledLogIndex, "3");
+  assert.equal(result.terminalAuthority, "none"); assert.equal(result.finality, "not_checked");
+});
+
 test("genuine payer signatures for another chain, token, spender, nonce, amount, deadline or witness cannot bind", async () => {
   const f = await protocolFixture(), typed = f.prepared.plan.permit2;
   const mutated = [ { ...typed, domain: { ...typed.domain, chainId: 1 } },
