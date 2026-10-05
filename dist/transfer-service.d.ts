@@ -4,7 +4,7 @@ export declare class TransferService {
     private readonly context;
     private readonly operations;
     private readonly providerDirect;
-    private readonly providerDirectRecovery;
+    private readonly observation;
     private readonly allowlist;
     constructor(context: RuntimeContext);
     prepare(request: Extract<CommandRequest, {
@@ -14,15 +14,13 @@ export declare class TransferService {
         command: "gasless.transfer.prepare";
     }>): Promise<unknown>;
     approve(operationIdInput: string): Promise<unknown>;
-    resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true): Promise<unknown>;
-    recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;
-    status(operationIdInput: string): Promise<unknown>;
-    receipt(operationIdInput: string): Promise<unknown>;
-    private submitAndInspect;
+    resume(operationId: string, waitSeconds?: number, observeOnly?: true): Promise<unknown>;
+    recoverProviderRequest(operationId: string, providerRequestId: string): Promise<unknown>;
+    status(operationId: string): Promise<unknown>;
+    receipt(operationId: string): Promise<unknown>;
     private inspectReceipt;
-    private proveSuperseding;
     private requiredOperation;
-    private effectFor;
+    private submitAndInspect;
     /** After every approval pre-check and before the native approve-and-sign call; refusals end the operation before effect. */
     private reserveUsage;
     /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently, after each durable write. */

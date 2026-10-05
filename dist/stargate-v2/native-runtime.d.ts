@@ -35,7 +35,7 @@ export declare class StargateNativeService {
     execute(operationId: string): Promise<StargateNativeOperation>;
     observe(operationId: string): Promise<StargateNativeOperation>;
     status(operationId: string): Promise<StargateNativeOperation>;
-    receipt(operationId: string): Promise<import("./native-execution.js").StargateNativeCanonicalReceipt>;
+    receipt(operationId: string): Promise<import("./native-record.js").StargateNativeCanonicalReceipt>;
     private required;
     private ports;
     private remote;

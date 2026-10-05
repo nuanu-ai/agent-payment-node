@@ -1,5 +1,6 @@
 import { ApnError } from "../errors.js";
-import type { RpcDecoder, RpcReadTelemetry } from "./rpc-session.js";
+import type { RpcReadTelemetry } from "./rpc-session.js";
+export type RpcDecoder<T = unknown> = (value: unknown) => T;
 export declare const MAX_READ_ATTEMPTS = 2;
 export declare const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
 /** One invocation's physical transport gate, shared by every chain and read/observation session. */
