@@ -31,6 +31,19 @@ async function setup(delegation: "empty" | "expected" = "empty", mode = "02") {
   return { f, state, wrapping, bound, expected, signer, temporary };
 }
 
+test("cloned prepared v2 binding cannot publish a new operation or claim; genuine async-auth grant still publishes", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = v2Fixture(), repository = new UsdtBoundOperationRepository(temporary.root);
+  const prepared = await preparePolicyBoundUsdtV2({ prepare: f.prepare, sponsor: f.sponsor }, f.request);
+  assert.equal(f.state.reads.length, 1);
+  await assert.rejects(repository.create(allowlistProfileHash("owner"), structuredClone(prepared), "cloned-grant-001", f.now()));
+  assert.deepEqual(await readdir(`${temporary.root}/gasless-usdt-bound-operations/claims`), []);
+  assert.deepEqual(await readdir(`${temporary.root}/gasless-usdt-bound-operations/${allowlistProfileHash("owner")}`), []);
+  const saved = await repository.create(allowlistProfileHash("owner"), prepared, "genuine-grant-001", f.now());
+  assert.equal(saved.schemaVersion, "apn.gasless-usdt-bound-operation.v2");
+  assert.equal((await readdir(`${temporary.root}/gasless-usdt-bound-operations/claims`)).length, 1);
+});
+
 test("v2 authentic signed economics admits initial estimate aboveF and records exact changed facts; mode03 cold/warm", async t => {
   for (const delegation of ["empty", "expected"] as const) {
     const f = await setup(delegation, "03"); t.after(f.temporary.cleanup);
