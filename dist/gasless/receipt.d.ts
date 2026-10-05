@@ -77,8 +77,8 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
         entry_point: `0x${string}`;
         paymaster: `0x${string}`;
         delegate: `0x${string}`;
-        initial_designation: "empty" | "expected";
-        observed_designation: "empty" | "expected" | null;
+        initial_designation: "expected" | "empty";
+        observed_designation: "expected" | "empty" | null;
         delegation_persists: boolean;
         permit_deadline: string;
         permit_amount_atomic: string;
@@ -185,8 +185,8 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
         entry_point: `0x${string}`;
         paymaster: `0x${string}`;
         delegate: `0x${string}`;
-        initial_designation: "empty" | "expected";
-        observed_designation: "empty" | "expected" | null;
+        initial_designation: "expected" | "empty";
+        observed_designation: "expected" | "empty" | null;
         delegation_persists: boolean;
         permit_deadline: string;
         permit_amount_atomic: string;
@@ -296,8 +296,8 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
         entry_point: `0x${string}`;
         paymaster: `0x${string}`;
         delegate: `0x${string}`;
-        initial_designation: "empty" | "expected";
-        observed_designation: "empty" | "expected" | null;
+        initial_designation: "expected" | "empty";
+        observed_designation: "expected" | "empty" | null;
         delegation_persists: boolean;
         permit_deadline: string;
         permit_amount_atomic: string;
@@ -405,8 +405,8 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
         entry_point: `0x${string}`;
         paymaster: `0x${string}`;
         delegate: `0x${string}`;
-        initial_designation: "empty" | "expected";
-        observed_designation: "empty" | "expected" | null;
+        initial_designation: "expected" | "empty";
+        observed_designation: "expected" | "empty" | null;
         delegation_persists: boolean;
         permit_deadline: string;
         permit_amount_atomic: string;
@@ -515,8 +515,8 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
         entry_point: `0x${string}`;
         paymaster: `0x${string}`;
         delegate: `0x${string}`;
-        initial_designation: "empty" | "expected";
-        observed_designation: "empty" | "expected" | null;
+        initial_designation: "expected" | "empty";
+        observed_designation: "expected" | "empty" | null;
         delegation_persists: boolean;
         permit_deadline: string;
         permit_amount_atomic: string;
@@ -628,8 +628,8 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
         entry_point: `0x${string}`;
         paymaster: `0x${string}`;
         delegate: `0x${string}`;
-        initial_designation: "empty" | "expected";
-        observed_designation: "empty" | "expected" | null;
+        initial_designation: "expected" | "empty";
+        observed_designation: "expected" | "empty" | null;
         delegation_persists: boolean;
         permit_deadline: string;
         permit_amount_atomic: string;

@@ -1,3 +1,5 @@
+import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
+import { type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
@@ -18,6 +20,12 @@ import { type FacilitatorGaslessRepositoryPort } from "./facilitator-gasless/ope
 import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation-model.js";
 import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 export type StoredMoneyOperation = {
+    readonly kind: "permit2_production";
+    readonly record: Permit2ProductionRecord;
+} | {
+    readonly kind: "permit2_legacy_conflict";
+    readonly record: Permit2LegacyConflict;
+} | {
     readonly kind: "relay_unsigned";
     readonly record: RelayUnsignedOperation;
 } | {
@@ -76,9 +84,13 @@ export declare class OperationService {
     assertProfileAvailable(profileHash: string): Promise<void>;
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
+    assertPermit2AccountAvailable(record: Permit2ProductionRecord): Promise<void>;
     /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
     assertRailAccountAvailable(profileHash: string, rail: "solana" | "tron", account: string): Promise<void>;
     private assertConflictDomainsAvailable;
+    private permit2ProductionOperations;
+    private permit2LegacyOperations;
     private profileOperations;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;

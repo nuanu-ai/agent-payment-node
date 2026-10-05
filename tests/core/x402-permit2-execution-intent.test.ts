@@ -476,3 +476,22 @@ test("Permit2 status rejects malformed, corrupt, insecure and symlink records wi
   const moved = join(state.root, "moved-intents"); await rename(directory, moved); await symlink(moved, directory);
   await assert.rejects(readPermit2IntentStatus(state.root, "owner", intent.operationId), errorCode("APN_STATE_SECURITY"));
 });
+
+test("money conflicts ignore blocked legacy intent alone and conservatively retain actual legacy exposure lease", async t => {
+  const { OperationService } = await import("../../src/operation-service.js");
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const intent = await new Permit2ExecutionIntentJournal(temp.root).create(request, port());
+  const operations = new OperationService(new StateStore(temp.root));
+  await operations.assertEvmAccountAvailable(intent.profileHash, 43114, payer);
+  const ledger = new AssetUsageLedger(temp.root);
+  await assert.rejects(new Permit2ExposureLifecycle(temp.root).resume(intent.operationId, prepared, {
+    nowSeconds: () => request.nowSeconds,
+    reserve: binding => ledger.reserve({ ...permit2UsageIdentity(binding), registry, rail: "x402", amountAtomic: binding.amountAtomic,
+      idempotencyKey: permit2UsageKey(binding), now: new Date(request.nowSeconds * 1000) }),
+    lookup: binding => ledger.load(permit2UsageIdentity(binding), permit2UsageReservationId(binding)),
+    sign: async () => { throw new Error("signature exposure is ambiguous"); },
+    submit: async () => { throw new Error("no submit"); }, observe: async () => null,
+  }), /signature exposure/);
+  await assert.rejects(operations.assertEvmAccountAvailable(intent.profileHash, 43114, payer), { code: "APN_OPERATION_BLOCKED" });
+  await operations.assertEvmAccountAvailable(intent.profileHash, 8453, payer);
+});
