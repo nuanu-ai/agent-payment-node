@@ -49,10 +49,21 @@ export async function encodePermit2ProductionProxyCall(record: Permit2Production
     s: `0x${signature.slice(66, 130)}`, v: Number.parseInt(signature.slice(130), 16),
   }, permit, a.from, witness, signed.permit2Signature] });
 }
+/** Own the complete flat projection before any asynchronous signature recovery. */
+export function snapshotPermit2DirectTransaction(value: unknown): Permit2DirectTransactionInput {
+  if (!isPlainRecord(value) || !exactKeys(value, ["chainId", "to", "value", "input", "hash", "blockHash", "blockNumber"])) fail();
+  const snapshot = { chainId: value.chainId, to: value.to, value: value.value, input: value.input,
+    hash: value.hash, blockHash: value.blockHash, blockNumber: value.blockNumber };
+  if (snapshot.chainId !== "0xa86a" || typeof snapshot.to !== "string" ||
+      snapshot.to.toLowerCase() !== X402_EXACT_PERMIT2_PROXY.toLowerCase() || snapshot.value !== "0x0" ||
+      typeof snapshot.input !== "string" || !hash(snapshot.hash) || !hash(snapshot.blockHash) || !quantity(snapshot.blockNumber)) fail();
+  return Object.freeze(snapshot) as Permit2DirectTransactionInput;
+}
 /** Binds all calldata bytes to the saved signatures/plan. Unknown batchers and builder suffixes refuse. */
 export async function attributePermit2DirectTransaction(record: Permit2ProductionRecord, signed: Permit2ProductionSigned,
   value: unknown): Promise<Permit2DirectAttribution> {
   record = validatePermit2ProductionRecord(JSON.parse(canonicalJson(record)));
+  value = snapshotPermit2DirectTransaction(value);
   signed = await validatePermit2ProductionSigned(signed, record);
   const expected = await encodePermit2ProductionProxyCall(record, signed);
   if (!isPlainRecord(value) || !exactKeys(value, ["chainId", "to", "value", "input", "hash", "blockHash", "blockNumber"]) ||
