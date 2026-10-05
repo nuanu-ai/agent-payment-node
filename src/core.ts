@@ -31,7 +31,7 @@ import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
-import { canonicalProfile } from "./wallet-policy.js";
+import { gaslessProvider } from "./core-gasless-provider.js";
 import { publicRelayNativeSourceJournal } from "./relay/native-source.js";
 import { OperationAbandonService } from "./operation-abandon-service.js";
 import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
@@ -42,81 +42,7 @@ import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
-export type { CommandRequest, OutputEnvelope } from "./commands.js";export type { CoreDependencies } from "./runtime.js";
-export {
-  ASSET_POLICY_REGISTRY_SCHEMA,
-  ASSET_POLICY_REGISTRY_SCHEMA_V2,
-  assetPolicyDigest,
-  evaluateAssetPolicy,
-  sealAssetPolicyRegistry,
-  validateAssetPolicyRegistry,
-} from "./asset-policy-registry.js";
-export {
-  ALLOWLIST_DATASET_PATH,
-  ALLOWLIST_DATASET_SCHEMA,
-  ALLOWLIST_DATASET_SHA256,
-  ALLOWLIST_DATASET_VERSION,
-  ALLOWLIST_INVENTORY_SCHEMA,
-  assertAllowlistExecutionConfigured,
-  compileAllowlistInventory,
-  loadAllowlistInventory,
-  resolveAllowlistAsset,
-} from "./allowlist-inventory.js";
-export type {
-  AllowlistInventory,
-  CandidateAsset,
-  CandidateDeployment,
-  CandidateFamily,
-  CandidateKind,
-  CandidateNetwork,
-  CandidateRail,
-  CandidateRails,
-} from "./allowlist-inventory.js";
-export * from "./allowlist-policy.js";
-export type {
-  AssetAtomicCaps,
-  AssetPolicyAdmission,
-  AssetPolicyChain,
-  AssetPolicyChainFamily,
-  AssetPolicyEvaluationInput,
-  AssetPolicyRail,
-  AssetPolicyRegistry,
-  AssetPolicyRegistrySchema,
-  AssetPolicyRow,
-  AssetRailAdmission,
-  UnsignedAssetPolicyRegistry,
-} from "./asset-policy-registry.js";
-export {
-  ASSET_USAGE_RESERVATION_SCHEMA,
-  ASSET_USAGE_WINDOW,
-  AssetUsageLedger,
-  validateAssetUsageReservation,
-} from "./asset-usage-ledger.js";
-export type {
-  AssetUsageIdentity,
-  AssetUsageReservation,
-  AssetUsageReserveInput,
-  AssetUsageSnapshot,
-  AssetUsageState,
-  AssetUsageTransitionInput,
-} from "./asset-usage-ledger.js";
-export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
-export type {
-  AssetPortfolio, AssetPortfolioInput, BatchBalanceAsset, BatchBalanceAvailable, BatchBalanceMode, BatchBalanceRequest,
-  BatchBalanceResult, BatchBalanceRow, BatchBalanceUnavailable, FamilyBalanceBatchPort, PortfolioAccount,
-  PortfolioNetworkResult, PortfolioRow, PortfolioRowStatus, PortfolioUnavailableReason,
-} from "./asset-portfolio-reader.js";
-export {
-  DIRECT_ASSET_USAGE_LEASE_SCHEMA,
-  DirectAssetUsageAdapter,
-  validateDirectAssetUsageLease,
-} from "./direct-asset-usage.js";
-export type {
-  DirectAssetUsageInput,
-  DirectAssetUsageLease,
-} from "./direct-asset-usage.js";
-export * from "./swap/index.js";
-export * from "./stargate-v2/index.js";
+export * from "./core-exports.js";
 export class ApnCore {
   readonly context: RuntimeContext;
   readonly wallet: WalletService;
@@ -321,7 +247,7 @@ export class ApnCore {
       }
       case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
       case "gasless.balance": {
-        const provider = await this.gaslessProvider(request.profile);
+        const provider = await gaslessProvider(this.context, request.profile);
         return dataOutcome(provider === "coinbase-agentic-wallet"
           ? request.chainId !== 8453 ? mmFail("mm_gasless_capability_unavailable") : await this.providerWallet.balance(request.profile)
           : provider === "metamask-smart-account"
@@ -560,7 +486,7 @@ export class ApnCore {
     if (existing?.kind === "smart_account_gasless_transfer")
       return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
     if (existing?.kind === "facilitator_gasless_transfer") return await this.facilitatorGasless.prepare(request);
-    const provider = await this.gaslessProvider(request.profile);
+    const provider = await gaslessProvider(this.context, request.profile);
     if (provider === "metamask-smart-account") return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
     if (provider === "coinbase-agentic-wallet") return await this.transfer.prepareCoinbaseGasless(request);
     if (provider === "metamask-agent-wallet") return await this.metaMaskGasless.prepare({ ...request, request: { ...request.request,
@@ -570,13 +496,5 @@ export class ApnCore {
     return await this.gasless.prepare({ ...request, request: { ...request.request,
       chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
   }
-  private async gaslessProvider(input: string): Promise<"local" | "metamask-agent-wallet" | "metamask-smart-account" | "coinbase-agentic-wallet"> {
-    const profile = canonicalProfile(input);
-    const stored = await this.context.state.loadProviderProfile(this.context.state.profileHash(profile));
-    if (stored === null || stored.provider_id === "local") return "local";
-    if (stored.provider_id === "metamask-agent-wallet") return "metamask-agent-wallet";
-    if (stored.provider_id === "metamask-smart-account") return "metamask-smart-account";
-    if (stored.provider_id === "coinbase-agentic-wallet") return "coinbase-agentic-wallet";
-    return mmFail("mm_gasless_capability_unavailable");
-  }
+
 }

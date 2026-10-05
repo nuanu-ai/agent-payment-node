@@ -1,3 +1,4 @@
+import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { EVM_COMMANDS } from "./evm-command-catalog.js";
 import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";
@@ -278,27 +279,4 @@ export const COMMAND_MANIFEST = {
     commands: COMMANDS,
 };
 validateCommandManifest(COMMAND_MANIFEST);
-function command(path, synopsis, summary, options, effectClass, effectSummary, approvalClass, approvalWhen, states, recovery, examples, outputContract = "apn.cli.v1") {
-    return {
-        path,
-        synopsis,
-        summary,
-        options,
-        effect: { class: effectClass, summary: effectSummary },
-        approval: { class: approvalClass, when: approvalWhen },
-        output: {
-            contract: outputContract,
-            success_exit: 0,
-            failure_exit: 1,
-            success: outputContract === "apn.cli.v1" ? "One successful apn.cli.v1 envelope." : "The command-specific raw transport output.",
-            failures: [outputContract === "apn.cli.v1" ? "One classified-failure apn.cli.v1 envelope." : "A classified command failure."],
-        },
-        states,
-        recovery,
-        examples,
-    };
-}
-function option(name, type, required, defaultValue, constraints, sensitivity) {
-    return { name, type, required, default: defaultValue, constraints, sensitivity };
-}
 //# sourceMappingURL=command-catalog.js.map

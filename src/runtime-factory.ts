@@ -1,19 +1,8 @@
-import { RelayUnsignedPrepareService, type RelayPreparePorts } from "./relay/prepare.js";
-import { RelayReadOnlyPreflightService, type RelayPreflightPorts } from "./relay/preflight.js";
+import { createSpecialApnCore } from "./runtime-factory-special.js";
+import { RelayUnsignedPrepareService } from "./relay/prepare.js";
+import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import { RelayRetireService } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
-import { RelayObserveService } from "./relay/observe.js";
-import { RelayNativeObserveService } from "./relay/native-observe.js";
-import { RelayBaseObserveService } from "./relay/base-observe.js";
-import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
-import { RelayArbitrumApprovalDecisionService } from "./relay/arbitrum-approval-decision.js";
-import { LocalRelayArbitrumApprovalSigner, RelayArbitrumApprovalExecuteService } from "./relay/arbitrum-approval-execute.js";
-import { LocalRelayArbitrumDepositSigner, RelayArbitrumDepositDispatchService } from "./relay/arbitrum-deposit-dispatch.js";
-import { RelayArbitrumDepositPreflightReader } from "./relay/arbitrum-deposit-preflight.js";
-import { RelayArbitrumApprovalPreflightReader } from "./relay/arbitrum-approval-preflight.js";
-import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
-import { RelayArbitrumSourceFinalityObserver } from "./relay/arbitrum-source-finality.js";
-import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { createRelayNativeSourceRuntime } from "./relay/native-source.js";
 import { ApnError } from "./errors.js";
@@ -24,58 +13,26 @@ import type { OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
 import { EncryptedProfilePolicy } from "./encrypted-profile-policy.js";
 import { LocalWalletNative } from "./local-wallet-native.js";
-import { MacOSLoginKeychainSecret, type WrappingSecretPort } from "./macos-keychain.js";
-import type { ClockPort, HttpPort, IdPort, NativePort, RpcPort, WaitPort } from "./ports.js";
-import { TtyProfilePolicyApproval, type ProfilePolicyApprovalPort } from "./policy-approval.js";
-import type { ProfilePolicyPort } from "./profile-policy.js";
+import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
+import { TtyProfilePolicyApproval } from "./policy-approval.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
-import type { TransferApprovalPort } from "./tty-approval.js";
-import { TtyRelayArbitrumApprovalConfirmation, TtyRelayArbitrumDepositConfirmation, TtyRelayExecuteConfirmation, TtyRelayNativeExecuteConfirmation, TtyTransferApproval, type TtyTransferApprovalOptions } from "./tty-approval.js";
+import { TtyRelayExecuteConfirmation, TtyRelayNativeExecuteConfirmation, TtyTransferApproval } from "./tty-approval.js";
 import { HttpsX402Http } from "./x402-http.js";
 import { AWAL_PROVIDER_ID, AwalProcessAdapter } from "./awal-process-adapter.js";
 import { TtyForegroundAuthentication } from "./foreground-auth.js";
-import type {
-  ForegroundAuthenticationPort,
-  ProviderProfileRepositoryPort,
-  ProviderRegistryPort,
-  X402PaymentMaterialPort,
-} from "./provider-ports.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import {
-  METAMASK_AGENT_WALLET_PROVIDER_ID,
-  MetaMaskProcessAdapter,
-} from "./metamask-process-adapter.js";
+import { METAMASK_AGENT_WALLET_PROVIDER_ID, MetaMaskProcessAdapter } from "./metamask-process-adapter.js";
 import { StateProfileRepository } from "./profile-repository.js";
-import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
-import {
-  EncryptedProviderAuthorizationStore,
-  type ProviderAuthorizationStorePort,
-} from "./encrypted-provider-authorization-store.js";
-import {
-  EncryptedSmartAccountPermissionStore,
-  type SmartAccountPermissionStorePort,
-} from "./encrypted-smart-account-permission-store.js";
-import {
-  METAMASK_SMART_ACCOUNT_PROVIDER_ID,
-  LocalSessionKeyFactory,
-  MetaMaskSmartAccountAdapter,
-  type SessionKeyFactoryPort,
-} from "./metamask-smart-account-adapter.js";
-import {
-  LoopbackMetaMaskConsent,
-  type SmartAccountConsentPort,
-} from "./metamask-smart-account-consent.js";
+import { EncryptedProviderAuthorizationStore } from "./encrypted-provider-authorization-store.js";
+import { EncryptedSmartAccountPermissionStore } from "./encrypted-smart-account-permission-store.js";
+import { METAMASK_SMART_ACCOUNT_PROVIDER_ID, LocalSessionKeyFactory, MetaMaskSmartAccountAdapter } from "./metamask-smart-account-adapter.js";
+import { LoopbackMetaMaskConsent } from "./metamask-smart-account-consent.js";
 import { EncryptedSmartAccountDirectEffectStore } from "./encrypted-smart-account-direct-effect-store.js";
-import {
-  MetaMaskSmartAccountDirectAdapter,
-  OfficialSmartAccountAllowance,
-} from "./metamask-smart-account-direct.js";
+import { MetaMaskSmartAccountDirectAdapter, OfficialSmartAccountAllowance } from "./metamask-smart-account-direct.js";
 import { EncryptedSmartAccountX402MaterialStore } from "./encrypted-smart-account-x402-material-store.js";
 import { MetaMaskSmartAccountX402Adapter } from "./metamask-smart-account-x402.js";
 import { ChainAccountStore } from "./chain-account-store.js";
-import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
-import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import { TtyChainPolicyApproval, TtyRailApproval } from "./tty-approval.js";
 import { SolanaRpc, SolanaRpcBudget } from "./solana/rpc.js";
 import { SolanaRpcPacer } from "./solana/pacing.js";
@@ -84,59 +41,47 @@ import { SolanaAwalAdapter } from "./solana/awal-adapter.js";
 import { TronLocalAdapter } from "./tron/local-adapter.js";
 import { TronRpc } from "./tron/rpc.js";
 import { configuredTronHttpsFetch } from "./tron/https.js";
-import type { BridgeDependencies } from "./lifi/service.js";
 import { LocalBridgeCustody } from "./lifi/custody.js";
 import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
-import type { CircleV2ApprovalExecutor as CircleApprovalService } from "./lifi/circle-v2-approval-executor.js";
 import { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
-import type { GaslessDependencies } from "./gasless/service.js";
 import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
-import { GaslessUsdtCommandPrepare, type UsdtCommandPrepareOptions } from "./gasless-usdt/command-prepare.js";
-import { GaslessUsdtCommandExecute, type UsdtCommandExecuteOptions } from "./gasless-usdt/command-execute.js";
+import { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
+import { GaslessUsdtCommandExecute } from "./gasless-usdt/command-execute.js";
 import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
 import { TtyGaslessApproval } from "./gasless/tty.js";
-import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js";
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
 import { metaMaskGaslessObservationRpcFactory, metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
 import { TtyMetaMaskGaslessApproval } from "./metamask-gasless/tty.js";
-import { TtyOperationAbandonApproval, type OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
-import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
+import { TtyOperationAbandonApproval } from "./operation-abandon-approval.js";
 import { smartAccountGaslessRuntime } from "./smart-account-gasless/runtime.js";
 import { LocalFacilitatorSigner } from "./facilitator-gasless/custody.js";
 import { PayAiFacilitator } from "./facilitator-gasless/facilitator.js";
 import { avalancheFacilitatorRpc } from "./facilitator-gasless/rpc.js";
-import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import { TtyFacilitatorApproval } from "./facilitator-gasless/tty.js";
-import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
-import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
-import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
-import { portfolioPause, type PortfolioDependencies } from "./portfolio/command.js";
+import { portfolioPause } from "./portfolio/command.js";
 import { PortfolioHttps } from "./portfolio/https.js";
-import { TtyAllowlistPolicyApproval, type AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
+import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
-import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
 import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
 import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
 import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
-import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
 import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
-import { verifyOrcaProgramPins, type OrcaProgramPinVerifier } from "./swap/orca-solana/pins.js";
+import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
 import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-candidate.js";
 import { orcaStablePreparedStatus } from "./swap/orca-solana/stable-status.js";
-import { approveOrcaStableReservation, confirmOrcaStableExecution, confirmOrcaStableNoSendRecovery,
-  TtyOrcaStableConsent, type OrcaStableConsentPort } from "./swap/orca-solana/stable-approval.js";
+import { approveOrcaStableReservation, confirmOrcaStableExecution, confirmOrcaStableNoSendRecovery, TtyOrcaStableConsent } from "./swap/orca-solana/stable-approval.js";
 import { executeOrcaStableFirstAttempt } from "./swap/orca-solana/stable-effect-runtime.js";
 import { recoverOrcaStableNoSend } from "./swap/orca-solana/stable-no-send-recovery.js";
 import { OrcaStableNoSendProofStore } from "./swap/orca-solana/stable-no-send-proof.js";
@@ -147,181 +92,20 @@ import { SavedOrcaStableMaterialStore } from "./swap/orca-solana/stable-material
 import { GuardedSwapService } from "./swap/service.js";
 import { SwapOperationRepository } from "./swap/repository.js";
 import { AssetUsageLedger } from "./asset-usage-ledger.js";
-import { permit2CurrentOwnerPreflight, permit2PublicRpc, type Permit2PreflightPorts } from "./x402-permit2/preflight.js";
+import { permit2CurrentOwnerPreflight, permit2PublicRpc } from "./x402-permit2/preflight.js";
 import { successEnvelope, failureEnvelope } from "./output.js";
 import { randomUUID } from "node:crypto";
 import { ORCA_SOLANA_CHAIN } from "./swap/orca-solana/pins.js";
-import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
+import type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
 
-export interface RuntimeFactoryOptions {
-  /** Synthetic read-only preflight seam; production uses the bounded HTTPS source. */
-  readonly permit2PreflightPorts?: Permit2PreflightPorts;
-  /** Synthetic CLI test seam; source runtime still owns confirmation, pacing, and source effect guards. */
-  readonly relayExecuteTransport?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
-  readonly relayExecuteTtyOptions?: TtyTransferApprovalOptions;
-  readonly relayPrepare?: RelayUnsignedPrepareService;
-  readonly relayPreparePorts?: RelayPreparePorts;
-  readonly relayPreflight?: RelayReadOnlyPreflightService;
-  readonly relayPreflightPorts?: RelayPreflightPorts;
-  readonly relayStatus?: RelayKeylessStatusService;
-  readonly relayStatusFetch?: typeof fetch;
-  readonly relayObserve?: RelayObserveService;
-  readonly relayBaseObserve?: RelayBaseObserveService;
-  readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
-  readonly relayArbitrumObserveRpc?: HttpsBaseRpc;
-  readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
-  readonly relayArbitrumApprovalExecute?: RelayArbitrumApprovalExecuteService;
-  readonly relayArbitrumDepositDispatch?: RelayArbitrumDepositDispatchService;
-  readonly relayArbitrumApprovalRpc?: Pick<HttpsBaseRpc, "batchCall">;
-  readonly relayArbitrumApprovalExecuteRpc?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
-  readonly relayArbitrumDepositDispatchRpc?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
-  readonly relayObserveBaseRpc?: HttpsBaseRpc;
-  readonly relayObserveSourceRpc?: HttpsBaseRpc;
-  readonly relayObserveBnbRpc?: HttpsBaseRpc;
-  readonly stargateNative?: StargateNativeService;
-  readonly stargateToken?: StargateTokenService;
-  readonly portfolio?: PortfolioDependencies;
-  readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
-  readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
-  readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
-  readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
-  readonly uniswap?: UniswapGuardedSwapBuilder;
-  /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
-  readonly swapPolicy?: GuardedSwapPolicyResolver;
-  readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-  readonly jupiter?: JupiterReadOnlyQuoteBuilder;
-  readonly facilitatorGasless?: FacilitatorGaslessDependencies;
-  readonly smartAccountGasless?: SmartAccountGaslessDependencies;
-  readonly metaMaskGasless?: MetaMaskGaslessDependencies;
-  readonly gasless?: GaslessDependencies;
-  readonly gaslessUsdt?: GaslessUsdtOperationService;
-  readonly gaslessUsdtPrepare?: GaslessUsdtCommandPrepare;
-  readonly gaslessUsdtPrepareOptions?: UsdtCommandPrepareOptions;
-  readonly gaslessUsdtExecute?: GaslessUsdtCommandExecute;
-  readonly gaslessUsdtExecuteOptions?: UsdtCommandExecuteOptions;
-  readonly bridge?: BridgeDependencies;
-  readonly circleApproval?: CircleApprovalService;
-  readonly circleSource?: CircleV2SourceService;
-  readonly oneClickSource?: OneClickSourceService;
-  readonly chainAccounts?: ChainWalletStoragePort;
-  readonly directRails?: readonly DirectRailPort[];
-  readonly railApproval?: RailApprovalPort;
-  readonly chainPolicyApproval?: ChainPolicyApprovalPort;
-  readonly allowlistPolicyApproval?: AllowlistPolicyApprovalPort;
-  readonly solanaRpcUrl?: string;
-  /** Offline transport injection; production uses the guarded Solana HTTPS fetch. */
-  readonly solanaRpcFetch?: typeof fetch;
-  readonly solanaRpcNow?: () => number;
-  readonly solanaRpcWait?: (milliseconds: number) => Promise<void>;
-  /** Offline acceptance only; the CLI exposes no option to replace pinned program proof. */
-  readonly orcaStablePinVerifier?: OrcaProgramPinVerifier;
-  /** Offline acceptance only; production reads exact consent from the owner TTY. */
-  readonly orcaStableExecuteConsent?: OrcaStableConsentPort;
-  /** Offline acceptance only; production reads separate recovery consent from the owner TTY. */
-  readonly orcaStableRecoveryConsent?: OrcaStableConsentPort;
-  readonly tronRpcUrl?: string;
-  readonly stateRoot?: string;
-  readonly native?: NativePort;
-  readonly wrappingSecret?: WrappingSecretPort;
-  readonly approval?: TransferApprovalPort;
-  readonly policy?: ProfilePolicyPort;
-  readonly policyApproval?: ProfilePolicyApprovalPort;
-  readonly rpc?: RpcPort;
-  readonly http?: HttpPort;
-  readonly clock?: ClockPort;
-  readonly ids?: IdPort;
-  readonly wait?: WaitPort;
-  readonly profileRepository?: ProviderProfileRepositoryPort;
-  readonly providerRegistry?: ProviderRegistryPort;
-  readonly foregroundAuthentication?: ForegroundAuthenticationPort;
-  readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
-  readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
-  readonly smartAccountPermissionStore?: SmartAccountPermissionStorePort;
-  readonly smartAccountConsent?: SmartAccountConsentPort;
-  readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
-  readonly smartAccountX402Material?: X402PaymentMaterialPort;
-  readonly operationAbandonApproval?: OperationAbandonApprovalPort;
-}
+export type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
 
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
   const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
-  if (bound.request.command === "gasless.transfer.quote") {
-    if (bound.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "Ethereum quote requires an explicit public RPC URL.");
-    // This read path has no custody implementation, signer, journal or effect transport.
-    const unavailable = async (): Promise<never> => { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Quote is read only."); };
-    return new ApnCore({ state, gasless: { rpcFor: options.gasless?.rpcFor ??
-      gaslessRpcFactory({ APN_ETHEREUM_RPC_URL: bound.rpcUrl }),
-      custody: { load: unavailable, seal: unavailable } } });
-  }
-  if (bound.request.command === "x402.permit2.status") return new ApnCore({ state });
-  if (bound.request.command === "relay.arbitrum.observe") {
-    const url = bound.rpcUrl ?? "";
-    // Construct only the guarded Arbitrum read path. No wallet, signer, or send transport exists here.
-    const observer = new RelayArbitrumSourceFinalityObserver(url, state, options.relayArbitrumObserveRpc);
-    return new ApnCore({ state, relayArbitrumObserve: options.relayArbitrumObserve ??
-      new RelayArbitrumSourceObserveService(state, observer) });
-  }
-  if (bound.request.command === "relay.arbitrum.approval-check") {
-    const url = bound.rpcUrl ?? "";
-    const guard = new EvmDirectRpcGuard(state);
-    const reader = new RelayArbitrumApprovalPreflightReader(url, state, options.relayArbitrumApprovalRpc,
-      () => guard);
-    return new ApnCore({ state, relayArbitrumApprovalDecision: options.relayArbitrumApprovalDecision ??
-      new RelayArbitrumApprovalDecisionService(state, reader) });
-  }
-  if (bound.request.command === "relay.arbitrum.approval-execute") {
-    const url = bound.rpcUrl ?? "";
-    const guard = new EvmDirectRpcGuard(state);
-    const rpc = options.relayArbitrumApprovalExecuteRpc ?? new HttpsBaseRpc(url);
-    const reader = new RelayArbitrumApprovalPreflightReader(url, state, rpc, () => guard);
-    const wrapping = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
-    const tty = new TtyRelayArbitrumApprovalConfirmation(options.relayExecuteTtyOptions);
-    return new ApnCore({ state, relayArbitrumApprovalExecute: options.relayArbitrumApprovalExecute ??
-      new RelayArbitrumApprovalExecuteService(state, reader, {
-        confirm: summary => tty.confirm(summary), signer: new LocalRelayArbitrumApprovalSigner(state, wrapping),
-        send: raw => guard.post(url, () => rpc.submitRawTransaction(raw)),
-        now: () => options.clock?.now() ?? new Date(),
-      }, wrapping) });
-  }
-  if (bound.request.command === "relay.arbitrum.deposit-dispatch") {
-    const url = bound.rpcUrl ?? "";
-    const guard = new EvmDirectRpcGuard(state);
-    const rpc = options.relayArbitrumDepositDispatchRpc ?? new HttpsBaseRpc(url);
-    const reader = new RelayArbitrumDepositPreflightReader(url, state, rpc, () => guard);
-    const wrapping = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
-    const tty = new TtyRelayArbitrumDepositConfirmation(options.relayExecuteTtyOptions);
-    return new ApnCore({ state, relayArbitrumDepositDispatch: options.relayArbitrumDepositDispatch ??
-      new RelayArbitrumDepositDispatchService(state, reader, {
-        confirm: summary => tty.confirm(summary), signer: new LocalRelayArbitrumDepositSigner(state, wrapping),
-        send: raw => guard.post(url, () => rpc.submitRawTransaction(raw)),
-        now: () => options.clock?.now() ?? new Date(),
-      }, wrapping) });
-  }
-  if (bound.request.command === "relay.base.observe") {
-    const baseUrl = bound.rpcUrl ?? "";
-    const baseInvocation = () => new RelayBnbReadOnlyRpc(baseUrl, state, options.relayObserveBaseRpc, undefined, 8453);
-    const source = bound.ethereumRpcUrl === undefined ? undefined :
-      new RelayEthereumFinalityRpc(bound.ethereumRpcUrl, state, options.relayObserveSourceRpc);
-    return new ApnCore({ state, relayBaseObserve: options.relayBaseObserve ??
-      new RelayBaseObserveService(state, baseInvocation,
-        new RelayKeylessStatusService(state, options.relayStatusFetch), source) });
-  }
-  if (bound.request.command === "relay.observe") {
-    const sourceUrl = bound.rpcUrl ?? "";
-    const bnbUrl = bound.bnbRpcUrl ?? "";
-    // Construct only keyless readers. No wallet, signer, custody, or execution runtime is installed.
-    const source = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc);
-    const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc);
-    const nativeSource = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc, undefined, 56);
-    const native = new RelayNativeObserveService(state, nativeSource,
-      chainId => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, undefined, chainId),
-      new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
-    return new ApnCore({ state, relayObserve: options.relayObserve ??
-      new RelayObserveService(state, source, bnbInvocation,
-        new RelayKeylessStatusService(state, options.relayStatusFetch), native) });
-  }
+  const special = createSpecialApnCore(bound, options, state);
+  if (special !== null) return special;
   const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
   const approvalLimits = bound.request.command === "circle.approval.prepare" ? {
     maxGasLimitAtomic: bound.request.maxGasLimitAtomic, maxFeePerGasWei: bound.request.maxFeePerGasWei,
