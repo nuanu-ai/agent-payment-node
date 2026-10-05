@@ -1,8 +1,8 @@
-import { decodePaymentSignatureHeader as decodeOfficialPaymentSignatureHeader } from "@x402/core/http";
 import { isPermit2Payload } from "@x402/evm";
 import { hashTypedData } from "viem";
 import { canonicalJson, domainHash } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { encodePermit2PaymentSignatureHeader, decodePermit2PaymentSignatureHeader } from "../x402-codec.js";
 import { verifyPermit2PayerSignature, planPermit2Authorization } from "./authorization.js";
 import { validatePermit2ExecutionIntent } from "./execution-intent.js";
 import { selectPermit2Offer } from "./offer.js";
@@ -69,8 +69,8 @@ export async function assemblePermit2PaymentPayload(input) {
                     info: { ...plan.eip2612.info, signature: input.eip2612Signature },
                 } } }),
     };
-    const paymentSignatureHeader = Buffer.from(canonicalJson(payload), "utf8").toString("base64");
-    if (canonicalJson(decodeOfficialPaymentSignatureHeader(paymentSignatureHeader)) !== canonicalJson(payload)) {
+    const paymentSignatureHeader = encodePermit2PaymentSignatureHeader(payload);
+    if (canonicalJson(decodePermit2PaymentSignatureHeader(paymentSignatureHeader)) !== canonicalJson(payload)) {
         refuse("The official x402 decoder disagrees with the payment payload.");
     }
     return { payload, paymentSignatureHeader };

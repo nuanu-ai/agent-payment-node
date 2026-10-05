@@ -1,3 +1,5 @@
+export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, classifyX402LogAvailabilityMessage, acceptRpcHttpBody } from "./rpc-envelope.js";
+export { isPublicIp } from "./network-policy.js";
 import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import { EvmRpc } from "./evm-rpc.js";
 import type { EvmBalanceSnapshot } from "./evm-ports.js";
@@ -85,16 +87,3 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private postDirectGuarded;
     private remainingTimeoutMs;
 }
-export declare function parseRpcResultEnvelope(raw: string, id: string, method?: string): unknown;
-export declare function parseRpcBatchResultEnvelope(raw: string, ids: readonly number[]): readonly unknown[];
-export declare function parseRpcLogEnvelope(raw: string, id: string): {
-    readonly kind: "complete";
-    readonly value: unknown;
-} | {
-    readonly kind: "pruned";
-} | {
-    readonly kind: "range_unavailable";
-};
-export declare function classifyX402LogAvailabilityMessage(message: string): "pruned" | "range_unavailable" | null;
-export { isPublicIp } from "./network-policy.js";
-export declare function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean;

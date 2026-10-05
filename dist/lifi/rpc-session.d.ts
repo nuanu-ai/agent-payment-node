@@ -1,26 +1,11 @@
+import { BridgeRpcPhysicalBudget } from "./rpc-session-helpers.js";
+export { BridgeRpcPhysicalBudget, BRIDGE_INVOCATION_RPC_POST_LIMIT, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
+export type { RpcReadMethod } from "./rpc-session-helpers.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
 import { RpcProviderScheduler } from "./rpc-scheduler.js";
 export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
 export type { RpcProviderPacingCoordinator } from "./rpc-scheduler.js";
-export declare const MAX_READ_ATTEMPTS = 2;
-export declare const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
-/** One invocation's physical transport gate, shared by every chain and read/observation session. */
-export declare class BridgeRpcPhysicalBudget {
-    private readonly now;
-    private readonly wait;
-    private posts;
-    private lastStart;
-    private tail;
-    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>);
-    remaining(): number;
-    require(posts: number, method: string): void;
-    beforePost(method: string): Promise<void>;
-}
-export declare const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
-export declare const RPC_BATCH_MAX_ITEMS = 33;
-export declare const RPC_READ_METHODS: readonly ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction"];
-export type RpcReadMethod = typeof RPC_READ_METHODS[number];
 export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
 export interface RpcBatchReadItem<T = unknown> {
     readonly method: string;
@@ -75,7 +60,7 @@ export interface RpcReadTelemetry {
     readonly perMethod: Readonly<Record<string, number>>;
     readonly remainingUniqueCalls: number;
 }
-type RpcDecoder<T = unknown> = (value: unknown) => T;
+export type RpcDecoder<T = unknown> = (value: unknown) => T;
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export declare class RpcReadSession {
     readonly physicalBudget: BridgeRpcPhysicalBudget | undefined;
@@ -150,7 +135,3 @@ export declare class RpcReadSession {
     private httpError;
     private transportError;
 }
-export declare function rpcEndpointIdentity(endpoint: string): string;
-export declare function approvedTransportReason(error: unknown): string | undefined;
-export declare function parseRetryAfter(headers: Readonly<Record<string, string | readonly string[] | undefined>> | undefined, now: number): number | undefined;
-export declare function telemetryDetails(telemetry: RpcReadTelemetry, method: string, reason: string): Record<string, string>;
