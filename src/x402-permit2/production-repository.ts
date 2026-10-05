@@ -5,6 +5,7 @@ import { SecureStateStore } from "../secure-state-store.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { assetUsageReservationId } from "../asset-usage-ledger.js";
+import type { ClockPort } from "../ports.js";
 import { PERMIT2_PRODUCTION_SCHEMA, validatePermit2ProductionMaterial, reconstructPermit2ProductionMaterial,
   type Permit2ProductionMaterial } from "./production-material.js";
 export type Permit2ProductionState = "prepared" | "reserving" | "reserved" | "release_pending" | "released_unsubmitted" | "exposure_unknown";
@@ -94,15 +95,28 @@ export class Permit2ProductionRepository extends SecureStateStore {
   }
   /** Caller holds profile + operation locks. Only unsigned preparation/lease states can be written in P2. */
   async persistLocked(record: Permit2ProductionRecord, createOnly = false): Promise<void> {
+    if (createOnly || record.state === "prepared") blocked("Prepared Permit2 material requires deadline-checked persistence.");
     validatePermit2ProductionRecord(record);
     const current = await this.findOperation(record.operationId);
     if (current !== null) {
-      if (createOnly || current.requestHash !== record.requestHash || current.material.materialHash !== record.material.materialHash ||
+      if (current.requestHash !== record.requestHash || current.material.materialHash !== record.material.materialHash ||
           current.createdAt !== record.createdAt || current.profileHash !== record.profileHash || current.idempotencyHash !== record.idempotencyHash ||
           current.exposureAt !== record.exposureAt || current.reservationStarted && !record.reservationStarted || current.updatedAt > record.updatedAt ||
           !allowed(current.state, record.state)) corrupt();
-    } else if (!createOnly || record.state !== "prepared") corrupt();
-    await this.writeJson(this.path(record.operationId), record, createOnly);
+    } else corrupt();
+    await this.writeJson(this.path(record.operationId), record);
+  }
+  /** Caller holds profile + operation locks; expiry is checked after the secure read immediately before creation. */
+  async persistPreparedLocked(record: Permit2ProductionRecord, clock: ClockPort): Promise<void> {
+    validatePermit2ProductionRecord(record);
+    if (record.state !== "prepared") corrupt();
+    const current = await this.findOperation(record.operationId);
+    if (current !== null) corrupt();
+    const now = clock.now(), nowMs = now instanceof Date ? now.getTime() : NaN;
+    if (!Number.isSafeInteger(nowMs) || nowMs < 0) blocked("Invalid production clock.");
+    const deadline = reconstructPermit2ProductionMaterial(record.material).expiresAtUnix;
+    if (BigInt(deadline) <= BigInt(Math.floor(nowMs / 1000))) blocked("Permit2 authorization expired.");
+    await this.writeJson(this.path(record.operationId), record, true);
   }
 }
 function allowed(from: Permit2ProductionState, to: Permit2ProductionState): boolean {
@@ -115,11 +129,12 @@ export function publicPermit2Production(record: Permit2ProductionRecord) {
   const p = reconstructPermit2ProductionMaterial(record.material), url = new URL(record.material.checked.request.url);
   return { operationId: record.operationId, state: record.state, terminal: record.terminal, capability: "execution_blocked",
     chain: p.chain, payer: p.payer, token: p.token, recipient: p.payTo, amountAtomic: p.amountAtomic, deadline: p.expiresAtUnix,
-    resource: { origin: url.origin, path: url.pathname, urlHash: sha256(url.toString()) },
+    resource: { origin: url.origin, urlHash: sha256(url.toString()) },
     blockerCodes: ["permit2_production_execution_not_wired"] };
 }
 function instant(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u.test(value) &&
     Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 }
+function blocked(message: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message); }
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "Permit2 production journal is corrupt."); }

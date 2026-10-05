@@ -1,4 +1,5 @@
 import { SecureStateStore } from "../secure-state-store.js";
+import type { ClockPort } from "../ports.js";
 import { PERMIT2_PRODUCTION_SCHEMA, type Permit2ProductionMaterial } from "./production-material.js";
 export type Permit2ProductionState = "prepared" | "reserving" | "reserved" | "release_pending" | "released_unsubmitted" | "exposure_unknown";
 export interface Permit2ProductionRecord {
@@ -41,6 +42,8 @@ export declare class Permit2ProductionRepository extends SecureStateStore {
     listOperations(profileHash: string): Promise<readonly Permit2ProductionRecord[]>;
     /** Caller holds profile + operation locks. Only unsigned preparation/lease states can be written in P2. */
     persistLocked(record: Permit2ProductionRecord, createOnly?: boolean): Promise<void>;
+    /** Caller holds profile + operation locks; expiry is checked after the secure read immediately before creation. */
+    persistPreparedLocked(record: Permit2ProductionRecord, clock: ClockPort): Promise<void>;
 }
 export declare function publicPermit2Production(record: Permit2ProductionRecord): {
     operationId: string;
@@ -55,7 +58,6 @@ export declare function publicPermit2Production(record: Permit2ProductionRecord)
     deadline: string;
     resource: {
         origin: string;
-        path: string;
         urlHash: string;
     };
     blockerCodes: string[];
