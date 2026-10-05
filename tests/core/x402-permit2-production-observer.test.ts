@@ -9,6 +9,8 @@ import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 
 for (const sponsor of [false, true]) test(`finite observer attests finalized exact ${sponsor ? "sponsored" : "allowance"} settlement without permit-success claim`, async t => {
   const f = await observerFixture(t, sponsor), result = await observePermit2Production(f.input);
+  assert.notEqual(f.wire.tx.from.toLowerCase(), f.prepared.payer.toLowerCase());
+  assert.equal(f.wire.receipt.from, f.wire.tx.from); assert.equal(f.wire.receipt.to, f.wire.tx.to);
   assert.equal(result.projection.outcome, "settled"); assert.ok(result.proof);
   assert.equal(result.projection.tokenPermitOutcome, sponsor ? "not_proven" : "not_requested");
   assert.equal(result.projection.blockNumber, "42"); assert.equal(result.projection.blockHash, f.wire.block.hash);
@@ -33,7 +35,7 @@ for (const sponsor of [false, true]) test(`finite observer proves expired unused
 });
 
 const faults = ["value", "proxy", "sender", "suffix", "nonce", "recipient", "amount", "inner_from", "token", "deadline", "branch", "log_identity", "log_index", "duplicate",
-  "event", "reorg", "unfinalized", "missing", "chain", "proxy_code", "permit2_code", "domain", "canonical", "http"] as const;
+  "receipt_from", "receipt_to", "receipt_missing_from", "receipt_missing_to", "event", "reorg", "unfinalized", "missing", "chain", "proxy_code", "permit2_code", "domain", "canonical", "http"] as const;
 for (const fault of faults) test(`finite settlement observer holds ${fault} and never retries`, async t => {
   const f = await observerFixture(t), w = f.wire;
   switch (fault) {
@@ -56,6 +58,10 @@ for (const fault of faults) test(`finite settlement observer holds ${fault} and 
     case "log_identity": w.receipt.logs[0]!.blockHash = factHash("d"); break;
     case "log_index": w.receipt.logs[1]!.logIndex = "0x2"; break;
     case "duplicate": w.receipt.logs.push({ ...w.receipt.logs[1]!, logIndex: "0x4" }); break;
+    case "receipt_from": w.receipt.from = f.prepared.payer; break;
+    case "receipt_to": w.receipt.to = f.prepared.token; break;
+    case "receipt_missing_from": delete (w.receipt as any).from; break;
+    case "receipt_missing_to": delete (w.receipt as any).to; break;
     case "event": w.receipt.logs[1]!.data = word(0n); break;
     case "reorg": w.reorg = true; break;
     case "unfinalized": w.finalized.number = "0x29"; break;

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { canonicalJson, domainHash, sha256 } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertPermit2OwnerLocked } from "./production-owner-admission.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { evmAddressLock, assertExclusiveEvmOwner } from "../evm-address-ownership.js";
@@ -113,25 +113,8 @@ export class Permit2ProductionPreparation {
     return this.state.withLocks(this.locks(record), async () => {
       const current = await this.required(id);
       if (current.integrityHash !== record.integrityHash || current.exposureAt !== null || current.terminal) blocked("Permit2 lifecycle changed.");
-      await this.ownerLocked(current, now, used.toString()); return current;
+      await assertPermit2OwnerLocked(this.state, this.operations, current, now, used.toString()); return current;
     });
-  }
-  private async ownerLocked(record: Permit2ProductionRecord, now: Date, usage: string) {
-    const wallet = await permit2WalletBinding(this.state, record.material.wallet.profile);
-    await assertExclusiveEvmOwner(this.state, wallet.account, wallet.profileHash);
-    const active = await loadActiveAssetPolicyRegistry(this.state.root, wallet.profile, now);
-    if (canonicalJson(wallet) !== canonicalJson(record.material.wallet) || active === null ||
-        active.digest !== record.material.owner.policyDigest || active.registry.registryVersion !== record.material.checkpoint.registryVersion ||
-        active.revision !== record.material.checkpoint.policyRevision ||
-        active.activationDigest !== record.material.checkpoint.activationDigest || active.accounts.evm?.toLowerCase() !== wallet.account.toLowerCase()) {
-      blocked("Permit2 current owner binding or policy activation changed.");
-    }
-    await this.operations.assertPermit2AccountAvailable(record);
-    const p = reconstructPermit2ProductionMaterial(record.material);
-    if (BigInt(p.expiresAtUnix) <= BigInt(Math.floor(now.getTime() / 1000))) blocked("Permit2 authorization expired.");
-    evaluateAssetPolicy(active.registry, { chain: p.chain, asset: { kind: "token", identifier: p.token }, rail: "x402", mechanism: X402_PERMIT2_MECHANISM,
-      amountAtomic: p.amountAtomic, dailyUsageAtomic: usage, asOf: now.toISOString(), asOfDate: now.toISOString().slice(0, 10) });
-    return active;
   }
   async reserve(id: string): Promise<Permit2ProductionRecord> {
     await this.records.ready();
