@@ -8,23 +8,27 @@ import { gaslessAddress } from "../gasless/validation.js";
 import { RpcHttpFailure, RpcProviderScheduler } from "../lifi/rpc-scheduler.js";
 import { StateStore } from "../state.js";
 import { USDT_GASLESS } from "./model.js";
-import { preparePolicyBoundUsdt } from "./policy-prepare.js";
+import {} from "./policy-prepare.js";
+import { preparePolicyBoundUsdtV2 } from "./policy-prepare-v2.js";
+import { attestUsdtSponsor } from "./sponsor-auth.js";
 import { usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
-/** One command owns exactly seven physical RPC attempts at most: two safe-chain batches and five sponsor reads. */
+/** Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. */
 export class UsdtCommandReadBudget {
     state;
     transport;
     now;
     wait;
+    scope;
     started;
     attempts = 0;
     scheduler;
-    constructor(state, transport, now = Date.now, wait = async (milliseconds) => await new Promise((resolve) => setTimeout(resolve, milliseconds))) {
+    constructor(state, transport, now = Date.now, wait = async (milliseconds) => await new Promise((resolve) => setTimeout(resolve, milliseconds)), scope = "execute") {
         this.state = state;
         this.transport = transport;
         this.now = now;
         this.wait = wait;
+        this.scope = scope;
         this.started = now();
         if (!Number.isFinite(this.started))
             throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read clock is invalid.");
@@ -38,7 +42,7 @@ export class UsdtCommandReadBudget {
     count() { return this.attempts; }
     async request(endpoint, method, body, maxBytes, code) {
         this.guard(0);
-        if (this.attempts >= 7)
+        if (this.attempts >= (this.scope === "prepare-v2" ? 8 : 7))
             throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read budget exhausted.", { reason: "gasless_usdt_read_budget" });
         this.attempts += 1;
         const result = await this.scheduler.schedule(endpoint, this.now, this.wait, (milliseconds) => this.guard(milliseconds), async () => {
@@ -87,16 +91,17 @@ export class GaslessUsdtCommandPrepare {
         if (needRpc && (rpcUrl === undefined || rpcUrl === "")) {
             throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT preparation.");
         }
-        const budget = needRpc ? new UsdtCommandReadBudget(this.state, this.options.transport ?? new GaslessHttps(), this.options.pacingNow, this.options.wait) : undefined;
+        const budget = needRpc ? new UsdtCommandReadBudget(this.state, this.options.transport ?? new GaslessHttps(), this.options.pacingNow, this.options.wait, "prepare-v2") : undefined;
         const prepare = this.options.preparePort ?? {
             now: () => this.clock.now(),
             activePolicy: async (profile) => await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile),
             dailyUsage: async (sender, at) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
                 chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
             safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender),
+            sponsorAuth: async (op, snapshot) => await attestUsdtSponsor({ op, snapshot, expectedBlockHash: snapshot.blockHash, transport: budget, rpcUrl: rpcUrl, clock: this.clock }),
         };
         const sponsor = this.options.sponsorPort ?? usdtSponsorPort(budget);
-        const policy = await preparePolicyBoundUsdt({ prepare, sponsor }, { profile: input.profile,
+        const policy = await preparePolicyBoundUsdtV2({ prepare, sponsor }, { profile: input.profile,
             sender: gaslessAddress(active.accounts.evm, "APN_ALLOWLIST_REFUSED"),
             recipient: input.recipient, grossAtomic: BigInt(input.grossAtomic), maxFeeAtomic: BigInt(input.maxFeeAtomic),
             minReceivedAtomic: BigInt(input.minReceivedAtomic), chain: USDT_GASLESS.chain, token: USDT_GASLESS.token,

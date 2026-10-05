@@ -45,3 +45,4 @@ export declare function attestUsdtSponsor(input: {
     userOperationDigest: string;
     schemaVersion: "apn.gasless-usdt-sponsor-auth.v1";
 }>;
+export type UsdtSponsorAuthEvidence = Awaited<ReturnType<typeof attestUsdtSponsor>>;

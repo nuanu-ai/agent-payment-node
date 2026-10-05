@@ -13,11 +13,12 @@ const TOKEN_ABI = parseAbi(["function approve(address spender,uint256 value) ret
 const ACCOUNT_ABI = parseAbi(["function executeBatch((address target,uint256 value,bytes data)[] calls)"]);
 const ESTIMATE_SIGNATURE = `0x${"fffffffffffffffffffffffffffffff0"}${"0".repeat(32)}7${"a".repeat(63)}1c` as Hex;
 const STUB_WORD = `0x${"11".repeat(32)}` as Hex;
+export const USDT_PREPARE_STUB_WORD = STUB_WORD;
 const HASH = /^0x[0-9a-f]{64}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const serializable = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry: unknown) =>
   typeof entry === "bigint" ? entry.toString() : entry));
-function frozenCopy<T>(value: T): T {
+export function frozenCopy<T>(value: T): T {
   const copy = structuredClone(value);
   const freeze = (entry: unknown): void => {
     if (entry !== null && typeof entry === "object") {
@@ -32,10 +33,13 @@ function frozenCopy<T>(value: T): T {
 /** A read-only adapter must authenticate the active policy and read one canonical safe block. */
 export interface UsdtPreparePort {
   now(): Date;
+  sponsorPermit?(bound: import("./bound-operation.js").UsdtAnyBoundOperation, identity: import("./local-signing.js").UsdtSigningIdentity, snapshot: import("./sponsor-auth.js").UsdtSponsorSnapshot): Promise<import("./sponsor-permit.js").UsdtSponsorPermit>;
+  sponsorAuth?(op: UsdtUserOperation, snapshot: import("./sponsor-auth.js").UsdtSponsorSnapshot): Promise<import("./sponsor-auth.js").UsdtSponsorAuthEvidence>;
   activePolicy(profile: string): Promise<ActiveAssetPolicy | null>;
   dailyUsage(sender: Address, at: Date): Promise<string>;
   safeSnapshot(sender: Address): Promise<{
     readonly chainId: bigint; readonly blockNumber: bigint; readonly blockHash: Hex; readonly account: UsdtAccountState;
+    readonly pins?: import("./sponsor-auth.js").UsdtSponsorSnapshot["pins"];
   }>;
 }
 
@@ -68,13 +72,13 @@ export interface UsdtPolicyPrepared {
   readonly bindingHash: string;
 }
 
-function canonicalAddress(value: unknown): Address {
+export function canonicalAddress(value: unknown): Address {
   if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value)) usdtFailure("APN_INVALID_INPUT", "gasless_usdt_address");
   try { if (getAddress(value) === value) return value as Address; } catch { /* refused below */ }
   usdtFailure("APN_INVALID_INPUT", "gasless_usdt_address");
 }
 
-function requirePolicy(active: ActiveAssetPolicy | null, request: UsdtPolicyPrepareRequest, usage: string, now: Date): ActiveAssetPolicy {
+export function requirePolicy(active: ActiveAssetPolicy | null, request: UsdtPolicyPrepareRequest, usage: string, now: Date): ActiveAssetPolicy {
   if (active === null) usdtFailure("APN_ALLOWLIST_REFUSED", "gasless_usdt_policy_required");
   if (active.profile !== request.profile || active.accounts.evm !== request.sender || active.digest !== active.registry.policyDigest ||
     !DIGEST.test(active.digest) || !DIGEST.test(active.activationDigest) || !Number.isSafeInteger(active.revision) || active.revision < 1) {
@@ -91,7 +95,7 @@ function requirePolicy(active: ActiveAssetPolicy | null, request: UsdtPolicyPrep
   return active;
 }
 
-export function usdtApprovalTransferBatch(plan: UsdtTransferPlan): Hex {
+export function usdtApprovalTransferBatch(plan: Pick<UsdtTransferPlan, "request" | "feeCapAtomic" | "netAtomic">): Hex {
   const approveZero = encodeFunctionData({ abi: TOKEN_ABI, functionName: "approve", args: [USDT_GASLESS.paymaster, 0n] });
   const approveExact = encodeFunctionData({ abi: TOKEN_ABI, functionName: "approve", args: [USDT_GASLESS.paymaster, plan.feeCapAtomic] });
   const transfer = encodeFunctionData({ abi: TOKEN_ABI, functionName: "transfer", args: [plan.request.recipient, plan.netAtomic] });

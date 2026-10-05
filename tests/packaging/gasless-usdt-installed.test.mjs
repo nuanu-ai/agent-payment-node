@@ -19,9 +19,10 @@ const PRICE = { slow: { maxFeePerGas: "0x10ef719d", maxPriorityFeePerGas: "0xbb0
   fast: { maxFeePerGas: "0x12a0fcf9", maxPriorityFeePerGas: "0xcdc27ec" } };
 const PAYMASTER_DATA = "0x020000006aacecdb000000000000dac17f958d2ee523a2206206994597c13d831ec700000000000000000000000000004c2c00000000000000000000000000000000000000000000000000000000a38ca6e3000000000000000000000000000138804337ff05c84b9a80ea0a78dbe7b8e102f66d4c08972391719016554aea7ecb13e50f38e455f67da2908c40238d37d162d3f3dc686067c76c198b6239400746330724b6191afa40a35538022086b0288210f55e1c1c";
 
-async function run(command, args, cwd) {
+async function run(command, args, cwd, sandboxHome) {
   return await new Promise((resolveRun, reject) => {
-    const child = spawn(command, args, { cwd, env: { ...process.env, npm_config_ignore_scripts: "true" } });
+    const child = spawn(command, args, { cwd, env: { ...process.env, HOME: sandboxHome, APN_STATE_ROOT: join(sandboxHome, "state"),
+      npm_config_cache: process.env.npm_config_cache ?? join(process.env.HOME, ".npm"), npm_config_logs_dir: join(sandboxHome, "npm-logs"), npm_config_ignore_scripts: "true" } });
     let stdout = "", stderr = "";
     child.stdout.on("data", chunk => { stdout += chunk; });
     child.stderr.on("data", chunk => { stderr += chunk; });
@@ -33,12 +34,12 @@ async function run(command, args, cwd) {
 test("packed APN installs and prepares one synthetic policy bound USDT without money effects", { timeout: 240000 }, async t => {
   const sandbox = await mkdtemp(join(await realpath(tmpdir()), "apn-usdt-installed-"));
   t.after(async () => rm(sandbox, { recursive: true, force: true }));
-  const packed = await run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", sandbox], source);
+  const packed = await run("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", sandbox], source, sandbox);
   assert.equal(packed.code, 0, packed.stderr);
   const [{ filename }] = JSON.parse(packed.stdout);
   const archive = join(sandbox, filename), archiveHash = digest(await readFile(archive));
   const installed = await run("npm", ["install", "--ignore-scripts", "--offline", "--no-audit", "--no-fund",
-    "--prefix", sandbox, archive], sandbox);
+    "--prefix", sandbox, archive], sandbox, sandbox);
   assert.equal(installed.code, 0, installed.stderr);
   assert.equal(digest(await readFile(archive)), archiveHash);
   const packageRoot = join(sandbox, "node_modules", "@nuanu-ai", "apn");
@@ -48,6 +49,11 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   const { runCli } = await moduleAt("cli.js");
   const { allowlistProfileHash } = await moduleAt("allowlist-policy-overlay.js");
   const { UsdtCommandReadBudget } = await moduleAt("gasless-usdt/command-prepare.js");
+  const { usdtSponsorHash } = await moduleAt("gasless-usdt/sponsor-hash.js");
+  const { attestUsdtSponsor } = await moduleAt("gasless-usdt/sponsor-auth.js");
+  const { publicUsdtBound } = await moduleAt("gasless-usdt/public-bound.js");
+  const { privateKeyToAccount } = await import(pathToFileURL(join(sandbox, "node_modules", "viem", "_esm", "accounts", "index.js")).href);
+  const sponsorKey = privateKeyToAccount(`0x${"11".repeat(32)}`);
   const { StateStore } = await moduleAt("state.js");
   assert.equal(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")).name, "@nuanu-ai/apn");
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2", registryVersion: "installed.1",
@@ -59,16 +65,22 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
       mechanismPins: { gasless: USDT_GASLESS.mechanism } }] }] });
   const policy = { profile: "owner", registry, digest: registry.policyDigest, revision: 1,
     activationDigest: "a".repeat(64), accounts: { evm: OWNER }, activatedAt: "2026-09-18T00:00:00.000Z" };
-  let active = policy, physical = 0, sponsorCalls = 0;
+  let active = policy, readPortCalls = 0, sponsorCalls = 0;
   const safe = { chainId: 1n, blockNumber: 26_002_950n, blockHash: `0x${"12".repeat(32)}`,
-    account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } };
+    account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" }, pins: { token: USDT_GASLESS.tokenCodeHash, entryPoint: USDT_GASLESS.entryPointCodeHash,
+      delegate: USDT_GASLESS.delegateCodeHash, paymaster: USDT_GASLESS.paymasterCodeHash, paymasterEntryPoint: USDT_GASLESS.entryPoint } };
   const preparePort = { now: () => NOW, activePolicy: async () => active, dailyUsage: async () => "0",
-    safeSnapshot: async () => { physical++; return safe; } };
-  const sponsorPort = { tokenQuote: async () => { physical++; sponsorCalls++; return { quotes: [{ ...QUOTE.quotes[0],
+    safeSnapshot: async () => { readPortCalls++; return safe; },
+    sponsorAuth: async (op, snapshot) => await attestUsdtSponsor({ op, snapshot, expectedBlockHash: snapshot.blockHash, rpcUrl: "https://rpc.test/", clock: { now: () => NOW },
+      transport: { request: async (_url, _method, body) => { readPortCalls++; const batch = JSON.parse(body);
+        return { status: 200, body: JSON.stringify(batch.map((call, index) => ({ jsonrpc: "2.0", id: call.id,
+          result: index === 0 ? `0x${"0".repeat(63)}1` : usdtSponsorHash(op) }))) }; } } }), };
+  const sponsorPort = { tokenQuote: async () => { readPortCalls++; sponsorCalls++; return { quotes: [{ ...QUOTE.quotes[0],
     paymaster: USDT_GASLESS.paymaster, token: USDT_GASLESS.token }] }; },
-  gasPrice: async () => { physical++; sponsorCalls++; return PRICE; },
-  paymasterData: async () => { physical++; sponsorCalls++; return { paymaster: USDT_GASLESS.paymaster,
-    paymasterData: PAYMASTER_DATA }; } };
+  gasPrice: async () => { readPortCalls++; sponsorCalls++; return PRICE; },
+  paymasterData: async op => { readPortCalls++; sponsorCalls++;
+    const signature = await sponsorKey.signMessage({ message: { raw: usdtSponsorHash({ ...op, signature: "0x", paymasterData: PAYMASTER_DATA }) } });
+    return { paymaster: USDT_GASLESS.paymaster, paymasterData: `${PAYMASTER_DATA.slice(0, -130)}${signature.slice(2)}` }; } };
   const effects = { approval: 0, signer: 0, dispatch: 0, walletSecret: 0 };
   const executionDisabled = {
     approval: { async approve() { effects.approval++; throw new Error("synthetic approval refusal"); } },
@@ -86,7 +98,11 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
     "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "installed-usdt-001"];
   const prepared = await runCli(argv, {}, options);
   assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
-  const operation = prepared.operation;
+  const publicOperation = prepared.operation;
+  const journal = join(stateRoot, "gasless-usdt-bound-operations", publicOperation.profileHash, `${publicOperation.operationId}.json`);
+  const operation = JSON.parse(await readFile(journal, "utf8"));
+  assert.deepEqual(publicUsdtBound(operation), publicOperation);
+  assert.doesNotMatch(JSON.stringify(publicOperation), /paymasterData|unsignedOperation|"signature"/u);
   assert.equal(operation.profileHash, allowlistProfileHash("owner"));
   assert.equal(operation.binding.plan.request.grossAtomic, "1000000");
   assert.equal(operation.binding.plan.netAtomic, "500000");
@@ -94,19 +110,18 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   assert.equal(operation.signerBoundary, "unavailable");
   assert.equal(operation.usageReservation, "disabled");
   assert.equal(operation.dispatch, "disabled");
-  assert.equal(physical, 6);
+  assert.equal(readPortCalls, 7);
   assert.equal(sponsorCalls, 5);
-  assert.ok(physical <= 7);
-  const journal = join(stateRoot, "gasless-usdt-bound-operations", operation.profileHash, `${operation.operationId}.json`);
+  assert.ok(readPortCalls <= 7);
   assert.deepEqual(JSON.parse(await readFile(journal, "utf8")), operation);
   const statusArgs = ["gasless", "usdt", "status", "--profile-hash", operation.profileHash,
     "--operation", operation.operationId];
   const status = await runCli(statusArgs, {}, { stateRoot });
   assert.equal(status.ok, true);
-  assert.deepEqual(status.operation, operation);
-  const countBeforeReplay = physical;
-  assert.deepEqual((await runCli(argv, {}, options)).operation, operation);
-  assert.equal(physical, countBeforeReplay);
+  assert.deepEqual(status.operation, publicOperation);
+  const countBeforeReplay = readPortCalls;
+  assert.deepEqual((await runCli(argv, {}, options)).operation, publicOperation);
+  assert.equal(readPortCalls, countBeforeReplay);
   active = null;
   const { GaslessUsdtOperationService } = await moduleAt("gasless-usdt/service.js");
   const { UsdtOperationRepository } = await moduleAt("gasless-usdt/operation.js");
@@ -148,15 +163,16 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   assert.deepEqual(await new UsdtExecutionJournal(stateRoot).load(operation.operationId), aborted);
   const refusedArgs = [...argv]; refusedArgs[refusedArgs.indexOf("--amount") + 1] = "1.000001";
   refusedArgs[refusedArgs.indexOf("--idempotency-key") + 1] = "installed-usdt-over-cap";
-  const beforeRefusal = physical;
+  const beforeRefusal = readPortCalls;
   const refused = await runCli(refusedArgs, {}, options);
   assert.equal(refused.ok, false);
   assert.equal(refused.error.code, "APN_OPERATION_BLOCKED");
-  assert.equal(physical, beforeRefusal, "cap refusal must precede public reads");
+  assert.equal(readPortCalls, beforeRefusal, "cap refusal must precede public reads");
   assert.equal((await readdir(join(stateRoot, "gasless-usdt-bound-operations", operation.profileHash))).filter(x => x.endsWith(".json")).length, 1);
   const attemptedArgs = [...argv];
   attemptedArgs[attemptedArgs.indexOf("--idempotency-key") + 1] = "installed-usdt-attempted";
-  const attempted = (await runCli(attemptedArgs, {}, options)).operation;
+  const attemptedPublic = (await runCli(attemptedArgs, {}, options)).operation;
+  const attempted = await service.statusBound(attemptedPublic.operationId);
   const executeArgs = ["gasless", "usdt", "execute", "--profile-hash", attempted.profileHash,
     "--operation", attempted.operationId];
   const approvalRefused = await runCli(executeArgs, {}, options);

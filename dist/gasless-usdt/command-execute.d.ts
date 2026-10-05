@@ -1,7 +1,7 @@
 import { type GaslessTransport } from "../gasless/https.js";
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
-import { type UsdtBoundOperation } from "./bound-operation.js";
+import { type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import { type UsdtExecutionRecord } from "./execution-journal.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import { type UsdtRecoveryPort } from "./recovery.js";
