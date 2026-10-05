@@ -1,3 +1,4 @@
+import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_COMMANDS } from "./evm-command-catalog.js";import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";import { UNISWAP_COMMANDS, UNISWAP_COMMAND_GROUPS } from "./swap/uniswap-command-catalog.js";import { SUNSWAP_COMMANDS, SUNSWAP_COMMAND_GROUPS } from "./swap/sunswap-tron/command-catalog.js";import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/command-catalog.js";import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { networkCommandVariants } from "./network-command-catalog.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
@@ -479,46 +480,3 @@ export const COMMAND_MANIFEST = {
   commands: COMMANDS,
 } as const;
 validateCommandManifest(COMMAND_MANIFEST);
-function command(
-  path: readonly string[],
-  synopsis: string,
-  summary: string,
-  options: readonly CommandOption[],
-  effectClass: EffectClass,
-  effectSummary: string,
-  approvalClass: ApprovalClass,
-  approvalWhen: string,
-  states: CommandDefinition["states"],
-  recovery: CommandDefinition["recovery"],
-  examples: readonly string[],
-  outputContract: CommandDefinition["output"]["contract"] = "apn.cli.v1",
-): CommandDefinition {
-  return {
-    path,
-    synopsis,
-    summary,
-    options,
-    effect: { class: effectClass, summary: effectSummary },
-    approval: { class: approvalClass, when: approvalWhen },
-    output: {
-      contract: outputContract,
-      success_exit: 0,
-      failure_exit: 1,
-      success: outputContract === "apn.cli.v1" ? "One successful apn.cli.v1 envelope." : "The command-specific raw transport output.",
-      failures: [outputContract === "apn.cli.v1" ? "One classified-failure apn.cli.v1 envelope." : "A classified command failure."],
-    },
-    states,
-    recovery,
-    examples,
-  };
-}
-function option(
-  name: `--${string}`,
-  type: ScalarType,
-  required: boolean,
-  defaultValue: CommandOption["default"],
-  constraints: readonly string[],
-  sensitivity: CommandOption["sensitivity"],
-): CommandOption {
-  return { name, type, required, default: defaultValue, constraints, sensitivity };
-}

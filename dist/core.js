@@ -32,7 +32,7 @@ import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
-import { canonicalProfile } from "./wallet-policy.js";
+import { gaslessProvider } from "./core-gasless-provider.js";
 import { publicRelayNativeSourceJournal } from "./relay/native-source.js";
 import { OperationAbandonService } from "./operation-abandon-service.js";
 import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
@@ -46,14 +46,7 @@ import { executeUniswapCommand } from "./swap/uniswap-command-service.js";
 import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";
 import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";
 import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
-export { ASSET_POLICY_REGISTRY_SCHEMA, ASSET_POLICY_REGISTRY_SCHEMA_V2, assetPolicyDigest, evaluateAssetPolicy, sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
-export { ALLOWLIST_DATASET_PATH, ALLOWLIST_DATASET_SCHEMA, ALLOWLIST_DATASET_SHA256, ALLOWLIST_DATASET_VERSION, ALLOWLIST_INVENTORY_SCHEMA, assertAllowlistExecutionConfigured, compileAllowlistInventory, loadAllowlistInventory, resolveAllowlistAsset, } from "./allowlist-inventory.js";
-export * from "./allowlist-policy.js";
-export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, AssetUsageLedger, validateAssetUsageReservation, } from "./asset-usage-ledger.js";
-export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
-export { DIRECT_ASSET_USAGE_LEASE_SCHEMA, DirectAssetUsageAdapter, validateDirectAssetUsageLease, } from "./direct-asset-usage.js";
-export * from "./swap/index.js";
-export * from "./stargate-v2/index.js";
+export * from "./core-exports.js";
 export class ApnCore {
     context;
     wallet;
@@ -330,7 +323,7 @@ export class ApnCore {
             }
             case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
             case "gasless.balance": {
-                const provider = await this.gaslessProvider(request.profile);
+                const provider = await gaslessProvider(this.context, request.profile);
                 return dataOutcome(provider === "coinbase-agentic-wallet"
                     ? request.chainId !== 8453 ? mmFail("mm_gasless_capability_unavailable") : await this.providerWallet.balance(request.profile)
                     : provider === "metamask-smart-account"
@@ -600,7 +593,7 @@ export class ApnCore {
             return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
         if (existing?.kind === "facilitator_gasless_transfer")
             return await this.facilitatorGasless.prepare(request);
-        const provider = await this.gaslessProvider(request.profile);
+        const provider = await gaslessProvider(this.context, request.profile);
         if (provider === "metamask-smart-account")
             return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
         if (provider === "coinbase-agentic-wallet")
@@ -613,19 +606,6 @@ export class ApnCore {
             return await this.facilitatorGasless.prepare(request);
         return await this.gasless.prepare({ ...request, request: { ...request.request,
                 chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
-    }
-    async gaslessProvider(input) {
-        const profile = canonicalProfile(input);
-        const stored = await this.context.state.loadProviderProfile(this.context.state.profileHash(profile));
-        if (stored === null || stored.provider_id === "local")
-            return "local";
-        if (stored.provider_id === "metamask-agent-wallet")
-            return "metamask-agent-wallet";
-        if (stored.provider_id === "metamask-smart-account")
-            return "metamask-smart-account";
-        if (stored.provider_id === "coinbase-agentic-wallet")
-            return "coinbase-agentic-wallet";
-        return mmFail("mm_gasless_capability_unavailable");
     }
 }
 //# sourceMappingURL=core.js.map
