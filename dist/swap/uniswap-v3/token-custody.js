@@ -3,8 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
-import { assertExclusiveEvmOwnerIncludingGrants, evmAddressLock } from "../../evm-address-ownership.js";
-import { EncryptedSmartAccountPermissionStore } from "../../encrypted-smart-account-permission-store.js";
+import { assertExclusiveEvmRawSigner, evmAddressLock } from "../../evm-address-ownership.js";
 import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
 import { UniswapTokenJournal } from "./token-operation.js";
@@ -19,7 +18,6 @@ export class UniswapTokenCustody {
     now;
     effects;
     wallets;
-    permissions;
     nonces;
     operations;
     constructor(state, wrapping, call, now, effects = new UniswapTokenEffectJournal(state.root)) {
@@ -28,7 +26,6 @@ export class UniswapTokenCustody {
         this.now = now;
         this.effects = effects;
         this.wallets = new EncryptedWalletStore(state, wrapping);
-        this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
         this.nonces = new UniswapTokenNonceStore(state.root);
         this.operations = new UniswapTokenJournal(state.root);
     }
@@ -37,7 +34,7 @@ export class UniswapTokenCustody {
             evmAddressLock(op.account)], async () => { await this.assertOwner(op); return await work(); });
     }
     async assertOwner(op) {
-        await assertExclusiveEvmOwnerIncludingGrants(this.state, this.permissions, op.account, this.state.profileHash(op.profile));
+        await assertExclusiveEvmRawSigner(this.state, op.account, this.state.profileHash(op.profile));
     }
     async allocateNonce(op, kind) {
         await this.reconcileNonceReservations(op.account);
