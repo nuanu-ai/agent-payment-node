@@ -1,3 +1,4 @@
+import { type PortfolioCacheContext, type PortfolioCacheMetadata } from "./portfolio/cache.js";
 import type { AllowlistInventory } from "./allowlist-inventory.js";
 import type { PortfolioEndpoint, PortfolioFamily } from "./portfolio/registry.js";
 export declare const PORTFOLIO_MAX_ATTEMPTS = 3;
@@ -70,6 +71,7 @@ export interface PortfolioRow {
     readonly httpStatus: number | null;
 }
 export interface PortfolioNetworkResult {
+    readonly cache?: PortfolioCacheMetadata;
     readonly chain: string;
     readonly name: string;
     readonly family: PortfolioFamily;
@@ -97,6 +99,7 @@ export interface AssetPortfolio {
     readonly networks: readonly PortfolioNetworkResult[];
 }
 export interface AssetPortfolioInput {
+    readonly cache?: PortfolioCacheContext;
     readonly inventory: AllowlistInventory;
     readonly accounts: Readonly<Record<PortfolioFamily, PortfolioAccount>>;
     readonly endpoint: (chain: string) => PortfolioEndpoint;

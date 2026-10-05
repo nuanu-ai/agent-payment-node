@@ -223,7 +223,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_wallet_status", properties: ["profile"], required: [], defaults: { profile: "default" } },
       { name: "apn_wallet_balance", properties: ["profile", "rpc_url"], required: ["rpc_url"], defaults: { profile: "default" } },
       { name: "apn_wallet_balance_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url"], required: ["profile", "chain", "asset", "rpc_url"], defaults: {} },
-      { name: "apn_wallet_portfolio", properties: ["profile"], required: [], defaults: { profile: "default" } },
+      { name: "apn_wallet_portfolio", properties: ["profile", "refresh"], required: [], defaults: { profile: "default", refresh: false } },
       { name: "apn_wallet_ensure_solana", properties: ["profile", "provider", "accept_risk"], required: ["profile", "provider"], defaults: {} },
       { name: "apn_wallet_balance_solana", properties: ["profile", "asset"], required: ["profile", "asset"], defaults: {} },
       { name: "apn_wallet_capabilities_solana", properties: ["profile"], required: [], defaults: {} },
@@ -330,8 +330,9 @@ test("manifest projection is exact, strict and rejects missing, colliding or uns
   assert.deepEqual(projected.map((tool) => tool.name), TOOL_NAMES);
   assert.equal(projected.every((tool) => tool.inputSchema.type === "object"), true);
   assert.equal(projected.every((tool) => tool.inputSchema.additionalProperties === false), true);
-  assert.equal(projected.every((tool) => Object.values(tool.inputSchema.properties).every((schema) => (
-    typeof schema === "object" && schema !== null && !Array.isArray(schema) && schema.type === "string"
+  assert.equal(projected.every((tool) => Object.entries(tool.inputSchema.properties).every(([field, schema]) => (
+    typeof schema === "object" && schema !== null && !Array.isArray(schema) &&
+    schema.type === (tool.name === "apn_wallet_portfolio" && field === "refresh" ? "boolean" : "string")
   ))), true);
   assert.equal(projected.some((tool) => tool.name.includes("mcp")), false);
   assert.equal(projected.some((tool) => tool.name.includes("mcp") || tool.name.includes("control")), false);

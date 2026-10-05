@@ -1,3 +1,4 @@
+import { parsePortfolioCache, type PortfolioCacheRecord } from "./portfolio/cache-record.js";
 import { randomBytes } from "node:crypto";
 import { constants, type Dirent, type Stats } from "node:fs";
 import {
@@ -48,6 +49,25 @@ const PROVIDER_X402_OPERATION_SCHEMAS = new Set<unknown>(["apn.provider-x402.sta
 const PROVIDER_X402_RECEIPT_SCHEMA = "apn.provider-x402.receipt.v1";
 
 export class StateStore extends SecureStateStore {
+  async loadPortfolioCache(slot: string): Promise<PortfolioCacheRecord | null> {
+    stateIdentifier(slot, "portfolio cache slot");
+    try {
+      const record = parsePortfolioCache(await this.readJson(join("portfolio-cache", `${slot}.json`)));
+      return record?.slot === slot ? record : null;
+    } catch (error) {
+      if (error instanceof ApnError && error.code === "APN_STATE_CORRUPT") return null;
+      throw error;
+    }
+  }
+  async writePortfolioCache(record: PortfolioCacheRecord): Promise<void> {
+    if (parsePortfolioCache(record) === null) stateCorrupt("Portfolio cache record is invalid.");
+    await this.withLocks([`portfolio-cache:${record.slot}`], async () => {
+      const current = await this.loadPortfolioCache(record.slot);
+      if (current !== null && Date.parse(current.capturedAt) > Date.parse(record.capturedAt)) return;
+      await this.ensureDirectory("portfolio-cache");
+      await this.writeJson(join("portfolio-cache", `${record.slot}.json`), record);
+    });
+  }
   async loadRpcProviderPacing(familyHash: string): Promise<number | null> {
     stateIdentifier(familyHash, "RPC provider family hash");
     return (await this.rpcProviderPacingRecord(familyHash))?.lastStartMs ?? null;

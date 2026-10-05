@@ -269,3 +269,21 @@ test("wallet portfolio is one read-only catalog command in CLI and MCP with the 
   assert.ok(tool);
   assert.deepEqual([tool.command.effect.class, tool.command.approval.class, tool.inputSchema.required], ["network_read", "none", []]);
 });
+
+
+test("separate production cores share only portfolio balances and expose current zero calls and original capture work", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root); await state.initialize();
+  await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile: "default", profileHash: state.profileHash("default"),
+    address: EVM, createdAt: "2026-09-18T00:00:00.000Z", bindingHash: "0".repeat(64) }));
+  const chains = await fakeChains();
+  const run = async (refresh = false) => await new ApnCore({ state: new StateStore(temp.root), chainAccounts: chainAccounts(["solana", "tron"]),
+    portfolio: { environment: {}, http: chains, wait: async () => "elapsed" } }).execute({ command: "wallet.portfolio", profile: "default", refresh });
+  const first = await run(); assert.equal(first.ok, true); assert.equal(chains.requests.length, 16);
+  const second = await run(); assert.equal(second.ok, true); assert.equal(chains.requests.length, 16);
+  const data = second.data as PortfolioData & { networks: readonly { cache: { hit: boolean; source_rpc: { calls: number }; age_ms: number; expires_at: string } }[] };
+  assert.equal(data.rpc_calls_total, 0);
+  for (const network of data.networks) { assert.equal(network.cache.hit, true); assert.equal(network.rpc.calls, 0); assert.ok(network.cache.source_rpc.calls > 0); }
+  assert.deepEqual(data.networks.map((v) => v.provenance), (first.data as PortfolioData).networks.map((v) => v.provenance));
+  await run(true); assert.equal(chains.requests.length, 32);
+});

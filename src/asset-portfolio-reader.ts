@@ -1,3 +1,4 @@
+import { cachedPortfolio, capturePortfolio, portfolioCacheKey, type PortfolioCacheContext, type PortfolioCacheMetadata } from "./portfolio/cache.js";
 import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import type { AllowlistInventory, CandidateAsset, CandidateNetwork } from "./allowlist-inventory.js";
@@ -82,6 +83,7 @@ export interface PortfolioRow {
 }
 
 export interface PortfolioNetworkResult {
+  readonly cache?: PortfolioCacheMetadata;
   readonly chain: string;
   readonly name: string;
   readonly family: PortfolioFamily;
@@ -107,6 +109,7 @@ export interface AssetPortfolio {
 }
 
 export interface AssetPortfolioInput {
+  readonly cache?: PortfolioCacheContext;
   readonly inventory: AllowlistInventory;
   readonly accounts: Readonly<Record<PortfolioFamily, PortfolioAccount>>;
   readonly endpoint: (chain: string) => PortfolioEndpoint;
@@ -129,13 +132,13 @@ export class AssetPortfolioReader {
   async read(input: AssetPortfolioInput): Promise<AssetPortfolio> {
     const accounts = portfolioAccounts(input.accounts);
     const networks = await Promise.all(input.inventory.networks.map(async (network) => await this.readNetwork(network,
-      input.inventory.assets.filter((asset) => asset.chain === network.chain), accounts[network.family], input.endpoint(network.chain))));
+      input.inventory.assets.filter((asset) => asset.chain === network.chain), accounts[network.family], input.endpoint(network.chain), input)));
     return { datasetVersion: input.inventory.dataset.version, datasetSha256: input.inventory.dataset.sha256,
       rpcCallsTotal: networks.reduce((total, network) => total + network.rpcCalls, 0), networks };
   }
 
   private async readNetwork(network: CandidateNetwork, assets: readonly CandidateAsset[], account: PortfolioAccount,
-    endpoint: PortfolioEndpoint): Promise<PortfolioNetworkResult> {
+    endpoint: PortfolioEndpoint, input: AssetPortfolioInput): Promise<PortfolioNetworkResult> {
     if (assets.length === 0 || assets.length !== network.assetCount) invalid("The frozen list network has no exact asset rows.");
     const base = { chain: network.chain, name: network.name, family: network.family,
       account: account.kind === "account" ? account.address : null, endpoint: publicEndpoint(endpoint),
@@ -144,6 +147,11 @@ export class AssetPortfolioReader {
     if (account.kind === "unsupported") return { ...base, rows: assets.map((asset) => row(asset, "unavailable", account.reason)) };
     if (endpoint.source === "not_configured") return { ...base, rows: assets.map((asset) => row(asset, "rpc_not_configured")) };
     if (endpoint.source === "invalid_env") return { ...base, rows: assets.map((asset) => row(asset, "unavailable", "rpc_config_invalid")) };
+    const key = input.cache === undefined ? undefined : portfolioCacheKey(input.cache, input.inventory, network, assets, account, endpoint);
+    if (input.cache !== undefined && key !== undefined) {
+      const cached = await cachedPortfolio(input.cache, key, this.now());
+      if (cached !== null) return { ...base, ...cached };
+    }
     const request: BatchBalanceRequest = { chain: network.chain, family: network.family, account: account.address, endpoint: endpoint.url.href,
       assets: assets.map(({ kind, identifier }) => ({ kind, identifier })) };
     let calls = 0, methods = 0;
@@ -153,9 +161,10 @@ export class AssetPortfolioReader {
       calls += result.calls; methods += result.methods;
       if (result.status === "available" || !RETRYABLE.has(result.reason) || attempt >= PORTFOLIO_MAX_ATTEMPTS ||
           await this.wait(PORTFOLIO_RETRY_PAUSES_MS[attempt - 1]!) !== "elapsed") {
-        return { ...base, mode: result.mode, rpcCalls: calls, attempts: attempt, methods, retried,
+        const fresh: PortfolioNetworkResult = { ...base, mode: result.mode, rpcCalls: calls, attempts: attempt, methods, retried,
           block: result.status === "available" ? result.block : null, slot: result.status === "available" ? result.slot : null,
           observedAt: this.now().toISOString(), rows: project(assets, result) };
+        return input.cache === undefined || key === undefined ? fresh : await capturePortfolio(input.cache, key, fresh);
       }
       retried.push(result.reason as PortfolioRetryableReason);
     }

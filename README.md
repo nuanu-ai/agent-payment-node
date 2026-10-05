@@ -602,7 +602,9 @@ operations.
 
 ## Portfolio read
 
-`apn wallet portfolio [--profile <profile>]` (MCP: `apn_wallet_portfolio`)
+Complete successful network results are cached privately for 15 seconds, including zero balances. `--refresh` (MCP `refresh: true`) always reads again; a failed refresh reports the failure without returning an older result. Cache hits preserve the original `provenance.observed_at`, block or slot, expose `cache.hit`, age and expiry, and report zero current RPC calls. `cache.source_rpc` records the work spent capturing the result. Changes to the profile, account, dataset, assets or endpoint invalidate the result. Money-moving commands never use this cache.
+
+`apn wallet portfolio [--profile <profile>] [--refresh]` (MCP: `apn_wallet_portfolio`)
 reads the native coin and every token of the frozen allowlist
 (`data/allowlist/2026-09-17/dataset.json`: 13 networks, 28 rows) for the
 profile's local EVM wallet and its Solana and TRON chain accounts. It is
@@ -753,7 +755,7 @@ apn wallet balance-tron --profile <profile> --asset <trx-or-usdt>
 apn wallet capabilities-tron [--profile <profile>]
 apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
 apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
-apn wallet portfolio [--profile <profile>]
+apn wallet portfolio [--profile <profile>] [--refresh]
 apn operation repair-deployment --operation <operation-id>
 apn bridge capabilities [--profile <profile>]
 apn bridge inventory

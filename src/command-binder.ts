@@ -52,6 +52,7 @@ export function bindMcpInput(command: CommandDefinition, input: unknown): BoundC
   for (const [field, value] of Object.entries(input)) {
     const option = byField.get(field);
     if (option === undefined) throw new ApnError("APN_INVALID_INPUT", "Tool input contains an unknown field.");
+    if (option.type === "boolean" && typeof value !== "boolean") throw new ApnError("APN_INVALID_INPUT", "Tool boolean input must be a boolean.");
     catalogInput[option.name] = value;
   }
   return bindParsedCatalog(parseCatalogInput(command, catalogInput));
@@ -219,7 +220,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
       request: { command: "wallet.balance", profile: value(options, "--profile") },
       rpcUrl: value(options, "--rpc-url"),
     };
-    case "wallet portfolio": return { request: { command: "wallet.portfolio", profile: value(options, "--profile") } };
+    case "wallet portfolio": return { request: { command: "wallet.portfolio", profile: value(options, "--profile"), ...(value(options, "--refresh") === "true" ? { refresh: true } : {}) } };
     case "wallet balance-asset": return {
       request: { command: "wallet.balance", profile: value(options, "--profile"), asset: bindAsset(options) },
       rpcUrl: value(options, "--rpc-url"),

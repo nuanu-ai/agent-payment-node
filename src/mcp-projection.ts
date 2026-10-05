@@ -153,14 +153,15 @@ function optionSchema(option: CommandOption): { [key: string]: JsonValue } {
   }
   const pattern = scalarPattern(option);
   return {
-    type: "string",
+    type: option.type === "boolean" ? "boolean" : "string",
     description: `Catalog type ${option.type}; constraints ${option.constraints.join(", ") || "none"}; sensitivity ${option.sensitivity}.`,
     ...(pattern === undefined ? {} : { pattern }),
-    ...(option.default.kind === "literal" ? { default: option.default.value } : {}),
+    ...(option.default.kind === "literal" ? { default: option.type === "boolean" ? option.default.value === "true" : option.default.value } : {}),
   };
 }
 
 function scalarPattern(option: CommandOption): string | undefined {
+  if (option.type === "boolean") return undefined;
   if (option.type === "string" && option.constraints.includes("64_lowercase_hex_characters")) {
     return "^[a-f0-9]{64}$";
   }

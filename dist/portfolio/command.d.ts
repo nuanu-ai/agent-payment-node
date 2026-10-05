@@ -9,4 +9,4 @@ export interface PortfolioDependencies {
 }
 export declare function portfolioPause(milliseconds: number): Promise<"elapsed">;
 /** Read-only: resolves public profile accounts under the profile lock, then reads every list network without holding it. */
-export declare function readProfilePortfolio(context: RuntimeContext, profileInput: string): Promise<unknown>;
+export declare function readProfilePortfolio(context: RuntimeContext, profileInput: string, refresh?: boolean): Promise<unknown>;
