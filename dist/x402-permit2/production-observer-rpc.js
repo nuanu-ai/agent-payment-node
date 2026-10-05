@@ -27,13 +27,20 @@ export class Permit2ObserverRpc {
         for (const call of calls)
             this.methods[call.method] = (this.methods[call.method] ?? 0) + 1;
         try {
-            // DNS must share the command abort deadline before any guarded POST is admitted.
+            // The shared command deadline covers DNS and every guard/pacing/transport await.
             const signal = this.controller.signal;
             if (signal.aborted)
                 aborted();
             let onAbort;
             try {
-                await Promise.race([this.rpc.primePublicAddresses(), new Promise((_resolve, reject) => {
+                const pipeline = (async () => {
+                    await this.rpc.primePublicAddresses();
+                    if (signal.aborted)
+                        aborted();
+                    return await this.rpc.batchCall(calls);
+                })();
+                // Promise.race observes late rejection too; cancellation does not cancel durable pacing I/O.
+                return await Promise.race([pipeline, new Promise((_resolve, reject) => {
                         onAbort = () => reject(new ApnError("APN_RPC_AMBIGUOUS", "Permit2 observation reached its read deadline."));
                         signal.addEventListener("abort", onAbort, { once: true });
                         if (signal.aborted)
@@ -44,10 +51,6 @@ export class Permit2ObserverRpc {
                 if (onAbort !== undefined)
                     signal.removeEventListener("abort", onAbort);
             }
-            // A timed-out lookup may finish later, but it must never continue into batch transport.
-            if (signal.aborted)
-                aborted();
-            return await this.rpc.batchCall(calls);
         }
         catch (error) {
             this.errors += 1;
