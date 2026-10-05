@@ -10,6 +10,11 @@ import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-
 import { usdtApprovalTransferBatch } from "./policy-prepare.js";
 import { planUsdtTransfer } from "./quote.js";
 import { usdtUserOperation } from "./userop.js";
+import { USDT_BOUND_V2_SCHEMA, validateUsdtBoundOperationV2 } from "./bound-v2-codec.js";
+import { consumeUsdtV2Prepared } from "./policy-prepare-v2.js";
+export function validateUsdtAnyBoundOperation(value) {
+    return isPlainRecord(value) && value.schemaVersion === USDT_BOUND_V2_SCHEMA ? validateUsdtBoundOperationV2(value) : validateUsdtBoundOperation(value);
+}
 export const USDT_BOUND_OPERATION_SCHEMA = "apn.gasless-usdt-bound-operation.v1";
 const HASH = /^[a-f0-9]{64}$/u;
 const KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
@@ -229,7 +234,7 @@ export class UsdtBoundOperationRepository {
         catch {
             fail("bound_json");
         }
-        return validateUsdtBoundOperation(parsed);
+        return validateUsdtAnyBoundOperation(parsed);
     }
     async readClaim(idempotencyKey) {
         if (!await this.dir(this.claimsPath(), false))
@@ -372,10 +377,13 @@ export class UsdtBoundOperationRepository {
         const claimPath = this.claimPath(idempotencyKey);
         let record = await this.readClaim(idempotencyKey);
         if (record === null) {
-            const operationId = hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA, profileHash, idempotencyKey, bindingHash: saved.bindingHash });
-            const draft = { schemaVersion: USDT_BOUND_OPERATION_SCHEMA, operationId, profileHash, idempotencyKey, binding: saved,
+            if (binding.schemaVersion === "apn.gasless-usdt-policy-prepare.v2")
+                consumeUsdtV2Prepared(binding);
+            const schemaVersion = binding.schemaVersion === "apn.gasless-usdt-policy-prepare.v2" ? USDT_BOUND_V2_SCHEMA : USDT_BOUND_OPERATION_SCHEMA;
+            const operationId = hashObject({ schemaVersion, profileHash, idempotencyKey, bindingHash: saved.bindingHash });
+            const draft = { schemaVersion, operationId, profileHash, idempotencyKey, binding: saved,
                 createdAt: now.toISOString(), signerBoundary: "unavailable", dispatch: "disabled", usageReservation: "disabled" };
-            const candidate = validateUsdtBoundOperation({ ...draft, integrityHash: hashObject(draft) });
+            const candidate = validateUsdtAnyBoundOperation({ ...draft, integrityHash: hashObject(draft) });
             await this.publish(this.claimsPath(), claimPath, candidate, true);
             record = await this.readClaim(idempotencyKey);
             if (record === null)

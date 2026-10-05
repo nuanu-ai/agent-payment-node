@@ -1,3 +1,4 @@
+import { publicUsdtBound } from "./gasless-usdt/public-bound.js";
 import { isPlainRecord } from "./canonical.js";
 export function dataOutcome(data, fallbackProofClass) {
     const artifact = artifactMetadata(data);
@@ -14,7 +15,7 @@ export function operationOutcome(operation) {
     return {
         proofClass: artifact.proofClass ?? "durable_public_state",
         data: null,
-        operation,
+        operation: publicUsdtBound(operation),
         receipt: null,
         nextActions: artifact.nextActions,
     };

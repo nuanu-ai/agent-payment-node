@@ -62,3 +62,5 @@ export async function attestUsdtSponsor(input: {
     chainId: "1", blockNumber: snapshot.blockNumber.toString(), blockHash: snapshot.blockHash,
     pins: { ...snapshot.pins }, membership: true as const, parityHash, capturedAt };
 }
+
+export type UsdtSponsorAuthEvidence = Awaited<ReturnType<typeof attestUsdtSponsor>>;

@@ -33,4 +33,4 @@ export interface UsdtSettlement {
  * exactly one USDT debit to the recipient of N, exactly one USDT debit to the treasury of A <= F, and no other USDT
  * leaving the sender in that transaction. Anything else is ambiguous and never closes the operation.
  */
-export declare function verifyUsdtReceipt(plan: UsdtTransferPlan, userOpHash: Hex, receipt: UsdtChainReceipt): UsdtSettlement;
+export declare function verifyUsdtReceipt(plan: Pick<UsdtTransferPlan, "request" | "feeCapAtomic" | "netAtomic">, userOpHash: Hex, receipt: UsdtChainReceipt): UsdtSettlement;

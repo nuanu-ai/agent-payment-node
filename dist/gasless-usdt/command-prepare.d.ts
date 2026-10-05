@@ -17,16 +17,17 @@ export interface UsdtCommandPrepareOptions {
     readonly wait?: (milliseconds: number) => Promise<void>;
     readonly pacingNow?: () => number;
 }
-/** One command owns exactly seven physical RPC attempts at most: two safe-chain batches and five sponsor reads. */
+/** Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. */
 export declare class UsdtCommandReadBudget implements GaslessTransport {
     private readonly state;
     private readonly transport;
     private readonly now;
     private readonly wait;
+    private readonly scope;
     private readonly started;
     private attempts;
     private readonly scheduler;
-    constructor(state: StateStore, transport: GaslessTransport, now?: () => number, wait?: (milliseconds: number) => Promise<void>);
+    constructor(state: StateStore, transport: GaslessTransport, now?: () => number, wait?: (milliseconds: number) => Promise<void>, scope?: "execute" | "prepare-v2");
     count(): number;
     request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<{
         readonly status: number;
@@ -42,6 +43,6 @@ export declare class GaslessUsdtCommandPrepare {
     private readonly operations;
     private readonly options;
     constructor(state: StateStore, clock: ClockPort, operations: GaslessUsdtOperationService, options?: UsdtCommandPrepareOptions);
-    prepare(input: PrepareCommand): Promise<import("./bound-operation.js").UsdtBoundOperation>;
+    prepare(input: PrepareCommand): Promise<import("./bound-operation.js").UsdtAnyBoundOperation>;
 }
 export {};

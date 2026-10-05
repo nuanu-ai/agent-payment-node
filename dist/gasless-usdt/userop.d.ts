@@ -29,7 +29,7 @@ export interface UsdtUserOperation {
     readonly signature: Hex;
     readonly eip7702Auth?: UsdtAuthorization;
 }
-export declare function usdtUserOperation(plan: UsdtTransferPlan, input: {
+export declare function usdtUserOperation(plan: Pick<UsdtTransferPlan, "request" | "gas" | "price">, input: {
     readonly entryPointNonce: bigint;
     readonly callData: Hex;
     readonly paymasterData: Hex;

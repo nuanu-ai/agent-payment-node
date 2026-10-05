@@ -1,7 +1,8 @@
 import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { StateStore } from "../state.js";
-import { type UsdtBoundOperation } from "./bound-operation.js";
+import { type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
+import { type UsdtSponsorPermit } from "./sponsor-permit.js";
 import { type UsdtUserOperation } from "./userop.js";
 export interface UsdtSigningIdentity {
     readonly profile: string;
@@ -24,7 +25,7 @@ export declare class LocalUsdtSigningService {
     private readonly now;
     private readonly wallets;
     constructor(state: StateStore, wrapping: WrappingSecretPort, now?: () => Date);
-    sign(value: UsdtBoundOperation, expected: UsdtSigningIdentity): Promise<SignedUsdtUserOperation>;
+    sign(value: UsdtBoundOperation, expected: UsdtSigningIdentity, permit?: UsdtSponsorPermit): Promise<SignedUsdtUserOperation>;
 }
 /** Independent local check for a returned wire. The prepared calldata, fees and paymaster bytes are immutable. */
 export declare function verifySignedUsdtOperation(boundValue: UsdtBoundOperation, wire: UsdtUserOperation): Promise<Hex>;

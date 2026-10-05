@@ -3,13 +3,14 @@ import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { ApnError } from "../errors.js";
 import { GaslessHttps } from "../gasless/https.js";
 import { StateStore } from "../state.js";
-import { UsdtBoundOperationRepository, validateUsdtBoundOperation } from "./bound-operation.js";
+import { UsdtBoundOperationRepository, validateUsdtAnyBoundOperation as validateUsdtBoundOperation } from "./bound-operation.js";
 import { UsdtCommandReadBudget } from "./command-prepare.js";
 import { UsdtExecutionJournal } from "./execution-journal.js";
 import { LocalUsdtSigningService } from "./local-signing.js";
 import { USDT_GASLESS } from "./model.js";
 import { UsdtRecoveryService } from "./recovery.js";
 import { usdtPacedRecoveryPort } from "./recovery-port.js";
+import { mintUsdtSponsorPermit } from "./sponsor-permit.js";
 import { usdtSafeSnapshot, usdtSendPort } from "./rpc.js";
 import { GuardedUsdtSendService } from "./send.js";
 import { createInterface } from "node:readline/promises";
@@ -112,6 +113,7 @@ export class GaslessUsdtCommandExecute {
             dailyUsage: async (sender, at) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
                 chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
             safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender),
+            sponsorPermit: async (bound, identity, snapshot) => await mintUsdtSponsorPermit({ bound, identity, snapshot, transport: budget, rpcUrl, clock: this.clock }),
         };
     }
     async execute(profileHash, operationId) {

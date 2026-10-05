@@ -12,6 +12,13 @@ import { usdtApprovalTransferBatch, type UsdtPolicyPrepared, type UsdtPreparePor
 import { planUsdtTransfer } from "./quote.js";
 import { usdtUserOperation } from "./userop.js";
 
+import { USDT_BOUND_V2_SCHEMA, validateUsdtBoundOperationV2, type UsdtBoundOperationV2 } from "./bound-v2-codec.js";
+import { consumeUsdtV2Prepared, type UsdtPolicyPreparedV2 } from "./policy-prepare-v2.js";
+export type UsdtAnyBoundOperation = UsdtBoundOperation | UsdtBoundOperationV2;
+export function validateUsdtAnyBoundOperation(value: unknown): UsdtAnyBoundOperation {
+  return isPlainRecord(value) && value.schemaVersion === USDT_BOUND_V2_SCHEMA ? validateUsdtBoundOperationV2(value) : validateUsdtBoundOperation(value);
+}
+
 export const USDT_BOUND_OPERATION_SCHEMA = "apn.gasless-usdt-bound-operation.v1" as const;
 type Persisted<T> = T extends bigint ? string : T extends readonly (infer Item)[] ? readonly Persisted<Item>[] :
   T extends object ? { readonly [Key in keyof T]: Persisted<T[Key]> } : T;
@@ -28,8 +35,8 @@ export interface UsdtBoundOperation {
   readonly integrityHash: string;
 }
 export type UsdtBoundRecovery =
-  | { readonly state: "prepared"; readonly operation: UsdtBoundOperation }
-  | { readonly state: "capability_unavailable" | "recovery_required"; readonly reason: string; readonly operation: UsdtBoundOperation };
+  | { readonly state: "prepared"; readonly operation: UsdtAnyBoundOperation }
+  | { readonly state: "capability_unavailable" | "recovery_required"; readonly reason: string; readonly operation: UsdtAnyBoundOperation };
 export interface UsdtBoundReplayIntent {
   readonly profile: string;
   readonly recipient: Address;
@@ -184,7 +191,7 @@ export class UsdtBoundOperationRepository {
     const handle = await open(path, "r");
     try { await handle.sync(); } finally { await handle.close(); }
   }
-  private async readRecord(path: string): Promise<UsdtBoundOperation | null> {
+  private async readRecord(path: string): Promise<UsdtAnyBoundOperation | null> {
     let stat;
     try { stat = await lstat(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -195,15 +202,15 @@ export class UsdtBoundOperationRepository {
       (stat.mode & 0o777) !== FILE_MODE || stat.size > MAX_BYTES) fail("bound_file", "APN_STATE_SECURITY");
     let parsed: unknown;
     try { parsed = JSON.parse(await readFile(path, "utf8")); } catch { fail("bound_json"); }
-    return validateUsdtBoundOperation(parsed);
+    return validateUsdtAnyBoundOperation(parsed);
   }
-  private async readClaim(idempotencyKey: string): Promise<UsdtBoundOperation | null> {
+  private async readClaim(idempotencyKey: string): Promise<UsdtAnyBoundOperation | null> {
     if (!await this.dir(this.claimsPath(), false)) return null;
     const record = await this.readRecord(this.claimPath(idempotencyKey));
     if (record !== null && record.idempotencyKey !== idempotencyKey) fail("bound_claim_binding");
     return record;
   }
-  private async writeCompleteTemp(directory: string, record: UsdtBoundOperation): Promise<string> {
+  private async writeCompleteTemp(directory: string, record: UsdtAnyBoundOperation): Promise<string> {
     const path = join(directory, `.pending-${randomUUID()}`);
     const content = `${canonicalJson(record)}\n`;
     if (Buffer.byteLength(content, "utf8") > MAX_BYTES) fail("bound_capacity");
@@ -220,7 +227,7 @@ export class UsdtBoundOperationRepository {
     return path;
   }
   /** Publish a fully written file with link(2), which fails rather than replacing an existing record. */
-  private async publish(directory: string, path: string, record: UsdtBoundOperation, acceptExisting = false): Promise<void> {
+  private async publish(directory: string, path: string, record: UsdtAnyBoundOperation, acceptExisting = false): Promise<void> {
     const temp = await this.writeCompleteTemp(directory, record);
     try {
       try { await link(temp, path); }
@@ -251,7 +258,7 @@ export class UsdtBoundOperationRepository {
       }
     }
   }
-  async load(profileHash: string, operationId: string): Promise<UsdtBoundOperation | null> {
+  async load(profileHash: string, operationId: string): Promise<UsdtAnyBoundOperation | null> {
     const path = this.path(profileHash, operationId);
     if (!await this.dir(this.root, false) || !await this.dir(this.directory, false) || !await this.dir(this.profilePath(profileHash), false)) return null;
     const record = await this.readRecord(path);
@@ -272,7 +279,7 @@ export class UsdtBoundOperationRepository {
     return null;
   }
   /** Read the durable claim before fresh policy or RPC work; repair claim-only publication for an exact caller intent. */
-  async replay(profileHash: string, idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtBoundOperation | null> {
+  async replay(profileHash: string, idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtAnyBoundOperation | null> {
     if (!HASH.test(profileHash) || !KEY.test(idempotencyKey)) fail("bound_input", "APN_INVALID_INPUT");
     if (!await this.dir(this.root, false) || !await this.dir(this.directory, false)) return null;
     const record = await this.readClaim(idempotencyKey);
@@ -291,9 +298,12 @@ export class UsdtBoundOperationRepository {
     await this.publish(this.profilePath(profileHash), finalPath, record);
     return record;
   }
-  async create(profileHash: string, binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation> {
+  async create(profileHash: string, binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation>;
+  async create(profileHash: string, binding: UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtBoundOperationV2>;
+  async create(profileHash: string, binding: UsdtPolicyPrepared | UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtAnyBoundOperation>;
+  async create(profileHash: string, binding: UsdtPolicyPrepared | UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtAnyBoundOperation> {
     if (!HASH.test(profileHash) || !KEY.test(idempotencyKey) || !Number.isFinite(now.getTime())) fail("bound_input", "APN_INVALID_INPUT");
-    const saved = serializable(binding) as Persisted<UsdtPolicyPrepared>;
+    const saved = serializable(binding) as Persisted<UsdtPolicyPrepared | UsdtPolicyPreparedV2>;
     await this.dir(this.root, true); await this.dir(this.directory, true); await this.dir(this.profilePath(profileHash), true);
     await this.dir(this.claimsPath(), true);
     await this.cleanupOldTemps(this.profilePath(profileHash));
@@ -301,10 +311,12 @@ export class UsdtBoundOperationRepository {
     const claimPath = this.claimPath(idempotencyKey);
     let record = await this.readClaim(idempotencyKey);
     if (record === null) {
-      const operationId = hashObject({ schemaVersion: USDT_BOUND_OPERATION_SCHEMA, profileHash, idempotencyKey, bindingHash: saved.bindingHash });
-      const draft = { schemaVersion: USDT_BOUND_OPERATION_SCHEMA, operationId, profileHash, idempotencyKey, binding: saved,
+      if (binding.schemaVersion === "apn.gasless-usdt-policy-prepare.v2") consumeUsdtV2Prepared(binding);
+      const schemaVersion = binding.schemaVersion === "apn.gasless-usdt-policy-prepare.v2" ? USDT_BOUND_V2_SCHEMA : USDT_BOUND_OPERATION_SCHEMA;
+      const operationId = hashObject({ schemaVersion, profileHash, idempotencyKey, bindingHash: saved.bindingHash });
+      const draft = { schemaVersion, operationId, profileHash, idempotencyKey, binding: saved,
         createdAt: now.toISOString(), signerBoundary: "unavailable" as const, dispatch: "disabled" as const, usageReservation: "disabled" as const };
-      const candidate = validateUsdtBoundOperation({ ...draft, integrityHash: hashObject(draft) });
+      const candidate = validateUsdtAnyBoundOperation({ ...draft, integrityHash: hashObject(draft) });
       await this.publish(this.claimsPath(), claimPath, candidate, true);
       record = await this.readClaim(idempotencyKey);
       if (record === null) fail("bound_claim_missing");
@@ -316,7 +328,7 @@ export class UsdtBoundOperationRepository {
 }
 
 /** Classification reads only. Drift or revocation never advances the operation or authorizes an effect. */
-export async function classifyUsdtBoundRecovery(operation: UsdtBoundOperation, port: UsdtPreparePort): Promise<UsdtBoundRecovery> {
+export async function classifyUsdtBoundRecovery(operation: UsdtAnyBoundOperation, port: UsdtPreparePort): Promise<UsdtBoundRecovery> {
   const b = operation.binding;
   try {
     const now = port.now();
