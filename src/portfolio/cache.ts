@@ -1,3 +1,4 @@
+import type { ClockPort } from "../ports.js";
 import type { AssetPortfolioInput, PortfolioAccount, PortfolioNetworkResult } from "../asset-portfolio-reader.js";
 import type { CandidateAsset, CandidateNetwork } from "../allowlist-inventory.js";
 import { hashObject, sha256 } from "../canonical.js";
@@ -37,11 +38,11 @@ export async function cachedPortfolio(context: PortfolioCacheContext, key: Cache
     record.capture.mode !== (key.family === "solana" ? "solana_json_rpc_batch" : "tron_http_sequential"))) return null;
   return { ...record.capture, rpcCalls: 0, attempts: 0, methods: 0, retried: [], cache: metadata(record.capture, record.capturedAt, record.expiresAt, true, now) };
 }
-export async function capturePortfolio(context: PortfolioCacheContext, key: CacheKey, result: PortfolioNetworkResult): Promise<PortfolioNetworkResult> {
+export async function capturePortfolio(context: PortfolioCacheContext, key: CacheKey, result: PortfolioNetworkResult, clock: ClockPort): Promise<PortfolioNetworkResult> {
   if (result.rows.some((row) => row.status !== "ok")) return result;
   const { mode, rpcCalls, attempts, methods, retried, block, slot, observedAt, rows } = result;
   const record = portfolioCacheRecord(key.slot, key.identity, { mode, rpcCalls, attempts, methods, retried, block, slot, observedAt, rows });
-  await context.state.writePortfolioCache(record);
+  await context.state.writePortfolioCache(record, clock);
   return { ...result, cache: metadata(record.capture, record.capturedAt, record.expiresAt, false, new Date(record.capturedAt)) };
 }
 function metadata(capture: PortfolioCapture, capturedAt: string, expiresAt: string, hit: boolean, now: Date): PortfolioCacheMetadata {

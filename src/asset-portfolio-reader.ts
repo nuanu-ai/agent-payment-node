@@ -164,7 +164,7 @@ export class AssetPortfolioReader {
         const fresh: PortfolioNetworkResult = { ...base, mode: result.mode, rpcCalls: calls, attempts: attempt, methods, retried,
           block: result.status === "available" ? result.block : null, slot: result.status === "available" ? result.slot : null,
           observedAt: this.now().toISOString(), rows: project(assets, result) };
-        return input.cache === undefined || key === undefined ? fresh : await capturePortfolio(input.cache, key, fresh);
+        return input.cache === undefined || key === undefined ? fresh : await capturePortfolio(input.cache, key, fresh, { now: () => this.now() });
       }
       retried.push(result.reason as PortfolioRetryableReason);
     }
