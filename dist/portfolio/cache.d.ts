@@ -1,3 +1,4 @@
+import type { ClockPort } from "../ports.js";
 import type { AssetPortfolioInput, PortfolioAccount, PortfolioNetworkResult } from "../asset-portfolio-reader.js";
 import type { CandidateAsset, CandidateNetwork } from "../allowlist-inventory.js";
 import type { StateStore } from "../state.js";
@@ -26,5 +27,5 @@ export declare function portfolioCacheKey(context: PortfolioCacheContext, invent
 export declare function cachedPortfolio(context: PortfolioCacheContext, key: CacheKey, now: Date): Promise<(PortfolioCapture & {
     cache: PortfolioCacheMetadata;
 }) | null>;
-export declare function capturePortfolio(context: PortfolioCacheContext, key: CacheKey, result: PortfolioNetworkResult): Promise<PortfolioNetworkResult>;
+export declare function capturePortfolio(context: PortfolioCacheContext, key: CacheKey, result: PortfolioNetworkResult, clock: ClockPort): Promise<PortfolioNetworkResult>;
 export {};

@@ -28,7 +28,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   } };
   const input: AssetPortfolioInput = { inventory, accounts, endpoint: (chain) => portfolioEndpoint(chain, {}),
     cache: { state, profileHash: state.profileHash("default"), profileIdentity: hashObject({ revision: 1 }) } };
-  return { state, temp, input, calls: () => calls, advance: (v: number) => { ms += v; }, failure: (v: typeof fail) => { fail = v; },
+  return { state, temp, input, clock: { now: () => new Date(ms) }, calls: () => calls, advance: (v: number) => { ms += v; }, failure: (v: typeof fail) => { fail = v; },
     read: (value = input) => new AssetPortfolioReader({ evm: port, solana: { ...port, family: "solana" }, tron: { ...port, family: "tron" } },
       () => new Date(ms), async () => "elapsed").read(value) };
 }
@@ -74,15 +74,23 @@ test("corrupt records and future timestamps miss, while private-file modes and s
   const future = { ...valid, capturedAt: "2026-10-05T01:00:00.000Z", expiresAt: "2026-10-05T01:00:15.000Z",
     capture: { ...valid.capture, observedAt: "2026-10-05T01:00:00.000Z" } }; delete future.digest; future.digest = hashObject(future);
   await writeFile(file, canonicalJson(future)); await f.read(); assert.equal(f.calls(), 3);
+  const repaired = await f.read({ ...f.input, cache: { ...f.input.cache!, state: new StateStore(f.temp.root) } });
+  assert.equal(f.calls(), 3); assert.equal(repaired.rpcCallsTotal, 0); assert.equal(repaired.networks[0]!.cache!.hit, true);
+  assert.equal(repaired.networks[0]!.observedAt, f.clock.now().toISOString());
+  await writeFile(file, canonicalJson(future));
+  const refreshed = await f.read({ ...f.input, cache: { ...f.input.cache!, refresh: true } });
+  assert.equal(f.calls(), 4); assert.equal(refreshed.networks[0]!.cache!.hit, false);
+  const afterRefresh = await f.read({ ...f.input, cache: { ...f.input.cache!, state: new StateStore(f.temp.root) } });
+  assert.equal(f.calls(), 4); assert.equal(afterRefresh.rpcCallsTotal, 0); assert.equal(afterRefresh.networks[0]!.cache!.hit, true);
   await chmod(file, 0o644); await assert.rejects(f.read(), { code: "APN_STATE_SECURITY" });
   await unlink(file); await symlink(join(f.temp.base, "foreign"), file); await assert.rejects(f.read(), { code: "APN_STATE_SECURITY" });
 });
 test("late older capture cannot replace a newer record under the slot lock", async (t) => {
   const f = await fixture(t); await f.read(); const file = join(f.temp.root, "portfolio-cache", (await readdir(join(f.temp.root, "portfolio-cache")))[0]!);
   const old = JSON.parse(await readFile(file, "utf8")); f.advance(1000); await f.read({ ...f.input, cache: { ...f.input.cache!, refresh: true } });
-  const newer = await readFile(file, "utf8"); await new StateStore(f.temp.root).writePortfolioCache(old); assert.equal(await readFile(file, "utf8"), newer);
+  const newer = await readFile(file, "utf8"); await new StateStore(f.temp.root).writePortfolioCache(old, f.clock); assert.equal(await readFile(file, "utf8"), newer);
   const sameInstant = { ...JSON.parse(newer), identity: "f".repeat(64) }; delete sameInstant.digest; sameInstant.digest = hashObject(sameInstant);
-  await f.state.writePortfolioCache(sameInstant);
+  await f.state.writePortfolioCache(sameInstant, f.clock);
   assert.equal((await f.state.loadPortfolioCache(old.slot))!.identity, sameInstant.identity, "equal-clock successful refresh can replace the result");
 });
 test("CLI refresh flag and MCP boolean bind with explicit schema and reject invalid types", () => {
@@ -105,4 +113,27 @@ test("transfer preparation performs fresh rail reads and never touches portfolio
     policy: new TestProfilePolicy(), ids: { next: () => "00000000-0000-4000-8000-000000000001" } });
   await ensureWallet(core); assert.equal(typeof await prepareTransfer(core, "portfolio-isolated-transfer"), "string");
   assert.ok(rpc.balanceCalls > 0); assert.ok(rpc.nonceCalls > 0); assert.equal(rpc.submissions.length, 0);
+});
+
+
+test("cache writer samples the live clock after the secure slot read and rejects invalid clock values", async (t) => {
+  const f = await fixture(t); await f.read();
+  const file = join(f.temp.root, "portfolio-cache", (await readdir(join(f.temp.root, "portfolio-cache")))[0]!);
+  const old = JSON.parse(await readFile(file, "utf8")); f.advance(1000);
+  await f.read({ ...f.input, cache: { ...f.input.cache!, refresh: true } });
+  const newer = await readFile(file, "utf8");
+  let loaded = false;
+  class CheckedReadStore extends StateStore {
+    override async loadPortfolioCache(slot: string) {
+      const record = await super.loadPortfolioCache(slot); loaded = true; return record;
+    }
+  }
+  await new CheckedReadStore(f.temp.root).writePortfolioCache(old, { now: () => {
+    assert.equal(loaded, true, "clock is sampled after the secure current-record read"); return f.clock.now();
+  } });
+  assert.equal(await readFile(file, "utf8"), newer);
+  for (const invalid of [new Date(NaN), new Date(-1)]) {
+    await assert.rejects(f.state.writePortfolioCache(old, { now: () => invalid }), { code: "APN_STATE_CORRUPT" });
+    assert.equal(await readFile(file, "utf8"), newer);
+  }
 });

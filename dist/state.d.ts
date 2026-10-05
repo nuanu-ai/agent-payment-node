@@ -1,3 +1,4 @@
+import type { ClockPort } from "./ports.js";
 import { type PortfolioCacheRecord } from "./portfolio/cache-record.js";
 import { type Dirent } from "node:fs";
 import { type ProviderProfileRecord } from "./provider-profile.js";
@@ -7,7 +8,7 @@ import { type X402OperationRecord, type X402ReceiptRecord, type X402ResultRecord
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
 export declare class StateStore extends SecureStateStore {
     loadPortfolioCache(slot: string): Promise<PortfolioCacheRecord | null>;
-    writePortfolioCache(record: PortfolioCacheRecord): Promise<void>;
+    writePortfolioCache(record: PortfolioCacheRecord, clock: ClockPort): Promise<void>;
     loadRpcProviderPacing(familyHash: string): Promise<number | null>;
     writeRpcProviderPacing(familyHash: string, lastStartMs: number): Promise<void>;
     loadRpcProviderCooldown(familyHash: string): Promise<number | null>;

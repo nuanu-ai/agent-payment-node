@@ -20,12 +20,12 @@ export async function cachedPortfolio(context, key, now) {
         return null;
     return { ...record.capture, rpcCalls: 0, attempts: 0, methods: 0, retried: [], cache: metadata(record.capture, record.capturedAt, record.expiresAt, true, now) };
 }
-export async function capturePortfolio(context, key, result) {
+export async function capturePortfolio(context, key, result, clock) {
     if (result.rows.some((row) => row.status !== "ok"))
         return result;
     const { mode, rpcCalls, attempts, methods, retried, block, slot, observedAt, rows } = result;
     const record = portfolioCacheRecord(key.slot, key.identity, { mode, rpcCalls, attempts, methods, retried, block, slot, observedAt, rows });
-    await context.state.writePortfolioCache(record);
+    await context.state.writePortfolioCache(record, clock);
     return { ...result, cache: metadata(record.capture, record.capturedAt, record.expiresAt, false, new Date(record.capturedAt)) };
 }
 function metadata(capture, capturedAt, expiresAt, hit, now) {

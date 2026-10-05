@@ -30,12 +30,16 @@ export class StateStore extends SecureStateStore {
             throw error;
         }
     }
-    async writePortfolioCache(record) {
+    async writePortfolioCache(record, clock) {
         if (parsePortfolioCache(record) === null)
             stateCorrupt("Portfolio cache record is invalid.");
         await this.withLocks([`portfolio-cache:${record.slot}`], async () => {
             const current = await this.loadPortfolioCache(record.slot);
-            if (current !== null && Date.parse(current.capturedAt) > Date.parse(record.capturedAt))
+            const at = clock.now(), nowMs = at instanceof Date ? at.getTime() : NaN;
+            if (!Number.isSafeInteger(nowMs) || nowMs < 0 || new Date(nowMs).toISOString() !== at.toISOString()) {
+                stateCorrupt("Portfolio cache writer clock is invalid.");
+            }
+            if (current !== null && Date.parse(current.capturedAt) <= nowMs && Date.parse(current.capturedAt) > Date.parse(record.capturedAt))
                 return;
             await this.ensureDirectory("portfolio-cache");
             await this.writeJson(join("portfolio-cache", `${record.slot}.json`), record);
