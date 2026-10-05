@@ -482,8 +482,8 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   private async postDirectGuarded(body: string, addresses: readonly PinnedAddress[], method: string): Promise<string> {
     this.observationCounters.attempts += 1;
     const post = () => {
-      this.observationCounters.admissions += 1;
       if (this.abortSignal?.aborted) throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.");
+      this.observationCounters.admissions += 1;
       return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal, this.observationCounters);
     };
     return this.directGuard === undefined ? await post() : await this.directGuard.post(this.endpoint.toString(), post);
