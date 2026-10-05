@@ -35,7 +35,7 @@ import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { createTokenRpc, tokenBatch, tokenChain, type TokenRpcCall } from "../../src/swap/uniswap-v3/token-rpc.js";
 import { UniswapTokenRpcBudgetJournal } from "../../src/swap/uniswap-v3/token-rpc-budget.js";
 import { tokenPrimaryCandidates } from "../../src/swap/uniswap-v3/token-rpc-pool.js";
-import { StateStore } from "../../src/state.js";
+import { sealWallet, StateStore } from "../../src/state.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -490,6 +490,32 @@ test("default profile with no wallet or Smart Account grant passes owner check",
     ACCOUNT, state.profileHash("default"));
 });
 
+for (const collision of ["local-wallet", "encrypted-envelope"] as const) {
+  test(`raw signer rejects a foreign ${collision} even with an exempt delegated profile`, async (t) => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const state = new StateStore(temporary.root); await state.initialize();
+    const key = `0x${"0".repeat(63)}1` as Hex, account = privateKeyToAccount(key).address,
+      profile = "foreign-delegated-owner", createdAt = NOW.toISOString(),
+      bindingHash = hashObject({ profile, address: account, createdAt });
+    const wrapping = { load: async () => Buffer.alloc(32, 73), create: async () => Buffer.alloc(32, 73) };
+    await state.writeProviderProfile(sameAddressProfile(state, account, profile));
+    const own = state.profileHash("token-swap");
+    await assertExclusiveUniswapTokenSigner(state, account, own);
+    if (collision === "local-wallet") {
+      await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile,
+        profileHash: state.profileHash(profile), address: account, createdAt, bindingHash }));
+      assert.equal(await state.loadEncryptedWalletEnvelope(profile), null);
+    } else {
+      await new EncryptedWalletStore(state, wrapping).save({ profile, address: account, chainId: 8453, createdAt, bindingHash },
+        { version: "apn.wallet-secret.v1", privateKey: key, directEffects: {}, x402Effects: {} });
+      assert.equal(await state.loadWallet(state.profileHash(profile)), null);
+    }
+    await assert.rejects(assertExclusiveUniswapTokenSigner(state, account, own), { code: "APN_OPERATION_BLOCKED" });
+    await assert.rejects(assertExclusiveRelayExecutionOwner(state, new EncryptedSmartAccountPermissionStore(state, wrapping), account, own),
+      { code: "APN_OPERATION_BLOCKED" });
+  });
+}
+
 test("single-primary pooled quote and prepare use eight and nine physical requests with bounded pin batches", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const at = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
     account = privateKeyToAccount(key).address; await setup(temporary.root, "3000000", account);
@@ -745,8 +771,17 @@ test("reprepare classification after native effect persistence remains recoverab
   assert.equal((await new AssetUsageLedger(temporary.root).load({ account: reservation.account, chain: reservation.chain, asset: reservation.asset }, reservation.reservationId))?.state, "reserved");
   const secret = await new EncryptedWalletStore(native.state, native.wrapping).describe("default"); assert.ok(secret); assert.equal(Object.keys(secret.secret.directEffects).length, 1);
   new EncryptedWalletStore(native.state, native.wrapping).clear(secret.secret);
-  const restarted = evmCore(temporary.root, native.rpc, native.wrapping); assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
+  const restarted = evmCore(temporary.root, native.rpc, native.wrapping);
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
   assert.equal(native.rpc.submissions.length, 1);
+  const usage = new AssetUsageLedger(temporary.root), asset = { account: reservation.account, chain: reservation.chain, asset: reservation.asset };
+  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "submitted");
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  const completed = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id);
+  assert.equal(completed?.state, "completed"); assert.equal(completed?.terminal, true);
+  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "finalized");
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
+  assert.equal(native.rpc.submissions.length, 1); assert.equal(restarted.approval.intents.length, 0);
 });
 
 test("token USDT behavior pins reject deprecated and fee-bearing state", async () => {
