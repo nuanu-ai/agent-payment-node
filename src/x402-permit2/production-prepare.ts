@@ -91,7 +91,7 @@ export class Permit2ProductionPreparation {
         createdAt: now.toISOString(), updatedAt: now.toISOString(), state: "prepared", terminal: false, reservationStarted: false,
         usageReservationId: assetUsageReservationId(identity, productionUsageKey(operationId)), usageReservationDigest: null,
         exposureAt: null, releaseDigest: null });
-      await this.records.persistLocked(record, true); return record;
+      await this.records.persistPreparedLocked(record, { now: () => this.now() }); return record;
     });
   }
   private async required(id: string): Promise<Permit2ProductionRecord> {

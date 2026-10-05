@@ -4,8 +4,8 @@ import { readFile, writeFile, lstat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { StateStore, sealWallet } from "../../src/state.js";
 import { STATE_VERSION } from "../../src/constants.js";
-import { hashObject, canonicalJson, domainHash } from "../../src/canonical.js";
-import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { hashObject, canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { loadActiveAssetPolicyRegistry } from "../../src/allowlist-active-policy.js";
 import { OperationService } from "../../src/operation-service.js";
 import { checkPermit2Challenge } from "../../src/x402-permit2/checked-challenge.js";
@@ -14,7 +14,7 @@ import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { Permit2ProductionPreparation } from "../../src/x402-permit2/production-prepare.js";
 import { PERMIT2_PRODUCTION_SCHEMA, validatePermit2ProductionMaterial, reconstructPermit2ProductionMaterial } from "../../src/x402-permit2/production-material.js";
 import { Permit2ProductionRepository, permit2ProductionId, publicPermit2Production, productionUsageIdentity,
-  productionRecordBody, sealPermit2ProductionRecord } from "../../src/x402-permit2/production-repository.js";
+  productionUsageKey, productionRecordBody, sealPermit2ProductionRecord } from "../../src/x402-permit2/production-repository.js";
 import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
 import type { X402PaymentRequired } from "../../src/x402-codec.js";
 import { temporaryState } from "./helpers.js";
@@ -27,10 +27,10 @@ const declaration = { info: { description: "EIP-2612", version: "1" }, schema: {
   properties: Object.fromEntries(["from", "asset", "spender", "amount", "nonce", "deadline", "signature", "version"].map(name => [name, { type: "string", pattern: ".*" }])),
   required: ["from", "asset", "spender", "amount", "nonce", "deadline", "signature", "version"] } };
 const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
-function challenge(sponsor = false, hints = sponsor): X402PaymentRequired {
-  return { x402Version: 2, resource: { url: "https://seller.example/data?private=hidden" },
+function challenge(sponsor = false, hints = sponsor, maxTimeoutSeconds = 60): X402PaymentRequired {
+  return { x402Version: 2, resource: { url: "https://seller.example/private-path-token/data?private=hidden" },
     accepts: [{ scheme: "exact", network: asset.chain, asset: asset.token, amount: "10000",
-      payTo: "0x2222222222222222222222222222222222222222", maxTimeoutSeconds: 60,
+      payTo: "0x2222222222222222222222222222222222222222", maxTimeoutSeconds,
       extra: { assetTransferMethod: "permit2", ...(hints ? asset.tokenDomain : {}) } }],
     ...(sponsor ? { extensions: { eip2612GasSponsoring: declaration } } : {}) };
 }
@@ -38,10 +38,11 @@ function input(key = "production-test-key-001", ch = challenge()) {
   const selection = selectPermit2Offer(ch.accepts, payer);
   return { profile: "owner", idempotencyKey: key,
     checked: checkPermit2Challenge(ch, { schemaVersion: "apn.http-request.v1", url: ch.resource.url,
-      method: "POST", headers: { "content-type": "application/json" }, bodyBase64: Buffer.from("private-body").toString("base64") }),
+      method: "POST", headers: { "content-type": "application/json", "x-private-header": "private-header-value" },
+      bodyBase64: Buffer.from("private-body").toString("base64") }),
     expected: { index: selection.index, requirement: selection.requirement, challengeHash: hashChallenge(ch) } };
 }
-async function setup(t: test.TestContext, options: { allowance?: bigint; sponsor?: boolean; badDomain?: boolean; badProxy?: boolean } = {}) {
+async function setup(t: test.TestContext, options: { allowance?: bigint; sponsor?: boolean; badDomain?: boolean; badProxy?: boolean; advanceDuringHttpMs?: number } = {}) {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root); await state.initialize();
   const bindingHash = hashObject({ profile: "owner", address: payer, createdAt: at.toISOString() });
@@ -68,6 +69,7 @@ async function setup(t: test.TestContext, options: { allowance?: bigint; sponsor
       throw new Error(`Unexpected ${method}`);
     } }, transport: { request: async (url, method, body) => {
       httpCalls++; assert.equal(url, "https://facilitator.payai.network/supported"); assert.equal(method, "GET"); assert.equal(body, null);
+      if (options.advanceDuringHttpMs !== undefined) clock = new Date(at.getTime() + options.advanceDuringHttpMs);
       return { status: 200, body: JSON.stringify({ kinds: [{ x402Version: 2, network: asset.chain, scheme: "exact" }],
         extensions: options.sponsor ? ["eip2612GasSponsoring"] : [] }) };
     } } });
@@ -84,7 +86,12 @@ test("durable exact private preparation replays immutable nonce before reads; ch
   assert.equal((await lstat(join(f.root, "permit2-production", `${a.operationId}.json`))).mode & 0o777, 0o600);
   assert.equal((await lstat(join(f.root, "permit2-production"))).mode & 0o777, 0o700);
   const publicValue = JSON.stringify(publicPermit2Production(a));
-  for (const secret of ["hidden", "private-body", "content-type", "bodyBase64"]) assert.equal(publicValue.includes(secret), false);
+  for (const secret of ["hidden", "private-path-token", "private-body", "content-type", "x-private-header", "private-header-value", "bodyBase64"])
+    assert.equal(publicValue.includes(secret), false);
+  assert.deepEqual(publicPermit2Production(a).resource, {
+    origin: "https://seller.example", urlHash: sha256("https://seller.example/private-path-token/data?private=hidden"),
+  });
+  assert.deepEqual(Object.keys(publicPermit2Production(a).resource).sort(), ["origin", "urlHash"]);
   assert.equal(publicPermit2Production(a).capability, "execution_blocked");
   f.advance(120); assert.deepEqual(await f.service.prepare(request), a); assert.equal(f.calls.length, 10);
   for (const change of [{ method: "GET" }, { headers: { accept: "application/json" } }, { bodyBase64: null }]) {
@@ -93,6 +100,31 @@ test("durable exact private preparation replays immutable nonce before reads; ch
   }
   const ch = challenge(); ch.accepts[0]!.amount = "9999";
   await assert.rejects(f.service.prepare(input(request.idempotencyKey, ch)), { code: "APN_IDEMPOTENCY_CONFLICT" });
+  const changedPath = challenge(); changedPath.resource.url = "https://seller.example/changed-private-path/data?private=hidden";
+  await assert.rejects(f.service.prepare(input(request.idempotencyKey, changedPath)), { code: "APN_IDEMPOTENCY_CONFLICT" });
+});
+
+test("slow read cannot persist an expired Permit2 challenge; a saved near-deadline record still replays", async t => {
+  const near = await setup(t, { advanceDuringHttpMs: 999 });
+  const nearRequest = input("permit2-near-deadline-001", challenge(false, false, 1));
+  const saved = await near.service.prepare(nearRequest);
+  assert.equal(saved.state, "prepared"); assert.equal(near.httpCount(), 1);
+  const readCount = near.calls.length;
+  near.advance(1);
+  await assert.rejects(near.service.records.persistLocked(saved), { code: "APN_OPERATION_BLOCKED" });
+  assert.deepEqual(await near.service.records.findOperation(saved.operationId), saved);
+  assert.deepEqual(await near.service.prepare(nearRequest), saved);
+  assert.equal(near.calls.length, readCount); assert.equal(near.httpCount(), 1);
+
+  const expired = await setup(t, { advanceDuringHttpMs: 1000 });
+  const expiredRequest = input("permit2-expired-read-001", challenge(false, false, 1));
+  await assert.rejects(expired.service.prepare(expiredRequest), { code: "APN_OPERATION_BLOCKED" });
+  const operationId = permit2ProductionId("owner", expiredRequest.idempotencyKey);
+  assert.equal(await expired.service.records.findOperation(operationId), null);
+  const identity = { account: payer, chain: asset.chain, asset: { kind: "token" as const, identifier: asset.token } };
+  const ledger = new AssetUsageLedger(expired.root);
+  assert.equal(await ledger.load(identity, assetUsageReservationId(identity, productionUsageKey(operationId))), null);
+  assert.equal((await ledger.usageReadOnly(identity, new Date(at.getTime() + 1000))).amountAtomic, "0");
 });
 
 test("reconstructed frozen material rejects rehashed plan, nonce, domain, checkpoint and unknown fields", async t => {
