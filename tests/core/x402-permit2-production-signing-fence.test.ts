@@ -78,6 +78,18 @@ test("raw, clone, serialized, wrong operation/mode and stale private facts refus
   f.advance(7); await assert.rejects(f.fence.consume(checked.fact, id, "reserved"));
   await assert.rejects(f.fence.check({ operationId: id } as any, "reserved"));
 });
+test("runtime-reflected issuance entry cannot admit a clone or duplicate genuine consumption", async t => {
+  const f = await setup(t), id = f.record.operationId, checked = await f.fence.check(id, "reserved"); assert.ok(checked.fact);
+  const clone = Object.freeze({ ...checked.fact });
+  // Try transplanting genuine provenance through any reflected own issuance map, without monkey-patching methods.
+  for (const key of Reflect.ownKeys(f.fence)) {
+    const candidate: unknown = Reflect.get(f.fence, key);
+    if (candidate instanceof WeakMap && candidate.has(checked.fact)) candidate.set(clone, candidate.get(checked.fact));
+  }
+  await assert.rejects(f.fence.consume(clone, id, "reserved"));
+  assert.equal((await f.fence.consume(checked.fact, id, "reserved")).outcome, "checked");
+  await assert.rejects(f.fence.consume(checked.fact, id, "reserved"));
+});
 test("reserved observation cannot cross risk mutation and exposed exact self hold can be freshly checked", async t => {
   const f = await setup(t), id = f.record.operationId, result = await f.fence.check(id, "reserved"); assert.ok(result.fact);
   await f.journal.markSignatureRisk(id); await assert.rejects(f.fence.consume(result.fact, id, "reserved"));

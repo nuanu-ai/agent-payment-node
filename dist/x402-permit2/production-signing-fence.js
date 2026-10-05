@@ -13,7 +13,7 @@ export class Permit2ProductionSigningFence {
     clock;
     state;
     records;
-    facts = new WeakMap();
+    #facts = new WeakMap();
     constructor(root, endpoint, clock = () => new Date()) {
         this.endpoint = endpoint;
         this.clock = clock;
@@ -70,7 +70,7 @@ export class Permit2ProductionSigningFence {
                 currentLeaseDigest: lease.reservationDigest, capturedAt: checked.captured.toISOString(), blockNumber: checked.block.number,
                 blockHash: checked.block.hash, rpc: rpc.metrics() });
             const fact = Object.freeze({ kind: "checked-permit2-signing-observation" });
-            this.facts.set(fact, { context: checked.context, projection });
+            this.#facts.set(fact, { context: checked.context, projection });
             return Object.freeze({ projection, fact });
         }
         catch {
@@ -88,7 +88,7 @@ export class Permit2ProductionSigningFence {
     async consume(fact, operationId, mode) {
         const id = operationId, selected = mode;
         identity(id, selected);
-        const saved = this.facts.get(fact);
+        const saved = this.#facts.get(fact);
         if (saved === undefined || saved.projection.operationId !== id || saved.projection.mode !== selected)
             invalid();
         const assertAge = () => {
@@ -100,9 +100,9 @@ export class Permit2ProductionSigningFence {
         assertAge();
         await signingOwnerFence(this.state, this.records, id, selected, this.now, saved.context);
         assertAge();
-        if (this.facts.get(fact) !== saved)
+        if (this.#facts.get(fact) !== saved)
             invalid();
-        this.facts.delete(fact);
+        this.#facts.delete(fact);
         return saved.projection;
     }
 }
