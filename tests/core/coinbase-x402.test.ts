@@ -16,11 +16,13 @@ import {
 import { AWAL_PROVIDER_ID } from "../../src/awal-process-adapter.js";
 import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import { BASE_USDC, TRANSFER_TOPIC } from "../../src/constants.js";
+import { COINBASE_GASLESS_MECHANISM } from "../../src/coinbase-gasless-policy.js";
 import { ApnCore } from "../../src/core.js";
 import { runCli } from "../../src/cli.js";
 import { canonicalizeNormalizedProviderJson } from "../../src/normalized-provider-json.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { createMcpServer } from "../../src/mcp-server.js";
+import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import type { Address, Hex } from "../../src/model.js";
 import type {
   ProviderAdapterBundle,
@@ -437,10 +439,25 @@ test("an active provider x402 operation blocks a gasless alias for the same Coin
   await new StateProfileRepository(fixture.state).save({ ...fixture.profile, profile: "provider-alias",
     profile_hash: fixture.state.profileHash("provider-alias") });
   await prepare(fixture.core, "x402-before-gasless-alias");
+  const recipient = "0x2222222222222222222222222222222222222222";
+  await activateDirectPolicy(fixture.temporary.root, "provider-alias", { accounts: { evm: PAYER },
+    now: fixture.clock.now(), admissions: [{ chain: "eip155:8453", kind: "token", identifier: BASE_USDC,
+      rail: "gasless", maximumPerTransferAtomic: "1000", dailyLimitAtomic: "1000",
+      mechanism: COINBASE_GASLESS_MECHANISM, recipient }] });
+  let rpcCalls = 0;
+  Object.assign(fixture.rpc, { coinbaseGaslessCall: async () => {
+    rpcCalls += 1; throw new Error("Account exclusion must precede Coinbase RPC.");
+  } });
+  const providerReads = [fixture.reads.statusCalls, fixture.reads.balanceCalls];
+  const httpCalls = fixture.http.calls.length;
   const response = await fixture.core.execute({ command: "gasless.transfer.prepare", profile: "provider-alias",
-    request: { chainId: 8453, recipient: "0x2222222222222222222222222222222222222222",
+    request: { chainId: 8453, recipient,
       grossAtomic: "1000", maxFeeAtomic: "0", minReceivedAtomic: "1000" }, idempotencyKey: "gasless-after-x402" });
   assert.equal(response.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(rpcCalls, 0); assert.equal(fixture.effect.calls.length, 0);
+  assert.deepEqual([fixture.reads.statusCalls, fixture.reads.balanceCalls], providerReads);
+  assert.equal(fixture.http.calls.length, httpCalls);
+  assert.equal(await fixture.state.findOperation(fixture.state.operationId("provider-alias", "gasless-after-x402")), null);
 });
 
 test("provider x402 approval rechecks account exclusion against a historical direct alias", async (t) => {
