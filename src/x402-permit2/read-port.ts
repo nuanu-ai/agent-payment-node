@@ -1,6 +1,6 @@
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
 import { performance } from "node:perf_hooks";
-import { isPlainRecord } from "../canonical.js";
+import { isPlainRecord, sha256 } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
@@ -46,12 +46,27 @@ export interface Permit2ProductionReadOptions {
   readonly now?: () => Date;
 }
 
+export interface Permit2ReadCheckpoint {
+  readonly policyRevision: number;
+  readonly registryVersion: string;
+  readonly activationDigest: string;
+  readonly blockNumber: string;
+  readonly blockHash: string;
+  readonly blockTimestamp: number;
+  readonly facilitatorSupportedDigest: string;
+}
+export interface Permit2CheckedReadPort extends Permit2PrepareReadPort {
+  readChecked(input: Parameters<Permit2PrepareReadPort["read"]>[0]): Promise<Awaited<ReturnType<Permit2PrepareReadPort["read"]>> & {
+    readonly checkpoint: Permit2ReadCheckpoint;
+  }>;
+}
+
 /** Production read adapter for the existing unsigned prepare boundary. It never creates an operation or reservation. */
-export function createPermit2ProductionReadPort(options: Permit2ProductionReadOptions): Permit2PrepareReadPort {
+export function createPermit2ProductionReadPort(options: Permit2ProductionReadOptions): Permit2CheckedReadPort {
   const transport = options.transport ?? new GaslessHttps();
   const now = options.now ?? (() => new Date());
   let busy = false;
-  return { async read(request) {
+  const readChecked: Permit2CheckedReadPort["readChecked"] = async (request) => {
     if (busy || activeRpcSources.has(options.rpc)) blocked("An Avalanche Permit2 read is already in progress.", "x402_permit2_read_busy");
     busy = true;
     activeRpcSources.add(options.rpc);
@@ -180,9 +195,12 @@ export function createPermit2ProductionReadPort(options: Permit2ProductionReadOp
       facilitator: { available: true, network: asset.chain, scheme: "exact", asset: asset.token,
         assetTransferMethod: "permit2", permit2Address: PERMIT2_ADDRESS,
         exactProxy: X402_EXACT_PERMIT2_PROXY, eip2612GasSponsoring: extensions.includes("eip2612GasSponsoring") } };
-    return { owner, evidence };
+    return { owner, evidence, checkpoint: { policyRevision: active.revision, registryVersion: active.registry.registryVersion, activationDigest: active.activationDigest,
+      blockNumber: block.number, blockHash: block.hash, blockTimestamp: Number(blockTime),
+      facilitatorSupportedDigest: sha256(response.body) } };
     } finally { busy = false; activeRpcSources.delete(options.rpc); }
-  } };
+  };
+  return { readChecked, read: async request => { const { owner, evidence } = await readChecked(request); return { owner, evidence }; } };
 }
 
 function proofCodeHash(value: unknown, address: Address): `0x${string}` {

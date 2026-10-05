@@ -62,6 +62,21 @@ export interface AssetUsageTransitionInput extends AssetUsageIdentity {
     /** Optional compare-and-transition guard, checked atomically while the bucket lock is held. */
     readonly expectedCurrentStates?: readonly AssetUsageState[];
 }
+/** Permit2 production only: caller durably proved no authorization exposure before cancellation. */
+export interface CancelUnsubmittedReservationInput extends AssetUsageIdentity {
+    readonly chain: "eip155:43114";
+    readonly asset: {
+        readonly kind: "token";
+        readonly identifier: string;
+    };
+    readonly idempotencyKey: `x402-permit2-production.v2:${string}`;
+    readonly policyDigest: string;
+    readonly registryVersion: string;
+    readonly rail: "x402";
+    readonly amountAtomic: string;
+    readonly outcomeDigest: string;
+    readonly now: Date;
+}
 export interface AssetUsageSnapshot {
     readonly windowPolicy: typeof ASSET_USAGE_WINDOW;
     readonly windowStart: string;
@@ -79,6 +94,8 @@ export declare class AssetUsageLedger extends SecureStateStore {
     withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, sourceChainId?: 1 | 56, allowFailedBeforeEffectReservationId?: string): Promise<T>;
     reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
+    /** Atomic cancellation in the existing schema; a delayed reserve can only replay the released row. */
+    cancelUnsubmittedReservation(input: CancelUnsubmittedReservationInput): Promise<AssetUsageReservation>;
     usage(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;
     /** Existing-ledger snapshot for nonpersistent preflight; never initializes, locks, or creates a bucket. */
     usageReadOnly(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;

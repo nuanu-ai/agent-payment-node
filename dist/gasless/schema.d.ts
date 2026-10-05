@@ -64,8 +64,8 @@ export declare const accountSchema: z.ZodObject<{
     eoaNonceAtomic: z.ZodString;
     pendingEoaNonceAtomic: z.ZodString;
     delegation: z.ZodEnum<{
-        empty: "empty";
         expected: "expected";
+        empty: "empty";
     }>;
 }, z.core.$strict>;
 export declare const snapshotSchema: z.ZodObject<{
@@ -98,8 +98,8 @@ export declare const snapshotSchema: z.ZodObject<{
     eoaNonceAtomic: z.ZodString;
     pendingEoaNonceAtomic: z.ZodString;
     delegation: z.ZodEnum<{
-        empty: "empty";
         expected: "expected";
+        empty: "empty";
     }>;
 }, z.core.$strict>;
 export declare const intentSchema: z.ZodObject<{
@@ -159,8 +159,8 @@ export declare const intentSchema: z.ZodObject<{
         eoaNonceAtomic: z.ZodString;
         pendingEoaNonceAtomic: z.ZodString;
         delegation: z.ZodEnum<{
-            empty: "empty";
             expected: "expected";
+            empty: "empty";
         }>;
     }, z.core.$strict>;
     gas: z.ZodObject<{
@@ -268,8 +268,8 @@ export declare const settlementSchema: z.ZodObject<{
         eoaNonceAtomic: z.ZodString;
         pendingEoaNonceAtomic: z.ZodString;
         delegation: z.ZodEnum<{
-            empty: "empty";
             expected: "expected";
+            empty: "empty";
         }>;
     }, z.core.$strict>;
     safeAccount: z.ZodObject<{
@@ -282,8 +282,8 @@ export declare const settlementSchema: z.ZodObject<{
         eoaNonceAtomic: z.ZodString;
         pendingEoaNonceAtomic: z.ZodString;
         delegation: z.ZodEnum<{
-            empty: "empty";
             expected: "expected";
+            empty: "empty";
         }>;
     }, z.core.$strict>;
     accounting: z.ZodObject<{
@@ -325,8 +325,8 @@ export declare const permissionInvalidationSchema: z.ZodObject<{
         eoaNonceAtomic: z.ZodString;
         pendingEoaNonceAtomic: z.ZodString;
         delegation: z.ZodEnum<{
-            empty: "empty";
             expected: "expected";
+            empty: "empty";
         }>;
     }, z.core.$strict>;
     headAccount: z.ZodObject<{
@@ -339,8 +339,8 @@ export declare const permissionInvalidationSchema: z.ZodObject<{
         eoaNonceAtomic: z.ZodString;
         pendingEoaNonceAtomic: z.ZodString;
         delegation: z.ZodEnum<{
-            empty: "empty";
             expected: "expected";
+            empty: "empty";
         }>;
     }, z.core.$strict>;
     userOperationMaterialHash: z.ZodOptional<z.ZodString>;
@@ -395,8 +395,8 @@ export declare const observationSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         safeAccount: z.ZodObject<{
@@ -409,8 +409,8 @@ export declare const observationSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         accounting: z.ZodObject<{
@@ -467,8 +467,8 @@ export declare const observationSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         headAccount: z.ZodObject<{
@@ -481,8 +481,8 @@ export declare const observationSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         userOperationMaterialHash: z.ZodOptional<z.ZodString>;
@@ -512,9 +512,9 @@ export declare const stateSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     failed_before_effect: "failed_before_effect";
     awaiting_approval: "awaiting_approval";
-    completed: "completed";
     submitted_pending: "submitted_pending";
     abandoned_unknown: "abandoned_unknown";
+    completed: "completed";
     execution_pending: "execution_pending";
     included_success: "included_success";
     included_revert: "included_revert";
@@ -526,6 +526,7 @@ export declare const stateSchema: z.ZodEnum<{
 export declare const phaseSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     submitted_pending: "submitted_pending";
+    checked: "checked";
     signing_started: "signing_started";
     submitting: "submitting";
     unsealed: "unsealed";
@@ -535,7 +536,6 @@ export declare const phaseSchema: z.ZodEnum<{
     safe_success: "safe_success";
     safe_revert: "safe_revert";
     disclosure_started: "disclosure_started";
-    checked: "checked";
 }>;
 export declare const effectSchema: z.ZodObject<{
     role: z.ZodEnum<{
@@ -545,6 +545,7 @@ export declare const effectSchema: z.ZodObject<{
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
+        checked: "checked";
         signing_started: "signing_started";
         submitting: "submitting";
         unsealed: "unsealed";
@@ -554,7 +555,6 @@ export declare const effectSchema: z.ZodObject<{
         safe_success: "safe_success";
         safe_revert: "safe_revert";
         disclosure_started: "disclosure_started";
-        checked: "checked";
     }>;
     signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
     materialHash: z.ZodNullable<z.ZodString>;
@@ -583,9 +583,9 @@ export declare const transitionSchema: z.ZodObject<{
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         awaiting_approval: "awaiting_approval";
-        completed: "completed";
         submitted_pending: "submitted_pending";
         abandoned_unknown: "abandoned_unknown";
+        completed: "completed";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";
@@ -608,6 +608,7 @@ export declare const transitionSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            checked: "checked";
             signing_started: "signing_started";
             submitting: "submitting";
             unsealed: "unsealed";
@@ -617,7 +618,6 @@ export declare const transitionSchema: z.ZodObject<{
             safe_success: "safe_success";
             safe_revert: "safe_revert";
             disclosure_started: "disclosure_started";
-            checked: "checked";
         }>;
         signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
         materialHash: z.ZodNullable<z.ZodString>;
@@ -645,6 +645,7 @@ export declare const transitionSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            checked: "checked";
             signing_started: "signing_started";
             submitting: "submitting";
             unsealed: "unsealed";
@@ -654,7 +655,6 @@ export declare const transitionSchema: z.ZodObject<{
             safe_success: "safe_success";
             safe_revert: "safe_revert";
             disclosure_started: "disclosure_started";
-            checked: "checked";
         }>;
         signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
         materialHash: z.ZodNullable<z.ZodString>;
@@ -724,8 +724,8 @@ export declare const transitionSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             safeAccount: z.ZodObject<{
@@ -738,8 +738,8 @@ export declare const transitionSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             accounting: z.ZodObject<{
@@ -796,8 +796,8 @@ export declare const transitionSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             headAccount: z.ZodObject<{
@@ -810,8 +810,8 @@ export declare const transitionSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             userOperationMaterialHash: z.ZodOptional<z.ZodString>;
@@ -858,8 +858,8 @@ export declare const transitionSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         safeAccount: z.ZodObject<{
@@ -872,8 +872,8 @@ export declare const transitionSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         accounting: z.ZodObject<{
@@ -960,8 +960,8 @@ export declare const operationSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         gas: z.ZodObject<{
@@ -1016,9 +1016,9 @@ export declare const operationSchema: z.ZodObject<{
             unknown_finality: "unknown_finality";
             failed_before_effect: "failed_before_effect";
             awaiting_approval: "awaiting_approval";
-            completed: "completed";
             submitted_pending: "submitted_pending";
             abandoned_unknown: "abandoned_unknown";
+            completed: "completed";
             execution_pending: "execution_pending";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -1041,6 +1041,7 @@ export declare const operationSchema: z.ZodObject<{
             phase: z.ZodEnum<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
+                checked: "checked";
                 signing_started: "signing_started";
                 submitting: "submitting";
                 unsealed: "unsealed";
@@ -1050,7 +1051,6 @@ export declare const operationSchema: z.ZodObject<{
                 safe_success: "safe_success";
                 safe_revert: "safe_revert";
                 disclosure_started: "disclosure_started";
-                checked: "checked";
             }>;
             signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
             materialHash: z.ZodNullable<z.ZodString>;
@@ -1078,6 +1078,7 @@ export declare const operationSchema: z.ZodObject<{
             phase: z.ZodEnum<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
+                checked: "checked";
                 signing_started: "signing_started";
                 submitting: "submitting";
                 unsealed: "unsealed";
@@ -1087,7 +1088,6 @@ export declare const operationSchema: z.ZodObject<{
                 safe_success: "safe_success";
                 safe_revert: "safe_revert";
                 disclosure_started: "disclosure_started";
-                checked: "checked";
             }>;
             signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
             materialHash: z.ZodNullable<z.ZodString>;
@@ -1157,8 +1157,8 @@ export declare const operationSchema: z.ZodObject<{
                     eoaNonceAtomic: z.ZodString;
                     pendingEoaNonceAtomic: z.ZodString;
                     delegation: z.ZodEnum<{
-                        empty: "empty";
                         expected: "expected";
+                        empty: "empty";
                     }>;
                 }, z.core.$strict>;
                 safeAccount: z.ZodObject<{
@@ -1171,8 +1171,8 @@ export declare const operationSchema: z.ZodObject<{
                     eoaNonceAtomic: z.ZodString;
                     pendingEoaNonceAtomic: z.ZodString;
                     delegation: z.ZodEnum<{
-                        empty: "empty";
                         expected: "expected";
+                        empty: "empty";
                     }>;
                 }, z.core.$strict>;
                 accounting: z.ZodObject<{
@@ -1229,8 +1229,8 @@ export declare const operationSchema: z.ZodObject<{
                     eoaNonceAtomic: z.ZodString;
                     pendingEoaNonceAtomic: z.ZodString;
                     delegation: z.ZodEnum<{
-                        empty: "empty";
                         expected: "expected";
+                        empty: "empty";
                     }>;
                 }, z.core.$strict>;
                 headAccount: z.ZodObject<{
@@ -1243,8 +1243,8 @@ export declare const operationSchema: z.ZodObject<{
                     eoaNonceAtomic: z.ZodString;
                     pendingEoaNonceAtomic: z.ZodString;
                     delegation: z.ZodEnum<{
-                        empty: "empty";
                         expected: "expected";
+                        empty: "empty";
                     }>;
                 }, z.core.$strict>;
                 userOperationMaterialHash: z.ZodOptional<z.ZodString>;
@@ -1291,8 +1291,8 @@ export declare const operationSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             safeAccount: z.ZodObject<{
@@ -1305,8 +1305,8 @@ export declare const operationSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             accounting: z.ZodObject<{
@@ -1331,9 +1331,9 @@ export declare const operationSchema: z.ZodObject<{
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         awaiting_approval: "awaiting_approval";
-        completed: "completed";
         submitted_pending: "submitted_pending";
         abandoned_unknown: "abandoned_unknown";
+        completed: "completed";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";
@@ -1356,6 +1356,7 @@ export declare const operationSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            checked: "checked";
             signing_started: "signing_started";
             submitting: "submitting";
             unsealed: "unsealed";
@@ -1365,7 +1366,6 @@ export declare const operationSchema: z.ZodObject<{
             safe_success: "safe_success";
             safe_revert: "safe_revert";
             disclosure_started: "disclosure_started";
-            checked: "checked";
         }>;
         signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
         materialHash: z.ZodNullable<z.ZodString>;
@@ -1393,6 +1393,7 @@ export declare const operationSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            checked: "checked";
             signing_started: "signing_started";
             submitting: "submitting";
             unsealed: "unsealed";
@@ -1402,7 +1403,6 @@ export declare const operationSchema: z.ZodObject<{
             safe_success: "safe_success";
             safe_revert: "safe_revert";
             disclosure_started: "disclosure_started";
-            checked: "checked";
         }>;
         signingAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
         materialHash: z.ZodNullable<z.ZodString>;
@@ -1472,8 +1472,8 @@ export declare const operationSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             safeAccount: z.ZodObject<{
@@ -1486,8 +1486,8 @@ export declare const operationSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             accounting: z.ZodObject<{
@@ -1544,8 +1544,8 @@ export declare const operationSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             headAccount: z.ZodObject<{
@@ -1558,8 +1558,8 @@ export declare const operationSchema: z.ZodObject<{
                 eoaNonceAtomic: z.ZodString;
                 pendingEoaNonceAtomic: z.ZodString;
                 delegation: z.ZodEnum<{
-                    empty: "empty";
                     expected: "expected";
+                    empty: "empty";
                 }>;
             }, z.core.$strict>;
             userOperationMaterialHash: z.ZodOptional<z.ZodString>;
@@ -1606,8 +1606,8 @@ export declare const operationSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         safeAccount: z.ZodObject<{
@@ -1620,8 +1620,8 @@ export declare const operationSchema: z.ZodObject<{
             eoaNonceAtomic: z.ZodString;
             pendingEoaNonceAtomic: z.ZodString;
             delegation: z.ZodEnum<{
-                empty: "empty";
                 expected: "expected";
+                empty: "empty";
             }>;
         }, z.core.$strict>;
         accounting: z.ZodObject<{

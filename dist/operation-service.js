@@ -1,3 +1,5 @@
+import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
+import { Permit2LegacyConflictRepository } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
 import { conflictDomainKey, evmConflictDomain, railConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
@@ -121,11 +123,19 @@ export class OperationService {
     async assertEvmAccountAvailable(profileHash, chainId, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
     }
+    /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
+    async assertPermit2AccountAvailable(record) {
+        validatePermit2ProductionRecord(record);
+        const saved = await new Permit2ProductionRepository(this.state.root).findOperation(record.operationId);
+        if (saved === null || saved.integrityHash !== record.integrityHash)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 conflict exclusion requires the exact saved operation.");
+        await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(43114, record.material.wallet.account)], record.operationId);
+    }
     /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
     async assertRailAccountAvailable(profileHash, rail, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
     }
-    async assertConflictDomainsAvailable(profileHash, domains) {
+    async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId) {
         let wanted;
         try {
             wanted = new Set(domains().map(conflictDomainKey));
@@ -134,7 +144,7 @@ export class OperationService {
             wanted = new Set();
         }
         for (const operation of await this.profileOperations(profileHash)) {
-            if (operation.record.terminal)
+            if (operation.record.terminal || operation.record.operationId === exceptOperationId)
                 continue;
             if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active")
                 continue;
@@ -152,8 +162,17 @@ export class OperationService {
             });
         }
     }
+    // Historical embedding ports supply only list methods; concrete StateStore always has a checked root.
+    async permit2ProductionOperations(profileHash) {
+        return this.state.root === undefined ? [] : new Permit2ProductionRepository(this.state.root).listOperations(profileHash);
+    }
+    async permit2LegacyOperations(profileHash) {
+        return this.state.root === undefined ? [] : new Permit2LegacyConflictRepository(this.state.root).listOperations(profileHash);
+    }
     async profileOperations(profileHash) {
         return [
+            ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production", record })),
+            ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict", record })),
             ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned", record })),
             ...(await this.facilitatorGasless.listOperations(profileHash)).map((record) => ({ kind: "facilitator_gasless_transfer", record })),
             ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
@@ -185,6 +204,7 @@ export class OperationService {
     }
     async required(operationId) {
         const canonicalId = canonicalOperationId(operationId);
+        const permit2 = await new Permit2ProductionRepository(this.state.root).findOperation(canonicalId);
         const direct = await this.state.findOperation(canonicalId);
         const x402 = await this.state.findX402Operation(canonicalId);
         const providerX402 = await this.providerX402.findOperation(canonicalId);
@@ -195,10 +215,12 @@ export class OperationService {
         const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
         const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
         const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
-        if ([direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
+        if ([permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
             .filter((value) => value !== null).length > 1) {
             throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
         }
+        if (permit2 !== null)
+            return { kind: "permit2_production", record: permit2 };
         if (direct !== null)
             return { kind: "direct_transfer", record: direct };
         if (x402 !== null)
@@ -223,6 +245,10 @@ export class OperationService {
     }
     async status(operationId) {
         const operation = await this.required(operationId);
+        if (operation.kind === "permit2_production")
+            return publicPermit2Production(operation.record);
+        if (operation.kind === "permit2_legacy_conflict")
+            throw new ApnError("APN_OPERATION_BLOCKED", "Legacy Permit2 execution remains blocked.");
         if (operation.kind === "relay_unsigned")
             return this.relayStatus(operation.record);
         if (operation.kind === "direct_transfer")

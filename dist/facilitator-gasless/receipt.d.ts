@@ -10,7 +10,7 @@ export declare function publicFacilitatorOperation(op: FacilitatorOperationRecor
     custody: "local_software";
     route: "x402_exact_eip3009_public_facilitator";
     fingerprint: string;
-    state: "failed_before_effect" | "awaiting_approval" | "completed" | "abandoned_unknown" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+    state: "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "completed" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
     terminal: boolean;
     proof_class: string;
     reason: string;
@@ -102,7 +102,7 @@ export declare function facilitatorReceipt(op: FacilitatorOperationRecord): {
     custody: "local_software";
     route: "x402_exact_eip3009_public_facilitator";
     fingerprint: string;
-    state: "failed_before_effect" | "awaiting_approval" | "completed" | "abandoned_unknown" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+    state: "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "completed" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
     terminal: boolean;
     proof_class: string;
     reason: string;

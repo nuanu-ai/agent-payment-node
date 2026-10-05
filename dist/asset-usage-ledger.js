@@ -138,6 +138,45 @@ export class AssetUsageLedger extends SecureStateStore {
             return next;
         });
     }
+    /** Atomic cancellation in the existing schema; a delayed reserve can only replay the released row. */
+    async cancelUnsubmittedReservation(input) {
+        if (input.chain !== "eip155:43114" || input.asset.kind !== "token" ||
+            input.asset.identifier !== "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7" ||
+            input.rail !== "x402" || !/^x402-permit2-production\.v2:[a-f0-9]{64}$/u.test(input.idempotencyKey) ||
+            typeof input.registryVersion !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.registryVersion)) {
+            throw invalid("Unsigned cancellation is restricted to a frozen Permit2 production lease.");
+        }
+        const identity = validateIdentity(input), at = instant(input.now), idempotencyHash = idempotency(input.idempotencyKey);
+        const reservationId = reservationIdFor(identity, idempotencyHash);
+        const policyDigest = digest(input.policyDigest, "Policy digest"), outcomeDigest = digest(input.outcomeDigest, "Outcome digest");
+        const amountAtomic = atomic(input.amountAtomic, true, false).toString();
+        await this.ready();
+        return this.withLocks([this.bucketLock(identity)], async () => {
+            const records = await this.loadBucket(identity);
+            assertBucketWindow(records, at);
+            const current = records.find(record => record.reservationId === reservationId);
+            if (current !== undefined) {
+                assertReplay(current, policyDigest, input.registryVersion, input.rail, amountAtomic, idempotencyHash);
+                if (at < current.updatedAt)
+                    throw blocked("Unsigned cancellation cannot move backward in time.");
+                if (current.state === "released_unsubmitted") {
+                    if (current.outcomeDigest !== outcomeDigest)
+                        throw blocked("Unsigned cancellation outcome changed.");
+                    return current;
+                }
+                if (current.state !== "reserved" || at < current.updatedAt)
+                    throw blocked("An exposed or terminal reservation cannot be cancelled.");
+            }
+            const body = current === undefined
+                ? { schemaVersion: ASSET_USAGE_RESERVATION_SCHEMA, ...identity, reservationId, idempotencyHash, policyDigest,
+                    registryVersion: input.registryVersion, rail: "x402", amountAtomic, reservedAt: at, updatedAt: at,
+                    state: "released_unsubmitted", effectAt: null, outcomeDigest }
+                : { ...withoutDigest(current), state: "released_unsubmitted", updatedAt: at, effectAt: null, outcomeDigest };
+            const released = seal(body);
+            await this.writeJson(this.recordPath(identity, reservationId), released, current === undefined);
+            return released;
+        });
+    }
     async usage(identityValue, now) {
         const identity = validateIdentity(identityValue);
         const at = instant(now);

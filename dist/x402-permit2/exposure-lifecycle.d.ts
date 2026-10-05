@@ -59,6 +59,8 @@ export declare class Permit2ExposureLifecycle extends SecureStateStore {
     private path;
     private lock;
     load(operationId: string): Promise<Permit2ExposureRecord | null>;
+    /** Checked compatibility read without initializing or changing legacy records. */
+    loadReadOnly(operationId: string): Promise<Permit2ExposureRecord | null>;
     /**
      * The caller supplies an explicitly scoped port set. It is intentionally not in production wiring.
      * Reservation runs without the exposure lock, as required by the common usage ledger.
