@@ -1,3 +1,4 @@
+import { rpcObservationCounters, rpcObservationSnapshot } from "./rpc-observation-metrics.js";
 import { MAX_RPC_BATCH_CALLS, BATCH_READ_METHODS, parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, postJson, rpcAbortableWait } from "./rpc-envelope.js";
 export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, classifyX402LogAvailabilityMessage, acceptRpcHttpBody } from "./rpc-envelope.js";
 export { isPublicIp } from "./network-policy.js";
@@ -19,6 +20,8 @@ export class HttpsBaseRpc {
     endpoint;
     rpcOrigin;
     sequence = 0n;
+    observationCounters = rpcObservationCounters();
+    get observationMetrics() { return rpcObservationSnapshot(this.observationCounters); }
     x402ChainId;
     pinnedAddresses;
     totalDeadlineMs;
@@ -440,10 +443,12 @@ export class HttpsBaseRpc {
         return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     }
     async postDirectGuarded(body, addresses, method) {
+        this.observationCounters.attempts += 1;
         const post = () => {
+            this.observationCounters.admissions += 1;
             if (this.abortSignal?.aborted)
                 throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.");
-            return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal);
+            return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal, this.observationCounters);
         };
         return this.directGuard === undefined ? await post() : await this.directGuard.post(this.endpoint.toString(), post);
     }

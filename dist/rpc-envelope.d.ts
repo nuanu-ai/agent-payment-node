@@ -1,3 +1,4 @@
+import type { RpcObservationCounters } from "./rpc-observation-metrics.js";
 import type { PinnedAddress } from "./network-policy.js";
 export declare const MAX_RPC_BATCH_CALLS = 16;
 export declare const BATCH_READ_METHODS: Set<string>;
@@ -12,6 +13,6 @@ export declare function parseRpcLogEnvelope(raw: string, id: string): {
     readonly kind: "range_unavailable";
 };
 export declare function classifyX402LogAvailabilityMessage(message: string): "pruned" | "range_unavailable" | null;
-export declare function postJson(endpoint: URL, body: string, addresses: readonly PinnedAddress[], timeoutMs: number, rpcMethod: string, allowJsonRpcClientError?: boolean, abortSignal?: AbortSignal): Promise<string>;
+export declare function postJson(endpoint: URL, body: string, addresses: readonly PinnedAddress[], timeoutMs: number, rpcMethod: string, allowJsonRpcClientError?: boolean, abortSignal?: AbortSignal, counters?: RpcObservationCounters): Promise<string>;
 export declare function acceptRpcHttpBody(status: number | undefined, allowJsonRpcClientError: boolean): boolean;
 export declare function rpcAbortableWait(signal: AbortSignal): (milliseconds: number) => Promise<void>;

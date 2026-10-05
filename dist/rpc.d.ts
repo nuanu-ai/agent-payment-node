@@ -15,6 +15,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     readonly endpoint: URL;
     readonly rpcOrigin: string;
     private sequence;
+    private readonly observationCounters;
+    get observationMetrics(): Readonly<import("./rpc-observation-metrics.js").RpcObservationCounters>;
     private readonly x402ChainId;
     private pinnedAddresses;
     private readonly totalDeadlineMs;
