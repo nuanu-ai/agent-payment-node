@@ -90,6 +90,7 @@ import { GuardedSwapService } from "./swap/service.js";
 import { SwapOperationRepository } from "./swap/repository.js";
 import { AssetUsageLedger } from "./asset-usage-ledger.js";
 import { permit2CurrentOwnerPreflight, permit2PublicRpc } from "./x402-permit2/preflight.js";
+import { executePermit2ProductionCli } from "./x402-permit2/production-cli.js";
 import { successEnvelope, failureEnvelope } from "./output.js";
 import { randomUUID } from "node:crypto";
 import { ORCA_SOLANA_CHAIN } from "./swap/orca-solana/pins.js";
@@ -382,6 +383,8 @@ function uniswapTokenRpcBudget(command) {
     return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
 }
 export async function executeBoundCommand(bound, options = {}) {
+    if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe")
+        return executePermit2ProductionCli(bound, options, options.stateRoot ?? effectiveStateRoot());
     if (bound.request.command === "x402.permit2.preflight") {
         const requestId = randomUUID();
         try {
