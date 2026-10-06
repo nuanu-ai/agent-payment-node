@@ -1,11 +1,12 @@
 import { LocalWalletNative } from "../local-wallet-native.js";
 import { Permit2ProductionSigningFence } from "./production-signing-fence.js";
-import type { Permit2NativeSigningExecution } from "./production-native-capability.js";
+import type { Permit2NativeRequestExecution, Permit2NativeSigningExecution } from "./production-native-capability.js";
 import { claimPermit2ForegroundApproval, assertClaimedPermit2ForegroundApproval, revokePermit2ForegroundApproval,
   type Permit2ForegroundApprovalProof, type Permit2ApprovalBinding } from "./production-approval-provenance.js";
 import { assertSigningLifecycle, checkedSigningLease } from "./production-signing-owner.js";
 import { assertSigningTime } from "./production-signing-facts.js";
 export interface Permit2SigningContinuation { readonly kind: "permit2-private-signing-continuation" }
+interface FirstRequestProof { readonly kind: "permit2-private-first-request-proof" }
 type RiskCandidate = { readonly kind: "permit2-private-risk-candidate" };
 import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -25,6 +26,39 @@ import { JOURNAL_SCHEMA, productionApprovalFingerprint, productionRiskBinding, p
 
 /** Storage/accounting only. No key, signing, transport or execution permission is returned. */
 export class Permit2ProductionJournal extends Permit2ProductionRepository {
+  readonly #firstRequests = new WeakMap<FirstRequestProof, { readonly execution: Permit2NativeRequestExecution; readonly record: Permit2ProductionRecord }>();
+  static markNativeRequestPending(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeRequestExecution) {
+    return journal.#markNativeRequestPending(id, execution);
+  }
+  static consumeNativeFirstRequestProof(journal: Permit2ProductionJournal, id: string,
+    execution: Permit2NativeRequestExecution, proof: FirstRequestProof): Permit2ProductionRecord {
+    LocalWalletNative.assertPermit2RequestExecution(execution, journal, id);
+    const saved = journal.#firstRequests.get(proof);
+    if (saved === undefined || saved.execution !== execution || saved.record.operationId !== id) blocked();
+    journal.#firstRequests.delete(proof); return saved.record;
+  }
+  #assertNativeRequestRecord(id: string, execution: Permit2NativeRequestExecution, r: Permit2ProductionRecord, lease: AssetUsageReservation): void {
+    const origin = LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
+    assertSigningLifecycle(r, "dispatch"); checkedSigningLease(r, lease, "dispatch");
+    if (r.material.materialHash !== origin.materialHash || r.material.checked.requestHash !== origin.requestHash ||
+        r.material.checked.challengeHash !== origin.challengeHash || r.exposureJournal?.signed?.signedHash !== origin.signedHash ||
+        lease.reservationDigest !== origin.grant.lease.reservationDigest ||
+        canonicalJson(r.material.wallet) !== canonicalJson(origin.grant.record.material.wallet)) blocked();
+  }
+  async #markNativeRequestPending(id: string, execution: Permit2NativeRequestExecution): Promise<{ readonly record: Permit2ProductionRecord; readonly proof: FirstRequestProof | null }> {
+    LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
+    const r = await this.#required(id); this.#assertNativeRequestRecord(id, execution, r, await this.#lease(r));
+    return this.state.withLocks(this.#locks(r), async () => {
+      const current = await this.#required(id); this.#assertNativeRequestRecord(id, execution, current, await this.#lease(current));
+      const j = current.exposureJournal!;
+      if (j.request !== null) return Object.freeze({ record: current, proof: null });
+      const next = await this.#save(current, { ...j, request: { attempt: 1, requestHash: current.material.checked.requestHash,
+        headerHash: j.signed!.headerHash } }, "request_pending");
+      LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
+      freezeApprovedSnapshot(next); const proof = Object.freeze({ kind: "permit2-private-first-request-proof" as const });
+      this.#firstRequests.set(proof, { execution, record: next }); return Object.freeze({ record: next, proof });
+    });
+  }
   readonly #riskCandidates = new WeakMap<RiskCandidate, { readonly proof: Permit2ForegroundApprovalProof; readonly binding: Permit2ApprovalBinding; readonly riskRecord: Permit2ProductionRecord }>();
   // Only the actual native execution can consume this private continuation.
   readonly #continuations = new WeakMap<Permit2SigningContinuation, { readonly binding: Permit2ApprovalBinding;

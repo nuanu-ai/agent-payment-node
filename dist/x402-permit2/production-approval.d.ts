@@ -1,6 +1,9 @@
 import { type TtyTransferApprovalOptions } from "../tty-approval.js";
 import type { Permit2ProductionRecord } from "./production-repository.js";
+export type Permit2ApprovalPurpose = "sign-only" | "sign-and-submit-once";
+export declare function permit2ApprovalPurpose(value: unknown): Permit2ApprovalPurpose;
 export interface Permit2ApprovalDisplay {
+    readonly purpose: Permit2ApprovalPurpose;
     readonly operationId: string;
     readonly profile: string;
     readonly payer: string;
@@ -33,7 +36,7 @@ export interface Permit2ForegroundApprovalPort {
     approve(display: Permit2ApprovalDisplay): Promise<void>;
 }
 /** Pure sanitized disclosure. This is binding, never current-owner or chain authority. */
-export declare function permit2ApprovalDisplay(record: Permit2ProductionRecord): Permit2ApprovalDisplay;
+export declare function permit2ApprovalDisplay(record: Permit2ProductionRecord, purpose?: Permit2ApprovalPurpose): Permit2ApprovalDisplay;
 /** Foreground only; no key/custody lock is acquired here. */
 export declare class TtyPermit2ForegroundApproval implements Permit2ForegroundApprovalPort {
     private readonly options;

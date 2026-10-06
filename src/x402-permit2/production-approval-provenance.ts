@@ -6,12 +6,12 @@ import { Permit2ProductionRepository, type Permit2ProductionRecord } from "./pro
 import type { Permit2ProductionJournal } from "./production-journal.js";
 import { assertSigningLifecycle } from "./production-signing-owner.js";
 import { assertSigningTime } from "./production-signing-facts.js";
-import { permit2ApprovalDisplay, type Permit2ForegroundApprovalPort } from "./production-approval.js";
+import { permit2ApprovalDisplay, type Permit2ApprovalPurpose, type Permit2ForegroundApprovalPort } from "./production-approval.js";
 export interface Permit2ForegroundApprovalProof { readonly kind: "permit2-foreground-approval-proof" }
 interface Issued {
   readonly journal: Permit2ProductionJournal; readonly controller: object; readonly native: NativePort;
   readonly capability: Permit2LocalCapability; readonly nativeState: object; readonly root: string;
-  readonly operationId: string; readonly materialHash: string; readonly displayHash: string; readonly fingerprint: string;
+  readonly purpose: Permit2ApprovalPurpose; readonly operationId: string; readonly materialHash: string; readonly displayHash: string; readonly fingerprint: string;
   readonly completedAt: number; readonly clock: () => Date; claimed: boolean;
 }
 export type Permit2ApprovalBinding = Readonly<Omit<Issued, "claimed">>;
@@ -30,15 +30,15 @@ export class Permit2ForegroundApprovalAuthority {
     this.#records = new Permit2ProductionRepository(journal.root);
     this.#binding = Object.freeze({ journal, controller, native, capability, nativeState, root: journal.root });
   }
-  async approveOwned(id: string): Promise<Permit2ForegroundApprovalProof> {
+  async approveOwned(id: string, purpose: Permit2ApprovalPurpose = "sign-only"): Promise<Permit2ForegroundApprovalProof> {
     const record = await this.#records.findOperation(id); if (record === null) blocked();
     assertSigningLifecycle(record, "reserved"); assertSigningTime(record, now(this.#clock));
-    const display = permit2ApprovalDisplay(record), started = now(this.#clock).getTime();
+    const display = permit2ApprovalDisplay(record, purpose), started = now(this.#clock).getTime();
     await this.#approval.approve(display);
     const completedAt = now(this.#clock).getTime(); if (completedAt < started) blocked();
     assertSigningTime(record, new Date(completedAt));
     const proof = Object.freeze({ kind: "permit2-foreground-approval-proof" as const });
-    proofs.set(proof, { ...this.#binding, operationId: id, materialHash: record.material.materialHash,
+    proofs.set(proof, { ...this.#binding, purpose: display.purpose, operationId: id, materialHash: record.material.materialHash,
       displayHash: display.displayHash, fingerprint: display.fingerprint, completedAt, clock: this.#clock, claimed: false });
     return proof;
   }
@@ -46,7 +46,7 @@ export class Permit2ForegroundApprovalAuthority {
 function checked(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal, record: Permit2ProductionRecord): Issued {
   const entry = proofs.get(proof); if (entry === undefined || entry.journal !== journal || entry.root !== journal.root ||
     entry.operationId !== record.operationId || entry.materialHash !== record.material.materialHash) blocked();
-  const display = permit2ApprovalDisplay(record);
+  const display = permit2ApprovalDisplay(record, entry.purpose);
   if (display.displayHash !== entry.displayHash || display.fingerprint !== entry.fingerprint ||
     LocalWalletNative.assertPermit2LocalCapability(entry.capability, entry.native, entry.root) !== entry.nativeState) blocked();
   const at = now(entry.clock); if (at.getTime() < entry.completedAt || at.getTime() - entry.completedAt > 60_000) blocked();

@@ -2,7 +2,7 @@ import type { NativePort } from "../ports.js";
 import type { Permit2LocalCapability } from "./production-native-capability.js";
 import { type Permit2ProductionRecord } from "./production-repository.js";
 import type { Permit2ProductionJournal } from "./production-journal.js";
-import { type Permit2ForegroundApprovalPort } from "./production-approval.js";
+import { type Permit2ApprovalPurpose, type Permit2ForegroundApprovalPort } from "./production-approval.js";
 export interface Permit2ForegroundApprovalProof {
     readonly kind: "permit2-foreground-approval-proof";
 }
@@ -13,6 +13,7 @@ interface Issued {
     readonly capability: Permit2LocalCapability;
     readonly nativeState: object;
     readonly root: string;
+    readonly purpose: Permit2ApprovalPurpose;
     readonly operationId: string;
     readonly materialHash: string;
     readonly displayHash: string;
@@ -26,7 +27,7 @@ export type Permit2ApprovalBinding = Readonly<Omit<Issued, "claimed">>;
 export declare class Permit2ForegroundApprovalAuthority {
     #private;
     constructor(journal: Permit2ProductionJournal, controller: object, native: NativePort, capability: Permit2LocalCapability, approval: Permit2ForegroundApprovalPort, clock: () => Date);
-    approveOwned(id: string): Promise<Permit2ForegroundApprovalProof>;
+    approveOwned(id: string, purpose?: Permit2ApprovalPurpose): Promise<Permit2ForegroundApprovalProof>;
 }
 /** Read-only recognition before fresh RPC. Atomic claiming still occurs only under the journal's first-write locks. */
 export declare function assertCurrentPermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal, record: Permit2ProductionRecord): void;

@@ -61,6 +61,20 @@ export class Permit2ProductionSigningFence {
     fact: Permit2SigningFact, root: string, id: string) {
     this.assertNativeScope(fence, scope, root, id); return fence.#consumeOwned(fact, id, "exposed", scope);
   }
+  static assertNativeDispatchScope(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): void {
+    identity(id, "exposed"); if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root) invalid();
+    fence.#scopes.assert(scope, id, "dispatch");
+  }
+  static async withNativeDispatchScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string,
+    action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T> {
+    identity(id, "exposed"); if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root) invalid();
+    return fence.#scopes.within(id, "dispatch", fence.#now, action);
+  }
+  static async nativeDispatchScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string) {
+    this.assertNativeDispatchScope(fence, scope, root, id);
+    const owned = await fence.#scopes.owner(scope, id, "dispatch", fence.#now);
+    this.assertNativeDispatchScope(fence, scope, root, id); freeze(owned); return owned;
+  }
   async check(operationId: string, mode: Permit2SigningMode): Promise<{ readonly projection: Permit2SigningProjection; readonly fact: Permit2SigningFact | null }> {
     return this.#runCheck(operationId, mode);
   }

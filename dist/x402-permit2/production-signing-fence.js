@@ -57,6 +57,25 @@ export class Permit2ProductionSigningFence {
         this.assertNativeScope(fence, scope, root, id);
         return fence.#consumeOwned(fact, id, "exposed", scope);
     }
+    static assertNativeDispatchScope(fence, scope, root, id) {
+        identity(id, "exposed");
+        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
+            invalid();
+        fence.#scopes.assert(scope, id, "dispatch");
+    }
+    static async withNativeDispatchScope(fence, root, id, action) {
+        identity(id, "exposed");
+        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
+            invalid();
+        return fence.#scopes.within(id, "dispatch", fence.#now, action);
+    }
+    static async nativeDispatchScopeOwner(fence, scope, root, id) {
+        this.assertNativeDispatchScope(fence, scope, root, id);
+        const owned = await fence.#scopes.owner(scope, id, "dispatch", fence.#now);
+        this.assertNativeDispatchScope(fence, scope, root, id);
+        freeze(owned);
+        return owned;
+    }
     async check(operationId, mode) {
         return this.#runCheck(operationId, mode);
     }
