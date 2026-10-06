@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { hash, loadModule, reinstall, scenario } from "./harness.mjs";
@@ -105,7 +106,7 @@ export async function runInstalledRetainedProof(installed) {
 async function installedModules(packageRoot) {
   const [core, state, canonical, constants, profiles, policy, profileRepository, providerRegistry, awal,
     providerX402Stage, providerX402State, providerX402Repository, chainAccount, chainPolicy, railModel, railRepository,
-    bridgeTransitions, bridgeRepository, bridgeEconomics, gaslessRegistry] = await Promise.all([
+    bridgeTransitions, bridgeRepository, bridgeEconomics, gaslessRegistry, allowlistPolicy, gaslessAssetPolicy] = await Promise.all([
     loadModule(packageRoot, "core.js"), loadModule(packageRoot, "state.js"), loadModule(packageRoot, "canonical.js"),
     loadModule(packageRoot, "constants.js"), loadModule(packageRoot, "provider-profile.js"),
     loadModule(packageRoot, "profile-policy.js"), loadModule(packageRoot, "profile-repository.js"),
@@ -117,11 +118,12 @@ async function installedModules(packageRoot) {
     loadModule(packageRoot, "lifi/transitions.js"), loadModule(packageRoot, "lifi/operation-repository.js"),
     loadModule(packageRoot, "lifi/economics.js"),
     loadModule(packageRoot, "gasless/registry.js"),
+    loadModule(packageRoot, "allowlist-policy-store.js"), loadModule(packageRoot, "gasless/asset-policy.js"),
   ]);
   return { ...core, ...state, ...canonical, ...constants, ...profiles, ...policy, ...profileRepository,
     ...providerRegistry, ...awal, ...providerX402Stage, ...providerX402State, ...providerX402Repository, ...chainAccount,
     ...chainPolicy, ...railModel, ...railRepository, ...bridgeTransitions, ...bridgeRepository, ...bridgeEconomics,
-    ...gaslessRegistry };
+    ...gaslessRegistry, ...allowlistPolicy, ...gaslessAssetPolicy };
 }
 
 async function buildLocalDirect(s, m) {
@@ -209,6 +211,19 @@ async function buildBridge(s, m) {
 
 async function buildLocalGasless(s, m) {
   const state = new m.StateStore(s.stateRoot); await state.initialize(); await ensureLocalWallet(s, state, m);
+  const { getAddress } = createRequire(join(s.packageRoot, "package.json"))("viem");
+  // Synthetic owner admission uses the production policy store in this scenario's isolated state root.
+  const policy = new m.AllowlistPolicyStore(s.stateRoot);
+  const record = await policy.stage({ profile: s.profile, now: NOW,
+    policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "retained-local-gasless.1",
+      accounts: { evm: getAddress(s.fixture().owner) }, effectiveAt: new Date(NOW.getTime() - 1_000).toISOString(),
+      admissions: [{ chain: "eip155:8453", kind: "token", identifier: m.gaslessDeployment(8453).token,
+        rail: "gasless", maximumPerTransferAtomic: "10000000", dailyLimitAtomic: "20000000",
+        mechanism: m.baseLocalGaslessMechanism(), recipient: "0x4444444444444444444444444444444444444444" }] } });
+  await policy.appendDecision(s.profile, null, { status: "active", revision: record.revision,
+    stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest,
+    registry: record.registry, approvalFingerprint: m.hashObject("retained-local-gasless-policy"),
+    decidedAt: NOW.toISOString() });
   const rpc = gaslessRpc(s, m);
   const forbiddenCustody = new Proxy({}, { get: (_target, property) => async () => {
     throw new Error(`unexpected retained gasless custody call: ${String(property)}`);

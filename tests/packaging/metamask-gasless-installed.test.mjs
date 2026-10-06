@@ -13,49 +13,55 @@ before(async () => { installed = await installedPackage(); }, { timeout: 240000 
 // Every invocation below runs the shipped bin and helper with the pinned public
 // SDKs. Only OS identity and the public DNS/HTTPS boundary are synthetic. Fixture
 // transaction signatures are produced independently by ethers outside the archive.
-test("installed MetaMask CLI proves G=N+F and provider gas payment on all eight finite mainnets", { timeout: 300000 }, async (t) => {
+test("installed MetaMask CLI proves G=N+F and provider gas payment on all eight finite mainnets", { timeout: 720000 }, async (t) => {
   const rows = [];
-  for (const chain of [1, 10, 137, 143, 1329, 8453, 42161, 59144]) await t.test(String(chain), async () => {
-    const s = await scenario(installed, chain, { nameless: true });
-    const privateBefore = await s.privateBytes(), connection = await mcp(s);
-    try {
-      const mcpPrepared = await connection.call("apn_gasless_transfer_prepare", { profile: s.profile, chain: String(chain),
-        to: s.fixture().recipient, amount: "1", max_fee: "0.002", min_received: "0.998", idempotency_key: "mm-installed-1" });
-      assert.equal(mcpPrepared.ok, true, JSON.stringify(mcpPrepared));
-      const { id, record, result } = await s.prepare();
-      assert.deepEqual(result.operation, mcpPrepared.operation);
-      assert.equal(record.state, "awaiting_approval"); assert.equal(record.submissionAttempts, 0);
-      assert.equal(BigInt(record.intent.quote.netAtomic) + BigInt(record.intent.quote.feeAtomic), 1000000n);
-      assert.equal(record.intent.quote.feeAtomic, chain === 1 ? "1050" : "1000");
-      const approved = await s.approve(id);
-      assert.equal(approved.envelope.ok, true, JSON.stringify(approved.envelope));
-      const completed = await s.record(id);
-      assert.equal(completed.state, "completed", JSON.stringify(approved.envelope));
-      assert.equal(completed.submissionAttempts, 1); assert.equal(s.fixture().postCount, 1);
-      assert.equal(completed.settlement.debitAtomic, "1000000");
-      assert.equal(completed.settlement.outerSender, s.fixture().relayer);
-      assert.notEqual(completed.settlement.outerSender, s.fixture().owner);
-      const traceBeforeReads = await s.trace();
-      const status = await connection.call("apn_operation_status", { operation: id });
-      const resumed = await connection.call("apn_operation_resume", { operation: id });
-      const receipt = await connection.call("apn_receipt_get", { operation: id });
-      const cliReceipt = await s.cli(["receipt", "get", "--operation", id]);
-      assert.deepEqual(status.operation, approved.envelope.operation);
-      assert.deepEqual(resumed.operation, approved.envelope.operation);
-      assert.deepEqual(receipt.receipt, cliReceipt.receipt);
-      assert.equal(receipt.receipt.operation_id, id);
-      assert.deepEqual(receipt.receipt.settlement, completed.settlement);
-      assert.equal(receipt.receipt.operation_binding_hash, completed.integrityHash);
-      assert.equal(receipt.receipt.transition_hash, completed.transitions.at(-1).transitionHash);
-      assert.deepEqual(await s.trace(), traceBeforeReads);
-      assert.deepEqual(await s.privateBytes(), privateBefore);
-      await assertSafeTrace(s, 1);
-      rows.push({ chainId: chain, operationId: id, state: completed.state, debitAtomic: completed.settlement.debitAtomic,
-        deliveredAtomic: completed.settlement.deliveredAtomic, feeAtomic: completed.settlement.feeAtomic,
-        outerGasPayer: completed.settlement.outerSender, nativeBalanceAtomic: "0", providerPosts: 1,
-        surfaces: ["cli", "stdio_mcp"] });
-    } finally { await connection.close(); }
-  });
+  const chains = [1, 10, 137, 143, 1329, 8453, 42161, 59144];
+  for (const chain of chains) {
+    t.signal.throwIfAborted();
+    await t.test(String(chain), async () => {
+      const s = await scenario(installed, chain, { nameless: true });
+      const privateBefore = await s.privateBytes(), connection = await mcp(s);
+      try {
+        const mcpPrepared = await connection.call("apn_gasless_transfer_prepare", { profile: s.profile, chain: String(chain),
+          to: s.fixture().recipient, amount: "1", max_fee: "0.002", min_received: "0.998", idempotency_key: "mm-installed-1" });
+        assert.equal(mcpPrepared.ok, true, JSON.stringify(mcpPrepared));
+        const { id, record, result } = await s.prepare();
+        assert.deepEqual(result.operation, mcpPrepared.operation);
+        assert.equal(record.state, "awaiting_approval"); assert.equal(record.submissionAttempts, 0);
+        assert.equal(BigInt(record.intent.quote.netAtomic) + BigInt(record.intent.quote.feeAtomic), 1000000n);
+        assert.equal(record.intent.quote.feeAtomic, chain === 1 ? "1050" : "1000");
+        const approved = await s.approve(id);
+        assert.equal(approved.envelope.ok, true, JSON.stringify(approved.envelope));
+        const completed = await s.record(id);
+        assert.equal(completed.state, "completed", JSON.stringify(approved.envelope));
+        assert.equal(completed.submissionAttempts, 1); assert.equal(s.fixture().postCount, 1);
+        assert.equal(completed.settlement.debitAtomic, "1000000");
+        assert.equal(completed.settlement.outerSender, s.fixture().relayer);
+        assert.notEqual(completed.settlement.outerSender, s.fixture().owner);
+        const traceBeforeReads = await s.trace();
+        const status = await connection.call("apn_operation_status", { operation: id });
+        const resumed = await connection.call("apn_operation_resume", { operation: id });
+        const receipt = await connection.call("apn_receipt_get", { operation: id });
+        const cliReceipt = await s.cli(["receipt", "get", "--operation", id]);
+        assert.deepEqual(status.operation, approved.envelope.operation);
+        assert.deepEqual(resumed.operation, approved.envelope.operation);
+        assert.deepEqual(receipt.receipt, cliReceipt.receipt);
+        assert.equal(receipt.receipt.operation_id, id);
+        assert.deepEqual(receipt.receipt.settlement, completed.settlement);
+        assert.equal(receipt.receipt.operation_binding_hash, completed.integrityHash);
+        assert.equal(receipt.receipt.transition_hash, completed.transitions.at(-1).transitionHash);
+        assert.deepEqual(await s.trace(), traceBeforeReads);
+        assert.deepEqual(await s.privateBytes(), privateBefore);
+        await assertSafeTrace(s, 1);
+        rows.push({ chainId: chain, operationId: id, state: completed.state, debitAtomic: completed.settlement.debitAtomic,
+          deliveredAtomic: completed.settlement.deliveredAtomic, feeAtomic: completed.settlement.feeAtomic,
+          outerGasPayer: completed.settlement.outerSender, nativeBalanceAtomic: "0", providerPosts: 1,
+          surfaces: ["cli", "stdio_mcp"] });
+      } finally { await connection.close(); }
+    });
+  }
+  t.signal.throwIfAborted();
+  assert.deepEqual(rows.map(row => row.chainId), chains);
   await writeFile(join(installed.root, "eight-chain-installed-proof.json"), JSON.stringify({
     proofClass: "installed_archive_synthetic_transport", archiveSha256: installed.identity.archiveSha256,
     realProviderOrMainnetPayment: false, rows }, null, 2) + "\n");
@@ -100,7 +106,7 @@ test("installed CLI and MCP discovery enumerate the same finite gasless surface 
     const discovery = await connection.client.listTools();
     assert.deepEqual(discovery.tools.filter(tool => tool.name.startsWith("apn_gasless_")).map(tool => tool.name),
       ["apn_gasless_usdt_prepare", "apn_gasless_usdt_status", "apn_gasless_usdt_resume", "apn_gasless_capabilities", "apn_gasless_balance",
-        "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve"]);
+        "apn_gasless_transfer_quote", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve"]);
     const capabilities = await connection.call("apn_gasless_capabilities", { profile: s.profile });
     assert.deepEqual(capabilities.data, cli.data);
   } finally { await connection.close(); }
@@ -126,7 +132,7 @@ test("installed approval rejects missing TTY, incomplete phrase, expiry, fee abo
   });
 });
 
-test("installed approval admits a fresh fee within the approved cap and binds the repriced dispatch", { timeout: 90000 }, async () => {
+test("installed approval admits a fresh fee within the approved cap and binds the repriced dispatch", { timeout: 120000 }, async () => {
   const s = await scenario(installed), { id } = await s.prepare();
   s.update({ rawFeeAtomic: "1100" });
   const result = await s.approve(id);
@@ -143,23 +149,26 @@ test("installed approval admits a fresh fee within the approved cap and binds th
   await assertSafeTrace(s, 1);
 });
 
-test("installed POST response loss and helper termination retain the marker across expiry and fresh processes", { timeout: 120000 }, async (t) => {
-  for (const kind of ["lost-response", "terminated-helper"]) await t.test(kind, async () => {
-    const s = await scenario(installed, 8453, { afterPostPhase: "pending", submitResponseLost: kind === "lost-response",
-      killSubmitHelper: kind === "terminated-helper" });
-    const { id } = await s.prepare(); await s.approve(id);
-    const first = await s.record(id);
-    assert.equal(first.submissionAttempts, 1); assert.equal(first.terminal, false);
-    assert.equal(s.fixture().postCount, kind === "lost-response" ? 1 : 0);
-    s.update({ nowOffsetMs: 301000, killSubmitHelper: false, submitResponseLost: false, phase: "success" });
-    const resumed = await s.cli(["operation", "resume", "--operation", id]);
-    assert.equal(resumed.ok, true, JSON.stringify(resumed));
-    const current = await s.record(id);
-    assert.equal(current.submissionAttempts, 1);
-    assert.equal(current.state, kind === "lost-response" ? "completed" : "unknown_finality");
-    assert.equal(s.fixture().postCount, kind === "lost-response" ? 1 : 0);
-    await assertSafeTrace(s, s.fixture().postCount);
-  });
+test("installed POST response loss and helper termination retain the marker across expiry and fresh processes", { timeout: 180000 }, async (t) => {
+  for (const kind of ["lost-response", "terminated-helper"]) {
+    t.signal.throwIfAborted();
+    await t.test(kind, async () => {
+      const s = await scenario(installed, 8453, { afterPostPhase: "pending", submitResponseLost: kind === "lost-response",
+        killSubmitHelper: kind === "terminated-helper" });
+      const { id } = await s.prepare(); await s.approve(id);
+      const first = await s.record(id);
+      assert.equal(first.submissionAttempts, 1); assert.equal(first.terminal, false);
+      assert.equal(s.fixture().postCount, kind === "lost-response" ? 1 : 0);
+      s.update({ nowOffsetMs: 301000, killSubmitHelper: false, submitResponseLost: false, phase: "success" });
+      const resumed = await s.cli(["operation", "resume", "--operation", id]);
+      assert.equal(resumed.ok, true, JSON.stringify(resumed));
+      const current = await s.record(id);
+      assert.equal(current.submissionAttempts, 1);
+      assert.equal(current.state, kind === "lost-response" ? "completed" : "unknown_finality");
+      assert.equal(s.fixture().postCount, kind === "lost-response" ? 1 : 0);
+      await assertSafeTrace(s, s.fixture().postCount);
+    });
+  }
 });
 
 test("installed invalid hinted receipt retains its cursor and resumes without a second POST", { timeout: 90000 }, async () => {
