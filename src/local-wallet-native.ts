@@ -91,19 +91,21 @@ export class LocalWalletNative implements NativePort {
       let loaded: Awaited<ReturnType<EncryptedWalletStore["describe"]>> = null;
       let account: ReturnType<typeof privateKeyToAccount> | undefined;
       let tokenSignature: Hex | null = null, permit2Signature: Hex | undefined;
+      let capturedAt = NaN;
+      const immediate = () => Permit2ProductionJournal.nativeSigningSecond(journal, id, execution, capturedAt);
       const assert = () => Permit2ProductionJournal.assertNativeSigningContinuation(journal, id, execution);
       const guard = async () => {
         await assert();
         const checked = await Permit2ProductionSigningFence.checkNativeScoped(fence, scope, owned.root, id);
         await assert(); if (checked.fact === null) throw protocol("Permit2 fresh signing observation refused.");
-        await Permit2ProductionSigningFence.consumeNativeScoped(fence, scope, checked.fact, owned.root, id);
+        capturedAt = Date.parse((await Permit2ProductionSigningFence.consumeNativeScoped(fence, scope, checked.fact, owned.root, id)).capturedAt!);
         return assert();
       };
       try {
         await Permit2ProductionJournal.claimNativeSigningContinuation(journal, id, continuation, execution);
         const record = await guard();
-        Permit2ProductionJournal.nativeSigningSecond(journal, id, execution);
-        loaded = await owned.wallets.describe(record.material.wallet.profile);
+        immediate();
+        loaded = await owned.wallets.describe(record.material.wallet.profile, immediate);
         await assert(); if (loaded === null) throw protocol("Permit2 local wallet is missing.");
         account = privateKeyToAccount(loaded.secret.privateKey);
         const plan = reconstructPermit2ProductionMaterial(record.material);
@@ -112,11 +114,11 @@ export class LocalWalletNative implements NativePort {
           account.address.toLowerCase() !== plan.payer.toLowerCase()) throw protocol("Permit2 actual payer differs from the saved local wallet.");
         await guard();
         if (plan.plan.eip2612 !== null) {
-          await guard(); Permit2ProductionJournal.nativeSigningSecond(journal, id, execution);
+          await guard(); immediate();
           tokenSignature = await account.signTypedData(plan.plan.eip2612.typedData as Parameters<typeof account.signTypedData>[0]);
           await assert(); await guard();
         }
-        await guard(); Permit2ProductionJournal.nativeSigningSecond(journal, id, execution);
+        await guard(); immediate();
         permit2Signature = await account.signTypedData(plan.plan.permit2 as Parameters<typeof account.signTypedData>[0]);
         const current = await assert(); await guard();
         const bundle = await createPermit2ProductionSigned(current, permit2Signature, tokenSignature,

@@ -116,8 +116,11 @@ for (const fault of ["expired_ui", "rollback", "owner", "window"] as const) test
 });
 test("expiry after risk/hold keeps common hold but emits no continuation", async t => {
   const f = await setup(t), proof = await f.authority().approveOwned(f.record.operationId);
-  const original = f.journal.confirmHold.bind(f.journal);
-  t.mock.method(f.journal, "confirmHold", async (id: string) => { const result = await original(id); f.advance(62); return result; });
+  const original = (SecureStateStore.prototype as any).writeJson;
+  t.mock.method(SecureStateStore.prototype as any, "writeJson", async function(this: SecureStateStore, path: string, value: any, ...rest: any[]) {
+    const result = await original.call(this, path, value, ...rest);
+    if (value?.exposureJournal?.holdConfirmed === true) f.advance(62); return result;
+  });
   await assert.rejects(f.journal.markApprovedSignatureRisk(f.record.operationId, proof));
   assert.equal((await f.lease()).state, "unknown_finality"); assert.equal((await f.journal.findOperation(f.record.operationId))!.exposureJournal!.holdConfirmed, true);
 });

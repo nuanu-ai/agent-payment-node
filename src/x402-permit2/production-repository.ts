@@ -90,9 +90,12 @@ export class Permit2ProductionRepository extends SecureStateStore {
     await this.initialize(); await this.ensureDirectory("permit2-production");
     const handle = await open(this.root, "r"); try { await handle.sync(); } finally { await handle.close(); }
   }
-  private path(id: string): string { if (!HASH.test(id)) corrupt(); return `permit2-production/${id}.json`; }
-  async findOperation(id: string): Promise<Permit2ProductionRecord | null> {
-    const value = await this.readJson(this.path(id));
+  #path(id: string): string { if (!HASH.test(id)) corrupt(); return `permit2-production/${id}.json`; }
+  static findOwnedOperation(repository: Permit2ProductionRepository, id: string) { return repository.#findOperation(id); }
+  static persistOwnedExposure(repository: Permit2ProductionRepository, record: Permit2ProductionRecord) { return repository.#persistExposureLocked(record); }
+  async findOperation(id: string): Promise<Permit2ProductionRecord | null> { return this.#findOperation(id); }
+  async #findOperation(id: string): Promise<Permit2ProductionRecord | null> {
+    const value = await this.readJson(this.#path(id));
     if (value === null) return null;
     const record = validatePermit2ProductionRecord(value); if (record.operationId !== id) corrupt();
     if (record.exposureJournal?.signed != null) await validatePermit2ProductionSigned(record.exposureJournal.signed, record);
@@ -120,12 +123,13 @@ export class Permit2ProductionRepository extends SecureStateStore {
           current.exposureAt !== record.exposureAt || current.reservationStarted && !record.reservationStarted || current.updatedAt > record.updatedAt ||
           !allowed(current.state, record.state)) corrupt();
     } else corrupt();
-    await this.writeJson(this.path(record.operationId), record);
+    await this.writeJson(this.#path(record.operationId), record);
   }
   /** Only the dedicated exposure lifecycle subclass can publish append-only private risk material. */
-  protected async persistExposureLocked(record: Permit2ProductionRecord): Promise<void> {
+  protected async persistExposureLocked(record: Permit2ProductionRecord): Promise<void> { return this.#persistExposureLocked(record); }
+  async #persistExposureLocked(record: Permit2ProductionRecord): Promise<void> {
     validatePermit2ProductionRecord(record);
-    const current = await this.findOperation(record.operationId);
+    const current = await this.#findOperation(record.operationId);
     if (current === null || record.exposureJournal === undefined ||
         current.requestHash !== record.requestHash || current.material.materialHash !== record.material.materialHash ||
         current.createdAt !== record.createdAt || current.profileHash !== record.profileHash || current.idempotencyHash !== record.idempotencyHash ||
@@ -136,7 +140,7 @@ export class Permit2ProductionRepository extends SecureStateStore {
     if (current.exposureJournal !== undefined && !exposureAllowed(current.state, record.state)) corrupt();
     assertExposureAppend(current.exposureJournal, record.exposureJournal);
     if (record.exposureJournal.signed !== null) await validatePermit2ProductionSigned(record.exposureJournal.signed, record);
-    await this.writeJson(this.path(record.operationId), record);
+    await this.writeJson(this.#path(record.operationId), record);
   }
   /** Caller holds profile + operation locks; expiry is checked after the secure read immediately before creation. */
   async persistPreparedLocked(record: Permit2ProductionRecord, clock: ClockPort): Promise<void> {
@@ -148,7 +152,7 @@ export class Permit2ProductionRepository extends SecureStateStore {
     if (!Number.isSafeInteger(nowMs) || nowMs < 0) blocked("Invalid production clock.");
     const deadline = reconstructPermit2ProductionMaterial(record.material).expiresAtUnix;
     if (BigInt(deadline) <= BigInt(Math.floor(nowMs / 1000))) blocked("Permit2 authorization expired.");
-    await this.writeJson(this.path(record.operationId), record, true);
+    await this.writeJson(this.#path(record.operationId), record, true);
   }
 }
 function exposureAllowed(from: Permit2ProductionState, to: Permit2ProductionState): boolean {

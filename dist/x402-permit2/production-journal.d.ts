@@ -15,7 +15,7 @@ export declare class Permit2ProductionJournal extends Permit2ProductionRepositor
     private readonly clock;
     static claimNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, continuation: Permit2SigningContinuation, execution: Permit2NativeSigningExecution): Promise<Permit2ProductionRecord>;
     static assertNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution): Promise<Permit2ProductionRecord>;
-    static nativeSigningSecond(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution): number;
+    static nativeSigningSecond(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution, capturedAt?: number): number;
     static nativeOriginBinding(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution): Readonly<{
         binding: Permit2ApprovalBinding;
         record: Permit2ProductionRecord;
@@ -26,11 +26,6 @@ export declare class Permit2ProductionJournal extends Permit2ProductionRepositor
     private readonly state;
     private readonly usage;
     constructor(root: string, preparation: Permit2ProductionPreparation, clock?: () => Date);
-    private now;
-    private locks;
-    private required;
-    private lease;
-    private save;
     /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
     markSignatureRisk(id: string): Promise<Permit2ProductionRecord>;
     /** Genuine UI + atomic first insertion only. No key/sign/HTTP permission is conveyed. */

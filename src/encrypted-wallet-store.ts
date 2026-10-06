@@ -76,7 +76,7 @@ export class EncryptedWalletStore {
     private readonly wrappingSecret: WrappingSecretPort,
   ) {}
 
-  async describe(profileInput: string): Promise<{ readonly identity: WalletIdentity; readonly secret: WalletSecretState } | null> {
+  async describe(profileInput: string, beforeDecrypt?: () => void): Promise<{ readonly identity: WalletIdentity; readonly secret: WalletSecretState } | null> {
     const profile = canonicalProfile(profileInput);
     const value = await this.state.loadEncryptedWalletEnvelope(profile);
     if (value === null) {
@@ -92,6 +92,7 @@ export class EncryptedWalletStore {
       throw new ApnError("APN_STATE_CORRUPT", "The encrypted wallet exists but its wrapping secret is missing.");
     }
     try {
+      beforeDecrypt?.();
       return { identity: envelope.identity, secret: decryptEnvelope(envelope, wrapping) };
     } finally {
       wrapping.fill(0);
