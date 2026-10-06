@@ -86,10 +86,13 @@ export class Permit2ProductionRepository extends SecureStateStore {
             await handle.close();
         }
     }
-    path(id) { if (!HASH.test(id))
+    #path(id) { if (!HASH.test(id))
         corrupt(); return `permit2-production/${id}.json`; }
-    async findOperation(id) {
-        const value = await this.readJson(this.path(id));
+    static findOwnedOperation(repository, id) { return repository.#findOperation(id); }
+    static persistOwnedExposure(repository, record) { return repository.#persistExposureLocked(record); }
+    async findOperation(id) { return this.#findOperation(id); }
+    async #findOperation(id) {
+        const value = await this.readJson(this.#path(id));
         if (value === null)
             return null;
         const record = validatePermit2ProductionRecord(value);
@@ -131,12 +134,13 @@ export class Permit2ProductionRepository extends SecureStateStore {
         }
         else
             corrupt();
-        await this.writeJson(this.path(record.operationId), record);
+        await this.writeJson(this.#path(record.operationId), record);
     }
     /** Only the dedicated exposure lifecycle subclass can publish append-only private risk material. */
-    async persistExposureLocked(record) {
+    async persistExposureLocked(record) { return this.#persistExposureLocked(record); }
+    async #persistExposureLocked(record) {
         validatePermit2ProductionRecord(record);
-        const current = await this.findOperation(record.operationId);
+        const current = await this.#findOperation(record.operationId);
         if (current === null || record.exposureJournal === undefined ||
             current.requestHash !== record.requestHash || current.material.materialHash !== record.material.materialHash ||
             current.createdAt !== record.createdAt || current.profileHash !== record.profileHash || current.idempotencyHash !== record.idempotencyHash ||
@@ -150,7 +154,7 @@ export class Permit2ProductionRepository extends SecureStateStore {
         assertExposureAppend(current.exposureJournal, record.exposureJournal);
         if (record.exposureJournal.signed !== null)
             await validatePermit2ProductionSigned(record.exposureJournal.signed, record);
-        await this.writeJson(this.path(record.operationId), record);
+        await this.writeJson(this.#path(record.operationId), record);
     }
     /** Caller holds profile + operation locks; expiry is checked after the secure read immediately before creation. */
     async persistPreparedLocked(record, clock) {
@@ -166,7 +170,7 @@ export class Permit2ProductionRepository extends SecureStateStore {
         const deadline = reconstructPermit2ProductionMaterial(record.material).expiresAtUnix;
         if (BigInt(deadline) <= BigInt(Math.floor(nowMs / 1000)))
             blocked("Permit2 authorization expired.");
-        await this.writeJson(this.path(record.operationId), record, true);
+        await this.writeJson(this.#path(record.operationId), record, true);
     }
 }
 function exposureAllowed(from, to) {

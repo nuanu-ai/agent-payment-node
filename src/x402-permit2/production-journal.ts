@@ -38,8 +38,8 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
   static assertNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution) {
     return journal.#assertNativeSigningContinuation(id, execution);
   }
-  static nativeSigningSecond(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution): number {
-    return journal.#nativeSigningSecond(id, execution);
+  static nativeSigningSecond(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution, capturedAt?: number): number {
+    return journal.#nativeSigningSecond(id, execution, capturedAt);
   }
   static nativeOriginBinding(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution) {
     LocalWalletNative.assertPermit2SigningExecution(execution, journal, id);
@@ -72,10 +72,12 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     checkedSigningLease(current.record, current.lease, "exposed", grant); this.#nativeApprovalTime(grant.binding, current.record);
     return current.record;
   }
-  #nativeSigningSecond(id: string, execution: Permit2NativeSigningExecution): number {
+  #nativeSigningSecond(id: string, execution: Permit2NativeSigningExecution, capturedAt?: number): number {
     LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
     const grant = this.#nativeClaims.get(execution); if (grant === undefined) blocked();
-    return Math.floor(this.#nativeApprovalTime(grant.binding, grant.record).getTime() / 1000);
+    const at = this.#nativeApprovalTime(grant.binding, grant.record).getTime();
+    if (capturedAt !== undefined && (!Number.isSafeInteger(capturedAt) || at < capturedAt || at - capturedAt > 5_000)) blocked();
+    return Math.floor(at / 1000);
   }
   #nativeApprovalTime(binding: Permit2ApprovalBinding, record: Permit2ProductionRecord): Date {
     const at = binding.clock();
@@ -91,30 +93,31 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     super(root); if (preparation.records.root !== this.root) blocked();
     this.state = new StateStore(root); this.usage = new AssetUsageLedger(root);
   }
-  private now(): Date {
+  #now(): Date {
     const at = this.clock();
     if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < 0) blocked();
     return new Date(at.getTime());
   }
-  private locks(r: Permit2ProductionRecord): string[] {
+  #locks(r: Permit2ProductionRecord): string[] {
     return [`profile:${r.profileHash}`, `operation:${r.operationId}`, evmAddressLock(r.material.wallet.account)];
   }
-  private async required(id: string): Promise<Permit2ProductionRecord> {
-    const r = await this.findOperation(id); if (r === null) blocked(); return r;
+  async #required(id: string): Promise<Permit2ProductionRecord> {
+    const r = await Permit2ProductionRepository.findOwnedOperation(this, id); if (r === null) blocked(); return r;
   }
-  private async lease(r: Permit2ProductionRecord): Promise<AssetUsageReservation> {
-    const value = (await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.now())).reservation;
+  async #lease(r: Permit2ProductionRecord): Promise<AssetUsageReservation> {
+    const value = (await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.#now())).reservation;
     if (value === null || value.reservationId !== r.usageReservationId || value.policyDigest !== r.material.owner.policyDigest ||
         value.registryVersion !== r.material.checkpoint.registryVersion || value.rail !== "x402" ||
         value.amountAtomic !== reconstructPermit2ProductionMaterial(r.material).amountAtomic ||
         value.idempotencyHash !== sha256(`asset-usage-idempotency\0${productionUsageKey(r.operationId)}`)) blocked();
     return value;
   }
-  private async save(r: Permit2ProductionRecord, j: Permit2ExposureJournal, state = r.state, terminal = r.terminal): Promise<Permit2ProductionRecord> {
+  async #save(r: Permit2ProductionRecord, j: Permit2ExposureJournal, state = r.state, terminal = r.terminal): Promise<Permit2ProductionRecord> {
     const next = sealPermit2ProductionRecord({ ...productionRecordBody(r), exposureJournal: j,
-      state, terminal, updatedAt: this.now().toISOString() });
-    await this.persistExposureLocked(next); return next;
+      state, terminal, updatedAt: this.#now().toISOString() });
+    await this.#persistExposureLocked(next); return next;
   }
+  async #persistExposureLocked(r: Permit2ProductionRecord): Promise<void> { await Permit2ProductionRepository.persistOwnedExposure(this, r); }
   /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
   async markSignatureRisk(id: string): Promise<Permit2ProductionRecord> { return (await this.#markRisk(id)).record; }
   /** Genuine UI + atomic first insertion only. No key/sign/HTTP permission is conveyed. */
@@ -125,11 +128,11 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
       const result = await this.#markRisk(id, proof); candidate = result.candidate;
       if (candidate === null) { freezeApprovedSnapshot(result.record); return Object.freeze({ record: result.record, continuation: null }); }
       const owned = this.#riskCandidates.get(candidate); if (owned === undefined) blocked();
-      return await this.state.withLocks(this.locks(result.record), async () => {
-        const current = await this.required(id); assertSigningLifecycle(current, "exposed");
+      return await this.state.withLocks(this.#locks(result.record), async () => {
+        const current = await this.#required(id); assertSigningLifecycle(current, "exposed");
         if (current.material.materialHash !== owned.riskRecord.material.materialHash ||
           current.exposureAt !== owned.riskRecord.exposureAt || current.exposureJournal?.bindingHash !== owned.riskRecord.exposureJournal?.bindingHash) blocked();
-        const lease = checkedSigningLease(current, await this.lease(current), "exposed");
+        const lease = checkedSigningLease(current, await this.#lease(current), "exposed");
         assertClaimedPermit2ForegroundApproval(proof, this, current); this.#approvalTime(owned.binding, current);
         freezeApprovedSnapshot(current); freezeApprovedSnapshot(lease);
         const continuation = Object.freeze({ kind: "permit2-private-signing-continuation" as const });
@@ -139,21 +142,21 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     } finally { revokePermit2ForegroundApproval(proof); if (candidate !== null) this.#riskCandidates.delete(candidate); }
   }
   #approvalTime(binding: Permit2ApprovalBinding, record: Permit2ProductionRecord): void {
-    const now = this.now(); if (now.getTime() < binding.completedAt || now.getTime() - binding.completedAt > 60_000) blocked();
+    const now = this.#now(); if (now.getTime() < binding.completedAt || now.getTime() - binding.completedAt > 60_000) blocked();
     assertSigningTime(record, now);
   }
   async #markRisk(id: string, proof?: Permit2ForegroundApprovalProof): Promise<{ readonly record: Permit2ProductionRecord; readonly candidate: RiskCandidate | null }> {
-    await this.ready(); let r = await this.required(id), candidate: RiskCandidate | null = null;
-    if (r.exposureJournal !== undefined) return { record: await this.confirmHold(id), candidate: null };
+    await this.ready(); let r = await this.#required(id), candidate: RiskCandidate | null = null;
+    if (r.exposureJournal !== undefined) return { record: await this.#confirmHold(id), candidate: null };
     r = await this.preparation.assertCurrentOwner(id);
-    const usage = await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.now());
-    const lease = await this.lease(r);
+    const usage = await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.#now());
+    const lease = await this.#lease(r);
     if (r.state !== "reserved" || lease.state !== "reserved" || lease.reservationDigest !== r.usageReservationDigest) blocked();
-    await this.state.withLocks(this.locks(r), async () => {
-      const current = await this.required(id);
+    await this.state.withLocks(this.#locks(r), async () => {
+      const current = await this.#required(id);
       if (current.exposureJournal !== undefined) return;
       if (current.integrityHash !== r.integrityHash) blocked();
-      const at = this.now();
+      const at = this.#now();
       if (BigInt(Math.floor(at.getTime() / 1000)) >= BigInt(reconstructPermit2ProductionMaterial(current.material).expiresAtUnix)) blocked();
       const used = BigInt(usage.snapshot.amountAtomic) - BigInt(lease.amountAtomic);
       if (used < 0n) blocked();
@@ -167,57 +170,58 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
         exposureAt: at.toISOString(), updatedAt: at.toISOString(), exposureJournal: journal });
       const binding = proof === undefined ? null : claimPermit2ForegroundApproval(proof, this, current);
       if (binding !== null) this.#approvalTime(binding, current);
-      await this.persistExposureLocked(next);
+      await this.#persistExposureLocked(next);
       if (binding !== null && proof !== undefined) {
         freezeApprovedSnapshot(next);
         candidate = Object.freeze({ kind: "permit2-private-risk-candidate" as const });
         this.#riskCandidates.set(candidate, { proof, binding, riskRecord: next });
       }
     });
-    try { return { record: await this.confirmHold(id), candidate }; }
+    try { return { record: await this.#confirmHold(id), candidate }; }
     catch (error) { if (candidate !== null) this.#riskCandidates.delete(candidate); throw error; }
   }
   /** No state locks span ledger I/O; risk remains durable if either side fails. */
-  async confirmHold(id: string): Promise<Permit2ProductionRecord> {
-    const r = await this.required(id), j = r.exposureJournal; if (j === undefined) blocked();
+  async confirmHold(id: string): Promise<Permit2ProductionRecord> { return this.#confirmHold(id); }
+  async #confirmHold(id: string): Promise<Permit2ProductionRecord> {
+    const r = await this.#required(id), j = r.exposureJournal; if (j === undefined) blocked();
     if (r.terminal || j.terminalIntent !== null) return r;
-    const lease = await this.lease(r);
+    const lease = await this.#lease(r);
     if (!["reserved", "unknown_finality"].includes(lease.state)) blocked();
     if (lease.state === "reserved") await this.usage.transition({ ...productionUsageIdentity(r), reservationId: r.usageReservationId,
-      policyDigest: r.material.owner.policyDigest, state: "unknown_finality", expectedCurrentStates: ["reserved", "unknown_finality"], now: this.now() });
-    return this.state.withLocks(this.locks(r), async () => {
-      const current = await this.required(id), journal = current.exposureJournal;
+      policyDigest: r.material.owner.policyDigest, state: "unknown_finality", expectedCurrentStates: ["reserved", "unknown_finality"], now: this.#now() });
+    return this.state.withLocks(this.#locks(r), async () => {
+      const current = await this.#required(id), journal = current.exposureJournal;
       if (journal === undefined || journal.bindingHash !== j.bindingHash) blocked();
       if (current.terminal || journal.terminalIntent !== null || journal.holdConfirmed) return current;
-      return this.save(current, { ...journal, holdConfirmed: true });
+      return this.#save(current, { ...journal, holdConfirmed: true });
     });
   }
   async storeSigned(id: string, value: Permit2ProductionSigned): Promise<Permit2ProductionRecord> { return this.#storeSigned(id, value); }
   async #storeSigned(id: string, value: Permit2ProductionSigned): Promise<Permit2ProductionRecord> {
     const snapshot = JSON.parse(canonicalJson(value)) as Permit2ProductionSigned;
-    const r = await this.required(id), signed = await validatePermit2ProductionSigned(snapshot, r);
-    return this.state.withLocks(this.locks(r), async () => {
-      const current = await this.required(id), j = current.exposureJournal;
+    const r = await this.#required(id), signed = await validatePermit2ProductionSigned(snapshot, r);
+    return this.state.withLocks(this.#locks(r), async () => {
+      const current = await this.#required(id), j = current.exposureJournal;
       if (j === undefined || !j.holdConfirmed || current.terminal || j.terminalIntent !== null) blocked();
       if (j.signed !== null) { if (canonicalJson(j.signed) !== canonicalJson(signed)) blocked(); return current; }
-      return this.save(current, { ...j, signed });
+      return this.#save(current, { ...j, signed });
     });
   }
   /** Attempt 1 is the sole durable request marker; it conveys no HTTP permission. */
   async markRequestPending(id: string): Promise<Permit2ProductionRecord> {
-    const r = await this.required(id);
-    return this.state.withLocks(this.locks(r), async () => {
-      const current = await this.required(id), j = current.exposureJournal;
+    const r = await this.#required(id);
+    return this.state.withLocks(this.#locks(r), async () => {
+      const current = await this.#required(id), j = current.exposureJournal;
       if (j === undefined || !j.holdConfirmed || j.signed === null || current.terminal || j.terminalIntent !== null) blocked();
       if (j.request !== null) return current;
-      return this.save(current, { ...j, request: { attempt: 1, requestHash: current.material.checked.requestHash,
+      return this.#save(current, { ...j, request: { attempt: 1, requestHash: current.material.checked.requestHash,
         headerHash: j.signed.headerHash } }, "request_pending");
     });
   }
   /** Only an actual observer's private, single-use capability can create or renew terminal authority. */
   async finalize(id: string, proof: Permit2ObservationProof, mode: Permit2ObservationMode): Promise<Permit2ProductionRecord> {
     const capturedMode = mode, capability = proof;
-    const r = await this.required(id), j = r.exposureJournal;
+    const r = await this.#required(id), j = r.exposureJournal;
     if (j === undefined || !j.holdConfirmed || r.terminal) blocked();
     const checked = await consumePermit2ObservationProof(capability, r, j.signed, capturedMode);
     if (checked.outcome === "hold" || checked.reason !== "checked" || checked.blockNumber === null || checked.blockHash === null ||
@@ -226,32 +230,32 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
       requestHash: checked.requestHash, challengeHash: checked.challengeHash, signedHash: checked.signedHash,
       transactionHash: checked.transactionHash, blockNumber: checked.blockNumber, blockHash: checked.blockHash, observation: checked };
     const intent: Permit2TerminalIntent = { ...body, outcomeDigest: productionTerminalDigest(r, body) };
-    const pending = await this.state.withLocks(this.locks(r), async () => {
-      const current = await this.required(id), journal = current.exposureJournal;
+    const pending = await this.state.withLocks(this.#locks(r), async () => {
+      const current = await this.#required(id), journal = current.exposureJournal;
       if (journal === undefined || current.terminal || canonicalJson(journal.signed) !== canonicalJson(j.signed)) blocked();
       if (journal.terminalIntent !== null) {
         if (journal.terminalIntent.outcomeDigest !== intent.outcomeDigest) blocked(); return current;
       }
-      return this.save(current, { ...journal, terminalIntent: intent }, "terminal_pending");
+      return this.#save(current, { ...journal, terminalIntent: intent }, "terminal_pending");
     });
-    const lease = await this.lease(pending), terminal = intent.outcome === "settled" ? "finalized" : "released_unsubmitted";
+    const lease = await this.#lease(pending), terminal = intent.outcome === "settled" ? "finalized" : "released_unsubmitted";
     if (lease.state !== terminal) await this.usage.transition({ ...productionUsageIdentity(pending), reservationId: pending.usageReservationId,
       policyDigest: pending.material.owner.policyDigest, state: terminal, outcomeDigest: intent.outcomeDigest,
-      expectedCurrentStates: ["unknown_finality"], now: this.now() });
+      expectedCurrentStates: ["unknown_finality"], now: this.#now() });
     return this.reconcileTerminal(id);
   }
   /** Persisted intent is sufficient ONLY to match an already-terminal ledger, never to decide a new transition. */
   async reconcileTerminal(id: string): Promise<Permit2ProductionRecord> {
-    const r = await this.required(id), intent = r.exposureJournal?.terminalIntent;
+    const r = await this.#required(id), intent = r.exposureJournal?.terminalIntent;
     if (intent == null || r.terminal) return r;
-    const lease = await this.lease(r), state = intent.outcome === "settled" ? "finalized" : "released_unsubmitted";
+    const lease = await this.#lease(r), state = intent.outcome === "settled" ? "finalized" : "released_unsubmitted";
     if (lease.state !== state) return r;
     if (lease.outcomeDigest !== intent.outcomeDigest) blocked();
-    return this.state.withLocks(this.locks(r), async () => {
-      const current = await this.required(id), j = current.exposureJournal;
+    return this.state.withLocks(this.#locks(r), async () => {
+      const current = await this.#required(id), j = current.exposureJournal;
       if (j?.terminalIntent?.outcomeDigest !== intent.outcomeDigest) blocked();
       if (current.terminal) return current;
-      return this.save(current, j, intent.outcome === "settled" ? "settled" : "expired_no_effect", true);
+      return this.#save(current, j, intent.outcome === "settled" ? "settled" : "expired_no_effect", true);
     });
   }
 }
