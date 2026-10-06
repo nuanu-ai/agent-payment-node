@@ -39,6 +39,7 @@ export declare class Permit2ProductionSigningFence {
     }>;
     static consumeNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, fact: Permit2SigningFact, root: string, id: string): Promise<Permit2SigningProjection>;
     static assertNativeDispatchScope(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): void;
+    static assertNativeDispatchTime(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string, at: Date): void;
     static withNativeDispatchScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
     static nativeDispatchScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
         record: import("./production-repository.js").Permit2ProductionRecord;

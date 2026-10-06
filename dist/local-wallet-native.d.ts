@@ -1,6 +1,7 @@
 import { Permit2ProductionSigningFence, type Permit2MetadataLockScope } from "./x402-permit2/production-signing-fence.js";
 import { Permit2ProductionJournal, type Permit2SigningContinuation } from "./x402-permit2/production-journal.js";
-import type { Permit2NativeRequestExecution, Permit2NativeSigningOrigin, Permit2NativeSigningExecution, Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
+import type { Permit2NativeDispatchExecution, Permit2NativeRequestExecution, Permit2NativeRequestGrant, Permit2NativeSigningOrigin, Permit2NativeSigningExecution, Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
+import { Permit2ProductionHttps } from "./x402-permit2/production-http.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { NativePort, NativeRequest } from "./ports.js";
 import type { StateStore } from "./state.js";
@@ -22,6 +23,13 @@ export declare class LocalWalletNative implements NativePort {
         readonly operationId: string;
     };
     static assertPermit2RequestExecution(execution: Permit2NativeRequestExecution, journal: Permit2ProductionJournal, id: string): OwnedPermit2SigningOrigin;
+    static permit2HttpMaterial(execution: Permit2NativeDispatchExecution, port: Permit2ProductionHttps): Readonly<{
+        record: import("./x402-permit2/production-repository.js").Permit2ProductionRecord;
+        deadlineMs: number;
+        signal: AbortSignal;
+    }>;
+    static assertPermit2HttpOwner(execution: Permit2NativeDispatchExecution, port: Permit2ProductionHttps): Promise<void>;
+    static consumePermit2HttpStep(execution: Permit2NativeDispatchExecution, port: Permit2ProductionHttps, stage: "construct" | "end"): void;
     private readonly wallets;
     constructor(state: StateStore, wrappingSecret: WrappingSecretPort, approval?: TransferApprovalPort);
     /** Direct chosen-native entry only: no JSON request, caller plan, callback or transport permission. */
@@ -93,6 +101,55 @@ export declare class LocalWalletNative implements NativePort {
         };
         requestGrant: Readonly<{
             kind: "permit2-native-request-grant";
+        }>;
+    }>>;
+    /** One actual dedicated HTTPS attempt; all returned observations remain untrusted and held. */
+    submitPermit2Production(journal: Permit2ProductionJournal, fence: Permit2ProductionSigningFence, id: string, grant: Permit2NativeRequestGrant): Promise<Readonly<{
+        status: {
+            lifecycle: string;
+            observeOnly: boolean;
+            operationId: string;
+            state: import("./x402-permit2/production-repository.js").Permit2ProductionState;
+            terminal: boolean;
+            capability: string;
+            chain: "eip155:43114";
+            payer: `0x${string}`;
+            token: `0x${string}`;
+            recipient: `0x${string}`;
+            amountAtomic: string;
+            deadline: string;
+            resource: {
+                origin: string;
+                urlHash: string;
+            };
+            blockerCodes: string[];
+        };
+        outcome: Readonly<{
+            kind: "observed";
+            observation: import("./x402-model.js").HttpObservation;
+        }>;
+    }> | Readonly<{
+        status: {
+            lifecycle: string;
+            observeOnly: boolean;
+            operationId: string;
+            state: import("./x402-permit2/production-repository.js").Permit2ProductionState;
+            terminal: boolean;
+            capability: string;
+            chain: "eip155:43114";
+            payer: `0x${string}`;
+            token: `0x${string}`;
+            recipient: `0x${string}`;
+            amountAtomic: string;
+            deadline: string;
+            resource: {
+                origin: string;
+                urlHash: string;
+            };
+            blockerCodes: string[];
+        };
+        outcome: Readonly<{
+            kind: "held";
         }>;
     }>>;
     request(request: NativeRequest): Promise<unknown>;

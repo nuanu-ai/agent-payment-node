@@ -63,6 +63,16 @@ export class Permit2MetadataLockOwner {
         if (c.keys.length !== keys.length || c.keys.some((key, index) => key !== keys[index]))
             blocked();
     }
+    assertTime(scope, id, mode, at) {
+        this.assert(scope, id, mode);
+        const c = this.#contexts.get(scope), t = c.time;
+        if (t === undefined)
+            blocked();
+        const policy = activeAssetPolicyFromState(t.policy, at);
+        assertPermit2OwnerIdentity(c.record, t.wallet, policy);
+        assertPermit2OwnerCaps(c.record, at, t.used, policy);
+        assertSigningTime(c.record, at);
+    }
     onExit(scope, id, mode, close) {
         this.assert(scope, id, mode);
         const c = this.#contexts.get(scope);
@@ -103,6 +113,7 @@ export class Permit2MetadataLockOwner {
         assertPermit2OwnerIdentity(record, wallet, currentPolicy);
         assertPermit2OwnerCaps(record, at, used.toString(), currentPolicy);
         assertSigningTime(record, clock());
+        this.#contexts.get(scope).time = { policy, wallet, used: used.toString() };
         return { record, lease };
     }
 }

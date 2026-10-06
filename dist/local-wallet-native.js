@@ -7,19 +7,21 @@ import { createPermit2ProductionSigned } from "./x402-permit2/production-signed.
 import { publicPermit2Production } from "./x402-permit2/production-repository.js";
 import { parseDirectIntent, parseDirectRecovery } from "./local-wallet-direct-payload.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
+import { assertWallet, ensureX402Live, effectSlot, requestProfile, exactRecord, addressEqual, x402Address, protocol, rejected } from "./local-wallet-native-fields.js";
+import { performance } from "node:perf_hooks";
+import { Permit2ProductionHttps } from "./x402-permit2/production-http.js";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { join, normalize, parse, resolve, sep } from "node:path";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
+import { domainHash, hashObject } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { EncryptedWalletStore, walletCustodyLock, } from "./encrypted-wallet-store.js";
 import { ApnError } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
 import { parseEvmNativeIntent } from "./evm-native-intent.js";
 import { TtyTransferApproval } from "./tty-approval.js";
-import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402Effect } from "./local-wallet-native-public.js";
 import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
 export class LocalWalletNative {
@@ -68,6 +70,36 @@ export class LocalWalletNative {
             at.getTime() - binding.completedAt > 60_000)
             throw protocol("Permit2 original paid approval expired.");
         assertSigningTime(origin.grant.record, at);
+        return new Date(at.getTime());
+    }
+    #permit2Http = new Permit2ProductionHttps();
+    static #permit2Dispatches = new WeakMap();
+    static #dispatch(execution, port) {
+        const e = this.#permit2Dispatches.get(execution);
+        if (e === undefined || e.port !== port || !e.attempt.active || performance.now() >= e.attempt.deadlineMs)
+            throw protocol("Permit2 HTTP attempt is unavailable.");
+        const o = e.owned.origin, at = this.#assertPermit2RequestTime(o);
+        if (this.assertPermit2LocalCapability(o.capability, o.native, o.root) !== o.grant.binding.nativeState)
+            throw protocol("Permit2 HTTP native changed.");
+        Permit2ProductionSigningFence.assertNativeDispatchTime(e.fence, e.scope, o.root, o.operationId, at);
+        return e;
+    }
+    static permit2HttpMaterial(execution, port) {
+        const e = this.#dispatch(execution, port);
+        return Object.freeze({ record: e.owned.record, deadlineMs: e.attempt.deadlineMs, signal: e.attempt.abort.signal });
+    }
+    static async assertPermit2HttpOwner(execution, port) {
+        const e = this.#dispatch(execution, port), o = e.owned.origin;
+        const current = await Permit2ProductionSigningFence.nativeDispatchScopeOwner(e.fence, e.scope, o.root, o.operationId);
+        this.#dispatch(execution, port);
+        if (current.record.integrityHash !== e.owned.record.integrityHash || current.lease.reservationDigest !== o.grant.lease.reservationDigest)
+            throw protocol("Permit2 HTTP owner changed.");
+    }
+    static consumePermit2HttpStep(execution, port, stage) {
+        const e = this.#dispatch(execution, port);
+        if (e.phase !== (stage === "construct" ? "pending" : "constructed"))
+            throw protocol("Permit2 HTTP step was consumed.");
+        e.phase = stage === "construct" ? "constructed" : "ended";
     }
     wallets;
     constructor(state, wrappingSecret, approval = new TtyTransferApproval()) {
@@ -200,7 +232,7 @@ export class LocalWalletNative {
                 return Object.freeze({ status: publicPermit2Production(marked.record), requestGrant: null });
             const record = Permit2ProductionJournal.consumeNativeFirstRequestProof(journal, id, execution, marked.proof);
             const requestGrant = Object.freeze({ kind: "permit2-native-request-grant" });
-            _a.#permit2RequestGrants.set(requestGrant, Object.freeze({ origin, record }));
+            _a.#permit2RequestGrants.set(requestGrant, Object.freeze({ origin, record, fence }));
             return Object.freeze({ status: publicPermit2Production(record), requestGrant });
         }
         finally {
@@ -216,6 +248,41 @@ export class LocalWalletNative {
         _a.#permit2RequestGrants.delete(grant);
         _a.#assertPermit2RequestTime(owned.origin);
         return owned;
+    }
+    /** One actual dedicated HTTPS attempt; all returned observations remain untrusted and held. */
+    async submitPermit2Production(journal, fence, id, grant) {
+        const deadlineMs = performance.now() + 20_000, owned = this.#consumePermit2ProductionRequestGrant(grant), origin = owned.origin;
+        if (origin.journal !== journal || owned.fence !== fence || origin.root !== journal.root || origin.operationId !== id)
+            throw protocol("Permit2 HTTP request binding changed.");
+        const attempt = { active: true, deadlineMs, abort: new AbortController() };
+        const running = Permit2ProductionSigningFence.withNativeDispatchScope(fence, origin.root, id, async (scope) => {
+            if (!attempt.active || performance.now() >= deadlineMs)
+                throw protocol("Permit2 HTTP admission timed out.");
+            const execution = Object.freeze({ kind: "permit2-native-dispatch-execution" });
+            _a.#permit2Dispatches.set(execution, { owned, fence, scope, port: this.#permit2Http, attempt, phase: "pending" });
+            try {
+                const observation = await this.#permit2Http.submit(execution);
+                return Object.freeze({ status: publicPermit2Production(owned.record), outcome: Object.freeze({ kind: "observed", observation }) });
+            }
+            finally {
+                _a.#permit2Dispatches.delete(execution);
+            }
+        });
+        let timer;
+        const timeout = new Promise((_resolve, reject) => { timer = setTimeout(() => { attempt.active = false; attempt.abort.abort(); reject(protocol("Permit2 HTTP attempt timed out.")); }, Math.max(1, deadlineMs - performance.now())); });
+        running.catch(() => { });
+        try {
+            return await Promise.race([running, timeout]);
+        }
+        catch {
+            return Object.freeze({ status: publicPermit2Production(owned.record), outcome: Object.freeze({ kind: "held" }) });
+        }
+        finally {
+            attempt.active = false;
+            attempt.abort.abort();
+            if (timer !== undefined)
+                clearTimeout(timer);
+        }
     }
     async request(request) {
         if (request.version !== "apn.native.v1")
@@ -457,36 +524,4 @@ export class LocalWalletNative {
     }
 }
 _a = LocalWalletNative;
-function assertWallet(identity, expected) {
-    if (!addressEqual(identity.address, expected))
-        throw rejected("APN_WALLET_MISMATCH", "Wallet identity differs from the frozen payment.");
-}
-function ensureX402Live(validBefore) {
-    if (BigInt(Math.floor(Date.now() / 1000)) >= BigInt(validBefore))
-        throw rejected("APN_APPROVAL_EXPIRED", "x402 authorization is expired.");
-}
-function effectSlot(domain, profile, operationId, fingerprint) {
-    return sha256(`${domain}\0${profile}\0${operationId}\0${fingerprint}`);
-}
-function requestProfile(payload) {
-    return canonicalProfile(payload.profile);
-}
-function exactRecord(value, keys) {
-    if (!isPlainRecord(value) || !exactKeys(value, keys))
-        throw protocol("Custody request violates the exact schema.");
-    return value;
-}
-function addressEqual(left, right) { return left.toLowerCase() === right.toLowerCase(); }
-function x402Address(value, label) {
-    if (typeof value !== "string")
-        throw protocol(`Invalid x402 ${label}.`);
-    canonicalAddress(value);
-    if (value !== value.toLowerCase())
-        throw protocol(`x402 ${label} must be normalized lowercase.`);
-    return value;
-}
-function protocol(message) { return new ApnError("APN_NATIVE_PROTOCOL", message); }
-function rejected(nativeCode, message) {
-    return new ApnError("APN_NATIVE_REJECTED", message, { nativeCode });
-}
 //# sourceMappingURL=local-wallet-native.js.map

@@ -11,6 +11,7 @@ export declare class Permit2MetadataLockOwner {
     constructor(state: StateStore, records: Permit2ProductionRepository);
     within<T>(id: string, mode: Permit2MetadataMode, clock: () => Date, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
     assert(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode): void;
+    assertTime(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, at: Date): void;
     onExit(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, close: () => void): () => void;
     owner(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, clock: () => Date, expected?: {
         readonly record: Permit2ProductionRecord;

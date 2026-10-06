@@ -15,7 +15,8 @@ import { productionUsageIdentity, type Permit2ProductionRecord, type Permit2Prod
 
 export interface Permit2MetadataLockScope { readonly kind: "permit2-metadata-lock-scope" }
 type Context = { readonly record: Permit2ProductionRecord; readonly mode: Permit2MetadataMode;
-  readonly keys: readonly string[]; readonly close: Set<() => void> };
+  readonly keys: readonly string[]; readonly close: Set<() => void>;
+  time?: { readonly policy: Awaited<ReturnType<AllowlistPolicyStore["readUnderProfileLock"]>>; readonly wallet: ReturnType<typeof decodePermit2WalletBinding>; readonly used: string } };
 /** An actual metadata lock callback only. No key, approval, signature or transport authority. */
 export class Permit2MetadataLockOwner {
   readonly #contexts = new WeakMap<Permit2MetadataLockScope, Context>();
@@ -51,6 +52,11 @@ export class Permit2MetadataLockOwner {
       walletCustodyLock(this.#state, c.record.material.wallet.profile), `profile:${allowlistProfileHash(c.record.material.wallet.profile)}`];
     if (c.keys.length !== keys.length || c.keys.some((key, index) => key !== keys[index])) blocked();
   }
+  assertTime(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, at: Date): void {
+    this.assert(scope, id, mode); const c = this.#contexts.get(scope)!, t = c.time; if (t === undefined) blocked();
+    const policy = activeAssetPolicyFromState(t.policy, at); assertPermit2OwnerIdentity(c.record, t.wallet, policy);
+    assertPermit2OwnerCaps(c.record, at, t.used, policy); assertSigningTime(c.record, at);
+  }
   onExit(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, close: () => void): () => void {
     this.assert(scope, id, mode); const c = this.#contexts.get(scope)!; c.close.add(close); return () => { c.close.delete(close); };
   }
@@ -75,6 +81,7 @@ export class Permit2MetadataLockOwner {
     const at = clock(), currentPolicy = activeAssetPolicyFromState(policy, at);
     assertPermit2OwnerIdentity(record, wallet, currentPolicy);
     assertPermit2OwnerCaps(record, at, used.toString(), currentPolicy); assertSigningTime(record, clock());
+    this.#contexts.get(scope)!.time = { policy, wallet, used: used.toString() };
     return { record, lease };
   }
 }
