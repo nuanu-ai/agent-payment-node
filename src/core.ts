@@ -89,7 +89,7 @@ export class ApnCore {
   }
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
-      case "x402.permit2.preflight":
+      case "x402.permit2.preflight": case "x402.permit2.approve": case "x402.permit2.observe":
         throw new ApnError("APN_UNSUPPORTED_COMMAND", "Permit2 preflight is available only through the CLI read path.");
       case "x402.permit2.status":
         return dataOutcome(await readPermit2IntentStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_blocked_intent");

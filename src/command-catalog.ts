@@ -1,3 +1,4 @@
+import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
 import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_COMMANDS } from "./evm-command-catalog.js";import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";import { UNISWAP_COMMANDS, UNISWAP_COMMAND_GROUPS } from "./swap/uniswap-command-catalog.js";import { SUNSWAP_COMMANDS, SUNSWAP_COMMAND_GROUPS } from "./swap/sunswap-tron/command-catalog.js";import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/command-catalog.js";import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { networkCommandVariants } from "./network-command-catalog.js";
@@ -91,21 +92,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ] as const;
 const BASE_COMMANDS: readonly CommandDefinition[] = [
-  command(["x402", "permit2", "preflight"],
-    "apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>",
-    "Check current local owner admission for exact inspected Permit2 terms without signing or saving a payment.",
-    [profileRequired, option("--payment-required", "base64", true, noDefault, ["decoded_x402_v2_PAYMENT-REQUIRED"], "operator_input"),
-      option("--expected-challenge-hash", "string", true, noDefault, ["64_lowercase_hex_characters"], "public"),
-      option("--expected-index", "string", true, noDefault, ["canonical_nonnegative_integer"], "public"),
-      option("--expected-terms", "base64", true, noDefault, ["decoded_selected_requirements_json"], "operator_input"), rpcRequired],
-    "network_read", "Reads local owner binding, active policy, usage, one finalized Avalanche block and facilitator capability; writes only RPC pacing metadata, never payment state or submission.",
-    "none", "Never.", { terminal: ["admissible_unsigned"], non_terminal: [] }, [],
-    ["apn x402 permit2 preflight --profile default --payment-required <inspected-header> --expected-challenge-hash <hash> --expected-index 0 --expected-terms <inspected-terms-base64> --rpc-url https://avalanche-rpc.example"]),
-  command(["x402", "permit2", "status"], "apn x402 permit2 status --profile <profile> --operation <operation-id>",
-    "Read one existing blocked Permit2 intent with redacted output.", [profileRequired, operationRequired],
-    "local_read", "Checks existing local state only; never initializes, repairs, reserves, signs or sends.",
-    "none", "Never.", { terminal: ["not_found"], non_terminal: ["execution_blocked"] }, [],
-    ["apn x402 permit2 status --profile default --operation <operation-id>"]),
+  ...PERMIT2_COMMANDS,
   command(["relay", "arbitrum", "prepare"],
     "apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>",
     "Save one unsigned Arbitrum USDC to the exact Ethereum USDC recipient Relay quote.",

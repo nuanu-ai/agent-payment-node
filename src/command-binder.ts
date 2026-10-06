@@ -68,6 +68,15 @@ export function mcpFieldName(optionName: `--${string}`): string {
 
 function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   const options = parsed.values;
+  if (parsed.command.path.join(" ") === "x402 permit2 approve") return { request: { command: "x402.permit2.approve",
+    profile: value(options, "--profile"), url: value(options, "--url"), idempotencyKey: value(options, "--idempotency-key") }, rpcUrl: value(options, "--rpc-url") };
+  if (parsed.command.path.join(" ") === "x402 permit2 observe") {
+    if (options["--transaction"] !== undefined && options["--expired-unused"] === "true") throw new ApnError("APN_INVALID_INPUT", "Permit2 observation modes are mutually exclusive.");
+    if (options["--transaction"] !== undefined && /^0x0{64}$/u.test(value(options, "--transaction"))) throw new ApnError("APN_INVALID_INPUT", "Permit2 transaction locator must be nonzero.");
+    return { request: { command: "x402.permit2.observe", operationId: value(options, "--operation"),
+      ...(options["--profile"] === undefined ? {} : { profile: value(options, "--profile") }),
+      ...(options["--transaction"] === undefined ? {} : { transaction: value(options, "--transaction") }), expiredUnused: options["--expired-unused"] === "true" }, rpcUrl: value(options, "--rpc-url") };
+  }
   if (parsed.command.path.join(" ") === "x402 permit2 preflight") return { request: {
     command: "x402.permit2.preflight", profile: value(options, "--profile"),
     paymentRequired: value(options, "--payment-required"),
