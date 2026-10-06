@@ -7,41 +7,60 @@ import { Permit2ObserverRpc } from "./production-observer-rpc.js";
 import { assertObserverChain, observerBlock } from "./production-observer-facts.js";
 import { signingIdentityCalls, signingTokenCalls, assertSigningIdentity, assertSigningTokens, assertSigningTime } from "./production-signing-facts.js";
 import { signingOwnerFence } from "./production-signing-owner.js";
+import { Permit2MetadataLockOwner } from "./production-signing-scope.js";
 /** Actual read-only observation only. Never human approval, custody permission, or transport authority. */
 export class Permit2ProductionSigningFence {
-    endpoint;
-    clock;
-    state;
-    records;
+    #state;
+    #records;
     #facts = new WeakMap();
+    #scopes;
+    #endpoint;
+    #clock;
     constructor(root, endpoint, clock = () => new Date()) {
-        this.endpoint = endpoint;
-        this.clock = clock;
         if (typeof root !== "string" || typeof endpoint !== "string")
             invalid();
-        this.state = new StateStore(root);
-        this.records = new Permit2ProductionRepository(root);
+        this.#endpoint = endpoint;
+        this.#clock = clock;
+        this.#state = new StateStore(root);
+        this.#records = new Permit2ProductionRepository(root);
+        this.#scopes = new Permit2MetadataLockOwner(this.#state, this.#records);
     }
-    now = () => {
-        const now = this.clock();
+    #now = () => {
+        const now = this.#clock();
         if (!(now instanceof Date) || !Number.isSafeInteger(now.getTime()) || now.getTime() < 0)
             invalid();
         return new Date(now.getTime());
     };
     async check(operationId, mode) {
+        return this.#runCheck(operationId, mode);
+    }
+    /** Scope owns actual metadata locks only; the callback receives no key/signing grant. */
+    async withScope(operationId, mode, action) {
         const id = operationId, selected = mode;
         identity(id, selected);
-        const rpc = new Permit2ObserverRpc(this.endpoint, this.state);
+        return this.#scopes.within(id, selected, this.#now, action);
+    }
+    async checkScoped(scope, operationId, mode) {
+        const id = operationId, selected = mode;
+        identity(id, selected);
+        this.#scopes.assert(scope, id, selected);
+        return this.#runCheck(id, selected, scope);
+    }
+    async #runCheck(operationId, mode, scope) {
+        const id = operationId, selected = mode;
+        identity(id, selected);
+        const rpc = new Permit2ObserverRpc(this.#endpoint, this.#state);
+        const unbind = scope === undefined ? () => { } : this.#scopes.onExit(scope, id, selected, () => rpc.close());
         let onAbort;
         try {
             const pipeline = (async () => {
-                const context = await signingOwnerFence(this.state, this.records, id, selected, this.now);
+                const context = await this.#owner(id, selected, scope);
                 open(rpc.signal);
                 freeze(context);
                 const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["finalized", false] }]);
                 assertObserverChain(first[0]);
                 const block = observerBlock(first[1], "finalized");
-                assertSigningTime(context.record, this.now(), block);
+                assertSigningTime(context.record, this.#now(), block);
                 assertSigningIdentity(context.record, await rpc.batch(signingIdentityCalls(context.record, block)));
                 assertSigningTokens(context.record, await rpc.batch(signingTokenCalls(context.record, block)));
                 const again = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: [block.tag, false] }]);
@@ -49,9 +68,9 @@ export class Permit2ProductionSigningFence {
                 const rechecked = observerBlock(again[1], block.tag);
                 if (rechecked.hash !== block.hash || rechecked.number !== block.number || rechecked.timestamp !== block.timestamp)
                     invalid();
-                await signingOwnerFence(this.state, this.records, id, selected, this.now, context);
+                await this.#owner(id, selected, scope, context);
                 open(rpc.signal);
-                const captured = this.now();
+                const captured = this.#now();
                 assertSigningTime(context.record, captured, block);
                 return { context, block, captured };
             })();
@@ -62,6 +81,8 @@ export class Permit2ProductionSigningFence {
                         onAbort();
                 })]);
             open(rpc.signal);
+            if (scope !== undefined)
+                this.#scopes.assert(scope, id, selected);
             const { record, lease } = checked.context;
             const projection = Object.freeze({ operationId: id, mode: selected, outcome: "checked",
                 operationDigest: permit2ProductionOperationDigest(record), recordHash: record.integrityHash, materialHash: record.material.materialHash,
@@ -70,7 +91,7 @@ export class Permit2ProductionSigningFence {
                 currentLeaseDigest: lease.reservationDigest, capturedAt: checked.captured.toISOString(), blockNumber: checked.block.number,
                 blockHash: checked.block.hash, rpc: rpc.metrics() });
             const fact = Object.freeze({ kind: "checked-permit2-signing-observation" });
-            this.#facts.set(fact, { context: checked.context, projection });
+            this.#facts.set(fact, { context: checked.context, projection, ...(scope === undefined ? {} : { scope }) });
             return Object.freeze({ projection, fact });
         }
         catch {
@@ -81,29 +102,45 @@ export class Permit2ProductionSigningFence {
         finally {
             if (onAbort !== undefined)
                 rpc.signal.removeEventListener("abort", onAbort);
+            unbind();
             rpc.close();
         }
     }
     /** Single-use private provenance; owned lifecycle/lease/owner and trusted age are rechecked, never caller facts. */
     async consume(fact, operationId, mode) {
+        return this.#consumeOwned(fact, operationId, mode);
+    }
+    async consumeScoped(scope, fact, operationId, mode) {
+        const id = operationId, selected = mode;
+        identity(id, selected);
+        this.#scopes.assert(scope, id, selected);
+        return this.#consumeOwned(fact, id, selected, scope);
+    }
+    async #consumeOwned(fact, operationId, mode, scope) {
         const id = operationId, selected = mode;
         identity(id, selected);
         const saved = this.#facts.get(fact);
-        if (saved === undefined || saved.projection.operationId !== id || saved.projection.mode !== selected)
+        if (saved === undefined || saved.scope !== scope || saved.projection.operationId !== id || saved.projection.mode !== selected)
             invalid();
         const assertAge = () => {
-            const now = this.now(), at = Date.parse(saved.projection.capturedAt);
+            const now = this.#now(), at = Date.parse(saved.projection.capturedAt);
             if (now.getTime() < at || now.getTime() - at > 5_000)
                 invalid();
             assertSigningTime(saved.context.record, now);
         };
         assertAge();
-        await signingOwnerFence(this.state, this.records, id, selected, this.now, saved.context);
+        await this.#owner(id, selected, scope, saved.context);
+        if (scope !== undefined)
+            this.#scopes.assert(scope, id, selected);
         assertAge();
         if (this.#facts.get(fact) !== saved)
             invalid();
         this.#facts.delete(fact);
         return saved.projection;
+    }
+    async #owner(id, mode, scope, expected) {
+        return scope === undefined ? signingOwnerFence(this.#state, this.#records, id, mode, this.#now, expected) :
+            this.#scopes.owner(scope, id, mode, this.#now, expected);
     }
 }
 function identity(id, mode) { if (typeof id !== "string" || !/^[a-f0-9]{64}$/u.test(id) || !["reserved", "exposed"].includes(mode))

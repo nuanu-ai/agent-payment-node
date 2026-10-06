@@ -8,6 +8,10 @@ export async function permit2WalletBinding(state, value) {
     const profile = canonicalProfile(value), profileHash = state.profileHash(profile);
     const artifacts = await state.loadWalletArtifacts(profile, profileHash);
     const provider = await state.loadProviderProfile(profileHash);
+    return decodePermit2WalletBinding(profile, profileHash, artifacts, provider);
+}
+/** Pure existing metadata predicates; no lock, decrypt or ownership authority. */
+export function decodePermit2WalletBinding(profile, profileHash, artifacts, provider) {
     if (artifacts.stored === null || artifacts.encrypted === null || provider !== null && provider.provider_id !== "local") {
         throw new ApnError("APN_OPERATION_BLOCKED", "A current local owner wallet is required.");
     }
