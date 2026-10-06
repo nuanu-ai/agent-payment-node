@@ -15,14 +15,7 @@ export async function signingOwnerFence(state, records, id, mode, clock, expecte
     assertSigningLifecycle(record, mode);
     assertSigningTime(record, clock());
     const usage = await new AssetUsageLedger(state.root).usageWithReservation(productionUsageIdentity(record), record.usageReservationId, clock());
-    const lease = usage.reservation, p = reconstructPermit2ProductionMaterial(record.material);
-    if (lease === null || lease.reservationId !== record.usageReservationId || lease.policyDigest !== record.material.owner.policyDigest ||
-        lease.registryVersion !== record.material.checkpoint.registryVersion || lease.rail !== "x402" || lease.amountAtomic !== p.amountAtomic ||
-        lease.idempotencyHash !== sha256(`asset-usage-idempotency\0${productionUsageKey(id)}`) ||
-        lease.state !== (mode === "reserved" ? "reserved" : "unknown_finality") ||
-        mode === "reserved" && lease.reservationDigest !== record.usageReservationDigest ||
-        expected !== undefined && (record.integrityHash !== expected.record.integrityHash || lease.reservationDigest !== expected.lease.reservationDigest))
-        blocked();
+    const lease = checkedSigningLease(record, usage.reservation, mode, expected);
     const used = BigInt(usage.snapshot.amountAtomic) - BigInt(lease.amountAtomic);
     if (used < 0n)
         blocked();
@@ -38,6 +31,18 @@ export async function signingOwnerFence(state, records, id, mode, clock, expecte
     if (expected !== undefined && canonicalJson(record.material.wallet) !== canonicalJson(expected.record.material.wallet))
         blocked();
     return { record, lease };
+}
+/** Shared strict self-lease predicates only; callers must obtain the actual locked ledger snapshot. */
+export function checkedSigningLease(record, lease, mode, expected) {
+    const id = record.operationId, p = reconstructPermit2ProductionMaterial(record.material);
+    if (lease === null || lease.reservationId !== record.usageReservationId || lease.policyDigest !== record.material.owner.policyDigest ||
+        lease.registryVersion !== record.material.checkpoint.registryVersion || lease.rail !== "x402" || lease.amountAtomic !== p.amountAtomic ||
+        lease.idempotencyHash !== sha256(`asset-usage-idempotency\0${productionUsageKey(id)}`) ||
+        lease.state !== (mode === "reserved" ? "reserved" : "unknown_finality") ||
+        mode === "reserved" && lease.reservationDigest !== record.usageReservationDigest ||
+        expected !== undefined && (record.integrityHash !== expected.record.integrityHash || lease.reservationDigest !== expected.lease.reservationDigest))
+        blocked();
+    return lease;
 }
 export function assertSigningLifecycle(record, mode) {
     if (record.terminal || record.usageReservationDigest === null || !record.reservationStarted)
