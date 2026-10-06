@@ -1,9 +1,14 @@
+import { type Permit2ForegroundApprovalProof } from "./production-approval-provenance.js";
+export interface Permit2SigningContinuation {
+    readonly kind: "permit2-private-signing-continuation";
+}
 import { Permit2ProductionPreparation } from "./production-prepare.js";
 import { Permit2ProductionRepository, type Permit2ProductionRecord } from "./production-repository.js";
 import { type Permit2ProductionSigned } from "./production-signed.js";
 import { type Permit2ObservationProof, type Permit2ObservationMode } from "./production-observer.js";
 /** Storage/accounting only. No key, signing, transport or execution permission is returned. */
 export declare class Permit2ProductionJournal extends Permit2ProductionRepository {
+    #private;
     private readonly preparation;
     private readonly clock;
     private readonly state;
@@ -16,6 +21,11 @@ export declare class Permit2ProductionJournal extends Permit2ProductionRepositor
     private save;
     /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
     markSignatureRisk(id: string): Promise<Permit2ProductionRecord>;
+    /** Genuine UI + atomic first insertion only. No key/sign/HTTP permission is conveyed. */
+    markApprovedSignatureRisk(id: string, proof: Permit2ForegroundApprovalProof): Promise<{
+        readonly record: Permit2ProductionRecord;
+        readonly continuation: Permit2SigningContinuation | null;
+    }>;
     /** No state locks span ledger I/O; risk remains durable if either side fails. */
     confirmHold(id: string): Promise<Permit2ProductionRecord>;
     storeSigned(id: string, value: Permit2ProductionSigned): Promise<Permit2ProductionRecord>;
