@@ -284,7 +284,7 @@ async function baseFeeFixture() {
   return { fixture, entries, block, receipt, observed, call };
 }
 
-type BaseObservationMode = "success" | "missing" | "reverted" | "retry429" | "terminal429" |
+type BaseObservationMode = "success" | "missing" | "reverted" | "first429" | "retry503" | "terminal429" |
   "multicallMalformed" | "multicallRevert" | "multicallOrder" | "multicallCode" | "deploymentCode" |
   "deploymentConfiguration" | "approvalEvent";
 async function baseApprovalObservation(mode: BaseObservationMode,
@@ -326,8 +326,8 @@ async function baseApprovalObservation(mode: BaseObservationMode,
     const request = JSON.parse(body!) as Json | Json[], rows = Array.isArray(request) ? request : [request], host = new URL(endpoint).host;
     calls.push({ host, rows });
     if (host === "base.drpc.org" && rows.some((row) => row.method === "eth_getCode") &&
-      (mode === "terminal429" || mode === "retry429" && limited === 0)) {
-      limited += 1; return { status: 429, body: "", headers: { "retry-after": "1" } };
+      (mode === "terminal429" || (mode === "first429" || mode === "retry503") && limited === 0)) {
+      limited += 1; return { status: mode === "retry503" ? 503 : 429, body: "", headers: { "retry-after": "1" } };
     }
     const responses = rows.map((row) => {
       let result: unknown;
@@ -427,15 +427,18 @@ test("LI.FI production source observation uses the complete ordered physical tra
   });
 });
 
-test("LI.FI production observation persists exact retry and zero-transport budget telemetry", async (t) => {
+test("LI.FI production observation persists first-429 and zero-transport budget telemetry", async (t) => {
   const limitedState = await temporaryState(); t.after(limitedState.cleanup);
   const limited = await productionBaseObservation(limitedState.root, "terminal429"), limitedResult = await limited.execute();
   assert.equal(limitedResult.reliable, false);
+  assert.equal(limitedResult.operation.failure?.observationRpc?.code, "APN_RPC_RATE_LIMITED");
+  assert.equal(limitedResult.operation.failure?.observationRpc?.endpointRole, "archive");
+  assert.equal(limited.run.session.telemetry().retryAfterMs, 1_000);
   assert.deepEqual(limitedResult.operation.observationTelemetry?.at(-1), {
     schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "approval", outcome: "failure",
-    physicalRequests: 8, httpAttempts: 8, logicalRpcItems: 18, batchCount: 2, maxBatchSize: 3,
-    budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 2 },
-    attemptsByMethodClass: { block: 2, chain: 4, code: 4, receipt: 1, transaction: 1 },
+    physicalRequests: 7, httpAttempts: 7, logicalRpcItems: 18, batchCount: 1, maxBatchSize: 3,
+    budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 1 },
+    attemptsByMethodClass: { block: 2, chain: 3, code: 2, receipt: 1, transaction: 1 },
   });
   const budgetState = await temporaryState(); t.after(budgetState.cleanup);
   const budget = await productionBaseObservation(budgetState.root, "success", { maxHttpRequests: 6, maxHttpAttempts: 8 }), budgetResult = await budget.execute();
@@ -510,17 +513,27 @@ for (const field of ["contractHash", "codeHash", "configurationHash", "block"] a
   assert.equal(result.operation.observationTelemetry?.at(-1)?.physicalRequests, 14);
 });
 
-test("LI.FI Base approval observation keeps missing, reverted and 429 outcomes bounded", async () => {
+test("LI.FI Base approval observation keeps missing, reverted, first-429 and transient retry outcomes bounded", async () => {
   const missing = await baseApprovalObservation("missing"); assert.equal(await missing.observe(), null);
   assert.equal(missing.session.telemetry().httpRequests, 4); assert.equal(missing.session.telemetry().httpAttempts, 4);
   const reverted = await baseApprovalObservation("reverted"), revertedProof = await reverted.observe();
   assert.equal(revertedProof?.transaction.status, "reverted"); assert.equal(reverted.session.telemetry().httpRequests, 10);
-  const retried = await baseApprovalObservation("retry429"), recovered = await retried.observe(); assert.ok(recovered);
+  const retried = await baseApprovalObservation("retry503"), recovered = await retried.observe(); assert.ok(recovered);
   assert.equal(retried.session.telemetry().httpRequests, 10); assert.equal(retried.session.telemetry().httpAttempts, 11);
-  const limited = await baseApprovalObservation("terminal429");
-  await assert.rejects(limited.observe(), (error: unknown) => error instanceof Error && (error as { code?: string }).code === "APN_RPC_RATE_LIMITED");
-  assert.equal(limited.session.telemetry().httpRequests, 7); assert.equal(limited.session.telemetry().httpAttempts, 8);
-  for (const run of [missing, reverted, retried, limited]) {
+  const retryCalls = retried.calls.filter(call => call.host === "base.drpc.org" && call.rows.some(row => row.method === "eth_getCode"));
+  assert.deepEqual(retryCalls[0], retryCalls[1]); // The one retry preserves the exact batch and IDs.
+  const limitedRuns = [];
+  for (const mode of ["first429", "terminal429"] as const) {
+    const limited = await baseApprovalObservation(mode);
+    await assert.rejects(limited.observe(), (error: unknown) => error instanceof Error &&
+      (error as { code?: string; details?: { retryAfterMs?: string } }).code === "APN_RPC_RATE_LIMITED" &&
+      (error as { details?: { retryAfterMs?: string } }).details?.retryAfterMs === "1000");
+    assert.equal(limited.session.telemetry().httpRequests, 7); assert.equal(limited.session.telemetry().httpAttempts, 7);
+    assert.equal(limited.session.telemetry().retryAfterMs, 1_000);
+    assert.equal(limited.calls.filter(call => call.host === "base.drpc.org").length, 1);
+    limitedRuns.push(limited);
+  }
+  for (const run of [missing, reverted, retried, ...limitedRuns]) {
     assert.equal(run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
     assert.ok(run.traces.filter((call) => call.endpointRole === "archive").every((call) => call.batchSize <= 3));
   }
