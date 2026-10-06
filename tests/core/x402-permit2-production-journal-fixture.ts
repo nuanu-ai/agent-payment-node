@@ -16,7 +16,7 @@ import { observerFixture } from "./x402-permit2-production-observer-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 
-export async function journalFixture(t: TestContext, sponsor = false, maxTimeoutSeconds = 60) {
+export async function journalFixture(t: TestContext, sponsor = false, maxTimeoutSeconds = 60, policyExpiresAt?: string) {
   const f = await observerFixture(t, sponsor, maxTimeoutSeconds), root = f.input.stateRoot, state = new StateStore(root);
   let clock = new Date((protocolSecond + 1) * 1000);
   const now = () => new Date(clock), original = f.record.material, date = f.record.createdAt;
@@ -27,6 +27,7 @@ export async function journalFixture(t: TestContext, sponsor = false, maxTimeout
     identity: { profile: "owner", address: m.wallet.account, chainId: 8453, createdAt: date, bindingHash: m.wallet.bindingHash },
     kdf: { name: "HKDF-SHA-256", salt: "fixture" }, cipher: { name: "AES-256-GCM", nonce: "fixture", ciphertext: "fixture", tag: "fixture" } });
   await activateDirectPolicy(root, "owner", { accounts: { evm: m.wallet.account }, now: new Date(protocolSecond * 1000),
+    ...(policyExpiresAt === undefined ? {} : { expiresAt: policyExpiresAt }),
     admissions: [{ chain: f.prepared.chain, kind: "token", identifier: f.prepared.token, rail: "x402", maximumPerTransferAtomic: "20000",
       dailyLimitAtomic: "30000", mechanism: X402_PERMIT2_MECHANISM }] });
   const active = await loadActiveAssetPolicyRegistry(root, "owner", now()); assert.ok(active);

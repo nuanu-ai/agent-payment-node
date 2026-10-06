@@ -63,6 +63,10 @@ export class Permit2ProductionSigningFence {
             invalid();
         fence.#scopes.assert(scope, id, "dispatch");
     }
+    static assertNativeDispatchTime(fence, scope, root, id, at) {
+        this.assertNativeDispatchScope(fence, scope, root, id);
+        fence.#scopes.assertTime(scope, id, "dispatch", at);
+    }
     static async withNativeDispatchScope(fence, root, id, action) {
         identity(id, "exposed");
         if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)

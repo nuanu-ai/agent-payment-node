@@ -18,3 +18,7 @@ export interface Permit2NativeRequestExecution {
 export interface Permit2NativeRequestGrant {
     readonly kind: "permit2-native-request-grant";
 }
+/** Minted only inside actual native held dispatch scope for its concrete HTTPS port. */
+export interface Permit2NativeDispatchExecution {
+    readonly kind: "permit2-native-dispatch-execution";
+}
