@@ -19,7 +19,7 @@ export class Permit2ApprovalRiskCoordinator {
     #endpoint;
     constructor(root, endpoint, native, preparation, clock = () => new Date(), approval = new TtyPermit2ForegroundApproval()) {
         const capability = LocalWalletNative.resolvePermit2LocalCapability(native, root);
-        if (!(native instanceof LocalWalletNative))
+        if (!(native instanceof LocalWalletNative) || Object.getPrototypeOf(native) !== LocalWalletNative.prototype)
             blocked();
         this.#native = native;
         this.#endpoint = endpoint;
@@ -48,13 +48,13 @@ export class Permit2ApprovalRiskCoordinator {
                 current = await this.#journal.findOperation(id) ?? current;
                 return status();
             }
-            const signed = await this.#native.signPermit2Production(this.#journal, this.#fence, id, approved.continuation);
-            const begun = await this.#native.beginPermit2ProductionRequest(this.#journal, this.#fence, id, signed.signingOrigin);
+            const signed = await LocalWalletNative.prototype.signPermit2Production.call(this.#native, this.#journal, this.#fence, id, approved.continuation);
+            const begun = await LocalWalletNative.prototype.beginPermit2ProductionRequest.call(this.#native, this.#journal, this.#fence, id, signed.signingOrigin);
             if (begun.requestGrant === null) {
                 current = await this.#journal.findOperation(id) ?? current;
                 return status();
             }
-            const sent = await this.#native.submitPermit2Production(this.#journal, this.#fence, id, begun.requestGrant);
+            const sent = await LocalWalletNative.prototype.submitPermit2Production.call(this.#native, this.#journal, this.#fence, id, begun.requestGrant);
             const results = new Permit2ProductionResults(new StateStore(this.#journal.root), this.#journal);
             if (sent.outcome.kind === "observed") {
                 await results.recordHttp(id, sent.outcome.observation);

@@ -30,6 +30,8 @@ export class LocalWalletNative {
     static #permit2Instances = new WeakMap();
     static #permit2Capabilities = new WeakMap();
     static resolvePermit2LocalCapability(native, root) {
+        if (Object.getPrototypeOf(native) !== _a.prototype)
+            throw protocol("Selected native is not the exact local Permit2 implementation.");
         const capability = this.#permit2Instances.get(native);
         if (capability === undefined)
             throw protocol("Selected native has no local Permit2 capability.");

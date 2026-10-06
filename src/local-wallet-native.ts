@@ -42,6 +42,7 @@ export class LocalWalletNative implements NativePort {
   static readonly #permit2Instances = new WeakMap<NativePort, Permit2LocalCapability>();
   static readonly #permit2Capabilities = new WeakMap<Permit2LocalCapability, { readonly native: NativePort; readonly state: StateStore; readonly root: string; readonly wallets: EncryptedWalletStore }>();
   static resolvePermit2LocalCapability(native: NativePort, root: string): Permit2LocalCapability {
+    if (Object.getPrototypeOf(native) !== LocalWalletNative.prototype) throw protocol("Selected native is not the exact local Permit2 implementation.");
     const capability = this.#permit2Instances.get(native); if (capability === undefined) throw protocol("Selected native has no local Permit2 capability.");
     this.assertPermit2LocalCapability(capability, native, root); return capability;
   }

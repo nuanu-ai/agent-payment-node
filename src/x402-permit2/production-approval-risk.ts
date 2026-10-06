@@ -20,7 +20,7 @@ export class Permit2ApprovalRiskCoordinator {
   constructor(root: string, endpoint: string, native: NativePort, preparation: Permit2ProductionPreparation,
     clock: () => Date = () => new Date(), approval: Permit2ForegroundApprovalPort = new TtyPermit2ForegroundApproval()) {
     const capability = LocalWalletNative.resolvePermit2LocalCapability(native, root);
-    if (!(native instanceof LocalWalletNative)) blocked();
+    if (!(native instanceof LocalWalletNative) || Object.getPrototypeOf(native) !== LocalWalletNative.prototype) blocked();
     this.#native = native; this.#endpoint = endpoint;
     if (preparation.records.root !== root) blocked();
     this.#preparation = preparation; this.#journal = new Permit2ProductionJournal(root, preparation, clock);
@@ -39,10 +39,10 @@ export class Permit2ApprovalRiskCoordinator {
       await this.#preparation.reserve(id);
       const approved = await this.#runWithAuthority(id, "sign-and-submit-once", this.#paidAuthority);
       if (approved.continuation === null) { current = await this.#journal.findOperation(id) ?? current; return status(); }
-      const signed = await this.#native.signPermit2Production(this.#journal, this.#fence, id, approved.continuation);
-      const begun = await this.#native.beginPermit2ProductionRequest(this.#journal, this.#fence, id, signed.signingOrigin);
+      const signed = await LocalWalletNative.prototype.signPermit2Production.call(this.#native, this.#journal, this.#fence, id, approved.continuation);
+      const begun = await LocalWalletNative.prototype.beginPermit2ProductionRequest.call(this.#native, this.#journal, this.#fence, id, signed.signingOrigin);
       if (begun.requestGrant === null) { current = await this.#journal.findOperation(id) ?? current; return status(); }
-      const sent = await this.#native.submitPermit2Production(this.#journal, this.#fence, id, begun.requestGrant);
+      const sent = await LocalWalletNative.prototype.submitPermit2Production.call(this.#native, this.#journal, this.#fence, id, begun.requestGrant);
       const results = new Permit2ProductionResults(new StateStore(this.#journal.root), this.#journal);
       if (sent.outcome.kind === "observed") {
         await results.recordHttp(id, sent.outcome.observation);
