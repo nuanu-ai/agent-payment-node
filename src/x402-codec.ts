@@ -122,7 +122,7 @@ export interface DecodedPaymentResponse {
 
 export function decodeAndNormalizePaymentResponseHeader(
   value: string,
-  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network },
+  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network | "eip155:43114" },
 ): DecodedPaymentResponse {
   try { return decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected); }
   catch (error) {
@@ -133,7 +133,7 @@ export function decodeAndNormalizePaymentResponseHeader(
 
 function decodeAndNormalizePaymentResponseHeaderUnsafe(
   value: string,
-  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network },
+  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network | "eip155:43114" },
 ): DecodedPaymentResponse {
   const strict = decodeCanonicalBase64Json(value);
   const response = record(strict, "PAYMENT-RESPONSE");
