@@ -147,6 +147,8 @@ test("declined foreground authorization makes no source RPC request or effect", 
 });
 
 test("TTY Relay authorization declines before source RPC, signing, or journal effects", async t => {
+  // Keep the foreground wall clock aligned with this signed historical fixture.
+  t.mock.method(Date, "now", () => now.getTime());
   const f = await setup(t);
   let screen = "";
   const terminal = { fd: 0, write: async (value: string) => { screen += value; },
@@ -172,6 +174,8 @@ test("TTY Relay authorization declines before source RPC, signing, or journal ef
 });
 
 test("installed Relay execute CLI refuses decline and non-TTY before source RPC", async t => {
+  // Keep the foreground wall clock aligned with this signed historical fixture.
+  t.mock.method(Date, "now", () => now.getTime());
   const f = await setup(t);
   let screen = "";
   const terminal = { fd: 0, write: async (value: string) => { screen += value; },
@@ -193,6 +197,10 @@ test("installed Relay execute CLI refuses decline and non-TTY before source RPC"
 });
 
 test("installed Relay execute CLI confirms exact saved operation and explicit resume does not resend", async t => {
+  // Advance the historical fixture clock with real elapsed time for foreground consent and RPC pacing.
+  const wallNow = Date.now, startedAt = wallNow();
+  const fixtureNow = () => now.getTime() + wallNow() - startedAt;
+  t.mock.method(Date, "now", fixtureNow);
   const f = await setup(t);
   let prompts = 0;
   const terminal = { fd: 0, write: async () => { prompts++; },
@@ -200,7 +208,7 @@ test("installed Relay execute CLI confirms exact saved operation and explicit re
     close: async () => {} };
   const args = ["relay", "execute", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
   const options = { stateRoot: f.state.root, wrappingSecret: f.wrapping,
-    clock: { now: () => now }, relayExecuteTransport: f.rpc,
+    clock: { now: () => new Date(fixtureNow()) }, relayExecuteTransport: f.rpc,
     relayExecuteTtyOptions: { openTerminal: async () => terminal, isTerminal: () => true } };
   const first = await runCli(args, {}, options);
   assert.equal(first.ok, true);

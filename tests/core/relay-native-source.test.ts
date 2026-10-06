@@ -252,6 +252,8 @@ for (const profile of ["evm-live-buyer", "default"] as const) test(`${profile} n
 });
 
 test("Monad foreground consent names MON, the destination chain and exact deposit", async t => {
+  // Keep the foreground wall clock aligned with this signed historical fixture.
+  t.mock.method(Date, "now", () => now.getTime());
   const temp = await temporaryState(); t.after(temp.cleanup);
   const op = await prepared(new StateStore(temp.root), true);
   let screen = "";
