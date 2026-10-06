@@ -24,6 +24,6 @@ export interface DecodedPaymentResponse {
 export declare function decodeAndNormalizePaymentResponseHeader(value: string, expected: {
     readonly payer: string;
     readonly amountAtomic: string;
-    readonly network?: X402Network;
+    readonly network?: X402Network | "eip155:43114";
 }): DecodedPaymentResponse;
 export declare function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, chainId?: EvmChainId): readonly InspectCandidate[];
