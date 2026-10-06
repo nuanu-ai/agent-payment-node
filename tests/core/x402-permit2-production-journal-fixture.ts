@@ -16,8 +16,8 @@ import { observerFixture } from "./x402-permit2-production-observer-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 
-export async function journalFixture(t: TestContext, sponsor = false) {
-  const f = await observerFixture(t, sponsor), root = f.input.stateRoot, state = new StateStore(root);
+export async function journalFixture(t: TestContext, sponsor = false, maxTimeoutSeconds = 60) {
+  const f = await observerFixture(t, sponsor, maxTimeoutSeconds), root = f.input.stateRoot, state = new StateStore(root);
   let clock = new Date((protocolSecond + 1) * 1000);
   const now = () => new Date(clock), original = f.record.material, date = f.record.createdAt;
   const m = { ...original, wallet: { ...original.wallet, bindingHash: hashObject({ profile: "owner", address: original.wallet.account, createdAt: date }) } };

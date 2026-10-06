@@ -27,6 +27,17 @@ export interface Permit2SigningProjection {
 export declare class Permit2ProductionSigningFence {
     #private;
     constructor(root: string, endpoint: string, clock?: () => Date);
+    static assertNativeScope(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): void;
+    static withNativeScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
+    static nativeScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
+        record: import("./production-repository.js").Permit2ProductionRecord;
+        lease: import("../asset-usage-ledger.js").AssetUsageReservation;
+    }>;
+    static checkNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
+        readonly projection: Permit2SigningProjection;
+        readonly fact: Permit2SigningFact | null;
+    }>;
+    static consumeNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, fact: Permit2SigningFact, root: string, id: string): Promise<Permit2SigningProjection>;
     check(operationId: string, mode: Permit2SigningMode): Promise<{
         readonly projection: Permit2SigningProjection;
         readonly fact: Permit2SigningFact | null;

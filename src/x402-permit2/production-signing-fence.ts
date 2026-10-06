@@ -41,6 +41,26 @@ export class Permit2ProductionSigningFence {
     const now = this.#clock(); if (!(now instanceof Date) || !Number.isSafeInteger(now.getTime()) || now.getTime() < 0) invalid();
     return new Date(now.getTime());
   };
+  static assertNativeScope(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): void {
+    if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root) invalid(); fence.#scopes.assert(scope, id, "exposed");
+  }
+  static async withNativeScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string,
+    action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T> {
+    identity(id, "exposed"); if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root) invalid();
+    return fence.#scopes.within(id, "exposed", fence.#now, action);
+  }
+  static async nativeScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string) {
+    this.assertNativeScope(fence, scope, root, id);
+    const owned = await fence.#scopes.owner(scope, id, "exposed", fence.#now);
+    this.assertNativeScope(fence, scope, root, id); freeze(owned); return owned;
+  }
+  static async checkNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string) {
+    this.assertNativeScope(fence, scope, root, id); return fence.#runCheck(id, "exposed", scope);
+  }
+  static async consumeNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope,
+    fact: Permit2SigningFact, root: string, id: string) {
+    this.assertNativeScope(fence, scope, root, id); return fence.#consumeOwned(fact, id, "exposed", scope);
+  }
   async check(operationId: string, mode: Permit2SigningMode): Promise<{ readonly projection: Permit2SigningProjection; readonly fact: Permit2SigningFact | null }> {
     return this.#runCheck(operationId, mode);
   }

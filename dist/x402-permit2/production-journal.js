@@ -1,3 +1,5 @@
+import { LocalWalletNative } from "../local-wallet-native.js";
+import { Permit2ProductionSigningFence } from "./production-signing-fence.js";
 import { claimPermit2ForegroundApproval, assertClaimedPermit2ForegroundApproval, revokePermit2ForegroundApproval } from "./production-approval-provenance.js";
 import { assertSigningLifecycle, checkedSigningLease } from "./production-signing-owner.js";
 import { assertSigningTime } from "./production-signing-facts.js";
@@ -19,8 +21,75 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     preparation;
     clock;
     #riskCandidates = new WeakMap();
-    // Unconsumed in this packet. Only the later actual-native signing entry may consume this private store.
+    // Only the actual native execution can consume this private continuation.
     #continuations = new WeakMap();
+    #nativeClaims = new WeakMap();
+    static claimNativeSigningContinuation(journal, id, continuation, execution) {
+        return journal.#claimNativeSigningContinuation(id, continuation, execution);
+    }
+    static assertNativeSigningContinuation(journal, id, execution) {
+        return journal.#assertNativeSigningContinuation(id, execution);
+    }
+    static nativeSigningSecond(journal, id, execution) {
+        return journal.#nativeSigningSecond(id, execution);
+    }
+    static nativeOriginBinding(journal, id, execution) {
+        LocalWalletNative.assertPermit2SigningExecution(execution, journal, id);
+        const grant = journal.#nativeClaims.get(execution);
+        if (grant === undefined)
+            blocked();
+        journal.#nativeApprovalTime(grant.binding, grant.record);
+        return Object.freeze({ ...grant });
+    }
+    static releaseNativeSigningContinuation(journal, execution) {
+        journal.#releaseNativeSigningContinuation(execution);
+    }
+    static storeNativeSigned(journal, id, value) {
+        return journal.#storeSigned(id, value);
+    }
+    async #claimNativeSigningContinuation(id, continuation, execution) {
+        const native = LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
+        const grant = this.#continuations.get(continuation);
+        if (grant === undefined || this.#nativeClaims.has(execution) || grant.binding.native !== native.native ||
+            grant.binding.capability !== native.capability || grant.binding.nativeState !== native.state ||
+            grant.binding.root !== native.root || grant.binding.operationId !== id)
+            blocked();
+        this.#continuations.delete(continuation);
+        this.#nativeClaims.set(execution, grant);
+        return this.#assertNativeSigningContinuation(id, execution);
+    }
+    async #assertNativeSigningContinuation(id, execution) {
+        const native = LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
+        const grant = this.#nativeClaims.get(execution);
+        if (grant === undefined)
+            blocked();
+        this.#nativeApprovalTime(grant.binding, grant.record);
+        const current = await Permit2ProductionSigningFence.nativeScopeOwner(native.fence, native.scope, native.root, id);
+        LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
+        if (this.#nativeClaims.get(execution) !== grant || current.record.integrityHash !== grant.record.integrityHash ||
+            canonicalJson(current.record.material.wallet) !== canonicalJson(grant.record.material.wallet))
+            blocked();
+        checkedSigningLease(current.record, current.lease, "exposed", grant);
+        this.#nativeApprovalTime(grant.binding, current.record);
+        return current.record;
+    }
+    #nativeSigningSecond(id, execution) {
+        LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
+        const grant = this.#nativeClaims.get(execution);
+        if (grant === undefined)
+            blocked();
+        return Math.floor(this.#nativeApprovalTime(grant.binding, grant.record).getTime() / 1000);
+    }
+    #nativeApprovalTime(binding, record) {
+        const at = binding.clock();
+        if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < binding.completedAt ||
+            at.getTime() - binding.completedAt > 60_000)
+            blocked();
+        const now = new Date(at.getTime());
+        assertSigningTime(record, now);
+        return now;
+    }
+    #releaseNativeSigningContinuation(execution) { this.#nativeClaims.delete(execution); }
     state;
     usage;
     constructor(root, preparation, clock = () => new Date()) {
@@ -176,7 +245,8 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
             return this.save(current, { ...journal, holdConfirmed: true });
         });
     }
-    async storeSigned(id, value) {
+    async storeSigned(id, value) { return this.#storeSigned(id, value); }
+    async #storeSigned(id, value) {
         const snapshot = JSON.parse(canonicalJson(value));
         const r = await this.required(id), signed = await validatePermit2ProductionSigned(snapshot, r);
         return this.state.withLocks(this.locks(r), async () => {

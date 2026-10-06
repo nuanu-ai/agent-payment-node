@@ -31,6 +31,32 @@ export class Permit2ProductionSigningFence {
             invalid();
         return new Date(now.getTime());
     };
+    static assertNativeScope(fence, scope, root, id) {
+        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
+            invalid();
+        fence.#scopes.assert(scope, id, "exposed");
+    }
+    static async withNativeScope(fence, root, id, action) {
+        identity(id, "exposed");
+        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
+            invalid();
+        return fence.#scopes.within(id, "exposed", fence.#now, action);
+    }
+    static async nativeScopeOwner(fence, scope, root, id) {
+        this.assertNativeScope(fence, scope, root, id);
+        const owned = await fence.#scopes.owner(scope, id, "exposed", fence.#now);
+        this.assertNativeScope(fence, scope, root, id);
+        freeze(owned);
+        return owned;
+    }
+    static async checkNativeScoped(fence, scope, root, id) {
+        this.assertNativeScope(fence, scope, root, id);
+        return fence.#runCheck(id, "exposed", scope);
+    }
+    static async consumeNativeScoped(fence, scope, fact, root, id) {
+        this.assertNativeScope(fence, scope, root, id);
+        return fence.#consumeOwned(fact, id, "exposed", scope);
+    }
     async check(operationId, mode) {
         return this.#runCheck(operationId, mode);
     }

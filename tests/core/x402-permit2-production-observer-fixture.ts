@@ -15,8 +15,8 @@ import { temporaryState } from "./helpers.js";
 export const factHash = (digit: string): Hex => `0x${digit.repeat(64)}`;
 export const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 const topic = (address: string) => `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
-export async function observerFixture(t: TestContext, sponsor = false) {
-  const f = await protocolFixture(sponsor), temp = await temporaryState(); t.after(temp.cleanup);
+export async function observerFixture(t: TestContext, sponsor = false, maxTimeoutSeconds = 60) {
+  const f = await protocolFixture(sponsor, maxTimeoutSeconds), temp = await temporaryState(); t.after(temp.cleanup);
   await new StateStore(temp.root).initialize();
   const proxyCode = readFileSync("tests/fixtures/x402-permit2/original-proxy-runtime.hex", "utf8").trim() as Hex;
   const permit2Code = readFileSync("tests/fixtures/x402-permit2/avalanche-permit2-runtime.hex", "utf8").trim() as Hex;
