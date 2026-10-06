@@ -1,6 +1,12 @@
+import { assertSigningTime } from "./x402-permit2/production-signing-facts.js";
+import { Permit2ProductionSigningFence, type Permit2MetadataLockScope } from "./x402-permit2/production-signing-fence.js";
+import { Permit2ProductionJournal, type Permit2SigningContinuation } from "./x402-permit2/production-journal.js";
+import { reconstructPermit2ProductionMaterial } from "./x402-permit2/production-material.js";
+import { createPermit2ProductionSigned } from "./x402-permit2/production-signed.js";
+import { publicPermit2Production } from "./x402-permit2/production-repository.js";
 import { decimal, hash, hex32 } from "./local-wallet-native-fields.js";
-import type { Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
-import { validX402Tuple, type X402ChainText } from "./x402-network.js";
+import type { Permit2NativeSigningOrigin, Permit2NativeSigningExecution, Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
+import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { join, normalize, parse, resolve, sep } from "node:path";
@@ -27,7 +33,7 @@ import type { StateStore } from "./state.js";
 import { transferData } from "./transfer-policy.js";
 import { TtyTransferApproval, type TransferApprovalIntent, type TransferApprovalPort } from "./tty-approval.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
-import { x402AuthorizationIntentHash } from "./x402-state-integrity.js";
+
 import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402Effect } from "./local-wallet-native-public.js";
 import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
 
@@ -36,7 +42,7 @@ const HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
 
 export class LocalWalletNative implements NativePort {
   static readonly #permit2Instances = new WeakMap<NativePort, Permit2LocalCapability>();
-  static readonly #permit2Capabilities = new WeakMap<Permit2LocalCapability, { readonly native: NativePort; readonly state: StateStore; readonly root: string }>();
+  static readonly #permit2Capabilities = new WeakMap<Permit2LocalCapability, { readonly native: NativePort; readonly state: StateStore; readonly root: string; readonly wallets: EncryptedWalletStore }>();
   static resolvePermit2LocalCapability(native: NativePort, root: string): Permit2LocalCapability {
     const capability = this.#permit2Instances.get(native); if (capability === undefined) throw protocol("Selected native has no local Permit2 capability.");
     this.assertPermit2LocalCapability(capability, native, root); return capability;
@@ -45,6 +51,20 @@ export class LocalWalletNative implements NativePort {
     const owned = this.#permit2Capabilities.get(capability);
     if (owned === undefined || owned.native !== native || owned.root !== root || owned.state.root !== owned.root) throw protocol("Permit2 native capability is not owned by this selected instance.");
     return owned.state;
+  }
+  static readonly #permit2SigningOrigins = new WeakMap<Permit2NativeSigningOrigin, {
+    readonly native: LocalWalletNative; readonly capability: Permit2LocalCapability; readonly journal: Permit2ProductionJournal;
+    readonly root: string; readonly operationId: string; readonly requestHash: string; readonly challengeHash: string;
+    readonly materialHash: string; readonly signedHash: string; readonly grant: ReturnType<typeof Permit2ProductionJournal.nativeOriginBinding> }>();
+  static readonly #permit2Executions = new WeakMap<Permit2NativeSigningExecution, {
+    readonly native: LocalWalletNative; readonly capability: Permit2LocalCapability; readonly state: StateStore;
+    readonly root: string; readonly journal: Permit2ProductionJournal; readonly fence: Permit2ProductionSigningFence;
+    readonly scope: Permit2MetadataLockScope; readonly operationId: string }>();
+  static assertPermit2SigningExecution(execution: Permit2NativeSigningExecution, journal: Permit2ProductionJournal, id: string) {
+    const owned = this.#permit2Executions.get(execution);
+    if (owned === undefined || owned.journal !== journal || owned.operationId !== id || owned.root !== journal.root ||
+      this.assertPermit2LocalCapability(owned.capability, owned.native, owned.root) !== owned.state) throw protocol("Unowned Permit2 native signing execution.");
+    Permit2ProductionSigningFence.assertNativeScope(owned.fence, owned.scope, owned.root, id); return owned;
   }
   private readonly wallets: EncryptedWalletStore;
 
@@ -55,7 +75,76 @@ export class LocalWalletNative implements NativePort {
   ) {
     this.wallets = new EncryptedWalletStore(state, wrappingSecret);
     const capability = Object.freeze({ kind: "permit2-local-native-capability" as const });
-    LocalWalletNative.#permit2Instances.set(this, capability); LocalWalletNative.#permit2Capabilities.set(capability, { native: this, state, root: state.root });
+    LocalWalletNative.#permit2Instances.set(this, capability); LocalWalletNative.#permit2Capabilities.set(capability, { native: this, state, root: state.root, wallets: this.wallets });
+  }
+
+  /** Direct chosen-native entry only: no JSON request, caller plan, callback or transport permission. */
+  async signPermit2Production(journal: Permit2ProductionJournal, fence: Permit2ProductionSigningFence,
+    operationId: string, continuation: Permit2SigningContinuation) {
+    const id = operationId, capability = LocalWalletNative.resolvePermit2LocalCapability(this, journal.root);
+    const owned = LocalWalletNative.#permit2Capabilities.get(capability)!;
+    const completed = await Permit2ProductionSigningFence.withNativeScope(fence, owned.root, id, async scope => {
+      Permit2ProductionSigningFence.assertNativeScope(fence, scope, owned.root, id);
+      const execution = Object.freeze({ kind: "permit2-native-signing-execution" as const });
+      LocalWalletNative.#permit2Executions.set(execution, { native: this, capability, state: owned.state,
+        root: owned.root, journal, fence, scope, operationId: id });
+      let loaded: Awaited<ReturnType<EncryptedWalletStore["describe"]>> = null;
+      let account: ReturnType<typeof privateKeyToAccount> | undefined;
+      let tokenSignature: Hex | null = null, permit2Signature: Hex | undefined;
+      const assert = () => Permit2ProductionJournal.assertNativeSigningContinuation(journal, id, execution);
+      const guard = async () => {
+        await assert();
+        const checked = await Permit2ProductionSigningFence.checkNativeScoped(fence, scope, owned.root, id);
+        await assert(); if (checked.fact === null) throw protocol("Permit2 fresh signing observation refused.");
+        await Permit2ProductionSigningFence.consumeNativeScoped(fence, scope, checked.fact, owned.root, id);
+        return assert();
+      };
+      try {
+        await Permit2ProductionJournal.claimNativeSigningContinuation(journal, id, continuation, execution);
+        const record = await guard();
+        Permit2ProductionJournal.nativeSigningSecond(journal, id, execution);
+        loaded = await owned.wallets.describe(record.material.wallet.profile);
+        await assert(); if (loaded === null) throw protocol("Permit2 local wallet is missing.");
+        account = privateKeyToAccount(loaded.secret.privateKey);
+        const plan = reconstructPermit2ProductionMaterial(record.material);
+        if (loaded.identity.profile !== record.material.wallet.profile ||
+          loaded.identity.address.toLowerCase() !== plan.payer.toLowerCase() ||
+          account.address.toLowerCase() !== plan.payer.toLowerCase()) throw protocol("Permit2 actual payer differs from the saved local wallet.");
+        await guard();
+        if (plan.plan.eip2612 !== null) {
+          await guard(); Permit2ProductionJournal.nativeSigningSecond(journal, id, execution);
+          tokenSignature = await account.signTypedData(plan.plan.eip2612.typedData as Parameters<typeof account.signTypedData>[0]);
+          await assert(); await guard();
+        }
+        await guard(); Permit2ProductionJournal.nativeSigningSecond(journal, id, execution);
+        permit2Signature = await account.signTypedData(plan.plan.permit2 as Parameters<typeof account.signTypedData>[0]);
+        const current = await assert(); await guard();
+        const bundle = await createPermit2ProductionSigned(current, permit2Signature, tokenSignature,
+          Permit2ProductionJournal.nativeSigningSecond(journal, id, execution));
+        await assert(); await guard(); return { bundle, grant: Permit2ProductionJournal.nativeOriginBinding(journal, id, execution) };
+      } finally {
+        try { if (loaded !== null) owned.wallets.clear(loaded.secret); }
+        finally {
+          account = undefined; loaded = null; tokenSignature = null; permit2Signature = undefined;
+          try { Permit2ProductionJournal.releaseNativeSigningContinuation(journal, execution); }
+          finally { LocalWalletNative.#permit2Executions.delete(execution); }
+        }
+      }
+    });
+    const saved = await Permit2ProductionJournal.storeNativeSigned(journal, id, completed.bundle);
+    const at = completed.grant.binding.clock();
+    if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < completed.grant.binding.completedAt ||
+      at.getTime() - completed.grant.binding.completedAt > 60_000 || saved.operationId !== id ||
+      saved.material.materialHash !== completed.grant.record.material.materialHash ||
+      saved.material.checked.requestHash !== completed.grant.record.material.checked.requestHash ||
+      saved.material.checked.challengeHash !== completed.grant.record.material.checked.challengeHash ||
+      saved.exposureJournal?.signed?.signedHash !== completed.bundle.signedHash) throw protocol("Permit2 signing origin is no longer current.");
+    assertSigningTime(saved, at); LocalWalletNative.assertPermit2LocalCapability(capability, this, owned.root);
+    const signingOrigin = Object.freeze({ kind: "permit2-native-signing-origin" as const });
+    LocalWalletNative.#permit2SigningOrigins.set(signingOrigin, Object.freeze({ native: this, capability, journal, root: owned.root,
+      operationId: id, requestHash: saved.material.checked.requestHash, challengeHash: saved.material.checked.challengeHash,
+      materialHash: saved.material.materialHash, signedHash: completed.bundle.signedHash, grant: completed.grant }));
+    return Object.freeze({ status: publicPermit2Production(saved), signingOrigin });
   }
 
   async request(request: NativeRequest): Promise<unknown> {
@@ -361,94 +450,6 @@ function parseDirectRecovery(payload: Readonly<Record<string, unknown>>): {
     fingerprint: hash(payload.fingerprint, "fingerprint"),
     expectedTransactionHash: hex32(payload.expectedTransactionHash, "transaction hash"),
     expectedRawTransactionHash: hex32(payload.expectedRawTransactionHash, "raw transaction hash"),
-  };
-}
-
-interface X402Binding {
-  readonly profile: string; readonly operationId: string; readonly fingerprint: string;
-  readonly wallet: Address; readonly chainId: X402ChainText; readonly token: Address;
-  readonly tokenDomain: { readonly name: string; readonly version: string };
-  readonly authorization: { readonly from: Address; readonly to: Address; readonly value: string; readonly validAfter: "0"; readonly validBefore: string; readonly nonce: Hex };
-  readonly intentHash: string;
-}
-
-interface X402Create extends X402Binding {
-  readonly payee: Address;
-  readonly amountAtomic: string;
-  readonly capAtomic: string;
-  readonly authorization: X402Binding["authorization"] & { readonly createdAt: string };
-}
-
-function parseX402Create(payload: Readonly<Record<string, unknown>>): X402Create {
-  const baseKeys = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "resource", "capAtomic", "payee", "amountAtomic", "tokenDomain", "authorization", "paymentIdentifierPosture", "offerHash", "intentHash"];
-  const posture = payload.paymentIdentifierPosture;
-  exactRecord(payload, posture === "absent" ? baseKeys : [...baseKeys, "paymentIdentifierValue"]);
-  const common = parseX402Common(payload, true);
-  const resource = exactRecord(payload.resource, ["origin", "path", "urlHash"]);
-  if (typeof resource.origin !== "string" || typeof resource.path !== "string" || typeof resource.urlHash !== "string" || !HASH.test(resource.urlHash)) throw protocol("x402 resource binding is invalid.");
-  if (!HASH.test(String(payload.offerHash)) || !["absent", "optional", "required"].includes(String(posture))) throw protocol("x402 offer binding is invalid.");
-  if (posture !== "absent" && (typeof payload.paymentIdentifierValue !== "string" || payload.paymentIdentifierValue.length === 0)) throw protocol("x402 payment identifier is invalid.");
-  const payee = x402Address(payload.payee, "payee");
-  const amountAtomic = decimal(payload.amountAtomic, "x402 amount", true);
-  const capAtomic = decimal(payload.capAtomic, "x402 cap", true);
-  if (BigInt(amountAtomic) > BigInt(capAtomic) || !addressEqual(payee, common.authorization.to) || common.authorization.value !== amountAtomic) throw protocol("x402 economics are invalid.");
-  const rawAuthorization = exactRecord(payload.authorization, ["from", "to", "value", "validAfter", "validBefore", "nonce", "createdAt"]);
-  const createdAt = decimal(rawAuthorization.createdAt, "x402 creation time");
-  const authorization = { ...common.authorization, createdAt };
-  const created = BigInt(createdAt);
-  const validBefore = BigInt(authorization.validBefore);
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  if (created > now || validBefore <= now || validBefore - created < 30n || validBefore - created > 300n) throw rejected("APN_APPROVAL_EXPIRED", "x402 authorization window is invalid or expired.");
-  if (common.intentHash !== x402AuthorizationIntentHash(authorization)) throw protocol("x402 authorization intent hash is invalid.");
-  return { ...common, payee, amountAtomic, capAtomic, authorization };
-}
-
-function parseX402Recovery(payload: Readonly<Record<string, unknown>>): X402Binding & { readonly expectedSignatureHash?: string } {
-  const allowed = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "tokenDomain", "authorization", "intentHash"];
-  exactRecord(payload, payload.expectedSignatureHash === undefined ? allowed : [...allowed, "expectedSignatureHash"]);
-  const common = parseX402Common(payload, false);
-  if (payload.expectedSignatureHash !== undefined && (typeof payload.expectedSignatureHash !== "string" || !HASH.test(payload.expectedSignatureHash))) throw protocol("x402 expected signature hash is invalid.");
-  return { ...common, ...(payload.expectedSignatureHash === undefined ? {} : { expectedSignatureHash: payload.expectedSignatureHash as string }) };
-}
-
-function parseX402Common(payload: Readonly<Record<string, unknown>>, create: boolean): X402Binding {
-  const profile = canonicalProfile(payload.profile);
-  const operationId = hash(payload.operationId, "operation ID");
-  const fingerprint = hash(payload.fingerprint, "fingerprint");
-  const wallet = x402Address(payload.wallet, "wallet");
-  const token = x402Address(payload.token, "token");
-  if (!validX402Tuple(payload.chainId, `eip155:${String(payload.chainId)}`, token)) throw protocol("x402 network or token is unsupported.");
-  const tokenDomain = exactRecord(payload.tokenDomain, ["name", "version"]);
-  if (typeof tokenDomain.name !== "string" || tokenDomain.name.length === 0 || typeof tokenDomain.version !== "string" || tokenDomain.version.length === 0) throw protocol("x402 token domain is invalid.");
-  const authKeys = create ? ["from", "to", "value", "validAfter", "validBefore", "nonce", "createdAt"] : ["from", "to", "value", "validAfter", "validBefore", "nonce"];
-  const authorization = exactRecord(payload.authorization, authKeys);
-  const from = x402Address(authorization.from, "authorization sender");
-  const to = x402Address(authorization.to, "authorization recipient");
-  const value = decimal(authorization.value, "x402 value", true);
-  const validBefore = decimal(authorization.validBefore, "x402 expiry", true);
-  const nonce = hex32(authorization.nonce, "x402 nonce");
-  if (!addressEqual(wallet, from) || authorization.validAfter !== "0") throw protocol("x402 authorization binding is invalid.");
-  const intentHash = hash(payload.intentHash, "x402 intent hash");
-  return {
-    profile, operationId, fingerprint, wallet, chainId: payload.chainId as X402ChainText, token,
-    tokenDomain: { name: tokenDomain.name, version: tokenDomain.version },
-    authorization: { from, to, value, validAfter: "0", validBefore, nonce },
-    intentHash,
-  };
-}
-
-function x402RecoveryBinding(value: X402Binding): X402Binding {
-  return {
-    profile: value.profile, operationId: value.operationId, fingerprint: value.fingerprint,
-    wallet: value.wallet, chainId: value.chainId, token: value.token, tokenDomain: value.tokenDomain,
-    authorization: publicAuthorization(value.authorization), intentHash: value.intentHash,
-  };
-}
-
-function publicAuthorization(value: X402Binding["authorization"]): X402Binding["authorization"] {
-  return {
-    from: value.from, to: value.to, value: value.value, validAfter: value.validAfter,
-    validBefore: value.validBefore, nonce: value.nonce,
   };
 }
 

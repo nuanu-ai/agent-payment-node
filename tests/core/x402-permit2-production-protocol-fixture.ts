@@ -10,12 +10,12 @@ import type { X402PaymentRequired } from "../../src/x402-codec.js";
 
 export const testPayer = privateKeyToAccount(`0x${"1".repeat(64)}`);
 export const protocolSecond = 1_789_720_000;
-export async function protocolFixture(sponsor = false) {
+export async function protocolFixture(sponsor = false, maxTimeoutSeconds = 60) {
   const asset = X402_PERMIT2_ASSETS[0]!, account = testPayer.address, date = new Date(protocolSecond * 1000).toISOString();
   const challenge: X402PaymentRequired = { x402Version: 2,
     resource: { url: "https://seller.example/private-path?private=hidden", description: "Private resource", mimeType: "application/json" },
     accepts: [{ scheme: "exact", network: asset.chain, asset: asset.token, amount: "10000",
-      payTo: "0x2222222222222222222222222222222222222222", maxTimeoutSeconds: 60,
+      payTo: "0x2222222222222222222222222222222222222222", maxTimeoutSeconds,
       extra: { assetTransferMethod: "permit2", ...asset.tokenDomain } }],
     ...(sponsor ? { extensions: { eip2612GasSponsoring: { info: { description: "EIP-2612", version: "1" }, schema: {
       $schema: "https://json-schema.org/draft/2020-12/schema", type: "object",
