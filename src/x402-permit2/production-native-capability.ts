@@ -6,3 +6,8 @@ export interface Permit2NativeSigningExecution { readonly kind: "permit2-native-
 
 /** In-process actual signing origin only; never a paid HTTP grant. */
 export interface Permit2NativeSigningOrigin { readonly kind: "permit2-native-signing-origin" }
+
+/** Actual privately claimed paid signing origin only; never caller registration. */
+export interface Permit2NativeRequestExecution { readonly kind: "permit2-native-request-execution" }
+/** First durable request marker plus genuine paid UI provenance; not a reusable HTTP grant. */
+export interface Permit2NativeRequestGrant { readonly kind: "permit2-native-request-grant" }

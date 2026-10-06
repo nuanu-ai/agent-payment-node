@@ -6,7 +6,7 @@ import { Permit2ProductionPreparation } from "./production-prepare.js";
 import { publicPermit2Production } from "./production-repository.js";
 import { Permit2ProductionSigningFence } from "./production-signing-fence.js";
 import { Permit2ForegroundApprovalAuthority, assertCurrentPermit2ForegroundApproval, revokePermit2ForegroundApproval, type Permit2ForegroundApprovalProof } from "./production-approval-provenance.js";
-import { TtyPermit2ForegroundApproval, type Permit2ForegroundApprovalPort } from "./production-approval.js";
+import { TtyPermit2ForegroundApproval, type Permit2ApprovalPurpose, type Permit2ForegroundApprovalPort } from "./production-approval.js";
 /** No-key production wiring. Returned continuation is private provenance, not signing/HTTP authority. */
 export class Permit2ApprovalRiskCoordinator {
   readonly #journal: Permit2ProductionJournal;
@@ -21,7 +21,7 @@ export class Permit2ApprovalRiskCoordinator {
     this.#fence = new Permit2ProductionSigningFence(root, endpoint, clock);
     this.#authority = new Permit2ForegroundApprovalAuthority(this.#journal, this, native, capability, approval, clock);
   }
-  async run(operationId: string): Promise<{ readonly status: ReturnType<typeof publicPermit2Production>; readonly continuation: Permit2SigningContinuation | null }> {
+  async run(operationId: string, purpose: Permit2ApprovalPurpose = "sign-only"): Promise<{ readonly status: ReturnType<typeof publicPermit2Production>; readonly continuation: Permit2SigningContinuation | null }> {
     const id = operationId; let proof: Permit2ForegroundApprovalProof | undefined;
     const owned = await this.#journal.findOperation(id); if (owned === null) blocked();
     if (owned.exposureAt !== null || owned.exposureJournal !== undefined || owned.terminal) {
@@ -29,7 +29,7 @@ export class Permit2ApprovalRiskCoordinator {
       return Object.freeze({ status: publicPermit2Production(record), continuation: null });
     }
     try {
-      proof = await this.#authority.approveOwned(id);
+      proof = await this.#authority.approveOwned(id, purpose);
       const current = await this.#journal.findOperation(id); if (current === null) blocked();
       if (current.exposureAt !== null || current.exposureJournal !== undefined || current.terminal) {
         const record = current.exposureJournal !== undefined && !current.terminal ? await this.#journal.confirmHold(id) : current;

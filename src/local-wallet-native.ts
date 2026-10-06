@@ -4,8 +4,8 @@ import { Permit2ProductionJournal, type Permit2SigningContinuation } from "./x40
 import { reconstructPermit2ProductionMaterial } from "./x402-permit2/production-material.js";
 import { createPermit2ProductionSigned } from "./x402-permit2/production-signed.js";
 import { publicPermit2Production } from "./x402-permit2/production-repository.js";
-import { decimal, hash, hex32 } from "./local-wallet-native-fields.js";
-import type { Permit2NativeSigningOrigin, Permit2NativeSigningExecution, Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
+import { parseDirectIntent, parseDirectRecovery, type DirectIntent } from "./local-wallet-direct-payload.js";
+import type { Permit2NativeRequestExecution, Permit2NativeRequestGrant, Permit2NativeSigningOrigin, Permit2NativeSigningExecution, Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
@@ -13,7 +13,7 @@ import { join, normalize, parse, resolve, sep } from "node:path";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
-import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID } from "./constants.js";
+import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import {
   EncryptedWalletStore,
   walletCustodyLock,
@@ -25,20 +25,16 @@ import {
 import { ApnError } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
 import { parseEvmNativeIntent } from "./evm-native-intent.js";
-import { formatAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { NativePort, NativeRequest } from "./ports.js";
 import type { StateStore } from "./state.js";
-import { transferData } from "./transfer-policy.js";
-import { TtyTransferApproval, type TransferApprovalIntent, type TransferApprovalPort } from "./tty-approval.js";
+import { TtyTransferApproval, type TransferApprovalPort } from "./tty-approval.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 
 import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402Effect } from "./local-wallet-native-public.js";
 import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
 
-const HASH = /^[a-f0-9]{64}$/u;
-const HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
 
 export class LocalWalletNative implements NativePort {
   static readonly #permit2Instances = new WeakMap<NativePort, Permit2LocalCapability>();
@@ -52,10 +48,7 @@ export class LocalWalletNative implements NativePort {
     if (owned === undefined || owned.native !== native || owned.root !== root || owned.state.root !== owned.root) throw protocol("Permit2 native capability is not owned by this selected instance.");
     return owned.state;
   }
-  static readonly #permit2SigningOrigins = new WeakMap<Permit2NativeSigningOrigin, {
-    readonly native: LocalWalletNative; readonly capability: Permit2LocalCapability; readonly journal: Permit2ProductionJournal;
-    readonly root: string; readonly operationId: string; readonly requestHash: string; readonly challengeHash: string;
-    readonly materialHash: string; readonly signedHash: string; readonly grant: ReturnType<typeof Permit2ProductionJournal.nativeOriginBinding> }>();
+  static readonly #permit2SigningOrigins = new WeakMap<Permit2NativeSigningOrigin, OwnedPermit2SigningOrigin>();
   static readonly #permit2Executions = new WeakMap<Permit2NativeSigningExecution, {
     readonly native: LocalWalletNative; readonly capability: Permit2LocalCapability; readonly state: StateStore;
     readonly root: string; readonly journal: Permit2ProductionJournal; readonly fence: Permit2ProductionSigningFence;
@@ -65,6 +58,23 @@ export class LocalWalletNative implements NativePort {
     if (owned === undefined || owned.journal !== journal || owned.operationId !== id || owned.root !== journal.root ||
       this.assertPermit2LocalCapability(owned.capability, owned.native, owned.root) !== owned.state) throw protocol("Unowned Permit2 native signing execution.");
     Permit2ProductionSigningFence.assertNativeScope(owned.fence, owned.scope, owned.root, id); return owned;
+  }
+  static readonly #permit2RequestExecutions = new WeakMap<Permit2NativeRequestExecution, OwnedPermit2SigningOrigin>();
+  static readonly #permit2RequestGrants = new WeakMap<Permit2NativeRequestGrant, { readonly origin: OwnedPermit2SigningOrigin;
+    readonly record: Awaited<ReturnType<typeof Permit2ProductionJournal.storeNativeSigned>> }>();
+  static assertPermit2RequestExecution(execution: Permit2NativeRequestExecution, journal: Permit2ProductionJournal, id: string) {
+    const origin = this.#permit2RequestExecutions.get(execution);
+    if (origin === undefined || Object.getPrototypeOf(origin.native) !== LocalWalletNative.prototype ||
+        origin.journal !== journal || origin.root !== journal.root || origin.operationId !== id ||
+        this.assertPermit2LocalCapability(origin.capability, origin.native, origin.root) !== origin.grant.binding.nativeState ||
+        origin.grant.binding.purpose !== "sign-and-submit-once") throw protocol("Unowned Permit2 native request execution.");
+    this.#assertPermit2RequestTime(origin); return origin;
+  }
+  static #assertPermit2RequestTime(origin: OwnedPermit2SigningOrigin): void {
+    const binding = origin.grant.binding, at = binding.clock();
+    if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < binding.completedAt ||
+        at.getTime() - binding.completedAt > 60_000) throw protocol("Permit2 original paid approval expired.");
+    assertSigningTime(origin.grant.record, at);
   }
   private readonly wallets: EncryptedWalletStore;
 
@@ -147,6 +157,45 @@ export class LocalWalletNative implements NativePort {
       operationId: id, requestHash: saved.material.checked.requestHash, challengeHash: saved.material.checked.challengeHash,
       materialHash: saved.material.materialHash, signedHash: completed.bundle.signedHash, grant: completed.grant }));
     return Object.freeze({ status: publicPermit2Production(saved), signingOrigin });
+  }
+
+  /** Claims a genuine paid origin once; metadata admission only, with no key, RPC or HTTP. */
+  async beginPermit2ProductionRequest(journal: Permit2ProductionJournal, fence: Permit2ProductionSigningFence,
+    operationId: string, signingOrigin: Permit2NativeSigningOrigin) {
+    const id = operationId, origin = LocalWalletNative.#permit2SigningOrigins.get(signingOrigin);
+    if (origin === undefined || Object.getPrototypeOf(this) !== LocalWalletNative.prototype || origin.native !== this ||
+        origin.journal !== journal || origin.root !== journal.root || origin.operationId !== id ||
+        origin.capability !== LocalWalletNative.resolvePermit2LocalCapability(this, origin.root) ||
+        origin.grant.binding.native !== this || origin.grant.binding.journal !== journal || origin.grant.binding.operationId !== id ||
+        origin.grant.binding.root !== origin.root || LocalWalletNative.assertPermit2LocalCapability(origin.capability, this, origin.root) !== origin.grant.binding.nativeState ||
+        origin.grant.binding.purpose !== "sign-and-submit-once") throw protocol("Permit2 paid signing origin is unavailable.");
+    LocalWalletNative.#permit2SigningOrigins.delete(signingOrigin); LocalWalletNative.#assertPermit2RequestTime(origin);
+    const execution = Object.freeze({ kind: "permit2-native-request-execution" as const });
+    LocalWalletNative.#permit2RequestExecutions.set(execution, origin);
+    try {
+      await Permit2ProductionSigningFence.withNativeDispatchScope(fence, origin.root, id, async scope => {
+        const current = await Permit2ProductionSigningFence.nativeDispatchScopeOwner(fence, scope, origin.root, id);
+        const r = current.record;
+        if (r.material.materialHash !== origin.materialHash || r.material.checked.requestHash !== origin.requestHash ||
+            r.material.checked.challengeHash !== origin.challengeHash || r.exposureJournal?.signed?.signedHash !== origin.signedHash ||
+            current.lease.reservationDigest !== origin.grant.lease.reservationDigest) throw protocol("Permit2 request owner or signed material changed.");
+        LocalWalletNative.assertPermit2RequestExecution(execution, journal, id);
+      });
+      const marked = await Permit2ProductionJournal.markNativeRequestPending(journal, id, execution);
+      LocalWalletNative.assertPermit2RequestExecution(execution, journal, id);
+      if (marked.proof === null) return Object.freeze({ status: publicPermit2Production(marked.record), requestGrant: null });
+      const record = Permit2ProductionJournal.consumeNativeFirstRequestProof(journal, id, execution, marked.proof);
+      const requestGrant = Object.freeze({ kind: "permit2-native-request-grant" as const });
+      LocalWalletNative.#permit2RequestGrants.set(requestGrant, Object.freeze({ origin, record }));
+      return Object.freeze({ status: publicPermit2Production(record), requestGrant });
+    } finally { LocalWalletNative.#permit2RequestExecutions.delete(execution); }
+  }
+  /** Reserved for this actual native's future dedicated sender; no public caller consumption API. */
+  #consumePermit2ProductionRequestGrant(grant: Permit2NativeRequestGrant) {
+    const owned = LocalWalletNative.#permit2RequestGrants.get(grant);
+    if (owned === undefined || owned.origin.native !== this || Object.getPrototypeOf(this) !== LocalWalletNative.prototype ||
+        LocalWalletNative.assertPermit2LocalCapability(owned.origin.capability, this, owned.origin.root) !== owned.origin.grant.binding.nativeState) throw protocol("Unowned Permit2 first-request grant.");
+    LocalWalletNative.#permit2RequestGrants.delete(grant); LocalWalletNative.#assertPermit2RequestTime(owned.origin); return owned;
   }
 
   async request(request: NativeRequest): Promise<unknown> {
@@ -385,76 +434,6 @@ export class LocalWalletNative implements NativePort {
   }
 }
 
-interface DirectIntent extends TransferApprovalIntent {
-  readonly transactionData: Hex;
-  readonly nonceAtomic: string;
-  readonly gasLimitAtomic: string;
-  readonly maxFeePerGasAtomic: string;
-  readonly maxPriorityFeePerGasAtomic: string;
-}
-
-function parseDirectIntent(payload: Readonly<Record<string, unknown>>): DirectIntent {
-  exactRecord(payload, ["profile", "operationId", "fingerprint", "walletAddress", "chainId", "transaction", "approval"]);
-  const profile = canonicalProfile(payload.profile);
-  const operationId = hash(payload.operationId, "operation ID");
-  const fingerprint = hash(payload.fingerprint, "fingerprint");
-  const walletAddress = canonicalAddress(payload.walletAddress);
-  if (payload.chainId !== CHAIN_ID) throw protocol("Direct-transfer chain is unsupported.");
-  const transaction = exactRecord(payload.transaction, ["type", "to", "valueAtomic", "data", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "accessList"]);
-  const approval = exactRecord(payload.approval, ["recipient", "amountAtomic", "amountDecimal", "expiresAt"]);
-  if (transaction.type !== "eip1559" || transaction.to !== BASE_USDC || transaction.valueAtomic !== "0" || !Array.isArray(transaction.accessList) || transaction.accessList.length !== 0) throw protocol("Direct-transfer transaction is not bounded Base USDC.");
-  const recipient = canonicalAddress(approval.recipient);
-  const amountAtomic = decimal(approval.amountAtomic, "amount", true);
-  if (approval.amountDecimal !== formatAtomic(amountAtomic, 6)) throw protocol("Direct-transfer decimal amount is inconsistent.");
-  if (typeof transaction.data !== "string" || !HEX.test(transaction.data) || transaction.data.toLowerCase() !== transferData(recipient, amountAtomic).toLowerCase()) throw protocol("Direct-transfer calldata is invalid.");
-  const nonceAtomic = decimal(transaction.nonceAtomic, "nonce");
-  const gasLimitAtomic = decimal(transaction.gasLimitAtomic, "gas limit", true);
-  const maxFeePerGasAtomic = decimal(transaction.maxFeePerGasAtomic, "maximum fee", true);
-  const maxPriorityFeePerGasAtomic = decimal(transaction.maxPriorityFeePerGasAtomic, "priority fee");
-  const nonce = BigInt(nonceAtomic);
-  const gas = BigInt(gasLimitAtomic);
-  const fee = BigInt(maxFeePerGasAtomic);
-  const priority = BigInt(maxPriorityFeePerGasAtomic);
-  if (nonce > BigInt(Number.MAX_SAFE_INTEGER) || gas < 21_000n || gas > 200_000n || fee > 1_000_000_000_000n || priority > fee) throw protocol("Direct-transfer economics exceed the custody boundary.");
-  if (typeof approval.expiresAt !== "string" || !Number.isFinite(Date.parse(approval.expiresAt))) throw protocol("Direct-transfer expiry is invalid.");
-  const expiresAt = approval.expiresAt;
-  const preparedAt = new Date(Date.parse(expiresAt) - APPROVAL_WINDOW_MS).toISOString();
-  const expectedFingerprint = hashObject({
-    method: "pay.transfer", operationId, profile, chainId: CHAIN_ID, token: BASE_USDC,
-    walletAddress, recipient, amountAtomic, transactionData: transaction.data,
-    economics: {
-      nonceAtomic, gasLimitAtomic, maxFeePerGasAtomic, maxPriorityFeePerGasAtomic,
-      maximumGasCostAtomic: (gas * fee).toString(),
-    },
-    preparedAt,
-    expiresAt,
-  });
-  if (expectedFingerprint !== fingerprint || Date.now() >= Date.parse(expiresAt)) throw rejected("APN_APPROVAL_EXPIRED", "Direct-transfer approval is invalid or expired.");
-  return {
-    profile, operationId, fingerprint, walletAddress, recipient, amountAtomic,
-    amountDecimal: approval.amountDecimal as string, nonceAtomic, gasLimitAtomic,
-    maxFeePerGasAtomic, maxPriorityFeePerGasAtomic, expiresAt, transactionData: transaction.data as Hex,
-  };
-}
-
-function parseDirectRecovery(payload: Readonly<Record<string, unknown>>): {
-  readonly profile: string; readonly operationId: string; readonly fingerprint: string;
-  readonly expectedTransactionHash: Hex; readonly expectedRawTransactionHash: Hex;
-} | { readonly profile: string; readonly operationId: string; readonly fingerprint: string; readonly expectedPayloadHash: string } {
-  if (payload.expectedPayloadHash !== undefined) {
-    exactRecord(payload, ["profile", "operationId", "fingerprint", "expectedPayloadHash"]);
-    return { profile: canonicalProfile(payload.profile), operationId: hash(payload.operationId, "operation ID"), fingerprint: hash(payload.fingerprint, "fingerprint"), expectedPayloadHash: hash(payload.expectedPayloadHash, "payload hash") };
-  }
-  exactRecord(payload, ["profile", "operationId", "fingerprint", "expectedTransactionHash", "expectedRawTransactionHash"]);
-  return {
-    profile: canonicalProfile(payload.profile),
-    operationId: hash(payload.operationId, "operation ID"),
-    fingerprint: hash(payload.fingerprint, "fingerprint"),
-    expectedTransactionHash: hex32(payload.expectedTransactionHash, "transaction hash"),
-    expectedRawTransactionHash: hex32(payload.expectedRawTransactionHash, "raw transaction hash"),
-  };
-}
-
 function assertWallet(identity: WalletIdentity, expected: Address): void {
   if (!addressEqual(identity.address, expected)) throw rejected("APN_WALLET_MISMATCH", "Wallet identity differs from the frozen payment.");
 }
@@ -490,3 +469,8 @@ function protocol(message: string): ApnError { return new ApnError("APN_NATIVE_P
 function rejected(nativeCode: string, message: string): ApnError {
   return new ApnError("APN_NATIVE_REJECTED", message, { nativeCode });
 }
+
+type OwnedPermit2SigningOrigin = {
+    readonly native: LocalWalletNative; readonly capability: Permit2LocalCapability; readonly journal: Permit2ProductionJournal;
+    readonly root: string; readonly operationId: string; readonly requestHash: string; readonly challengeHash: string;
+    readonly materialHash: string; readonly signedHash: string; readonly grant: ReturnType<typeof Permit2ProductionJournal.nativeOriginBinding> };

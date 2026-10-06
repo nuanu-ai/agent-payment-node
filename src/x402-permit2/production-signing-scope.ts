@@ -9,12 +9,12 @@ import { evmAddressLock, assertExclusiveEvmOwner } from "../evm-address-ownershi
 import { OperationService } from "../operation-service.js";
 import { decodePermit2WalletBinding } from "./owner-binding.js";
 import { assertPermit2OwnerIdentity, assertPermit2OwnerCaps } from "./production-owner-validation.js";
-import { assertSigningLifecycle, checkedSigningLease, type Permit2SigningMode } from "./production-signing-owner.js";
+import { assertSigningLifecycle, checkedSigningLease, type Permit2MetadataMode } from "./production-signing-owner.js";
 import { assertSigningTime } from "./production-signing-facts.js";
 import { productionUsageIdentity, type Permit2ProductionRecord, type Permit2ProductionRepository } from "./production-repository.js";
 
 export interface Permit2MetadataLockScope { readonly kind: "permit2-metadata-lock-scope" }
-type Context = { readonly record: Permit2ProductionRecord; readonly mode: Permit2SigningMode;
+type Context = { readonly record: Permit2ProductionRecord; readonly mode: Permit2MetadataMode;
   readonly keys: readonly string[]; readonly close: Set<() => void> };
 /** An actual metadata lock callback only. No key, approval, signature or transport authority. */
 export class Permit2MetadataLockOwner {
@@ -25,7 +25,7 @@ export class Permit2MetadataLockOwner {
   constructor(state: StateStore, records: Permit2ProductionRepository) {
     this.#state = state; this.#records = records; this.#policies = new AllowlistPolicyStore(state.root);
   }
-  async within<T>(id: string, mode: Permit2SigningMode, clock: () => Date,
+  async within<T>(id: string, mode: Permit2MetadataMode, clock: () => Date,
     action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T> {
     const initial = await this.#records.findOperation(id); if (initial === null) blocked();
     assertSigningLifecycle(initial, mode); assertSigningTime(initial, clock());
@@ -44,17 +44,17 @@ export class Permit2MetadataLockOwner {
         finally { const context = this.#contexts.get(scope); this.#contexts.delete(scope); for (const close of context?.close ?? []) close(); }
       })));
   }
-  assert(scope: Permit2MetadataLockScope, id: string, mode: Permit2SigningMode): void {
+  assert(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode): void {
     const c = this.#contexts.get(scope);
     if (c === undefined || c.record.operationId !== id || c.mode !== mode || c.record.material.wallet.profileHash !== c.record.profileHash) blocked();
     const keys = [`profile:${c.record.profileHash}`, `operation:${id}`, evmAddressLock(c.record.material.wallet.account),
       walletCustodyLock(this.#state, c.record.material.wallet.profile), `profile:${allowlistProfileHash(c.record.material.wallet.profile)}`];
     if (c.keys.length !== keys.length || c.keys.some((key, index) => key !== keys[index])) blocked();
   }
-  onExit(scope: Permit2MetadataLockScope, id: string, mode: Permit2SigningMode, close: () => void): () => void {
+  onExit(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, close: () => void): () => void {
     this.assert(scope, id, mode); const c = this.#contexts.get(scope)!; c.close.add(close); return () => { c.close.delete(close); };
   }
-  async owner(scope: Permit2MetadataLockScope, id: string, mode: Permit2SigningMode, clock: () => Date,
+  async owner(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, clock: () => Date,
     expected?: { readonly record: Permit2ProductionRecord; readonly lease: AssetUsageReservation }) {
     this.assert(scope, id, mode); const frozen = this.#contexts.get(scope)!.record;
     const record = await this.#records.findOperation(id); this.assert(scope, id, mode);

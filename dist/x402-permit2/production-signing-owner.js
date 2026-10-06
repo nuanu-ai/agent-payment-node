@@ -57,6 +57,13 @@ export function assertSigningLifecycle(record, mode) {
             j.signed !== null || j.request !== null || j.terminalIntent !== null)
             blocked();
     }
+    else if (mode === "dispatch") {
+        const j = record.exposureJournal;
+        if (!["exposure_unknown", "request_pending"].includes(record.state) || record.exposureAt === null ||
+            j === undefined || !j.holdConfirmed || j.signed === null || j.terminalIntent !== null ||
+            (record.state === "request_pending") !== (j.request !== null))
+            blocked();
+    }
     else
         blocked();
 }

@@ -20,6 +20,47 @@ import { JOURNAL_SCHEMA, productionApprovalFingerprint, productionRiskBinding, p
 export class Permit2ProductionJournal extends Permit2ProductionRepository {
     preparation;
     clock;
+    #firstRequests = new WeakMap();
+    static markNativeRequestPending(journal, id, execution) {
+        return journal.#markNativeRequestPending(id, execution);
+    }
+    static consumeNativeFirstRequestProof(journal, id, execution, proof) {
+        LocalWalletNative.assertPermit2RequestExecution(execution, journal, id);
+        const saved = journal.#firstRequests.get(proof);
+        if (saved === undefined || saved.execution !== execution || saved.record.operationId !== id)
+            blocked();
+        journal.#firstRequests.delete(proof);
+        return saved.record;
+    }
+    #assertNativeRequestRecord(id, execution, r, lease) {
+        const origin = LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
+        assertSigningLifecycle(r, "dispatch");
+        checkedSigningLease(r, lease, "dispatch");
+        if (r.material.materialHash !== origin.materialHash || r.material.checked.requestHash !== origin.requestHash ||
+            r.material.checked.challengeHash !== origin.challengeHash || r.exposureJournal?.signed?.signedHash !== origin.signedHash ||
+            lease.reservationDigest !== origin.grant.lease.reservationDigest ||
+            canonicalJson(r.material.wallet) !== canonicalJson(origin.grant.record.material.wallet))
+            blocked();
+    }
+    async #markNativeRequestPending(id, execution) {
+        LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
+        const r = await this.#required(id);
+        this.#assertNativeRequestRecord(id, execution, r, await this.#lease(r));
+        return this.state.withLocks(this.#locks(r), async () => {
+            const current = await this.#required(id);
+            this.#assertNativeRequestRecord(id, execution, current, await this.#lease(current));
+            const j = current.exposureJournal;
+            if (j.request !== null)
+                return Object.freeze({ record: current, proof: null });
+            const next = await this.#save(current, { ...j, request: { attempt: 1, requestHash: current.material.checked.requestHash,
+                    headerHash: j.signed.headerHash } }, "request_pending");
+            LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
+            freezeApprovedSnapshot(next);
+            const proof = Object.freeze({ kind: "permit2-private-first-request-proof" });
+            this.#firstRequests.set(proof, { execution, record: next });
+            return Object.freeze({ record: next, proof });
+        });
+    }
     #riskCandidates = new WeakMap();
     // Only the actual native execution can consume this private continuation.
     #continuations = new WeakMap();

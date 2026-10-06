@@ -21,7 +21,7 @@ export class Permit2ApprovalRiskCoordinator {
         this.#fence = new Permit2ProductionSigningFence(root, endpoint, clock);
         this.#authority = new Permit2ForegroundApprovalAuthority(this.#journal, this, native, capability, approval, clock);
     }
-    async run(operationId) {
+    async run(operationId, purpose = "sign-only") {
         const id = operationId;
         let proof;
         const owned = await this.#journal.findOperation(id);
@@ -32,7 +32,7 @@ export class Permit2ApprovalRiskCoordinator {
             return Object.freeze({ status: publicPermit2Production(record), continuation: null });
         }
         try {
-            proof = await this.#authority.approveOwned(id);
+            proof = await this.#authority.approveOwned(id, purpose);
             const current = await this.#journal.findOperation(id);
             if (current === null)
                 blocked();

@@ -1,7 +1,10 @@
-import type { Permit2NativeSigningExecution } from "./production-native-capability.js";
+import type { Permit2NativeRequestExecution, Permit2NativeSigningExecution } from "./production-native-capability.js";
 import { type Permit2ForegroundApprovalProof, type Permit2ApprovalBinding } from "./production-approval-provenance.js";
 export interface Permit2SigningContinuation {
     readonly kind: "permit2-private-signing-continuation";
+}
+interface FirstRequestProof {
+    readonly kind: "permit2-private-first-request-proof";
 }
 import { type AssetUsageReservation } from "../asset-usage-ledger.js";
 import { Permit2ProductionPreparation } from "./production-prepare.js";
@@ -13,6 +16,11 @@ export declare class Permit2ProductionJournal extends Permit2ProductionRepositor
     #private;
     private readonly preparation;
     private readonly clock;
+    static markNativeRequestPending(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeRequestExecution): Promise<{
+        readonly record: Permit2ProductionRecord;
+        readonly proof: FirstRequestProof | null;
+    }>;
+    static consumeNativeFirstRequestProof(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeRequestExecution, proof: FirstRequestProof): Permit2ProductionRecord;
     static claimNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, continuation: Permit2SigningContinuation, execution: Permit2NativeSigningExecution): Promise<Permit2ProductionRecord>;
     static assertNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution): Promise<Permit2ProductionRecord>;
     static nativeSigningSecond(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution, capturedAt?: number): number;
@@ -43,3 +51,4 @@ export declare class Permit2ProductionJournal extends Permit2ProductionRepositor
     /** Persisted intent is sufficient ONLY to match an already-terminal ledger, never to decide a new transition. */
     reconcileTerminal(id: string): Promise<Permit2ProductionRecord>;
 }
+export {};

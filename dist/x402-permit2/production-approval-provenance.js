@@ -18,20 +18,20 @@ export class Permit2ForegroundApprovalAuthority {
         this.#records = new Permit2ProductionRepository(journal.root);
         this.#binding = Object.freeze({ journal, controller, native, capability, nativeState, root: journal.root });
     }
-    async approveOwned(id) {
+    async approveOwned(id, purpose = "sign-only") {
         const record = await this.#records.findOperation(id);
         if (record === null)
             blocked();
         assertSigningLifecycle(record, "reserved");
         assertSigningTime(record, now(this.#clock));
-        const display = permit2ApprovalDisplay(record), started = now(this.#clock).getTime();
+        const display = permit2ApprovalDisplay(record, purpose), started = now(this.#clock).getTime();
         await this.#approval.approve(display);
         const completedAt = now(this.#clock).getTime();
         if (completedAt < started)
             blocked();
         assertSigningTime(record, new Date(completedAt));
         const proof = Object.freeze({ kind: "permit2-foreground-approval-proof" });
-        proofs.set(proof, { ...this.#binding, operationId: id, materialHash: record.material.materialHash,
+        proofs.set(proof, { ...this.#binding, purpose: display.purpose, operationId: id, materialHash: record.material.materialHash,
             displayHash: display.displayHash, fingerprint: display.fingerprint, completedAt, clock: this.#clock, claimed: false });
         return proof;
     }
@@ -41,7 +41,7 @@ function checked(proof, journal, record) {
     if (entry === undefined || entry.journal !== journal || entry.root !== journal.root ||
         entry.operationId !== record.operationId || entry.materialHash !== record.material.materialHash)
         blocked();
-    const display = permit2ApprovalDisplay(record);
+    const display = permit2ApprovalDisplay(record, entry.purpose);
     if (display.displayHash !== entry.displayHash || display.fingerprint !== entry.fingerprint ||
         LocalWalletNative.assertPermit2LocalCapability(entry.capability, entry.native, entry.root) !== entry.nativeState)
         blocked();
