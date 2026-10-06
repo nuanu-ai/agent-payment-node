@@ -1,3 +1,9 @@
+import { claimPermit2ForegroundApproval, assertClaimedPermit2ForegroundApproval, revokePermit2ForegroundApproval,
+  type Permit2ForegroundApprovalProof, type Permit2ApprovalBinding } from "./production-approval-provenance.js";
+import { assertSigningLifecycle, checkedSigningLease } from "./production-signing-owner.js";
+import { assertSigningTime } from "./production-signing-facts.js";
+export interface Permit2SigningContinuation { readonly kind: "permit2-private-signing-continuation" }
+type RiskCandidate = { readonly kind: "permit2-private-risk-candidate" };
 import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { AssetUsageLedger, type AssetUsageReservation } from "../asset-usage-ledger.js";
@@ -16,6 +22,10 @@ import { JOURNAL_SCHEMA, productionApprovalFingerprint, productionRiskBinding, p
 
 /** Storage/accounting only. No key, signing, transport or execution permission is returned. */
 export class Permit2ProductionJournal extends Permit2ProductionRepository {
+  readonly #riskCandidates = new WeakMap<RiskCandidate, { readonly proof: Permit2ForegroundApprovalProof; readonly binding: Permit2ApprovalBinding; readonly riskRecord: Permit2ProductionRecord }>();
+  // Unconsumed in this packet. Only the later actual-native signing entry may consume this private store.
+  readonly #continuations = new WeakMap<Permit2SigningContinuation, { readonly binding: Permit2ApprovalBinding;
+    readonly record: Permit2ProductionRecord; readonly lease: AssetUsageReservation }>();
   private readonly state: StateStore;
   private readonly usage: AssetUsageLedger;
   constructor(root: string, private readonly preparation: Permit2ProductionPreparation,
@@ -48,9 +58,35 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     await this.persistExposureLocked(next); return next;
   }
   /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
-  async markSignatureRisk(id: string): Promise<Permit2ProductionRecord> {
-    await this.ready(); let r = await this.required(id);
-    if (r.exposureJournal !== undefined) return this.confirmHold(id);
+  async markSignatureRisk(id: string): Promise<Permit2ProductionRecord> { return (await this.#markRisk(id)).record; }
+  /** Genuine UI + atomic first insertion only. No key/sign/HTTP permission is conveyed. */
+  async markApprovedSignatureRisk(id: string, proof: Permit2ForegroundApprovalProof): Promise<{
+    readonly record: Permit2ProductionRecord; readonly continuation: Permit2SigningContinuation | null }> {
+    let candidate: RiskCandidate | null = null;
+    try {
+      const result = await this.#markRisk(id, proof); candidate = result.candidate;
+      if (candidate === null) { freezeApprovedSnapshot(result.record); return Object.freeze({ record: result.record, continuation: null }); }
+      const owned = this.#riskCandidates.get(candidate); if (owned === undefined) blocked();
+      return await this.state.withLocks(this.locks(result.record), async () => {
+        const current = await this.required(id); assertSigningLifecycle(current, "exposed");
+        if (current.material.materialHash !== owned.riskRecord.material.materialHash ||
+          current.exposureAt !== owned.riskRecord.exposureAt || current.exposureJournal?.bindingHash !== owned.riskRecord.exposureJournal?.bindingHash) blocked();
+        const lease = checkedSigningLease(current, await this.lease(current), "exposed");
+        assertClaimedPermit2ForegroundApproval(proof, this, current); this.#approvalTime(owned.binding, current);
+        freezeApprovedSnapshot(current); freezeApprovedSnapshot(lease);
+        const continuation = Object.freeze({ kind: "permit2-private-signing-continuation" as const });
+        this.#continuations.set(continuation, { binding: owned.binding, record: current, lease });
+        return Object.freeze({ record: current, continuation });
+      });
+    } finally { revokePermit2ForegroundApproval(proof); if (candidate !== null) this.#riskCandidates.delete(candidate); }
+  }
+  #approvalTime(binding: Permit2ApprovalBinding, record: Permit2ProductionRecord): void {
+    const now = this.now(); if (now.getTime() < binding.completedAt || now.getTime() - binding.completedAt > 60_000) blocked();
+    assertSigningTime(record, now);
+  }
+  async #markRisk(id: string, proof?: Permit2ForegroundApprovalProof): Promise<{ readonly record: Permit2ProductionRecord; readonly candidate: RiskCandidate | null }> {
+    await this.ready(); let r = await this.required(id), candidate: RiskCandidate | null = null;
+    if (r.exposureJournal !== undefined) return { record: await this.confirmHold(id), candidate: null };
     r = await this.preparation.assertCurrentOwner(id);
     const usage = await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.now());
     const lease = await this.lease(r);
@@ -71,9 +107,17 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
         holdConfirmed: false, signed: null, request: null, terminalIntent: null };
       const next = sealPermit2ProductionRecord({ ...productionRecordBody(current), state: "exposure_unknown",
         exposureAt: at.toISOString(), updatedAt: at.toISOString(), exposureJournal: journal });
+      const binding = proof === undefined ? null : claimPermit2ForegroundApproval(proof, this, current);
+      if (binding !== null) this.#approvalTime(binding, current);
       await this.persistExposureLocked(next);
+      if (binding !== null && proof !== undefined) {
+        freezeApprovedSnapshot(next);
+        candidate = Object.freeze({ kind: "permit2-private-risk-candidate" as const });
+        this.#riskCandidates.set(candidate, { proof, binding, riskRecord: next });
+      }
     });
-    return this.confirmHold(id);
+    try { return { record: await this.confirmHold(id), candidate }; }
+    catch (error) { if (candidate !== null) this.#riskCandidates.delete(candidate); throw error; }
   }
   /** No state locks span ledger I/O; risk remains durable if either side fails. */
   async confirmHold(id: string): Promise<Permit2ProductionRecord> {
@@ -153,3 +197,11 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
   }
 }
 function blocked(): never { throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 exposure lifecycle remains held or its binding changed."); }
+
+/** These repository-owned JSON snapshots are retained only by the approved path. */
+function freezeApprovedSnapshot(value: unknown): void {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) freezeApprovedSnapshot(child);
+    Object.freeze(value);
+  }
+}

@@ -1,3 +1,5 @@
+import { decimal, hash, hex32 } from "./local-wallet-native-fields.js";
+import type { Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
 import { validX402Tuple, type X402ChainText } from "./x402-network.js";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
@@ -31,10 +33,19 @@ import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.
 
 const HASH = /^[a-f0-9]{64}$/u;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
-const DECIMAL = /^(?:0|[1-9][0-9]*)$/u;
-const NONCE = /^0x[0-9a-fA-F]{64}$/u;
 
 export class LocalWalletNative implements NativePort {
+  static readonly #permit2Instances = new WeakMap<NativePort, Permit2LocalCapability>();
+  static readonly #permit2Capabilities = new WeakMap<Permit2LocalCapability, { readonly native: NativePort; readonly state: StateStore; readonly root: string }>();
+  static resolvePermit2LocalCapability(native: NativePort, root: string): Permit2LocalCapability {
+    const capability = this.#permit2Instances.get(native); if (capability === undefined) throw protocol("Selected native has no local Permit2 capability.");
+    this.assertPermit2LocalCapability(capability, native, root); return capability;
+  }
+  static assertPermit2LocalCapability(capability: Permit2LocalCapability, native: NativePort, root: string): StateStore {
+    const owned = this.#permit2Capabilities.get(capability);
+    if (owned === undefined || owned.native !== native || owned.root !== root || owned.state.root !== owned.root) throw protocol("Permit2 native capability is not owned by this selected instance.");
+    return owned.state;
+  }
   private readonly wallets: EncryptedWalletStore;
 
   constructor(
@@ -43,6 +54,8 @@ export class LocalWalletNative implements NativePort {
     private readonly approval: TransferApprovalPort = new TtyTransferApproval(),
   ) {
     this.wallets = new EncryptedWalletStore(state, wrappingSecret);
+    const capability = Object.freeze({ kind: "permit2-local-native-capability" as const });
+    LocalWalletNative.#permit2Instances.set(this, capability); LocalWalletNative.#permit2Capabilities.set(capability, { native: this, state, root: state.root });
   }
 
   async request(request: NativeRequest): Promise<unknown> {
@@ -458,21 +471,6 @@ function requestProfile(payload: Readonly<Record<string, unknown>>): string {
 function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!isPlainRecord(value) || !exactKeys(value, keys)) throw protocol("Custody request violates the exact schema.");
   return value;
-}
-
-function decimal(value: unknown, label: string, positive = false): string {
-  if (typeof value !== "string" || !DECIMAL.test(value) || (positive && value === "0")) throw protocol(`Invalid ${label}.`);
-  return value;
-}
-
-function hash(value: unknown, label: string): string {
-  if (typeof value !== "string" || !HASH.test(value)) throw protocol(`Invalid ${label}.`);
-  return value;
-}
-
-function hex32(value: unknown, label: string): Hex {
-  if (typeof value !== "string" || !NONCE.test(value)) throw protocol(`Invalid ${label}.`);
-  return value as Hex;
 }
 
 function addressEqual(left: string, right: string): boolean { return left.toLowerCase() === right.toLowerCase(); }

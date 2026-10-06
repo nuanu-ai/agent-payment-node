@@ -1,3 +1,6 @@
+import { claimPermit2ForegroundApproval, assertClaimedPermit2ForegroundApproval, revokePermit2ForegroundApproval } from "./production-approval-provenance.js";
+import { assertSigningLifecycle, checkedSigningLease } from "./production-signing-owner.js";
+import { assertSigningTime } from "./production-signing-facts.js";
 import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
@@ -15,6 +18,9 @@ import { JOURNAL_SCHEMA, productionApprovalFingerprint, productionRiskBinding, p
 export class Permit2ProductionJournal extends Permit2ProductionRepository {
     preparation;
     clock;
+    #riskCandidates = new WeakMap();
+    // Unconsumed in this packet. Only the later actual-native signing entry may consume this private store.
+    #continuations = new WeakMap();
     state;
     usage;
     constructor(root, preparation, clock = () => new Date()) {
@@ -57,11 +63,53 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
         return next;
     }
     /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
-    async markSignatureRisk(id) {
+    async markSignatureRisk(id) { return (await this.#markRisk(id)).record; }
+    /** Genuine UI + atomic first insertion only. No key/sign/HTTP permission is conveyed. */
+    async markApprovedSignatureRisk(id, proof) {
+        let candidate = null;
+        try {
+            const result = await this.#markRisk(id, proof);
+            candidate = result.candidate;
+            if (candidate === null) {
+                freezeApprovedSnapshot(result.record);
+                return Object.freeze({ record: result.record, continuation: null });
+            }
+            const owned = this.#riskCandidates.get(candidate);
+            if (owned === undefined)
+                blocked();
+            return await this.state.withLocks(this.locks(result.record), async () => {
+                const current = await this.required(id);
+                assertSigningLifecycle(current, "exposed");
+                if (current.material.materialHash !== owned.riskRecord.material.materialHash ||
+                    current.exposureAt !== owned.riskRecord.exposureAt || current.exposureJournal?.bindingHash !== owned.riskRecord.exposureJournal?.bindingHash)
+                    blocked();
+                const lease = checkedSigningLease(current, await this.lease(current), "exposed");
+                assertClaimedPermit2ForegroundApproval(proof, this, current);
+                this.#approvalTime(owned.binding, current);
+                freezeApprovedSnapshot(current);
+                freezeApprovedSnapshot(lease);
+                const continuation = Object.freeze({ kind: "permit2-private-signing-continuation" });
+                this.#continuations.set(continuation, { binding: owned.binding, record: current, lease });
+                return Object.freeze({ record: current, continuation });
+            });
+        }
+        finally {
+            revokePermit2ForegroundApproval(proof);
+            if (candidate !== null)
+                this.#riskCandidates.delete(candidate);
+        }
+    }
+    #approvalTime(binding, record) {
+        const now = this.now();
+        if (now.getTime() < binding.completedAt || now.getTime() - binding.completedAt > 60_000)
+            blocked();
+        assertSigningTime(record, now);
+    }
+    async #markRisk(id, proof) {
         await this.ready();
-        let r = await this.required(id);
+        let r = await this.required(id), candidate = null;
         if (r.exposureJournal !== undefined)
-            return this.confirmHold(id);
+            return { record: await this.confirmHold(id), candidate: null };
         r = await this.preparation.assertCurrentOwner(id);
         const usage = await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.now());
         const lease = await this.lease(r);
@@ -87,9 +135,24 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
                 holdConfirmed: false, signed: null, request: null, terminalIntent: null };
             const next = sealPermit2ProductionRecord({ ...productionRecordBody(current), state: "exposure_unknown",
                 exposureAt: at.toISOString(), updatedAt: at.toISOString(), exposureJournal: journal });
+            const binding = proof === undefined ? null : claimPermit2ForegroundApproval(proof, this, current);
+            if (binding !== null)
+                this.#approvalTime(binding, current);
             await this.persistExposureLocked(next);
+            if (binding !== null && proof !== undefined) {
+                freezeApprovedSnapshot(next);
+                candidate = Object.freeze({ kind: "permit2-private-risk-candidate" });
+                this.#riskCandidates.set(candidate, { proof, binding, riskRecord: next });
+            }
         });
-        return this.confirmHold(id);
+        try {
+            return { record: await this.confirmHold(id), candidate };
+        }
+        catch (error) {
+            if (candidate !== null)
+                this.#riskCandidates.delete(candidate);
+            throw error;
+        }
     }
     /** No state locks span ledger I/O; risk remains durable if either side fails. */
     async confirmHold(id) {
@@ -194,4 +257,12 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     }
 }
 function blocked() { throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 exposure lifecycle remains held or its binding changed."); }
+/** These repository-owned JSON snapshots are retained only by the approved path. */
+function freezeApprovedSnapshot(value) {
+    if (value !== null && typeof value === "object") {
+        for (const child of Object.values(value))
+            freezeApprovedSnapshot(child);
+        Object.freeze(value);
+    }
+}
 //# sourceMappingURL=production-journal.js.map

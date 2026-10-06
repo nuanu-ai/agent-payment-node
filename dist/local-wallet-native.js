@@ -1,3 +1,4 @@
+import { decimal, hash, hex32 } from "./local-wallet-native-fields.js";
 import { validX402Tuple } from "./x402-network.js";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
@@ -19,16 +20,32 @@ import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402E
 import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
 const HASH = /^[a-f0-9]{64}$/u;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
-const DECIMAL = /^(?:0|[1-9][0-9]*)$/u;
-const NONCE = /^0x[0-9a-fA-F]{64}$/u;
 export class LocalWalletNative {
     state;
     approval;
+    static #permit2Instances = new WeakMap();
+    static #permit2Capabilities = new WeakMap();
+    static resolvePermit2LocalCapability(native, root) {
+        const capability = this.#permit2Instances.get(native);
+        if (capability === undefined)
+            throw protocol("Selected native has no local Permit2 capability.");
+        this.assertPermit2LocalCapability(capability, native, root);
+        return capability;
+    }
+    static assertPermit2LocalCapability(capability, native, root) {
+        const owned = this.#permit2Capabilities.get(capability);
+        if (owned === undefined || owned.native !== native || owned.root !== root || owned.state.root !== owned.root)
+            throw protocol("Permit2 native capability is not owned by this selected instance.");
+        return owned.state;
+    }
     wallets;
     constructor(state, wrappingSecret, approval = new TtyTransferApproval()) {
         this.state = state;
         this.approval = approval;
         this.wallets = new EncryptedWalletStore(state, wrappingSecret);
+        const capability = Object.freeze({ kind: "permit2-local-native-capability" });
+        LocalWalletNative.#permit2Instances.set(this, capability);
+        LocalWalletNative.#permit2Capabilities.set(capability, { native: this, state, root: state.root });
     }
     async request(request) {
         if (request.version !== "apn.native.v1")
@@ -428,21 +445,6 @@ function requestProfile(payload) {
 function exactRecord(value, keys) {
     if (!isPlainRecord(value) || !exactKeys(value, keys))
         throw protocol("Custody request violates the exact schema.");
-    return value;
-}
-function decimal(value, label, positive = false) {
-    if (typeof value !== "string" || !DECIMAL.test(value) || (positive && value === "0"))
-        throw protocol(`Invalid ${label}.`);
-    return value;
-}
-function hash(value, label) {
-    if (typeof value !== "string" || !HASH.test(value))
-        throw protocol(`Invalid ${label}.`);
-    return value;
-}
-function hex32(value, label) {
-    if (typeof value !== "string" || !NONCE.test(value))
-        throw protocol(`Invalid ${label}.`);
     return value;
 }
 function addressEqual(left, right) { return left.toLowerCase() === right.toLowerCase(); }
