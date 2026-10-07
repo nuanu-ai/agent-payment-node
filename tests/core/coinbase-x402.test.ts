@@ -546,7 +546,7 @@ test("AWAL x402 uses exact Node argv, exact deadline and normalized bounded JSON
     ],
     options: { shell: false, stdio: ["ignore", "pipe", "pipe"] },
   }]);
-  assert.equal(JSON.stringify(launches).includes("-d"), false);
+  assert.equal(launches.some(({ args }) => args.includes("-d")), false, "no actual process argument may be the -d flag");
   if (result.disposition === "seller_result") {
     assert.equal(result.result.classification, "normalized_provider_json");
     assert.equal(result.result.canonical_json, "true");
