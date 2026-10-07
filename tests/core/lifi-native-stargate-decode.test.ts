@@ -18,6 +18,7 @@ const SOURCE = 200000000000000n;
 const FIXED_FEE = 500000000000n;
 const LZ_FEE = 191951159457037n;
 const BRIDGED = SOURCE - FIXED_FEE;
+const NORMALIZED_BRIDGED = 199000000000000n;
 const VALUE = SOURCE + LZ_FEE;
 const NATIVE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 const BASE_NATIVE_POOL = getAddress("0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7");
@@ -95,7 +96,7 @@ function sourceReceipt(m: BridgeMaterialization): BridgeProtocolReceipt {
       eventLog(FEE_FORWARDER, "FeesForwarded", { token: BRIDGE_ZERO_ADDRESS,
         distributions: [{ recipient: FEE_RECIPIENT, amount: FIXED_FEE }] }),
       eventLog(NATIVE_POOL, "OFTSent", { guid: GUID, dstEid: 30184, fromAddress: BRIDGE_DIAMOND,
-        amountSentLD: BRIDGED, amountReceivedLD: 197010000000000n }),
+        amountSentLD: NORMALIZED_BRIDGED, amountReceivedLD: 197010000000000n }),
     ] };
 }
 
@@ -120,7 +121,7 @@ test("native Stargate source rejects wrong pool, GUID, EID, amount, sender, and 
     [{ ...sent, address: getAddress("0xc026395860Db2d07ee33e05fE50ed7bD583189C7") }],
     [mutateEvent(sent, "OFTSent", { guid: `0x${"00".repeat(32)}` })],
     [mutateEvent(sent, "OFTSent", { dstEid: 30110 })],
-    [mutateEvent(sent, "OFTSent", { amountSentLD: BRIDGED - 1n })],
+    [mutateEvent(sent, "OFTSent", { amountSentLD: NORMALIZED_BRIDGED - 1n })],
     [mutateEvent(sent, "OFTSent", { amountReceivedLD: 197009999999999n })],
     [mutateEvent(sent, "OFTSent", { fromAddress: OWNER })],
     [sent, sent],

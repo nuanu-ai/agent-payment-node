@@ -102,7 +102,7 @@ function validateStoredSource(source: BridgeSourceProof, decoded: DecodedBridgeC
     bridgeUint(c.amountSentAtomic, true, "APN_STATE_CORRUPT");
     const received = bridgeUint(c.amountReceivedAtomic, true, "APN_STATE_CORRUPT");
     if (guid === BRIDGE_ZERO_WORD || c.sourceEid !== bridgeEndpointId(decoded.sourceChainId) || c.destinationEid !== decoded.protocol.dstEid ||
-      sender !== decoded.sender || recipient !== decoded.recipient || c.amountSentAtomic !== decoded.bridgeAmountAtomic ||
+      sender !== decoded.sender || recipient !== decoded.recipient || c.amountSentAtomic !== stargateExpectedSentAmount(decoded) ||
       received < BigInt(decoded.minimumOutputAtomic)) fail("stored_stargate_correlation");
     return;
   }
@@ -174,12 +174,28 @@ function validateNativeStargateSource(decoded: DecodedBridgeCall, materializatio
     materialization.transaction.valueAtomic !== decoded.sourceValueAtomic) fail("stargate_native_source_binding");
 }
 
+/** Stargate converts native local units to shared units and emits the exact dust-free local amount. */
+function stargateExpectedSentAmount(decoded: DecodedBridgeCall): string {
+  if (decoded.sourceToken !== BRIDGE_ZERO_ADDRESS) return decoded.bridgeAmountAtomic;
+  if (decoded.protocol.kind !== "stargateV2" || decoded.protocol.assetId !== 13 ||
+    decoded.sourceChainId !== 1 || decoded.destinationChainId !== 8453 ||
+    decoded.destinationToken !== BRIDGE_ZERO_ADDRESS || decoded.protocol.dstEid !== 30184) fail("stargate_native_amount_lane");
+  const asset = BRIDGE_ASSET_REGISTRY[decoded.sourceChainId].nativeCoin, pool = asset.stargate;
+  if (pool === null || pool.assetId !== decoded.protocol.assetId ||
+    !Number.isSafeInteger(asset.decimals) || !Number.isSafeInteger(pool.sharedDecimals) ||
+    asset.decimals < 0 || asset.decimals > 255 || pool.sharedDecimals < 0 || pool.sharedDecimals > asset.decimals) fail("stargate_native_precision");
+  const rate = 10n ** BigInt(asset.decimals - pool.sharedDecimals);
+  const normalized = BigInt(decoded.bridgeAmountAtomic) / rate * rate;
+  if (normalized <= 0n) fail("stargate_native_amount_zero");
+  return normalized.toString();
+}
+
 function stargateSource(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): StargateCorrelation {
   if (decoded.protocol.kind !== "stargateV2") return fail("stargate_shape");
   const emitter = bridgeProtocolEmitter(decoded.sourceChainId, "stargateV2", decoded.sourceToken);
   const e = oneEvent(receipt, emitter, EVENT_TOPICS.oftSent, "OFTSent") as OFTSent;
   if (e.guid.toLowerCase() === BRIDGE_ZERO_WORD || e.dstEid !== decoded.protocol.dstEid || e.fromAddress !== BRIDGE_DIAMOND ||
-    e.amountSentLD.toString() !== decoded.bridgeAmountAtomic || e.amountReceivedLD < BigInt(decoded.minimumOutputAtomic)) fail("OFTSent");
+    e.amountSentLD.toString() !== stargateExpectedSentAmount(decoded) || e.amountReceivedLD < BigInt(decoded.minimumOutputAtomic)) fail("OFTSent");
   return {
     kind: "stargateV2", guid: bridgeHex(e.guid, 32, 32), sourceEid: bridgeEndpointId(decoded.sourceChainId),
     destinationEid: decoded.protocol.dstEid, sender: decoded.sender, recipient: decoded.recipient,
