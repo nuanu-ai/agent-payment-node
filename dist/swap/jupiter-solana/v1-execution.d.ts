@@ -1,5 +1,5 @@
 import type { ClockPort } from "../../ports.js";
-import { SolanaRpc, type SolanaMethod } from "../../solana/rpc.js";
+import { SolanaRpc, type SolanaMethod, type SolanaBatchRead } from "../../solana/rpc.js";
 import type { SwapOperationRecord } from "../model.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
@@ -50,5 +50,6 @@ export declare class JupiterV1BudgetedRpc extends SolanaRpc {
     chargeOfficialRead(): Promise<void>;
     private charge;
     call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
+    batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
     sendTransactionAtStart(params: readonly unknown[], beforeStart: () => void | Promise<void>): Promise<unknown>;
 }

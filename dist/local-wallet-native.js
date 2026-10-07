@@ -1,4 +1,8 @@
 var _a;
+import { assertFreshDirectEffect, publishDirectPublicEffect } from "./direct-public-attestation.js";
+import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
+import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
+import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
 import { assertSigningTime } from "./x402-permit2/production-signing-facts.js";
 import { Permit2ProductionSigningFence } from "./x402-permit2/production-signing-fence.js";
 import { Permit2ProductionJournal } from "./x402-permit2/production-journal.js";
@@ -17,11 +21,10 @@ import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { domainHash, hashObject } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
-import { EncryptedWalletStore, walletCustodyLock, } from "./encrypted-wallet-store.js";
+import { EncryptedWalletStore, walletEnvelopeIdentity, walletCustodyLock, } from "./encrypted-wallet-store.js";
 import { ApnError } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
-import { evmCustodyPayload } from "./evm-transfer-approval.js";
-import { assertEvmNativeCustody } from "./evm-native-custody.js";
+import { evmNativeCustody, assertEvmNativeCustody } from "./evm-native-custody.js";
 import { parseEvmNativeIntent, snapshotEvmNativePayload } from "./evm-native-intent.js";
 import { TtyTransferApproval } from "./tty-approval.js";
 import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402Effect } from "./local-wallet-native-public.js";
@@ -292,7 +295,7 @@ export class LocalWalletNative {
         if (request.version !== "apn.native.v1")
             throw protocol("Unsupported custody request version.");
         const operation = request.operation;
-        const payload = operation === "directTransfer.approveAndSign" && request.payload.evm !== undefined
+        const payload = operation === "directTransfer.approveAndSign"
             ? snapshotEvmNativePayload(request.payload) : request.payload;
         await this.state.initialize();
         const profile = requestProfile(payload);
@@ -372,49 +375,55 @@ export class LocalWalletNative {
         }
     }
     async describeWallet(profile) {
-        const loaded = await this.wallets.describe(profile);
-        if (loaded === null)
+        const wallet = await this.state.loadWallet(this.state.profileHash(profile));
+        if (wallet === null)
             return { found: false };
-        try {
-            return { found: true, ...publicIdentity(loaded.identity) };
-        }
-        finally {
-            this.wallets.clear(loaded.secret);
-        }
+        const envelope = await this.state.loadEncryptedWalletEnvelope(profile);
+        if (envelope === null)
+            throw protocol("Public wallet has no custody envelope.");
+        await assertEvmNativeCustody(this.state, profile, await evmNativeCustody(this.state, profile), walletEnvelopeIdentity(envelope, profile));
+        return { found: true, profile: wallet.profile, address: wallet.address, createdAt: wallet.createdAt, bindingHash: wallet.bindingHash };
     }
     async approveAndSign(payload) {
-        const intent = payload.evm === undefined ? parseDirectIntent(payload) : parseEvmNativeIntent(payload);
-        if (intent.evm !== undefined) {
-            const frozen = await this.state.findOperation(intent.operationId);
-            if (frozen === null || frozen.profile !== intent.profile || frozen.evm === undefined ||
-                hashObject(evmCustodyPayload(frozen)) !== hashObject(payload))
-                throw protocol("Native request differs from its durable prepared operation.");
-            await assertEvmNativeCustody(this.state, intent.profile, intent.evm.nativeCustody);
-        }
+        const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
+        const frozen = await this.state.findOperation(intent.operationId), journal = new DirectPublicEffectJournal(this.state);
+        if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
+            hashObject(directCustodyPayload(frozen)) !== hashObject(payload))
+            throw protocol("Native request differs from its saved fresh operation.");
+        await journal.prepared(frozen);
+        if (await journal.hasSigned(frozen))
+            throw protocol("A signed direct effect cannot be approved or recovered through signing.");
+        const attempt = await journal.beginSigning(frozen);
         // Human approval must complete before the Keychain-backed wallet envelope
         // is loaded. This keeps the raw signing key out of memory while approval is
         // pending, refused, interrupted, or expired.
-        await this.approval.approve(intent);
+        try {
+            await this.approval.approve(intent);
+        }
+        catch (error) {
+            // This catch encloses only foreground approval, before any private wallet entry.
+            // Its proof describes Native control flow, never the meaning or authenticity of callback consent.
+            try {
+                await journal.recordNoPrivateEntry(frozen, attempt);
+            }
+            catch { /* Unprovable attempts stay held. */ }
+            throw error;
+        }
         return await this.withWallet(intent.profile, async (identity, secret) => {
             assertWallet(identity, intent.walletAddress);
             const slot = effectSlot("apn-effect-v1", intent.profile, intent.operationId, intent.fingerprint);
             const payloadHash = hashObject(payload);
             const existing = secret.directEffects[slot];
-            if (existing !== undefined) {
-                if (existing.payloadHash !== payloadHash)
-                    throw rejected("APN_EFFECT_MISMATCH", "Stored direct-transfer effect differs from the frozen request.");
-                return publicDirectEffect(existing);
-            }
+            if (existing !== undefined)
+                throw protocol("Existing encrypted direct effect requires public observation; signing cannot recover it.");
             if ((intent.evm?.asset.chainId ?? CHAIN_ID) === 1 && await uniswapTokenNonceOwned(this.state.root, identity.address, intent.nonceAtomic)) {
                 throw new ApnError("APN_REPREPARE_REQUIRED", "A guarded token effect already owns the approved Ethereum nonce; prepare a fresh transfer.");
             }
-            if (intent.evm !== undefined) {
-                const frozen = await this.state.findOperation(intent.operationId);
-                if (frozen === null || frozen.profile !== intent.profile || frozen.evm === undefined ||
-                    hashObject(evmCustodyPayload(frozen)) !== hashObject(payload))
-                    throw protocol("Native request differs from its durable prepared operation before signing.");
-                await assertEvmNativeCustody(this.state, intent.profile, intent.evm.nativeCustody, identity);
-            }
+            const latest = await this.state.findOperation(intent.operationId);
+            if (latest === null || latest.state !== "started" || hashObject(directCustodyPayload(latest)) !== hashObject(payload))
+                throw protocol("Fresh direct operation changed before signing.");
+            const binding = await journal.prepared(latest);
+            await assertEvmNativeCustody(this.state, intent.profile, binding.custody, identity);
             const account = privateKeyToAccount(secret.privateKey);
             const rawTransaction = await account.signTransaction({
                 type: "eip1559",
@@ -437,33 +446,24 @@ export class LocalWalletNative {
                 rawTransaction,
                 rawTransactionHash: transactionHash,
             };
+            await assertFreshDirectEffect(this.state, frozen, effect);
             secret.directEffects[slot] = effect;
             await this.wallets.save(identity, secret);
+            await publishDirectPublicEffect(this.state, frozen, effect, account);
             return publicDirectEffect(effect);
-        }, intent.evm === undefined ? undefined : async (identity) => {
-            await assertEvmNativeCustody(this.state, intent.profile, intent.evm.nativeCustody, identity);
+        }, async (identity) => {
+            const binding = await journal.prepared(frozen);
+            await assertEvmNativeCustody(this.state, intent.profile, binding.custody, identity);
         });
     }
     async getEffect(payload) {
-        const recovery = parseDirectRecovery(payload);
-        return await this.withWallet(recovery.profile, async (_identity, secret) => {
-            const slot = effectSlot("apn-effect-v1", recovery.profile, recovery.operationId, recovery.fingerprint);
-            const effect = secret.directEffects[slot];
-            if (effect === undefined) {
-                if ("expectedPayloadHash" in recovery)
-                    return { found: false };
-                throw rejected("APN_EFFECT_NOT_FOUND", "Direct-transfer effect material was not found.");
-            }
-            if ("expectedPayloadHash" in recovery) {
-                if (effect.payloadHash !== recovery.expectedPayloadHash)
-                    throw rejected("APN_EFFECT_MISMATCH", "Stored signature does not match the frozen started operation.");
-                return publicDirectEffect(effect);
-            }
-            if (effect.transactionHash.toLowerCase() !== recovery.expectedTransactionHash.toLowerCase() ||
-                effect.rawTransactionHash.toLowerCase() !== recovery.expectedRawTransactionHash.toLowerCase())
-                throw rejected("APN_EFFECT_MISMATCH", "Direct-transfer recovery binding does not match.");
-            return publicDirectEffect(effect);
-        });
+        const recovery = parseDirectRecovery(payload), operation = await this.state.findOperation(recovery.operationId);
+        if (operation === null || operation.profile !== recovery.profile || operation.fingerprint !== recovery.fingerprint)
+            throw protocol("Public recovery operation does not match.");
+        if ("expectedPayloadHash" in recovery ? recovery.expectedPayloadHash !== hashObject(directCustodyPayload(operation)) :
+            recovery.expectedTransactionHash !== operation.transactionHash || recovery.expectedRawTransactionHash !== operation.rawTransactionHash)
+            throw protocol("Public recovery binding does not match.");
+        return await new DirectPublicEffectJournal(this.state).effect(operation);
     }
     async approveX402(payload) {
         const intent = parseX402Create(payload);

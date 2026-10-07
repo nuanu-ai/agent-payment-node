@@ -2,6 +2,7 @@ import type { ActiveAssetPolicy } from "../../allowlist-active-policy.js";
 import type { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import type { ChainAccount, ChainWalletStoragePort } from "../../direct-rail-ports.js";
 import { type SwapOperationRecord } from "../model.js";
+import { type JupiterV1RouteConfig } from "./v1-route-config.js";
 export interface JupiterV1OwnerBinding {
     readonly account: ChainAccount;
     readonly accountBindingHash: string;
@@ -19,6 +20,10 @@ export declare class JupiterV1OwnerAdmission {
     constructor(accounts: Pick<ChainWalletStoragePort, "account" | "ownerBinding">, activePolicy: (profile: string) => Promise<ActiveAssetPolicy | null>, usage: AssetUsageLedger, now: () => Date);
     localAccount(profile: string, expected?: string): Promise<ChainAccount>;
     resolve(profile: string, amountAtomic: string, minimumOutputAtomic: string, expected?: string, ownReservationAtomic?: string): Promise<JupiterV1OwnerBinding>;
+    resolveRoute(profile: string, amountAtomic: string, minimumOutputAtomic: string, expected?: string, ownReservationAtomic?: string): Promise<{
+        readonly route: JupiterV1RouteConfig;
+        readonly owner: JupiterV1OwnerBinding;
+    }>;
     assert(operationValue: SwapOperationRecord, materialValue: unknown): Promise<JupiterV1OwnerBinding>;
 }
 export declare function jupiterV1AccountBindingHash(account: ChainAccount): string;

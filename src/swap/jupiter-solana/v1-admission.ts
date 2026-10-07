@@ -7,6 +7,7 @@ import { ApnError } from "../../errors.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import { swapMechanismDigest } from "../pin.js";
 import { validateJupiterV1PreparedMaterial } from "./v1-material.js";
+import { JUPITER_V1_FINITE_ROUTES, routeConfigForQuoteBuild, type JupiterV1RouteConfig } from "./v1-route-config.js";
 import { JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 
 export interface JupiterV1OwnerBinding {
@@ -27,22 +28,30 @@ export class JupiterV1OwnerAdmission {
    return detached(publicAccount);
  }
  async resolve(profile:string, amountAtomic:string, minimumOutputAtomic:string, expected?:string, ownReservationAtomic="0"):Promise<JupiterV1OwnerBinding>{
+   return (await this.resolveRoute(profile,amountAtomic,minimumOutputAtomic,expected,ownReservationAtomic)).owner;
+ }
+ async resolveRoute(profile:string, amountAtomic:string, minimumOutputAtomic:string, expected?:string, ownReservationAtomic="0"):Promise<{readonly route:JupiterV1RouteConfig;readonly owner:JupiterV1OwnerBinding}>{
    const account=await this.localAccount(profile,expected), active=await this.activePolicy(profile), now=this.now(), at=now.toISOString();
    if(active===null||active.profile!==profile||active.accounts.solana!==account.address||active.digest!==active.registry.policyDigest) blocked("The exact active owner policy is required.");
+   let selected:JupiterV1RouteConfig|undefined;
    for(const [asset,amount] of [[{kind:"native" as const,identifier:null},amountAtomic],[{kind:"token" as const,identifier:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"},minimumOutputAtomic]] as const){
      const used=await this.usage.usage({account:account.address,chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,asset},now);
      const admitted=evaluateAssetPolicy(active.registry,{chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,asset,rail:"swap",amountAtomic:amount,
        dailyUsageAtomic:asset.kind==="native"?(BigInt(used.amountAtomic)-BigInt(ownReservationAtomic)).toString():used.amountAtomic,asOfDate:at.slice(0,10),asOf:at});
-     if(admitted.asset.mechanismPins?.swap===undefined||swapMechanismDigest(admitted.asset.mechanismPins.swap)!==JUPITER_V1_MECHANISM_DIGEST) blocked("Both assets require the exact Jupiter V1 Whirlpool mechanism admission.");
+     const pin=admitted.asset.mechanismPins?.swap,digest=pin===undefined?null:swapMechanismDigest(pin);
+     const route=JUPITER_V1_FINITE_ROUTES.find(r=>swapMechanismDigest(r.mechanismPin)===digest);
+     if(route===undefined||selected!==undefined&&selected.routeId!==route.routeId)blocked("Both assets require the same exact finite Jupiter V1 mechanism admission.");selected=route;
    }
    const body={account,accountBindingHash:jupiterV1AccountBindingHash(account),policyDigest:active.digest,activationDigest:active.activationDigest};
-   return detached({...body,admissionHash:domainHash("apn.jupiter-v1-owner-admission.v1",canonicalJson(body))});
+   return {route:selected!,owner:detached({...body,admissionHash:domainHash("apn.jupiter-v1-owner-admission.v1",canonicalJson(body))})};
  }
  async assert(operationValue:SwapOperationRecord, materialValue:unknown):Promise<JupiterV1OwnerBinding>{
    const op=validateSwapOperation(operationValue),material=validateJupiterV1PreparedMaterial(materialValue);
-   if(op.mechanismDigest!==JUPITER_V1_MECHANISM_DIGEST||canonicalJson(op.quote)!==canonicalJson(material.quote)||
+   const config=routeConfigForQuoteBuild(material.execution.quoteResponse,material.execution.rawBuildResponse),registry=config.protocolRegistry;
+   if(op.mechanismDigest!==swapMechanismDigest(config.mechanismPin)||op.protocolRegistryDigest!==registry.registryDigest||op.protocolRegistryVersion!==registry.registryVersion||canonicalJson(op.quote)!==canonicalJson(material.quote)||
       op.approvalCapAtomic!==material.approvalCapAtomic) blocked("The prepared Jupiter operation or material changed.");
-   const admission=await this.resolve(op.quote.profile,op.quote.inputAmountAtomic,op.quote.minimumOutputAtomic,op.quote.account,op.usageLease!==null&&["reserved","submitted","unknown_finality"].includes(op.usageLease.state)?op.usageLease.amountAtomic:"0");
+   const resolved=await this.resolveRoute(op.quote.profile,op.quote.inputAmountAtomic,op.quote.minimumOutputAtomic,op.quote.account,op.usageLease!==null&&["reserved","submitted","unknown_finality"].includes(op.usageLease.state)?op.usageLease.amountAtomic:"0");
+   const admission=resolved.owner;if(resolved.route.routeId!==config.routeId)blocked("Jupiter saved material differs from active mechanism admission.");
    if(admission.policyDigest!==op.policyDigest) blocked("The active Jupiter owner policy changed after preparation.");
    return admission;
  }

@@ -1,3 +1,4 @@
+import { routeConfigForQuote } from "./v1-route-config.js";
 import { getBase58Decoder } from "@solana/kit";
 import { canonicalJson, isPlainRecord, exactKeys, sha256 } from "../../canonical.js";
 import { atomic, canonicalAddress, canonicalBase64, invalid, JUPITER_V6_PROGRAM, WRAPPED_SOL_MINT, SOLANA_USDC_MINT } from "./catalog.js";
@@ -63,6 +64,7 @@ export function decodeJupiterV1Quote(value: unknown): JupiterV1QuoteResponse {
     canonicalAddress(swap.ammKey);
     if (typeof value.priceImpactPct !== "string" || !/^(0|[1-9][0-9]*)(\.[0-9]+)?$/u.test(value.priceImpactPct))
         invalid("Jupiter V1 price impact is invalid.");
+    routeConfigForQuote(value as unknown as JupiterV1QuoteResponse);
     return freezeJson(value) as JupiterV1QuoteResponse;
 }
 export function decodeJupiterV1Instruction(value: unknown): JupiterV1RawInstruction {

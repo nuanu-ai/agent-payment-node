@@ -112,7 +112,7 @@ test("CLI creates, reuses, and restarts one encrypted disposable wallet under th
   assert.equal(JSON.stringify(created).includes("privateKey"), false);
 });
 
-test("encrypted wallet fails closed for missing/wrong wrapping secret, tag tamper, and unsafe mode", async (t) => {
+test("public wallet status reads no keys; explicit doctor fails closed for missing/wrong wrapping secret, tag tamper, and unsafe mode", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const state = new StateStore(temporary.root);
@@ -125,10 +125,13 @@ test("encrypted wallet fails closed for missing/wrong wrapping secret, tag tampe
   for (const wrapping of [new TestWrappingSecret(null), new TestWrappingSecret(WRONG_MASTER)]) {
     const result = await new ApnCore({
       state: new StateStore(temporary.root),
-      native: new LocalWalletNative(new StateStore(temporary.root), wrapping),
+      native: new LocalWalletNative(new StateStore(temporary.root), wrapping), keychainProbe: wrapping,
     }).execute({ command: "wallet.status", profile: "default" });
-    assert.equal(result.ok, false);
-    assert.equal(result.error?.code, "APN_STATE_CORRUPT");
+    assert.equal(result.ok, true); assert.equal(wrapping.loads, 0);
+    const diagnostic = await new ApnCore({ state: new StateStore(temporary.root), keychainProbe: wrapping,
+      native: new LocalWalletNative(new StateStore(temporary.root), wrapping) }).execute({ command: "doctor.keychain" });
+    assert.equal(diagnostic.ok, false);
+    assert.equal(diagnostic.error?.code, "APN_STATE_CORRUPT");
   }
 
   const tampered = JSON.parse(original) as { cipher: { tag: string } };
@@ -140,8 +143,11 @@ test("encrypted wallet fails closed for missing/wrong wrapping secret, tag tampe
     state: new StateStore(temporary.root),
     native: new LocalWalletNative(new StateStore(temporary.root), new TestWrappingSecret()),
   }).execute({ command: "wallet.status", profile: "default" });
-  assert.equal(tagResult.ok, false);
-  assert.equal(tagResult.error?.code, "APN_STATE_CORRUPT");
+  assert.equal(tagResult.ok, true);
+  const tagWrapping = new TestWrappingSecret();
+  const tagDiagnostic = await new ApnCore({ state: new StateStore(temporary.root), keychainProbe: tagWrapping,
+    native: new LocalWalletNative(new StateStore(temporary.root), tagWrapping) }).execute({ command: "doctor.keychain" });
+  assert.equal(tagDiagnostic.ok, false); assert.equal(tagDiagnostic.error?.code, "APN_STATE_CORRUPT");
 
   await writeFile(envelopePath, original, { encoding: "utf8", mode: 0o600 });
   await chmod(envelopePath, 0o644);

@@ -68,6 +68,8 @@ for (const file of files) {
     // This exact path does not authorize adjacent or generic typed-data signers.
     if (needle === "signTypedData" && ["local-wallet-native.ts", "gasless/custody.ts", "facilitator-gasless/custody.ts",
       "gasless-usdt/local-signing.ts"].some((name) => file === join(sourceRoot, name))) continue;
+    // Audited hash-only attestation for one saved direct operation; no generic personal signing port.
+    if (needle === "signMessage" && file === join(sourceRoot, "direct-public-attestation.ts")) continue;
     // The Avalanche facilitator route's single approved exposure: one verify and one settle per human-approved operation.
     if (["facilitator.verify", "facilitator.settle"].includes(needle) && file === join(sourceRoot, "facilitator-gasless/execution.ts")) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);

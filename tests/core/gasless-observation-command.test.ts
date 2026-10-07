@@ -1,3 +1,4 @@
+import { CanonicalDirectTestNative as TestNative } from "./canonical-direct-native-fixture.js";
 import assert from "node:assert/strict";
 import { stat } from "node:fs/promises";
 import test from "node:test";
@@ -10,7 +11,7 @@ import type { GaslessDependencies } from "../../src/gasless/service.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js";
-import { ensureWallet, makeCore, prepareTransfer, temporaryState, TestNative, TestRpc } from "./helpers.js";
+import { ensureWallet, makeCore, prepareTransfer, temporaryState, TestRpc } from "./helpers.js";
 
 const OPERATION_ID = "a".repeat(64);
 const OBSERVATION_ENV = "APN_ETHEREUM_ARCHIVE_RPC_URL";
@@ -118,7 +119,7 @@ test("CLI and MCP reject invalid or conflicting observation options before runti
 test("core rejects observation RPC mode for a non-Local operation before recovery effects", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const native = new TestNative();
+  const native = new TestNative(temporary.root);
   const rpc = new TestRpc();
   const core = makeCore({ root: temporary.root, native, rpc });
   await ensureWallet(core);

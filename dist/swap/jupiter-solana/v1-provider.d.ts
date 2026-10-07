@@ -7,6 +7,8 @@ export interface JupiterV1ExactInRequest {
     readonly recipient: string;
     readonly slippageBps: number;
     readonly computeUnitPriceMicroLamports: number;
+    /** Internal finite legacy-lane filter; never authority to admit a returned pool. */
+    readonly maximumInnerAccounts?: 12;
 }
 /** Only official V1 price/build reads. No generic endpoint, credentials, signer or sender. */
 export declare class JupiterV1ReadOnlyProvider {

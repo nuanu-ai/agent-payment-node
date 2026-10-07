@@ -20,6 +20,8 @@ export class JupiterV1ReadOnlyProvider {
         const url = new URL("https://api.jup.ag/swap/v1/quote");
         for (const [k, v] of Object.entries({ inputMint: request.inputMint, outputMint: request.outputMint, amount: request.amount, slippageBps: String(request.slippageBps), swapMode: "ExactIn", dexes: "Whirlpool", onlyDirectRoutes: "true", instructionVersion: "V1", platformFeeBps: "0" }))
             url.searchParams.set(k, v);
+        if (request.maximumInnerAccounts !== undefined)
+            url.searchParams.set("maxAccounts", String(request.maximumInnerAccounts));
         return decodeJupiterV1Quote(await this.read(url, "GET"));
     }
     async buildExactIn(request, quote) {
@@ -64,6 +66,8 @@ export class JupiterV1ReadOnlyProvider {
 }
 export function validateJupiterV1Request(request) { validateRequest(request); }
 function validateRequest(request) {
+    if (request.maximumInnerAccounts !== undefined && request.maximumInnerAccounts !== 12)
+        invalid("Jupiter V1 inner account filter is outside the finite legacy lane.");
     canonicalAddress(request.taker);
     canonicalAddress(request.recipient);
     if (request.taker !== request.recipient || request.inputMint !== WRAPPED_SOL_MINT || request.outputMint !== SOLANA_USDC_MINT || atomic(request.amount) > (1n << 64n) - 1n || !Number.isSafeInteger(request.slippageBps) || request.slippageBps < 0 || request.slippageBps >= 10000 || !Number.isSafeInteger(request.computeUnitPriceMicroLamports) || request.computeUnitPriceMicroLamports < 0 || request.computeUnitPriceMicroLamports > 1000)

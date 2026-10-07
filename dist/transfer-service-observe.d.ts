@@ -6,6 +6,8 @@ import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 export interface TransferObserveLifecycle {
     followUsage<T extends OperationRecord>(operation: T): Promise<T>;
     transition(operation: LocalOperationRecord, state: OperationRecord["state"], terminal: boolean, reason: string, proofClass: string, extra?: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease">>, rpcReceipt?: RpcReceipt): Promise<LocalOperationRecord>;
+    /** Caller protects and releases its exact reservation without recursively taking the bucket lock. */
+    persistNoPrivateEntry(operation: LocalOperationRecord): Promise<LocalOperationRecord>;
     failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never>;
 }
 /** Observation/recovery implementation behind the unchanged TransferService facade. */
@@ -22,9 +24,7 @@ export declare class TransferServiceObservation {
     status(operationIdInput: string): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;
     inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord>;
-    private proveSuperseding;
     requiredOperation(operationId: string): Promise<OperationRecord>;
-    private effectFor;
 }
 export type LocalOperationRecord = OperationRecord & {
     readonly providerDirect?: never;

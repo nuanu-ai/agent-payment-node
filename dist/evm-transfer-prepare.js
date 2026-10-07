@@ -1,3 +1,4 @@
+import { DirectPublicEffectJournal } from "./direct-public-effect.js";
 import { evmNativeCustody } from "./evm-native-custody.js";
 import { hashObject } from "./canonical.js";
 import { APPROVAL_WINDOW_MS, STATE_VERSION } from "./constants.js";
@@ -124,6 +125,7 @@ export async function prepareEvmTransfer(context, operations, request, persist, 
                 state: initial.state, terminal: false, reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial),
             });
             await persist(operation);
+            await new DirectPublicEffectJournal(context.state).prepare(operation);
             return publicOperation(operation);
         });
     });

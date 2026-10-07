@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { keccak256 } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { evmCustodyPayload } from "./evm-transfer-approval.js";
+import { directCustodyPayload } from "./direct-public-effect.js";
 import type { Hex, OperationRecord } from "./model.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 
@@ -20,7 +20,7 @@ export class EvmDirectSubmissionJournal extends SecureStateStore {
   }
 
   async fence(operation: OperationRecord, raw: Hex): Promise<void> {
-    if (operation.evm === undefined || operation.state !== "signed_not_submitted" || operation.transactionHash === undefined ||
+    if (operation.state !== "signed_not_submitted" || operation.transactionHash === undefined ||
       operation.rawTransactionHash !== operation.transactionHash || keccak256(raw) !== operation.transactionHash) corrupt();
     const path = this.path(operation);
     await this.ensureDirectory(join("direct-submissions", operation.profileHash));
@@ -36,7 +36,7 @@ export class EvmDirectSubmissionJournal extends SecureStateStore {
 
   private binding(operation: OperationRecord) {
     return { operationId: operation.operationId, profileHash: operation.profileHash, fingerprint: operation.fingerprint,
-      signedPayloadHash: hashObject(evmCustodyPayload(operation)), transactionHash: operation.transactionHash, rawTransactionHash: operation.rawTransactionHash };
+      signedPayloadHash: hashObject(directCustodyPayload(operation)), transactionHash: operation.transactionHash, rawTransactionHash: operation.rawTransactionHash };
   }
   private path(operation: OperationRecord): string {
     stateIdentifier(operation.profileHash, "submission profile hash"); stateIdentifier(operation.operationId, "submission operation id");

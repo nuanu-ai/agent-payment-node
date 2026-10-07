@@ -10,4 +10,22 @@ export const JUPITER_V1_RUNTIME_PROGRAM_PINS = Object.freeze([
 ]);
 export const JUPITER_V1_WHIRLPOOL_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({ schemaVersion: SWAP_MECHANISM_PIN_SCHEMA, protocolFamily: "jupiter_solana", networkFamily: "solana", chain: `solana:${SOLANA_MAINNET_GENESIS}`, protocolVersion: "jup6-route-v1-whirlpool.1", constructorKind: "builder_api", constructorIdentity: "https://api.jup.ag/swap/v1/swap-instructions", constructorVersion: "1.0.0", routerProgramIdentity: JUPITER_V6_PROGRAM, auxiliaryContractProgramIdentities: [JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_POOL, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM], quoteSchemaVersion: "jupiter-v1-exact-in-whirlpool.1", transactionSchemaVersion: "v0-jup6-route-whirlpool-wrap-close.1", validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc", validationPolicyVersion: "1.0.0" }));
 export const JUPITER_V1_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool.2026-10-07", pins: [JUPITER_V1_WHIRLPOOL_MECHANISM_PIN] });
+/** Additional finite route; the historical 83 mechanism and registry above remain unchanged. */
+export const JUPITER_V1_WHIRLPOOL_V2_POOL = "Esvfxt3jMDdtTZqLF1fqRhDjzM8Bpr7fZxJMrK69PB7e";
+export const JUPITER_V1_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+export const JUPITER_V1_MEMO_PIN = Object.freeze({ programId: JUPITER_V1_MEMO_PROGRAM, loader: "BPFLoader2111111111111111111111111111111111", byteLength: 74800, payloadHash: "f520eaf096361abbb9639ea4dc3e5388a87b9330e121f476607b87c46ef67954" });
+export const JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({ ...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, protocolVersion: "jup6-route-v1-whirlpool-swap-v2.1", auxiliaryContractProgramIdentities: Object.freeze([JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_WHIRLPOOL_V2_POOL, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM, JUPITER_V1_MEMO_PROGRAM]), quoteSchemaVersion: "jupiter-v1-exact-in-whirlpool-swap-v2.1", transactionSchemaVersion: "v0-jup6-route-whirlpool-swap-v2-wrap-close.1", validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc-whirlpool-swap-v2" }));
+export const JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-swap-v2.2026-10-08", pins: [JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN] });
+/** A separately admitted pool. Historical mechanism and registry digests above stay exact. */
+export const JUPITER_V1_WHIRLPOOL_4H_POOL = "4HppGTweoGQ8ZZ6UcCgwJKfi5mJD9Dqwy6htCpnbfBLW";
+export const JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({ ...JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN,
+    protocolVersion: "jup6-route-v1-whirlpool-swap-v2-4h.1",
+    auxiliaryContractProgramIdentities: Object.freeze([JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_WHIRLPOOL_4H_POOL, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM, JUPITER_V1_MEMO_PROGRAM]),
+    validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc-whirlpool-swap-v2-4h" }));
+export const JUPITER_V1_WHIRLPOOL_4H_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-swap-v2-4h.2026-10-08", pins: [JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN] });
+export const JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS = Object.freeze([
+    Object.freeze({ programId: ASSOCIATED_TOKEN_PROGRAM, loader: "BPFLoader2111111111111111111111111111111111", payloadHash: "6804554e69fd3a58caa191dc4a58f4c67223d30ca28ab8987f39fc18d2f7374d" }),
+    Object.freeze({ programId: COMPUTE_BUDGET_PROGRAM, loader: "NativeLoader1111111111111111111111111111111", payloadHash: "005950c007e8e550a16beddf836f0082d26d197f5f645ff7c04a5c8d171cf8a1" }),
+    Object.freeze({ programId: SYSTEM_PROGRAM, loader: "NativeLoader1111111111111111111111111111111", payloadHash: "c94b792a6d8b25d3e53ea94d8b80111735ed80d6a7dc8deb937cd342707f5f03" }),
+]);
 //# sourceMappingURL=v1-pins.js.map

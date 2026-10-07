@@ -147,6 +147,26 @@ test("a batched read returns HTTP 429 after one POST without retrying", async ()
   assert.equal(budget.physicalRequests, 1);
 });
 
+for (const endpoint of ["https://api.mainnet-beta.solana.com", "https://api.mainnet-beta.solana.com/"]) test(`public mainnet account compatibility charges each single POST at ${endpoint}`, async () => {
+  const methods: string[] = [], budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 500, wait: ms => new Promise(resolve => setTimeout(resolve, ms)) });
+  const rpc = new SolanaRpc(endpoint, async (_url, init) => {
+    const request = JSON.parse(String(init?.body)); assert.equal(Array.isArray(request), false); methods.push(request.method);
+    return json({ jsonrpc: "2.0", id: request.id, result: request.method });
+  }, budget);
+  assert.deepEqual(await rpc.batch([{ method: "getAccountInfo", params: [] }, { method: "getMultipleAccounts", params: [] }]), ["getAccountInfo", "getMultipleAccounts"]);
+  assert.deepEqual(methods, ["getAccountInfo", "getMultipleAccounts"]); assert.equal(budget.physicalRequests, 2); assert.equal(budget.logicalCalls, 2);
+});
+test("public mainnet account compatibility stops on its first cooldown response", async () => {
+  let posts = 0; const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 500, wait: ms => new Promise(resolve => setTimeout(resolve, ms)) });
+  const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", async () => { posts++; return json({ error: "cooldown" }, 429, { "retry-after": "10" }); }, budget);
+  await assert.rejects(rpc.batch([{ method: "getAccountInfo", params: [] }, { method: "getMultipleAccounts", params: [] }]), { code: "APN_RPC_RATE_LIMITED" });
+  assert.equal(posts, 1); assert.equal(budget.physicalRequests, 1); assert.equal(budget.logicalCalls, 1);
+});
+test("public mainnet compatibility cannot dispatch an effect hidden after a read", async () => {
+  let posts = 0; const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", async () => { posts++; throw Error("transport forbidden"); });
+  await assert.rejects(rpc.batch([{ method: "getAccountInfo", params: [] }, { method: "sendTransaction" as never, params: [] }])); assert.equal(posts, 0);
+});
+
 test("persistent Solana pacing serializes concurrent commands and survives a fresh client", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const firstState = new StateStore(temporary.root); await firstState.initialize();

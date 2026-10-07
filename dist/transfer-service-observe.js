@@ -1,12 +1,16 @@
+import { AssetUsageLedger } from "./asset-usage-ledger.js";
+import { walletCustodyLock } from "./encrypted-wallet-store.js";
+import { DirectPublicEffectJournal } from "./direct-public-effect.js";
+import { checkTransferApproval } from "./transfer-approval-check.js";
+import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
+import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
-import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
 import { requireEvmRpc } from "./evm-direct.js";
 import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
-import { checkEvmTransferFunding, evmCustodyPayload } from "./evm-transfer-approval.js";
-import { parseAtomic } from "./money.js";
-import { canonicalOperationId, hasExactTransfer, parseEffect, publicOperation, publicReceipt, verifyEffect } from "./transfer-policy.js";
+import { checkEvmTransferFunding } from "./evm-transfer-approval.js";
+import { canonicalOperationId, hasExactTransfer, publicOperation, publicReceipt } from "./transfer-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
@@ -23,17 +27,28 @@ export class TransferServiceObservation {
         this.providerDirectRecovery = new ProviderDirectRequestRecoveryService(context);
     }
     async submitAndInspect(operationInput, rawTransaction) {
-        if (operationInput.evm !== undefined) {
-            const journal = new EvmDirectSubmissionJournal(this.context.state.root);
-            return await journal.withLocks([`submission:${operationInput.operationId}`], async () => {
-                if (await journal.exists(operationInput))
-                    return await this.inspectReceipt(operationInput, this.context.requireRpc());
+        const journal = new EvmDirectSubmissionJournal(this.context.state.root);
+        return await journal.withLocks([`submission:${operationInput.operationId}`], async () => {
+            await new DirectPublicEffectJournal(this.context.state).effect(operationInput);
+            if (await journal.exists(operationInput))
+                return await this.inspectReceipt(operationInput, this.context.requireRpc());
+            if (operationInput.evm !== undefined) {
+                await new DirectAllowlistGate(this.context).confirm(evmAllowlistSubject(operationInput), operationInput.allowlist);
                 await checkEvmTransferFunding(this.context.requireRpc(), operationInput, false);
-                await journal.fence(operationInput, rawTransaction);
-                return await this.dispatchAndInspect(operationInput, rawTransaction);
-            });
-        }
-        return await this.dispatchAndInspect(operationInput, rawTransaction);
+            }
+            else {
+                await checkTransferApproval(this.context.requireRpc(), operationInput, async () => {
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Signed direct funding or nonce changed; retain the exact effect for observation.");
+                }, this.context.state.root);
+            }
+            await new DirectPublicEffectJournal(this.context.state).effect(operationInput);
+            await journal.fence(operationInput, rawTransaction);
+            await new DirectPublicEffectJournal(this.context.state).effect(operationInput);
+            if (operationInput.evm !== undefined)
+                await new DirectAllowlistGate(this.context).confirm(evmAllowlistSubject(operationInput), operationInput.allowlist);
+            await new DirectPublicEffectJournal(this.context.state).prepared(operationInput);
+            return await this.dispatchAndInspect(operationInput, rawTransaction);
+        });
     }
     async dispatchAndInspect(operationInput, rawTransaction) {
         let operation = operationInput;
@@ -76,7 +91,7 @@ export class TransferServiceObservation {
             throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
         }
         const localFound = requiredLocal(found);
-        const { profile, profileHash } = localFound;
+        const { profileHash } = localFound;
         return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
             let operation = requiredLocal(await this.requiredOperation(operationId));
             if (observeOnly && !(operation.evm !== undefined && operation.state === "signed_not_submitted") && operation.state !== "submitted_pending" && operation.state !== "unknown_finality" &&
@@ -85,56 +100,40 @@ export class TransferServiceObservation {
             }
             if (operation.terminal)
                 return publicOperation(await this.lifecycle.followUsage(operation));
-            if (operation.evm !== undefined && operation.transactionHash !== undefined)
-                await new EvmDirectSubmissionJournal(this.context.state.root).exists(operation);
-            if (operation.state === "unknown_finality") {
-                return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
-            }
-            if (observeOnly && operation.evm === undefined)
-                return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
-            if (operation.evm !== undefined) {
-                if (!observeOnly)
-                    await this.lifecycle.followUsage(operation);
-                if (operation.state === "started") {
-                    const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
-                        profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(evmCustodyPayload(operation)),
-                    }));
-                    if (isPlainRecord(stored) && exactKeys(stored, ["found"]) && stored.found === false)
-                        await this.lifecycle.failBeforeEffect(operation, "no_durable_signature_created");
-                    const recovered = parseEffect(stored);
-                    await verifyEffect(recovered, operation);
-                    operation = await this.lifecycle.transition(operation, "signed_not_submitted", false, "same_signature_recovered", "native_transaction_hash", {
-                        transactionHash: recovered.transactionHash, rawTransactionHash: recovered.rawTransactionHash,
-                    });
-                }
-                if (operation.state !== "awaiting_approval") {
-                    if (operation.transactionHash === undefined || operation.rawTransactionHash === undefined)
-                        throw new ApnError("APN_STATE_CORRUPT", "Signed operation lacks its durable hash.");
-                    await new EvmDirectSubmissionJournal(this.context.state.root).exists(operation);
-                    if (operation.state === "signed_not_submitted")
-                        operation = await this.lifecycle.transition(operation, "unknown_finality", false, "signed_recovery_observation_only", "dispatch_history_ambiguous");
-                    return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
-                }
-            }
-            if (operation.state === "awaiting_approval") {
+            if (operation.state === "awaiting_approval")
                 throw new ApnError("APN_OPERATION_BLOCKED", "Operation still requires transfer approve.");
-            }
-            if (operation.transactionHash === undefined || operation.rawTransactionHash === undefined) {
-                throw new ApnError("APN_STATE_CORRUPT", "Signed operation is missing its public effect binding.");
-            }
-            operation = await this.inspectReceipt(operation, this.context.requireRpc());
-            if (operation.terminal)
-                return publicOperation(operation);
-            const superseding = await this.proveSuperseding(operation, this.context.requireRpc());
-            if (superseding !== null)
-                return publicOperation(superseding);
-            const effect = await this.effectFor(operation);
-            await verifyEffect(effect, operation);
-            if (effect.transactionHash !== operation.transactionHash || effect.rawTransactionHash !== operation.rawTransactionHash) {
-                throw new ApnError("APN_NATIVE_PROTOCOL", "Recovered effect material differs from the durable binding.");
-            }
-            operation = await this.submitAndInspect(operation, effect.rawTransaction);
-            return publicOperation(operation);
+            const publicJournal = new DirectPublicEffectJournal(this.context.state);
+            await this.context.state.withLocks([walletCustodyLock(this.context.state, operation.profile)], async () => {
+                if (!await publicJournal.noPrivateEntry(operation))
+                    return;
+                const reservation = operation.allowlistLease?.reservation;
+                // Finish the public proof before taking the bucket lock. A concurrent ledger transition
+                // is then compared under that lock, which remains held through terminal persistence and release.
+                if (!await publicJournal.noPrivateEntry(operation))
+                    throw new ApnError("APN_OPERATION_BLOCKED", "No-private-entry proof disappeared.");
+                if (reservation === undefined) {
+                    await this.lifecycle.transition(operation, "failed_before_effect", true, "native_approval_returned_before_private_entry", "durable_native_no_private_entry");
+                }
+                else {
+                    operation = await new AssetUsageLedger(this.context.state.root).releaseDirectReservedAfter(reservation, async () => {
+                        const updated = await this.lifecycle.persistNoPrivateEntry(operation);
+                        const last = updated.transitions.at(-1);
+                        return { value: updated, now: new Date(last.at), outcomeDigest: last.hash };
+                    });
+                    await this.lifecycle.followUsage(operation);
+                }
+                throw new ApnError("APN_REPREPARE_REQUIRED", "Native returned before private entry; prepare a new operation.");
+            });
+            // Missing public proof cannot establish absence of a signature or release an occupied nonce.
+            const effect = await publicJournal.effect(operation);
+            if (operation.state === "started")
+                operation = await this.lifecycle.transition(operation, "signed_not_submitted", false, "same_public_signature_recovered", "public_native_transaction_hash", effect);
+            if (operation.transactionHash === undefined || operation.rawTransactionHash === undefined)
+                throw new ApnError("APN_STATE_CORRUPT", "Signed operation lacks its public effect binding.");
+            await new EvmDirectSubmissionJournal(this.context.state.root).exists(operation);
+            if (operation.state === "signed_not_submitted")
+                operation = await this.lifecycle.transition(operation, "unknown_finality", false, "signed_recovery_observation_only", "dispatch_history_ambiguous");
+            return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
         });
     }
     async recoverProviderRequest(operationIdInput, providerRequestId) {
@@ -210,28 +209,11 @@ export class TransferServiceObservation {
         }
         return await this.lifecycle.transition(operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer", operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_transfer_event_and_block_balance_deltas", {}, receipt);
     }
-    async proveSuperseding(operation, rpc) {
-        const latest = parseAtomic(operation.evm === undefined ? await rpc.getLatestConfirmedNonce(operation.walletAddress) :
-            await requireEvmRpc(rpc).nonce(operation.chainId, operation.walletAddress, "latest"));
-        if (latest <= parseAtomic(operation.economics.nonceAtomic))
-            return null;
-        const hash = operation.evm === undefined ? await rpc.getConfirmedTransactionAtNonce(operation.walletAddress, operation.economics.nonceAtomic, operation.preparedBlockNumberAtomic) : await requireEvmRpc(rpc).confirmedAtNonce(operation.chainId, operation.walletAddress, operation.economics.nonceAtomic, operation.preparedBlockNumberAtomic);
-        if (hash !== null && hash.toLowerCase() !== operation.transactionHash?.toLowerCase()) {
-            return await this.lifecycle.transition(operation, "failed_proven_superseded", true, "confirmed_different_transaction_at_nonce", "confirmed_superseding_nonce");
-        }
-        return await this.lifecycle.transition(operation, "unknown_finality", false, hash === null ? "confirmed_nonce_advanced_unresolved" : "own_transaction_confirmed_receipt_unavailable", "manual_finality_resolution_required");
-    }
     async requiredOperation(operationId) {
         const operation = await this.context.state.findOperation(operationId);
         if (operation === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
         return operation;
-    }
-    async effectFor(operation) {
-        return parseEffect(await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
-            profile: operation.profile, operationId: operation.operationId, fingerprint: operation.fingerprint,
-            expectedTransactionHash: operation.transactionHash, expectedRawTransactionHash: operation.rawTransactionHash,
-        })));
     }
 }
 function evmEffectFailureReason(error) {

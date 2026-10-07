@@ -740,7 +740,7 @@ test("native pre-sign refuses when its frozen nonce becomes token-owned", async 
   new EncryptedWalletStore(native.state, native.wrapping).clear(loaded.secret); assert.equal(native.rpc.submissions.length, 0);
 });
 
-test("signer-time token nonce race retains ambiguity until explicit no-signature recovery", async (t) => {
+test("signer-time token nonce race retains ambiguity without authenticated public no-private-entry evidence", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); let inject: (() => Promise<void>) | null = null, signerCalls = 0, effectReads = 0;
   const native = evmCore(temporary.root, undefined, undefined, undefined, (port) => ({ request: async (request) => {
     if (request.operation === "directTransfer.approveAndSign") { signerCalls += 1; const race = inject; inject = null; await race?.(); }
@@ -767,16 +767,18 @@ test("signer-time token nonce race retains ambiguity until explicit no-signature
     return await port.request(request);
   } }));
   const beforeRecoveryLoads = native.wrapping.loads;
-  await assert.rejects(restarted.core.transfer.resume(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
-  const failed = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id); assert.ok(failed);
-  assert.equal(failed.state, "failed_before_effect"); assert.equal(failed.terminal, true); assert.equal(failed.reason, "no_durable_signature_created");
-  assert.equal(failed.transactionHash, undefined); assert.equal(failed.rawTransactionHash, undefined);
-  assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, beforeRecoveryLoads + 1);
-  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "failed_before_effect");
-  const afterRecoveryLoads = native.wrapping.loads;
-  assert.equal((await native.core.transfer.approve(prepared.operation_id) as { state: string }).state, "failed_before_effect");
-  assert.equal((await restarted.core.transfer.approve(prepared.operation_id) as { state: string }).state, "failed_before_effect");
-  assert.equal(signerCalls, 1); assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, afterRecoveryLoads);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assert.rejects(restarted.core.transfer.resume(prepared.operation_id), (error: any) =>
+      error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "direct_public_evidence_missing");
+    assert.deepEqual(await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id), started);
+    assert.equal((await usage.load(asset, reservation.reservationId))?.state, "reserved");
+  }
+  // Entering custody without producing a signature is not a public proof of absence.
+  // Recovery retains the exact nonce and reservation instead of reopening encrypted custody.
+  await assert.rejects(native.core.transfer.approve(prepared.operation_id), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(restarted.core.transfer.approve(prepared.operation_id), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(signerCalls, 1); assert.equal(effectReads, 0);
+  assert.equal(native.wrapping.loads, beforeRecoveryLoads);
   assert.equal(restarted.approval.intents.length, 0); assert.equal(native.rpc.submissions.length, 0);
 });
 
@@ -806,17 +808,19 @@ test("persisted native effect response loss recovers the same hash by observatio
     if (request.operation === "effectMaterial.get") effectReads += 1;
     return await port.request(request);
   } }));
+  const beforeRecoveryLoads = native.wrapping.loads;
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "unknown_finality");
+  assert.equal(native.wrapping.loads, beforeRecoveryLoads, "public recovery never reopens encrypted custody");
   const recovered = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id); assert.ok(recovered);
   assert.equal(recovered.transactionHash, persisted.transactionHash); assert.equal(recovered.rawTransactionHash, persisted.rawTransactionHash);
-  assert.equal(recovered.fingerprint, started!.fingerprint); assert.equal(effectReads, 1);
+  assert.equal(recovered.fingerprint, started!.fingerprint); assert.equal(effectReads, 0);
   assert.equal((await usage.load(asset, reservation.reservationId))?.state, "unknown_finality");
   const afterRecoveryLoads = native.wrapping.loads;
   for (const observeOnly of [undefined, true] as const) {
     assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, observeOnly) as { state: string }).state, "unknown_finality");
   }
   await assert.rejects(restarted.core.transfer.approve(prepared.operation_id), { code: "APN_OPERATION_BLOCKED" });
-  assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, afterRecoveryLoads); assert.equal(signerCalls, 1);
+  assert.equal(effectReads, 0); assert.equal(native.wrapping.loads, afterRecoveryLoads); assert.equal(signerCalls, 1);
   assert.equal(native.rpc.submissions.length, 0); assert.equal(restarted.approval.intents.length, 0);
   // Independent fake read evidence proves same-hash finalization without creating a dispatch witness.
   const { EVM_BLOCK_HASH } = await import("./evm-helpers.js");
@@ -831,7 +835,7 @@ test("persisted native effect response loss recovers the same hash by observatio
   assert.equal((await usage.load(asset, reservation.reservationId))?.state, "finalized");
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
   assert.equal(native.rpc.submissions.length, 0); assert.equal(restarted.approval.intents.length, 0);
-  assert.equal(signerCalls, 1); assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, afterRecoveryLoads);
+  assert.equal(signerCalls, 1); assert.equal(effectReads, 0); assert.equal(native.wrapping.loads, afterRecoveryLoads);
 });
 
 test("token USDT behavior pins reject deprecated and fee-bearing state", async () => {

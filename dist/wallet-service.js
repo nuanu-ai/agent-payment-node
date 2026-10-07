@@ -1,3 +1,4 @@
+import { EncryptedWalletStore } from "./encrypted-wallet-store.js";
 import { BASE_USDC, CHAIN_CAIP2, ETH_DECIMALS, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
@@ -22,7 +23,19 @@ export class WalletService {
             wrapping?.fill(0);
             return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
         }
-        return await this.initializedStatus(profile, profileHash);
+        // Explicit custody diagnostic. Public wallet status does not load wrapping secrets.
+        const probe = this.context.requireKeychainProbe();
+        const wallets = new EncryptedWalletStore(this.context.state, { load: () => probe.load(),
+            create: async () => { throw new ApnError("APN_INTERNAL", "Keychain diagnostics cannot create custody material."); } });
+        const loaded = await wallets.describe(profile);
+        if (loaded === null)
+            throw new ApnError("APN_STATE_CORRUPT", "The public wallet has no encrypted custody material.");
+        try {
+            return await this.initializedStatus(profile, profileHash);
+        }
+        finally {
+            wallets.clear(loaded.secret);
+        }
     }
     async ensure(profileInput) {
         const profile = canonicalProfile(profileInput);
