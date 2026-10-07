@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, readdir, readlink, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -480,7 +480,7 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
   const entrypoint = resolve("bin/apn.js");
   const profile = `no-effect-${randomBytes(16).toString("hex")}`;
   const effectiveRoot = resolve(userInfo().homedir, ".apn");
-  const before = await treeDigest(effectiveRoot);
+  const before = await treeMetadataDigest(effectiveRoot);
   const result = spawnSync(entrypoint, ["wallet", "status", "--profile", profile], {
     encoding: "utf8",
     cwd: temporary.base,
@@ -496,13 +496,13 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
     proof_class: "encrypted_apn_home_status",
     next_actions: ["apn wallet ensure"],
   });
-  assert.equal(await treeDigest(effectiveRoot), before, "HOME is ignored by design; the effective-user ~/.apn tree must remain unchanged");
+  assert.equal(await treeMetadataDigest(effectiveRoot), before, "HOME is ignored by design; the effective-user ~/.apn tree metadata must remain unchanged");
   await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
 });
 
 test("actual compiled Stargate status needs no RPC environment and creates no state", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const effectiveRoot = resolve(userInfo().homedir, ".apn");
-  const before = await treeDigest(effectiveRoot), environment = { ...process.env };
+  const before = await treeMetadataDigest(effectiveRoot), environment = { ...process.env };
   delete environment.APN_ETHEREUM_RPC_URL; delete environment.APN_UNICHAIN_RPC_URL;
   const result = spawnSync(resolve("bin/apn.js"), ["stargate", "native", "status", "--operation", "d".repeat(64)], {
     encoding: "utf8", cwd: temporary.base, env: environment,
@@ -510,7 +510,7 @@ test("actual compiled Stargate status needs no RPC environment and creates no st
   assert.equal(result.status, 1, result.stderr ?? result.error?.message); assert.equal(result.stderr, "");
   const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly error: { readonly code: string } };
   assert.equal(envelope.ok, false); assert.equal(envelope.error.code, "APN_OPERATION_NOT_FOUND");
-  assert.equal(await treeDigest(effectiveRoot), before); await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
+  assert.equal(await treeMetadataDigest(effectiveRoot), before); await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
 });
 
 test("actual compiled discovery is raw and no-effect with empty or unwritable caller HOME", async (t) => {
@@ -518,7 +518,7 @@ test("actual compiled discovery is raw and no-effect with empty or unwritable ca
   t.after(temporary.cleanup);
   const entrypoint = resolve("bin/apn.js");
   const effectiveRoot = resolve(userInfo().homedir, ".apn");
-  const before = await treeDigest(effectiveRoot);
+  const before = await treeMetadataDigest(effectiveRoot);
   const unwritableHome = join(temporary.base, "unwritable-home");
   await mkdir(unwritableHome, { mode: 0o700 });
   await chmod(unwritableHome, 0o000);
@@ -564,7 +564,7 @@ test("actual compiled discovery is raw and no-effect with empty or unwritable ca
   }
 
   await chmod(unwritableHome, 0o700);
-  assert.equal(await treeDigest(effectiveRoot), before, "discovery must not alter the effective-user ~/.apn tree");
+  assert.equal(await treeMetadataDigest(effectiveRoot), before, "discovery must not alter effective-user ~/.apn tree metadata");
   await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
   await assert.rejects(stat(join(unwritableHome, ".apn")), { code: "ENOENT" });
 });
@@ -597,6 +597,7 @@ test("wallet status for an absent unique profile is read-only before initializat
 
   const unsafeRoot = join(temporary.base, "unsafe-state");
   await mkdir(unsafeRoot, { mode: 0o755 });
+  await chmod(unsafeRoot, 0o755);
   const unsafe = await runCli(["wallet", "status", "--profile", "unsafe-root-agent"], {}, { stateRoot: unsafeRoot, native });
   assert.equal(unsafe.ok, false);
   assert.equal(unsafe.error?.code, "APN_STATE_SECURITY");
@@ -661,7 +662,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-async function treeDigest(root: string): Promise<string> {
+async function treeMetadataDigest(root: string): Promise<string> {
   const rows: unknown[] = [];
   const visit = async (path: string, relativePath: string): Promise<void> => {
     let stats;
@@ -674,22 +675,24 @@ async function treeDigest(root: string): Promise<string> {
       }
       throw error;
     }
-    const mode = stats.mode & 0o7777;
-    if (stats.isSymbolicLink()) {
-      rows.push({ path: relativePath || ".", type: "symlink", mode, target: await readlink(path) });
-      return;
-    }
+    const metadata = {
+      path: relativePath || ".",
+      dev: stats.dev,
+      ino: stats.ino,
+      ctimeMs: stats.ctimeMs,
+      mtimeMs: stats.mtimeMs,
+      mode: stats.mode & 0o7777,
+      size: stats.size,
+    };
     if (stats.isDirectory()) {
-      rows.push({ path: relativePath || ".", type: "directory", mode });
-      for (const name of (await readdir(path)).sort()) await visit(join(path, name), relativePath === "" ? name : join(relativePath, name));
+      const entries = (await readdir(path)).sort();
+      rows.push({ ...metadata, type: "directory", entries });
+      for (const name of entries) await visit(join(path, name), relativePath === "" ? name : join(relativePath, name));
       return;
     }
-    if (stats.isFile()) {
-      const bytes = await readFile(path);
-      rows.push({ path: relativePath, type: "file", mode, size: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex") });
-      return;
-    }
-    rows.push({ path: relativePath, type: "other", mode, size: stats.size });
+    if (stats.isSymbolicLink()) rows.push({ ...metadata, type: "symlink" });
+    else if (stats.isFile()) rows.push({ ...metadata, type: "file" });
+    else rows.push({ ...metadata, type: "other" });
   };
   await visit(root, "");
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
