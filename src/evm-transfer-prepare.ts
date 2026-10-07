@@ -1,3 +1,4 @@
+import { evmNativeCustody } from "./evm-native-custody.js";
 import { hashObject } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, STATE_VERSION } from "./constants.js";
@@ -122,7 +123,7 @@ export async function prepareEvmTransfer(
     const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();
     const binding: EvmDirectBinding = {
       schemaVersion: "apn.evm-direct.v1", asset: balance.asset, transactionTo: transaction.to,
-      valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote,
+      valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote, nativeCustody: await evmNativeCustody(state, profile),
     };
     const frozen = {
       operationId, profile, chainId: selection.chainId, token: balance.asset.address, walletAddress: wallet.address,

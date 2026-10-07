@@ -1,3 +1,4 @@
+import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
@@ -22,10 +23,21 @@ export class TransferServiceObservation {
         this.providerDirectRecovery = new ProviderDirectRequestRecoveryService(context);
     }
     async submitAndInspect(operationInput, rawTransaction) {
+        if (operationInput.evm !== undefined) {
+            const journal = new EvmDirectSubmissionJournal(this.context.state.root);
+            return await journal.withLocks([`submission:${operationInput.operationId}`], async () => {
+                if (await journal.exists(operationInput))
+                    return await this.inspectReceipt(operationInput, this.context.requireRpc());
+                await checkEvmTransferFunding(this.context.requireRpc(), operationInput, false);
+                await journal.fence(operationInput, rawTransaction);
+                return await this.dispatchAndInspect(operationInput, rawTransaction);
+            });
+        }
+        return await this.dispatchAndInspect(operationInput, rawTransaction);
+    }
+    async dispatchAndInspect(operationInput, rawTransaction) {
         let operation = operationInput;
         const rpc = this.context.requireRpc();
-        if (operation.evm !== undefined)
-            await checkEvmTransferFunding(rpc, operation, false);
         try {
             const returnedHash = await rpc.submitRawTransaction(rawTransaction);
             if (returnedHash.toLowerCase() !== operation.transactionHash?.toLowerCase()) {
@@ -67,20 +79,22 @@ export class TransferServiceObservation {
         const { profile, profileHash } = localFound;
         return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
             let operation = requiredLocal(await this.requiredOperation(operationId));
-            if (observeOnly && operation.state !== "submitted_pending" && operation.state !== "unknown_finality" &&
+            if (observeOnly && !(operation.evm !== undefined && operation.state === "signed_not_submitted") && operation.state !== "submitted_pending" && operation.state !== "unknown_finality" &&
                 !(operation.terminal && operation.transactionHash !== undefined)) {
                 throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires an already submitted local direct transfer.");
             }
             if (operation.terminal)
                 return publicOperation(await this.lifecycle.followUsage(operation));
+            if (operation.evm !== undefined && operation.transactionHash !== undefined)
+                await new EvmDirectSubmissionJournal(this.context.state.root).exists(operation);
             if (operation.state === "unknown_finality") {
                 return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
             }
-            if (observeOnly)
+            if (observeOnly && operation.evm === undefined)
                 return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
             if (operation.evm !== undefined) {
-                await this.lifecycle.followUsage(operation);
-                await requireEvmRpc(this.context.requireRpc()).assertChain(operation.chainId);
+                if (!observeOnly)
+                    await this.lifecycle.followUsage(operation);
                 if (operation.state === "started") {
                     const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
                         profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(evmCustodyPayload(operation)),
@@ -93,8 +107,14 @@ export class TransferServiceObservation {
                         transactionHash: recovered.transactionHash, rawTransactionHash: recovered.rawTransactionHash,
                     });
                 }
-                if (operation.state !== "awaiting_approval")
-                    await verifyEffect(await this.effectFor(operation), operation);
+                if (operation.state !== "awaiting_approval") {
+                    if (operation.transactionHash === undefined || operation.rawTransactionHash === undefined)
+                        throw new ApnError("APN_STATE_CORRUPT", "Signed operation lacks its durable hash.");
+                    await new EvmDirectSubmissionJournal(this.context.state.root).exists(operation);
+                    if (operation.state === "signed_not_submitted")
+                        operation = await this.lifecycle.transition(operation, "unknown_finality", false, "signed_recovery_observation_only", "dispatch_history_ambiguous");
+                    return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
+                }
             }
             if (operation.state === "awaiting_approval") {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Operation still requires transfer approve.");

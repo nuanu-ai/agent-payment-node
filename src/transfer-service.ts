@@ -1,5 +1,6 @@
+import { assertEvmNativeCustody } from "./evm-native-custody.js";
 import { TransferServiceObservation, requiredLocal, type LocalOperationRecord } from "./transfer-service-observe.js";
-import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
+import { hashObject } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -175,12 +176,18 @@ export class TransferService {
       if (operation.state !== "awaiting_approval") {
         throw new ApnError("APN_OPERATION_BLOCKED", "Operation is already signed; use operation resume.");
       }
+      if (operation.evm !== undefined && operation.evm.nativeCustody === undefined) {
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Prepare a new generic transfer with a frozen native custody binding.");
+      }
       if (this.context.clock.now().getTime() >= Date.parse(operation.expiresAt)) {
         await this.failBeforeEffect(operation, "approval_window_expired");
       }
       const rpc = this.context.requireRpc();
       if (operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329) rpc.armEvmDirectRpcGuard?.();
-      const check = async () => await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
+      const check = async () => {
+        if (operation.evm?.nativeCustody !== undefined) await assertEvmNativeCustody(this.context.state, profile, operation.evm.nativeCustody);
+        await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
+      };
       if (operation.evm === undefined) await check();
       else await this.context.state.withLocks([walletCustodyLock(this.context.state, profile)], check);
       if (operation.evm !== undefined) {
@@ -212,19 +219,8 @@ export class TransferService {
           expiresAt: operation.expiresAt,
         },
       } : evmCustodyPayload(operation);
-      let effectValue: unknown;
-      try { effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload)); }
-      catch (error) {
-        if (operation.evm !== undefined && error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED") {
-          const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
-            profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(custodyPayload),
-          }));
-          if (isPlainRecord(stored) && exactKeys(stored, ["found"]) && stored.found === false) {
-            await this.transition(operation, "failed_before_effect", true, "native_signer_reprepare_required", "durable_pre_effect_failure");
-          }
-        }
-        throw error;
-      }
+      // A failed native call may have lost its response after signing. Classification cannot decrypt custody here.
+      const effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
       const effect = parseEffect(effectValue);
       await verifyEffect(effect, operation);
       operation = await this.transition(

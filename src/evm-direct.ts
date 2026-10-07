@@ -9,6 +9,8 @@ import type { RpcPort } from "./ports.js";
 import { canonicalAddress } from "./wallet-policy.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 
+import { validateEvmNativeCustody, type EvmNativeCustody } from "./evm-native-custody.js";
+
 export interface EvmDirectBinding {
   readonly schemaVersion: "apn.evm-direct.v1";
   readonly asset: EvmAsset;
@@ -16,6 +18,7 @@ export interface EvmDirectBinding {
   readonly valueAtomic: string;
   readonly maxFeeWei: string;
   readonly feeQuote: EvmFeeQuote;
+  readonly nativeCustody?: EvmNativeCustody;
 }
 
 export function requireEvmRpc(rpc: RpcPort): EvmRpcPort {
@@ -68,10 +71,11 @@ export function validateEvmFeeQuote(value: unknown, economics?: Economics): EvmF
 }
 
 export function validateEvmDirectBinding(value: unknown, economics?: Economics): EvmDirectBinding {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote"])) {
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote", ...(value.nativeCustody === undefined ? [] : ["nativeCustody"])])) {
     throw new ApnError("APN_STATE_CORRUPT", "EVM direct binding schema is invalid.");
   }
   const binding = value as unknown as EvmDirectBinding;
+  if (binding.nativeCustody !== undefined) validateEvmNativeCustody(binding.nativeCustody);
   const asset = validateEvmAsset(binding.asset);
   const quote = validateEvmFeeQuote(binding.feeQuote, economics);
   if (binding.schemaVersion !== "apn.evm-direct.v1" || quote.chainId !== asset.chainId ||
@@ -84,6 +88,8 @@ export function validateEvmDirectBinding(value: unknown, economics?: Economics):
 
 export function validateEvmOperation(operation: OperationRecord): void {
   const binding = validateEvmDirectBinding(operation.evm, operation.economics);
+  if (binding.nativeCustody !== undefined && (binding.nativeCustody.walletAddress !== operation.walletAddress ||
+    binding.nativeCustody.profileHash !== operation.profileHash)) throw new ApnError("APN_STATE_CORRUPT", "Generic native custody identity differs from the operation owner.");
   const transaction = evmTransaction(binding.asset, operation.walletAddress, operation.recipient, operation.amountAtomic);
   validateEvmAmount(binding.asset, operation.amountAtomic, operation.amountDecimal);
   const economics = operation.economics;

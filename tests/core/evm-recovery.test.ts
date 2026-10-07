@@ -23,7 +23,7 @@ import { temporaryState } from "./helpers.js";
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
 
-for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process resumes exactly once without signing`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process observes a recovered signature without signing or dispatch`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   setup.rpc.chainId = chainId;
@@ -36,9 +36,9 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real 
   const resumed = spawnSync(process.execPath, [worker, "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(resumed.status, 0, resumed.stderr);
   const result = JSON.parse(resumed.stdout);
-  assert.equal(result.result.state, chainId === 1 ? "submitted_pending" : "completed");
-  assert.equal(result.approvals, 0); assert.equal(result.submissions, 1);
-  const replay = spawnSync(process.execPath, [worker, chainId === 1 ? "observe" : "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
+  assert.equal(result.result.state, "unknown_finality");
+  assert.equal(result.approvals, 0); assert.equal(result.submissions, 0);
+  const replay = spawnSync(process.execPath, [worker, "observe", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(replay.status, 0, replay.stderr);
   const observed = JSON.parse(replay.stdout);
   assert.equal(observed.result.state, "completed"); assert.equal(observed.approvals, 0); assert.equal(observed.submissions, 0);

@@ -18,6 +18,7 @@ export interface EvmNativeIntent extends TransferApprovalIntent {
 }
 
 export function parseEvmNativeIntent(payload: Readonly<Record<string, unknown>>): EvmNativeIntent {
+  payload = snapshotEvmNativePayload(payload);
   if (!exactKeys(payload, ["profile", "operationId", "fingerprint", "walletAddress", "chainId", "transaction", "approval", "evm"]) ||
       !isPlainRecord(payload.transaction) || !exactKeys(payload.transaction, ["type", "to", "valueAtomic", "data", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "accessList"]) ||
       !isPlainRecord(payload.approval) || !exactKeys(payload.approval, ["recipient", "amountAtomic", "amountDecimal", "expiresAt"])) invalid();
@@ -31,6 +32,8 @@ export function parseEvmNativeIntent(payload: Readonly<Record<string, unknown>>)
   if (BigInt(nonceAtomic) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(gasLimitAtomic) < 21_000n || BigInt(maxPriorityFeePerGasAtomic) > BigInt(maxFeePerGasAtomic)) invalid();
   const economics = { nonceAtomic, gasLimitAtomic, maxFeePerGasAtomic, maxPriorityFeePerGasAtomic, maximumGasCostAtomic: (BigInt(gasLimitAtomic) * BigInt(maxFeePerGasAtomic)).toString() };
   const evm = validateEvmDirectBinding(payload.evm, economics);
+  if (evm.nativeCustody === undefined) throw new ApnError("APN_REPREPARE_REQUIRED", "Prepare a new generic transfer with a frozen native custody binding.");
+  if (evm.nativeCustody.walletAddress !== walletAddress) invalid();
   const expected = evmTransaction(evm.asset, walletAddress, recipient, amountAtomic);
   if (evm.asset.chainId !== chainId || transaction.type !== "eip1559" || transaction.to !== expected.to ||
       transaction.to !== evm.transactionTo || transaction.valueAtomic !== expected.valueAtomic ||
@@ -44,8 +47,8 @@ export function parseEvmNativeIntent(payload: Readonly<Record<string, unknown>>)
   const preparedAt = new Date(expiration - APPROVAL_WINDOW_MS).toISOString();
   if (evmDirectFingerprint({ operationId, profile, chainId, token: evm.asset.address, walletAddress, recipient, amountAtomic,
     transactionData: expected.data, economics, preparedAt, expiresAt, evm }) !== fingerprint) invalid();
-  return { profile, operationId, fingerprint, walletAddress, recipient, amountAtomic, amountDecimal: approval.amountDecimal,
-    expiresAt, nonceAtomic, gasLimitAtomic, maxFeePerGasAtomic, maxPriorityFeePerGasAtomic, evm, transactionData: expected.data };
+  return Object.freeze({ profile, operationId, fingerprint, walletAddress, recipient, amountAtomic, amountDecimal: approval.amountDecimal,
+    expiresAt, nonceAtomic, gasLimitAtomic, maxFeePerGasAtomic, maxPriorityFeePerGasAtomic, evm, transactionData: expected.data });
 }
 
 function hash(value: unknown): string {
@@ -54,3 +57,30 @@ function hash(value: unknown): string {
 }
 
 function invalid(): never { throw new ApnError("APN_NATIVE_PROTOCOL", "Generic direct-transfer intent violates its frozen custody boundary."); }
+
+/** Detach caller data before an async approval can change any nested financial field. */
+export function snapshotEvmNativePayload(payload: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  return snapshotJson(payload) as Readonly<Record<string, unknown>>;
+}
+
+function snapshotJson(value: unknown): unknown {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER) return value;
+  if (Array.isArray(value)) {
+    if (Object.getOwnPropertySymbols(value).length !== 0 || Object.keys(value).length !== value.length || Object.keys(value).some((key, index) => key !== String(index))) invalid();
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const detached = Array.from({ length: value.length }, (_, index) => {
+      const descriptor = descriptors[String(index)];
+      if (descriptor === undefined || !("value" in descriptor)) invalid();
+      return snapshotJson(descriptor.value);
+    });
+    return Object.freeze(detached);
+  }
+  if (!isPlainRecord(value) || Object.getOwnPropertySymbols(value).length !== 0) invalid();
+  const detached: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    if (!("value" in descriptor) || !descriptor.enumerable) invalid();
+    detached[key] = snapshotJson(descriptor.value);
+  }
+  return Object.freeze(detached);
+}

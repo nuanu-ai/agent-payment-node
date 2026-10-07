@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import { EVM_BLOCK_HASH, evmCore } from "./evm-helpers.js";
 
@@ -20,7 +22,16 @@ if (phase === "observe") {
       observedAt: new Date().toISOString(), rpcOrigin: setup.rpc.rpcOrigin, logs: [] };
   } });
 }
-if (phase === "sign-crash") {
+if (phase === "dispatch-before-crash" || phase === "dispatch-after-crash") {
+  const submit = setup.rpc.submitRawTransaction.bind(setup.rpc);
+  setup.rpc.submitRawTransaction = async raw => {
+    if (phase === "dispatch-before-crash") process.exit(75);
+    await submit(raw);
+    await writeFile(join(root, "fake-dispatch-witness.json"), JSON.stringify({ transactionHash: setup.rpc.returnedHash, sends: 1 }), { mode: 0o600 });
+    process.exit(76);
+  };
+}
+if (phase === "sign-crash" || phase === "dispatch-before-crash" || phase === "dispatch-after-crash") {
   await setup.core.transfer.approve(operationId);
   throw new Error("expected process loss was not injected");
 }
