@@ -67,6 +67,7 @@ class FakeChains implements PortfolioHttpPort {
     if (item.method === "eth_getCode") return this.code.get(chainId) ?? (pin === keccak256(ALTERNATE) ? ALTERNATE : CODE);
     if (item.method === "eth_chainId") return toHex(this.reportedChain.get(chainId) ?? BigInt(chainId));
     if (item.method === "eth_blockNumber") return "0x309";
+    if (item.method === "eth_getBlockByNumber") return { number: "0x17d78400", hash: `0x${"ab".repeat(32)}` };
     if (item.method === "eth_getBalance") return toHex(1234567890123456789n);
     const call = item.params[0] as { readonly to: string; readonly data: Hex };
     if (getAddress(call.to) !== MULTICALL3_ADDRESS) return word(1000001n);
@@ -144,21 +145,23 @@ async function fakeChains(): Promise<FakeChains> {
   return chains;
 }
 
-test("keyless full read: 11 Multicall3 batches, 1 Solana batch and 4 TRON calls — 16 RPC calls for 28 rows", async () => {
+test("keyless full read: 11 Multicall3 batches, 1 Solana batch and 4 TRON calls — 18 RPC calls for 28 rows", async () => {
   const chains = await fakeChains();
   const { data } = await portfolio(chains);
-  assert.equal(data.rpc_calls_total, 16);
-  assert.equal(chains.requests.length, 16);
+  assert.equal(data.rpc_calls_total, 18);
+  assert.equal(chains.requests.length, 18);
   assert.deepEqual(data.summary, { networks: 13, rows: 28, ok: 28, unavailable: 0, no_account: 0, rpc_not_configured: 0 });
   for (const row of PORTFOLIO_NETWORK_RPC) {
     const entry = net(data, row.chain);
     assert.deepEqual(entry.endpoint, { source: "default_public", env: row.env, url: row.defaultEndpoint });
-    assert.deepEqual(entry.rpc, row.family === "evm" ? { mode: "evm_multicall3_aggregate3", calls: 1, attempts: 1, methods: 2, retried: [] }
+    assert.deepEqual(entry.rpc, row.chain === "eip155:42161" ? { mode: "evm_multicall3_aggregate3", calls: 3, attempts: 1, methods: 8, retried: [] }
+      : row.family === "evm" ? { mode: "evm_multicall3_aggregate3", calls: 1, attempts: 1, methods: 2, retried: [] }
       : row.family === "solana" ? { mode: "solana_json_rpc_batch", calls: 1, attempts: 1, methods: 2, retried: [] }
       : { mode: "tron_http_sequential", calls: 4, attempts: 1, methods: 4, retried: [] }, row.chain);
   }
-  assert.deepEqual(chains.requests.filter((request) => request.methods.includes("eth_call")).map((request) => request.methods),
-    Array(11).fill(["eth_getCode", "eth_call"]));
+  assert.equal(chains.requests.filter((request) => request.methods.join(",") === "eth_getCode,eth_call").length, 10);
+  assert.deepEqual(chains.requests.filter((request) => request.host === "arb1.arbitrum.io").map((request) => request.methods), [
+    ["eth_chainId", "eth_getBlockByNumber", "eth_getCode"], ["eth_chainId", "eth_getBlockByNumber", "eth_getCode", "eth_call"], ["eth_getBlockByNumber"]]);
   assert.deepEqual(net(data, "eip155:1").rows.map((row) => [row.symbol, row.atomic, row.display]),
     [["ETH", "1234567890123456789", "1.234567890123456789"], ["USDC", "1000001", "1.000001"], ["USDT", "1000001", "1.000001"]]);
   assert.deepEqual(net(data, "eip155:1").provenance.block, "777");
@@ -215,7 +218,7 @@ test("a default endpoint answering HTTP 429 is unavailable after 3 attempts with
     [3, 3, ["server_error", "timeout"], ["ok", "ok"]]);
   assert.deepEqual([tron.rpc.calls, tron.rpc.attempts, tron.rows.map((row) => row.reason)], [3, 3, ["unreachable", "unreachable"]]);
   assert.deepEqual(waits.sort(), [1_000, 1_000, 1_000, 2_000, 2_000, 2_000]);
-  assert.equal(data.rpc_calls_total, 16 - 2 + 3 + 3 - 4 + 3);
+  assert.equal(data.rpc_calls_total, 18 - 2 + 3 + 3 - 4 + 3);
   assert.equal(net(data, "eip155:1").rows.every((row) => row.status === "ok"), true);
 });
 
@@ -244,7 +247,7 @@ test("a Solana genesis mismatch is unavailable; profiles without Solana or TRON 
   const solana = net(data, `solana:${SOLANA_GENESIS}`), tron = net(data, `tron:${TRON_GENESIS}`);
   assert.deepEqual([solana.rows.map((row) => row.status), solana.rpc.calls], [["no_account", "no_account", "no_account"], 0]);
   assert.deepEqual([tron.rows.map((row) => row.status), tron.rpc.calls], [["no_account", "no_account"], 0]);
-  assert.equal(data.rpc_calls_total, 11);
+  assert.equal(data.rpc_calls_total, 13);
   const withSolana = await portfolio(chains, { rails: ["solana"], evmWallet: false });
   assert.deepEqual(net(withSolana.data, `solana:${SOLANA_GENESIS}`).rows.map((row) => row.reason), Array(3).fill("chain_mismatch"));
   assert.equal(withSolana.data.summary.no_account, 23 + 2);
@@ -279,11 +282,66 @@ test("separate production cores share only portfolio balances and expose current
   const chains = await fakeChains();
   const run = async (refresh = false) => await new ApnCore({ state: new StateStore(temp.root), chainAccounts: chainAccounts(["solana", "tron"]),
     portfolio: { environment: {}, http: chains, wait: async () => "elapsed" } }).execute({ command: "wallet.portfolio", profile: "default", refresh });
-  const first = await run(); assert.equal(first.ok, true); assert.equal(chains.requests.length, 16);
-  const second = await run(); assert.equal(second.ok, true); assert.equal(chains.requests.length, 16);
+  const first = await run(); assert.equal(first.ok, true); assert.equal(chains.requests.length, 18);
+  const second = await run(); assert.equal(second.ok, true); assert.equal(chains.requests.length, 18);
   const data = second.data as PortfolioData & { networks: readonly { cache: { hit: boolean; source_rpc: { calls: number }; age_ms: number; expires_at: string } }[] };
   assert.equal(data.rpc_calls_total, 0);
   for (const network of data.networks) { assert.equal(network.cache.hit, true); assert.equal(network.rpc.calls, 0); assert.ok(network.cache.source_rpc.calls > 0); }
   assert.deepEqual(data.networks.map((v) => v.provenance), (first.data as PortfolioData).networks.map((v) => v.provenance));
-  await run(true); assert.equal(chains.requests.length, 32);
+  await run(true); assert.equal(chains.requests.length, 36);
+});
+
+
+test("Arbitrum pins every aggregate balance to the RPC L2 header, not Solidity's L1 counter", async () => {
+  const chains = await fakeChains();
+  const requests: Rpc[][] = [];
+  const http: PortfolioHttpPort = { post: async (url, body) => { requests.push(JSON.parse(body) as Rpc[]); return await chains.post(url, body); } };
+  const result = await new EvmPortfolioPort(http).read({ chain: "eip155:42161", family: "evm", account: EVM,
+    endpoint: "https://arb1.arbitrum.io/rpc", assets: [{ kind: "native", identifier: null },
+      { kind: "token", identifier: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" },
+      { kind: "token", identifier: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f" }] });
+  assert.equal(result.status, "available");
+  if (result.status !== "available") return;
+  assert.equal(result.block, "400000000"); // Fixture Solidity counter is 777.
+  assert.deepEqual([result.calls, result.methods], [3, 8]);
+  assert.equal(result.balances.length, 3);
+  for (const item of requests[1]!.slice(1)) {
+    assert.equal(item.params[item.method === "eth_getBlockByNumber" ? 0 : 1], "0x17d78400");
+  }
+});
+
+for (const mutation of ["hash", "number", "chain", "code", "null_header", "rpc_error"] as const) {
+  test(`Arbitrum rejects second-phase ${mutation} inconsistency without returning balances`, async () => {
+    const chains = await fakeChains(); let calls = 0;
+    const http: PortfolioHttpPort = { post: async (url, body) => {
+      const response = await chains.post(url, body); calls += 1;
+      if (calls !== 2) return response;
+      const batch = JSON.parse(response.body) as { result?: unknown; error?: unknown }[];
+      if (mutation === "chain") batch[0]!.result = "0x1";
+      else if (mutation === "code") batch[2]!.result = "0x";
+      else if (mutation === "null_header") batch[1]!.result = null;
+      else if (mutation === "rpc_error") { delete batch[1]!.result; batch[1]!.error = { code: -32000 }; }
+      else (batch[1]!.result as Record<string, unknown>)[mutation] = mutation === "hash" ? `0x${"cd".repeat(32)}` : "0x17d78401";
+      return { ...response, body: JSON.stringify(batch) };
+    } };
+    const result = await new EvmPortfolioPort(http).read({ chain: "eip155:42161", family: "evm", account: EVM,
+      endpoint: "https://arb1.arbitrum.io/rpc", assets: [{ kind: "native", identifier: null }] });
+    assert.deepEqual(result, { status: "unavailable", mode: "evm_multicall3_aggregate3", calls: 2, methods: 7,
+      reason: mutation === "chain" ? "chain_mismatch" : mutation === "code" ? "multicall_code_mismatch" : mutation === "rpc_error" ? "rpc_error" : "protocol" });
+  });
+}
+
+
+test("Arbitrum rejects a reorg observed only after the aggregate call", async () => {
+  const chains = await fakeChains(); let calls = 0;
+  const http: PortfolioHttpPort = { post: async (url, body) => {
+    const response = await chains.post(url, body); calls += 1;
+    if (calls !== 3) return response;
+    const batch = JSON.parse(response.body) as { result: Record<string, unknown> }[];
+    batch[0]!.result.hash = `0x${"cd".repeat(32)}`;
+    return { ...response, body: JSON.stringify(batch) };
+  } };
+  assert.deepEqual(await new EvmPortfolioPort(http).read({ chain: "eip155:42161", family: "evm", account: EVM,
+    endpoint: "https://arb1.arbitrum.io/rpc", assets: [{ kind: "native", identifier: null }] }),
+    { status: "unavailable", mode: "evm_multicall3_aggregate3", calls: 3, methods: 8, reason: "protocol" });
 });
