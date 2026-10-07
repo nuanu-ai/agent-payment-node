@@ -113,6 +113,16 @@ export class SolanaRpc {
     async batch(reads) {
         if (reads.length < 1 || reads.length > 8 || reads.some(read => !READ_METHODS.has(read.method)))
             protocolFailure();
+        // The official public mainnet endpoint refuses account methods in JSON-RPC
+        // arrays (HTTP 429, method limit zero), while the same single reads succeed.
+        // Choose compatibility before dispatch; never retry a failed HTTP request.
+        if ((this.endpoint === "https://api.mainnet-beta.solana.com" || this.endpoint === "https://api.mainnet-beta.solana.com/") &&
+            reads.some(read => read.method === "getMultipleAccounts" || read.method === "getAccountInfo")) {
+            const results = [];
+            for (const read of reads)
+                results.push(await this.call(read.method, read.params));
+            return results;
+        }
         const requests = reads.map(read => ({ jsonrpc: "2.0", id: randomUUID(), method: read.method, params: read.params }));
         const value = await this.request(requests, requests.length, false);
         if (!Array.isArray(value) || value.length !== requests.length)

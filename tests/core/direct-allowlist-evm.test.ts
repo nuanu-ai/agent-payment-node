@@ -197,7 +197,7 @@ test("an interrupted approval replays its reservation instead of reserving twice
   assert.equal(ended.allowlistLease, undefined); assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1);
 });
 
-test("a record written before the gate still validates, reads and resumes, but approval refuses it before any signature", async (t) => {
+test("legacy records remain readable; approval refuses an unbound record and recovery holds an unproven started attempt", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const setup = await owner(temporary.root);
   const legacy = async (key: string, started: boolean): Promise<string> => {
@@ -216,8 +216,14 @@ test("a record written before the gate still validates, reads and resumes, but a
   assert.equal((await setup.state.findOperation(waiting))!.state, "failed_before_effect");
   assert.equal(setup.approval.intents.length, 0); assert.equal(setup.rpc.submissions.length, 0);
   const interrupted = await legacy("eth-legacy-started", true);
-  await assert.rejects(setup.core.transfer.resume(interrupted), { code: "APN_REPREPARE_REQUIRED" });
-  assert.equal((await setup.state.findOperation(interrupted))!.state, "failed_before_effect");
+  const before = await setup.state.findOperation(interrupted);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assert.rejects(setup.core.transfer.resume(interrupted), { code: "APN_OPERATION_BLOCKED" });
+    assert.deepEqual(await setup.state.findOperation(interrupted), before);
+  }
+  assert.equal((await setup.state.findOperation(interrupted))!.state, "started");
+  assert.equal((await setup.state.findOperation(interrupted))!.terminal, false);
+  assert.equal(setup.approval.intents.length, 0); assert.equal(setup.rpc.submissions.length, 0);
   assert.equal(await directUsage(temporary.root, setup.wallet.address, BASE, null, setup.clock.now()), "0");
 });
 

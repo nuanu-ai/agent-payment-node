@@ -11,6 +11,7 @@ import { StateStore } from "../../src/state.js";
 import { portfolioEndpoint } from "../../src/portfolio/registry.js";
 import { ApnCore } from "../../src/core.js";
 import { temporaryState, TestNative, TestRpc, TestClock, TestProfilePolicy, ensureWallet, prepareTransfer } from "./helpers.js";
+import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 
 const full = loadAllowlistInventory();
 const inventory = { ...full, networks: full.networks.filter((v) => v.chain === "eip155:1"), assets: full.assets.filter((v) => v.chain === "eip155:1") };
@@ -109,7 +110,7 @@ test("transfer preparation performs fresh rail reads and never touches portfolio
     override async writePortfolioCache(): Promise<never> { throw new Error("transfer wrote portfolio cache"); }
   }
   const rpc = new TestRpc();
-  const core = new ApnCore({ state: new NoCacheState(temp.root), native: new TestNative(), rpc, clock: new TestClock(),
+  const core = new ApnCore({ state: new NoCacheState(temp.root), native: new CanonicalDirectTestNative(temp.root), rpc, clock: new TestClock(),
     policy: new TestProfilePolicy(), ids: { next: () => "00000000-0000-4000-8000-000000000001" } });
   await ensureWallet(core); assert.equal(typeof await prepareTransfer(core, "portfolio-isolated-transfer"), "string");
   assert.ok(rpc.balanceCalls > 0); assert.ok(rpc.nonceCalls > 0); assert.equal(rpc.submissions.length, 0);

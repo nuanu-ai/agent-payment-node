@@ -1,10 +1,10 @@
+import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
 import { assertEvmNativeCustody } from "./evm-native-custody.js";
 import { TransferServiceObservation, requiredLocal } from "./transfer-service-observe.js";
 import { hashObject } from "./canonical.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { prepareEvmTransfer } from "./evm-transfer-prepare.js";
-import { evmCustodyPayload } from "./evm-transfer-approval.js";
 import { checkTransferApproval } from "./transfer-approval-check.js";
 import { parseDecimal } from "./money.js";
 import { conflictDomainKey, evmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
@@ -30,6 +30,7 @@ export class TransferService {
         this.observation = new TransferServiceObservation(context, this.providerDirect, {
             followUsage: operation => this.followUsage(operation),
             transition: (operation, state, terminal, reason, proofClass, extra, rpcReceipt) => this.transition(operation, state, terminal, reason, proofClass, extra, rpcReceipt),
+            persistNoPrivateEntry: operation => this.transition(operation, "failed_before_effect", true, "native_approval_returned_before_private_entry", "durable_native_no_private_entry", {}, undefined, false),
             failBeforeEffect: (operation, reason) => this.failBeforeEffect(operation, reason),
         });
     }
@@ -140,6 +141,7 @@ export class TransferService {
                 transitions: appendTransition([], initial),
             });
             await this.persist(operation);
+            await new DirectPublicEffectJournal(state).prepare(operation);
             return publicOperation(operation);
         });
     }
@@ -164,6 +166,7 @@ export class TransferService {
             if (operation.evm !== undefined && operation.evm.nativeCustody === undefined) {
                 throw new ApnError("APN_REPREPARE_REQUIRED", "Prepare a new generic transfer with a frozen native custody binding.");
             }
+            await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
             if (this.context.clock.now().getTime() >= Date.parse(operation.expiresAt)) {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
@@ -175,8 +178,10 @@ export class TransferService {
                     await assertEvmNativeCustody(this.context.state, profile, operation.evm.nativeCustody);
                 await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
             };
-            if (operation.evm === undefined)
+            if (operation.evm === undefined) {
+                await new DirectPublicEffectJournal(this.context.state).prepared(operation);
                 await check();
+            }
             else
                 await this.context.state.withLocks([walletCustodyLock(this.context.state, profile)], check);
             if (operation.evm !== undefined) {
@@ -184,30 +189,9 @@ export class TransferService {
                 const allowlistLease = await this.reserveUsage(operation);
                 operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
             }
-            const custodyPayload = operation.evm === undefined ? {
-                profile,
-                operationId: operation.operationId,
-                fingerprint: operation.fingerprint,
-                walletAddress: operation.walletAddress,
-                chainId: CHAIN_ID,
-                transaction: {
-                    type: "eip1559",
-                    to: BASE_USDC,
-                    valueAtomic: "0",
-                    data: operation.transactionData,
-                    nonceAtomic: operation.economics.nonceAtomic,
-                    gasLimitAtomic: operation.economics.gasLimitAtomic,
-                    maxFeePerGasAtomic: operation.economics.maxFeePerGasAtomic,
-                    maxPriorityFeePerGasAtomic: operation.economics.maxPriorityFeePerGasAtomic,
-                    accessList: [],
-                },
-                approval: {
-                    recipient: operation.recipient,
-                    amountAtomic: operation.amountAtomic,
-                    amountDecimal: operation.amountDecimal,
-                    expiresAt: operation.expiresAt,
-                },
-            } : evmCustodyPayload(operation);
+            if (operation.evm === undefined)
+                operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect");
+            const custodyPayload = directCustodyPayload(operation);
             // A failed native call may have lost its response after signing. Classification cannot decrypt custody here.
             const effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
             const effect = parseEffect(effectValue);
@@ -277,20 +261,22 @@ export class TransferService {
                 (operation.evm !== undefined && await this.allowlist.hasReservation(evmAllowlistSubject(operation)))) {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Expired direct transfer has durable effect or reservation evidence.", { blockingOperationId: operation.operationId, blockingState: operation.state });
             }
+            await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
             await this.transition(operation, "failed_before_effect", true, "approval_window_expired", "durable_pre_effect_failure");
         }
     }
     async failBeforeEffect(operation, reason) {
+        await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
         await this.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
         throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.");
     }
-    async transition(operation, state, terminal, reason, proofClass, extra = {}, rpcReceipt) {
+    async transition(operation, state, terminal, reason, proofClass, extra = {}, rpcReceipt, followUsage = true) {
         const at = this.context.clock.now().toISOString();
         const transitions = appendTransition(operation.transitions, { at, state, terminal, reason, proofClass });
         const { integrityHash: _previousIntegrityHash, ...base } = operation;
         const updated = sealOperation({ ...base, ...extra, state, terminal, reason, proofClass, transitions });
         await this.persist(updated, rpcReceipt);
-        return await this.followUsage(updated);
+        return followUsage ? await this.followUsage(updated) : updated;
     }
     async persist(operation, rpcReceipt) {
         if (operation.evm === undefined)

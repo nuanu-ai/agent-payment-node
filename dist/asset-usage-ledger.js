@@ -87,6 +87,29 @@ export class AssetUsageLedger extends SecureStateStore {
             return record;
         });
     }
+    /** Direct pre-private recovery: hold the exact reservation through its durable outcome and release.
+     * The callback must not acquire this bucket lock. Its owning profile/operation/custody locks remain held. */
+    async releaseDirectReservedAfter(expectedValue, persistOutcome) {
+        const expected = structuredClone(validateAssetUsageReservation(expectedValue));
+        if (expected.rail !== "direct" || expected.state !== "reserved")
+            throw blocked("Only an unchanged direct reserve can close a pre-private attempt.");
+        const identity = validateIdentity(expected);
+        await this.ready();
+        return this.withLocks([this.bucketLock(identity)], async () => {
+            const value = await this.readJson(this.recordPath(identity, expected.reservationId));
+            if (value === null || canonicalJson(validateAssetUsageReservation(value)) !== canonicalJson(expected)) {
+                throw blocked("The exact no-private-entry reservation is no longer held unchanged.");
+            }
+            const outcome = await persistOutcome();
+            const at = instant(outcome.now), outcomeDigest = digest(outcome.outcomeDigest, "Outcome digest");
+            if (at < expected.updatedAt)
+                throw blocked("The usage reservation transition cannot move backward in time.");
+            const released = seal({ ...withoutDigest(expected), state: "failed_before_effect", updatedAt: at,
+                effectAt: null, outcomeDigest });
+            await this.writeJson(this.recordPath(identity, expected.reservationId), released);
+            return outcome.value;
+        });
+    }
     async transition(input) {
         const identity = validateIdentity(input);
         const reservationId = digest(input.reservationId, "Reservation id");

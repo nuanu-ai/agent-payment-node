@@ -3,7 +3,7 @@ import { SecureStateStore } from "../../secure-state-store.js";
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
-import { rpcAtomic, SolanaRpc, solanaSignature, type SolanaMethod } from "../../solana/rpc.js";
+import { rpcAtomic, SolanaRpc, solanaSignature, type SolanaMethod, type SolanaBatchRead } from "../../solana/rpc.js";
 import type { SwapOperationRecord } from "../model.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
@@ -52,7 +52,7 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
   const admission=await this.d.admission.assert(op,material);await this.d.bindings.assertPrepared(op,admission,material);
   // Re-resolve the same frozen official build. No new quote, lifetime, transaction, or route bytes are substituted.
   const fresh=await new JupiterV1MaterialResolver(this.d.rpc).resolve(material.execution.payer,material.execution.quoteResponse,
-   material.execution.rawBuildResponse,material.execution.maximumNativeExpenseLamports);
+   material.execution.rawBuildResponse,material.execution.maximumNativeExpenseLamports,material.execution.quoteRpcLifetime);
   if(fresh.transactionBase64!==material.execution.transactionBase64||fresh.messageHash!==material.execution.messageHash||
    fresh.lookupBindingDigest!==material.execution.lookupBindingDigest||canonicalJson(fresh.programPins)!==canonicalJson(material.execution.programPins))blocked("Jupiter's frozen message, lookup or runtime executable identity changed.");
   const guarded=await guardJupiterV1WhirlpoolMaterial(fresh,{now:this.d.clock.now().getTime(),deadline:op.quote.expiresAt}),simulation=await proveJupiterV1Simulation(this.d.rpc,guarded);
@@ -124,5 +124,9 @@ export class JupiterV1BudgetedRpc extends SolanaRpc{
  async chargeOfficialRead():Promise<void>{await this.charge();}
  private async charge(){this.calls=await this.journal.charge(this.stageKey,this.priorQuoteCalls);}
  override async call(method:SolanaMethod,params:readonly unknown[]):Promise<unknown>{await this.charge();return await this.base.call(method,params);}
+ override async batch(reads:readonly SolanaBatchRead[]):Promise<readonly unknown[]>{
+  // Every logical read consumes the durable stage cap before the shared physical POST.
+  for(const _read of reads)await this.charge();return await this.base.batch(reads);
+ }
  override async sendTransactionAtStart(params:readonly unknown[],beforeStart:()=>void|Promise<void>):Promise<unknown>{await this.charge();return await this.base.sendTransactionAtStart(params,beforeStart);}
 }

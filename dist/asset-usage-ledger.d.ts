@@ -93,6 +93,13 @@ export declare class AssetUsageLedger extends SecureStateStore {
      * exact source asset bucket lock through the caller's retirement write. */
     withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, sourceChainId?: 1 | 56, allowFailedBeforeEffectReservationId?: string): Promise<T>;
     reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation>;
+    /** Direct pre-private recovery: hold the exact reservation through its durable outcome and release.
+     * The callback must not acquire this bucket lock. Its owning profile/operation/custody locks remain held. */
+    releaseDirectReservedAfter<T>(expectedValue: AssetUsageReservation, persistOutcome: () => Promise<{
+        value: T;
+        now: Date;
+        outcomeDigest: string;
+    }>): Promise<T>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
     /** Atomic cancellation in the existing schema; a delayed reserve can only replay the released row. */
     cancelUnsubmittedReservation(input: CancelUnsubmittedReservationInput): Promise<AssetUsageReservation>;

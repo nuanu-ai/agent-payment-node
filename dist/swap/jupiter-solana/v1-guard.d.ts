@@ -1,5 +1,8 @@
 import { type JupiterV1ResolvedMaterial, type JupiterV1SemanticAccount } from "./v1-material.js";
+import { type JupiterV1RouteId, type WhirlpoolV2NamedRoles } from "./v1-route-config.js";
 export interface JupiterV1GuardedMaterial {
+    readonly routeId?: JupiterV1RouteId;
+    readonly namedRoles?: WhirlpoolV2NamedRoles;
     readonly material: JupiterV1ResolvedMaterial;
     readonly payer: string;
     readonly sourceTokenAccount: string;
@@ -25,3 +28,5 @@ export declare function guardJupiterV1WhirlpoolMaterial(material: JupiterV1Resol
     readonly deadline?: string;
 }): Promise<JupiterV1GuardedMaterial>;
 export declare function validateJupiterV1GuardedMaterial(guarded: JupiterV1GuardedMaterial, requireFresh?: boolean): Promise<void>;
+/** Old positional roles are accessed only behind the historical variant boundary. */
+export declare function jupiterV1ProofRoles(g: JupiterV1GuardedMaterial): WhirlpoolV2NamedRoles;

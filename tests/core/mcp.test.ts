@@ -9,6 +9,7 @@ import { COMMAND_MANIFEST, type CommandDefinition, type CommandOption } from "..
 import type { OutputEnvelope } from "../../src/commands.js";
 import { runCli } from "../../src/cli.js";
 import { PRODUCT_VERSION } from "../../src/constants.js";
+import { StateStore } from "../../src/state.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { MCP_LAUNCH_DESCRIPTOR_JSON } from "../../src/mcp-config.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
@@ -16,6 +17,7 @@ import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js
 import type { NativePort, NativeRequest } from "../../src/ports.js";
 import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "../../src/policy-approval.js";
 import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./helpers.js";
+import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 
 const TOOL_NAMES = [
   "apn_swap_ethereum_uniswap_inventory",
@@ -435,7 +437,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const rpc = new TestRpc();
-  const setupNative = new TestNative();
+  const setupNative = new CanonicalDirectTestNative(temporary.root);
   assert.equal((await runCli(["wallet", "ensure"], {}, {
     stateRoot: temporary.root, native: setupNative,
   })).ok, true);
@@ -461,6 +463,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
       amount_usdc: "1.25", rpc_url: "https://rpc.example/",
     },
   }));
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
   const operation = prepared.operation as {
     readonly operation_id?: unknown; readonly state?: unknown; readonly fingerprint?: unknown;
   };
@@ -468,6 +471,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   assert.equal(typeof operation.operation_id, "string");
   assert.equal(operation.fingerprint, undefined);
   const operationId = operation.operation_id as string;
+  const savedBeforeHandoff = await new StateStore(temporary.root).findOperation(operationId);
   assert.equal(hostileNativeCalls, 0);
   assert.equal(hostileApprovalCalls, 0);
   assert.equal(wrappingLoads, 0);
@@ -490,6 +494,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
     ],
   });
   assert.deepEqual(rejected.next_actions, [handoff]);
+  assert.deepEqual(await new StateStore(temporary.root).findOperation(operationId), savedBeforeHandoff);
   assert.equal(hostileNativeCalls, 0);
   assert.equal(hostileApprovalCalls, 0);
   assert.equal(wrappingLoads, 0);
@@ -511,6 +516,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   ]);
   assert.equal(hostileDetails?.cli_handoff, hostileHandoff);
   assert.deepEqual(hostileRejected.next_actions, [hostileHandoff]);
+  assert.deepEqual(await new StateStore(temporary.root).findOperation(operationId), savedBeforeHandoff);
   assert.equal(hostileNativeCalls, 0);
   assert.equal(hostileApprovalCalls, 0);
   assert.equal(wrappingLoads, 0);
@@ -569,11 +575,12 @@ test("direct MCP approval returns the exact foreground handoff before custody an
     name: "apn_operation_status", arguments: { operation: operationId },
   }));
   assert.equal((status.operation as { readonly state: string }).state, "awaiting_approval");
+  assert.deepEqual(await new StateStore(temporary.root).findOperation(operationId), savedBeforeHandoff);
   assert.equal(JSON.stringify(status).includes("fingerprint"), false);
   rpc.receipt = exactReceipt();
   const completed = await runCli([
     "pay", "transfer", "approve", "--operation", operationId, "--rpc-url", "https://rpc.example/",
-  ], {}, { stateRoot: temporary.root, native: new TestNative(), rpc });
+  ], {}, { stateRoot: temporary.root, native: new CanonicalDirectTestNative(temporary.root), rpc });
   assert.equal(completed.ok, true, JSON.stringify(completed));
   const receipt = decodeResult(await connection.client.callTool({
     name: "apn_receipt_get", arguments: { operation: operationId },

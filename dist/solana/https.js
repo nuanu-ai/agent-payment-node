@@ -2,6 +2,7 @@ import { request } from "node:https";
 import { rootCertificates } from "node:tls";
 import { ApnError } from "../errors.js";
 import { resolvePublicAddresses } from "../network-policy.js";
+import { solanaRpcHttpResponse } from "./https-body.js";
 /** Production transport pins one validated public address and built-in TLS roots. */
 export const solanaHttpsFetch = async (input, init) => {
     if (!(input instanceof URL) || typeof init?.body !== "string" || init.signal === undefined || init.signal === null)
@@ -26,12 +27,12 @@ export const solanaHttpsFetch = async (input, init) => {
                 resolve(response);
         };
         const outgoing = request(endpoint, { method: "POST", family: selected.family, ca: [...rootCertificates],
-            headers: { "content-type": "application/json", accept: "application/json", "content-length": Buffer.byteLength(body).toString() },
+            headers: { "content-type": "application/json", accept: "application/json", "accept-encoding": "gzip", "content-length": Buffer.byteLength(body).toString() },
             lookup: (_hostname, _options, callback) => callback(null, selected.address, selected.family),
         }, (incoming) => {
             const contentType = incoming.headers["content-type"] ?? "";
             const declared = Number(incoming.headers["content-length"] ?? "0");
-            if (incoming.statusCode !== 200 || !contentType.includes("application/json") || !Number.isSafeInteger(declared) || declared < 0 || declared > 2_097_152) {
+            if ((incoming.statusCode !== 200 && incoming.statusCode !== 429) || !contentType.includes("application/json") || !Number.isSafeInteger(declared) || declared < 0 || declared > 2_097_152) {
                 incoming.destroy();
                 finish();
                 return;
@@ -47,7 +48,15 @@ export const solanaHttpsFetch = async (input, init) => {
                 }
                 chunks.push(chunk);
             });
-            incoming.on("end", () => finish(new Response(new Uint8Array(Buffer.concat(chunks)), { headers: { "content-type": contentType }, status: 200 })));
+            incoming.on("end", () => {
+                try {
+                    finish(solanaRpcHttpResponse(Buffer.concat(chunks), { statusCode: incoming.statusCode, contentType,
+                        contentEncoding: incoming.headers["content-encoding"], retryAfter: incoming.headers["retry-after"] }));
+                }
+                catch {
+                    finish();
+                }
+            });
             incoming.on("error", () => finish());
             incoming.on("aborted", () => finish());
         });

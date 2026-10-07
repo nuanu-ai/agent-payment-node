@@ -5,10 +5,21 @@ import { validateSwapQuote } from "../quote.js";
 import { assembleJupiterV1, decodeJupiterV1AddressTable } from "./v1-resolver.js";
 import { canonicalAddress, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT } from "./catalog.js";
 import { decodeJupiterV1Quote, decodeJupiterV1Build, jupiterV1ResponseHash, jupiterV1Lifetime, jupiterV1Instructions } from "./v1-codec.js";
+import { routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { decodeWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 export const JUPITER_V1_MATERIAL_SCHEMA = "apn.jupiter-v1-resolved-material.v1";
+export function checkedJupiterV1QuoteRpcLifetime(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["source", "rpcOriginHash", "contextSlot", "minimumContextSlot", "blockhash", "lastValidBlockHeight"]) ||
+        value.source !== "configured_mainnet_rpc_before_quote_freeze" || typeof value.rpcOriginHash !== "string" || !/^[a-f0-9]{64}$/u.test(value.rpcOriginHash) ||
+        [value.contextSlot, value.minimumContextSlot, value.lastValidBlockHeight].some(v => typeof v !== "string" || !/^[1-9][0-9]{0,19}$/u.test(v)) ||
+        BigInt(value.contextSlot) < BigInt(value.minimumContextSlot) || typeof value.blockhash !== "string")
+        corrupt();
+    canonicalAddress(value.blockhash);
+    return value;
+}
 export function jupiterV1MaterialDigest(value) { return domainHash(JUPITER_V1_MATERIAL_SCHEMA, canonicalJson(value)); }
 export function validateJupiterV1Material(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "genesis", "payer", "quoteResponse", "rawBuildResponse", "quoteResponseHash", "rawBuildResponseHash", "lifetime", "transactionBase64", "transactionHash", "messageBase64", "messageHash", "rawInstructions", "compiledAccounts", "lookupBindingDigest", "semanticAccounts", "addressTables", "programPins", "accountSlot", "currentBlockHeight", "networkFeeLamports", "tokenAccountRentLamports", "maximumNativeExpenseLamports", "materialDigest"]) || value.schemaVersion !== JUPITER_V1_MATERIAL_SCHEMA || value.genesis !== SOLANA_MAINNET_GENESIS || typeof value.materialDigest !== "string")
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "genesis", "payer", "quoteResponse", "rawBuildResponse", "quoteResponseHash", "rawBuildResponseHash", "lifetime", ...(Object.hasOwn(value, "quoteRpcLifetime") ? ["quoteRpcLifetime"] : []), "transactionBase64", "transactionHash", "messageBase64", "messageHash", "compiledAccounts", "lookupBindingDigest", "rawInstructions", "semanticAccounts", "addressTables", "programPins", "accountSlot", "currentBlockHeight", "networkFeeLamports", "tokenAccountRentLamports", "maximumNativeExpenseLamports", "materialDigest"]) || value.schemaVersion !== JUPITER_V1_MATERIAL_SCHEMA || value.genesis !== SOLANA_MAINNET_GENESIS || typeof value.materialDigest !== "string")
         corrupt();
     const { materialDigest, ...body } = value;
     if (jupiterV1MaterialDigest(body) !== materialDigest)
@@ -17,7 +28,8 @@ export function validateJupiterV1Material(value) {
     canonicalAddress(typed.payer);
     decodeJupiterV1Quote(typed.quoteResponse);
     decodeJupiterV1Build(typed.rawBuildResponse);
-    if (jupiterV1ResponseHash(typed.quoteResponse) !== typed.quoteResponseHash || jupiterV1ResponseHash(typed.rawBuildResponse) !== typed.rawBuildResponseHash || canonicalJson(jupiterV1Lifetime(typed.rawBuildResponse)) !== canonicalJson(typed.lifetime) || sha256(Buffer.from(typed.transactionBase64, "base64")) !== typed.transactionHash || sha256(Buffer.from(typed.messageBase64, "base64")) !== typed.messageHash)
+    const route = routeConfigForQuoteBuild(typed.quoteResponse, typed.rawBuildResponse);
+    if (jupiterV1ResponseHash(typed.quoteResponse) !== typed.quoteResponseHash || jupiterV1ResponseHash(typed.rawBuildResponse) !== typed.rawBuildResponseHash || sha256(Buffer.from(typed.transactionBase64, "base64")) !== typed.transactionHash || sha256(Buffer.from(typed.messageBase64, "base64")) !== typed.messageHash)
         corrupt();
     for (const row of typed.semanticAccounts) {
         canonicalAddress(row.address);
@@ -41,7 +53,16 @@ export function validateJupiterV1Material(value) {
         if (canonicalJson(decodeJupiterV1AddressTable(t.account)) !== canonicalJson(t) || canonicalJson(typed.semanticAccounts.find(a => a.address === t.account.address)) !== canonicalJson(t.account))
             corrupt();
     }
-    const assembled = assembleJupiterV1(typed.payer, typed.rawBuildResponse, typed.addressTables);
+    if (route.variant === 47) {
+        const snapshot = decodeWhirlpoolV2AccountSnapshot(typed.rawBuildResponse, typed.semanticAccounts);
+        if (snapshot.roles.payer !== typed.payer)
+            corrupt();
+    }
+    const rpcLifetime = Object.hasOwn(value, "quoteRpcLifetime") ? checkedJupiterV1QuoteRpcLifetime(typed.quoteRpcLifetime) : undefined;
+    const lifetime = rpcLifetime === undefined ? jupiterV1Lifetime(typed.rawBuildResponse) : { blockhash: rpcLifetime.blockhash, lastValidBlockHeight: rpcLifetime.lastValidBlockHeight };
+    if (canonicalJson(lifetime) !== canonicalJson(typed.lifetime))
+        corrupt();
+    const assembled = assembleJupiterV1(typed.payer, typed.rawBuildResponse, typed.addressTables, rpcLifetime);
     if (assembled.transactionBase64 !== typed.transactionBase64 || assembled.messageBase64 !== typed.messageBase64 || assembled.lookupBindingDigest !== typed.lookupBindingDigest || canonicalJson(assembled.compiledAccounts) !== canonicalJson(typed.compiledAccounts) || canonicalJson(jupiterV1Instructions(typed.rawBuildResponse)) !== canonicalJson(typed.rawInstructions))
         corrupt();
     if (typed.compiledAccounts.some(a => !typed.semanticAccounts.some(row => row.address === a.address)))

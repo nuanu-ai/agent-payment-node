@@ -5,6 +5,8 @@ import { associatedTokenAddress, decodeWhirlpool, decodeTickArray, whirlpoolTick
 import { assertJupiterV1FreshMaterial, validateJupiterV1Material } from "./v1-material.js";
 import { JUPITER_V1_RUNTIME_PROGRAM_PINS, JUPITER_V1_POOL, JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA } from "./v1-pins.js";
 import { JUPITER_V6_PROGRAM as JUP, TOKEN_PROGRAM as TOKEN, ASSOCIATED_TOKEN_PROGRAM as ATA, SYSTEM_PROGRAM as SYS, COMPUTE_BUDGET_PROGRAM as COMPUTE, WRAPPED_SOL_MINT as SOL, SOLANA_USDC_MINT as USDC } from "./catalog.js";
+import { routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 export function reject(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
 export function semanticAccount(material, key) { const row = material.semanticAccounts.find(a => a.address === key); return row ?? reject("Jupiter V1 semantic snapshot is incomplete."); }
 function raw(a) { return a.existence === "absent" ? null : { owner: a.owner, lamports: BigInt(a.lamports), executable: a.executable, space: Buffer.from(a.dataBase64, "base64").length, data: Buffer.from(a.dataBase64, "base64") }; }
@@ -26,36 +28,46 @@ async function evaluate(material, options, requireFresh) {
     }
     if (options.deadline !== undefined && (!Number.isFinite(Date.parse(options.deadline)) || (options.now ?? Date.now()) >= Date.parse(options.deadline)))
         reject("Jupiter V1 consent deadline expired.");
-    const q = material.quoteResponse, b = material.rawBuildResponse, p = material.payer, pool = q.routePlan[0].swapInfo.ammKey;
-    if (pool !== JUPITER_V1_POOL || q.inAmount !== "1000000" || BigInt(material.maximumNativeExpenseLamports) > 6000000n)
+    const q = material.quoteResponse, b = material.rawBuildResponse, p = material.payer, pool = q.routePlan[0].swapInfo.ammKey, config = routeConfigForQuoteBuild(q, b);
+    if (q.inAmount !== "1000000" || BigInt(material.maximumNativeExpenseLamports) > 6000000n)
         reject("Jupiter V1 route or cap is outside the admitted lane.");
     const source = await associatedTokenAddress(p, SOL, TOKEN), destination = await associatedTokenAddress(p, USDC, TOKEN), ix = b.swapInstruction, d = Buffer.from(ix.data, "base64");
-    if (d.length !== 36 || d.subarray(0, 8).toString("hex") !== "e517cb977ae3ad2a" || d.readUInt32LE(8) !== 1 || d[12] !== 17 || d[13] !== 1 || d[14] !== 100 || d[15] !== 0 || d[16] !== 1 || d.readBigUInt64LE(17).toString() !== q.inAmount || d.readBigUInt64LE(25).toString() !== q.outAmount || d.readUInt16LE(33) !== q.slippageBps)
-        reject("Jupiter V1 canonical route arguments changed.");
-    // The zero platform-fee byte is part of the complete canonical route encoding.
-    rejectIfMissingFeeByte(ix, q.slippageBps);
-    const state = decodeWhirlpool(pool, raw(semanticAccount(material, pool)), ORCA, "3f95d10ce1806309");
-    if (state.mintA !== SOL || state.mintB !== USDC)
-        reject("Jupiter V1 pool pair changed.");
-    const r = ix.accounts;
-    if (r.length !== 21)
-        reject("Jupiter V1 remaining accounts changed.");
-    const ticks = r.slice(17, 20).map(a => a.pubkey), oracle = await whirlpoolOracleAddress(ORCA, pool);
-    const native = [TOKEN, p, pool, source, state.vaultA, destination, state.vaultB, ...ticks, oracle];
-    const expected = [[TOKEN, false, false], [p, true, false], [source, false, true], [destination, false, true], [JUP, false, false], [USDC, false, false], [JUP, false, false], ["D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf", false, false], [JUP, false, false], [ORCA, false, false], ...native.map((a, i) => [a, false, i >= 2 && i <= 9])];
-    metas(ix, expected);
-    tokenState(semanticAccount(material, state.vaultA), SOL, pool);
-    tokenState(semanticAccount(material, state.vaultB), USDC, pool);
-    tokenState(semanticAccount(material, destination), USDC, p);
-    for (const [i, key] of ticks.entries()) {
-        const t = decodeTickArray(key, raw(semanticAccount(material, key)), ORCA, "4561bdbe6e0742bb");
-        const width = state.tickSpacing * 88;
-        if (t.whirlpool !== pool || t.startTickIndex % width !== 0 || key !== await whirlpoolTickArrayAddress(ORCA, pool, t.startTickIndex) || t.startTickIndex !== Math.floor(state.tickCurrentIndex / width) * width - i * width)
-            reject("Jupiter V1 tick array seed or order changed.");
+    let native, namedRoles;
+    if (config.variant === 47) {
+        if (material.programPins.length === 0)
+            reject("Jupiter V1 runtime pin evidence is outside the admitted lane.");
+        const snapshot = await validateWhirlpoolV2AccountSnapshot(p, b, material.semanticAccounts);
+        namedRoles = snapshot.roles;
+        native = namedRoles.nativeCpiAccounts;
     }
-    const o = semanticAccount(material, oracle);
-    if (o.executable || (o.existence === "present" && (o.owner !== SYS || o.dataBase64 !== "")))
-        reject("Jupiter V1 adaptive oracle state is unsupported.");
+    else {
+        if (d.length !== 36 || d.subarray(0, 8).toString("hex") !== "e517cb977ae3ad2a" || d.readUInt32LE(8) !== 1 || d[12] !== 17 || d[13] !== 1 || d[14] !== 100 || d[15] !== 0 || d[16] !== 1 || d.readBigUInt64LE(17).toString() !== q.inAmount || d.readBigUInt64LE(25).toString() !== q.outAmount || d.readUInt16LE(33) !== q.slippageBps)
+            reject("Jupiter V1 canonical route arguments changed.");
+        // The zero platform-fee byte is part of the complete canonical route encoding.
+        rejectIfMissingFeeByte(ix, q.slippageBps);
+        const state = decodeWhirlpool(pool, raw(semanticAccount(material, pool)), ORCA, "3f95d10ce1806309");
+        if (state.mintA !== SOL || state.mintB !== USDC)
+            reject("Jupiter V1 pool pair changed.");
+        const r = ix.accounts;
+        if (r.length !== 21)
+            reject("Jupiter V1 remaining accounts changed.");
+        const ticks = r.slice(17, 20).map(a => a.pubkey), oracle = await whirlpoolOracleAddress(ORCA, pool);
+        native = [TOKEN, p, pool, source, state.vaultA, destination, state.vaultB, ...ticks, oracle];
+        const expected = [[TOKEN, false, false], [p, true, false], [source, false, true], [destination, false, true], [JUP, false, false], [USDC, false, false], [JUP, false, false], ["D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf", false, false], [JUP, false, false], [ORCA, false, false], ...native.map((a, i) => [a, false, i >= 2 && i <= 9])];
+        metas(ix, expected);
+        tokenState(semanticAccount(material, state.vaultA), SOL, pool);
+        tokenState(semanticAccount(material, state.vaultB), USDC, pool);
+        tokenState(semanticAccount(material, destination), USDC, p);
+        for (const [i, key] of ticks.entries()) {
+            const t = decodeTickArray(key, raw(semanticAccount(material, key)), ORCA, "4561bdbe6e0742bb");
+            const width = state.tickSpacing * 88;
+            if (t.whirlpool !== pool || t.startTickIndex % width !== 0 || key !== await whirlpoolTickArrayAddress(ORCA, pool, t.startTickIndex) || t.startTickIndex !== Math.floor(state.tickCurrentIndex / width) * width - i * width)
+                reject("Jupiter V1 tick array seed or order changed.");
+        }
+        const o = semanticAccount(material, oracle);
+        if (o.executable || (o.existence === "present" && (o.owner !== SYS || o.dataBase64 !== "")))
+            reject("Jupiter V1 adaptive oracle state is unsupported.");
+    }
     const src = semanticAccount(material, source), initial = src.existence === "absent" ? 0n : tokenState(src, SOL, p).amount;
     if (initial !== 0n)
         reject("Jupiter V1 refuses to close existing WSOL funds.");
@@ -97,9 +109,21 @@ async function evaluate(material, options, requireFresh) {
     const floor = BigInt(q.outAmount) * BigInt(10000 - q.slippageBps) / 10000n, rounding = BigInt(q.otherAmountThreshold) - floor;
     if (rounding < 0n || rounding > 1n)
         reject("Jupiter V1 quote minimum rounding exceeds admitted difference.");
-    const body = { material, payer: p, sourceTokenAccount: source, destinationTokenAccount: destination, pool, nativeAccounts: native, inputAtomic: q.inAmount, quotedOutputAtomic: q.outAmount, instructionMinimumOutputAtomic: (BigInt(q.outAmount) * BigInt(10000 - q.slippageBps) / 10000n).toString(), quotedMinimumOutputAtomic: q.otherAmountThreshold, minimumRoundingDeltaAtomic: rounding.toString(), maximumNativeExpenseLamports: material.maximumNativeExpenseLamports };
+    const body = { ...(namedRoles === undefined ? {} : { routeId: config.routeId, namedRoles }), material, payer: p, sourceTokenAccount: source, destinationTokenAccount: destination, pool, nativeAccounts: native, inputAtomic: q.inAmount, quotedOutputAtomic: q.outAmount, instructionMinimumOutputAtomic: (BigInt(q.outAmount) * BigInt(10000 - q.slippageBps) / 10000n).toString(), quotedMinimumOutputAtomic: q.otherAmountThreshold, minimumRoundingDeltaAtomic: rounding.toString(), maximumNativeExpenseLamports: material.maximumNativeExpenseLamports };
     return Object.freeze({ ...body, admissionDigest: domainHash("apn.jupiter-v1-semantic-admission.v1", canonicalJson(body)) });
 }
 function rejectIfMissingFeeByte(ix, _slippage) { const d = Buffer.from(ix.data, "base64"); if (d.length !== 36 || d[35] !== 0)
     reject("Jupiter V1 platform fee byte is invalid."); }
+/** Old positional roles are accessed only behind the historical variant boundary. */
+export function jupiterV1ProofRoles(g) {
+    const config = routeConfigForQuoteBuild(g.material.quoteResponse, g.material.rawBuildResponse);
+    if (config.variant === 47) {
+        if (g.routeId !== config.routeId || g.namedRoles === undefined)
+            reject("Jupiter V1 new route roles are missing.");
+        return g.namedRoles;
+    }
+    if (g.routeId !== undefined || g.namedRoles !== undefined)
+        reject("Jupiter V1 old proof shape changed.");
+    return { payer: g.payer, source: g.sourceTokenAccount, destination: g.destinationTokenAccount, pool: g.pool, mintA: SOL, mintB: USDC, vaultA: g.nativeAccounts[4], vaultB: g.nativeAccounts[6], ticks: [g.nativeAccounts[7], g.nativeAccounts[8], g.nativeAccounts[9]], oracle: g.nativeAccounts[10], nativeCpiAccounts: g.nativeAccounts };
+}
 //# sourceMappingURL=v1-guard.js.map

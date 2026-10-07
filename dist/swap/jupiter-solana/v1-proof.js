@@ -1,11 +1,14 @@
+import { normalizeJupiterV1Cpi } from "./v1-cpi.js";
 import { getBase58Encoder, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "../../canonical.js";
 import { createSwapQuote } from "../quote.js";
 import { freezeJson } from "./v1-codec.js";
 import { validateJupiterV1Material } from "./v1-material.js";
 import { rawAccount } from "../orca-solana/accounts.js";
-import { guardJupiterV1WhirlpoolMaterial, validateJupiterV1GuardedMaterial, reject, semanticAccount, tokenState } from "./v1-guard.js";
+import { guardJupiterV1WhirlpoolMaterial, validateJupiterV1GuardedMaterial, jupiterV1ProofRoles, reject, semanticAccount, tokenState } from "./v1-guard.js";
 import { JUPITER_V6_PROGRAM as JUP, TOKEN_PROGRAM as TOKEN, SYSTEM_PROGRAM as SYS, ASSOCIATED_TOKEN_PROGRAM as ATA, SOLANA_USDC_MINT as USDC, WRAPPED_SOL_MINT as SOL, canonicalAddress } from "./catalog.js";
+import { routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { decodeWhirlpoolV2Pool, decodeWhirlpoolV2TickArray, decodeWhirlpoolV2Oracle } from "./v1-whirlpool-v2-accounts.js";
 import { JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA } from "./v1-pins.js";
 const quoteProofBrand = Symbol("JupiterV1QuoteProof");
 const quoteProofs = new WeakMap();
@@ -27,7 +30,7 @@ export function snapshotFromJupiterV1QuoteProof(proof, material, input) { if (pr
     reject("Jupiter V1 quote proof is forged, cloned or bound to another input."); return issued.snapshot; }
 export async function proveJupiterV1Simulation(reader, guarded) {
     await revalidate(guarded);
-    const m = guarded.material, keys = m.compiledAccounts.map(a => a.address);
+    const roles = jupiterV1ProofRoles(guarded), v2 = guarded.routeId !== undefined, m = guarded.material, keys = m.compiledAccounts.map(a => a.address);
     if (BigInt(m.accountSlot) > BigInt(Number.MAX_SAFE_INTEGER))
         reject("Jupiter V1 simulation context slot cannot be represented safely.");
     if (keys.length > 64)
@@ -51,21 +54,22 @@ export async function proveJupiterV1Simulation(reader, guarded) {
         reject("Jupiter V1 proof account is missing."); return i; };
     const state = (key) => { const value = after[index(key)]; if (value === null)
         reject("Jupiter V1 required post-account is absent."); const a = rawAccount(value, 1048576); return { address: key, existence: "present", owner: a.owner, executable: a.executable, lamports: a.lamports.toString(), dataBase64: a.data.toString("base64"), dataHash: sha256(a.data), slot: slot.toString() }; };
-    const destBefore = tokenState(semanticAccount(m, guarded.destinationTokenAccount), USDC, guarded.payer).amount, destAfter = tokenState(state(guarded.destinationTokenAccount), USDC, guarded.payer).amount, output = destAfter - destBefore;
-    const payerBefore = BigInt(semanticAccount(m, guarded.payer).lamports), payerAfter = BigInt(state(guarded.payer).lamports), nativeSpend = payerBefore - payerAfter;
+    const coherent = simulationBalanceEvidence(v, guarded, keys, after);
+    const destBefore = coherent?.tokenBefore.get(guarded.destinationTokenAccount) ?? tokenState(semanticAccount(m, guarded.destinationTokenAccount), USDC, guarded.payer).amount, destAfter = tokenState(state(guarded.destinationTokenAccount), USDC, guarded.payer).amount, output = destAfter - destBefore;
+    const payerBefore = coherent?.lamportsBefore[index(guarded.payer)] ?? BigInt(semanticAccount(m, guarded.payer).lamports), payerAfter = BigInt(state(guarded.payer).lamports), nativeSpend = payerBefore - payerAfter;
     const closed = after[index(guarded.sourceTokenAccount)];
     if (closed !== null) {
         const c = rawAccount(closed, 165);
         if (c.lamports !== 0n || c.data.length !== 0 || c.owner !== SYS)
             reject("Jupiter V1 WSOL rent was not returned on close.");
     }
-    const vaultA = guarded.nativeAccounts[4], vaultB = guarded.nativeAccounts[6];
-    if (tokenState(state(vaultA), SOL, guarded.pool).amount - tokenState(semanticAccount(m, vaultA), SOL, guarded.pool).amount !== BigInt(guarded.inputAtomic) || tokenState(semanticAccount(m, vaultB), USDC, guarded.pool).amount - tokenState(state(vaultB), USDC, guarded.pool).amount !== output)
+    const vaultA = roles.vaultA, vaultB = roles.vaultB;
+    if (tokenState(state(vaultA), SOL, guarded.pool).amount - (coherent?.tokenBefore.get(vaultA) ?? tokenState(semanticAccount(m, vaultA), SOL, guarded.pool).amount) !== BigInt(guarded.inputAtomic) || (coherent?.tokenBefore.get(vaultB) ?? tokenState(semanticAccount(m, vaultB), USDC, guarded.pool).amount) - tokenState(state(vaultB), USDC, guarded.pool).amount !== output)
         reject("Jupiter V1 vault input/output effects disagree.");
     checkEffects(guarded, output, nativeSpend, BigInt(m.networkFeeLamports));
     bindCpi(v.innerInstructions, guarded, output);
     // Every owned or read-only account is checked against the frozen before snapshot. Pool/vault/tick state is the only permitted foreign mutation.
-    const mutableData = new Set([guarded.pool, ...guarded.nativeAccounts.slice(7, 10)]), tokenData = new Set([guarded.destinationTokenAccount, guarded.nativeAccounts[4], guarded.nativeAccounts[6]]);
+    const mutableData = new Set([guarded.pool, ...roles.ticks, ...(v2 ? [roles.oracle] : [])]), tokenData = new Set([guarded.destinationTokenAccount, roles.vaultA, roles.vaultB]);
     for (const [i, key] of keys.entries()) {
         if (key === guarded.sourceTokenAccount)
             continue;
@@ -75,7 +79,7 @@ export async function proveJupiterV1Simulation(reader, guarded) {
                 reject("Jupiter V1 simulation removed an unrelated account.");
             continue;
         }
-        const a = rawAccount(value, 1048576), expectedLamports = BigInt(before.lamports) + (key === guarded.payer ? -nativeSpend : key === guarded.nativeAccounts[4] ? BigInt(guarded.inputAtomic) : 0n);
+        const a = rawAccount(value, 1048576), expectedLamports = (coherent?.lamportsBefore[i] ?? BigInt(before.lamports)) + (key === guarded.payer ? -nativeSpend : key === roles.vaultA ? BigInt(guarded.inputAtomic) : 0n);
         if (before.owner !== a.owner || before.executable !== a.executable || expectedLamports !== a.lamports)
             reject("Jupiter V1 account identity or lamport effects changed.");
         const beforeData = Buffer.from(before.dataBase64, "base64");
@@ -86,6 +90,10 @@ export async function proveJupiterV1Simulation(reader, guarded) {
                 reject("Jupiter V1 token data changed beyond its amount.");
         }
         else if (mutableData.has(key)) {
+            if (v2) {
+                validateV2Mutation(guarded, before, { ...before, dataBase64: a.data.toString("base64"), dataHash: sha256(a.data) });
+                continue;
+            }
             if (a.data.length !== beforeData.length || !a.data.subarray(0, 8).equals(beforeData.subarray(0, 8)) || key !== guarded.pool && !a.data.subarray(9956).equals(beforeData.subarray(9956)))
                 reject("Jupiter V1 pool/tick identity data changed.");
             if (key === guarded.pool)
@@ -93,9 +101,18 @@ export async function proveJupiterV1Simulation(reader, guarded) {
                     if (!a.data.subarray(offset, offset + length).equals(beforeData.subarray(offset, offset + length)))
                         reject("Jupiter V1 pool static identity changed.");
         }
+        else if (key === USDC && coherent !== undefined && !m.compiledAccounts[i].writable) {
+            // Supply may change between the earlier snapshot and this bank. The message keeps the mint read-only;
+            // authority, decimals, initialized state and freeze authority must remain byte-identical.
+            if (a.data.length !== 82 || beforeData.length !== 82 || before.owner !== TOKEN ||
+                !a.data.subarray(0, 36).equals(beforeData.subarray(0, 36)) || !a.data.subarray(44).equals(beforeData.subarray(44)))
+                reject("Jupiter V1 read-only USDC mint identity changed.");
+        }
         else if (!a.data.equals(beforeData))
             reject("Jupiter V1 simulation mutated read-only account data.");
     }
+    if (v2 && v.fee === null)
+        reject("Jupiter V1 simulation fee extension is null.");
     if (v.fee !== undefined && v.fee !== null && integer(v.fee) !== BigInt(m.networkFeeLamports))
         reject("Jupiter V1 simulation fee extension disagrees.");
     if (v.loadedAddresses !== undefined) {
@@ -113,6 +130,7 @@ export async function proveJupiterV1Simulation(reader, guarded) {
 export async function validateFinalizedJupiterV1Receipt(reader, g, expected) {
     // Receipt observation remains valid after blockhash expiry; integrity/semantics were frozen before signature.
     await validateJupiterV1GuardedMaterial(g, false);
+    const roles = jupiterV1ProofRoles(g);
     signature(expected.signature);
     const m = g.material, statusResponse = strict(record(await reader.call("getSignatureStatuses", [[expected.signature], { searchTransactionHistory: true }])), ["context", "value"]), ctx = record(statusResponse.context);
     contextExtensions(ctx);
@@ -143,14 +161,14 @@ export async function validateFinalizedJupiterV1Receipt(reader, g, expected) {
         reject("Jupiter V1 finalized fee exceeds cap.");
     bindCpi(meta.innerInstructions, g, output);
     for (const [i, key] of keys.entries()) {
-        const expectedDelta = key === g.payer ? -nativeSpend : key === g.sourceTokenAccount ? -pre[i] : key === g.nativeAccounts[4] ? BigInt(g.inputAtomic) : 0n;
+        const expectedDelta = key === g.payer ? -nativeSpend : key === g.sourceTokenAccount ? -pre[i] : key === roles.vaultA ? BigInt(g.inputAtomic) : 0n;
         if (post[i] - pre[i] !== expectedDelta)
             reject("Jupiter V1 receipt has unexpected account lamport effects.");
     }
     validateAllTokens(meta.preTokenBalances, meta.postTokenBalances, keys, g);
     const tokenVault = (v, key, mint) => { const rows = tokenRows(v).filter(r => integer(r.accountIndex) === BigInt(keys.indexOf(key))); if (rows.length !== 1 || rows[0].mint !== mint || rows[0].owner !== g.pool)
         reject("Jupiter V1 receipt vault identity changed."); return BigInt(record(rows[0].uiTokenAmount).amount); };
-    if (tokenVault(meta.postTokenBalances, g.nativeAccounts[4], SOL) - tokenVault(meta.preTokenBalances, g.nativeAccounts[4], SOL) !== BigInt(g.inputAtomic) || tokenVault(meta.preTokenBalances, g.nativeAccounts[6], USDC) - tokenVault(meta.postTokenBalances, g.nativeAccounts[6], USDC) !== output)
+    if (tokenVault(meta.postTokenBalances, roles.vaultA, SOL) - tokenVault(meta.preTokenBalances, roles.vaultA, SOL) !== BigInt(g.inputAtomic) || tokenVault(meta.preTokenBalances, roles.vaultB, USDC) - tokenVault(meta.postTokenBalances, roles.vaultB, USDC) !== output)
         reject("Jupiter V1 receipt vault effects changed.");
     const body = { signature: expected.signature, slot: slot.toString(), feeLamports: fee.toString(), nativeSpendLamports: nativeSpend.toString(), recipientOutputAtomic: output.toString(), messageHash: m.messageHash, admissionDigest: g.admissionDigest, responseHash: jupiterV1RpcResponseHash("apn.jupiter-v1-receipt-response.v1", response) };
     return Object.freeze({ signature: body.signature, slot: body.slot, feeLamports: body.feeLamports, nativeSpendLamports: body.nativeSpendLamports, recipientOutputAtomic: body.recipientOutputAtomic, receiptHash: domainHash("apn.jupiter-v1-finalized-receipt.v1", canonicalJson(body)) });
@@ -158,8 +176,65 @@ export async function validateFinalizedJupiterV1Receipt(reader, g, expected) {
 async function revalidate(g) { await validateJupiterV1GuardedMaterial(g); }
 function checkEffects(g, output, spend, fee) { if (output < BigInt(g.quotedMinimumOutputAtomic) || output < BigInt(g.instructionMinimumOutputAtomic) || spend !== BigInt(g.inputAtomic) + fee - (semanticAccount(g.material, g.sourceTokenAccount).existence === "present" ? BigInt(semanticAccount(g.material, g.sourceTokenAccount).lamports) : 0n) || spend > BigInt(g.maximumNativeExpenseLamports))
     reject("Jupiter V1 output, input debit or rent refund proof failed."); }
+/** Monetary deltas must share the simulation bank. An earlier public pool snapshot is not a pre-balance. */
+function simulationBalanceEvidence(v, g, keys, after) {
+    const fields = ["preBalances", "postBalances", "preTokenBalances", "postTokenBalances"];
+    if (fields.every(key => v[key] === undefined))
+        return undefined;
+    if (fields.some(key => v[key] === undefined))
+        reject("Jupiter V1 simulation balance evidence is incomplete.");
+    const pre = amountArray(v.preBalances, keys.length), post = amountArray(v.postBalances, keys.length), beforeTokens = tokenRows(v.preTokenBalances), afterTokens = tokenRows(v.postTokenBalances), roles = jupiterV1ProofRoles(g);
+    const rowMap = (rows) => {
+        const result = new Map();
+        for (const row of rows) {
+            const i = Number(integer(row.accountIndex));
+            if (i >= keys.length || result.has(i))
+                reject("Jupiter V1 simulation token indices are invalid or duplicated.");
+            result.set(i, row);
+        }
+        return result;
+    };
+    const beforeRows = rowMap(beforeTokens), afterRows = rowMap(afterTokens), tokenBefore = new Map(), expected = new Map([[g.destinationTokenAccount, { mint: USDC, owner: g.payer, decimals: 6 }],
+        [roles.vaultA, { mint: SOL, owner: g.pool, decimals: 9 }], [roles.vaultB, { mint: USDC, owner: g.pool, decimals: 6 }]]);
+    const token = (row, mint, owner, decimals) => {
+        if (row === undefined || row.mint !== mint || row.owner !== owner || row.programId !== undefined && row.programId !== TOKEN ||
+            integer(record(row.uiTokenAmount).decimals) !== BigInt(decimals))
+            reject("Jupiter V1 simulation token identity changed.");
+        return BigInt(record(row.uiTokenAmount).amount);
+    };
+    for (const [key, role] of expected) {
+        const i = keys.indexOf(key);
+        if (i < 0)
+            reject("Jupiter V1 simulation token role is missing.");
+        const before = token(beforeRows.get(i), role.mint, role.owner, role.decimals), amount = token(afterRows.get(i), role.mint, role.owner, role.decimals), a = rawAccount(after[i], 1048576);
+        if (a.owner !== TOKEN || a.data.length !== 165 || a.data.readBigUInt64LE(64) !== amount)
+            reject("Jupiter V1 simulation token post-data disagrees with its balance vector.");
+        tokenBefore.set(key, before);
+    }
+    const source = keys.indexOf(g.sourceTokenAccount);
+    if (source < 0 || afterRows.has(source))
+        reject("Jupiter V1 simulation WSOL balance was not closed.");
+    if (beforeRows.has(source) && token(beforeRows.get(source), SOL, g.payer, 9) !== 0n)
+        reject("Jupiter V1 simulation WSOL source has preexisting value.");
+    const beforeSource = semanticAccount(g.material, g.sourceTokenAccount);
+    if (beforeSource.existence === "absent" && (beforeRows.has(source) || pre[source] !== 0n))
+        reject("Jupiter V1 simulation WSOL source existence changed.");
+    for (const [i, key] of keys.entries()) {
+        const value = after[i], a = value === null ? null : rawAccount(value, 1048576);
+        if (post[i] !== (a?.lamports ?? 0n))
+            reject("Jupiter V1 simulation lamport post-data disagrees with its balance vector.");
+        const snapshot = semanticAccount(g.material, key);
+        if (key !== g.payer && key !== roles.vaultA && pre[i] !== BigInt(snapshot.lamports))
+            reject("Jupiter V1 simulation unrelated pre-lamports changed.");
+        if (key === roles.vaultA && pre[i] - tokenBefore.get(key) !== BigInt(snapshot.lamports) - tokenState(snapshot, SOL, g.pool).amount)
+            reject("Jupiter V1 simulation native vault rent reserve changed.");
+        if (!expected.has(key) && key !== g.sourceTokenAccount && canonicalJson(beforeRows.get(i) ?? null) !== canonicalJson(afterRows.get(i) ?? null))
+            reject("Jupiter V1 simulation changed an unrelated token balance.");
+    }
+    return { lamportsBefore: pre, tokenBefore };
+}
 function bindCpi(value, g, actualOutput) {
-    const groups = array(value, 32), keys = g.material.compiledAccounts.map(a => a.address), swapIndex = g.material.rawBuildResponse.computeBudgetInstructions.length + g.material.rawBuildResponse.setupInstructions.length;
+    const roles = jupiterV1ProofRoles(g), v2 = g.routeId !== undefined, groups = array(value, 32), keys = g.material.compiledAccounts.map(a => a.address), swapIndex = g.material.rawBuildResponse.computeBudgetInstructions.length + g.material.rawBuildResponse.setupInstructions.length;
     let native = 0, input = 0, output = 0;
     const seen = new Set();
     for (const item of groups) {
@@ -168,7 +243,7 @@ function bindCpi(value, g, actualOutput) {
             reject("Jupiter V1 CPI group index changed.");
         seen.add(index);
         for (const entry of array(group.instructions, 128)) {
-            const ix = strict(record(entry), ["programIdIndex", "accounts", "data", "stackHeight"]), programIndex = Number(integer(ix.programIdIndex)), program = keys[programIndex];
+            const ix = normalizeJupiterV1Cpi(entry, keys), programIndex = Number(integer(ix.programIdIndex)), program = keys[programIndex];
             if (program === undefined || typeof ix.data !== "string")
                 reject("Jupiter V1 CPI encoding changed.");
             const accountIndices = array(ix.accounts, 32).map(x => Number(integer(x)));
@@ -186,24 +261,29 @@ function bindCpi(value, g, actualOutput) {
             if (ix.stackHeight !== undefined && ix.stackHeight !== null && (integer(ix.stackHeight) < 2n || integer(ix.stackHeight) > 8n))
                 reject("Jupiter V1 CPI stack height is invalid.");
             if (program === ORCA) {
-                if (integer(ix.stackHeight) !== 2n || index !== swapIndex || canonicalJson(accounts) !== canonicalJson(g.nativeAccounts) || d.length !== 42 || d.subarray(0, 8).toString("hex") !== "f8c69e91e17587c8" || d.readBigUInt64LE(8).toString() !== g.inputAtomic || d.subarray(16, 40).some(b => b !== 0) || d[40] !== 1 || d[41] !== 1)
+                if (integer(ix.stackHeight) !== 2n || index !== swapIndex || canonicalJson(accounts) !== canonicalJson(roles.nativeCpiAccounts) || d.length !== (v2 ? 43 : 42) || d.subarray(0, 8).toString("hex") !== (v2 ? "2b04ed0b1ac91e62" : "f8c69e91e17587c8") || d.readBigUInt64LE(8).toString() !== g.inputAtomic || d.subarray(16, 40).some(b => b !== 0) || d[40] !== 1 || d[41] !== 1 || v2 && d[42] !== 0)
                     reject("Jupiter V1 native Whirlpool CPI roles or input changed.");
                 native++;
+                if (v2 && native !== 1)
+                    reject("Jupiter V1 duplicate native invocation.");
             }
             else if (program === TOKEN) {
                 if (index !== swapIndex) {
                     if (g.material.rawInstructions[index]?.programId !== ATA)
                         reject("Jupiter V1 unexpected token CPI outside swap.");
+                    if (integer(ix.stackHeight) !== 2n)
+                        reject("Jupiter V1 ATA token stack changed.");
                     if (!(d[0] === 21 && (d.length === 1 || d.length === 3 && d.readUInt16LE(1) === 7) && accounts.length === 1 && accounts[0] === SOL || d[0] === 22 && d.length === 1 && accounts.length === 1 && accounts[0] === g.sourceTokenAccount || d[0] === 18 && d.length === 33 && accounts.length === 2 && accounts[0] === g.sourceTokenAccount && accounts[1] === SOL && getBase58Encoder().encode(g.payer).every((b, i) => b === d[i + 1])))
                         reject("Jupiter V1 ATA token initialization CPI changed.");
                     continue;
                 }
-                if (integer(ix.stackHeight) !== 3n || d.length !== 9 || d[0] !== 3 || accounts.length !== 3)
+                if (integer(ix.stackHeight) !== 3n || d.length !== (v2 ? 10 : 9) || d[0] !== (v2 ? 12 : 3) || accounts.length !== (v2 ? 4 : 3) || v2 && native !== 1)
                     reject("Jupiter V1 swap token CPI is unsupported.");
                 const amount = d.readBigUInt64LE(1);
-                if (accounts[0] === g.sourceTokenAccount && accounts[1] === g.nativeAccounts[4] && accounts[2] === g.payer && amount === BigInt(g.inputAtomic))
+                const inputRoles = v2 ? [roles.source, roles.mintA, roles.vaultA, g.payer] : [roles.source, roles.vaultA, g.payer], outputRoles = v2 ? [roles.vaultB, roles.mintB, roles.destination, g.pool] : [roles.vaultB, roles.destination, g.pool];
+                if (canonicalJson(accounts) === canonicalJson(inputRoles) && amount === BigInt(g.inputAtomic) && (!v2 || d[9] === 9 && input === 0 && output === 0))
                     input++;
-                else if (accounts[0] === g.nativeAccounts[6] && accounts[1] === g.destinationTokenAccount && accounts[2] === g.pool && amount === actualOutput)
+                else if (canonicalJson(accounts) === canonicalJson(outputRoles) && amount === actualOutput && (!v2 || d[9] === 6 && input === 1 && output === 0))
                     output++;
                 else
                     reject("Jupiter V1 unexpected token transfer CPI.");
@@ -213,6 +293,8 @@ function bindCpi(value, g, actualOutput) {
                     reject("Jupiter V1 unexpected Jupiter CPI.");
             }
             else if (program === SYS) {
+                if (integer(ix.stackHeight) !== 2n)
+                    reject("Jupiter V1 ATA system stack changed.");
                 if (g.material.rawInstructions[index]?.programId !== ATA || canonicalJson(accounts) !== canonicalJson([g.payer, g.sourceTokenAccount]) || d.length !== 52 || d.readUInt32LE(0) !== 0 || d.readBigUInt64LE(4) !== BigInt(g.material.tokenAccountRentLamports) || d.readBigUInt64LE(12) !== 165n || !getBase58Encoder().encode(TOKEN).every((b, i) => b === d[i + 20]))
                     reject("Jupiter V1 system CPI outside exact own ATA creation.");
             }
@@ -258,20 +340,45 @@ function tokenRows(value) { return array(value, 64).map(x => { const r = strict(
     reject("Jupiter V1 token UI string extension is invalid."); return r; }); }
 function tokenAmount(value, index, owner) { const rows = tokenRows(value).filter(r => integer(r.accountIndex) === BigInt(index)); if (rows.length !== 1 || rows[0].owner !== owner || rows[0].mint !== USDC || integer(record(rows[0].uiTokenAmount).decimals) !== 6n)
     reject("Jupiter V1 recipient token identity changed."); return BigInt(record(rows[0].uiTokenAmount).amount); }
-function validateAllTokens(before, after, keys, g) { const pre = tokenRows(before), post = tokenRows(after), allowed = new Set([g.sourceTokenAccount, g.destinationTokenAccount, g.nativeAccounts[4], g.nativeAccounts[6]]); for (const row of pre) {
-    const i = Number(integer(row.accountIndex)), key = keys[i];
-    if (key === undefined)
-        reject("Jupiter V1 token account index is invalid.");
-    if (allowed.has(key))
-        continue;
-    const other = post.find(r => integer(r.accountIndex) === BigInt(i));
-    if (other === undefined || canonicalJson(other) !== canonicalJson(row))
-        reject("Jupiter V1 receipt changed another token account.");
-} for (const row of post) {
-    const i = Number(integer(row.accountIndex));
-    if (keys[i] === undefined || !allowed.has(keys[i]) && !pre.some(r => integer(r.accountIndex) === BigInt(i)))
-        reject("Jupiter V1 receipt introduced another token account.");
-} }
+function validateAllTokens(before, after, keys, g) {
+    const roles = jupiterV1ProofRoles(g), pre = tokenRows(before), post = tokenRows(after), allowed = new Set([g.sourceTokenAccount, g.destinationTokenAccount, roles.vaultA, roles.vaultB]);
+    if (g.routeId !== undefined) {
+        for (const rows of [pre, post]) {
+            const seen = new Set();
+            for (const row of rows) {
+                const i = Number(integer(row.accountIndex));
+                if (seen.has(i))
+                    reject("Jupiter V1 receipt duplicated a token account.");
+                seen.add(i);
+                const key = keys[i];
+                if (key === undefined)
+                    reject("Jupiter V1 receipt token account index changed.");
+                if (!allowed.has(key))
+                    continue;
+                const isSol = key === roles.source || key === roles.vaultA, expectedOwner = key === roles.vaultA || key === roles.vaultB ? g.pool : g.payer;
+                if (row.mint !== (isSol ? SOL : USDC) || row.owner !== expectedOwner || integer(record(row.uiTokenAmount).decimals) !== (isSol ? 9n : 6n) || row.programId !== undefined && row.programId !== TOKEN)
+                    reject("Jupiter V1 receipt token role, mint, decimals or owner changed.");
+                if (key === roles.source && (rows === post || semanticAccount(g.material, key).existence === "absent" || BigInt(record(row.uiTokenAmount).amount) !== 0n))
+                    reject("Jupiter V1 receipt WSOL source closure changed.");
+            }
+        }
+    }
+    for (const row of pre) {
+        const i = Number(integer(row.accountIndex)), key = keys[i];
+        if (key === undefined)
+            reject("Jupiter V1 token account index is invalid.");
+        if (allowed.has(key))
+            continue;
+        const other = post.find(r => integer(r.accountIndex) === BigInt(i));
+        if (other === undefined || canonicalJson(other) !== canonicalJson(row))
+            reject("Jupiter V1 receipt changed another token account.");
+    }
+    for (const row of post) {
+        const i = Number(integer(row.accountIndex));
+        if (keys[i] === undefined || !allowed.has(keys[i]) && !pre.some(r => integer(r.accountIndex) === BigInt(i)))
+            reject("Jupiter V1 receipt introduced another token account.");
+    }
+}
 function amountArray(v, n) { const a = array(v, 64); if (a.length !== n)
     reject("Jupiter V1 balance vector changed."); return a.map(integer); }
 function integer(v) { if (typeof v === "bigint" && v >= 0n && v <= 18446744073709551615n)
@@ -336,5 +443,43 @@ function normalizeRpc(value) {
         return out;
     }
     return reject("Jupiter V1 RPC digest contains an unsupported type.");
+}
+/** Source-derived swap writes; no arbitrary same-length foreign account mutation. */
+function validateV2Mutation(g, before, after) {
+    const roles = jupiterV1ProofRoles(g), old = Buffer.from(before.dataBase64, "base64"), next = Buffer.from(after.dataBase64, "base64"), ranges = [];
+    if (next.length !== old.length)
+        reject("Jupiter V1 V2 mutable account length changed.");
+    const poolBytes = Buffer.from(semanticAccount(g.material, g.pool).dataBase64, "base64"), initialized = (r) => poolBytes.subarray(269 + 128 * r, 301 + 128 * r).some(b => b !== 0);
+    if (before.address === roles.pool) {
+        ranges.push(...decodeWhirlpoolV2Pool(before).mutableRanges);
+        decodeWhirlpoolV2Pool(after);
+    }
+    else if (before.address === roles.oracle) {
+        const b = decodeWhirlpoolV2Oracle(before), a = decodeWhirlpoolV2Oracle(after);
+        ranges.push(...b.mutableRanges);
+        if (a.variables.lastReferenceUpdateTimestamp < b.variables.lastReferenceUpdateTimestamp || a.variables.lastMajorSwapTimestamp < b.variables.lastMajorSwapTimestamp)
+            reject("Jupiter V1 oracle timestamp moved backwards.");
+    }
+    else if (roles.ticks.includes(before.address)) {
+        const b = decodeWhirlpoolV2TickArray(before);
+        decodeWhirlpoolV2TickArray(after);
+        let cursor = b.kind === "fixed" ? 12 : 60;
+        for (const tick of b.ticks) {
+            if (tick.initialized) {
+                ranges.push({ offset: cursor + 33, length: 32 });
+                for (let r = 0; r < 3; r++)
+                    if (initialized(r))
+                        ranges.push({ offset: cursor + 65 + 16 * r, length: 16 });
+            }
+            cursor += b.kind === "dynamic" && !tick.initialized ? 1 : 113;
+        }
+    }
+    else
+        reject("Jupiter V1 mutable account role changed.");
+    const checked = Buffer.from(next);
+    for (const r of ranges)
+        old.subarray(r.offset, r.offset + r.length).copy(checked, r.offset);
+    if (!checked.equals(old))
+        reject("Jupiter V1 V2 account changed outside source-defined swap fields.");
 }
 //# sourceMappingURL=v1-proof.js.map

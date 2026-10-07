@@ -49,6 +49,8 @@ export interface JupiterV1ResolvedMaterial {
         readonly blockhash: string;
         readonly lastValidBlockHeight: string;
     };
+    /** Obtained before quote freeze; the original official build stays untouched. */
+    readonly quoteRpcLifetime?: JupiterV1QuoteRpcLifetime;
     readonly transactionBase64: string;
     readonly transactionHash: string;
     readonly messageBase64: string;
@@ -66,6 +68,15 @@ export interface JupiterV1ResolvedMaterial {
     readonly maximumNativeExpenseLamports: string;
     readonly materialDigest: string;
 }
+export interface JupiterV1QuoteRpcLifetime {
+    readonly source: "configured_mainnet_rpc_before_quote_freeze";
+    readonly rpcOriginHash: string;
+    readonly contextSlot: string;
+    readonly minimumContextSlot: string;
+    readonly blockhash: string;
+    readonly lastValidBlockHeight: string;
+}
+export declare function checkedJupiterV1QuoteRpcLifetime(value: unknown): JupiterV1QuoteRpcLifetime;
 export interface JupiterV1PreparedMaterial extends GuardedSwapPreparedMaterial {
     readonly quote: SwapQuoteSnapshot;
     readonly approvalCapAtomic: "0";

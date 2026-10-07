@@ -84,29 +84,36 @@ async function pipelineFixture(t:test.TestContext){
  });
  // mutate() freezes raw-build lifetime independently; rederive the canonical fake lifetime from its exact bytes.
  const {jupiterV1Lifetime}=await import("../../src/swap/jupiter-solana/v1-codec.js"),{jupiterV1MaterialDigest}=await import("../../src/swap/jupiter-solana/v1-material.js");
- const {materialDigest:_digest,...body}=material,execution={...body,lifetime:jupiterV1Lifetime(body.rawBuildResponse)};const m={...execution,materialDigest:jupiterV1MaterialDigest(execution)};
+ const {materialDigest:_digest,...body}=material,execution={...body,lifetime:jupiterV1Lifetime(body.rawBuildResponse)};const {assembleJupiterV1}=await import("../../src/swap/jupiter-solana/v1-resolver.js"),{sha256}=await import("../../src/canonical.js"),{getBase58Decoder}=await import("@solana/kit");
+ const quoteRpcLifetime={source:"configured_mainnet_rpc_before_quote_freeze" as const,rpcOriginHash:sha256("https://example.com"),contextSlot:"454241651",minimumContextSlot:"454241651",blockhash:getBase58Decoder().decode(Buffer.alloc(32,38)),lastValidBlockHeight:"1100"};
+ const frozen={...execution,quoteRpcLifetime,lifetime:{blockhash:quoteRpcLifetime.blockhash,lastValidBlockHeight:quoteRpcLifetime.lastValidBlockHeight},...assembleJupiterV1(execution.payer,execution.rawBuildResponse,execution.addressTables,quoteRpcLifetime)};
+ const m={...frozen,materialDigest:jupiterV1MaterialDigest(frozen)};
  const guarded=await guardJupiterV1WhirlpoolMaterial(m),sim=simulation(guarded),final=receipt(guarded),store=new ChainAccountStore(temp.root,wrapping);
  await store.ensureLocal({profile:"jupiter-test",rail:"solana",create:async()=>({address:owner,seed:Buffer.from(seed)})});
  const start=new Date(),policy=new AllowlistPolicyStore(temp.root),staged=await policy.stage({profile:"jupiter-test",now:start,policy:{schemaVersion:"apn.allowlist-policy-file.v1",overlayVersion:"jupiter-runtime.1",accounts:{solana:owner},effectiveAt:new Date(start.getTime()-1000).toISOString(),expiresAt:new Date(start.getTime()+86400000).toISOString(),admissions:[{chain:PIN.chain,kind:"native",rail:"swap",maximumPerTransferAtomic:"1000000",dailyLimitAtomic:"2000000",mechanism:PIN},{chain:PIN.chain,kind:"token",identifier:SOLANA_USDC_MINT,rail:"swap",maximumPerTransferAtomic:"1000000",dailyLimitAtomic:"2000000",mechanism:PIN}]}});
  const activation=await policy.appendDecision("jupiter-test",null,{status:"active",revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,registry:staged.registry,approvalFingerprint:allowlistDecisionFingerprint({action:"activate",profileHash:allowlistProfileHash("jupiter-test"),revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,headEntryDigest:null}),decidedAt:start.toISOString()});
  let clockMs=Date.now(),sends=0,rawSigned:string|null=null,signature:string|null=null,finalized=false,height=1000,secretReads=0,ambiguous=false,revokeWrapping=false,revokeAfterSign=false,lastWrappingKey:Buffer|null=null;
  async function revokePolicy(){await policy.appendDecision("jupiter-test",activation.entryDigest,{status:"revoked",revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,approvalFingerprint:allowlistDecisionFingerprint({action:"revoke",profileHash:allowlistProfileHash("jupiter-test"),revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,headEntryDigest:activation.entryDigest}),decidedAt:new Date().toISOString()});}
- const rpcFetch:typeof fetch=async(_url,init)=>{const request=JSON.parse(String(init?.body)),keys=request.params?.[0];let result:unknown;
+ const rpcFetch:typeof fetch=async(_url,init)=>{const body=JSON.parse(String(init?.body));const handle=async(request:any)=>{const keys=request.params?.[0];let result:unknown;
   switch(request.method){case"getGenesisHash":result=m.genesis;break;case"getMultipleAccounts":result={context:{slot:454241651},value:keys.map((key:string)=>accountWire(key,request.params[1]?.dataSlice))};break;
   case"getAccountInfo":result={context:{slot:454241651},value:accountWire(keys,request.params[1]?.dataSlice)};break;
+  case"getLatestBlockhash":result={context:{slot:454241651},value:{blockhash:m.lifetime.blockhash,lastValidBlockHeight:1100}};break;
   case"getFeeForMessage":result={context:{slot:454241651},value:6400};break;case"getBlockHeight":if(revokeAfterSign&&secretReads>0){revokeAfterSign=false;await revokePolicy();}result=height;break;case"getMinimumBalanceForRentExemption":result=1488440;break;
   case"simulateTransaction":assert.equal(keys,m.transactionBase64);result=sim;break;
   case"sendTransaction":sends++;assert.equal(request.params[1].maxRetries,0);rawSigned=keys;signature=getSignatureFromTransaction(getTransactionDecoder().decode(Buffer.from(keys,"base64")));if(ambiguous)throw new Error("transport lost after dispatch");result=signature;break;
   case"getSignatureStatuses":assert.equal(keys[0],signature);result=finalized?final.status:{context:{slot:454241800},value:[null]};break;
   case"getTransaction":result={...final.response,transaction:[rawSigned,"base64"]};break;
   default:throw new Error(`unexpected ${request.method}`);}
-  return new Response(JSON.stringify({jsonrpc:"2.0",id:request.id,result}),{headers:{"content-type":"application/json"}});
+  return {jsonrpc:"2.0",id:request.id,result};};
+  const response=Array.isArray(body)?await Promise.all(body.map(handle)):await handle(body);
+  return new Response(JSON.stringify(response),{headers:{"content-type":"application/json"}});
  };
  function accountWire(key:string,slice?:{offset:number;length:number}){const a=m.semanticAccounts.find(a=>a.address===key);if(a===undefined||a.existence==="absent")return null;const bytes=Buffer.from(a.dataBase64,"base64");return {owner:a.owner,lamports:Number(a.lamports),executable:a.executable,data:[(slice===undefined?bytes:bytes.subarray(slice.offset,slice.offset+slice.length)).toString("base64"),"base64"],space:bytes.length,rentEpoch:0};}
  const providerFetch:typeof fetch=async url=>new Response(JSON.stringify(String(url).includes("/quote?")?m.quoteResponse:m.rawBuildResponse),{headers:{"content-type":"application/json"}});
- const state=new StateStore(temp.root),clock={now:()=>new Date()};
+ let dateOverride:Date|undefined;
+ const state=new StateStore(temp.root),clock={now:()=>dateOverride??new Date()};
  function runtime(stage:"quote"|"prepare"|"execute"|"observe",op?:string,foreground=true){const base=new SolanaRpc("https://example.com",rpcFetch,new SolanaRpcBudget({maxPhysicalRequests:64,minimumIntervalMs:750,now:()=>clockMs,wait:async ms=>{clockMs+=ms;}}),new SolanaRpcPacer(state,()=>clockMs,async ms=>{clockMs+=ms;}));return createJupiterV1Runtime({state,clock,rpc:base,wrappingSecret:{async load(){secretReads++;const key=Buffer.alloc(32,77);lastWrappingKey=key;if(revokeWrapping){revokeWrapping=false;await revokePolicy();}return key;},async create(){return Buffer.alloc(32,77);}},foreground,stage,...(op===undefined?{}:{operationId:op}),providerFetch});}
- return{temp,owner,m,runtime,get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},ambiguousSend(){ambiguous=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
+ return{temp,owner,m,runtime,setNow(v:Date){dateOverride=v;},get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},ambiguousSend(){ambiguous=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
 }
 test("V1 genuine Native pipeline prepares unsigned, prompts exact TTY, sends once, reopens observation and charges usage once",async t=>{
  if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest("V1 genuine Native pipeline prepares unsigned, prompts exact TTY, sends once, reopens observation and charges usage once");return;}
@@ -130,6 +137,7 @@ test("V1 ambiguous dispatch retains the same signature and cannot resend across 
  process.stdout.write("PTY_CASE_ENTERED:V1 ambiguous dispatch retains the same signature and cannot resend across reopen\n");
  const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-ambiguous");f.ambiguousSend();
  const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());assert.equal(result.state,"unknown_finality");assert.equal(f.sends,1);const secrets=f.secretReads;
+ f.setNow(new Date(Date.parse(op.quote.expiresAt)+1));
  await f.runtime("execute",op.operationId).execute(op.operationId,new Date());assert.equal(f.sends,1);assert.equal(f.secretReads,secrets);
  f.setFinal();assert.equal((await f.runtime("observe",op.operationId,false).status(op.operationId,new Date())).state,"finalized");assert.equal(f.sends,1);
 });
@@ -140,6 +148,11 @@ test("V1 frozen expired blockhash refuses before the effect marker, decryption o
  const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-expired");f.setHeight(1101);
  await assert.rejects(f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date()),/expired/);assert.equal(f.sends,0);assert.equal(f.secretReads,0);
  const saved=await new (await import("../../src/swap/repository.js")).SwapOperationRepository(f.temp.root).loadAny(op.operationId);assert.equal(saved?.submissionMarker,null);
+ f.setNow(new Date(Date.parse(op.quote.expiresAt)+1));
+ const released=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());
+ assert.equal(released.state,"failed_before_effect");assert.equal(released.usageLease?.state,"failed_before_effect");assert.equal(released.submissionMarker,null);
+ assert.equal(f.sends,0);assert.equal(f.secretReads,0);
+ assert.equal((await new AssetUsageLedger(f.temp.root).usage({account:f.owner,chain:PIN.chain,asset:{kind:"native",identifier:null}},new Date())).amountAtomic,"0");
 });
 test("V1 duplicate foreground execution races leave one signature and one send",async t=>{
  if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest("V1 duplicate foreground execution races leave one signature and one send");return;}
