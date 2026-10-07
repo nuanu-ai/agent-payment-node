@@ -219,3 +219,15 @@ test("Solana HTTP 403 ends a read after one physical POST", async () => {
   assert.equal(posts, 1);
   assert.equal(rpc.budget?.physicalRequests, 1);
 });
+
+
+test("Solana send awaits the final asynchronous admission fence before one physical POST",async()=>{
+ let posts=0,resolveFence!:()=>void;const fence=new Promise<void>(resolve=>{resolveFence=resolve;});
+ const rpc=new SolanaRpc("https://rpc.example",async(_url,init)=>{posts++;const request=JSON.parse(String(init?.body));return json({jsonrpc:"2.0",id:request.id,result:"admitted"});});
+ const sending=rpc.sendTransactionAtStart(["fixture"],async()=>{await fence;});
+ await new Promise<void>(resolve=>setImmediate(resolve));assert.equal(posts,0);resolveFence();assert.equal(await sending,"admitted");assert.equal(posts,1);
+});
+test("Solana rejected asynchronous dispatch admission starts zero physical POSTs",async()=>{
+ let posts=0;const rpc=new SolanaRpc("https://rpc.example",async()=>{posts++;throw new Error("must not post");});
+ await assert.rejects(rpc.sendTransactionAtStart(["fixture"],async()=>{await Promise.resolve();throw new Error("policy revoked at dispatch");}));assert.equal(posts,0);
+});

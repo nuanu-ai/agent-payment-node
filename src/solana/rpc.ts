@@ -104,7 +104,7 @@ export class SolanaRpc implements SolanaRpcPort {
     return record.result;
   }
   /** Guard the actual send transport start after persistent pacing has admitted the POST. */
-  async sendTransactionAtStart(params: readonly unknown[], beforePost: () => void): Promise<unknown> {
+  async sendTransactionAtStart(params: readonly unknown[], beforePost: () => void | Promise<void>): Promise<unknown> {
     const id = randomUUID();
     const value = await this.request({ jsonrpc: "2.0", id, method: "sendTransaction", params }, 1, true, beforePost);
     const record = rpcRecord(value);
@@ -130,7 +130,7 @@ export class SolanaRpc implements SolanaRpcPort {
     if (seen.size !== requests.length) protocolFailure();
     return results;
   }
-  private async request(body: unknown, logicalCalls: number, effect: boolean, beforePost?: () => void): Promise<unknown> {
+  private async request(body: unknown, logicalCalls: number, effect: boolean, beforePost?: () => void | Promise<void>): Promise<unknown> {
     if (this.endpoint === undefined) configFailure();
     let url: URL;
     try { url = parsePublicHttpsUrl(this.endpoint, "APN_RPC_CONFIG", "Solana RPC endpoint", 2048); } catch { return configFailure(); }
@@ -147,12 +147,13 @@ export class SolanaRpc implements SolanaRpcPort {
       throw error;
     }
   }
-  private async post(url: URL, payload: string, effect: boolean, beforePost?: () => void): Promise<unknown> {
+  private async post(url: URL, payload: string, effect: boolean, beforePost?: () => void | Promise<void>): Promise<unknown> {
     const controller = new AbortController();
     const deadline = setTimeout(() => controller.abort(), 10_000); deadline.unref();
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
-      beforePost?.();
+      await beforePost?.();
+      if (controller.signal.aborted) protocolFailure();
       const response = await this.fetcher(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
         body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
       if (response.status === 429) throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC provider requested a cooldown.",

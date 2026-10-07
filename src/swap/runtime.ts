@@ -1,11 +1,12 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
-import type { AssetPolicyRegistry } from "../asset-policy-registry.js";
+import { evaluateAssetPolicy, validateAssetPolicyRegistry, type AssetPolicyRegistry } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
 import type { AssetUsageLedger } from "../asset-usage-ledger.js";
 import type { ClockPort } from "../ports.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { validateSwapOperation, type SwapOperationRecord } from "./model.js";
-import type { SwapProtocolRegistry } from "./protocol-registry.js";
+import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "./protocol-registry.js";
+import { swapMechanismDigest } from "./pin.js";
 import { validateSwapQuote, type SwapQuoteInput, type SwapQuoteSnapshot } from "./quote.js";
 import { SwapOperationRepository } from "./repository.js";
 import { GuardedSwapService } from "./service.js";
@@ -151,6 +152,7 @@ export class GuardedSwapRuntime<Request> {
   async quote(request: Request, now: Date): Promise<unknown> { instant(now); return await this.dependencies.builder.quote({ ...request, now }); }
 
   async prepare(request: { readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }, now: Date): Promise<SwapOperationRecord> {
+    request = immutableSnapshot(request);
     const material = await this.material(request.quoteHash);
     const quote = validateSwapQuote(material.quote, "input");
     if (quote.profile !== request.profile || quote.quoteHash !== request.quoteHash || quote.sourceAsset.chain !== this.dependencies.chain ||
@@ -164,15 +166,25 @@ export class GuardedSwapRuntime<Request> {
   }
 
   async approve(operationId: string, now: Date): Promise<SwapOperationRecord> {
+    const caps = immutableSnapshot(this.dependencies.caps);
     const operation = await this.required(operationId);
     if (operation.state !== "awaiting_approval") blocked("Guarded swap is not awaiting foreground approval.", "swap_approval_state");
     instant(now);
     const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
-    const policy = await this.activePolicy(operation.quote.profile);
+    await this.assertCurrentPolicy(operation);
     await this.dependencies.ownerAdmission.assert(operation, material);
-    const intent = approvalIntent(operation, material), answer = await this.dependencies.foregroundApproval.approve(intent);
+    const intent = immutableSnapshot(approvalIntent(operation, material));
+    const binding = domainHash("apn.guarded-swap-consent-binding.v1", canonicalJson({ operation, material, intent, caps }));
+    const answer = await this.dependencies.foregroundApproval.approve(intent);
     // The human may type for a while: validate against a fresh clock, and reserve at the sealed consent instant.
-    const artifact = validateGuardedSwapApprovalArtifact(answer, operation, intent, this.now());
+    const artifact = immutableSnapshot(validateGuardedSwapApprovalArtifact(immutableSnapshot(answer), operation, intent, this.now()));
+    await this.dependencies.ownerAdmission.assert(operation, material);
+    const current = await this.required(operationId), currentMaterial = await this.material(operation.quote.quoteHash);
+    bindMaterial(current, currentMaterial);
+    if (binding !== domainHash("apn.guarded-swap-consent-binding.v1", canonicalJson({ operation: current, material: currentMaterial, intent: approvalIntent(current, currentMaterial),
+      caps: immutableSnapshot(this.dependencies.caps) }))) blocked("Prepared swap approval binding changed during consent.", "swap_material_drift");
+    const policy = await this.assertCurrentPolicy(operation);
+    validateGuardedSwapApprovalArtifact(artifact, operation, intent, this.now());
     const reserved = await this.service.reserve(operation, policy, new Date(artifact.approvedAt));
     await this.dependencies.approvals.store(reserved, artifact);
     return reserved;
@@ -191,7 +203,8 @@ export class GuardedSwapRuntime<Request> {
     if (operation.state !== "reserved" || operation.usageLease?.state !== "reserved") {
       blocked("Guarded swap execution requires the exact approved reservation.", "swap_execution_lease");
     }
-    const artifact = await this.dependencies.approvals.load(operation), at = this.now();
+    const loadedArtifact = await this.dependencies.approvals.load(operation), at = this.now();
+    const artifact = loadedArtifact === null ? null : immutableSnapshot(loadedArtifact);
     if (artifact === null || at.toISOString() >= operation.quote.expiresAt) {
       // Nothing was signed: without surviving consent, or past the deadline, the reservation is released, never kept.
       return await this.service.failBeforeEffect(operation, at, domainHash("apn.guarded-swap-unsent-release.v1", canonicalJson({
@@ -199,9 +212,16 @@ export class GuardedSwapRuntime<Request> {
     }
     validateGuardedSwapApprovalArtifact(artifact, operation, undefined, at);
     const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
+    const dependencies = effectDependencies(this.dependencies);
     await this.dependencies.ownerAdmission.assert(operation, material);
+    const current = await this.required(operationId), currentMaterial = await this.material(operation.quote.quoteHash);
+    if (canonicalJson(current) !== canonicalJson(operation) || canonicalJson(currentMaterial) !== canonicalJson(material) ||
+        canonicalJson(dependencies.caps) !== canonicalJson(this.dependencies.caps))
+      blocked("Prepared swap execution binding changed.", "swap_material_drift");
+    await this.assertCurrentPolicy(operation);
+    validateGuardedSwapApprovalArtifact(artifact, operation, approvalIntent(operation, material), this.now());
     const result = validateSwapOperation(await this.dependencies.execution.execute({ operation, material, approval: artifact,
-      dependencies: effectDependencies(this.dependencies), now: this.now() }));
+      dependencies, now: this.now() }));
     if (result.operationId !== operation.operationId || result.submissionMarker === null) {
       throw new ApnError("APN_STATE_CORRUPT", "Guarded swap execution returned without its durable submission marker.");
     }
@@ -227,18 +247,39 @@ export class GuardedSwapRuntime<Request> {
   private async activePolicy(profile: string): Promise<AssetPolicyRegistry> {
     const policy = await this.dependencies.policy(profile);
     if (policy === null) blocked("No active owner swap admission is installed for this profile.", "swap_owner_admission_required");
+    return immutableSnapshot(validateAssetPolicyRegistry(immutableSnapshot(policy)));
+  }
+  private async assertCurrentPolicy(operation: SwapOperationRecord): Promise<AssetPolicyRegistry> {
+    const policy = await this.activePolicy(operation.quote.profile), at = this.now().toISOString();
+    if (policy.policyDigest !== operation.policyDigest || policy.registryVersion !== operation.policyVersion)
+      blocked("Swap asset policy no longer matches the prepared operation.", "swap_policy_drift");
+    for (const [asset, amount] of [[operation.quote.sourceAsset, operation.quote.inputAmountAtomic],
+      [operation.quote.destinationAsset, operation.quote.minimumOutputAtomic]] as const) {
+      const admission = evaluateAssetPolicy(policy, { chain: asset.chain, asset: asset.kind === "native" ?
+        { kind: "native", identifier: null } : { kind: "token", identifier: asset.identifier! }, rail: "swap",
+        amountAtomic: amount, dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
+      const pin = admission.asset.mechanismPins?.swap;
+      if (pin === undefined || swapMechanismDigest(pin) !== operation.mechanismDigest)
+        blocked("Swap mechanism admission changed.", "swap_policy_drift");
+    }
+    const registry = validateSwapProtocolRegistry(immutableSnapshot(this.dependencies.protocolRegistry));
+    if (registry.registryDigest !== operation.protocolRegistryDigest || registry.registryVersion !== operation.protocolRegistryVersion)
+      blocked("Swap protocol registry changed.", "swap_policy_drift");
+    requireSwapProtocol(registry, operation.mechanismDigest);
     return policy;
   }
   private async required(operationId: string): Promise<SwapOperationRecord> {
-    const operation = await this.dependencies.operations.loadAny(operationId);
-    if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
+    const loaded = await this.dependencies.operations.loadAny(operationId);
+    if (loaded === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
+    const operation = validateSwapOperation(immutableSnapshot(loaded));
     if (operation.quote.sourceAsset.chain !== this.dependencies.chain) blocked("Swap operation belongs to another runtime.", "swap_runtime_chain");
     return operation;
   }
   private async material(hash: string): Promise<GuardedSwapPreparedMaterial> {
     const material = await this.dependencies.builder.load(hash);
     if (material === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Prepared swap quote was not found.");
-    validateGasOrEnergy(material.gasOrEnergy); return material;
+    const snapshot = immutableSnapshot(material);
+    validateSwapQuote(snapshot.quote, "input"); validateGasOrEnergy(snapshot.gasOrEnergy); return snapshot;
   }
 }
 
@@ -292,7 +333,7 @@ function validateGasOrEnergy(value: unknown): asserts value is Readonly<Record<s
 }
 function effectDependencies(value: GuardedSwapRuntimeDependencies<unknown>): GuardedSwapExecutionDependencies {
   return { rpc: value.rpc, effectStore: value.effectStore, signer: value.signer, sender: value.sender,
-    observer: value.observer, caps: value.caps };
+    observer: value.observer, caps: immutableSnapshot(value.caps) };
 }
 function assertDependencyObject(value: GuardedSwapRuntimeDependencies<unknown>): void {
   for (const [name, dependency] of Object.entries({ builder: value.builder, policy: value.policy, clock: value.clock,
@@ -308,3 +349,41 @@ function assertDependencyObject(value: GuardedSwapRuntimeDependencies<unknown>):
 function hash(value: unknown): string { if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) blocked("Guarded swap approval hash is invalid.", "swap_approval_tamper"); return value; }
 function instant(value: Date): string { if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new ApnError("APN_INVALID_INPUT", "Guarded swap time is invalid."); return value.toISOString(); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
+
+/** Copy data descriptors synchronously; never evaluate accessors or discard non-JSON fields. */
+function immutableSnapshot<T>(value: T): T {
+  const ancestors = new Set<object>();
+  function invalid(): never { throw new ApnError("APN_INVALID_INPUT", "Swap snapshot contains unsupported non-JSON data."); }
+  function copy(input: unknown): unknown {
+    if (input === null || typeof input === "string" || typeof input === "boolean") return input;
+    if (typeof input === "number" && Number.isFinite(input) && Math.abs(input) <= Number.MAX_SAFE_INTEGER) return input;
+    if (typeof input !== "object" || input === null || ancestors.has(input)) invalid();
+    const array = Array.isArray(input);
+    if (array ? Object.getPrototypeOf(input) !== Array.prototype : !isPlainRecord(input)) invalid();
+    const keys = Reflect.ownKeys(input), descriptors = Object.getOwnPropertyDescriptors(input);
+    if (keys.some(key => typeof key !== "string")) invalid();
+    ancestors.add(input);
+    try {
+      if (array) {
+        const length = descriptors.length;
+        if (length === undefined || !("value" in length) || length.enumerable ||
+            !Number.isSafeInteger(length.value) || length.value < 0 || keys.length !== length.value + 1) invalid();
+        const result: unknown[] = [];
+        for (let index = 0; index < length.value; index++) {
+          const descriptor = descriptors[String(index)];
+          if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) invalid();
+          result.push(copy(descriptor.value));
+        }
+        return Object.freeze(result);
+      }
+      const result: Record<string, unknown> = {};
+      for (const key of keys as string[]) {
+        const descriptor = descriptors[key]!;
+        if (!("value" in descriptor) || !descriptor.enumerable) invalid();
+        Object.defineProperty(result, key, { value: copy(descriptor.value), enumerable: true });
+      }
+      return Object.freeze(result);
+    } finally { ancestors.delete(input); }
+  }
+  return copy(value) as T;
+}

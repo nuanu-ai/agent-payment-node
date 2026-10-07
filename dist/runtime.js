@@ -35,6 +35,7 @@ export class RuntimeContext {
     uniswap;
     sunswap;
     jupiter;
+    jupiterV1Runtime;
     facilitatorGasless;
     smartAccountGasless;
     metaMaskGasless;
@@ -137,6 +138,8 @@ export class RuntimeContext {
             this.sunswap = dependencies.sunswap;
         if (dependencies.jupiter !== undefined)
             this.jupiter = dependencies.jupiter;
+        if (dependencies.jupiterV1Runtime !== undefined)
+            this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
         if (dependencies.facilitatorGasless !== undefined)
             this.facilitatorGasless = dependencies.facilitatorGasless;
         if (dependencies.smartAccountGasless !== undefined)

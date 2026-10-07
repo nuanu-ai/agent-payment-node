@@ -105,6 +105,7 @@ export interface CoreDependencies {
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
+  readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -176,6 +177,7 @@ export class RuntimeContext {
   readonly uniswap?: UniswapGuardedSwapBuilder;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
   readonly jupiter?: JupiterReadOnlyQuoteBuilder;
+  readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -248,6 +250,7 @@ export class RuntimeContext {
     if (dependencies.uniswap !== undefined) this.uniswap = dependencies.uniswap;
     if (dependencies.sunswap !== undefined) this.sunswap = dependencies.sunswap;
     if (dependencies.jupiter !== undefined) this.jupiter = dependencies.jupiter;
+    if (dependencies.jupiterV1Runtime !== undefined) this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
     if (dependencies.facilitatorGasless !== undefined) this.facilitatorGasless = dependencies.facilitatorGasless;
     if (dependencies.smartAccountGasless !== undefined) this.smartAccountGasless = dependencies.smartAccountGasless;
     if (dependencies.metaMaskGasless !== undefined) this.metaMaskGasless = dependencies.metaMaskGasless;

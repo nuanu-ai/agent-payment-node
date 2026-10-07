@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { lstat } from "node:fs/promises";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { compileAllowlistPolicyOverlay, type AllowlistPolicyOverlayInput } from "../../src/allowlist-policy-overlay.js";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
@@ -41,7 +42,7 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
   const policy = compileAllowlistPolicyOverlay(overlay).registry;
   const protocols = compileSwapProtocolRegistry({ registryVersion: "runtime-swap.1", pins: [pin] });
   const operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root), approvals = new GuardedSwapApprovalRepository(root);
-  const quote = createSwapQuote(quoteInput), material = { quote, approvalCapAtomic: "0",
+  const quote = createSwapQuote(structuredClone(quoteInput)), material = { quote, approvalCapAtomic: "0",
     gasOrEnergy: { gasLimit: "100000", maxFeePerGas: "2", maxPriorityFeePerGas: "1", executionHead: "101" }, execution: { unsigned: true } };
   let runtime!: GuardedSwapRuntime<any>, sends = 0, observes = 0, admissionCalls = 0, clockMs = NOW.getTime();
   const clock = { now: () => new Date(clockMs) };
@@ -58,7 +59,7 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
     ownerAdmission: { async assert() { admissionCalls++; } },
     foregroundApproval: { async approve(intent) { clockMs += options.typingMs ?? 0; return sealGuardedSwapApproval(intent, clock.now(), H("f")); } }, execution,
     rpc: {}, effectStore: {}, signer: {}, sender: {}, observer: {}, caps: { gasLimit: "100000", maxFeePerGas: "2" } });
-  return { runtime, quote, approvals, operations, counters: () => ({ sends, observes, admissionCalls }),
+  return { runtime, quote, material, policy, approvals, operations, counters: () => ({ sends, observes, admissionCalls }),
     setClock: (value: Date) => { clockMs = value.getTime(); } };
 }
 
@@ -68,12 +69,12 @@ test("explicit runtime prepares, separately approves, and only execute crosses t
   assert.equal(prepared.state, "awaiting_approval"); assert.deepEqual(f.counters(), { sends: 0, observes: 0, admissionCalls: 0 });
   const approved = await f.runtime.approve(prepared.operationId, NOW);
   assert.equal(approved.state, "reserved"); assert.equal(approved.submissionMarker, null);
-  assert.deepEqual(f.counters(), { sends: 0, observes: 0, admissionCalls: 1 });
+  assert.deepEqual(f.counters(), { sends: 0, observes: 0, admissionCalls: 2 });
   const executed = await f.runtime.execute(prepared.operationId, NOW);
   assert.equal(executed.state, "unknown_finality"); assert.notEqual(executed.submissionMarker, null);
-  assert.deepEqual(f.counters(), { sends: 1, observes: 0, admissionCalls: 2 });
+  assert.deepEqual(f.counters(), { sends: 1, observes: 0, admissionCalls: 3 });
   const resumed = await f.runtime.execute(prepared.operationId, NOW);
-  assert.equal(resumed.integrityHash, executed.integrityHash); assert.deepEqual(f.counters(), { sends: 1, observes: 1, admissionCalls: 2 });
+  assert.equal(resumed.integrityHash, executed.integrityHash); assert.deepEqual(f.counters(), { sends: 1, observes: 1, admissionCalls: 3 });
 });
 
 test("approval artifacts bind every displayed field and expire before execution", async (t) => {
@@ -184,3 +185,91 @@ test("an approved reservation that outlives its deadline or loses its consent is
   assert.equal(released.state, "failed_before_effect"); assert.equal(released.usageLease?.state, "failed_before_effect");
   assert.equal(released.submissionMarker, null); assert.equal(f.counters().sends, 0);
 });
+
+// These fixtures use only temporary state and fake approval/effect ports; no key or RPC is available.
+for (const field of ["recipient", "inputAmountAtomic", "account", "gasOrEnergy"] as const) {
+  test(`foreground callback cannot mutate immutable approval ${field}`, async (t) => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+    const op = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: `mutation-${field}` }, NOW);
+    const deps: any = f.runtime.dependencies;
+    deps.foregroundApproval = { async approve(intent: any) {
+      await Promise.resolve();
+      assert.throws(() => { if (field === "gasOrEnergy") intent.gasOrEnergy.gasLimit = "999999";
+        else intent[field] = field === "inputAmountAtomic" ? "999" : RECIPIENT; }, TypeError);
+      return sealGuardedSwapApproval(intent, NOW, H("f"));
+    } };
+    const approved = await f.runtime.approve(op.operationId, NOW);
+    assert.equal(approved.quote.quoteHash, op.quote.quoteHash); assert.equal(approved.quote.account, ACCOUNT);
+    assert.equal(approved.quote.inputAmountAtomic, "100"); assert.equal(f.counters().sends, 0);
+  });
+}
+for (const change of ["policy", "material", "caps", "owner", "stored"] as const) {
+  test(`post-prompt ${change} drift refuses without usage, approval or effect writes`, async (t) => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+    const op = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: `drift-${change}-0001` }, NOW);
+    const deps: any = f.runtime.dependencies; let reservations = 0;
+    deps.usage.reserve = async () => { reservations++; throw new Error("unexpected reservation"); };
+    deps.foregroundApproval = { async approve(intent: any) {
+      await Promise.resolve();
+      if (change === "policy") deps.policy = async () => null;
+      if (change === "material") (f.material.quote as any).destinationAsset.identifier = RECIPIENT;
+      if (change === "caps") deps.caps.gasLimit = "999999";
+      if (change === "owner") deps.ownerAdmission = { async assert() { throw new Error("owner revoked"); } };
+      if (change === "stored") {
+        const original = deps.operations.loadAny.bind(deps.operations);
+        deps.operations.loadAny = async (id: string) => { const loaded = await original(id);
+          const { integrityHash: _hash, ...body } = loaded;
+          const changed = { ...body, quote: createSwapQuote({ ...quoteInput, recipient: ACCOUNT }) };
+          return { ...changed, integrityHash: domainHash("apn.swap-operation.v1", canonicalJson(changed)) }; };
+      }
+      return sealGuardedSwapApproval(intent, NOW, H("f"));
+    } };
+    await assert.rejects(f.runtime.approve(op.operationId, NOW));
+    assert.equal(reservations, 0); assert.equal(f.counters().sends, 0);
+    assert.equal(await f.approvals.load(op), null);
+    if (change !== "stored") assert.equal((await f.operations.loadAny(op.operationId))?.state, "awaiting_approval");
+  });
+}
+
+test("revoking active policy after reservation prevents execution", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+  const op = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "execute-policy-revoked" }, NOW);
+  await f.runtime.approve(op.operationId, NOW);
+  (f.runtime.dependencies as any).policy = async () => null;
+  await assert.rejects(f.runtime.execute(op.operationId, NOW), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(f.counters().sends, 0); assert.equal((await f.operations.loadAny(op.operationId))?.submissionMarker, null);
+});
+
+for (const shape of ["getter", "symbol", "nonenumerable", "object-prototype", "array-subclass", "array-extra",
+  "array-symbol", "array-hole", "array-getter", "array-nonenumerable", "cycle", "date", "bigint"] as const) {
+  test(`malformed ${shape} snapshot refuses before getter or external port invocation`, async (t) => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+    let getterReads = 0, externalCalls = 0;
+    const request: any = { profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "malformed-snapshot-0001" };
+    const getter = () => { getterReads++; return f.quote.quoteHash; };
+    if (shape === "getter") Object.defineProperty(request, "quoteHash", { enumerable: true, get: getter });
+    if (shape === "symbol") request[Symbol("hidden")] = "financial-data";
+    if (shape === "nonenumerable") Object.defineProperty(request, "hidden", { value: "financial-data" });
+    if (shape === "object-prototype") Object.setPrototypeOf(request, { inherited: "financial-data" });
+    if (shape === "date") request.extra = NOW;
+    if (shape === "bigint") request.extra = 1n;
+    if (shape === "cycle") request.extra = request;
+    if (shape.startsWith("array-")) {
+      const array: any = shape === "array-subclass" ? new (class extends Array {})() : ["entry"];
+      if (shape === "array-extra") array.financialData = "ignored";
+      if (shape === "array-symbol") array[Symbol("hidden")] = "ignored";
+      if (shape === "array-hole") delete array[0];
+      if (shape === "array-getter") Object.defineProperty(array, "0", { enumerable: true, get: getter });
+      if (shape === "array-nonenumerable") Object.defineProperty(array, "0", { value: "entry", enumerable: false });
+      request.extra = array;
+    }
+    const deps: any = f.runtime.dependencies;
+    const unexpected = async () => { externalCalls++; throw new Error("external port must not run"); };
+    deps.builder.load = unexpected; deps.policy = unexpected; deps.ownerAdmission.assert = unexpected;
+    deps.foregroundApproval.approve = unexpected; deps.usage.reserve = unexpected; deps.execution.execute = unexpected;
+    await assert.rejects(f.runtime.prepare(request, NOW), { code: "APN_INVALID_INPUT" });
+    assert.equal(getterReads, 0); assert.equal(externalCalls, 0);
+    assert.deepEqual(f.counters(), { sends: 0, observes: 0, admissionCalls: 0 });
+    await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
+  });
+}

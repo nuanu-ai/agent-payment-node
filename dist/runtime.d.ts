@@ -102,6 +102,9 @@ export interface CoreDependencies {
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
+    readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.jupiter.quote";
+    }>>;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -178,6 +181,9 @@ export declare class RuntimeContext {
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
+    readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.jupiter.quote";
+    }>>;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
