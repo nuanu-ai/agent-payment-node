@@ -21,7 +21,8 @@ const WORD = /^0x[0-9a-fA-F]{64}$/u;
 const QUANTITY = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63})$/u;
 
 /**
- * One HTTP request per EVM network. With a pinned Multicall3 it carries `eth_getCode` (runtime-code hash check)
+ * One HTTP request per EVM network, except Arbitrum which pins and rechecks an RPC L2 header.
+ * With a pinned Multicall3 it carries `eth_getCode` (runtime-code hash check)
  * and one `aggregate3` `eth_call` that also returns chainId and block number; otherwise one plain JSON-RPC batch array.
  */
 export class EvmPortfolioPort implements FamilyBalanceBatchPort {
@@ -55,11 +56,24 @@ async function multicallBatch(counter: CountingPortfolioHttp, request: BatchBala
       : { target: getAddress(asset.identifier!), allowFailure: true, callData: encodeFunctionData({ abi: ERC20_BALANCE_OF, functionName: "balanceOf", args: [account] }) }),
   ];
   const data = encodeFunctionData({ abi: MULTICALL3_ABI, functionName: "aggregate3", args: [calls] });
+  // Arbitrum's Solidity block.number is an L1 counter, not an RPC L2 block tag.
+  const anchor = chainId === 42161 ? await arbitrumAnchor(counter, request, chainId, codeHash) : null;
+  const tag = anchor?.number ?? "latest";
   const raw = await counter.postJson(new URL(request.endpoint), jsonRpcBatchBody([
-    { method: "eth_getCode", params: [MULTICALL3_ADDRESS, "latest"] },
-    { method: "eth_call", params: [{ to: MULTICALL3_ADDRESS, data }, "latest"] },
-  ]), 2);
-  const [code, call] = jsonRpcBatchResults(raw, 2, false) as [JsonRpcItem, JsonRpcItem];
+    ...(anchor === null ? [] : [
+      { method: "eth_chainId", params: [] },
+      { method: "eth_getBlockByNumber", params: [tag, false] },
+    ]),
+    { method: "eth_getCode", params: [MULTICALL3_ADDRESS, tag] },
+    { method: "eth_call", params: [{ to: MULTICALL3_ADDRESS, data }, tag] },
+  ]), anchor === null ? 2 : 4);
+  const items = jsonRpcBatchResults(raw, anchor === null ? 2 : 4, false);
+  if (anchor !== null) {
+    checkChain(items[0]!, chainId);
+    const rechecked = rpcHeader(items[1]!);
+    if (rechecked.number !== anchor.number || rechecked.hash !== anchor.hash) throw new PortfolioReadFailure("protocol");
+  }
+  const [code, call] = items.slice(anchor === null ? 0 : 2) as [JsonRpcItem, JsonRpcItem];
   if (!code.ok || !call.ok) throw new PortfolioReadFailure("rpc_error");
   if (typeof code.value !== "string" || !HEX_DATA.test(code.value) || keccak256(code.value as Hex) !== codeHash) {
     throw new PortfolioReadFailure("multicall_code_mismatch");
@@ -72,12 +86,57 @@ async function multicallBatch(counter: CountingPortfolioHttp, request: BatchBala
   const observedChain = word(results[0]!), block = word(results[1]!);
   if (observedChain === null || block === null) throw new PortfolioReadFailure("protocol");
   if (observedChain !== BigInt(chainId)) throw new PortfolioReadFailure("chain_mismatch");
-  return { block: block.toString(), balances: request.assets.map((asset, index) => {
+  if (anchor !== null) {
+    // A batch may execute its header and eth_call in either order. Recheck after the call completes.
+    const after = await counter.postJson(new URL(request.endpoint), jsonRpcBatchBody([
+      { method: "eth_getBlockByNumber", params: [tag, false] },
+    ]), 1);
+    const rechecked = rpcHeader(jsonRpcBatchResults(after, 1, false)[0]!);
+    if (rechecked.number !== anchor.number || rechecked.hash !== anchor.hash) throw new PortfolioReadFailure("protocol");
+  }
+  return { block: anchor === null ? block.toString() : BigInt(anchor.number).toString(), balances: request.assets.map((asset, index) => {
     const result = results[index + 2]!;
     if (!result.success) return { ...asset, unavailable: "partial_batch" as const };
     const amount = word(result);
     return amount === null ? { ...asset, unavailable: "protocol" as const } : { ...asset, amountAtomic: amount.toString() };
   }) };
+}
+
+/** Select an RPC L2 header before reading balances; the follow-up rechecks its identity. */
+async function arbitrumAnchor(counter: CountingPortfolioHttp, request: BatchBalanceRequest, chainId: number,
+  codeHash: Hex): Promise<{ readonly number: Hex; readonly hash: Hex }> {
+  const raw = await counter.postJson(new URL(request.endpoint), jsonRpcBatchBody([
+    { method: "eth_chainId", params: [] },
+    { method: "eth_getBlockByNumber", params: ["latest", false] },
+    { method: "eth_getCode", params: [MULTICALL3_ADDRESS, "latest"] },
+  ]), 3);
+  const items = jsonRpcBatchResults(raw, 3, false);
+  checkChain(items[0]!, chainId);
+  const anchor = rpcHeader(items[1]!);
+  const code = items[2]!;
+  if (!code.ok) throw new PortfolioReadFailure("rpc_error");
+  if (typeof code.value !== "string" || !HEX_DATA.test(code.value) || keccak256(code.value as Hex) !== codeHash) {
+    throw new PortfolioReadFailure("multicall_code_mismatch");
+  }
+  return anchor;
+}
+
+function checkChain(item: JsonRpcItem, chainId: number): void {
+  if (!item.ok) throw new PortfolioReadFailure("rpc_error");
+  const chain = quantity(item);
+  if (chain === null) throw new PortfolioReadFailure("protocol");
+  if (chain !== BigInt(chainId)) throw new PortfolioReadFailure("chain_mismatch");
+}
+
+function rpcHeader(item: JsonRpcItem): { readonly number: Hex; readonly hash: Hex } {
+  if (!item.ok) throw new PortfolioReadFailure("rpc_error");
+  const header = item.value;
+  if (header === null || typeof header !== "object" || Array.isArray(header) ||
+      !("number" in header) || typeof header.number !== "string" || !QUANTITY.test(header.number) ||
+      !("hash" in header) || typeof header.hash !== "string" || !WORD.test(header.hash)) {
+    throw new PortfolioReadFailure("protocol");
+  }
+  return { number: header.number as Hex, hash: header.hash.toLowerCase() as Hex };
 }
 
 async function plainBatch(counter: CountingPortfolioHttp, request: BatchBalanceRequest, account: Hex,
