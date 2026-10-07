@@ -278,6 +278,25 @@ test("Stargate destination requires GUID, source EID, receiver, amount, and exac
   assert.throws(() => bridgeDestinationProof(source, m, d, { ...good, logs: [...good.logs, cached] }), { code: "APN_RPC_PROTOCOL" });
 });
 
+test("nonnative protocol source and stored correlations retain exact raw amount equality", async () => {
+  for (const m of await fixtures()) {
+    const d = decodeBridgeCall(m), good = makeSourceReceipt(d);
+    const source = bridgeSourceProof(m, d, good), destination = makeDestinationReceipt(d, source);
+    const raw = BigInt(d.bridgeAmountAtomic);
+    // A value normalized with the native lane's quantum must never be admitted for token evidence.
+    for (const amount of [raw - 1n, raw + 1n, raw / 1000000000000n * 1000000000000n]) {
+      const logs = [...good.logs];
+      logs[5] = d.tool === "across" ? mutateEvent(logs[5]!, "FundsDeposited", { inputAmount: amount }) :
+        mutateEvent(logs[5]!, "OFTSent", { amountSentLD: amount });
+      assert.throws(() => bridgeSourceProof(m, d, { ...good, logs }), { code: "APN_RPC_PROTOCOL" });
+      const correlation = source.correlation.kind === "across" ?
+        { ...source.correlation, inputAmountAtomic: amount.toString() } :
+        { ...source.correlation, amountSentAtomic: amount.toString() };
+      assert.throws(() => bridgeDestinationProof({ ...source, correlation }, m, d, destination));
+    }
+  }
+});
+
 test("destination proof rejects forged stored source correlations and wrong receipt chains", async () => {
   for (const m of [(await fixtures())[0]!, (await fixtures())[3]!]) {
     const d = decodeBridgeCall(m), source = bridgeSourceProof(m, d, makeSourceReceipt(d));

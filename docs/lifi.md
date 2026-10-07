@@ -476,7 +476,14 @@ approval reset. Every fee row is the native coin itself (`asset: "native"`);
 LI.FI's fixed fee must equal the forwarded amount. The captured Ethereum to
 Base native Stargate Taxi calldata decodes with asset ID 13:
 transaction value equals the source principal plus the separate LayerZero native
-fee. An offline destination decoder conditionally accepts the canonical
+fee. Source observation requires `OFTSent.amountSentLD` to equal the bridge
+amount rounded down to shared precision using the pinned native registry's
+18 local decimals and 6 shared decimals (a 10^12 wei quantum). The frozen
+calldata amount and source proof keep the raw value; the source correlation
+stores the actual normalized sent value. Stored-correlation validation applies
+the same exact calculation. This rule applies only to the admitted Ethereum
+to Base native Taxi lane; other Stargate and Across amounts retain exact equality.
+An offline destination decoder conditionally accepts the canonical
 `OFTReceived` from the official Base native pool when a frozen code and
 configuration pin matches historical deployment evidence at the receipt block.
 The event must bind the source GUID, source EID, recipient and amount; the
