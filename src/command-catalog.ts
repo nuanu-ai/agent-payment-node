@@ -84,7 +84,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
   { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
   { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
-  { path: ["x402", "permit2"], summary: "Read current owner admission and existing blocked Permit2 intents.", kind: "group" },
+  { path: ["x402", "permit2"], summary: "Read owner admission and intents, approve one foreground Permit2 GET and observe chain evidence.", kind: "group" },
   { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
   { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
   { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },

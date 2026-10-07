@@ -5,10 +5,11 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-The source tree prepares unreleased APN 0.5.35 for Apple Silicon macOS. The
-published 0.5.34 release and its Homebrew Formula are separate from this source
-version. Verify the exact installed version before relying on source changes
-after 0.5.34.
+This source tree prepares an unreleased APN 0.5.35 candidate for Apple Silicon
+macOS. Published packages and the Homebrew Formula have separate provenance.
+A matching version number does not prove that an installed artifact contains
+these source changes: verify its release commit or artifact digest and installed
+command contract before relying on them.
 
 The current platform boundary and the required work for future Linux or
 Windows support are recorded in the [platform support matrix](docs/platform-support.md).
@@ -71,9 +72,10 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 
 ## Install
 
-Homebrew installation is a separate publication gate. Verify that `apn --version`
-reports `0.5.35` before relying on the current source behavior. The published
-0.5.34 installation predates this unreleased source version.
+Homebrew installation is a separate publication gate. The command below installs
+the published Formula; it does not establish that the unreleased source candidate
+is available there. Check `apn --version`, the installed release provenance and
+`apn help --json` together before using a source capability.
 
 ```sh
 brew install nuanu-ai/tap/apn
@@ -682,6 +684,38 @@ through the configured Keychain-backed wrapping-secret port. A matching grant
 in another profile blocks execution; unreadable or malformed permission state
 fails closed. Grant commits use the same address lock after browser consent has
 returned. The signer must perform network reads outside that lock.
+
+## Foreground Permit2 requests
+
+The source candidate provides CLI-only Avalanche USDT Permit2 approval and
+observation. Verify installed artifact provenance and both commands' help first.
+No eligible live merchant URL is established here. These are templates: fill
+every placeholder with verified merchant, profile and public HTTPS RPC inputs.
+Before approval, verify the current local-native owner binding, active Permit2
+policy and caps, funds and the exact merchant offer.
+
+```text
+apn x402 permit2 approve --url <verified-merchant-https-url> --rpc-url <verified-public-avalanche-https-rpc> --profile <verified-local-profile> --idempotency-key <stable-request-key>
+```
+
+Read the frozen request, payee and maximum debit in the foreground TTY. Consent
+authorizes signing and at most one paid GET. Keep the returned operation ID.
+The same profile, key and exact request retain that operation; changing the
+request with the same profile/key conflicts. Exposed, signed, pending and terminal
+operations never prepare again, sign again or send again. For a held operation
+(HOLD), continue only with observation:
+
+```text
+apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-avalanche-https-rpc> --profile <same-local-profile> --transaction <candidate-transaction-hash>
+```
+
+HTTP 200 and transaction hints do not prove public chain finality. Observation
+checks genuine chain evidence and can reconcile the owned local journal and usage
+ledger. For an expired authorization with no effect, replace `--transaction <hash>`
+with `--expired-unused`; the modes are mutually exclusive. This requires actual
+finalized chain time beyond the saved deadline and unused nonce evidence.
+See the [Permit2 guide](docs/x402-non-usdc.md#foreground-production-cli) for exact
+options, saved-hint handling and recovery boundaries.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text

@@ -36,6 +36,55 @@ When another process holds the endpoint lock through a slow RPC, a queued prefli
 
 ## Foreground production CLI
 
+Use an installed artifact whose provenance and `approve`/`observe` help match this
+source contract. The source candidate is unreleased; its version number alone
+does not establish installed support. No eligible live merchant URL is established
+here. The following commands are templates. Replace every placeholder with
+verified inputs before running them; do not use example endpoints for payment.
+
+1. Verify the current local-native owner binding, active Permit2 policy and caps,
+   available funds, the merchant's exact Avalanche USDT offer and a credential-free
+   public HTTPS Avalanche RPC. Choose a stable 8 to 200 character safe ASCII
+   idempotency key for this exact request. `--profile` defaults to `default` on
+   approve; name the verified profile explicitly when another wallet owns it.
+2. Run the approval command in a foreground TTY:
+
+   ```text
+   apn x402 permit2 approve --url <verified-merchant-https-url> --rpc-url <verified-public-avalanche-https-rpc> --profile <verified-local-profile> --idempotency-key <stable-request-key>
+   ```
+
+   Inspect the frozen request, payee and maximum debit at the prompt. Consent
+   authorizes signing and at most one paid GET in that process. This command
+   does not offer sign-only approval. Keep the returned operation ID.
+3. If the operation is held (HOLD), continue only with observation. An explicit
+   nonzero transaction hash is a candidate to check, not proof of payment:
+
+   ```text
+   apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-avalanche-https-rpc> --profile <same-local-profile> --transaction <candidate-transaction-hash>
+   ```
+
+   Without `--transaction`, settlement observation can use a saved transaction
+   hint. A missing or bad hint leaves the operation held; a later explicit
+   candidate can be checked. HTTP 200 and transaction hints do not prove public
+   chain finality. Only genuine finalized chain evidence can finalize payment.
+4. For an expired authorization with no effect, use the separate mode:
+
+   ```text
+   apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-avalanche-https-rpc> --profile <same-local-profile> --expired-unused
+   ```
+
+   `--transaction` and `--expired-unused` are mutually exclusive. Expiry alone
+   is insufficient: this mode requires actual finalized chain time beyond the
+   saved deadline and evidence that the nonce remains unused.
+
+The same profile, key and exact request retain one operation. Changing the request
+with the same profile/key returns an idempotency conflict. Prepared, reserving or
+reserved operations resume saved material. Exposed, signed, pending and terminal
+operations never prepare again, sign again or send again. Observation reads the
+saved owner and operation, and may reconcile the owned local journal and usage
+ledger; it performs no merchant request or signing. Omit `--profile` on observe
+to use the saved owner, or provide the same profile as a check.
+
 `apn x402 permit2 approve --help` describes the required owner-selected HTTPS URL, HTTPS RPC, explicit stable idempotency key and optional profile (default `default`). The command permits GET only, with no caller headers/body or approval bypass flag. Before unsigned merchant HTTP, it validates a genuine local-native capability and metadata binding; it does not describe/decrypt the wallet or load Keychain before approval. Matching exposed, signed, request-pending and terminal operations return sanitized status with no HTTP, RPC, UI, keys or ledger repair. Prepared/reserving/reserved operations resume from saved material without another 402 inspection or preparation.
 
 The new same-process `signAndSubmitOnce` enclosure owns concrete default foreground TTY consent, original approval clock, journal and fence. Constructor-injected approval callbacks and public `run` cannot authorize this enclosure. After consent it uses guarded native signing, one private first-request grant and one dedicated HTTPS attempt, with a 20-second monotonic dispatch deadline and no retry. Response data is reduced to an immutable untrusted locator sidecar. HTTP 200, a transaction hint or a timeout cannot mark payment settled or failed.
