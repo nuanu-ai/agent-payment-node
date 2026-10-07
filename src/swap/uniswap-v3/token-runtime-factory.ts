@@ -39,8 +39,9 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     currentUsage: async (op) => await usage.current(op), followUsage: async (op, target) => await usage.follow(op, target),
     revalidate: async (op) => await revalidator.revalidate(op), seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
     probeSealed: async (op, kind, nonce) => await custody.probeSealed(op, kind, nonce),
+    recoverSealed: async (op, kind, nonce) => await custody.probeJournaled(op, kind, nonce),
     send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => {
-      await custody.bindEffectProvider(op, kind); return await observer.observe(op, kind, hash); },
+      await custody.bindEffectProvider(op, kind, hash); return await observer.observe(op, kind, hash); },
     foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
     foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },
     confirm: async (material) => await guard.confirm(material),

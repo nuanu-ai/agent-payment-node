@@ -8,8 +8,8 @@ import { slippageAboveCap } from "../slippage-refusal.js";
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
   ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
-  success: "Frozen Jupiter inventory, unsigned read-only quote, or durable status.",
-  failures: ["Classified refusal; no signing, broadcast, approval, or provider fallback."] } as const;
+  success: "Jupiter mechanism inventory, durable unsigned simulated V1 quote or operation status.",
+  failures: ["Classified refusal, exact foreground approval or observation of the same signature."] } as const;
 const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert"], non_terminal: ["quoted", "prepared", "awaiting_approval",
   "reserved", "submitting", "submitted", "unknown_finality"] } as const;
 const profile = option("--profile", "profile", ["existing_profile_name"]);
@@ -18,7 +18,7 @@ const operation = option("--operation", "operation_id", ["64_lowercase_hex_chara
 
 export const JUPITER_COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["swap", "solana"], summary: "Solana guarded swaps.", kind: "group" },
-  { path: ["swap", "solana", "jupiter"], summary: "Pinned Jupiter V2 native SOL to USDC exact input.", kind: "group" },
+  { path: ["swap", "solana", "jupiter"], summary: "Jupiter V1 direct Whirlpool SOL to USDC; V2 Quantum remains blocked.", kind: "group" },
 ];
 
 export const JUPITER_COMMANDS: readonly CommandDefinition[] = [
@@ -26,20 +26,20 @@ export const JUPITER_COMMANDS: readonly CommandDefinition[] = [
   command("quote", [profile, account, option("--to", "string", ["canonical_32_byte_base58_solana_recipient"]),
     option("--amount", "wei", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
     option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"])],
-    "Request one unsigned quote through an explicitly injected read-only builder.", "network_read"),
+    "Build and save one runtime-pinned V1 Whirlpool SOL to USDC quote after active owner policy checks.", "local_write"),
   command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]),
     option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
     "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
-  command("status", [operation], "Read one durable guarded swap operation without resending.", "local_read"),
-  command("approve", [operation], "Approval is blocked because the Jupiter V6 instruction ABI is unverified.", "none"),
-  command("execute", [operation], "Execution is blocked because the Jupiter V6 instruction ABI is unverified.", "none"),
+  command("status", [operation], "Observe the same durable Jupiter signature and save proved finality without resending.", "local_write"),
+  command("approve", [operation], "Confirm the exact V1 operation in a genuine foreground terminal, then sign locally and send once.", "payment_submit"),
+  command("execute", [operation], "Require a fresh genuine foreground approval for the same unmarked V1 operation; marked operations observe only.", "payment_submit"),
 ];
 
 function command(name: string, options: readonly CommandOption[], summary: string,
   effect: CommandDefinition["effect"]["class"]): CommandDefinition {
   const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
   return { path: ["swap", "solana", "jupiter", name], synopsis: `apn swap solana jupiter ${name}${suffix}`, summary, options,
-    effect: { class: effect, summary }, approval: { class: "none", when: "Never signs or broadcasts." }, output, states,
+    effect: { class: effect, summary }, approval: { class: name === "approve" || name === "execute" ? "foreground_tty" : "none", when: name === "approve" || name === "execute" ? "Exact genuine TTY approval; MCP returns the foreground CLI handoff." : "No financial effect." }, output, states,
     recovery: [], examples: [`apn swap solana jupiter ${name}`] };
 }
 

@@ -96,3 +96,18 @@ route ABI shown by the Solscan IDL. No build or executable attestation was
 found tying this source and IDL snapshot to the deployed JUP6 executable. The
 eleven route-dependent account roles remain unverified; APN remains
 `signable: false`.
+
+
+## Additive Jupiter V1 lane, 7 October 2026
+
+The implementation adds one Jupiter V1 ExactIn route beside the retained V2 prototype: 1,000,000 lamports of native SOL to canonical USDC through the direct Whirlpool pool `83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d`. The route uses one 100% A to B step, no platform fee, no delegate and the payer's own token accounts. V2 Quantum remains dormant and `signable: false`.
+
+The V1 guard binds the official program identities, runtime executable bytes, raw and compiled account roles, mint/vault/tick/oracle relationships, lookup table contents and the exact unsigned message. Its provenance is `runtime_bytes_only`; source reproducibility is unproved. The API minimum uses ceiling arithmetic and the client expected instruction floor can differ by one atomic USDC unit. The approval shows both values, and simulation and the finalized receipt must meet both. APN preserves the official route bytes.
+
+`createApnCore` installs `createJupiterV1Runtime` for the existing Jupiter commands. Quote requires the actual active owner policy admitting SOL swap, USDC swap and the exact V1 mechanism before network reads. Preparation stores the authoritative operation and its public/encrypted owner binding. `approve` opens the genuine foreground TTY, then performs the first local signature and single send. `execute` requests fresh foreground approval for the same unmarked operation; an existing effect marker makes it observe only. MCP approval and execution return the exact CLI handoff. No caller approval artifact or structural signer port can unlock the finite Native signer.
+
+The signer owns a canonical `ChainAccountStore`. It checks the same operation, owner, public account, envelope and active policy before TTY approval and before normal Keychain/decryption/signing. The exact fresh read material and simulation are saved as content-hashed chunks before signing. A public signature marker and encrypted exact signed bytes precede the fsynced first-send claim. The sender consumes that claim under the operation lock before one `sendTransaction` with `maxRetries: 0`. Crashes, transport ambiguity, missing status and blockhash expiry retain `unknown_finality`; status never signs, resends, requotes or opens wallet secrets.
+
+The root-approved runtime cap is 64 logical network attempts for quote (including official quote/build HTTP and RPC), 64 for execution and 64 for observation, at most 192 for one operation. Preparation reads local state. Failed attempts count before transport; execution and observation counters survive restarts. This is a `runtime_cap`, not a field in the owner's asset policy. The approved maximum native expense is 6,000,000 lamports including input, rent, base and priority fees; each live frozen build still needs its own fee proof.
+
+Tony waived CI for this task. Local implementation and fixture tests do not establish paid acceptance. The historical September rows retain their original identifiers, titles and statuses. A fresh exact owner policy, real foreground approval, actual first send and finalized receipt remain required before the generic Jupiter row can close. The saved 7 October diagnostic build is expired and cannot be used for live signing.

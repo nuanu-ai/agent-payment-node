@@ -210,7 +210,7 @@ test("token usage finalizes consumed principal and releases only proven no-debit
   assert.equal((await s.usage.current(reverted)).state, "failed_confirmed_revert");
   assert.equal((await s.usage.current(preswap)).state, "failed_before_effect");
 });
-test("ledger-terminal live split brain reconciles the operation to no-effect cleaned after restart", async (t) => {
+test("ledger-terminal hashless marked recovery refuses unproven no-effect cleanup", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await setup(temporary.root, "3000000"), journal = new UniswapTokenJournal(temporary.root);
   const prepared = await journal.save(operation(s.policy.policyDigest, "7")), usage = await s.usage.reserve(prepared);
   const approved = await journal.save(transitionUniswapToken(prepared, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, NOW));
@@ -224,8 +224,10 @@ test("ledger-terminal live split brain reconciles the operation to no-effect cle
     followUsage: async (op: UniswapTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => await s.usage.follow(op, target),
     seal: never, probeSealed: async () => null, send: never, observe: never,
   } as any);
-  const cleaned = await runtime.status(split.operationId); assert.equal(cleaned.phase, "cleaned"); assert.equal(cleaned.usageState, "failed_before_effect");
-  assert.equal(cleaned.cleanupEvidence?.source, "legacy_usage_reconciliation"); assert.equal(cleaned.approvalAttempt?.transactionHash, null);
+  await assert.rejects(runtime.status(split.operationId), (e: any) => e.details?.reason === "uniswap_token_public_effect_missing");
+  const saved = await journal.load(split.operationId); assert.equal(saved?.phase, "cleanup_required"); assert.equal(saved?.usageState, "failed_before_effect");
+  assert.equal(saved?.cleanupEvidence, null); assert.equal(saved?.approvalAttempt?.transactionHash, null);
+  assert.equal((await s.usage.current(split)).state, "failed_before_effect");
 });
 test("journal-only sealed or send-started evidence blocks no-effect cleanup and usage release", async (t) => {
   for (const phase of ["sealed", "send_started"] as const) {
@@ -254,7 +256,11 @@ test("wallet-only signed crash evidence blocks no-effect cleanup and usage relea
   const cleanup = await journal.save(transitionUniswapToken(started, "cleanup_required", { cleanupReason: "injected_crash" }, now));
   assert.equal(await new UniswapTokenEffectJournal(temporary.root).load(cleanup, "approval"), null);
   const runtime = createUniswapTokenRuntime({ ...p, clock: { now: () => now }, foreground: "cleanup", verifyPins: async () => undefined });
-  await assert.rejects(runtime.cleanup(cleanup.operationId), (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "uniswap_cleanup_effect_exists");
+  let walletReads = 0; const describe = EncryptedWalletStore.prototype.describe;
+  EncryptedWalletStore.prototype.describe = async () => { walletReads++; throw new Error("custody forbidden during recovery"); };
+  t.after(() => { EncryptedWalletStore.prototype.describe = describe; });
+  await assert.rejects(runtime.cleanup(cleanup.operationId), (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "uniswap_token_public_effect_missing");
+  assert.equal(walletReads, 0);
   assert.equal((await journal.load(cleanup.operationId))?.cleanupEvidence, null); assert.equal((await s.usage.current(cleanup)).state, "reserved"); assert.equal(p.sends.length, 0);
 });
 
@@ -538,7 +544,7 @@ test("single-primary pooled quote and prepare use eight and nine physical reques
   ]);
 });
 
-test("post-wallet-save journal failure commits nonce and restart repairs and broadcasts the cached effect once", async (t) => {
+test("post-wallet-save failure recovery observes public journal without broadcasting cached effect", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
     account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "0"),
     effects = new FailOnceEffectJournal(temporary.root), journal = new UniswapTokenJournal(temporary.root), prepared = await journal.save(operation(s.policy.policyDigest, "5", account)),
@@ -554,6 +560,7 @@ test("post-wallet-save journal failure commits nonce and restart repairs and bro
     followUsage: async (op: UniswapTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => await s.usage.follow(op, target),
     seal: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.seal(op, kind, nonce),
     probeSealed: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.probeSealed(op, kind, nonce),
+    recoverSealed: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.probeJournaled(op, kind, nonce),
     send: async (op: UniswapTokenOperation, kind: TokenEffectKind) => await custody.send(op, kind), observe: async () => null });
   const first = new UniswapTokenExecution(journal, ports(firstCustody));
   await assert.rejects(first.execute(approved.operationId), /injected post-wallet-save failure/u); assert.equal(effects.failed, true);
@@ -562,9 +569,14 @@ test("post-wallet-save journal failure commits nonce and restart repairs and bro
   const other = operation(s.policy.policyDigest, "6", account), custody = new UniswapTokenCustody(p.state, p.wrapping, p.call, () => now);
   assert.equal(await custody.withAccountLock(other, async () => await custody.allocateNonce(other, "approval")), "8");
   const restarted = new UniswapTokenExecution(journal, ports(custody));
-  let recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_submitted"); assert.equal(recovered.approvalAttempt?.nonce, "7");
-  assert.match(recovered.approvalAttempt?.transactionHash ?? "", /^0x[a-f0-9]{64}$/u); assert.equal(p.sends.length, 1);
-  recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_submitted"); assert.equal(p.sends.length, 1);
+  let walletReads = 0; const describe = EncryptedWalletStore.prototype.describe;
+  EncryptedWalletStore.prototype.describe = async () => { walletReads++; throw new Error("custody forbidden during recovery"); };
+  t.after(() => { EncryptedWalletStore.prototype.describe = describe; });
+  const publicEffect = await new UniswapTokenEffectJournal(temporary.root).load(interrupted!, "approval"); assert.ok(publicEffect);
+  let recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_unknown_finality"); assert.equal(recovered.approvalAttempt?.nonce, "7");
+  assert.equal(recovered.approvalAttempt?.transactionHash, publicEffect.transactionHash); assert.equal(p.sends.length, 0);
+  recovered = await restarted.execute(prepared.operationId); assert.equal(recovered.phase, "approval_unknown_finality"); assert.equal(p.sends.length, 0);
+  assert.equal(walletReads, 0); assert.deepEqual(new Set(await occupiedUniswapTokenNonces(temporary.root, account)), new Set([7n, 8n]));
 });
 
 test("wallet-only crash binds signed raw to its opaque primary across reorder and rejects provider removal", async (t) => {
@@ -728,10 +740,11 @@ test("native pre-sign refuses when its frozen nonce becomes token-owned", async 
   new EncryptedWalletStore(native.state, native.wrapping).clear(loaded.secret); assert.equal(native.rpc.submissions.length, 0);
 });
 
-test("signer-time token nonce race releases native usage only after proving no signed effect", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); let inject: (() => Promise<void>) | null = null, signerCalls = 0;
+test("signer-time token nonce race retains ambiguity until explicit no-signature recovery", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); let inject: (() => Promise<void>) | null = null, signerCalls = 0, effectReads = 0;
   const native = evmCore(temporary.root, undefined, undefined, undefined, (port) => ({ request: async (request) => {
     if (request.operation === "directTransfer.approveAndSign") { signerCalls += 1; const race = inject; inject = null; await race?.(); }
+    if (request.operation === "effectMaterial.get") effectReads += 1;
     return await port.request(request);
   } }));
   native.rpc.chainId = 1; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; const wallet = await ensureDirectWallet(native); native.rpc.sender = wallet.address;
@@ -740,48 +753,85 @@ test("signer-time token nonce race releases native usage only after proving no s
   const frozen = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id); assert.ok(frozen?.economics);
   const token = operation("a".repeat(64), "2", wallet.address, "default"), store = new UniswapTokenNonceStore(temporary.root);
   inject = async () => { assert.equal(await store.allocate(token, "approval", BigInt(frozen.economics!.nonceAtomic)), frozen.economics!.nonceAtomic); };
+  const beforeSigningLoads = native.wrapping.loads;
   await assert.rejects(native.core.transfer.approve(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
-  const failed = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id); assert.ok(failed?.allowlistLease);
-  assert.equal(failed.state, "failed_before_effect"); assert.equal(failed.terminal, true); assert.equal(failed.reason, "native_signer_reprepare_required");
-  assert.equal(failed.transactionHash, undefined); assert.equal(failed.rawTransactionHash, undefined); assert.equal(signerCalls, 1); assert.equal(native.rpc.submissions.length, 0);
-  const secret = await new EncryptedWalletStore(native.state, native.wrapping).describe("default"); assert.ok(secret); assert.equal(Object.keys(secret.secret.directEffects).length, 0);
-  new EncryptedWalletStore(native.state, native.wrapping).clear(secret.secret); const reservation = failed.allowlistLease.reservation;
-  const ledger = await new AssetUsageLedger(temporary.root).load({ account: reservation.account, chain: reservation.chain, asset: reservation.asset }, reservation.reservationId);
-  assert.equal(ledger?.state, "failed_before_effect");
-  assert.equal((await native.core.transfer.approve(prepared.operation_id) as { state: string }).state, "failed_before_effect"); assert.equal(signerCalls, 1);
-  const restarted = evmCore(temporary.root, native.rpc, native.wrapping);
+  const started = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id); assert.ok(started?.allowlistLease);
+  assert.equal(started.state, "started"); assert.equal(started.terminal, false); assert.equal(started.reason, "foreground_signing_started");
+  assert.equal(started.transactionHash, undefined); assert.equal(started.rawTransactionHash, undefined); assert.equal(signerCalls, 1);
+  assert.equal(effectReads, 0, "signing refusal cannot classify the effect by reopening custody");
+  assert.equal(native.wrapping.loads, beforeSigningLoads + 1); assert.equal(native.rpc.submissions.length, 0);
+  const reservation = started.allowlistLease.reservation, asset = { account: reservation.account, chain: reservation.chain, asset: reservation.asset };
+  const usage = new AssetUsageLedger(temporary.root); assert.equal((await usage.load(asset, reservation.reservationId))?.state, "reserved");
+  const restarted = evmCore(temporary.root, native.rpc, native.wrapping, undefined, port => ({ request: async request => {
+    if (request.operation === "effectMaterial.get") effectReads += 1;
+    return await port.request(request);
+  } }));
+  const beforeRecoveryLoads = native.wrapping.loads;
+  await assert.rejects(restarted.core.transfer.resume(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
+  const failed = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id); assert.ok(failed);
+  assert.equal(failed.state, "failed_before_effect"); assert.equal(failed.terminal, true); assert.equal(failed.reason, "no_durable_signature_created");
+  assert.equal(failed.transactionHash, undefined); assert.equal(failed.rawTransactionHash, undefined);
+  assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, beforeRecoveryLoads + 1);
+  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "failed_before_effect");
+  const afterRecoveryLoads = native.wrapping.loads;
+  assert.equal((await native.core.transfer.approve(prepared.operation_id) as { state: string }).state, "failed_before_effect");
   assert.equal((await restarted.core.transfer.approve(prepared.operation_id) as { state: string }).state, "failed_before_effect");
-  assert.equal((await new AssetUsageLedger(temporary.root).load({ account: reservation.account, chain: reservation.chain, asset: reservation.asset }, reservation.reservationId))?.state, "failed_before_effect");
-  assert.equal(native.rpc.submissions.length, 0);
+  assert.equal(signerCalls, 1); assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, afterRecoveryLoads);
+  assert.equal(restarted.approval.intents.length, 0); assert.equal(native.rpc.submissions.length, 0);
 });
 
-test("reprepare classification after native effect persistence remains recoverable and reserved", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup);
+test("persisted native effect response loss recovers the same hash by observation without sending", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); let signerCalls = 0, effectReads = 0;
+  let persisted: { transactionHash: Hex; rawTransactionHash: Hex } | undefined;
   const native = evmCore(temporary.root, undefined, undefined, undefined, (port) => ({ request: async (request) => {
+    if (request.operation === "effectMaterial.get") effectReads += 1;
     const result = await port.request(request);
-    if (request.operation === "directTransfer.approveAndSign") throw new ApnError("APN_REPREPARE_REQUIRED", "injected after effect persistence");
+    if (request.operation === "directTransfer.approveAndSign") {
+      signerCalls += 1; persisted = result as { transactionHash: Hex; rawTransactionHash: Hex };
+      throw new ApnError("APN_REPREPARE_REQUIRED", "injected after effect persistence");
+    }
     return result;
   } }));
   native.rpc.chainId = 1; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; const wallet = await ensureDirectWallet(native); native.rpc.sender = wallet.address;
   const prepared = await native.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
     idempotencyKey: "native-post-marker-reprepare-001" }) as { operation_id: string };
+  const beforeSigningLoads = native.wrapping.loads;
   await assert.rejects(native.core.transfer.approve(prepared.operation_id), { code: "APN_REPREPARE_REQUIRED" });
   const started = await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id); assert.equal(started?.state, "started");
-  const reservation = started?.allowlistLease?.reservation; assert.ok(reservation);
-  assert.equal((await new AssetUsageLedger(temporary.root).load({ account: reservation.account, chain: reservation.chain, asset: reservation.asset }, reservation.reservationId))?.state, "reserved");
-  const secret = await new EncryptedWalletStore(native.state, native.wrapping).describe("default"); assert.ok(secret); assert.equal(Object.keys(secret.secret.directEffects).length, 1);
-  new EncryptedWalletStore(native.state, native.wrapping).clear(secret.secret);
-  const restarted = evmCore(temporary.root, native.rpc, native.wrapping);
-  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
-  assert.equal(native.rpc.submissions.length, 1);
+  const reservation = started?.allowlistLease?.reservation; assert.ok(reservation); assert.ok(persisted);
   const usage = new AssetUsageLedger(temporary.root), asset = { account: reservation.account, chain: reservation.chain, asset: reservation.asset };
-  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "submitted");
+  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "reserved");
+  assert.equal(effectReads, 0); assert.equal(native.wrapping.loads, beforeSigningLoads + 2, "initial signing loads the key and durably saves its effect"); assert.equal(signerCalls, 1);
+  const restarted = evmCore(temporary.root, native.rpc, native.wrapping, undefined, port => ({ request: async request => {
+    if (request.operation === "effectMaterial.get") effectReads += 1;
+    return await port.request(request);
+  } }));
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "unknown_finality");
+  const recovered = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id); assert.ok(recovered);
+  assert.equal(recovered.transactionHash, persisted.transactionHash); assert.equal(recovered.rawTransactionHash, persisted.rawTransactionHash);
+  assert.equal(recovered.fingerprint, started!.fingerprint); assert.equal(effectReads, 1);
+  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "unknown_finality");
+  const afterRecoveryLoads = native.wrapping.loads;
+  for (const observeOnly of [undefined, true] as const) {
+    assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, observeOnly) as { state: string }).state, "unknown_finality");
+  }
+  await assert.rejects(restarted.core.transfer.approve(prepared.operation_id), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, afterRecoveryLoads); assert.equal(signerCalls, 1);
+  assert.equal(native.rpc.submissions.length, 0); assert.equal(restarted.approval.intents.length, 0);
+  // Independent fake read evidence proves same-hash finalization without creating a dispatch witness.
+  const { EVM_BLOCK_HASH } = await import("./evm-helpers.js");
+  Object.assign(native.rpc.evm, { receipt: async (chainId: Parameters<typeof native.rpc.evm.receipt>[0], transactionHash: Hex) => {
+    await native.rpc.evm.assertChain(chainId); assert.equal(transactionHash, persisted!.transactionHash);
+    return { transactionHash, blockNumberAtomic: "12346", blockHash: EVM_BLOCK_HASH, status: "success" as const,
+      observedAt: new Date().toISOString(), rpcOrigin: native.rpc.rpcOrigin, logs: [] };
+  } });
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
   const completed = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id);
-  assert.equal(completed?.state, "completed"); assert.equal(completed?.terminal, true);
+  assert.equal(completed?.state, "completed"); assert.equal(completed?.terminal, true); assert.equal(completed?.transactionHash, persisted.transactionHash);
   assert.equal((await usage.load(asset, reservation.reservationId))?.state, "finalized");
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  assert.equal(native.rpc.submissions.length, 1); assert.equal(restarted.approval.intents.length, 0);
+  assert.equal(native.rpc.submissions.length, 0); assert.equal(restarted.approval.intents.length, 0);
+  assert.equal(signerCalls, 1); assert.equal(effectReads, 1); assert.equal(native.wrapping.loads, afterRecoveryLoads);
 });
 
 test("token USDT behavior pins reject deprecated and fee-bearing state", async () => {

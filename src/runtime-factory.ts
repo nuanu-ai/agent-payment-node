@@ -76,6 +76,7 @@ import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
+import { createJupiterV1Runtime } from "./swap/jupiter-solana/v1-runtime-factory.js";
 import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
 import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
@@ -117,7 +118,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
   const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, options.solanaRpcFetch,
-    new SolanaRpcBudget({ maxPhysicalRequests: 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
+    new SolanaRpcBudget({ maxPhysicalRequests: bound.request.command.startsWith("swap.jupiter.") ? 64 : 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
       wait: options.solanaRpcWait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))) }),
     new SolanaRpcPacer(state, options.solanaRpcNow, options.solanaRpcWait));
   const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL,
@@ -257,8 +258,15 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
+  const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.") && options.jupiter === undefined
+    ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
+      foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute",
+      stage: bound.request.command === "swap.jupiter.quote" ? "quote" : bound.request.command === "swap.jupiter.prepare" ? "prepare" :
+        bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" ? "execute" : "observe",
+      ...("operationId" in bound.request ? { operationId: bound.request.operationId } : {}) }) : undefined);
   return new ApnCore({
     state,
+    ...(jupiterV1Runtime === undefined ? {} : { jupiterV1Runtime }),
     ...(relayExecute === undefined ? {} : { relayExecute, relayExecuteConfirmation: relayExecuteConfirmation! }),
     ...(relayNativeExecute === undefined ? {} : { relayNativeExecute }),
     ...(stargateNative === undefined ? {} : { stargateNative }),

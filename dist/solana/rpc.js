@@ -172,7 +172,9 @@ export class SolanaRpc {
         deadline.unref();
         let reader;
         try {
-            beforePost?.();
+            await beforePost?.();
+            if (controller.signal.aborted)
+                protocolFailure();
             const response = await this.fetcher(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
                 body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
             if (response.status === 429)
