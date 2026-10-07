@@ -137,7 +137,7 @@ test("Arbitrum USD₮0 approval signs once and leaves fast receipt for explicit 
   assert.equal(observed.state, "completed"); assert.equal(setup.rpc.broadcastCount, 1);
 });
 
-test("v0.5.31-compatible signed Arbitrum USD₮0 operation resumes through grouped HTTPS reads without signing again", async t => {
+test("v0.5.31-compatible signed Arbitrum USD₮0 operation observes the same hash without signing or dispatch", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   let signedRaw: `0x${string}` | undefined;
   const setup = evmCore(temporary.root, undefined, undefined, undefined, native => ({ request: async request => {
@@ -201,11 +201,10 @@ test("v0.5.31-compatible signed Arbitrum USD₮0 operation resumes through group
     return await setup.local.request(request);
   } } });
   const resumed = await core.transfer.resume(prepared.operation_id) as { state: string };
-  assert.equal(resumed.state, "submitted_pending", "a missing receipt cannot establish paid completion");
-  assert.equal(newSigns, 0); assert.equal(sends, 1); assert.equal(latestNonceReads, 1);
-  assert.equal(posts.length, 12, "grouped recovery uses twelve physical POSTs");
+  assert.equal(resumed.state, "unknown_finality", "a missing receipt cannot establish paid completion or allow another send");
+  assert.equal(newSigns, 0); assert.equal(sends, 0); assert.equal(latestNonceReads, 0);
+  assert.equal(posts.length, 2, "recovery asserts the selected chain and reads the receipt");
   assert.ok(posts.length <= 24);
-  assert.ok(posts.some(methods => methods.length > 1), "funding rereads must use HTTPS batches");
   const retained = await state.findOperation(prepared.operation_id);
   assert.equal(retained?.rawTransactionHash, saved.rawTransactionHash);
   assert.equal(retained?.transactionHash, saved.transactionHash);

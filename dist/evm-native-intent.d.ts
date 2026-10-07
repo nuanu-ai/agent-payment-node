@@ -10,3 +10,5 @@ export interface EvmNativeIntent extends TransferApprovalIntent {
     readonly maxPriorityFeePerGasAtomic: string;
 }
 export declare function parseEvmNativeIntent(payload: Readonly<Record<string, unknown>>): EvmNativeIntent;
+/** Detach caller data before an async approval can change any nested financial field. */
+export declare function snapshotEvmNativePayload(payload: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;

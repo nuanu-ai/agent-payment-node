@@ -76,10 +76,11 @@ export class EncryptedWalletStore {
     private readonly wrappingSecret: WrappingSecretPort,
   ) {}
 
-  async describe(profileInput: string, beforeDecrypt?: () => void): Promise<{ readonly identity: WalletIdentity; readonly secret: WalletSecretState } | null> {
+  async describe(profileInput: string, beforeDecrypt?: () => void, beforeKeyLoad?: (identity: WalletIdentity) => Promise<void>): Promise<{ readonly identity: WalletIdentity; readonly secret: WalletSecretState } | null> {
     const profile = canonicalProfile(profileInput);
     const value = await this.state.loadEncryptedWalletEnvelope(profile);
     if (value === null) {
+      if (beforeKeyLoad !== undefined) throw new ApnError("APN_PROFILE_DRIFT", "Frozen native custody has no wallet envelope.");
       // A native describe against incomplete public state still exercises the
       // production Keychain query without creating a wrapping secret.
       const probe = await this.wrappingSecret.load();
@@ -87,11 +88,13 @@ export class EncryptedWalletStore {
       return null;
     }
     const envelope = parseEnvelope(value, profile);
+    if (beforeKeyLoad !== undefined) await beforeKeyLoad(envelope.identity);
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) {
       throw new ApnError("APN_STATE_CORRUPT", "The encrypted wallet exists but its wrapping secret is missing.");
     }
     try {
+      if (beforeKeyLoad !== undefined) await beforeKeyLoad(envelope.identity);
       beforeDecrypt?.();
       return { identity: envelope.identity, secret: decryptEnvelope(envelope, wrapping) };
     } finally {

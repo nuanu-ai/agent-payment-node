@@ -16,6 +16,7 @@ export declare class TransferServiceObservation {
     private readonly providerDirectRecovery;
     constructor(context: RuntimeContext, providerDirect: ProviderDirectTransferService, lifecycle: TransferObserveLifecycle);
     submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord>;
+    private dispatchAndInspect;
     resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true): Promise<unknown>;
     recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;
     status(operationIdInput: string): Promise<unknown>;

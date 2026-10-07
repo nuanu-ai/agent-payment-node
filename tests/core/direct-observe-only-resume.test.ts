@@ -72,11 +72,11 @@ test("observation-only resume returns on null, receipt RPC error, and missing ev
   }
 });
 
-test("ordinary resume keeps its existing resubmission behavior", async (t) => {
+test("ordinary generic resume observes the same hash without resubmission", async (t) => {
   const s = await pending(t);
   const result = await s.core.execute({ command: "operation.resume", operationId: s.operationId });
   assert.equal(result.ok, true, result.error?.message);
-  assert.equal(s.rpc.broadcastCount, 2);
+  assert.equal(s.rpc.broadcastCount, 1);
 });
 
 test("observation-only recovery keeps unknown finality unresolved without replay and refuses unsigned operations", async (t) => {

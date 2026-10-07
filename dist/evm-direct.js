@@ -5,6 +5,7 @@ import { evmUint, validateEvmAmount, validateEvmAsset } from "./evm-asset.js";
 import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel } from "./evm-direct-networks.js";
 import { canonicalAddress } from "./wallet-policy.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
+import { validateEvmNativeCustody } from "./evm-native-custody.js";
 export function requireEvmRpc(rpc) {
     if (rpc.evm === undefined)
         throw new ApnError("APN_RPC_CONFIG", "RPC adapter does not implement explicit EVM assets.");
@@ -50,10 +51,12 @@ export function validateEvmFeeQuote(value, economics) {
     return quote;
 }
 export function validateEvmDirectBinding(value, economics) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote"])) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote", ...(value.nativeCustody === undefined ? [] : ["nativeCustody"])])) {
         throw new ApnError("APN_STATE_CORRUPT", "EVM direct binding schema is invalid.");
     }
     const binding = value;
+    if (binding.nativeCustody !== undefined)
+        validateEvmNativeCustody(binding.nativeCustody);
     const asset = validateEvmAsset(binding.asset);
     const quote = validateEvmFeeQuote(binding.feeQuote, economics);
     if (binding.schemaVersion !== "apn.evm-direct.v1" || quote.chainId !== asset.chainId ||
@@ -65,6 +68,9 @@ export function validateEvmDirectBinding(value, economics) {
 }
 export function validateEvmOperation(operation) {
     const binding = validateEvmDirectBinding(operation.evm, operation.economics);
+    if (binding.nativeCustody !== undefined && (binding.nativeCustody.walletAddress !== operation.walletAddress ||
+        binding.nativeCustody.profileHash !== operation.profileHash))
+        throw new ApnError("APN_STATE_CORRUPT", "Generic native custody identity differs from the operation owner.");
     const transaction = evmTransaction(binding.asset, operation.walletAddress, operation.recipient, operation.amountAtomic);
     validateEvmAmount(binding.asset, operation.amountAtomic, operation.amountDecimal);
     const economics = operation.economics;

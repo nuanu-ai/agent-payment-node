@@ -2,6 +2,7 @@ import { type EvmAsset } from "./evm-asset.js";
 import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcPort, EvmTransactionInput } from "./evm-ports.js";
 import type { Address, Economics, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
+import { type EvmNativeCustody } from "./evm-native-custody.js";
 export interface EvmDirectBinding {
     readonly schemaVersion: "apn.evm-direct.v1";
     readonly asset: EvmAsset;
@@ -9,6 +10,7 @@ export interface EvmDirectBinding {
     readonly valueAtomic: string;
     readonly maxFeeWei: string;
     readonly feeQuote: EvmFeeQuote;
+    readonly nativeCustody?: EvmNativeCustody;
 }
 export declare function requireEvmRpc(rpc: RpcPort): EvmRpcPort;
 export declare function evmTransaction(asset: EvmAsset, from: Address, recipient: Address, amountAtomic: string): EvmTransactionInput;
