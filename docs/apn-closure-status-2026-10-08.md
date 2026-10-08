@@ -1,6 +1,6 @@
 # APN: проверка и остаток работ на 8 октября 2026
 
-Проверки выполняются локально по решению Тони. Последний source producer: 930 тестов, 0 ошибок, 0 пропусков. Он проверяет текущие Solana/Jupiter/Orca изменения; новая публикация, установка и paid acceptance проверяются отдельно. Исторический счётчик 32 задач за 29 сентября сохраняется в [backlog](sprint-remaining-2026-09-23.md).
+Проверки выполняются локально по решению Тони. Последний producer на чистой обновлённой dependency installation: 1135 тестов, 0 ошибок, 0 пропусков. Он проверяет текущие Solana/Jupiter/Orca изменения; новая публикация, установка и paid acceptance проверяются отдельно. Исторический счётчик 32 задач за 29 сентября сохраняется в [backlog](sprint-remaining-2026-09-23.md).
 
 ## Реальные операции
 
@@ -58,16 +58,24 @@ Create-only `data.dispatchObservation` связывает RPC результат
 
 Начальные неуспешные compile/test/parity попытки сохранены. В частности, неполный reserve producer был остановлен после compile failure и изменения inputs; он не считается QA. Финальная parity проверка исключает ровно compiler comment, без предположения о завершающем newline. Свежая проверка после 930-test producer повторно подтвердила hashes всех 1228 inputs и 744 production JS.
 
+## Исправляемые dependency advisories
+
+Чистая npm installation с отключёнными lifecycle scripts проверила Axios 0.34.0 и 1.20.0, fast-uri 3.1.8, brace-expansion 5.0.12 и pbkdf2 3.1.7. Lock сохраняет остальные версии; npm удалил одну дублирующую запись ws 8.21.3, оставив ту же версию выше в дереве. `package-lock.json` и `npm-shrinkwrap.json` побайтно совпадают. Foreign/shared node_modules не менялся; owned candidate использует отдельную проверенную installation.
+
+На этой installation прошли 1135 Solana/Jupiter/Orca/MetaMask tests в 50 files, 0 fail/skip; snapshot inputs не менялись. Source compile и 744-file emission parity прошли. Три shipped dependency-boundary tests и 15 offline advisory regression checks прошли; последние проверяют form options, URI authority/normalization, bounded brace parsing и long-password PBKDF2 против Node crypto. Native addon attempts в этих 15 проверках: 0. Первый URI test использовал неверный attack vector и сохранён как failed diagnostic; после сравнения с Node URL и старым parser vector исправлен на незакрытую host bracket.
+
+Свежий production npm audit до/после: 8→5 high affected records, 3→0 moderate, 47→48 low. В окончательном результате прямые advisory sources остались только у bigint-buffer и elliptic; downstream affected records учитываются отдельно. Новая версия Solana layout-utils 0.3.0 всё ещё зависит от исходного bigint-buffer, Fox SDK 2.9.0 всё ещё закрепляет SPL Token 0.4.14. Поэтому C1-11 dependency replacement остаётся открытым, guard сохраняется. npm ls также сообщает три peer/override conflicts (providers, utf-8-validate, strip-hex-prefix); чистым всё дерево не объявляется. Новая публикация или глобальная установка не выполнялась.
+
 ## Что остаётся
 
 | Задача | Остаток |
 |---|---|
-| C1-02, local Ethereum gasless USDC | Реальная доставка в исходном gross/fee cap. Ранние quote превышали лимиты; свежего bounded delivery proof нет. MetaMask waiver не изменяет этот cap. |
+| C1-02, local Ethereum gasless USDC | Реальная доставка в исходном gross/fee cap. Свежий fee-only quote 8 октября: 985141 atomic USDC (0,985141) при fee cap 4000; balance 6974, block 26145748. Operation отсутствует, delivery proof нет. MetaMask waiver не изменяет этот cap. |
 | C1-04, MetaMask 8 сетей | Семь дополнительных network receipts и новая installed APN acceptance. |
 | C1-06, Coinbase install acceptance | Paid Base provider proof готов; новый APN artifact/install отдельно. |
 | C1-09, LI.FI | Ethereum→Base canonical USDC и исходные дополнительные asset obligations. Завершённые направления не пересылаются. |
 | C1-11, nativefree dependency closure | Runtime mitigation действует. Portable alias candidate не принят: consumer root collision разрешил исходный bigint-buffer; pre-import gate остановил его исполнение. Нужны исправленная упаковка и свежий real-consumer proof. |
-| C2-08, Sei | Последний funding read 7 октября 19:57 UTC: три profiles по 0 SEI. Admitted funding route и direct receipt отсутствуют. |
+| C2-08, Sei | Свежий safe funding read 8 октября 06:00:34 UTC: три profiles по 0 SEI. Admitted funding route и direct receipt отсутствуют. |
 | C2-10, non-USDC x402 | Ранее принят Ethereum USDT owned-seller payment; внешний x402 merchant result ещё не доказан. |
 | C3-01/C3-08, Uniswap token input | Bounded SAFE paid proof завершён; новая release/install acceptance отдельно. |
 | C3-04, Jupiter | Finalized SOL→USDC receipt и штатное usage charge. Две unknown операции и новая submitted операция наблюдаются без resend/release. |
