@@ -135,7 +135,8 @@ test("Stargate binds Taxi, endpoint, receiver, amounts, refund, and native fee",
   ];
   for (const edit of cases) rejected(mutateData(m, edit));
   rejected({ ...m, feeCosts: m.feeCosts.filter((x) => x.included) });
-  rejected({ ...m, request: { ...m.request, maxNativeDebitWei: (BigInt(m.transaction.valueAtomic) - 1n).toString() } });
+  assert.throws(() => decodeBridgeCall({ ...m, request: { ...m.request,
+    maxNativeDebitWei: (BigInt(m.transaction.valueAtomic) - 1n).toString() } }), { code: "APN_FEE_BUDGET_EXCEEDED" });
 });
 
 test("deployment contracts pin code, legacy proxies, protocol configuration, and Stargate peers", () => {

@@ -75,12 +75,17 @@ test("captured native Stargate ABI shape decodes principal and separate LayerZer
   assert.equal(bridgeAssetTool(bridgeAssetRow(1, BRIDGE_ZERO_ADDRESS), "stargateV2")?.assetId, 13);
 });
 
-test("native Stargate fails closed on debit cap, asset ID and both fee bindings", () => {
+test("native Stargate distinguishes the owner fee cap from invalid protocol bindings", () => {
+  assert.throws(() => decodeBridgeCall(fixture({ cap: LZ_FEE - 1n })), {
+    code: "APN_FEE_BUDGET_EXCEEDED", details: { reason: "stargate_native_fee_exceeds_cap",
+      offendingPredicate: "nativeFeeWei > maxNativeDebitWei", nativeFeeWei: LZ_FEE.toString(), maxNativeDebitWei: (LZ_FEE - 1n).toString() },
+  });
+  assert.doesNotThrow(() => decodeBridgeCall(fixture({ cap: LZ_FEE })));
   for (const bad of [
-    fixture({ cap: LZ_FEE - 1n }), fixture({ value: SOURCE }), fixture({ value: VALUE + 1n }),
+    fixture({ value: SOURCE }), fixture({ value: VALUE + 1n }),
     fixture({ assetId: 1 }), fixture({ nativeFee: LZ_FEE + 1n }),
     fixture({ forwardedFee: FIXED_FEE + 1n }), fixture({ feeRow: LZ_FEE + 1n }),
-    fixture({ destination: 42161 }),
+    fixture({ destination: 42161 }), fixture({ cap: LZ_FEE - 1n, nativeFee: LZ_FEE + 1n }),
   ]) assert.throws(() => decodeBridgeCall(bad), { code: "APN_PROVIDER_PROTOCOL" });
   assert.throws(() => validateRouteEconomics(fixture({ feeRow: LZ_FEE + 1n })), { code: "APN_PROVIDER_PROTOCOL" });
 });

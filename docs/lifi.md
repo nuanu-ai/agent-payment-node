@@ -975,3 +975,29 @@ the proven credits reach the saved minimum output. Source RPCs come only from
 Base lane keeps its original status output, operation IDs and nonce reservation
 path; v1 and v2 records remain readable as that lane, and v3 records carry the
 lane. Ethereum nonce reservations are scoped under `eip155-1`.
+
+## Stargate fee refusal and funding checkpoint, 2026-10-08
+
+A correctly reconciled Stargate LayerZero fee above `maxNativeDebitWei` is now
+classified as `APN_FEE_BUDGET_EXCEEDED` (`stargate_native_fee_exceeds_cap`). ABI,
+Taxi semantics, refund identity and declared fee rows must validate first;
+malformed bindings remain `APN_PROVIDER_PROTOCOL`. Equality at this decode
+stage does not cover approval and bridge gas: preparation still checks the
+aggregate native debit independently. No cap or execution admission changed.
+Source/test compilation and 48 focused tests passed; 744 production JS matched
+test emission after removing only the terminal TypeScript source-map comment.
+
+A fresh normal Arbitrum→Ethereum canonical USDC preparation (100000 atomic
+input, owner minimum 99000, native cap 680000000000000 wei) refused before
+operation creation: aggregate native debit 825421587693206 wei, available
+699562158869357 wei. No approval or bridge was signed or submitted. This lane
+remains open pending bounded funding and its own correlated SAFE receipt.
+
+Separate normal Across funding completed at 08:02:27 UTC: operation
+`bec13b5a51d755eca9b6d7f93c9bf55e9ca50962f4d370d2e4ae749bdc990394`,
+Ethereum source `0x38dbcf06888fdf9427406ef7686d2496e24f8d38fc3f4d73bec3f78e9ca2abb3`,
+Arbitrum destination `0x608d8737634f4301f81970b79d6f9f3c8cc4b98c27c72d35b8d1721cfd1647de`.
+Principal 400000000000000 wei, exact delivery 394497813408405 wei, actual
+source gas 17239614285600 wei. Both chain proofs are SAFE; residual allowance
+is zero and submission attempts remain one. A failed residual observation
+was retried through normal `operation resume`, without resending.
