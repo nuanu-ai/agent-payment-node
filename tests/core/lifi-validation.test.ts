@@ -45,7 +45,10 @@ test("captured Base USDC to Arbitrum USDC Stargate V2 envelope stays exactly bou
 
   // The failed live request capped all native debit below LI.FI's independently quoted LayerZero fee.
   assert.throws(() => materialize(captured.stepResponse, { ...request, maxNativeDebitWei: "20000000000000" }),
-    (error: any) => error.code === "APN_PROVIDER_PROTOCOL" && error.message === "Bridge validation failed: transaction_envelope.");
+    { code: "APN_FEE_BUDGET_EXCEEDED", message: "Bridge validation failed: stargate_native_fee_exceeds_cap.",
+      details: { reason: "stargate_native_fee_exceeds_cap", offendingPredicate: "nativeFeeWei > maxNativeDebitWei",
+        nativeFeeWei: "110644682401786", maxNativeDebitWei: "20000000000000" } });
+  assert.doesNotThrow(() => materialize(captured.stepResponse, { ...request, maxNativeDebitWei: "110644682401786" }));
 
   const edits: Array<(step: any) => void> = [
     (step) => { delete step.transactionRequest.to; },
