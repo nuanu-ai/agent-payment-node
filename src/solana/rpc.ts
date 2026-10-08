@@ -50,12 +50,20 @@ export class SolanaRpcBudget {
     try {
       if (this.physical >= this.maxPhysicalRequests) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "The Solana operation exhausted its physical RPC request budget.",
         { logicalCalls: this.logical, physicalRequests: this.physical, maxPhysicalRequests: this.maxPhysicalRequests });
-      const delay = Math.max(0, this.nextStart - this.now());
+      const before = this.now(), delay = Math.max(0, this.nextStart - before);
       if (delay > 0) {
         if (this.wait === undefined) throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC pacing window is not yet open.",
           { retryAfterMs: delay, logicalCalls: this.logical, physicalRequests: this.physical });
         await this.wait(delay);
-        const remaining = this.nextStart - this.now();
+        let current = this.now();
+        // Node timers can wake early. Wait once for the remainder only when
+        // the clock advanced; never admit an early POST or spin on a stuck clock.
+        if (current > before && current < this.nextStart) {
+          await this.wait(this.nextStart - current);
+          const rechecked = this.now();
+          if (rechecked > current) current = rechecked;
+        }
+        const remaining = this.nextStart - current;
         if (remaining > 0) throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC pacing window is not yet open.",
           { retryAfterMs: remaining, logicalCalls: this.logical, physicalRequests: this.physical });
       }

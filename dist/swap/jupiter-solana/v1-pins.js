@@ -10,6 +10,13 @@ export const JUPITER_V1_RUNTIME_PROGRAM_PINS = Object.freeze([
 ]);
 export const JUPITER_V1_WHIRLPOOL_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({ schemaVersion: SWAP_MECHANISM_PIN_SCHEMA, protocolFamily: "jupiter_solana", networkFamily: "solana", chain: `solana:${SOLANA_MAINNET_GENESIS}`, protocolVersion: "jup6-route-v1-whirlpool.1", constructorKind: "builder_api", constructorIdentity: "https://api.jup.ag/swap/v1/swap-instructions", constructorVersion: "1.0.0", routerProgramIdentity: JUPITER_V6_PROGRAM, auxiliaryContractProgramIdentities: [JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_POOL, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM], quoteSchemaVersion: "jupiter-v1-exact-in-whirlpool.1", transactionSchemaVersion: "v0-jup6-route-whirlpool-wrap-close.1", validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc", validationPolicyVersion: "1.0.0" }));
 export const JUPITER_V1_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool.2026-10-07", pins: [JUPITER_V1_WHIRLPOOL_MECHANISM_PIN] });
+/** Static-fee pool reviewed from public mainnet accounts at slot 454440585. */
+export const JUPITER_V1_WHIRLPOOL_FP_POOL = "FpCMFDFGYotvufJ7HrFHsWEiiQCGbkLCtwHiDnh7o28Q";
+export const JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({ ...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN,
+    protocolVersion: "jup6-route-v1-whirlpool-fp.1",
+    auxiliaryContractProgramIdentities: Object.freeze([JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_WHIRLPOOL_FP_POOL, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM]),
+    validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc-whirlpool-fp" }));
+export const JUPITER_V1_WHIRLPOOL_FP_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-fp.2026-10-08", pins: [JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN] });
 /** Additional finite route; the historical 83 mechanism and registry above remain unchanged. */
 export const JUPITER_V1_WHIRLPOOL_V2_POOL = "Esvfxt3jMDdtTZqLF1fqRhDjzM8Bpr7fZxJMrK69PB7e";
 export const JUPITER_V1_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";

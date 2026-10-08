@@ -42,13 +42,39 @@ test("batched public resolution retains the complete frozen message and full exe
  assert.deepEqual(b, a); assert.equal(b.messageHash, m.messageHash);
  assert.deepEqual(b.programPins, m.programPins);
  assert.equal(batched.reads.length, ordinary.reads.length);
- assert.equal(batched.batches.length, 3);
+ assert.equal(batched.batches.length, 2);
  assert.ok(batched.batches.every(r => r.length >= 2 && r.length <= 8));
  for (const pin of b.programPins.filter(p => p.programDataAddress !== null)) {
   const original = m.semanticAccounts.find(a => a.address === pin.programDataAddress)!;
   const resolved = b.semanticAccounts.find(a => a.address === pin.programDataAddress)!;
   assert.equal(resolved.dataBase64, original.dataBase64);
  }
+});
+test("public ProgramData resolution retains every byte in ten bounded chunks without header-only reads",async()=>{
+ const p=publicPort(false),resolved=await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse);
+ const reads=p.reads.filter(r=>r.method==="getAccountInfo");assert.equal(reads.length,10);
+ assert.ok(reads.every(r=>{const slice=(r.params[1] as any).dataSlice;return slice.length>45&&slice.length<=1500000;}));
+ for(const pin of resolved.programPins.filter(p=>p.programDataAddress!==null)){
+  const data=Buffer.from(m.semanticAccounts.find(a=>a.address===pin.programDataAddress)!.dataBase64,"base64"),parts=reads.filter(r=>r.params[0]===pin.programDataAddress);
+  assert.equal(parts.length,Math.ceil(data.length/1500000));
+  assert.deepEqual(parts.map(r=>(r.params[1] as any).dataSlice.offset),parts.map((_,i)=>i*1500000));
+  assert.equal(resolved.semanticAccounts.find(a=>a.address===pin.programDataAddress)!.dataBase64,data.toString("base64"));
+ }
+});
+for(const mutation of ["short-first","short-later","changed-owner","changed-lamports","changed-space","stale-first"] as const)test(`public ProgramData chunks refuse ${mutation} before fee proof`,async()=>{
+ const p=publicPort(false),original=p.rpc.call;let first=0;
+ p.rpc.call=async(method,params)=>{const value=await original(method,params);
+  if(method==="getAccountInfo"){
+   const row=value as any,slice=(params[1] as any).dataSlice;first++;
+   if(mutation==="short-first"&&slice.offset===0||mutation==="short-later"&&slice.offset>0){const b=Buffer.from(row.value.data[0],"base64");row.value.data[0]=b.subarray(0,b.length-1).toString("base64");}
+   if(mutation==="changed-owner"&&slice.offset>0)row.value.owner=m.payer;
+   if(mutation==="changed-lamports"&&slice.offset>0)row.value.lamports++;
+   if(mutation==="changed-space"&&slice.offset>0)row.value.space++;
+   if(mutation==="stale-first"&&first===1)row.context.slot=1n;
+  }return value;
+ };
+ await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse));
+ assert.equal(p.reads.some(r=>r.method==="getFeeForMessage"),false);
 });
 test("batched public proof still refuses a changed deployed executable payload", async () => {
  const p = publicPort(true, (key, bytes) => {if (key === m.programPins.find(p => p.programDataAddress !== null)!.programDataAddress) bytes[45] = bytes[45]! ^ 1;});

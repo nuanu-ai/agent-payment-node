@@ -74,6 +74,7 @@ import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { SolanaRpcPacer } from "../../src/solana/pacing.js";
 import { JupiterV1ExecutionBindingStore } from "../../src/swap/jupiter-solana/v1-effects.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "../../src/swap/jupiter-solana/v1-dispatch.js";
+import { JupiterV1ExecutionFailureStore } from "../../src/swap/jupiter-solana/v1-execution-failure.js";
 import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 async function pipelineFixture(t:test.TestContext){
@@ -95,13 +96,13 @@ async function pipelineFixture(t:test.TestContext){
  await store.ensureLocal({profile:"jupiter-test",rail:"solana",create:async()=>({address:owner,seed:Buffer.from(seed)})});
  const start=new Date(),policy=new AllowlistPolicyStore(temp.root),staged=await policy.stage({profile:"jupiter-test",now:start,policy:{schemaVersion:"apn.allowlist-policy-file.v1",overlayVersion:"jupiter-runtime.1",accounts:{solana:owner},effectiveAt:new Date(start.getTime()-1000).toISOString(),expiresAt:new Date(start.getTime()+86400000).toISOString(),admissions:[{chain:PIN.chain,kind:"native",rail:"swap",maximumPerTransferAtomic:"1000000",dailyLimitAtomic:"2000000",mechanism:PIN},{chain:PIN.chain,kind:"token",identifier:SOLANA_USDC_MINT,rail:"swap",maximumPerTransferAtomic:"1000000",dailyLimitAtomic:"2000000",mechanism:PIN}]}});
  const activation=await policy.appendDecision("jupiter-test",null,{status:"active",revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,registry:staged.registry,approvalFingerprint:allowlistDecisionFingerprint({action:"activate",profileHash:allowlistProfileHash("jupiter-test"),revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,headEntryDigest:null}),decidedAt:start.toISOString()});
- let clockMs=Date.now(),sends=0,rawSigned:string|null=null,signature:string|null=null,finalized=false,height=1000,secretReads=0,ambiguous=false,rejected=false,revokeWrapping=false,revokeAfterSign=false,lastWrappingKey:Buffer|null=null;
+ let clockMs=Date.now(),sends=0,rawSigned:string|null=null,signature:string|null=null,finalized=false,height=1000,senderHeight:number|null=null,secretReads=0,ambiguous=false,rejected=false,revokeWrapping=false,revokeAfterSign=false,lastWrappingKey:Buffer|null=null;
  async function revokePolicy(){await policy.appendDecision("jupiter-test",activation.entryDigest,{status:"revoked",revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,approvalFingerprint:allowlistDecisionFingerprint({action:"revoke",profileHash:allowlistProfileHash("jupiter-test"),revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,headEntryDigest:activation.entryDigest}),decidedAt:new Date().toISOString()});}
  const rpcFetch:typeof fetch=async(_url,init)=>{const body=JSON.parse(String(init?.body));const handle=async(request:any)=>{const keys=request.params?.[0];let result:unknown;
   switch(request.method){case"getGenesisHash":result=m.genesis;break;case"getMultipleAccounts":result={context:{slot:454241651},value:keys.map((key:string)=>accountWire(key,request.params[1]?.dataSlice))};break;
   case"getAccountInfo":result={context:{slot:454241651},value:accountWire(keys,request.params[1]?.dataSlice)};break;
   case"getLatestBlockhash":result={context:{slot:454241651},value:{blockhash:m.lifetime.blockhash,lastValidBlockHeight:1100}};break;
-  case"getFeeForMessage":result={context:{slot:454241651},value:6400};break;case"getBlockHeight":if(revokeAfterSign&&secretReads>0){revokeAfterSign=false;await revokePolicy();}result=height;break;case"getMinimumBalanceForRentExemption":result=1488440;break;
+  case"getFeeForMessage":result={context:{slot:454241651},value:6400};break;case"getBlockHeight":if(revokeAfterSign&&secretReads>0){revokeAfterSign=false;await revokePolicy();}result=secretReads>0&&senderHeight!==null?senderHeight:height;break;case"getMinimumBalanceForRentExemption":result=1488440;break;
   case"simulateTransaction":assert.equal(keys,m.transactionBase64);result=sim;break;
   case"sendTransaction":sends++;assert.equal(request.params[1].maxRetries,0);rawSigned=keys;signature=getSignatureFromTransaction(getTransactionDecoder().decode(Buffer.from(keys,"base64")));if(ambiguous)throw new Error("transport lost after dispatch");if(rejected)return {jsonrpc:"2.0",id:request.id,error:{code:-32002,message:"SECRET provider echo",data:{err:"BlockhashNotFound",logs:[keys]}}};result=signature;break;
   case"getSignatureStatuses":assert.equal(keys[0],signature);result=finalized?final.status:{context:{slot:454241800},value:[null]};break;
@@ -116,7 +117,7 @@ async function pipelineFixture(t:test.TestContext){
  let dateOverride:Date|undefined;
  const state=new StateStore(temp.root),clock={now:()=>dateOverride??new Date()};
  function runtime(stage:"quote"|"prepare"|"execute"|"observe",op?:string,foreground=true){const base=new SolanaRpc("https://example.com",rpcFetch,new SolanaRpcBudget({maxPhysicalRequests:64,minimumIntervalMs:750,now:()=>clockMs,wait:async ms=>{clockMs+=ms;}}),new SolanaRpcPacer(state,()=>clockMs,async ms=>{clockMs+=ms;}));return createJupiterV1Runtime({state,clock,rpc:base,wrappingSecret:{async load(){secretReads++;const key=Buffer.alloc(32,77);lastWrappingKey=key;if(revokeWrapping){revokeWrapping=false;await revokePolicy();}return key;},async create(){return Buffer.alloc(32,77);}},foreground,stage,...(op===undefined?{}:{operationId:op}),providerFetch});}
- return{temp,owner,m,runtime,setNow(v:Date){dateOverride=v;},get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},ambiguousSend(){ambiguous=true;},rejectSend(){rejected=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
+ return{temp,owner,m,runtime,setNow(v:Date){dateOverride=v;},get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},setSenderHeight(v:number){senderHeight=v;},ambiguousSend(){ambiguous=true;},rejectSend(){rejected=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
 }
 test("V1 genuine Native pipeline prepares unsigned, prompts exact TTY, sends once, reopens observation and charges usage once",async t=>{
  if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest("V1 genuine Native pipeline prepares unsigned, prompts exact TTY, sends once, reopens observation and charges usage once");return;}
@@ -184,6 +185,47 @@ test("V1 frozen expired blockhash refuses before the effect marker, decryption o
  assert.equal(f.sends,0);assert.equal(f.secretReads,0);
  assert.equal((await new AssetUsageLedger(f.temp.root).usage({account:f.owner,chain:PIN.chain,asset:{kind:"native",identifier:null}},new Date())).amountAtomic,"0");
 });
+for(const remaining of [23,24])test(`V1 signing reserve ${remaining} blocks keeps the exact marker and custody boundary`,async t=>{
+ const title=`V1 signing reserve ${remaining} blocks keeps the exact marker and custody boundary`;
+ if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest(title);return;}
+ process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
+ const f=await pipelineFixture(t),op=await preparedPipeline(f,`jupiter-v1-reserve-${remaining}`);f.setHeight(1100-remaining);
+ if(remaining===23){
+  await assert.rejects(f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date()),{code:"APN_REPREPARE_REQUIRED"});
+  const saved=await new (await import("../../src/swap/repository.js")).SwapOperationRepository(f.temp.root).loadAny(op.operationId);
+  assert.equal(saved?.submissionMarker,null);assert.equal(f.secretReads,0);assert.equal(f.sends,0);
+  f.setNow(new Date(Date.parse(op.quote.expiresAt)+1));const released=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());
+  assert.equal(released.state,"failed_before_effect");assert.equal(released.usageLease?.state,"failed_before_effect");
+ }else{
+  const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());
+  assert.ok(result.submissionMarker);assert.equal(f.sends,1);assert.ok(f.secretReads>0);
+ }
+});
+test("V1 expiry after signing retains public failure and never retries without a send claim",async t=>{
+ const title="V1 expiry after signing retains public failure and never retries without a send claim";
+ if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest(title);return;}
+ process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
+ const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-expired-after-sign");f.setSenderHeight(1101);
+ const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());
+ assert.equal(result.state,"unknown_finality");assert.equal(result.usageLease?.state,"unknown_finality");assert.equal(f.sends,0);
+ const bindings=new JupiterV1ExecutionBindingStore(f.temp.root);assert.equal(await bindings.loadClaim(result),null);
+ const material=await new (await import("../../src/swap/jupiter-solana/v1-material.js")).SavedJupiterV1MaterialStore(f.temp.root).load(op.quote.quoteHash);assert.ok(material);
+ const binding=await bindings.load(result,material);assert.ok(binding);assert.ok(await bindings.loadSignature(result,binding));
+ const failures=new JupiterV1ExecutionFailureStore(f.temp.root),failure=await failures.load(result);assert.ok(failure);
+ assert.equal(failure.phase,"sender_preflight");assert.equal(failure.currentBlockHeight,"1101");assert.equal(failure.lastValidBlockHeight,"1100");assert.equal(failure.errorCode,"APN_OPERATION_BLOCKED");
+ const raw=await readFile(join(f.temp.root,"jupiter-v1-execution-failures",result.ownerProfileHash,`${result.operationId}.json`),"utf8");
+ assert.doesNotMatch(raw,/rawPayload|transactionBase64|seedHex|SECRET|unsignedPayload/u);
+ const secrets=f.secretReads;
+ const context={state:new StateStore(f.temp.root),clock:{now:()=>new Date()},jupiterV1Runtime:f.runtime("observe",op.operationId,false)} as unknown as RuntimeContext;
+ const status=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},context);
+ assert.deepEqual(status.data,{executionFailure:failure});assert.equal(status.proofClass,"unknown_finality");
+ f.setNow(new Date(Date.parse(op.quote.expiresAt)+1));await f.runtime("execute",op.operationId).execute(op.operationId,new Date());
+ assert.equal(f.sends,0);assert.equal(f.secretReads,secrets);assert.deepEqual(await failures.load(result),failure);
+ await assert.rejects(failures.save(result,"sender_preflight",new ApnError("APN_STATE_CORRUPT","SECRET"),"1100","1101",new Date()),{code:"APN_STATE_CORRUPT"});
+ const {recordHash:_hash,...body}=failure,changed={...body,markerHash:"0".repeat(64)};
+ await writeFile(join(f.temp.root,"jupiter-v1-execution-failures",result.ownerProfileHash,`${result.operationId}.json`),canonicalJson({...changed,recordHash:domainHash(failure.schemaVersion,canonicalJson(changed))}),{mode:0o600});
+ await assert.rejects(failures.load(result),{code:"APN_STATE_CORRUPT"});assert.equal(f.sends,0);
+});
 test("V1 duplicate foreground execution races leave one signature and one send",async t=>{
  if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest("V1 duplicate foreground execution races leave one signature and one send");return;}
  assert.equal(process.stdin.isTTY,true);assert.equal(process.stderr.isTTY,true);
@@ -197,6 +239,7 @@ test("V1 policy revocation while loading wrapping key zeroizes it before decrypt
  assert.equal(process.stdin.isTTY,true);assert.equal(process.stderr.isTTY,true);process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
  const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-wrapping-revoke");f.revokeWhileWrapping();
  const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());assert.equal(result.state,"unknown_finality");assert.ok(result.submissionMarker);assert.equal(f.sends,0);assert.equal(f.secretReads,1);assert.ok(f.lastWrappingKey);assert.ok(f.lastWrappingKey.every(byte=>byte===0));
+ assert.equal((await new JupiterV1ExecutionFailureStore(f.temp.root).load(result))?.phase,"binding_and_sign");
  const secrets=f.secretReads;await f.runtime("execute",op.operationId).execute(op.operationId,new Date());assert.equal(f.sends,0);assert.equal(f.secretReads,secrets);
 });
 test("V1 sealed signature before transport remains observe-only after pre-send policy revocation",async t=>{

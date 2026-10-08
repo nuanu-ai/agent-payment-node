@@ -7,6 +7,7 @@ import { JUPITER_V1_RUNTIME_PROGRAM_PINS, JUPITER_V1_POOL, JUPITER_V1_WHIRLPOOL_
 import { JUPITER_V6_PROGRAM as JUP, TOKEN_PROGRAM as TOKEN, ASSOCIATED_TOKEN_PROGRAM as ATA, SYSTEM_PROGRAM as SYS, COMPUTE_BUDGET_PROGRAM as COMPUTE, WRAPPED_SOL_MINT as SOL, SOLANA_USDC_MINT as USDC } from "./catalog.js";
 import { routeConfigForQuoteBuild } from "./v1-route-config.js";
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
+import { REVIEWED_WHIRLPOOL_FP, validateReviewedWhirlpoolFpPool } from "./v1-whirlpool-fp.js";
 export function reject(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
 export function semanticAccount(material, key) { const row = material.semanticAccounts.find(a => a.address === key); return row ?? reject("Jupiter V1 semantic snapshot is incomplete."); }
 function raw(a) { return a.existence === "absent" ? null : { owner: a.owner, lamports: BigInt(a.lamports), executable: a.executable, space: Buffer.from(a.dataBase64, "base64").length, data: Buffer.from(a.dataBase64, "base64") }; }
@@ -48,6 +49,8 @@ async function evaluate(material, options, requireFresh) {
         const state = decodeWhirlpool(pool, raw(semanticAccount(material, pool)), ORCA, "3f95d10ce1806309");
         if (state.mintA !== SOL || state.mintB !== USDC)
             reject("Jupiter V1 pool pair changed.");
+        if (pool === REVIEWED_WHIRLPOOL_FP.pool)
+            await validateReviewedWhirlpoolFpPool(semanticAccount(material, pool));
         const r = ix.accounts;
         if (r.length !== 21)
             reject("Jupiter V1 remaining accounts changed.");

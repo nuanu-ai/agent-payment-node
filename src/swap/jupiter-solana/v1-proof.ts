@@ -1,6 +1,7 @@
 import { normalizeJupiterV1Cpi } from "./v1-cpi.js";
 import { getBase58Encoder, getSignatureFromTransaction, getTransactionDecoder } from "@solana/kit";
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "../../canonical.js";
+import { ApnError } from "../../errors.js";
 import type { SolanaRpcPort } from "../../solana/rpc.js";
 import { createSwapQuote, type SwapQuoteSnapshot } from "../quote.js";
 import { freezeJson } from "./v1-codec.js";
@@ -28,7 +29,7 @@ export interface JupiterV1FinalizedReceipt {readonly signature:string;readonly s
 export async function proveJupiterV1Simulation(reader:Pick<SolanaRpcPort,"call">,guarded:JupiterV1GuardedMaterial):Promise<JupiterV1SimulationProof>{
  await revalidate(guarded);const roles=jupiterV1ProofRoles(guarded),v2=guarded.routeId!==undefined,m=guarded.material,keys=m.compiledAccounts.map(a=>a.address);if(BigInt(m.accountSlot)>BigInt(Number.MAX_SAFE_INTEGER))reject("Jupiter V1 simulation context slot cannot be represented safely.");if(keys.length>64)reject("Jupiter V1 simulation account request exceeds bounds.");
  const params=[m.transactionBase64,{encoding:"base64",commitment:"confirmed",sigVerify:false,replaceRecentBlockhash:false,minContextSlot:Number(m.accountSlot),innerInstructions:true,accounts:{encoding:"base64",addresses:keys}}] as const;
- const response=strict(record(await reader.call("simulateTransaction",params)),["context","value"]),context=record(response.context),v=record(response.value);parseExtensions(context,v,keys.length);const slot=integer(context.slot);if(slot<BigInt(m.accountSlot)||v.err!==null||v.replacementBlockhash!==undefined&&v.replacementBlockhash!==null)reject("Jupiter V1 simulation failed or changed blockhash.");const units=integer(v.unitsConsumed);if(units<1n||units>1400000n)reject("Jupiter V1 simulation compute evidence is invalid.");
+ const response=strict(record(await reader.call("simulateTransaction",params)),["context","value"]),context=record(response.context),v=record(response.value);parseExtensions(context,v,keys.length);const slot=integer(context.slot);if(slot<BigInt(m.accountSlot)||v.err!==null||v.replacementBlockhash!==undefined&&v.replacementBlockhash!==null)simulationFailed(v,slot<BigInt(m.accountSlot));const units=integer(v.unitsConsumed);if(units<1n||units>1400000n)reject("Jupiter V1 simulation compute evidence is invalid.");
  const wire=getTransactionDecoder().decode(Buffer.from(m.transactionBase64,"base64"));if(sha256(new Uint8Array(wire.messageBytes))!==m.messageHash||Object.values(wire.signatures).some(s=>s!==null&&s.some(b=>b!==0)))reject("Jupiter V1 simulation wire is signed or changed.");
  const after=array(v.accounts,64);if(after.length!==keys.length)reject("Jupiter V1 simulation post-state is incomplete.");const index=(key:string)=>{const i=keys.indexOf(key);if(i<0)reject("Jupiter V1 proof account is missing.");return i;};
  const state=(key:string)=>{const value=after[index(key)];if(value===null)reject("Jupiter V1 required post-account is absent.");const a=rawAccount(value,1048576);return {address:key,existence:"present" as const,owner:a.owner,executable:a.executable,lamports:a.lamports.toString(),dataBase64:a.data.toString("base64"),dataHash:sha256(a.data),slot:slot.toString()};};
@@ -64,6 +65,23 @@ export async function validateFinalizedJupiterV1Receipt(reader:Pick<SolanaRpcPor
  const body={signature:expected.signature,slot:slot.toString(),feeLamports:fee.toString(),nativeSpendLamports:nativeSpend.toString(),recipientOutputAtomic:output.toString(),messageHash:m.messageHash,admissionDigest:g.admissionDigest,responseHash:jupiterV1RpcResponseHash("apn.jupiter-v1-receipt-response.v1",response)};return Object.freeze({signature:body.signature,slot:body.slot,feeLamports:body.feeLamports,nativeSpendLamports:body.nativeSpendLamports,recipientOutputAtomic:body.recipientOutputAtomic,receiptHash:domainHash("apn.jupiter-v1-finalized-receipt.v1",canonicalJson(body))});
 }
 async function revalidate(g:JupiterV1GuardedMaterial){await validateJupiterV1GuardedMaterial(g);}
+/** Fixed categories and bounded numeric instruction codes only; never copy RPC text or logs. */
+function simulationFailed(value:Record<string,unknown>,stale:boolean):never{
+ const err=value.err,replacement=value.replacementBlockhash!==undefined&&value.replacementBlockhash!==null;
+ const instruction=isPlainRecord(err)&&Array.isArray(err.InstructionError)?err.InstructionError:undefined;
+ const reason=stale?"stale_context":replacement?"replacement_blockhash":err==="BlockhashNotFound"?"blockhash_not_found":
+  err==="InsufficientFundsForFee"?"insufficient_funds_for_fee":instruction===undefined?"unclassified":"instruction_error";
+ const index=simulationInteger(instruction?.[0],255),custom=simulationInteger(isPlainRecord(instruction?.[1])?instruction![1].Custom:undefined,4294967295);
+ throw new ApnError("APN_OPERATION_BLOCKED","Jupiter V1 simulation failed or changed blockhash.",{
+  simulationFailureReason:reason,
+  ...(index===null?{}:{instructionIndex:index}),
+  ...(custom===null?{}:{instructionCustomCode:custom}),
+ });
+}
+function simulationInteger(value:unknown,maximum:number):number|null{
+ if(typeof value!=="number"&&typeof value!=="bigint"||typeof value==="number"&&!Number.isSafeInteger(value))return null;
+ return value>=0&&value<=maximum?Number(value):null;
+}
 function checkEffects(g:JupiterV1GuardedMaterial,output:bigint,spend:bigint,fee:bigint){if(output<BigInt(g.quotedMinimumOutputAtomic)||output<BigInt(g.instructionMinimumOutputAtomic)||spend!==BigInt(g.inputAtomic)+fee-(semanticAccount(g.material,g.sourceTokenAccount).existence==="present"?BigInt(semanticAccount(g.material,g.sourceTokenAccount).lamports):0n)||spend>BigInt(g.maximumNativeExpenseLamports))reject("Jupiter V1 output, input debit or rent refund proof failed.");}
 /** Monetary deltas must share the simulation bank. An earlier public pool snapshot is not a pre-balance. */
 function simulationBalanceEvidence(v:Record<string,unknown>,g:JupiterV1GuardedMaterial,keys:readonly string[],after:readonly unknown[]):

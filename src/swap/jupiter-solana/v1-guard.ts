@@ -8,6 +8,7 @@ import { JUPITER_V6_PROGRAM as JUP, TOKEN_PROGRAM as TOKEN, ASSOCIATED_TOKEN_PRO
 import { routeConfigForQuoteBuild, type JupiterV1RouteId, type WhirlpoolV2NamedRoles } from "./v1-route-config.js";
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import type { JupiterV1RawInstruction } from "./v1-codec.js";
+import { REVIEWED_WHIRLPOOL_FP, validateReviewedWhirlpoolFpPool } from "./v1-whirlpool-fp.js";
 export interface JupiterV1GuardedMaterial {readonly routeId?:JupiterV1RouteId;readonly namedRoles?:WhirlpoolV2NamedRoles;readonly material:JupiterV1ResolvedMaterial;readonly payer:string;readonly sourceTokenAccount:string;readonly destinationTokenAccount:string;readonly pool:string;readonly nativeAccounts:readonly string[];readonly inputAtomic:string;readonly quotedOutputAtomic:string;readonly instructionMinimumOutputAtomic:string;readonly quotedMinimumOutputAtomic:string;readonly minimumRoundingDeltaAtomic:string;readonly maximumNativeExpenseLamports:string;readonly admissionDigest:string}
 export function reject(message:string):never {throw new ApnError("APN_OPERATION_BLOCKED",message);}
 export function semanticAccount(material:JupiterV1ResolvedMaterial,key:string):JupiterV1SemanticAccount {const row=material.semanticAccounts.find(a=>a.address===key);return row??reject("Jupiter V1 semantic snapshot is incomplete.");}
@@ -26,6 +27,7 @@ async function evaluate(material:JupiterV1ResolvedMaterial,options:{readonly now
  // The zero platform-fee byte is part of the complete canonical route encoding.
  rejectIfMissingFeeByte(ix,q.slippageBps);
  const state=decodeWhirlpool(pool,raw(semanticAccount(material,pool)),ORCA,"3f95d10ce1806309");if(state.mintA!==SOL||state.mintB!==USDC)reject("Jupiter V1 pool pair changed.");
+ if(pool===REVIEWED_WHIRLPOOL_FP.pool)await validateReviewedWhirlpoolFpPool(semanticAccount(material,pool));
  const r=ix.accounts;if(r.length!==21)reject("Jupiter V1 remaining accounts changed.");const ticks=r.slice(17,20).map(a=>a.pubkey),oracle=await whirlpoolOracleAddress(ORCA,pool);
  native=[TOKEN,p,pool,source,state.vaultA,destination,state.vaultB,...ticks,oracle];const expected: (readonly [string,boolean,boolean])[]=[[TOKEN,false,false],[p,true,false],[source,false,true],[destination,false,true],[JUP,false,false],[USDC,false,false],[JUP,false,false],["D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf",false,false],[JUP,false,false],[ORCA,false,false],...native.map((a,i)=>[a,false,i>=2&&i<=9] as const)];metas(ix,expected);
  tokenState(semanticAccount(material,state.vaultA),SOL,pool);tokenState(semanticAccount(material,state.vaultB),USDC,pool);tokenState(semanticAccount(material,destination),USDC,p);

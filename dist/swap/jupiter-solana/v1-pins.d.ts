@@ -7,6 +7,10 @@ export declare const JUPITER_V1_RUNTIME_PROGRAM_PINS: readonly {
 }[];
 export declare const JUPITER_V1_WHIRLPOOL_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
 export declare const JUPITER_V1_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+/** Static-fee pool reviewed from public mainnet accounts at slot 454440585. */
+export declare const JUPITER_V1_WHIRLPOOL_FP_POOL = "FpCMFDFGYotvufJ7HrFHsWEiiQCGbkLCtwHiDnh7o28Q";
+export declare const JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_FP_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
 /** Additional finite route; the historical 83 mechanism and registry above remain unchanged. */
 export declare const JUPITER_V1_WHIRLPOOL_V2_POOL = "Esvfxt3jMDdtTZqLF1fqRhDjzM8Bpr7fZxJMrK69PB7e";
 export declare const JUPITER_V1_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";

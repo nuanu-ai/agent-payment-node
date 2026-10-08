@@ -2,7 +2,7 @@ import { ApnError } from "../../errors.js";
 import { snapshotFromJupiterV1QuoteProof } from "./v1-proof.js";
 import { WRAPPED_SOL_MINT, SOLANA_USDC_MINT } from "./catalog.js";
 import { jupiterV1GasDisplay, assertJupiterV1FreshMaterial, validateJupiterV1PreparedMaterial } from "./v1-material.js";
-import { JUPITER_V1_OLD_ROUTE, routeConfigForQuote, routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { JUPITER_V1_OLD_ROUTE, JUPITER_V1_FINITE_ROUTES, routeConfigForQuote, routeConfigForQuoteBuild } from "./v1-route-config.js";
 export class JupiterV1QuoteBuilder {
     provider;
     resolver;
@@ -21,8 +21,9 @@ export class JupiterV1QuoteBuilder {
         if (input.account !== payer || input.recipient !== payer)
             throw new ApnError("APN_INVALID_INPUT", "Jupiter V1 quoted parties differ from the owned payer.");
         const routeId = this.options.resolveRouteId === undefined ? JUPITER_V1_OLD_ROUTE.routeId : await this.options.resolveRouteId(input.profile);
+        const legacy = JUPITER_V1_FINITE_ROUTES.find(route => route.routeId === routeId)?.variant === 17;
         const request = { inputMint: WRAPPED_SOL_MINT, outputMint: SOLANA_USDC_MINT, amount: input.amountAtomic, taker: payer, recipient: payer, slippageBps: input.slippageBps, computeUnitPriceMicroLamports: this.options.computeUnitPriceMicroLamports,
-            ...(routeId === JUPITER_V1_OLD_ROUTE.routeId ? { maximumInnerAccounts: 12 } : {}) };
+            ...(legacy ? { maximumInnerAccounts: 12 } : {}) };
         let quoteResponse;
         try {
             quoteResponse = await this.provider.quoteExactIn(request);
@@ -31,7 +32,7 @@ export class JupiterV1QuoteBuilder {
         catch (error) {
             // maxAccounts is only a discovery hint. One bounded official retry may
             // find the same policy-selected legacy pool. Decoder pins stay strict.
-            if (routeId !== JUPITER_V1_OLD_ROUTE.routeId || !(error instanceof ApnError) || error.code !== "APN_OPERATION_BLOCKED")
+            if (!legacy || !(error instanceof ApnError) || error.code !== "APN_OPERATION_BLOCKED")
                 throw error;
             const { maximumInnerAccounts: _hint, ...unfiltered } = request;
             quoteResponse = await this.provider.quoteExactIn(unfiltered);

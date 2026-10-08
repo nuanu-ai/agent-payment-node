@@ -11,6 +11,8 @@ import { routeConfigForQuoteBuild } from "./v1-route-config.js";
 import { assertWhirlpoolV2Memo, validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { refreshJupiterV1QuoteBuild } from "./v1-quote-refresh.js";
 const UPGRADEABLE = "BPFLoaderUpgradeab1e11111111111111111111111";
+// Base64 occupies 2,000,000 bytes, leaving room for metadata under the 2 MiB RPC body cap.
+const PROGRAM_DATA_CHUNK_BYTES = 1_500_000;
 export class JupiterV1MaterialResolver {
     constructor(private readonly rpc: SolanaRpcPort) { }
     async refreshQuoteBuild(material: JupiterV1ResolvedMaterial, build: JupiterV1RawBuildResponse, useRpcLifetime = false): Promise<JupiterV1ResolvedMaterial> {
@@ -28,19 +30,6 @@ export class JupiterV1MaterialResolver {
         const tables = build.addressLookupTableAddresses.map(key => decodeJupiterV1AddressTable(map.get(key)!));
         const programPins: JupiterV1RuntimeProgramPin[] = [];
         const programIds = [...new Set(instructions.map(ix => ix.programId).concat(JUPITER_V1_RUNTIME_PROGRAM_PINS.map(p => p.programId), route.requiredExtraPrograms))];
-        const pointers: string[] = [];
-        for (const programId of programIds) {
-            const program = map.get(programId);
-            if (program === undefined || program.existence !== "present" || !program.executable) invalid("Jupiter V1 executable program is missing.");
-            if (program.owner !== UPGRADEABLE) continue;
-            const bytes = Buffer.from(program.dataBase64, "base64"), pin = JUPITER_V1_RUNTIME_PROGRAM_PINS.find(p => p.programId === programId);
-            if (bytes.length !== 36 || bytes.readUInt32LE(0) !== 2) invalid("Jupiter V1 upgradeable Program metadata is invalid.");
-            const pointer = getAddressDecoder().decode(bytes.subarray(4, 36));
-            if (pin === undefined || pointer !== pin.programDataAddress) invalid("Jupiter V1 ProgramData pointer is unpinned.");
-            pointers.push(pointer);
-        }
-        const metadata = await boundedPublicReads(this.rpc, pointers.map(key => ({ method: "getAccountInfo", params: [key, { encoding: "base64", commitment: "confirmed", minContextSlot: quote.contextSlot, dataSlice: { offset: 0, length: 45 } }] })));
-        const headers = new Map(pointers.map((key, index) => [key, metadata[index]]));
         for (const programId of programIds) {
             const program = map.get(programId);
             if (program === undefined || program.existence !== "present" || !program.executable)
@@ -52,7 +41,7 @@ export class JupiterV1MaterialResolver {
                 const pointer = getAddressDecoder().decode(bytes.subarray(4, 36)), pin = JUPITER_V1_RUNTIME_PROGRAM_PINS.find(p => p.programId === programId);
                 if (pin === undefined || pointer !== pin.programDataAddress)
                     invalid("Jupiter V1 ProgramData pointer is unpinned.");
-                const pd = await this.readProgramData(pointer, quote.contextSlot, headers.get(pointer)), data = Buffer.from(pd.dataBase64, "base64");
+                const pd = await this.readProgramData(pointer, quote.contextSlot), data = Buffer.from(pd.dataBase64, "base64");
                 if (pd.owner !== UPGRADEABLE || pd.executable || data.length < 45 || data.readUInt32LE(0) !== 3 || ![0, 1].includes(data[12]!))
                     invalid("Jupiter V1 ProgramData metadata is invalid.");
                 const payloadHash = sha256(data.subarray(45));
@@ -93,28 +82,36 @@ export class JupiterV1MaterialResolver {
         response.value.forEach((v, i) => { const key = batch[i]!; if (v === null) {
             result.push({ address: key, existence: "absent", owner: null, executable: false, lamports: "0", dataBase64: "", dataHash: sha256(Buffer.alloc(0)), slot });
             return;
-        } const a = rawAccount(v, 1048576, slice); result.push({ address: key, existence: "present", owner: a.owner, executable: a.executable, lamports: a.lamports.toString(), dataBase64: a.data.toString("base64"), dataHash: sha256(a.data), slot }); });
+        } const a = rawAccount(v, slice === undefined ? 1048576 : Math.min(slice.length, PROGRAM_DATA_CHUNK_BYTES), slice); result.push({ address: key, existence: "present", owner: a.owner, executable: a.executable, lamports: a.lamports.toString(), dataBase64: a.data.toString("base64"), dataHash: sha256(a.data), slot }); });
     } return result; }
-    private async readProgramData(key: string, minContextSlot: number, metadataValue: unknown): Promise<JupiterV1SemanticAccount> {
-        const metadata = rpcRecord(metadataValue);
-        if (metadata.value === null)
-            invalid("Jupiter V1 ProgramData is missing.");
-        const header = rawAccount(metadata.value, 45, { offset: 0, length: 45 });
-        if (header.space > 16777216 || header.space < 45)
-            invalid("Jupiter V1 ProgramData size exceeds limit.");
-        const chunks: Buffer[] = [];
-        let last: JupiterV1SemanticAccount | undefined;
-        for (let offset = 0; offset < header.space; offset += 1048576) {
-            const read = await this.read([key], minContextSlot, { offset, length: Math.min(1048576, header.space - offset) });
-            last = read[0]!;
-            if (last.owner !== header.owner || last.executable !== header.executable || last.lamports !== header.lamports.toString() || last.existence !== "present")
+    private async readProgramData(key: string, minContextSlot: number): Promise<JupiterV1SemanticAccount> {
+        // The first full chunk carries the same loader header and declared account space.
+        // It is also retained in the payload; no separate header-only POST is needed.
+        const { raw: first, account: initial } = await this.readProgramDataChunk(key, minContextSlot, 0, PROGRAM_DATA_CHUNK_BYTES);
+        if (first.space > 16777216 || first.space < 45) invalid("Jupiter V1 ProgramData size exceeds limit.");
+        const chunks: Buffer[] = [first.data];
+        let last = initial;
+        for (let offset = PROGRAM_DATA_CHUNK_BYTES; offset < first.space; offset += PROGRAM_DATA_CHUNK_BYTES) {
+            const { raw, account } = await this.readProgramDataChunk(key, minContextSlot, offset, Math.min(PROGRAM_DATA_CHUNK_BYTES, first.space - offset));
+            last = account;
+            if (raw.space !== first.space || last.owner !== first.owner || last.executable !== first.executable || last.lamports !== first.lamports.toString() || last.existence !== "present")
                 invalid("Jupiter V1 ProgramData changed during read.");
             chunks.push(Buffer.from(last.dataBase64, "base64"));
         }
         const bytes = Buffer.concat(chunks);
-        if (!bytes.subarray(0, 45).equals(header.data))
-            invalid("Jupiter V1 ProgramData header changed during read.");
-        return { ...last!, dataBase64: bytes.toString("base64"), dataHash: sha256(bytes) };
+        if (bytes.length !== first.space || !bytes.subarray(0, 45).equals(first.data.subarray(0, 45)))
+            invalid("Jupiter V1 ProgramData header or length changed during read.");
+        return { ...last, dataBase64: bytes.toString("base64"), dataHash: sha256(bytes) };
+    }
+    private async readProgramDataChunk(key: string, minContextSlot: number, offset: number, length: number) {
+        const response = rpcRecord(await this.rpc.call("getAccountInfo", [key, { encoding: "base64", commitment: "confirmed", minContextSlot,
+            dataSlice: { offset, length } }]));
+        const slot = rpcAtomic(rpcRecord(response.context).slot).toString();
+        if (response.value === null || BigInt(slot) < BigInt(minContextSlot)) invalid("Jupiter V1 ProgramData is missing or stale.");
+        const raw = rawAccount(response.value, PROGRAM_DATA_CHUNK_BYTES, { offset, length });
+        const account: JupiterV1SemanticAccount = { address: key, existence: "present", owner: raw.owner, executable: raw.executable,
+            lamports: raw.lamports.toString(), dataBase64: raw.data.toString("base64"), dataHash: sha256(raw.data), slot };
+        return { raw, account };
     }
 }
 async function boundedPublicReads(rpc: SolanaRpcPort, reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]> {

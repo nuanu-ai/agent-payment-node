@@ -98,6 +98,34 @@ test("shared Solana operation budget refuses a send before transport and paces P
   assert.equal(budget.logicalCalls, 3); assert.equal(budget.physicalRequests, 2);
 });
 
+test("a Solana timer waking one millisecond early waits for the boundary before the next POST", async () => {
+  let now = 0;
+  const waits: number[] = [], starts: number[] = [];
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 3, minimumIntervalMs: 750, now: () => now,
+    wait: async ms => { waits.push(ms); now += waits.length === 1 ? ms - 1 : ms; } });
+  const rpc = new SolanaRpc("https://rpc.example", (async (_url, init) => {
+    starts.push(now); const q = JSON.parse(String(init?.body)); return json({ jsonrpc: "2.0", id: q.id, result: 1 });
+  }) as typeof fetch, budget);
+  await rpc.call("getGenesisHash", []);
+  await rpc.call("getBlockHeight", []);
+  await rpc.call("getBlockHeight", []);
+  assert.deepEqual(starts, [0,750,1500]); assert.deepEqual(waits, [750,1,750]);
+  assert.equal(budget.physicalRequests, 3); assert.equal(budget.logicalCalls, 3);
+});
+for (const kind of ["stuck", "backwards", "second early wake"] as const) test(`Solana pacing refuses a ${kind} clock without an early POST or unbounded waits`, async () => {
+  let now = 0, posts = 0;
+  const waits: number[] = [];
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 3, minimumIntervalMs: 750, now: () => now,
+    wait: async ms => { waits.push(ms); now += kind === "stuck" ? 0 : kind === "backwards" ? -1 : Math.max(0,ms-1); } });
+  const rpc = new SolanaRpc("https://rpc.example", (async (_url,init) => {
+    posts++; const q = JSON.parse(String(init?.body)); return json({ jsonrpc: "2.0", id: q.id, result: 1 });
+  }) as typeof fetch,budget);
+  await rpc.call("getGenesisHash", []);
+  await assert.rejects(rpc.call("getBlockHeight", []),{code:"APN_RPC_RATE_LIMITED"});
+  assert.equal(posts,1); assert.equal(budget.physicalRequests,1); assert.equal(budget.logicalCalls,2);
+  assert.deepEqual(waits,kind === "second early wake" ? [750,1] : [750]);
+});
+
 test("default operation pacing fails fast without sleeping under a caller's state lock", async () => {
   let now = 0; let posts = 0;
   const budget = new SolanaRpcBudget({ maxPhysicalRequests: 3, now: () => now });
