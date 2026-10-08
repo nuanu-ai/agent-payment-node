@@ -1,3 +1,4 @@
+import { verifySmartAccountVendor } from "./metamask-smart-account-vendor.js";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -14,12 +15,8 @@ export const METAMASK_X402_INTEGRITY = "sha512-jgQ7iCBKPE+k3dPCgEIBKrt1xFLfwyaXV
 export const X402_EVM_VERSION = "2.23.0";
 export const X402_EVM_INTEGRITY = "sha512-Ikaya5c0/qV/pdFRGfGSdlUX3ELZaUgrddsmmXZHPANtIAQ5uFH15+O+9Bt4PqdAXqCuS43WskJ7HgiLn/uW2g==";
 export async function assertMetaMaskSmartAccountPackageIdentity() {
-    await Promise.all([
-        assertManifest("@metamask/smart-accounts-kit", METAMASK_SMART_ACCOUNTS_KIT_VERSION, true),
-        assertManifest("@metamask/7715-permission-types", METAMASK_PERMISSION_TYPES_VERSION, false),
-        assertManifest("@metamask/x402", METAMASK_X402_VERSION, false),
-        assertX402EvmManifest(),
-    ]);
+    verifySmartAccountVendor();
+    await assertX402EvmManifest();
 }
 async function assertX402EvmManifest() {
     const require = createRequire(import.meta.url);
@@ -51,32 +48,6 @@ async function assertX402EvmManifest() {
     if (!isPlainRecord(value) || value.name !== "@x402/evm" || value.version !== X402_EVM_VERSION ||
         value.license !== "Apache-2.0" || repository !== "https://github.com/x402-foundation/x402" ||
         !isPlainRecord(rootExport))
-        throw protocol();
-}
-async function assertManifest(name, version, kit) {
-    const require = createRequire(import.meta.url);
-    let manifestPath;
-    try {
-        manifestPath = require.resolve(`${name}/package.json`);
-    }
-    catch {
-        throw unavailable(`The exact ${name} package is not installed.`);
-    }
-    let value;
-    try {
-        value = JSON.parse(await readFile(manifestPath, "utf8"));
-    }
-    catch {
-        throw unavailable(`The ${name} manifest is unavailable.`);
-    }
-    const rootExport = isPlainRecord(value) && isPlainRecord(value.exports) ? value.exports["."] : undefined;
-    const actionsExport = isPlainRecord(value) && isPlainRecord(value.exports) ? value.exports["./actions"] : undefined;
-    const utilsExport = isPlainRecord(value) && isPlainRecord(value.exports) ? value.exports["./utils"] : undefined;
-    const repository = isPlainRecord(value) && isPlainRecord(value.repository) ? value.repository.url : undefined;
-    if (!isPlainRecord(value) || value.name !== name || value.version !== version ||
-        value.license !== "(MIT-0 OR Apache-2.0)" ||
-        typeof repository !== "string" || repository !== "https://github.com/MetaMask/smart-accounts-kit.git" ||
-        !isPlainRecord(rootExport) || (kit && (!isPlainRecord(actionsExport) || !isPlainRecord(utilsExport))))
         throw protocol();
 }
 function unavailable(message) {

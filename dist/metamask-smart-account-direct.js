@@ -1,7 +1,7 @@
-import { ExecutionMode, createExecution, } from "@metamask/smart-accounts-kit";
-import { getErc20PeriodTransferEnforcerAvailableAmount, redelegatePermissionContextAction, } from "@metamask/smart-accounts-kit/actions";
-import { DelegationManager } from "@metamask/smart-accounts-kit/contracts";
-import { decodeDelegations, encodeDelegations } from "@metamask/smart-accounts-kit/utils";
+import { ExecutionMode, createExecution, } from "./metamask-smart-account-vendor.js";
+import { getErc20PeriodTransferEnforcerAvailableAmount, redelegatePermissionContextAction, } from "./metamask-smart-account-vendor.js";
+import { DelegationManager } from "./metamask-smart-account-vendor.js";
+import { decodeDelegations, encodeDelegations } from "./metamask-smart-account-vendor.js";
 import { createPublicClient, createWalletClient, encodeFunctionData, http, keccak256, toHex, } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";

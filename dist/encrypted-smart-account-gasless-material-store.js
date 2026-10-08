@@ -1,8 +1,8 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { TextDecoder } from "node:util";
-import { hashDelegation } from "@metamask/delegation-core";
-import { decodeDelegations, encodeDelegations, toDelegationStruct } from "@metamask/smart-accounts-kit/utils";
+import { hashDelegation } from "./metamask-smart-account-vendor.js";
+import { decodeDelegations, encodeDelegations, toDelegationStruct } from "./metamask-smart-account-vendor.js";
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { SA_MATERIAL_DOMAINS, saMaterialHash, saRequirementsHash, saRootContextHash } from "./smart-account-gasless/integrity.js";

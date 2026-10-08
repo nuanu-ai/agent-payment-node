@@ -15,10 +15,7 @@
         "darwin"
       ],
       "dependencies": {
-        "@metamask/7715-permission-types": "2.0.0",
         "@metamask/agent-wallet": "6.1.5",
-        "@metamask/smart-accounts-kit": "2.0.0",
-        "@metamask/x402": "1.0.0",
         "@modelcontextprotocol/server": "2.0.0",
         "@solana-program/system": "0.14.1",
         "@solana-program/token": "0.16.1",
@@ -33,9 +30,13 @@
         "apn": "bin/apn.js"
       },
       "devDependencies": {
+        "@metamask/7715-permission-types": "2.0.0",
         "@metamask/agent-sdk": "6.1.4",
+        "@metamask/delegation-core": "3.0.0",
         "@metamask/fox-sdk": "2.7.0",
-        "@modelcontextprotocol/client": "2.0.0",
+        "@metamask/smart-accounts-kit": "2.0.0",
+        "@metamask/x402": "1.0.0",
+        "@modelcontextprotocol/client": "2.3.1",
         "@relay-protocol/settlement-sdk": "0.0.143",
         "@toruslabs/ethereum-controllers": "9.12.0",
         "@types/node": "24.5.2",
@@ -876,6 +877,7 @@
       "version": "3.2.0",
       "resolved": "https://registry.npmjs.org/@ethereumjs/common/-/common-3.2.0.tgz",
       "integrity": "sha512-pksvzI0VyLgmuEF2FA/JR/4/y6hcPq8OUail3/AvycBaW1d5VSauOZzqGvJ3RTmR4MU35lWE8KseKOsEhrFRBA==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@ethereumjs/util": "^8.1.0",
@@ -886,6 +888,7 @@
       "version": "4.0.1",
       "resolved": "https://registry.npmjs.org/@ethereumjs/rlp/-/rlp-4.0.1.tgz",
       "integrity": "sha512-tqsQiBQDQdmPWE1xkkBq4rlSW5QZpLOUJ5RJh2/9fug+q9tnUhuZoVLk7s0scUIKTOzEtR72DFBXI4WiZcMpvw==",
+      "dev": true,
       "license": "MPL-2.0",
       "bin": {
         "rlp": "bin/rlp"
@@ -898,6 +901,7 @@
       "version": "4.2.0",
       "resolved": "https://registry.npmjs.org/@ethereumjs/tx/-/tx-4.2.0.tgz",
       "integrity": "sha512-1nc6VO4jtFd172BbSnTnDQVr9IYBFl1y4xPzZdtkrkKIncBCkdbgfdRV+MiTkJYAtTxvV12GRZLqBFT1PNK6Yw==",
+      "dev": true,
       "license": "MPL-2.0",
       "dependencies": {
         "@ethereumjs/common": "^3.2.0",
@@ -913,6 +917,7 @@
       "version": "1.4.2",
       "resolved": "https://registry.npmjs.org/@noble/curves/-/curves-1.4.2.tgz",
       "integrity": "sha512-TavHr8qycMChk8UwMld0ZDRvatedkzWfH8IiaeGCfymOP5i0hSCozz9vHOL0nkwk7HRMlFnAiKpS2jrUmSybcw==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/hashes": "1.4.0"
@@ -925,6 +930,7 @@
       "version": "1.4.0",
       "resolved": "https://registry.npmjs.org/@noble/hashes/-/hashes-1.4.0.tgz",
       "integrity": "sha512-V1JJ1WTRUqHHrOSh597hURcMqVKVGL/ea3kv0gSnEdsEZ0/+VyPghM1lMNGc00z7CIQorSvbKpuJkxvuHbvdbg==",
+      "dev": true,
       "license": "MIT",
       "engines": {
         "node": ">= 16"
@@ -937,6 +943,7 @@
       "version": "1.1.9",
       "resolved": "https://registry.npmjs.org/@scure/base/-/base-1.1.9.tgz",
       "integrity": "sha512-8YKhl8GHiNI/pU2VMaofa2Tor7PJRAjwQLBBuilkJ9L5+13yVbC7JO/wS7piioAvPSwR3JKM1IJ/u4xQzbcXKg==",
+      "dev": true,
       "license": "MIT",
       "funding": {
         "url": "https://paulmillr.com/funding/"
@@ -946,6 +953,7 @@
       "version": "1.4.0",
       "resolved": "https://registry.npmjs.org/@scure/bip32/-/bip32-1.4.0.tgz",
       "integrity": "sha512-sVUpc0Vq3tXCkDGYVWGIZTRfnvu8LoTDaev7vbwh0omSvVORONr960MQWdKqJDCReIEmTj3PAr73O3aoxz7OPg==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/curves": "~1.4.0",
@@ -960,6 +968,7 @@
       "version": "1.3.0",
       "resolved": "https://registry.npmjs.org/@scure/bip39/-/bip39-1.3.0.tgz",
       "integrity": "sha512-disdg7gHuTDZtY+ZdkmLpPCk7fxZSu3gBiEGuoC1XYxv9cGx3Z6cpTggCgW6odSOOIXCiDjuGejW+aJKCY/pIQ==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/hashes": "~1.4.0",
@@ -973,6 +982,7 @@
       "version": "2.2.1",
       "resolved": "https://registry.npmjs.org/ethereum-cryptography/-/ethereum-cryptography-2.2.1.tgz",
       "integrity": "sha512-r/W8lkHSiTLxUxW8Rf3u4HGB0xQweG2RyETjywylKZSzLWoWAijRz8WCuOtJ6wah+avllXBqZuk29HCCvhEIRg==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/curves": "1.4.2",
@@ -985,6 +995,7 @@
       "version": "8.1.0",
       "resolved": "https://registry.npmjs.org/@ethereumjs/util/-/util-8.1.0.tgz",
       "integrity": "sha512-zQ0IqbdX8FZ9aw11vP+dZkKDkS+kgIvQPHnSAXzP9pLu+Rfu3D3XEeLbicvoXJTYnhZiPmsZUxgdzXwNKxRPbA==",
+      "dev": true,
       "license": "MPL-2.0",
       "dependencies": {
         "@ethereumjs/rlp": "^4.0.1",
@@ -999,6 +1010,7 @@
       "version": "1.4.2",
       "resolved": "https://registry.npmjs.org/@noble/curves/-/curves-1.4.2.tgz",
       "integrity": "sha512-TavHr8qycMChk8UwMld0ZDRvatedkzWfH8IiaeGCfymOP5i0hSCozz9vHOL0nkwk7HRMlFnAiKpS2jrUmSybcw==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/hashes": "1.4.0"
@@ -1011,6 +1023,7 @@
       "version": "1.4.0",
       "resolved": "https://registry.npmjs.org/@noble/hashes/-/hashes-1.4.0.tgz",
       "integrity": "sha512-V1JJ1WTRUqHHrOSh597hURcMqVKVGL/ea3kv0gSnEdsEZ0/+VyPghM1lMNGc00z7CIQorSvbKpuJkxvuHbvdbg==",
+      "dev": true,
       "license": "MIT",
       "engines": {
         "node": ">= 16"
@@ -1023,6 +1036,7 @@
       "version": "1.1.9",
       "resolved": "https://registry.npmjs.org/@scure/base/-/base-1.1.9.tgz",
       "integrity": "sha512-8YKhl8GHiNI/pU2VMaofa2Tor7PJRAjwQLBBuilkJ9L5+13yVbC7JO/wS7piioAvPSwR3JKM1IJ/u4xQzbcXKg==",
+      "dev": true,
       "license": "MIT",
       "funding": {
         "url": "https://paulmillr.com/funding/"
@@ -1032,6 +1046,7 @@
       "version": "1.4.0",
       "resolved": "https://registry.npmjs.org/@scure/bip32/-/bip32-1.4.0.tgz",
       "integrity": "sha512-sVUpc0Vq3tXCkDGYVWGIZTRfnvu8LoTDaev7vbwh0omSvVORONr960MQWdKqJDCReIEmTj3PAr73O3aoxz7OPg==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/curves": "~1.4.0",
@@ -1046,6 +1061,7 @@
       "version": "1.3.0",
       "resolved": "https://registry.npmjs.org/@scure/bip39/-/bip39-1.3.0.tgz",
       "integrity": "sha512-disdg7gHuTDZtY+ZdkmLpPCk7fxZSu3gBiEGuoC1XYxv9cGx3Z6cpTggCgW6odSOOIXCiDjuGejW+aJKCY/pIQ==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/hashes": "~1.4.0",
@@ -1059,6 +1075,7 @@
       "version": "2.2.1",
       "resolved": "https://registry.npmjs.org/ethereum-cryptography/-/ethereum-cryptography-2.2.1.tgz",
       "integrity": "sha512-r/W8lkHSiTLxUxW8Rf3u4HGB0xQweG2RyETjywylKZSzLWoWAijRz8WCuOtJ6wah+avllXBqZuk29HCCvhEIRg==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/curves": "1.4.2",
@@ -1882,6 +1899,7 @@
       "version": "2.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/7715-permission-types/-/7715-permission-types-2.0.0.tgz",
       "integrity": "sha512-NS6NolXd7fDQhMZoEmzyQcLuJ9NtIPntKOAEOMdFQuR8y1HWpN6PYx1BrY6OgHmJ1D/P4vuWlCooDlh+L8CmVw==",
+      "dev": true,
       "license": "(MIT-0 OR Apache-2.0)",
       "dependencies": {
         "@metamask/delegation-core": "^3.0.0",
@@ -1895,6 +1913,7 @@
       "version": "3.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/abi-utils/-/abi-utils-3.0.0.tgz",
       "integrity": "sha512-a/l0DiSIr7+CBYVpHygUa3ztSlYLFCQMsklLna+t6qmNY9+eIO5TedNxhyIyvaJ+4cN7TLy0NQFbp9FV3X2ktg==",
+      "dev": true,
       "license": "(Apache-2.0 AND MIT)",
       "dependencies": {
         "@metamask/superstruct": "^3.1.0",
@@ -3767,6 +3786,7 @@
       "version": "2.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/delegation-abis/-/delegation-abis-2.0.0.tgz",
       "integrity": "sha512-3LW1mC/wrtgceMtou4kTJWlS683IXRRWzKY/fVnW9PieN5dayrDyZhJBP+1MJy7LyO19+E2l/IP+g9TES1ua2Q==",
+      "dev": true,
       "license": "(MIT-0 OR Apache-2.0)",
       "engines": {
         "node": ">=20"
@@ -3776,6 +3796,7 @@
       "version": "3.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/delegation-core/-/delegation-core-3.0.0.tgz",
       "integrity": "sha512-crrbAFb6+uyzQ+q9F8wyOFK42/f6tpFiUiLq8fxV7+McD2AbqmsxFEBH0bB4pKFjdxi3HxKn8naEDR7/w7k45A==",
+      "dev": true,
       "license": "(MIT-0 OR Apache-2.0)",
       "dependencies": {
         "@metamask/abi-utils": "^3.0.0",
@@ -3790,6 +3811,7 @@
       "version": "2.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/delegation-deployments/-/delegation-deployments-2.0.0.tgz",
       "integrity": "sha512-DnI1eZ2fCZtkfrq9+G4NKh2S4WOVczKkrTh+JVTgBCS4bCmObxN1pDvdxbTA9WPl9TZoL0XamRhjfYSRXIq6wA==",
+      "dev": true,
       "license": "(MIT-0 OR Apache-2.0)",
       "engines": {
         "node": ">=20"
@@ -7449,6 +7471,7 @@
       "version": "2.1.1",
       "resolved": "https://registry.npmjs.org/@metamask/scure-bip39/-/scure-bip39-2.1.1.tgz",
       "integrity": "sha512-1K8aBsAqr6+8jWhguVl06n8e+zjV9sUnys+5PLyVU4mb8LbulQ60F6cq7iQys3xX/yCwKt1+7c7j2nuTEpW+ZQ==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@noble/hashes": "~1.3.2",
@@ -7462,6 +7485,7 @@
       "version": "1.3.3",
       "resolved": "https://registry.npmjs.org/@noble/hashes/-/hashes-1.3.3.tgz",
       "integrity": "sha512-V7/fPHgl+jsVPXqqeOzT8egNj2iBIVt+ECeMMG8TdcnTikP3oaBtUVqpT/gYCR68aEBJSF+XbYUxStjbFMqIIA==",
+      "dev": true,
       "license": "MIT",
       "engines": {
         "node": ">= 16"
@@ -7474,6 +7498,7 @@
       "version": "1.1.9",
       "resolved": "https://registry.npmjs.org/@scure/base/-/base-1.1.9.tgz",
       "integrity": "sha512-8YKhl8GHiNI/pU2VMaofa2Tor7PJRAjwQLBBuilkJ9L5+13yVbC7JO/wS7piioAvPSwR3JKM1IJ/u4xQzbcXKg==",
+      "dev": true,
       "license": "MIT",
       "funding": {
         "url": "https://paulmillr.com/funding/"
@@ -7548,6 +7573,7 @@
       "version": "2.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/smart-accounts-kit/-/smart-accounts-kit-2.0.0.tgz",
       "integrity": "sha512-eye6GMdOyhL9SPaWwwE0Zlk1466JFxQqB5NH5lHaTo8htibFZmjnKctbKzhdW+FOx53R767BRZXQx7bq6/KACA==",
+      "dev": true,
       "license": "(MIT-0 OR Apache-2.0)",
       "dependencies": {
         "@metamask/7715-permission-types": "^2.0.0",
@@ -7569,6 +7595,7 @@
       "version": "0.8.1",
       "resolved": "https://registry.npmjs.org/ox/-/ox-0.8.1.tgz",
       "integrity": "sha512-e+z5epnzV+Zuz91YYujecW8cF01mzmrUtWotJ0oEPym/G82uccs7q0WDHTYL3eiONbTUEvcZrptAKLgTBD3u2A==",
+      "dev": true,
       "funding": [
         {
           "type": "github",
@@ -8256,6 +8283,7 @@
       "version": "3.4.1",
       "resolved": "https://registry.npmjs.org/@metamask/superstruct/-/superstruct-3.4.1.tgz",
       "integrity": "sha512-caTaaBUcwBGbUNf3r0uT48upX4nECRbKhQ9pPOfW4sIkfcIUUDV4S9DZxq/5fuNPVt5KWpyd5xIIz0sP+iWLlg==",
+      "dev": true,
       "license": "MIT",
       "engines": {
         "node": ">=16.0.0"
@@ -8896,6 +8924,7 @@
       "version": "11.12.0",
       "resolved": "https://registry.npmjs.org/@metamask/utils/-/utils-11.12.0.tgz",
       "integrity": "sha512-dtw3Kb0SwYpFfKrdTeFF0k0N9GLZ48sT6idGqk5lGriLCz120zxwgSbFyuHLA1XhFVvlYXoTf8wrPVffEZcVZg==",
+      "dev": true,
       "license": "ISC",
       "dependencies": {
         "@ethereumjs/tx": "^4.2.0",
@@ -8919,6 +8948,7 @@
       "version": "1.0.0",
       "resolved": "https://registry.npmjs.org/@metamask/x402/-/x402-1.0.0.tgz",
       "integrity": "sha512-jgQ7iCBKPE+k3dPCgEIBKrt1xFLfwyaXVBIa9dxuN5dkXTkQs9X9gmY4V/7wRqN32WoeV4qhEj/L/6qcHw+i9g==",
+      "dev": true,
       "license": "(MIT-0 OR Apache-2.0)",
       "dependencies": {
         "@metamask/utils": "^11.4.0"
@@ -8932,18 +8962,31 @@
       }
     },
     "node_modules/@modelcontextprotocol/client": {
-      "version": "2.0.0",
-      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/client/-/client-2.0.0.tgz",
-      "integrity": "sha512-8f1OghQ2rjzIOfqgUCP+8GiUWqRs89njoWLNqAe8kWmDePv3s1fZXseej+QXemssEuuOvLLmLO/kqM3IQHtISw==",
+      "version": "2.3.1",
+      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/client/-/client-2.3.1.tgz",
+      "integrity": "sha512-mIGZXpHsjnZ6lD+gD/WCMpR5k8yVQQ8nNFH1N0Srf7AvnwTUMYD6pvTY8ng2+He5FfV7YMZLmrjL7cLa/cc3dQ==",
       "dev": true,
-      "license": "MIT",
+      "license": "Apache-2.0",
       "dependencies": {
-        "@modelcontextprotocol/core": "2.0.0",
+        "@modelcontextprotocol/core": "2.3.1",
         "cross-spawn": "^7.0.5",
         "eventsource": "^3.0.2",
-        "eventsource-parser": "^3.0.0",
+        "eventsource-parser": "^3.0.8",
         "jose": "^6.1.3",
         "pkce-challenge": "^5.0.0",
+        "zod": "^4.2.0"
+      },
+      "engines": {
+        "node": ">=20"
+      }
+    },
+    "node_modules/@modelcontextprotocol/client/node_modules/@modelcontextprotocol/core": {
+      "version": "2.3.1",
+      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/core/-/core-2.3.1.tgz",
+      "integrity": "sha512-laVmIhPGpWi7rG9q+0UigblRN0Hws/Yjlb6qLFtVqryXVLkc4h+yN8z731POD2LnAGQlFe7/tXhUm7Bi0YB91g==",
+      "dev": true,
+      "license": "Apache-2.0",
+      "dependencies": {
         "zod": "^4.2.0"
       },
       "engines": {
@@ -11846,6 +11889,7 @@
       "version": "4.1.13",
       "resolved": "https://registry.npmjs.org/@types/debug/-/debug-4.1.13.tgz",
       "integrity": "sha512-KSVgmQmzMwPlmtljOomayoR89W4FynCAi3E8PPs7vmDVPe84hT+vGPKkJfThkmXs0x0jAaa9U8uW8bbfyS2fWw==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "@types/ms": "*"
@@ -11862,12 +11906,14 @@
       "version": "4.17.25",
       "resolved": "https://registry.npmjs.org/@types/lodash/-/lodash-4.17.25.tgz",
       "integrity": "sha512-+K1NIO8I+F9/wNulfVvu23QYd0Pe9/OCqRrim4NoYIf1VoEDL90Ve4ClzpyqBLc7NpGGWRvYNCKZ1BE/Jpf8dQ==",
+      "dev": true,
       "license": "MIT"
     },
     "node_modules/@types/ms": {
       "version": "2.1.0",
       "resolved": "https://registry.npmjs.org/@types/ms/-/ms-2.1.0.tgz",
       "integrity": "sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==",
+      "dev": true,
       "license": "MIT"
     },
     "node_modules/@types/node": {
@@ -13175,6 +13221,7 @@
       "version": "1.2.2",
       "resolved": "https://registry.npmjs.org/crc-32/-/crc-32-1.2.2.tgz",
       "integrity": "sha512-ROmzCKrTnOwybPcJApAA6WBWij23HVfGVNKqqrZpuyZOHqK2CwHSvpGuyt/UNNvaIjEd8X5IFGp4Mh+Ie1IHJQ==",
+      "dev": true,
       "license": "Apache-2.0",
       "bin": {
         "crc32": "bin/crc32.njs"
@@ -15184,6 +15231,7 @@
       "version": "0.3.1",
       "resolved": "https://registry.npmjs.org/micro-ftch/-/micro-ftch-0.3.1.tgz",
       "integrity": "sha512-/0LLxhzP0tfiR5hcQebtudP56gUurs2CLkGarnCiB/OqEyUFQ6U3paQi/tgLv0hBJYt2rnr9MNpxz4fiiugstg==",
+      "dev": true,
       "license": "MIT"
     },
     "node_modules/mime-db": {
@@ -15410,6 +15458,7 @@
       "version": "0.13.8",
       "resolved": "https://registry.npmjs.org/openapi-fetch/-/openapi-fetch-0.13.8.tgz",
       "integrity": "sha512-yJ4QKRyNxE44baQ9mY5+r/kAzZ8yXMemtNAOFwOzRXJscdjSxxzWSNlyBAr+o5JjkUw9Lc3W7OIoca0cY3PYnQ==",
+      "dev": true,
       "license": "MIT",
       "dependencies": {
         "openapi-typescript-helpers": "^0.0.15"
@@ -15419,6 +15468,7 @@
       "version": "0.0.15",
       "resolved": "https://registry.npmjs.org/openapi-typescript-helpers/-/openapi-typescript-helpers-0.0.15.tgz",
       "integrity": "sha512-opyTPaunsklCBpTK8JGef6mfPhLSnyy5a0IN9vKtx3+4aExf+KxEqYwIy3hqkedXIB97u357uLMJsOnm3GVjsw==",
+      "dev": true,
       "license": "MIT"
     },
     "node_modules/openid-client": {
@@ -15624,6 +15674,7 @@
       "version": "2.1.11",
       "resolved": "https://registry.npmjs.org/pony-cause/-/pony-cause-2.1.11.tgz",
       "integrity": "sha512-M7LhCsdNbNgiLYiP4WjsfLUuFmCfnjdF6jKe2R9NKl4WFN+HZPGHJZ9lnLP7f9ZnKe3U9nuWD0szirmj+migUg==",
+      "dev": true,
       "license": "0BSD",
       "engines": {
         "node": ">=12.0.0"
@@ -16808,6 +16859,7 @@
       "version": "11.1.1",
       "resolved": "https://registry.npmjs.org/uuid/-/uuid-11.1.1.tgz",
       "integrity": "sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==",
+      "dev": true,
       "funding": [
         "https://github.com/sponsors/broofa",
         "https://github.com/sponsors/ctavan"

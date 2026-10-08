@@ -9,15 +9,81 @@ const root = resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
 const tron = process.argv[2] === "--tron-utils";
 const relay = process.argv[2] === "--relay-order-id";
-const args = process.argv.slice(tron || relay ? 3 : 2);
+const smart = process.argv[2] === "--smart-account";
+const args = process.argv.slice(tron || relay || smart ? 3 : 2);
 const check = args[0] === "--check" && args.length === 1;
 const destination = args[0] === "--out-dir" ? args[1] : undefined;
-assert(check || (destination && args.length === 2), "use [--tron-utils|--relay-order-id] --check or --out-dir <new directory>");
-const vendorName = tron ? "tron-utils" : relay ? "relay-order-id" : "metamask-evm-sdk";
+assert(check || (destination && args.length === 2), "use [--tron-utils|--relay-order-id|--smart-account] --check or --out-dir <new directory>");
+const vendorName = smart ? "metamask-smart-account" : tron ? "tron-utils" : relay ? "relay-order-id" : "metamask-evm-sdk";
 const temporary = await mkdtemp(join(tmpdir(), "apn-sdk-build-"));
 const output = join(temporary, "vendor");
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
-const entries = tron ? { utils: ["tronweb", ["utils"]] } : relay ? { "order-id": ["@relay-protocol/settlement-sdk", ["getOrderId"]] } : {
+const entries = smart ? {
+  "smart-utils": [
+    "@metamask/smart-accounts-kit/utils",
+    [
+      "SIGNABLE_DELEGATION_TYPED_DATA",
+      "decodeDelegations",
+      "encodeDelegations",
+      "toDelegationStruct"
+    ]
+  ],
+  "smart-root": [
+    "@metamask/smart-accounts-kit",
+    [
+      "ExecutionMode",
+      "ROOT_AUTHORITY",
+      "createExecution",
+      "getSmartAccountsEnvironment"
+    ]
+  ],
+  "smart-actions": [
+    "@metamask/smart-accounts-kit/actions",
+    [
+      "getErc20PeriodTransferEnforcerAvailableAmount",
+      "redelegatePermissionContextAction"
+    ]
+  ],
+  "smart-contracts": [
+    "@metamask/smart-accounts-kit/contracts",
+    [
+      "DelegationManager"
+    ]
+  ],
+  "permission-types": [
+    "@metamask/7715-permission-types",
+    [
+      "ALL_METAMASK_FACILITATOR_ADDRESSES",
+      "METAMASK_FACILITATOR_ADDRESSES",
+      "makePermissionDecoderConfigs",
+      "createErc20TokenAllowanceCaveats"
+    ]
+  ],
+  "smart-experimental": [
+    "@metamask/smart-accounts-kit/experimental",
+    [
+      "createx402DelegationProvider"
+    ]
+  ],
+  "x402-client": [
+    "@metamask/x402",
+    [
+      "x402Erc7710Client"
+    ]
+  ],
+  "delegation-core": [
+    "@metamask/delegation-core",
+    [
+      "ANY_BENEFICIARY",
+      "decodeAllowedCalldataTerms",
+      "decodeERC20TransferAmountTerms",
+      "decodeRedeemerTerms",
+      "decodeTimestampTerms",
+      "decodeValueLteTerms",
+      "hashDelegation"
+    ]
+  ]
+} : tron ? { utils: ["tronweb", ["utils"]] } : relay ? { "order-id": ["@relay-protocol/settlement-sdk", ["getOrderId"]] } : {
   "sdk-root": ["@metamask/agent-sdk", ["NetworkRegistry", "PriceService", "createWalletServiceFromSession", "disableAnalytics"]],
   "sdk-base": ["@metamask/agent-sdk/base", ["SessionManager", "WalletStateManager"]],
   "sdk-evm": ["@metamask/agent-sdk/evm", ["getAgenticEvmChains", "withEvmRpcTarget"]],
@@ -28,14 +94,19 @@ const entries = tron ? { utils: ["tronweb", ["utils"]] } : relay ? { "order-id":
 const entrySource = name => `export { ${entries[name][1].join(", ")} } from ${JSON.stringify(entries[name][0])};\n`;
 const forbiddenPackage = /^(?:@metamask\/fox-sdk\/wallets\/solana|@solana\/(?:spl-token|buffer-layout-utils)|bigint-buffer)(?:\/|$)/;
 const forbiddenFile = /(?:^|\/)node_modules\/(?:@metamask\/fox-sdk\/dist\/wallets\/solana|@solana\/(?:spl-token|buffer-layout-utils)|bigint-buffer)(?:\/|$)/u;
-const versions = tron ? { tronweb: "6.5.0" } : relay ? { settlementSdk: "0.0.143" } : { agentSdk: "6.1.4", foxSdk: "2.7.0", ethereumControllers: "9.12.0" };
+const versions = smart ? { smartAccountsKit: "2.0.0", permissionTypes: "2.0.0", x402: "1.0.0", delegationCore: "3.0.0" } : tron ? { tronweb: "6.5.0" } : relay ? { settlementSdk: "0.0.143" } : { agentSdk: "6.1.4", foxSdk: "2.7.0", ethereumControllers: "9.12.0" };
 const binaryHash = "10b6243df618d374bb2d5c9cfbe7052e1405f6aa4e53a6164f11a91b9f2e1384";
 try {
   assert.equal(process.platform, "darwin"); assert.equal(process.arch, "arm64");
-  const upstreamPackages = tron ? [["tronweb", versions.tronweb]] : relay ? [["@relay-protocol/settlement-sdk", versions.settlementSdk]] : [["@metamask/agent-sdk", versions.agentSdk], ["@metamask/fox-sdk", versions.foxSdk], ["@toruslabs/ethereum-controllers", versions.ethereumControllers]];
-  for (const [name, version] of [...upstreamPackages, ["esbuild", "0.28.2"]]) {
+  const upstreamPackages = smart ? [["@metamask/smart-accounts-kit", versions.smartAccountsKit], ["@metamask/7715-permission-types", versions.permissionTypes], ["@metamask/x402", versions.x402], ["@metamask/delegation-core", versions.delegationCore]] : tron ? [["tronweb", versions.tronweb]] : relay ? [["@relay-protocol/settlement-sdk", versions.settlementSdk]] : [["@metamask/agent-sdk", versions.agentSdk], ["@metamask/fox-sdk", versions.foxSdk], ["@toruslabs/ethereum-controllers", versions.ethereumControllers]];
+  for (const [name, version] of [...upstreamPackages, ["esbuild", "0.28.2"], ["punycode", "2.3.1"]]) {
     const path = join(root, "node_modules", name, "package.json");
     assert.equal(JSON.parse(await readFile(path, "utf8")).version, version, name);
+  }
+  if (smart) for (const [name] of upstreamPackages) {
+    const metadata = JSON.parse(await readFile(join(root, "node_modules", name, "package.json"), "utf8"));
+    assert.equal(metadata.name, name); assert.equal(metadata.license, "(MIT-0 OR Apache-2.0)");
+    assert.equal(metadata.repository?.url, "https://github.com/MetaMask/smart-accounts-kit.git");
   }
   const binary = require.resolve("@esbuild/darwin-arm64/bin/esbuild");
   assert.equal(sha(await readFile(binary)), binaryHash, "unreviewed esbuild binary");
@@ -52,6 +123,7 @@ try {
       builder.onLoad({ filter: /.*/, namespace: "apn-sdk" }, args => {
         assert(args.path in entries); return { contents: entrySource(args.path), loader: "js", resolveDir: root };
       });
+      builder.onResolve({ filter: /^punycode$/ }, () => ({ path: require.resolve("punycode/") }));
       builder.onResolve({ filter: forbiddenPackage }, args => { throw Error(`forbidden SDK dependency: ${args.path}`); });
       builder.onLoad({ filter: /.*/, namespace: "file" }, args => {
         assert(!forbiddenFile.test(args.path), `forbidden decoder input: ${args.path}`);
@@ -68,7 +140,7 @@ try {
     const bytes = await readFile(join(output, name)); files[name] = { bytes: bytes.length, sha256: sha(bytes) };
   }
   const manifest = { schemaVersion: `apn.${vendorName}.v1`, upstreamVersions: versions,
-    bundler: { version: "0.28.2", target: "node24" }, files, entryNames: Object.keys(entries) };
+    bundler: { version: "0.28.2", target: "node24" }, builtinSubstitutions: { punycode: "punycode.js@2.3.1" }, files, entryNames: Object.keys(entries) };
   const packages = {}, inputs = [], licenses = new Map();
   for (const name of Object.keys(result.metafile.inputs).sort()) {
     if (name.startsWith("apn-sdk:")) {
@@ -107,7 +179,7 @@ try {
     schemaVersion: `apn.${vendorName}.provenance.v1`, inputFiles: inputs, packages, externalImports: external,
     bundler: { version: "0.28.2", binarySha256: binaryHash, target: "node24" },
     ...(relay ? { disabledOptionalPackages: ["encoding"], dynamicPackageRequires: "rejected before parent resolution by bundled builtin-only require" } : {}),
-    scope: tron ? "Offline TRON utilities only; forbidden decoder inputs absent; other upstream advisories are not declared patched" : relay ? "Relay getOrderId only; forbidden decoder inputs absent; other upstream advisories are not declared patched" : "EVM SDK slice; forbidden decoder inputs absent; other upstream advisories are not declared patched",
+    scope: smart ? "Smart Account exports; original package identities checked; other upstream advisories are not declared patched" : tron ? "Offline TRON utilities only; forbidden decoder inputs absent; other upstream advisories are not declared patched" : relay ? "Relay getOrderId only; forbidden decoder inputs absent; other upstream advisories are not declared patched" : "EVM SDK slice; forbidden decoder inputs absent; other upstream advisories are not declared patched",
   }));
   async function inventory(directory, prefix = "") {
     const rows = {};

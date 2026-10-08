@@ -1,42 +1,46 @@
 # Runtime SDK slices
 
-APN ships the EVM functions it uses from MetaMask, the offline TRON utilities and Relay's `getOrderId` as static ESM bundles. A normal consumer installation no longer needs the original Agent SDK, Fox SDK, TronWeb, settlement SDK or Ethereum controllers package. Their exact versions remain development dependencies for type checking and reproducible generation.
+APN ships its MetaMask EVM and Smart Account exports, offline TRON utilities and Relay `getOrderId` as static ESM bundles. The original Agent/Fox SDKs, Smart Account kit, permission types, delegation core, MetaMask x402, Ethereum controllers, TronWeb and settlement SDK remain exact development dependencies for types and generation. The separate MetaMask Agent Wallet CLI stays a runtime dependency.
 
-The original Agent/Fox dependency graph pulled in `bigint-buffer` and SPL decoders. A real npm consumer also selected old Axios through TronWeb, including the settlement SDK's TronWeb dependency. Root overrides inside APN did not control that consumer's resolutions. The slices preserve the existing upstream exports and remove these runtime package chains; payment logic, RPC limits, signing and monetary caps are unchanged.
+Original package chains pulled in `bigint-buffer`, SPL decoders, old nested Axios and UUID 9.x. A genuine npm consumer showed that APN's root overrides did not control those resolutions. The slices retain upstream functions while removing these runtime package chains. Signing, monetary caps, RPC budgets, operation ownership and send fences retain their existing contracts.
 
-| Directory | Upstream entry points | Manifest SHA256 |
+| Directory | Upstream exports | Manifest SHA256 |
 |---|---|---|
-| `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `b5de0a094a32f1b22b8e2e428cac5b6716e7ae726d5a1a3f38375b32b2a0df13` |
-| `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `87526ab76191501ab3571c3ce6395ad9f3e28b6780944ca29f854a43e2cb0e65` |
-| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `97a5f15af76987ee71e0490abf49a5c401d0b7b94e9c984e7325f1644ceac4a6` |
+| `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `31863561a74b0fdc5ba37afe70fc827ca9e9f171d83d12b56f2b7221dfdd6c1c` |
+| `vendor/metamask-smart-account` | Smart Account kit 2.0.0 root/actions/contracts/utils/experimental, permission types 2.0.0, delegation core 3.0.0, MetaMask x402 1.0.0 | `ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece27448ddc3` |
+| `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `cbf69134172a065d967339f8c3f432df347e55b944b83bd64cc02459647228a6` |
+| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `1c697732810415f01663bb774256b662c337c9cb8f0f17fbf0e22cb665e991e2` |
 
-Before the first entry import, each APN loader checks its pinned manifest and every declared executable/legal file's size and SHA256. It rejects substitutions and symlinked files or bundle directories. Verification is cached for that process. This protects the initial load; it does not attest every installed dependency byte or prevent concurrent filesystem modification after verification.
+Before the first entry import, each loader checks its pinned manifest and every declared executable/legal file's size and SHA256. File and bundle-directory symlinks refuse. Verification is cached for that process; concurrent filesystem changes after verification and unrelated installed dependency bytes are outside this check.
 
-The bundles import Node builtins and their own chunks. Non-builtin dynamic `require` calls refuse before parent resolution. Relay retains node-fetch's optional `encoding` fallback, whose upstream catch handles this refusal. A parent `encoding` canary remains unevaluated in packaging tests. No Solana wallet, SPL decoder or `bigint-buffer` input is admitted by the generator.
+The bundles import Node builtins and their own chunks. Non-builtin dynamic require refuses before parent resolution. Relay's node-fetch optional `encoding` fallback catches that refusal, and a parent canary remains unevaluated. Legacy bare `punycode` imports resolve to the locked userland implementation 2.3.1 during generation, avoiding Node's deprecated builtin. Quiet stderr is required by packaging and actual stdio tests. No Solana wallet, SPL decoder or bigint-buffer input is admitted by the generator.
 
 ## Reproduce from the source checkout
 
-Use macOS arm64, Node 24 and a clean installation of the committed lock with lifecycle scripts disabled. The generator pins esbuild 0.28.2 and its darwin-arm64 binary SHA256. It reads and bundles upstream files without importing their runtime code.
+Use macOS arm64, Node 24 and a clean installation of the committed lock with lifecycle scripts disabled. The generator pins esbuild 0.28.2 and its darwin-arm64 binary SHA256. It bundles upstream files without importing their runtime code. Smart Account source package name/version/license/repository checks run before bundling.
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
 node scripts/build-sdk-vendor.mjs --check
+node scripts/build-sdk-vendor.mjs --smart-account --check
 node scripts/build-sdk-vendor.mjs --tron-utils --check
 node scripts/build-sdk-vendor.mjs --relay-order-id --check
 ```
 
-Each check regenerates into a temporary directory and compares all vendor files, including provenance and notices, byte-for-byte. To inspect a proposed regeneration, replace `--check` with `--out-dir <new-directory>`; the generator refuses to overwrite an existing destination. Updating a bundle requires reviewing its inputs, updating its loader's manifest pin, rebuilding `dist`, and repeating packaging and genuine-consumer checks.
+Each check regenerates into a temporary directory and compares every vendor file byte-for-byte. Replace `--check` with `--out-dir <new-directory>` to inspect a regeneration; an existing destination refuses. A bundle update requires input review, a new loader manifest pin, rebuilt dist and repeated packaging/consumer checks.
 
-`provenance.json` records package versions, upstream input hashes, external imports and bundler identity. `licenses/` retains original upstream LICENSE, COPYING and NOTICE files, and emitted `.LEGAL.txt` files retain bundled notices. The three roots contain 421 files in total.
+Provenance records upstream input hashes, package versions, external imports and bundler identity. Original LICENSE, COPYING and NOTICE files and emitted `.LEGAL.txt` files are retained. The four roots contain 494 files. `.gitattributes` preserves their bytes, including original CRLF notices.
 
-## Verified scope on 8 October 2026
+## Local proof on 8 October 2026
 
-A fresh clean producer reproduced all three bundles and all 747 production JS files. The source boundary passed, as did 25 packaging checks for imports, metadata, tampering and symlinks. Focused checks passed 205 MetaMask tests, 100 TRON/SunSwap/LI.FI tests and 227 Relay tests across 33 Relay files, with zero failures or skips. Relay was split into 15/15/3-file batches after the combined producer hit its aggregate timeout; production limits and individual assertions were retained.
+Both TypeScript builds, all 748 production/test executable comparisons and the 500-line source boundary passed. All four bundles regenerated exactly. The final Smart Account packet passed 423 MetaMask/Smart Account checks in 37 files, 584 MCP checks in 33 files and 37 packaging checks, with zero failures or skips and all 1842 inputs unchanged. These cohorts overlap and their counts are not added. The unchanged Relay and TRON components retain separately checked 227/33-file and 64/9-file cohorts from the preceding snapshot.
 
-A fresh npm consumer with no parent overrides installed the local archive with scripts disabled. All 2686 installed files matched the tested candidate archive, whose SHA256 is `216745b9504be492a122852768cfe070d13c8088e97d70f4f59c78e7148ba4b2`. CLI version/help/MCP config passed. Its actual installed helper passed five modes on all eight supported EVM networks using synthetic transport, with zero network, native or child-process attempts. A second real consumer deliberately included the original decoder packages; all six ESM/CommonJS loads refused before evaluation, while the 40 helper checks still passed. These are offline installation proofs, separate from paid network acceptance.
+A fresh npm consumer with no parent overrides installed candidate archive SHA256 `74cc00bf469cf2743691a0ee01711627665c71a2a075c2ea6679ee2f2c85efd3`. All 2763 installed files matched the archive and source. The original SDK packages, MetaMask utility chain, UUID and native decoder packages are absent. CLI version/help/MCP config pass with quiet stderr. This archive precedes the final documentation edit; exact committed-source archive proof is recorded in the closure ledger.
 
-## Advisories and upstream licenses
+Initial failures remain in private evidence: deprecated builtin punycode also failed with the old MCP client, a genuine consumer exposed undeclared delegation-core imports, and a cross-process material fixture needed its default test-emission path. The corrected generator, export slice and owned test-path alias preserve the assertions. No warning suppression or financial-limit change was used.
 
-Bundling does not patch upstream cryptography or erase upstream license obligations. The final standalone lock audit still reports 6 high and 48 low affected package records, including development-only MCP client and decoder dependencies. The genuine consumer's production audit reports 0 high and 8 moderate affected records from `uuid` below 11.1.1 through MetaMask utilities. Portable remediation of this chain remains open. `elliptic` advisories also remain relevant to bundled upstream code even when npm cannot see that code as a separate installed package.
+## Remaining advisories and licenses
 
-Retained metadata includes `@toruslabs/ffjavascript@6.0.0` under GPL-3.0 in the EVM slice and `rpc-websockets@9.3.9` under LGPL-3.0-only in the Relay slice. APN's own MIT license does not replace the licenses of vendored portions. Upstream notices and provenance are retained; release-license review remains open. This source change has not been published to npm/Homebrew or installed globally.
+The genuine consumer's production package audit reports zero affected package records. This does not patch or audit every bundled cryptographic function. Existing elliptic advisories remain relevant to upstream code in the EVM/Relay slices. The standalone development graph retains 5 high and 48 low affected records, including original development-only decoder packages. MCP client is pinned to patched 2.3.1; its production server remains 2.0.0 and passed the compatibility checks.
+
+Retained license metadata includes GPL-3.0 `@toruslabs/ffjavascript@6.0.0` in the EVM slice and LGPL-3.0-only `rpc-websockets@9.3.9` in the Relay slice. APN's own MIT license does not replace upstream licenses. Notices and provenance are retained; release-license review remains open. This packet proves source and private offline installation. New paid acceptance, npm/Homebrew publication and global installation remain separate.

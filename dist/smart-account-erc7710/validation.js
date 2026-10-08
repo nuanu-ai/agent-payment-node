@@ -1,5 +1,5 @@
-import { ANY_BENEFICIARY, decodeAllowedCalldataTerms, decodeERC20TransferAmountTerms, decodeRedeemerTerms, decodeTimestampTerms, decodeValueLteTerms, hashDelegation, } from "@metamask/delegation-core";
-import { SIGNABLE_DELEGATION_TYPED_DATA, decodeDelegations, encodeDelegations, toDelegationStruct, } from "@metamask/smart-accounts-kit/utils";
+import { ANY_BENEFICIARY, decodeAllowedCalldataTerms, decodeERC20TransferAmountTerms, decodeRedeemerTerms, decodeTimestampTerms, decodeValueLteTerms, hashDelegation, } from "../metamask-smart-account-vendor.js";
+import { SIGNABLE_DELEGATION_TYPED_DATA, decodeDelegations, encodeDelegations, toDelegationStruct, } from "../metamask-smart-account-vendor.js";
 import { getAddress, isAddress, isHex, pad, recoverTypedDataAddress } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";

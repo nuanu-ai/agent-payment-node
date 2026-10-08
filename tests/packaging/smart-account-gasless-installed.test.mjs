@@ -107,9 +107,7 @@ async function scenario(crash = null) {
   await state.initialize();
   const require = createRequire(join(installed.packageRoot, "package.json"));
   const { privateKeyToAccount } = require("viem/accounts"), { encodePacked } = require("viem");
-  const { createErc20TokenAllowanceCaveats } = require("@metamask/7715-permission-types");
-  const { ROOT_AUTHORITY } = require("@metamask/smart-accounts-kit");
-  const { encodeDelegations, toDelegationStruct, SIGNABLE_DELEGATION_TYPED_DATA } = require("@metamask/smart-accounts-kit/utils");
+  const { createErc20TokenAllowanceCaveats, ROOT_AUTHORITY, encodeDelegations, toDelegationStruct, SIGNABLE_DELEGATION_TYPED_DATA } = await moduleAt(installed.packageRoot, "metamask-smart-account-vendor.js");
   const { saRegistry } = await moduleAt(installed.packageRoot, "smart-account-gasless/registry.js"), row = saRegistry(8453);
   // Public deterministic keys, used only in this temporary fixture state.
   const ownerKey = `0x${"1".repeat(64)}`, sessionKey = `0x${"2".repeat(64)}`, ownerAccount = privateKeyToAccount(ownerKey);
@@ -238,7 +236,7 @@ async function exposedMaterial(s, id) {
   assert.equal(material.childDelegationHash, op.material.childDelegationHash);
   assert.ok(Date.parse(material.updated_at) >= Date.parse(op.exposureStartedAt));
   const require = createRequire(join(installed.packageRoot, "package.json"));
-  const { decodeDelegations } = require("@metamask/smart-accounts-kit/utils");
+  const { decodeDelegations } = await moduleAt(installed.packageRoot, "metamask-smart-account-vendor.js");
   s.protect([material.root_context, material.encoded_child, material.permission_context, material.payment_payload_canonical_json,
     ...decodeDelegations(material.permission_context).map(delegation => delegation.signature)]);
   assert.deepEqual(await readFile(join(s.state.root, "smart-account-gasless-materials", `${id}.json`)), bytes);
