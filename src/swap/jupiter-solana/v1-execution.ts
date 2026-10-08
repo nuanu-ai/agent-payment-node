@@ -135,6 +135,7 @@ export class JupiterV1BudgetedRpc extends SolanaRpc{
   this.stageKey=sha256(`jupiter-v1-runtime-stage:${stage}:${stage==="execute"||stage==="observe"?operationId:randomUUID()}`);
  }
  override get hasPersistentPacer(){return this.base.hasPersistentPacer;}
+ override get maximumAccountsPerRead(){return this.base.maximumAccountsPerRead;}
  async bindOperation(quoteHash:string):Promise<void>{if(this.stage==="execute")this.priorQuoteCalls=await this.journal.quoteCalls(quoteHash);}
  async bindQuote(quoteHash:string):Promise<void>{if(this.stage!=="quote")corrupt();await this.journal.bindQuote(quoteHash,this.calls);}
  async chargeOfficialRead():Promise<void>{await this.charge();}

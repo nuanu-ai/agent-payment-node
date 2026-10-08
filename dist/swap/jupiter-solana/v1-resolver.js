@@ -76,8 +76,11 @@ export class JupiterV1MaterialResolver {
     }
     async read(keys, minContextSlot, slice) {
         const result = [], batches = [];
-        for (let offset = 0; offset < keys.length; offset += 16)
-            batches.push(keys.slice(offset, offset + 16));
+        const readLimit = this.rpc.maximumAccountsPerRead ?? 16;
+        if (readLimit !== 8 && readLimit !== 16)
+            invalid("Jupiter V1 account read limit is invalid.");
+        for (let offset = 0; offset < keys.length; offset += readLimit)
+            batches.push(keys.slice(offset, offset + readLimit));
         const responses = await boundedPublicReads(this.rpc, batches.map(batch => ({ method: "getMultipleAccounts", params: [batch, { encoding: "base64", commitment: "confirmed", minContextSlot, ...(slice === undefined ? {} : { dataSlice: slice }) }] })));
         for (const [index, batch] of batches.entries()) {
             const response = rpcRecord(responses[index]), slot = rpcAtomic(rpcRecord(response.context).slot).toString();

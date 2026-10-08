@@ -45,6 +45,7 @@ export declare class JupiterV1BudgetedRpc extends SolanaRpc {
     private priorQuoteCalls;
     constructor(base: SolanaRpc, root: string, stage: "quote" | "prepare" | "execute" | "observe", operationId?: string);
     get hasPersistentPacer(): boolean;
+    get maximumAccountsPerRead(): 16 | 8;
     bindOperation(quoteHash: string): Promise<void>;
     bindQuote(quoteHash: string): Promise<void>;
     chargeOfficialRead(): Promise<void>;
