@@ -1024,3 +1024,29 @@ submission attempts one and usage finalized. Native funding does not prove a
 USDC bridge. Explicit Arbitrum receipt configuration uses the official
 `https://arb1.arbitrum.io/rpc` reader after a retained PublicNode HTTP 403;
 the frozen primary RPC origin remains unchanged.
+
+## Base native Across observation budget, 2026-10-08
+
+The canonical source transaction and complete Base fee proof consume ten POSTs.
+The subsequent exact historical deployment proof previously exhausted the fixed
+14-request source budget. Base native Across now uses the existing reviewed
+Multicall path, while retaining every code/configuration check, exact historical
+block binding, reviewed Multicall bytecode and `allowFailure: false`. Other
+Across assets and chains retain their previous path. No executable identity,
+financial cap, custody/sign/send rule or RPC budget changed.
+
+A live read-only production-adapter observation and historical deployment proof
+passed in 13 POSTs with unchanged frozen hashes and journal bytes. This is not
+the normal installed terminal receipt. The retained pre-fix control fails the
+14-request limit; configuration and Multicall-code mutations still refuse.
+Both builds and 290 tests in 17 LI.FI files passed, with all 1142 inputs unchanged,
+all 744 production JS matching test emission and the 500-line source check passing.
+Cold Ethereum-to-Base native preparation now uses 16 rather than 19 POSTs;
+archive chunks remain at most three items, and the shared physical cap remains 24.
+
+Separately, normal installed Arbitrum-to-Ethereum canonical USDC operation
+`7e509318bdc0933075eaff099e906cbf46c148250224ba0a56c5282d7ab8602c`
+completed at 09:25:11 UTC with correlated SAFE source and destination proofs:
+100000 atomic input, 99683 exact output, zero residual allowance, one bridge
+submission and finalized usage. Existing SAFE approval was reused. The earlier
+approval-only failure retains its own receipt and was never resent.
