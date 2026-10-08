@@ -66,7 +66,8 @@ export class BridgeRpc implements BridgeRpcPort {
   async deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin = false) {
     if (this.batchCall === undefined) await this.assertChain();
     const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token),
-      compactDeployment = tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161),
+      compactDeployment = (tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161)) ||
+        (tool === "across" && this.chainId === 8453 && token === BRIDGE_ZERO_ADDRESS),
       tag = exactHashPin ? { blockHash: at.hash, requireCanonical: true } : quantity(BigInt(at.numberAtomic));
     const code: Array<{ address: Address; codeHash: Hex }> = [], configuration: Array<{ kind: string; address: Address; data: Hex; expected: Hex }> = [];
     const feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
