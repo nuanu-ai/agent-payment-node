@@ -25,6 +25,8 @@ Jupiter operation: `67cec83fd91f78acb9decf9ef89dcf1f95c9551dcdf996d0a840db4c48cd
 
 MCP Jupiter отказал запросу вне exact lane, а свежий допустимый запрос — маршруту вне выбранного finite pool/variant. Provider route gate сохранён. Первый MCP клиент передал slippage числом вместо требуемой schema строки и был исправлен; эта попытка не является acceptance.
 
+C3-07 получил свежую установленную проверку текущего владельца на APN 0.5.35: policy r27 `83299d5c428451f158e86f680982381a17222c61c51c8a1e775275981abcb1f8` ограничивает USDC swap суммой 3000000 atomic. Реальный CLI quote запрос на 3000001 atomic вернул `APN_OPERATION_BLOCKED`, `The transfer exceeds the asset policy per-transfer cap.` Operation отсутствует; все 97 файлов операций, эффектов, nonces, quotes и общего usage ledger сохранили исходные hashes. Это установленная current-owner cap-refusal acceptance; установка нового candidate остаётся отдельной границей.
+
 Принятые ранее Monad native, Ethereum USDT и Stargate Ethereum→Base операции не повторялись. Исторические LI.FI Base→Arbitrum и Arbitrum→Ethereum USDC journals завершены; Ethereum→Base canonical USDC остаётся отдельным незакрытым направлением.
 
 ## Исходники и локальные проверки
@@ -34,6 +36,8 @@ MCP Jupiter отказал запросу вне exact lane, а свежий д�
 Jupiter получает confirmed blockhash от настроенного mainnet RPC после объёмных публичных чтений и до фиксации quote. Исходный официальный build и его hash сохраняются без изменения; отдельное `quoteRpcLifetime` связывает RPC origin, context и lifetime с окончательным message. Quote требует запас 100–151 блоков. После фиксации quote замена blockhash или message запрещена: execution повторно собирает именно одобренный message, не запрашивая новый lifetime. TTL остаётся 90 секунд. Полные ProgramData payload Token/JUP6/Whirlpool проверяются перед финансовым эффектом; сокращения до одного header/hash доверенного провайдера нет.
 
 Учитываются каждый logical read, physical POST и сохраняемый cooldown. Gzip допускается с независимыми лимитами 2 MiB на wire и decoded body. HTTP 429 проходит в существующий RPC/pacer механизм с `Retry-After`; ошибки не запускают автоматический повтор.
+
+Для будущих Jupiter отправок добавлено неизменяемое public dispatch observation, связанное с permanent claim, marker, binding и signature. Коррелированный JSON-RPC отказ сохраняет числовой code и фиксированную reason category; HTTP отказ сохраняет status, cooldown ограничен прежним максимумом. Текст провайдера, logs и подписанный payload не сохраняются. CLI status/approve/execute возвращают этот record в `data.dispatchObservation`, если он существует. Diagnostic не доказывает finality и не разрешает retry или release; у старой операции потерянный ответ не восстанавливается.
 
 На `api.mainnet-beta.solana.com` два публичных batch account запроса вернули HTTP 429 с method limit 0, тогда как такой же одиночный account запрос вернул HTTP 200. Поэтому account reads на этом конкретном endpoint выполняются последовательными отдельными POST до первой ошибки. Бюджеты и pacing сохранены. Другие endpoints сохраняют bounded batch path.
 
@@ -45,15 +49,20 @@ Jupiter получает confirmed blockhash от настроенного mainn
 | Gzip/freshness focused producer | 664 pass, 0 fail, 0 skip. Предшествует batching и последней compatibility правке. |
 | Batching focused producer | 635 pass, 0 fail, 0 skip. Предшествует последней discovery/HTTP429/mainnet compatibility правке. |
 | Mainnet compatibility producer | 654 pass, 0 fail, 0 skip; 169679 ms. Предшествует правке pre-freeze RPC lifetime. |
-| Latest pre-freeze RPC lifetime producer | 663 pass, 0 fail, 0 skip; 169195 ms. Source/test snapshot: 1195 files; отдельное неизменённое compiled tree: 1118 files. |
+| Pre-freeze RPC lifetime producer | 663 pass, 0 fail, 0 skip; 169195 ms. Source/test snapshot: 1195 files; отдельное неизменённое compiled tree: 1118 files. Предшествует dispatch-observation правке. |
+| Current dispatch-observation Solana/Jupiter producer | 703 pass, 0 fail, 0 skip; 243799 ms, 24 test files. Включает более широкий Solana regression набор. |
+| Dispatch-focused producer | 35 pass, 0 fail, 0 skip; 93416 ms. Genuine TEST-key PTY доказывает сохранение RPC rejection, reopen без resend, retained unknown lease, запрет чужого claim и отсутствие provider logs/payload в record. |
 | Genuine TEST-key Native и quote refresh | 38 pass, 0 fail, 0 skip. Official build blockhash и фиксируемый RPC blockhash различаются; подтверждены single-send, reopen без resend, expiry и policy revocation. |
 | Shipped runtime dependency boundary | 3 pass, 0 fail, 0 skip на текущем dist. |
-| Orca regression через общий Solana RPC | 130 pass, 0 fail, 0 skip; 42167 ms на том же compiled tree. |
-| Generated dist parity | Все 741 source JS emission совпадают с проверенной test-сборкой. После удаления лишней пустой строки в конце test fixture выполнена финальная test compile: все 1118 compiled files побайтно совпадают с producer 663/130 тестов. Runtime sources не изменены. |
+| Current Orca regression через общий Solana RPC | 130 pass, 0 fail, 0 skip; 54388 ms на dispatch compiled tree. |
+| Pre-dispatch generated dist parity | Все 741 source JS emission совпадали с проверенной test-сборкой. Финальная test compile после удаления лишней пустой строки сохранила побайтное совпадение 1118 compiled files с producer 663/130 тестов. |
+| Current generated dist parity | Все 742 production JS совпадают с emission проверенной dispatch test-сборки после удаления только точного заключительного TypeScript source-map footer. Других различий в байтах нет; raw production files содержат этот footer, test compile sourceMap=false. |
 | Source и test compile | Последние обе сборки завершились с exit 0. |
-| Core boundary | Scan 741 source files и Native limit 500 строк прошли. |
+| Current core boundary | Scan 742 source files и limit 500 строк прошли. |
 
 Первый новый discovery test run выявил отказ строгого decoder до builder fallback (11 pass / 4 fail). Fallback перенесён вокруг прежнего route refusal; decoder не ослаблен. Начальные ошибки TypeScript затронули только тип возвращаемого значения test resolver и исправлены. Эти попытки не считаются успешной QA. Первый полный compatibility прогон дал 649 pass / 5 fail: старый HTTP counter и четыре test budget fixtures. После исправления fixtures затронутые 192 теста и полный 654-test producer прошли; production pacing не ослаблен.
+
+Первая dispatch test compile выявила неверную арность helper `exactKeys` и типовое обращение к generic command outcome; оба места исправлены, последующие source/test compile прошли. Первый raw parity check выявил стандартный source-map footer production build; точная проверка остальных байтов прошла для всех 742 файлов. Неуспешные диагностические артефакты сохранены отдельно.
 
 ## Что остаётся
 
@@ -68,7 +77,6 @@ Jupiter получает confirmed blockhash от настроенного mainn
 | C2-10, non-USDC x402 | Ethereum USDT owned-seller payment принят ранее. Реальный внешний x402 merchant результат не доказан. |
 | C3-01/C3-08, Uniswap token input | Bounded token-input paid proof завершён: SAFE receipt, точные deltas и нулевой residual allowance. Новая release/install acceptance отдельно. |
 | C3-04, Jupiter | Разрешить `unknown_finality` указанной подписи через observation-only путь; реальный finalized SOL→USDC receipt и usage charge пока отсутствуют. |
-| C3-07, cap refusal | Offline proof принят; свежая installed/current-owner acceptance отдельно. |
 | C3-09, MCP swap | Реальный local-candidate MCP quote→prepare→status Uniswap и CLI paid proof готовы. Новая APN release/install acceptance остаётся отдельно; успешный live MCP Jupiter quote не доказан. |
 | Release/distribution | Новая npm/Homebrew публикация и установка отсутствуют. Local-only QA не выдаётся за CI/artifact attestation. |
 

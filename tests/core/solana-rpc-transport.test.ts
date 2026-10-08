@@ -251,3 +251,29 @@ test("Solana rejected asynchronous dispatch admission starts zero physical POSTs
  let posts=0;const rpc=new SolanaRpc("https://rpc.example",async()=>{posts++;throw new Error("must not post");});
  await assert.rejects(rpc.sendTransactionAtStart(["fixture"],async()=>{await Promise.resolve();throw new Error("policy revoked at dispatch");}));assert.equal(posts,0);
 });
+
+test("Solana send retains correlated numeric RPC rejection without provider text or simulation logs",async()=>{
+ let posts=0;
+ const rpc=new SolanaRpc("https://rpc.example",async(_url,init)=>{
+  posts++;const request=JSON.parse(String(init?.body));
+  return json({jsonrpc:"2.0",id:request.id,error:{code:-32002,message:"untrusted SECRET raw payload",data:{err:"BlockhashNotFound",logs:["SECRET"]}}});
+ });
+ await assert.rejects(rpc.sendTransactionAtStart(["fixture"],()=>{}),error=>{
+  assert.equal((error as any).code,"APN_RPC_PROTOCOL");
+  assert.deepEqual((error as any).details,{rpcErrorCode:-32002,rpcErrorReason:"blockhash_not_found"});
+  assert.doesNotMatch(JSON.stringify(error),/SECRET|payload|logs/u);return true;
+ });assert.equal(posts,1);
+});
+test("Solana send does not attribute mismatched or malformed RPC error envelopes",async()=>{
+ for(const shape of ["wrong-id","result-and-error","string-code"]){
+  let posts=0;const rpc=new SolanaRpc("https://rpc.example",async(_url,init)=>{
+   posts++;const request=JSON.parse(String(init?.body));
+   return json({jsonrpc:"2.0",id:shape==="wrong-id"?"foreign":request.id,error:{code:shape==="string-code"?"-32002":-32002,message:"untrusted"},...(shape==="result-and-error"?{result:"anything"}:{})});
+  });
+  await assert.rejects(rpc.sendTransactionAtStart(["fixture"],()=>{}),error=>{assert.equal((error as any).code,"APN_RPC_PROTOCOL");assert.equal((error as any).details,undefined);return true;});assert.equal(posts,1);
+ }
+});
+test("Solana unsuccessful send HTTP status is bounded evidence and never retried",async()=>{
+ let posts=0;const rpc=new SolanaRpc("https://rpc.example",async()=>{posts++;return json({error:"untrusted SECRET"},403);});
+ await assert.rejects(rpc.sendTransactionAtStart(["fixture"],()=>{}),error=>{assert.deepEqual((error as any).details,{httpStatus:403});assert.doesNotMatch(JSON.stringify(error),/SECRET/u);return true;});assert.equal(posts,1);
+});

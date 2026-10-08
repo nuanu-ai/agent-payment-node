@@ -6,6 +6,8 @@ The [8 October closure status](apn-closure-status-2026-10-08.md) records the new
 
 On 8 October Tony waived the MetaMask zero-USDC-fee requirement. C1-05 Base acceptance uses the completed receipt with 0.005101 USDC fee and zero native debit; no repeat payment is needed. This does not close the separate eight-network matrix or new APN installation acceptance.
 
+C3-07 now also has fresh installed APN 0.5.35/current-owner acceptance: a real Uniswap token quote for 3000001 atomic USDC refused the active r27 cap of 3000000. No operation was created; all 97 retained economic-state files were unchanged. This supplements the historical offline proof and does not establish installation of the new candidate.
+
 ## 7 October 2026 closure overlay
 
 The [dated closure status](apn-closure-status-2026-10-07.md) records completed source/documentation and offline QA work, current prerequisites, and remaining lanes. The 32-row status count below is the **29 September checkpoint**, carried forward unchanged: 21 done, 5 in_progress, 6 blocked. The current paid evidence below supplements these historical statuses; it does not close the whole Program. Tony removed the external Avalanche paid-GET merchant search from the current blocking work on 7 October; this changes execution priority, not an acceptance verdict or the original obligations.

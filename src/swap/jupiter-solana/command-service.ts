@@ -9,6 +9,7 @@ import {
 import { JUPITER_V1_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 import { assertJupiterV1Runtime } from "./v1-runtime-factory.js";
 import { swapMechanismDigest } from "../pin.js";
+import { JupiterV1DispatchStore } from "./v1-dispatch.js";
 
 export interface JupiterReadOnlyQuoteBuilder {
   quote(input: Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }> & { readonly now: Date }): Promise<unknown>;
@@ -28,9 +29,9 @@ export async function executeJupiterCommand(request: Request, context: RuntimeCo
     const op=await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
     if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Swap operation was not found.");
     if(![JUPITER_V1_WHIRLPOOL_MECHANISM_PIN,JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN].some(pin=>op.mechanismDigest===swapMechanismDigest(pin)))throw new ApnError("APN_OPERATION_BLOCKED","This operation belongs to another mechanism.");
-    if(request.command==="swap.jupiter.status")return operationOutcome(await runtime.status(request.operationId,context.clock.now()));
-    if(request.command==="swap.jupiter.approve")return operationOutcome(await runtime.approveAndExecute(request.operationId,context.clock.now()));
-    if(request.command==="swap.jupiter.execute")return operationOutcome(await runtime.execute(request.operationId,context.clock.now()));
+    if(request.command==="swap.jupiter.status")return await withDispatch(await runtime.status(request.operationId,context.clock.now()),context);
+    if(request.command==="swap.jupiter.approve")return await withDispatch(await runtime.approveAndExecute(request.operationId,context.clock.now()),context);
+    if(request.command==="swap.jupiter.execute")return await withDispatch(await runtime.execute(request.operationId,context.clock.now()),context);
   }
   if (request.command === "swap.jupiter.quote") {
     if (context.jupiter === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
@@ -58,4 +59,8 @@ function data(value: unknown, proofClass: string): CommandOutcome {
 function operationOutcome(operation:import("../model.js").SwapOperationRecord):CommandOutcome {
  return {proofClass:operation.state,data:null,operation,receipt:null,nextActions:operation.submissionMarker===null?
   [`apn swap solana jupiter approve --operation ${operation.operationId}`]:[`apn swap solana jupiter status --operation ${operation.operationId}`]};
+}
+async function withDispatch(operation:import("../model.js").SwapOperationRecord,context:RuntimeContext):Promise<CommandOutcome>{
+ const observation=await new JupiterV1DispatchStore(context.state.root).load(operation);
+ return {...operationOutcome(operation),data:observation===null?null:{dispatchObservation:observation}};
 }

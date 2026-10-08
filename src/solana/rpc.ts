@@ -108,6 +108,7 @@ export class SolanaRpc implements SolanaRpcPort {
     const id = randomUUID();
     const value = await this.request({ jsonrpc: "2.0", id, method: "sendTransaction", params }, 1, true, beforePost);
     const record = rpcRecord(value);
+    if (exactKeys(record, ["jsonrpc", "id", "error"]) && record.jsonrpc === "2.0" && record.id === id) sendRejection(record.error);
     if (!exactKeys(record, ["jsonrpc", "id", "result"]) || record.jsonrpc !== "2.0" || record.id !== id) protocolFailure();
     return record.result;
   }
@@ -167,7 +168,8 @@ export class SolanaRpc implements SolanaRpcPort {
         body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
       if (response.status === 429) throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC provider requested a cooldown.",
         retryAfterDetails(response.headers.get("retry-after")));
-      if (!response.ok || response.body === null || !(response.headers.get("content-type") ?? "").includes("application/json")) protocolFailure();
+      if (!response.ok) throw new ApnError("APN_RPC_PROTOCOL", "The Solana RPC returned an unsuccessful HTTP status.", { httpStatus: response.status });
+      if (response.body === null || !(response.headers.get("content-type") ?? "").includes("application/json")) protocolFailure();
       reader = response.body.getReader(); const chunks: Uint8Array[] = []; let length = 0;
       while (true) {
         const result = await reader.read();
@@ -182,6 +184,18 @@ export class SolanaRpc implements SolanaRpcPort {
       throw new ApnError(effect ? "APN_RPC_AMBIGUOUS" : "APN_RPC_PROTOCOL", "The bounded Solana RPC request did not return valid evidence.");
     } finally { clearTimeout(deadline); await reader?.cancel().catch(() => {}); }
   }
+}
+/** Only correlated numeric codes and a fixed reason vocabulary leave the untrusted send response. */
+function sendRejection(value: unknown): never {
+  if (!isPlainRecord(value) || !(exactKeys(value, ["code", "message"]) || exactKeys(value, ["code", "message", "data"])) || typeof value.message !== "string" ||
+    (typeof value.code !== "number" && typeof value.code !== "bigint")) protocolFailure();
+  const code = Number(value.code);
+  if (!Number.isSafeInteger(code) || code < -2147483648 || code > 2147483647) protocolFailure();
+  const err = isPlainRecord(value.data) ? value.data.err : undefined;
+  const reason = err === "BlockhashNotFound" ? "blockhash_not_found" : err === "InsufficientFundsForFee" ? "insufficient_funds_for_fee" :
+    err === "AccountNotFound" ? "account_not_found" : err === "AlreadyProcessed" ? "already_processed" :
+    isPlainRecord(err) && Array.isArray(err.InstructionError) ? "instruction_error" : "unclassified";
+  throw new ApnError("APN_RPC_PROTOCOL", "The correlated Solana send RPC returned an error.", { rpcErrorCode: code, rpcErrorReason: reason });
 }
 function retryAfterDetails(value: string | null): { readonly retryAfterMs: number } | undefined {
   if (value === null) return undefined;
