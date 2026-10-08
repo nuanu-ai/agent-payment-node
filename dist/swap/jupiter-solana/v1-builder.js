@@ -40,7 +40,7 @@ export class JupiterV1QuoteBuilder {
         }
         const build = await this.provider.buildExactIn(request, quoteResponse);
         routeConfigForQuoteBuild(quoteResponse, build, routeId);
-        let execution = await this.resolver.resolve(payer, quoteResponse, build, this.options.maximumNativeExpenseLamports);
+        let execution = await this.resolver.resolve(payer, quoteResponse, build, this.options.maximumNativeExpenseLamports, undefined, routeId);
         if (this.options.refreshBuildAfterPublicReads === true) {
             const refreshed = await this.provider.buildExactIn(request, quoteResponse);
             routeConfigForQuoteBuild(quoteResponse, refreshed, routeId);

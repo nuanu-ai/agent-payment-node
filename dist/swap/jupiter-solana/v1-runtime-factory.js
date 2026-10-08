@@ -1,5 +1,5 @@
 import { swapMechanismDigest } from "../pin.js";
-import { JUPITER_V1_OLD_ROUTE, routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { JUPITER_V1_OLD_ROUTE, routeConfigForMaterial } from "./v1-route-config.js";
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
@@ -59,7 +59,7 @@ export function createJupiterV1Runtime(options) {
                 const saved = await materials.load(request.quoteHash);
                 if (saved === null)
                     throw new ApnError("APN_OPERATION_NOT_FOUND", "Jupiter quote was not found.");
-                if (routeConfigForQuoteBuild(saved.execution.quoteResponse, saved.execution.rawBuildResponse).routeId !== route.routeId)
+                if (routeConfigForMaterial(saved.execution).routeId !== route.routeId)
                     blocked("Jupiter saved material belongs to another finite runtime.");
                 await selectedOwner(route, request.profile, saved.quote.inputAmountAtomic, saved.quote.minimumOutputAtomic, saved.quote.account);
                 const operation = await super.prepare(detached(request), now), owner = await admission.assert(operation, saved);
@@ -134,7 +134,7 @@ export function createJupiterV1Runtime(options) {
         });
     }
     async function materialRoute(quoteHash) { const saved = await materials.load(quoteHash); if (saved === null)
-        throw new ApnError("APN_OPERATION_NOT_FOUND", "Jupiter quote was not found."); return routeConfigForQuoteBuild(saved.execution.quoteResponse, saved.execution.rawBuildResponse); }
+        throw new ApnError("APN_OPERATION_NOT_FOUND", "Jupiter quote was not found."); return routeConfigForMaterial(saved.execution); }
     async function operationRuntime(operationId) {
         const op = await required(operationId), route = await materialRoute(op.quote.quoteHash), registry = route.protocolRegistry;
         if (op.mechanismDigest !== swapMechanismDigest(route.mechanismPin) || op.protocolRegistryDigest !== registry.registryDigest || op.protocolRegistryVersion !== registry.registryVersion)

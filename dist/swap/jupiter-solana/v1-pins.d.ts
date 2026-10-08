@@ -1,5 +1,12 @@
 export declare const JUPITER_V1_WHIRLPOOL_PROGRAM = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
 export declare const JUPITER_V1_POOL = "83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d";
+export interface JupiterV1RegisteredProgramPin {
+    readonly programId: string;
+    readonly programDataAddress: string;
+    readonly payloadHash: string;
+    /** New snapshots also bind the complete loader header; historical pins remain exact. */
+    readonly programDataHash?: string;
+}
 export declare const JUPITER_V1_RUNTIME_PROGRAM_PINS: readonly {
     programId: string;
     programDataAddress: string;
@@ -11,6 +18,13 @@ export declare const JUPITER_V1_PROTOCOL_REGISTRY: import("../protocol-registry.
 export declare const JUPITER_V1_WHIRLPOOL_FP_POOL = "FpCMFDFGYotvufJ7HrFHsWEiiQCGbkLCtwHiDnh7o28Q";
 export declare const JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
 export declare const JUPITER_V1_WHIRLPOOL_FP_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+/** Independently captured on two mainnet origins. Runtime bytes only, not a source-build attestation. */
+export declare const JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS: readonly JupiterV1RegisteredProgramPin[];
+/** Separate owner admission: historical FP policy cannot authorize upgraded executable bytes. */
+export declare const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+export declare const JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
 /** Additional finite route; the historical 83 mechanism and registry above remain unchanged. */
 export declare const JUPITER_V1_WHIRLPOOL_V2_POOL = "Esvfxt3jMDdtTZqLF1fqRhDjzM8Bpr7fZxJMrK69PB7e";
 export declare const JUPITER_V1_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";

@@ -90,7 +90,7 @@ Shipped bootstrap теперь проверяет actual resolved package metada
 | C2-08, Sei | Свежий safe funding read 8 октября 06:00:34 UTC: три profiles по 0 SEI. Admitted funding route и direct receipt отсутствуют. |
 | C2-10, non-USDC x402 | Ранее принят Ethereum USDT owned-seller payment. Найден внешний Obolo offer 0,001 USDT на Ethereum, но normal installed x402 inspect отказал на отсутствии PAYMENT-REQUIRED; внешний оплаченный результат не доказан. |
 | C3-01/C3-08, Uniswap token input | Bounded SAFE paid proof завершён; новая release/install acceptance отдельно. |
-| C3-04, Jupiter | Finalized SOL→USDC receipt и штатное usage charge. В 13:49 UTC оба RPC вернули null status/finalized transaction для трёх marked signatures. Новая программа отличается от допущенного snapshot; операции и usage сохраняются без resend/release. |
+| C3-04, Jupiter | Finalized SOL→USDC receipt и штатное usage charge остаются открытыми. В 16:08 UTC оба RPC вернули null status/finalized transaction для трёх прежних подписей. Новая версия runtime отдельно зарегистрирована для 83/Fp; свежая unsigned mainnet simulation 83 прошла в 16:30 UTC. Owner admission и paid installed proof этой версии пока отсутствуют; прежние operations/usage сохраняются без resend/release. |
 | C3-09, MCP swap | Local-candidate Uniswap и Jupiter quote→prepare→status доказаны, Uniswap paid proof готов. Jupiter paid proof и новый installed release отдельно. |
 | Release/distribution | Private fresh installation проверена. Новая npm/Homebrew публикация, global installation и protected-main merge не выполнены; CI runners Тони исключил из текущих условий. |
 
@@ -188,3 +188,15 @@ Fresh read-only Jupiter evidence at 13:49 UTC: both public origins returned null
 The external Obolo unsigned GET returned HTTP 402 and Ethereum USDT amount 1000 atomic, but its custom payment_options/direct-transfer format has no canonical PAYMENT-REQUIRED header. Normal x402 inspect from this exact installation refused `APN_HTTP_PROTOCOL`, operation/receipt null, stderr empty; 219 existing economic files preserved bytes. This is compatibility evidence, not paid acceptance. No Hub/Seller UI or removed Avalanche search was used. Private evidence: `external-non-usdc-obolo-review-20261008.md`.
 
 Known-indicator Mac scan at 13:46 UTC covered 671 processes, open connections, cron and 28 autostart plists: no established IOC, including raw-byte fallback for three unparseable Keystone plists. This remains limited to known indicators.
+
+## Новая версия Jupiter, 9 октября local / 8 октября UTC
+
+В исходниках отдельно зарегистрирован runtime `099da3…` для прежних pools 83 и Fp. Старые четыре mechanism/registry digests, schema материалов и подписанные operations сохранены. Новые asset admissions обязательны; старые policies эту версию кода не разрешают. ProgramData payload и полный account/header закреплены отдельными hashes. V1 сохраняет provenance `runtime_bytes_only`; source reproducibility и whole-program semantic equivalence не объявляются доказанными.
+
+На официальном mainnet RPC в 16:30:37 UTC прошла свежая unsigned simulation 83: input 1000000 lamports, recipient output 108719 atomic USDC при minimum 108077, fee 6400, native spend 1006400, slot 454598741, 54022 compute units. Использованы 3 official API reads, 20 logical RPC reads и 18 physical RPC POSTs. Это read-only diagnostic без owner activation, APN economic-state writes, подписи или отправки. Fp имеет synthetic local checks; свежий успешный mainnet proof этой версии для Fp отсутствует.
+
+Final source producer прошёл 951 Solana/Jupiter/Orca tests в 33 files за 317582.827 ms: fail/cancelled/skip 0, все 1743 inputs неизменны. Обе TypeScript сборки, точная 748-file executable parity и 500-line boundary прошли. Первый широкий прогон сохранил 713 pass / 3 fail: новый generation lookup мешал чтению старых pinless diagnostics. Исправление сохраняет их чтение и отказ runtime/guard/signing; assertions не ослаблены. Полный исправленный producer выше проверен отдельно.
+
+Чистый read трёх сохранённых marked operations подтвердил historical 83 dispatch и hashes всех 70 operation/material files. Public readback двух origins в 16:08 UTC снова вернул null statuses/finalized transactions. Holds не освобождались, подписи не пересылались. Штатный installed policy status подтвердил: `solana-local` r15 истекла в 07:10:53 UTC, accounts и caps не изменены. Нужен новый конкретный допуск перед следующим эффектом; новый installed/paid proof пока отдельно.
+
+Private evidence: `jupiter-upgrade-review-20261009-1608/final-local-qa.json`, `historical-operation-compatibility.json`, `mainnet-official-03/runtime099da3-mainnet-simulation.json`, `solana-local-policy-current.json`. Старые error outputs и несогласованный PublicNode height сохранены; lifetime guard не ослаблен.

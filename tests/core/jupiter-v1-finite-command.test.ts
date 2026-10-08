@@ -10,9 +10,10 @@ import { SolanaRpc, SolanaRpcBudget } from "../../src/solana/rpc.js";
 import { SolanaRpcPacer } from "../../src/solana/pacing.js";
 import { createJupiterV1Runtime } from "../../src/swap/jupiter-solana/v1-runtime-factory.js";
 import { executeJupiterCommand } from "../../src/swap/jupiter-solana/command-service.js";
-import { JUPITER_V1_FINITE_ROUTES, JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE as ROUTE } from "../../src/swap/jupiter-solana/v1-route-config.js";
+import { JUPITER_V1_FINITE_ROUTES, JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE as OLD, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE as NEW, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE as NEW83 } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { guardJupiterV1WhirlpoolMaterial } from "../../src/swap/jupiter-solana/v1-guard.js";
 import { syntheticFpMaterial } from "../fixtures/jupiter-v1-whirlpool-fp/material.js";
+import { syntheticRuntime099da3Material } from "../fixtures/jupiter-v1-runtime-099da3/material.js";
 import { simulation } from "../fixtures/jupiter-v1/scenarios.js";
 import type { RuntimeContext } from "../../src/runtime.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
@@ -25,8 +26,9 @@ test("finite inventory includes every additive source-reviewed route without own
  assert.deepEqual(data.v1.additionalFiniteMechanisms.map(r=>r.mechanismDigest),JUPITER_V1_FINITE_ROUTES.filter(r=>r.routeId!==JUPITER_V1_OLD_ROUTE.routeId).map(r=>swapMechanismDigest(r.mechanismPin)));
  assert.ok(data.v1.additionalFiniteMechanisms.every(r=>r.admitted===false));
 });
-test("SYNTHETIC Fp production factory quote, prepare and CLI status pass the same finite mechanism gate without custody or send",async t => {
- const temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root),profile="test-fp-command",m=syntheticFpMaterial();
+for (const [label,ROUTE,material] of [["historical",OLD,syntheticFpMaterial],["runtime 099da3",NEW,syntheticRuntime099da3Material],["runtime 099da3 83",NEW83,()=>syntheticRuntime099da3Material("83")]] as const)
+test(`SYNTHETIC ${label} Fp production factory quote, prepare and CLI status pass the same finite mechanism gate without custody or send`,async t => {
+ const temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root),profile="test-fp-command",m=material();
  const wrapping={async load(){return Buffer.alloc(32,77);},async create(){return Buffer.alloc(32,77);}},accounts=new ChainAccountStore(temp.root,wrapping);
  await accounts.ensureLocal({profile,rail:"solana",create:async()=>({address:m.payer,seed:Buffer.alloc(32,9)})});
  const now=new Date(),policy=new AllowlistPolicyStore(temp.root),staged=await policy.stage({profile,now,policy:{schemaVersion:"apn.allowlist-policy-file.v1",overlayVersion:"test-fp.1",accounts:{solana:m.payer},effectiveAt:new Date(now.getTime()-1000).toISOString(),expiresAt:new Date(now.getTime()+3600000).toISOString(),admissions:[{chain:ROUTE.mechanismPin.chain,kind:"native",rail:"swap",maximumPerTransferAtomic:"6000000",dailyLimitAtomic:"6000000",mechanism:ROUTE.mechanismPin},{chain:ROUTE.mechanismPin.chain,kind:"token",identifier:m.quoteResponse.outputMint,rail:"swap",maximumPerTransferAtomic:"500000",dailyLimitAtomic:"500000",mechanism:ROUTE.mechanismPin}]}});

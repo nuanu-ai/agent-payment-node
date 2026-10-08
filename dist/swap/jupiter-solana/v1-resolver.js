@@ -5,9 +5,8 @@ import { assertSolanaNetwork, rpcRecord, rpcAtomic, solanaReadBatch } from "../.
 import { rawAccount } from "../orca-solana/accounts.js";
 import { ADDRESS_LOOKUP_TABLE_PROGRAM, SOLANA_MAINNET_GENESIS, canonicalAddress, invalid } from "./catalog.js";
 import { jupiterV1Instructions, jupiterV1Lifetime, jupiterV1ResponseHash, decodeJupiterV1Build, decodeJupiterV1Quote, freezeJson } from "./v1-codec.js";
-import { JUPITER_V1_RUNTIME_PROGRAM_PINS } from "./v1-pins.js";
 import { JUPITER_V1_MATERIAL_SCHEMA, jupiterV1MaterialDigest, checkedJupiterV1QuoteRpcLifetime } from "./v1-material.js";
-import { routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { routeConfigForQuoteBuild, jupiterV1RegisteredProgramPins } from "./v1-route-config.js";
 import { assertWhirlpoolV2Memo, validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { refreshJupiterV1QuoteBuild } from "./v1-quote-refresh.js";
 const UPGRADEABLE = "BPFLoaderUpgradeab1e11111111111111111111111";
@@ -21,11 +20,11 @@ export class JupiterV1MaterialResolver {
     async refreshQuoteBuild(material, build, useRpcLifetime = false) {
         return await refreshJupiterV1QuoteBuild(this.rpc, material, build, useRpcLifetime);
     }
-    async resolve(payer, quote, build, maximumNativeExpenseLamports = "6000000", frozenRpcLifetime) {
+    async resolve(payer, quote, build, maximumNativeExpenseLamports = "6000000", frozenRpcLifetime, expectedRouteId) {
         canonicalAddress(payer);
         decodeJupiterV1Quote(quote);
         decodeJupiterV1Build(build);
-        const route = routeConfigForQuoteBuild(quote, build);
+        const route = routeConfigForQuoteBuild(quote, build, expectedRouteId), registeredPins = jupiterV1RegisteredProgramPins(route);
         await assertSolanaNetwork(this.rpc);
         const instructions = jupiterV1Instructions(build), keys = [...new Set([payer, ...instructions.flatMap(ix => [ix.programId, ...ix.accounts.map(a => a.pubkey)]), ...build.addressLookupTableAddresses])];
         const accounts = await this.read(keys, quote.contextSlot), map = new Map(accounts.map(a => [a.address, a]));
@@ -33,7 +32,7 @@ export class JupiterV1MaterialResolver {
             await validateWhirlpoolV2AccountSnapshot(payer, build, accounts);
         const tables = build.addressLookupTableAddresses.map(key => decodeJupiterV1AddressTable(map.get(key)));
         const programPins = [];
-        const programIds = [...new Set(instructions.map(ix => ix.programId).concat(JUPITER_V1_RUNTIME_PROGRAM_PINS.map(p => p.programId), route.requiredExtraPrograms))];
+        const programIds = [...new Set(instructions.map(ix => ix.programId).concat(registeredPins.map(p => p.programId), route.requiredExtraPrograms))];
         for (const programId of programIds) {
             const program = map.get(programId);
             if (program === undefined || program.existence !== "present" || !program.executable)
@@ -42,14 +41,14 @@ export class JupiterV1MaterialResolver {
             if (program.owner === UPGRADEABLE) {
                 if (bytes.length !== 36 || bytes.readUInt32LE(0) !== 2)
                     invalid("Jupiter V1 upgradeable Program metadata is invalid.");
-                const pointer = getAddressDecoder().decode(bytes.subarray(4, 36)), pin = JUPITER_V1_RUNTIME_PROGRAM_PINS.find(p => p.programId === programId);
+                const pointer = getAddressDecoder().decode(bytes.subarray(4, 36)), pin = registeredPins.find(p => p.programId === programId);
                 if (pin === undefined || pointer !== pin.programDataAddress)
                     invalid("Jupiter V1 ProgramData pointer is unpinned.");
                 const pd = await this.readProgramData(pointer, quote.contextSlot), data = Buffer.from(pd.dataBase64, "base64");
                 if (pd.owner !== UPGRADEABLE || pd.executable || data.length < 45 || data.readUInt32LE(0) !== 3 || ![0, 1].includes(data[12]))
                     invalid("Jupiter V1 ProgramData metadata is invalid.");
                 const payloadHash = sha256(data.subarray(45));
-                if (payloadHash !== pin.payloadHash)
+                if (payloadHash !== pin.payloadHash || pin.programDataHash !== undefined && pd.dataHash !== pin.programDataHash)
                     throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed.");
                 accounts.push(pd);
                 programPins.push({ programId, loader: program.owner, programDataAddress: pointer, deploymentSlot: data.readBigUInt64LE(4).toString(), upgradeAuthority: data[12] === 1 ? getAddressDecoder().decode(data.subarray(13, 45)) : null, accountHash: program.dataHash, programDataHash: pd.dataHash, storedPayloadHash: payloadHash, provenance: "runtime_bytes_only" });
