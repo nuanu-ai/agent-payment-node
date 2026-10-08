@@ -4,6 +4,7 @@ import { EMPTY_PROGRAM_SNAPSHOT, JUPITER_SOLANA_SCHEMA, JUPITER_SWAP_API_V2, JUP
 import { JUPITER_V1_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 import { assertJupiterV1Runtime } from "./v1-runtime-factory.js";
 import { swapMechanismDigest } from "../pin.js";
+import { JupiterV1DispatchStore } from "./v1-dispatch.js";
 export async function executeJupiterCommand(request, context) {
     if (request.command === "swap.jupiter.inventory")
         return data({ catalog: Object.freeze({ schemaVersion: JUPITER_SOLANA_SCHEMA,
@@ -23,11 +24,11 @@ export async function executeJupiterCommand(request, context) {
         if (![JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN].some(pin => op.mechanismDigest === swapMechanismDigest(pin)))
             throw new ApnError("APN_OPERATION_BLOCKED", "This operation belongs to another mechanism.");
         if (request.command === "swap.jupiter.status")
-            return operationOutcome(await runtime.status(request.operationId, context.clock.now()));
+            return await withDispatch(await runtime.status(request.operationId, context.clock.now()), context);
         if (request.command === "swap.jupiter.approve")
-            return operationOutcome(await runtime.approveAndExecute(request.operationId, context.clock.now()));
+            return await withDispatch(await runtime.approveAndExecute(request.operationId, context.clock.now()), context);
         if (request.command === "swap.jupiter.execute")
-            return operationOutcome(await runtime.execute(request.operationId, context.clock.now()));
+            return await withDispatch(await runtime.execute(request.operationId, context.clock.now()), context);
     }
     if (request.command === "swap.jupiter.quote") {
         if (context.jupiter === undefined)
@@ -52,5 +53,9 @@ function data(value, proofClass) {
 function operationOutcome(operation) {
     return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: operation.submissionMarker === null ?
             [`apn swap solana jupiter approve --operation ${operation.operationId}`] : [`apn swap solana jupiter status --operation ${operation.operationId}`] };
+}
+async function withDispatch(operation, context) {
+    const observation = await new JupiterV1DispatchStore(context.state.root).load(operation);
+    return { ...operationOutcome(operation), data: observation === null ? null : { dispatchObservation: observation } };
 }
 //# sourceMappingURL=command-service.js.map
