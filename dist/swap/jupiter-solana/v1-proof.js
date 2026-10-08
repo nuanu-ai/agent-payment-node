@@ -143,7 +143,7 @@ export async function validateFinalizedJupiterV1Receipt(reader, g, expected) {
         successfulStatus(status.status);
     if (status.err !== null || status.confirmationStatus !== "finalized" || status.confirmations !== null || integer(ctx.slot) < slot)
         reject("Jupiter V1 signature is not finalized successfully.");
-    const response = strict(record(await reader.call("getTransaction", [expected.signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])), ["slot", "version", "transaction", "meta", "blockTime"]), meta = record(response.meta), encoded = array(response.transaction, 2);
+    const response = strict(record(await reader.call("getTransaction", [expected.signature, { encoding: "base64", commitment: "finalized", maxSupportedTransactionVersion: 0 }])), ["slot", "version", "transaction", "meta", "blockTime", "transactionIndex"]), meta = record(response.meta), encoded = array(response.transaction, 2);
     receiptExtensions(response, meta);
     if (integer(response.slot) !== slot || integer(response.version) !== 0n || meta.err !== null || encoded.length !== 2 || encoded[1] !== "base64" || typeof encoded[0] !== "string")
         reject("Jupiter V1 finalized transaction shape changed.");
@@ -413,7 +413,8 @@ function strict(r, allowed) { if (Object.keys(r).some(key => !allowed.includes(k
 function successfulStatus(v) { const r = strict(record(v), ["Ok"]); if (Object.keys(r).length !== 1 || r.Ok !== null)
     reject("Jupiter V1 legacy status extension is not successful."); }
 function receiptExtensions(response, meta) { strict(meta, ["err", "fee", "preBalances", "postBalances", "innerInstructions", "preTokenBalances", "postTokenBalances", "loadedAddresses", "logMessages", "rewards", "status", "computeUnitsConsumed", "costUnits", "returnData"]); if (response.blockTime !== undefined && response.blockTime !== null)
-    integer(response.blockTime); if (meta.status !== undefined)
+    integer(response.blockTime); if (response.transactionIndex !== undefined && response.transactionIndex !== null && integer(response.transactionIndex) > 4294967295n)
+    reject("Jupiter V1 receipt transaction index exceeds u32."); if (meta.status !== undefined)
     successfulStatus(meta.status); for (const k of ["computeUnitsConsumed", "costUnits"])
     if (meta[k] !== undefined)
         integer(meta[k]); if (meta.logMessages !== undefined && meta.logMessages !== null)

@@ -267,3 +267,26 @@ chunks: 70 files retained exact hashes. Both public origins returned null
 statuses and finalized transactions at 16:08 UTC; no usage hold was released
 and no signed transaction was resent. New owner activation, normal installed
 acceptance and finalized delivery remain separate work.
+
+## Finalized receipt metadata compatibility, 8 October 17:05 UTC
+
+The actual mainnet receipt for operation
+`fae738543bf7cbe972115b49368dc9b461fca2d7a03c5db572b0dd75c3cabd1d`
+contains top-level `transactionIndex: 1368`. The preceding strict decoder
+refused that field and left the operation submitted even after both RPCs
+reported successful finalized delivery. The primary [Agave response type](https://github.com/anza-xyz/agave/blob/db760d28d35aee77ce6c1dd1777aa4f029d5ed1e/transaction-status-client-types/src/lib.rs)
+defines this optional field as `Option<u32>`.
+
+APN accepts an absent or null index, or an integer from 0 through 4294967295.
+Strings, fractions, negatives, overflow and every other unvalidated field
+still refuse. The full response, including the supplied index, contributes
+to the receipt digest. Signature, frozen message, finalized slot, loaded
+addresses, CPI, native expense, token identities and both output minima
+remain mandatory. Status observes the existing signature and never repeats
+the financial effect.
+
+The corrected source validator proved actual credit 107824 atomic USDC,
+input plus fee 1006400 lamports and fee 6400 at finalized slot 454604807.
+This read-only diagnostic did not mutate the operation or finalize its usage;
+the normal freshly installed CLI checkpoint is recorded separately in the
+[closure ledger](apn-closure-status-2026-10-08.md).
