@@ -14,6 +14,7 @@ import { guardJupiterV1WhirlpoolMaterial, validateJupiterV1GuardedMaterial } fro
 import { validateJupiterV1PreparedMaterial, type SavedJupiterV1MaterialStore } from "./v1-material.js";
 import { proveJupiterV1Simulation, validateFinalizedJupiterV1Receipt } from "./v1-proof.js";
 import { JupiterV1MaterialResolver } from "./v1-resolver.js";
+import { routeConfigForMaterial } from "./v1-route-config.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
 
@@ -63,7 +64,7 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
   const admission=await this.d.admission.assert(op,material);await this.d.bindings.assertPrepared(op,admission,material);
   // Re-resolve the same frozen official build. No new quote, lifetime, transaction, or route bytes are substituted.
   const fresh=await new JupiterV1MaterialResolver(this.d.rpc).resolve(material.execution.payer,material.execution.quoteResponse,
-   material.execution.rawBuildResponse,material.execution.maximumNativeExpenseLamports,material.execution.quoteRpcLifetime);
+   material.execution.rawBuildResponse,material.execution.maximumNativeExpenseLamports,material.execution.quoteRpcLifetime,routeConfigForMaterial(material.execution).routeId);
   if(fresh.transactionBase64!==material.execution.transactionBase64||fresh.messageHash!==material.execution.messageHash||
    fresh.lookupBindingDigest!==material.execution.lookupBindingDigest||canonicalJson(fresh.programPins)!==canonicalJson(material.execution.programPins))blocked("Jupiter's frozen message, lookup or runtime executable identity changed.");
   const guarded=await guardJupiterV1WhirlpoolMaterial(fresh,{now:this.d.clock.now().getTime(),deadline:op.quote.expiresAt}),simulation=await proveJupiterV1Simulation(this.d.rpc,guarded);

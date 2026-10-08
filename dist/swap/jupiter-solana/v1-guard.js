@@ -3,9 +3,9 @@ import { canonicalJson, domainHash, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { associatedTokenAddress, decodeWhirlpool, decodeTickArray, whirlpoolTickArrayAddress, whirlpoolOracleAddress } from "../orca-solana/accounts.js";
 import { assertJupiterV1FreshMaterial, validateJupiterV1Material } from "./v1-material.js";
-import { JUPITER_V1_RUNTIME_PROGRAM_PINS, JUPITER_V1_POOL, JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA } from "./v1-pins.js";
+import { JUPITER_V1_POOL, JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA } from "./v1-pins.js";
 import { JUPITER_V6_PROGRAM as JUP, TOKEN_PROGRAM as TOKEN, ASSOCIATED_TOKEN_PROGRAM as ATA, SYSTEM_PROGRAM as SYS, COMPUTE_BUDGET_PROGRAM as COMPUTE, WRAPPED_SOL_MINT as SOL, SOLANA_USDC_MINT as USDC } from "./catalog.js";
-import { routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { routeConfigForMaterial, jupiterV1RegisteredProgramPins } from "./v1-route-config.js";
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { REVIEWED_WHIRLPOOL_FP, validateReviewedWhirlpoolFpPool } from "./v1-whirlpool-fp.js";
 export function reject(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
@@ -29,7 +29,7 @@ async function evaluate(material, options, requireFresh) {
     }
     if (options.deadline !== undefined && (!Number.isFinite(Date.parse(options.deadline)) || (options.now ?? Date.now()) >= Date.parse(options.deadline)))
         reject("Jupiter V1 consent deadline expired.");
-    const q = material.quoteResponse, b = material.rawBuildResponse, p = material.payer, pool = q.routePlan[0].swapInfo.ammKey, config = routeConfigForQuoteBuild(q, b);
+    const q = material.quoteResponse, b = material.rawBuildResponse, p = material.payer, pool = q.routePlan[0].swapInfo.ammKey, config = routeConfigForMaterial(material);
     if (q.inAmount !== "1000000" || BigInt(material.maximumNativeExpenseLamports) > 6000000n)
         reject("Jupiter V1 route or cap is outside the admitted lane.");
     const source = await associatedTokenAddress(p, SOL, TOKEN), destination = await associatedTokenAddress(p, USDC, TOKEN), ix = b.swapInstruction, d = Buffer.from(ix.data, "base64");
@@ -96,9 +96,9 @@ async function evaluate(material, options, requireFresh) {
     const fee = BigInt(material.networkFeeLamports), rent = BigInt(material.tokenAccountRentLamports), cap = BigInt(material.maximumNativeExpenseLamports);
     if (fee < 1400n || fee > 20000n || 1000000n + fee + (src.existence === "absent" ? rent : 0n) > cap || BigInt(semanticAccount(material, p).lamports) < 1000000n + fee + (src.existence === "absent" ? rent : 0n))
         reject("Jupiter V1 prospective expense or payer balance exceeds cap.");
-    for (const pin of JUPITER_V1_RUNTIME_PROGRAM_PINS) {
+    for (const pin of jupiterV1RegisteredProgramPins(config)) {
         const a = semanticAccount(material, pin.programId), actual = material.programPins.find(x => x.programId === pin.programId), pd = semanticAccount(material, pin.programDataAddress);
-        if (!a.executable || actual?.storedPayloadHash !== pin.payloadHash || actual.programDataAddress !== pin.programDataAddress || actual.provenance !== "runtime_bytes_only" || actual.accountHash !== a.dataHash || actual.programDataHash !== pd.dataHash || sha256(Buffer.from(pd.dataBase64, "base64").subarray(45)) !== pin.payloadHash || a.owner !== "BPFLoaderUpgradeab1e11111111111111111111111" || pd.owner !== a.owner || pd.executable || Buffer.from(pd.dataBase64, "base64").length < 45 || Buffer.from(pd.dataBase64, "base64").readUInt32LE(0) !== 3 || ![0, 1].includes(Buffer.from(pd.dataBase64, "base64")[12]) || actual.loader !== a.owner || actual.deploymentSlot !== Buffer.from(pd.dataBase64, "base64").readBigUInt64LE(4).toString() || actual.upgradeAuthority !== (Buffer.from(pd.dataBase64, "base64")[12] === 1 ? getAddressDecoder().decode(Buffer.from(pd.dataBase64, "base64").subarray(13, 45)) : null) || Buffer.from(a.dataBase64, "base64").length !== 36 || Buffer.from(a.dataBase64, "base64").readUInt32LE(0) !== 2 || getAddressDecoder().decode(Buffer.from(a.dataBase64, "base64").subarray(4)) !== pin.programDataAddress)
+        if (!a.executable || actual?.storedPayloadHash !== pin.payloadHash || actual.programDataAddress !== pin.programDataAddress || actual.provenance !== "runtime_bytes_only" || actual.accountHash !== a.dataHash || actual.programDataHash !== pd.dataHash || pin.programDataHash !== undefined && pd.dataHash !== pin.programDataHash || sha256(Buffer.from(pd.dataBase64, "base64").subarray(45)) !== pin.payloadHash || a.owner !== "BPFLoaderUpgradeab1e11111111111111111111111" || pd.owner !== a.owner || pd.executable || Buffer.from(pd.dataBase64, "base64").length < 45 || Buffer.from(pd.dataBase64, "base64").readUInt32LE(0) !== 3 || ![0, 1].includes(Buffer.from(pd.dataBase64, "base64")[12]) || actual.loader !== a.owner || actual.deploymentSlot !== Buffer.from(pd.dataBase64, "base64").readBigUInt64LE(4).toString() || actual.upgradeAuthority !== (Buffer.from(pd.dataBase64, "base64")[12] === 1 ? getAddressDecoder().decode(Buffer.from(pd.dataBase64, "base64").subarray(13, 45)) : null) || Buffer.from(a.dataBase64, "base64").length !== 36 || Buffer.from(a.dataBase64, "base64").readUInt32LE(0) !== 2 || getAddressDecoder().decode(Buffer.from(a.dataBase64, "base64").subarray(4)) !== pin.programDataAddress)
             reject("Jupiter V1 runtime pin changed.");
     }
     const fixed = [{ programId: ATA, hash: "6804554e69fd3a58caa191dc4a58f4c67223d30ca28ab8987f39fc18d2f7374d" }, { programId: COMPUTE, hash: "005950c007e8e550a16beddf836f0082d26d197f5f645ff7c04a5c8d171cf8a1" }, { programId: SYS, hash: "c94b792a6d8b25d3e53ea94d8b80111735ed80d6a7dc8deb937cd342707f5f03" }];
@@ -119,7 +119,7 @@ function rejectIfMissingFeeByte(ix, _slippage) { const d = Buffer.from(ix.data, 
     reject("Jupiter V1 platform fee byte is invalid."); }
 /** Old positional roles are accessed only behind the historical variant boundary. */
 export function jupiterV1ProofRoles(g) {
-    const config = routeConfigForQuoteBuild(g.material.quoteResponse, g.material.rawBuildResponse);
+    const config = routeConfigForMaterial(g.material);
     if (config.variant === 47) {
         if (g.routeId !== config.routeId || g.namedRoles === undefined)
             reject("Jupiter V1 new route roles are missing.");

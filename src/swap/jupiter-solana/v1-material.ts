@@ -6,7 +6,7 @@ import type { GuardedSwapPreparedMaterial } from "../runtime.js";
 import { assembleJupiterV1, decodeJupiterV1AddressTable } from "./v1-resolver.js";
 import { canonicalAddress, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT } from "./catalog.js";
 import { decodeJupiterV1Quote, decodeJupiterV1Build, jupiterV1ResponseHash, jupiterV1Lifetime, jupiterV1Instructions, type JupiterV1QuoteResponse, type JupiterV1RawBuildResponse, type JupiterV1RawInstruction } from "./v1-codec.js";
-import { routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { routeConfigForMaterial, routeConfigForQuoteBuild } from "./v1-route-config.js";
 import { decodeWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 export const JUPITER_V1_MATERIAL_SCHEMA = "apn.jupiter-v1-resolved-material.v1" as const;
 export interface JupiterV1SemanticAccount {
@@ -105,7 +105,9 @@ export function validateJupiterV1Material(value: unknown): JupiterV1ResolvedMate
     canonicalAddress(typed.payer);
     decodeJupiterV1Quote(typed.quoteResponse);
     decodeJupiterV1Build(typed.rawBuildResponse);
-    const route = routeConfigForQuoteBuild(typed.quoteResponse, typed.rawBuildResponse);
+    // Historical unsigned diagnostics contain no executable evidence. They remain
+    // readable, but the guard and runtime dispatch require a registered generation.
+    const route = typed.programPins.length === 0 ? routeConfigForQuoteBuild(typed.quoteResponse, typed.rawBuildResponse) : routeConfigForMaterial(typed);
     if (jupiterV1ResponseHash(typed.quoteResponse) !== typed.quoteResponseHash || jupiterV1ResponseHash(typed.rawBuildResponse) !== typed.rawBuildResponseHash || sha256(Buffer.from(typed.transactionBase64, "base64")) !== typed.transactionHash || sha256(Buffer.from(typed.messageBase64, "base64")) !== typed.messageHash)
         corrupt();
     for (const row of typed.semanticAccounts) {

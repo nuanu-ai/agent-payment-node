@@ -7,7 +7,7 @@ import { ApnError } from "../../errors.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import { swapMechanismDigest } from "../pin.js";
 import { validateJupiterV1PreparedMaterial } from "./v1-material.js";
-import { JUPITER_V1_FINITE_ROUTES, routeConfigForQuoteBuild, type JupiterV1RouteConfig } from "./v1-route-config.js";
+import { JUPITER_V1_FINITE_ROUTES, routeConfigForMaterial, type JupiterV1RouteConfig } from "./v1-route-config.js";
 import { JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 
 export interface JupiterV1OwnerBinding {
@@ -47,7 +47,7 @@ export class JupiterV1OwnerAdmission {
  }
  async assert(operationValue:SwapOperationRecord, materialValue:unknown):Promise<JupiterV1OwnerBinding>{
    const op=validateSwapOperation(operationValue),material=validateJupiterV1PreparedMaterial(materialValue);
-   const config=routeConfigForQuoteBuild(material.execution.quoteResponse,material.execution.rawBuildResponse),registry=config.protocolRegistry;
+   const config=routeConfigForMaterial(material.execution),registry=config.protocolRegistry;
    if(op.mechanismDigest!==swapMechanismDigest(config.mechanismPin)||op.protocolRegistryDigest!==registry.registryDigest||op.protocolRegistryVersion!==registry.registryVersion||canonicalJson(op.quote)!==canonicalJson(material.quote)||
       op.approvalCapAtomic!==material.approvalCapAtomic) blocked("The prepared Jupiter operation or material changed.");
    const resolved=await this.resolveRoute(op.quote.profile,op.quote.inputAmountAtomic,op.quote.minimumOutputAtomic,op.quote.account,op.usageLease!==null&&["reserved","submitted","unknown_finality"].includes(op.usageLease.state)?op.usageLease.amountAtomic:"0");

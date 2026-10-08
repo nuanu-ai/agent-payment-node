@@ -3,19 +3,45 @@ import { ApnError } from "../../errors.js";
 import { JUPITER_V1_POOL, JUPITER_V1_WHIRLPOOL_V2_POOL, JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, JUPITER_V1_MEMO_PROGRAM, JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_4H_POOL, JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_4H_PROTOCOL_REGISTRY } from "./v1-pins.js";
 import { JUPITER_V6_PROGRAM, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM, WRAPPED_SOL_MINT, SOLANA_USDC_MINT } from "./catalog.js";
 import { JUPITER_V1_WHIRLPOOL_FP_POOL, JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_FP_PROTOCOL_REGISTRY } from "./v1-pins.js";
+import { JUPITER_V1_RUNTIME_PROGRAM_PINS, JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
+import { JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
 export const JUPITER_V1_OLD_ROUTE = Object.freeze({ routeId: "whirlpool-v1-83-sol-usdc", pool: JUPITER_V1_POOL, variant: 17, instructionBytes: 36, accountCount: 21, mechanismPin: Object.freeze({ ...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, auxiliaryContractProgramIdentities: Object.freeze([...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.auxiliaryContractProgramIdentities]) }), protocolRegistry: JUPITER_V1_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([]) });
 export const JUPITER_V1_WHIRLPOOL_V2_ROUTE = Object.freeze({ routeId: "whirlpool-swap-v2-esv-sol-usdc", pool: JUPITER_V1_WHIRLPOOL_V2_POOL, variant: 47, instructionBytes: 37, accountCount: 25, mechanismPin: JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, protocolRegistry: JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([JUPITER_V1_MEMO_PROGRAM]) });
 export const JUPITER_V1_WHIRLPOOL_4H_ROUTE = Object.freeze({ routeId: "whirlpool-swap-v2-4h-sol-usdc", pool: JUPITER_V1_WHIRLPOOL_4H_POOL, variant: 47, instructionBytes: 37, accountCount: 25, mechanismPin: JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN, protocolRegistry: JUPITER_V1_WHIRLPOOL_4H_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([JUPITER_V1_MEMO_PROGRAM]) });
 export const JUPITER_V1_WHIRLPOOL_FP_ROUTE = Object.freeze({ routeId: "whirlpool-v1-fp-sol-usdc", pool: JUPITER_V1_WHIRLPOOL_FP_POOL, variant: 17, instructionBytes: 36, accountCount: 21, mechanismPin: JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN, protocolRegistry: JUPITER_V1_WHIRLPOOL_FP_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([]) });
-export const JUPITER_V1_FINITE_ROUTES = Object.freeze([JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_V2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE]);
+export const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE = Object.freeze({
+    ...JUPITER_V1_WHIRLPOOL_FP_ROUTE, routeId: "whirlpool-v1-fp-sol-usdc-runtime-099da3",
+    mechanismPin: JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_MECHANISM_PIN,
+    protocolRegistry: JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_PROTOCOL_REGISTRY,
+    runtimeProgramPins: JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS
+});
+export const JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE = Object.freeze({
+    ...JUPITER_V1_OLD_ROUTE, routeId: "whirlpool-v1-83-sol-usdc-runtime-099da3",
+    mechanismPin: JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_MECHANISM_PIN,
+    protocolRegistry: JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY,
+    runtimeProgramPins: JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS
+});
+export const JUPITER_V1_FINITE_ROUTES = Object.freeze([JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_V2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE]);
+export function jupiterV1RegisteredProgramPins(route) {
+    return route.runtimeProgramPins ?? JUPITER_V1_RUNTIME_PROGRAM_PINS;
+}
 function blocked() { throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 pool, variant or canonical route shape is outside the admitted lane."); }
 /** Finite source-reviewed pool lookup, never a pin learned from a provider response. */
 export function routeConfigForQuote(quote, expectedRouteId) {
     const pool = quote.routePlan[0]?.swapInfo.ammKey;
-    const config = JUPITER_V1_FINITE_ROUTES.find(route => route.pool === pool) ?? blocked();
-    if (expectedRouteId !== undefined && config.routeId !== expectedRouteId)
-        blocked();
+    const config = JUPITER_V1_FINITE_ROUTES.find(route => route.pool === pool && (expectedRouteId === undefined || route.routeId === expectedRouteId)) ?? blocked();
     return config;
+}
+/** Saved materials select only a registered generation. Pool identity alone cannot select upgraded code. */
+export function routeConfigForMaterial(material) {
+    const jup = material.programPins.filter(pin => pin.programId === JUPITER_V6_PROGRAM);
+    if (jup.length !== 1 || jup[0].provenance !== "runtime_bytes_only")
+        blocked();
+    const config = JUPITER_V1_FINITE_ROUTES.find(route => route.pool === material.quoteResponse.routePlan[0]?.swapInfo.ammKey &&
+        jupiterV1RegisteredProgramPins(route).some(pin => pin.programId === JUPITER_V6_PROGRAM &&
+            pin.payloadHash === jup[0].storedPayloadHash && pin.programDataAddress === jup[0].programDataAddress &&
+            (pin.programDataHash === undefined || pin.programDataHash === jup[0].programDataHash))) ?? blocked();
+    return routeConfigForQuoteBuild(material.quoteResponse, material.rawBuildResponse, config.routeId);
 }
 /** Complete Borsh route bytes. Option Some and every trailing byte are unsupported. */
 export function decodeJupiterV1RouteArguments(build, config) {

@@ -215,3 +215,55 @@ Current-candidate production MCP stdio passed live Jupiter quote, prepare and st
 PublicNode compatibility (8 October 2026): account methods use individually paced POSTs and the resolver reads at most eight addresses per getMultipleAccounts. The endpoint accepted two eight-address controls and refused the equivalent sixteen-address request, even with a zero-length slice. The endpoint bound propagates through the durable Jupiter RPC; all accounts and executable bytes remain required, and every read consumes the existing caps. TypeScript builds and 46 focused tests passed.
 
 A subsequent unsigned read refused at the Jupiter executable pin. Two independent RPCs returned identical ProgramData deployed at slot 454465850, payload hash `099da3a26d336aa7174960f057546f192fc1ccda8e3e9d1b4aa5c69fa8a79a5f`, while the admitted snapshot was slot 451957263/hash `899161c0e20b212c34671de0fbc2fcb7da4140fb837de431213e6ef6e321850f`. Historical pins and signed operations are preserved; no new program snapshot is admitted by this change.
+
+## Separately registered runtime snapshot, 9 October local / 8 October UTC
+
+The upgraded JUP6 runtime is registered for the existing legacy 83 and Fp pools
+through separate mechanisms and registries. Historical four mechanism/registry
+digests remain exact. Esv and 4H retain their historical snapshot and refuse
+upgraded runtime bytes. No additional pool is admitted.
+
+The new registrations bind payload SHA256
+`099da3a26d336aa7174960f057546f192fc1ccda8e3e9d1b4aa5c69fa8a79a5f`
+and complete ProgramData SHA256
+`3bd95cf0775979fdaed8a383474461d538a6ef040303f161abf9ed8c40dbc517`.
+Two independent mainnet origins returned identical 2,892,269-byte accounts,
+deployment slot 454465850, unchanged upgrade authority and the canonical
+executable Program pointer. Static ELF comparison found 60,192 additional
+`.text` bytes. Neither source reproducibility nor whole-program semantic
+equivalence is claimed; finite V1 retains its explicit `runtime_bytes_only`
+contract. An unverified source-build record alone does not redefine that contract.
+
+Both active asset rows must admit the selected new mechanism. The 83 mechanism
+digest is `f8bcdf0e2beeb784153a7c7ffd114846f486c3ec2b1590b9509617420ccf1a5f`;
+its registry digest is `32d64fc2b9fd97e96c9787a0fb1ab6618292fac536ff2fdd303ccab5e2387818`.
+Historical owner policies do not authorize this version. Quote resolution and
+the pre-sign reread use the selected registered code generation; full-payload,
+header, pointer, ABI, account, CPI, expense, minimum and lifetime checks remain
+mandatory. Saved material selects its generation from registered program
+identities, without changing its historical JSON schema or digests.
+Pinless historical diagnostics remain readable, but cannot select a runtime
+generation, obtain a guarded proof or enter signing.
+
+A fresh unsigned diagnostic on the official mainnet RPC passed all current
+guards and exact-message simulation at 16:30:37 UTC on 8 October. The 83 route
+input was 1,000,000 lamports; simulated recipient credit was 108,719 atomic USDC
+against minimum 108,077, native spend 1,006,400 lamports and fee 6,400.
+Simulation slot was 454598741, with 54,022 compute units. It used 3 official
+API reads, 20 logical RPC reads and 18 physical RPC POSTs under a shared 64-read
+bound. No owner admission, APN economic-state write, custody entry, signature,
+send or paid receipt occurred. Fp has local model checks, without a fresh
+successful mainnet simulation for this snapshot.
+
+The preceding PublicNode diagnostic refused the unchanged lifetime guard:
+its raw `getBlockHeight` response was 454598483 while the returned blockhash
+expired at height 432636048. That inconsistent response is retained; no
+height substitution or guard relaxation was applied. The official RPC
+diagnostic used an independent fresh quote/build/lifetime.
+
+All three existing marked operations still validate through their historical
+83 generation. A pure read checked their operations and public material
+chunks: 70 files retained exact hashes. Both public origins returned null
+statuses and finalized transactions at 16:08 UTC; no usage hold was released
+and no signed transaction was resent. New owner activation, normal installed
+acceptance and finalized delivery remain separate work.

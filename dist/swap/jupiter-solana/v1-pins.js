@@ -17,6 +17,28 @@ export const JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN = Object.freeze(validateSwapM
     auxiliaryContractProgramIdentities: Object.freeze([JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_WHIRLPOOL_FP_POOL, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM]),
     validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc-whirlpool-fp" }));
 export const JUPITER_V1_WHIRLPOOL_FP_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-fp.2026-10-08", pins: [JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN] });
+/** Independently captured on two mainnet origins. Runtime bytes only, not a source-build attestation. */
+export const JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS = Object.freeze(JUPITER_V1_RUNTIME_PROGRAM_PINS.map(pin => Object.freeze(pin.programId === JUPITER_V6_PROGRAM ? {
+    ...pin, payloadHash: "099da3a26d336aa7174960f057546f192fc1ccda8e3e9d1b4aa5c69fa8a79a5f",
+    programDataHash: "3bd95cf0775979fdaed8a383474461d538a6ef040303f161abf9ed8c40dbc517"
+} : { ...pin })));
+/** Separate owner admission: historical FP policy cannot authorize upgraded executable bytes. */
+export const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({
+    ...JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN, protocolVersion: "jup6-route-v1-whirlpool-fp-runtime.2",
+    validationPolicyIdentity: "apn.jupiter-v1.runtime-099da3a26d336aa7174960f057546f192fc1ccda8e3e9d1b4aa5c69fa8a79a5f-sol-usdc-whirlpool-fp",
+    validationPolicyVersion: "2.0.0"
+}));
+export const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({
+    registryVersion: "jupiter-v1-whirlpool-fp-runtime.2026-10-09", pins: [JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_MECHANISM_PIN]
+});
+export const JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({
+    ...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, protocolVersion: "jup6-route-v1-whirlpool-runtime.2",
+    validationPolicyIdentity: "apn.jupiter-v1.runtime-099da3a26d336aa7174960f057546f192fc1ccda8e3e9d1b4aa5c69fa8a79a5f-sol-usdc-whirlpool-83",
+    validationPolicyVersion: "2.0.0"
+}));
+export const JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({
+    registryVersion: "jupiter-v1-whirlpool-runtime.2026-10-09", pins: [JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_MECHANISM_PIN]
+});
 /** Additional finite route; the historical 83 mechanism and registry above remain unchanged. */
 export const JUPITER_V1_WHIRLPOOL_V2_POOL = "Esvfxt3jMDdtTZqLF1fqRhDjzM8Bpr7fZxJMrK69PB7e";
 export const JUPITER_V1_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
