@@ -9,6 +9,7 @@ import { guardJupiterV1WhirlpoolMaterial, validateJupiterV1GuardedMaterial } fro
 import { validateJupiterV1PreparedMaterial } from "./v1-material.js";
 import { proveJupiterV1Simulation, validateFinalizedJupiterV1Receipt } from "./v1-proof.js";
 import { JupiterV1MaterialResolver } from "./v1-resolver.js";
+import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
     core;
@@ -54,17 +55,22 @@ export class JupiterV1SingleSender {
             // Persist before any transport. A crash from here permanently makes this operation observe-only.
             await this.native.assertDispatchAdmission(op, binding);
             await this.bindings.claim(op, binding, effect, at);
-            let state = "unknown_finality";
+            let state = "unknown_finality", dispatch = jupiterV1DispatchResult("signature_mismatch");
             try {
                 const returned = await this.rpc.sendTransactionAtStart([effect.rawPayload, { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 0 }], async () => {
                     await this.native.assertDispatchAdmission(op, binding);
                     if (this.clock.now().toISOString() >= op.quote.expiresAt || this.clock.now().getTime() - Date.parse(binding.checkedAt) > 30000)
                         blocked("Jupiter expired before physical send.");
                 });
-                if (solanaSignature(returned) === effect.transactionId)
+                if (solanaSignature(returned) === effect.transactionId) {
                     state = "submitted";
+                    dispatch = jupiterV1DispatchResult("acknowledged");
+                }
             }
-            catch { /* The permanent claim is consumed even when transport is ambiguous. */ }
+            catch (error) {
+                dispatch = jupiterV1DispatchResult("error", error); /* The permanent claim remains consumed even when transport is ambiguous. */
+            }
+            await new JupiterV1DispatchStore(this.core.operations.root).save(op, binding.bindingHash, dispatch, this.clock.now());
             return await this.core.recordPossibleSend(op, state, this.clock.now());
         });
     }
