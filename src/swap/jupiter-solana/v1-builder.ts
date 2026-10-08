@@ -6,7 +6,7 @@ import { WRAPPED_SOL_MINT, SOLANA_USDC_MINT } from "./catalog.js";
 import { jupiterV1GasDisplay, assertJupiterV1FreshMaterial, validateJupiterV1PreparedMaterial, type JupiterV1ResolvedMaterial, type JupiterV1PreparedMaterial, type SavedJupiterV1MaterialStore } from "./v1-material.js";
 import type { JupiterV1ReadOnlyProvider } from "./v1-provider.js";
 import type { JupiterV1MaterialResolver } from "./v1-resolver.js";
-import { JUPITER_V1_OLD_ROUTE, routeConfigForQuote, routeConfigForQuoteBuild, type JupiterV1RouteId } from "./v1-route-config.js";
+import { JUPITER_V1_OLD_ROUTE, JUPITER_V1_FINITE_ROUTES, routeConfigForQuote, routeConfigForQuoteBuild, type JupiterV1RouteId } from "./v1-route-config.js";
 export type JupiterV1QuoteRequest = Extract<CommandRequest, {
     readonly command: "swap.jupiter.quote";
 }>;
@@ -36,8 +36,9 @@ export class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder<Jupiter
         if (input.account !== payer || input.recipient !== payer)
             throw new ApnError("APN_INVALID_INPUT", "Jupiter V1 quoted parties differ from the owned payer.");
         const routeId = this.options.resolveRouteId === undefined ? JUPITER_V1_OLD_ROUTE.routeId : await this.options.resolveRouteId(input.profile);
+        const legacy = JUPITER_V1_FINITE_ROUTES.find(route => route.routeId === routeId)?.variant === 17;
         const request = { inputMint: WRAPPED_SOL_MINT, outputMint: SOLANA_USDC_MINT, amount: input.amountAtomic, taker: payer, recipient: payer, slippageBps: input.slippageBps, computeUnitPriceMicroLamports: this.options.computeUnitPriceMicroLamports,
-            ...(routeId === JUPITER_V1_OLD_ROUTE.routeId ? { maximumInnerAccounts: 12 as const } : {}) };
+            ...(legacy ? { maximumInnerAccounts: 12 as const } : {}) };
         let quoteResponse;
         try {
             quoteResponse = await this.provider.quoteExactIn(request);
@@ -45,7 +46,7 @@ export class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder<Jupiter
         } catch (error) {
             // maxAccounts is only a discovery hint. One bounded official retry may
             // find the same policy-selected legacy pool. Decoder pins stay strict.
-            if (routeId !== JUPITER_V1_OLD_ROUTE.routeId || !(error instanceof ApnError) || error.code !== "APN_OPERATION_BLOCKED") throw error;
+            if (!legacy || !(error instanceof ApnError) || error.code !== "APN_OPERATION_BLOCKED") throw error;
             const { maximumInnerAccounts: _hint, ...unfiltered } = request;
             quoteResponse = await this.provider.quoteExactIn(unfiltered);
             routeConfigForQuote(quoteResponse, routeId);

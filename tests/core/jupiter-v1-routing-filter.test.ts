@@ -7,6 +7,7 @@ import { JupiterV1MaterialResolver } from "../../src/swap/jupiter-solana/v1-reso
 import type { SavedJupiterV1MaterialStore } from "../../src/swap/jupiter-solana/v1-material.js";
 import { JUPITER_V1_WHIRLPOOL_V2_POOL } from "../../src/swap/jupiter-solana/v1-pins.js";
 import type { JupiterV1RouteId } from "../../src/swap/jupiter-solana/v1-route-config.js";
+import { capturedFp } from "../fixtures/jupiter-v1-whirlpool-fp/capture.js";
 const m=fixture(),request={inputMint:m.quoteResponse.inputMint,outputMint:m.quoteResponse.outputMint,amount:"1000000",taker:m.payer,recipient:m.payer,slippageBps:50,computeUnitPriceMicroLamports:1000};
 test("finite legacy filter changes only the unsigned quote query and preserves the official response",async()=>{
  let seen:URL|undefined;
@@ -24,14 +25,14 @@ for(const maximumInnerAccounts of [0,11,13,"12",null])test(`invalid finite inner
  await assert.rejects(provider.quoteExactIn({...request,maximumInnerAccounts} as any));assert.equal(calls,0);
 });
 
-const unknownPool="FpCMFDFGYotvufJ7HrFHsWEiiQCGbkLCtwHiDnh7o28Q";
+const unknownPool="11111111111111111111111111111111";
 function withPool(pool:string){const quote=structuredClone(m.quoteResponse);return {...quote,routePlan:quote.routePlan.map(leg=>({...leg,swapInfo:{...leg.swapInfo,ammKey:pool}}))};}
 const selected=new Error("TEST-only resolver reached after strict quote/build route admission");
-async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1RouteId="whirlpool-v1-83-sol-usdc"){
+async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1RouteId="whirlpool-v1-83-sol-usdc",build=m.rawBuildResponse){
  const urls:URL[]=[],posted:unknown[]=[];let resolved=0,proof=0,saved=0,get=0;
  const provider=new JupiterV1ReadOnlyProvider(async(input,init)=>{
   const url=new URL(String(input));urls.push(url);
-  if(init?.method==="POST") {posted.push(JSON.parse(String(init.body)));return new Response(JSON.stringify(m.rawBuildResponse),{headers:{"content-type":"application/json"}});}
+  if(init?.method==="POST") {posted.push(JSON.parse(String(init.body)));return new Response(JSON.stringify(build),{headers:{"content-type":"application/json"}});}
   const response=responses[get++];if(response instanceof Error)throw response;
   return new Response(JSON.stringify(response),{headers:{"content-type":"application/json"}});
  });
@@ -65,4 +66,15 @@ test("a failed second discovery read is terminal without a third request",async(
 });
 test("V2 policy selection has no legacy hint or legacy discovery fallback",async()=>{
  const r=await discover([m.quoteResponse],"whirlpool-swap-v2-esv-sol-usdc");assert.equal((r.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(r.urls.length,1);assert.equal(r.urls[0]?.searchParams.has("maxAccounts"),false);assert.equal(r.resolved,0);
+});
+test("Fp's separately admitted legacy ABI receives the same bounded account hint",async()=>{
+ const c=capturedFp(),r=await discover([c.quote],"whirlpool-v1-fp-sol-usdc",c.build);
+ assert.equal(r.error,selected);assert.equal(r.urls.length,2);assert.equal(r.urls[0]?.searchParams.get("maxAccounts"),"12");assert.equal(r.resolved,1);
+});
+test("Fp discovery can retry once but never build a foreign policy-selected pool",async()=>{
+ const c=capturedFp(),r=await discover([m.quoteResponse,c.quote],"whirlpool-v1-fp-sol-usdc",c.build);
+ assert.equal(r.error,selected);assert.equal(r.urls.length,3);assert.equal(r.urls[0]?.searchParams.get("maxAccounts"),"12");assert.equal(r.urls[1]?.searchParams.has("maxAccounts"),false);
+ assert.deepEqual((r.posted[0] as any).quoteResponse,c.quote);
+ const refused=await discover([m.quoteResponse,m.quoteResponse],"whirlpool-v1-fp-sol-usdc",c.build);
+ assert.equal((refused.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(refused.resolved,0);assert.equal(refused.posted.length,0);assert.equal(refused.urls.length,2);
 });

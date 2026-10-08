@@ -10,6 +10,7 @@ import { validateJupiterV1PreparedMaterial } from "./v1-material.js";
 import { proveJupiterV1Simulation, validateFinalizedJupiterV1Receipt } from "./v1-proof.js";
 import { JupiterV1MaterialResolver } from "./v1-resolver.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
+import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
     core;
@@ -40,38 +41,48 @@ export class JupiterV1SingleSender {
             const binding = await this.bindings.load(op, material);
             if (binding === null)
                 corrupt();
-            const { fresh } = await this.bindings.loadFresh(op, binding);
-            await validateJupiterV1GuardedMaterial(await guardJupiterV1WhirlpoolMaterial(fresh, { deadline: op.quote.expiresAt }));
-            const effect = await this.native.savedEffect(op, binding);
-            if (effect === null)
-                corrupt();
-            const height = rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
-            if (height > BigInt(fresh.lifetime.lastValidBlockHeight))
-                blocked("Jupiter's frozen blockhash expired before send.");
-            const at = this.clock.now();
-            if (at.toISOString() >= op.quote.expiresAt || at.getTime() - Date.parse(binding.checkedAt) > 30000 || this.rpc.budget === undefined ||
-                this.rpc.budget.maxPhysicalRequests !== 64 || this.rpc.budget.remainingPhysicalRequests < 1 || !this.rpc.hasPersistentPacer)
-                blocked("Jupiter send freshness or runtime RPC budget is unavailable.");
-            // Persist before any transport. A crash from here permanently makes this operation observe-only.
-            await this.native.assertDispatchAdmission(op, binding);
-            await this.bindings.claim(op, binding, effect, at);
-            let state = "unknown_finality", dispatch = jupiterV1DispatchResult("signature_mismatch");
+            let observedHeight = null;
             try {
-                const returned = await this.rpc.sendTransactionAtStart([effect.rawPayload, { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 0 }], async () => {
-                    await this.native.assertDispatchAdmission(op, binding);
-                    if (this.clock.now().toISOString() >= op.quote.expiresAt || this.clock.now().getTime() - Date.parse(binding.checkedAt) > 30000)
-                        blocked("Jupiter expired before physical send.");
-                });
-                if (solanaSignature(returned) === effect.transactionId) {
-                    state = "submitted";
-                    dispatch = jupiterV1DispatchResult("acknowledged");
+                const { fresh } = await this.bindings.loadFresh(op, binding);
+                await validateJupiterV1GuardedMaterial(await guardJupiterV1WhirlpoolMaterial(fresh, { deadline: op.quote.expiresAt }));
+                const effect = await this.native.savedEffect(op, binding);
+                if (effect === null)
+                    corrupt();
+                const height = rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
+                observedHeight = height.toString();
+                if (height > BigInt(fresh.lifetime.lastValidBlockHeight))
+                    blocked("Jupiter's frozen blockhash expired before send.");
+                const at = this.clock.now();
+                if (at.toISOString() >= op.quote.expiresAt || at.getTime() - Date.parse(binding.checkedAt) > 30000 || this.rpc.budget === undefined ||
+                    this.rpc.budget.maxPhysicalRequests !== 64 || this.rpc.budget.remainingPhysicalRequests < 1 || !this.rpc.hasPersistentPacer)
+                    blocked("Jupiter send freshness or runtime RPC budget is unavailable.");
+                // Persist before any transport. A crash from here permanently makes this operation observe-only.
+                await this.native.assertDispatchAdmission(op, binding);
+                await this.bindings.claim(op, binding, effect, at);
+                let state = "unknown_finality", dispatch = jupiterV1DispatchResult("signature_mismatch");
+                try {
+                    const returned = await this.rpc.sendTransactionAtStart([effect.rawPayload, { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 0 }], async () => {
+                        await this.native.assertDispatchAdmission(op, binding);
+                        if (this.clock.now().toISOString() >= op.quote.expiresAt || this.clock.now().getTime() - Date.parse(binding.checkedAt) > 30000)
+                            blocked("Jupiter expired before physical send.");
+                    });
+                    if (solanaSignature(returned) === effect.transactionId) {
+                        state = "submitted";
+                        dispatch = jupiterV1DispatchResult("acknowledged");
+                    }
                 }
+                catch (error) {
+                    dispatch = jupiterV1DispatchResult("error", error); /* The permanent claim remains consumed even when transport is ambiguous. */
+                }
+                await new JupiterV1DispatchStore(this.core.operations.root).save(op, binding.bindingHash, dispatch, this.clock.now());
+                return await this.core.recordPossibleSend(op, state, this.clock.now());
             }
             catch (error) {
-                dispatch = jupiterV1DispatchResult("error", error); /* The permanent claim remains consumed even when transport is ambiguous. */
+                // A diagnostic cannot release the marked lease or restore a first-send grant.
+                if (await this.bindings.loadClaim(op) === null)
+                    await new JupiterV1ExecutionFailureStore(this.core.operations.root).save(op, "sender_preflight", error, material.execution.lifetime.lastValidBlockHeight, observedHeight, this.clock.now());
+                throw error;
             }
-            await new JupiterV1DispatchStore(this.core.operations.root).save(op, binding.bindingHash, dispatch, this.clock.now());
-            return await this.core.recordPossibleSend(op, state, this.clock.now());
         });
     }
 }
@@ -96,6 +107,10 @@ export class JupiterV1ExecutionDriver {
         const height = rpcAtomic(await this.d.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
         if (height > BigInt(fresh.lifetime.lastValidBlockHeight))
             blocked("Jupiter's frozen blockhash expired before signing.");
+        // Leave a bounded reserve for custody, final ownership checks, paced send and preflight.
+        // This refuses before any marker or signature; it never replaces the frozen lifetime.
+        if (BigInt(fresh.lifetime.lastValidBlockHeight) - height < 24n)
+            throw new ApnError("APN_REPREPARE_REQUIRED", "Jupiter's frozen blockhash has insufficient reserve before signing.", { remainingBlocksAtomic: (BigInt(fresh.lifetime.lastValidBlockHeight) - height).toString(), minimumRemainingBlocksAtomic: "24" });
         const currentAdmission = await this.d.admission.assert(op, material);
         if (canonicalJson(currentAdmission) !== canonicalJson(admission))
             blocked("Jupiter's owner or active policy changed after simulation.");
@@ -120,7 +135,11 @@ export class JupiterV1ExecutionDriver {
                 signed = true;
                 return marked;
             }
-            catch {
+            catch (error) {
+                try {
+                    await new JupiterV1ExecutionFailureStore(this.d.core.operations.root).save(marked, "binding_and_sign", error, fresh.lifetime.lastValidBlockHeight, null, this.d.clock.now());
+                }
+                catch { /* Diagnostic failure never grants a retry of this marked operation. */ }
                 return await this.d.core.recordPossibleSend(marked, "unknown_finality", this.d.clock.now());
             }
         });

@@ -1,0 +1,13 @@
+{
+  "fixtureSha256": "e28dfb6dc5ca813767e4ae0a0b20250972f493a17d320206fd6aee4d7d643c19",
+  "diagnosticOnly": true,
+  "simulationObserved": false,
+  "mixedSlotTestFixture": true,
+  "at": "2026-10-08T04:47:19.467Z",
+  "slots": [
+    "454441352",
+    "454440585"
+  ],
+  "officialAbiCommit": "f2a3d13fa04eb15cf5b5a309ef9b226fd5d34e36",
+  "provenance": "Unsigned official Jupiter quote/build and public Solana accounts. This mixed-slot TEST fixture is not a simulation or financial acceptance. The ABI source is a reference, not deployed-source attestation."
+}

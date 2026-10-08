@@ -1,7 +1,7 @@
 import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { SwapMechanismPin } from "../pin.js";
 import type { JupiterV1QuoteResponse, JupiterV1RawBuildResponse } from "./v1-codec.js";
-export type JupiterV1RouteId = "whirlpool-v1-83-sol-usdc" | "whirlpool-swap-v2-esv-sol-usdc" | "whirlpool-swap-v2-4h-sol-usdc";
+export type JupiterV1RouteId = "whirlpool-v1-83-sol-usdc" | "whirlpool-swap-v2-esv-sol-usdc" | "whirlpool-swap-v2-4h-sol-usdc" | "whirlpool-v1-fp-sol-usdc";
 export interface JupiterV1RouteConfig {
     readonly routeId: JupiterV1RouteId;
     readonly pool: string;
@@ -15,6 +15,7 @@ export interface JupiterV1RouteConfig {
 export declare const JUPITER_V1_OLD_ROUTE: JupiterV1RouteConfig;
 export declare const JUPITER_V1_WHIRLPOOL_V2_ROUTE: JupiterV1RouteConfig;
 export declare const JUPITER_V1_WHIRLPOOL_4H_ROUTE: JupiterV1RouteConfig;
+export declare const JUPITER_V1_WHIRLPOOL_FP_ROUTE: JupiterV1RouteConfig;
 export declare const JUPITER_V1_FINITE_ROUTES: readonly JupiterV1RouteConfig[];
 /** Finite source-reviewed pool lookup, never a pin learned from a provider response. */
 export declare function routeConfigForQuote(quote: JupiterV1QuoteResponse, expectedRouteId?: JupiterV1RouteId): JupiterV1RouteConfig;

@@ -6,10 +6,12 @@ import {
   EMPTY_PROGRAM_SNAPSHOT, JUPITER_SOLANA_SCHEMA, JUPITER_SWAP_API_V2, JUPITER_V2_SOURCE, JUPITER_V6_PROGRAM,
   SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, WRAPPED_SOL_MINT,
 } from "./catalog.js";
-import { JUPITER_V1_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
+import { JUPITER_V1_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
+import { JUPITER_V1_FINITE_ROUTES, JUPITER_V1_OLD_ROUTE } from "./v1-route-config.js";
 import { assertJupiterV1Runtime } from "./v1-runtime-factory.js";
 import { swapMechanismDigest } from "../pin.js";
 import { JupiterV1DispatchStore } from "./v1-dispatch.js";
+import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
 
 export interface JupiterReadOnlyQuoteBuilder {
   quote(input: Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }> & { readonly now: Date }): Promise<unknown>;
@@ -20,7 +22,7 @@ export async function executeJupiterCommand(request: Request, context: RuntimeCo
   if (request.command === "swap.jupiter.inventory") return data({ catalog: Object.freeze({ schemaVersion: JUPITER_SOLANA_SCHEMA,
     genesis: SOLANA_MAINNET_GENESIS, api: JUPITER_SWAP_API_V2, program: JUPITER_V6_PROGRAM, nativeInput: WRAPPED_SOL_MINT,
     outputToken: SOLANA_USDC_MINT, source: JUPITER_V2_SOURCE, programSnapshot: EMPTY_PROGRAM_SNAPSHOT }), admitted: false,
-    execution: "dormant", v2Quantum: { signable: false, execution: "dormant" }, v1: { mechanismPin: JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(JUPITER_V1_WHIRLPOOL_MECHANISM_PIN), protocolRegistryDigest: JUPITER_V1_PROTOCOL_REGISTRY.registryDigest, installed: context.jupiterV1Runtime !== undefined, provenance: "runtime_bytes_only", admitted: false, additionalFiniteMechanisms:[{mechanismPin:JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN,mechanismDigest:swapMechanismDigest(JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN),protocolRegistryDigest:JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY.registryDigest,admitted:false,genuineSimulation:"pending"}] } }, "official_catalog_not_owner_admission");
+    execution: "dormant", v2Quantum: { signable: false, execution: "dormant" }, v1: { mechanismPin: JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(JUPITER_V1_WHIRLPOOL_MECHANISM_PIN), protocolRegistryDigest: JUPITER_V1_PROTOCOL_REGISTRY.registryDigest, installed: context.jupiterV1Runtime !== undefined, provenance: "runtime_bytes_only", admitted: false, additionalFiniteMechanisms:JUPITER_V1_FINITE_ROUTES.filter(r=>r.routeId!==JUPITER_V1_OLD_ROUTE.routeId).map(r=>({mechanismPin:r.mechanismPin,mechanismDigest:swapMechanismDigest(r.mechanismPin),protocolRegistryDigest:r.protocolRegistry.registryDigest,admitted:false,genuineSimulation:"pending"})) } }, "official_catalog_not_owner_admission");
   const runtime=context.jupiterV1Runtime;
   if(runtime!==undefined){
     assertJupiterV1Runtime(runtime,context.state.root);
@@ -28,7 +30,7 @@ export async function executeJupiterCommand(request: Request, context: RuntimeCo
     if(request.command==="swap.jupiter.prepare")return operationOutcome(await runtime.prepare(request,context.clock.now()));
     const op=await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
     if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Swap operation was not found.");
-    if(![JUPITER_V1_WHIRLPOOL_MECHANISM_PIN,JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN].some(pin=>op.mechanismDigest===swapMechanismDigest(pin)))throw new ApnError("APN_OPERATION_BLOCKED","This operation belongs to another mechanism.");
+    if(!JUPITER_V1_FINITE_ROUTES.some(route=>op.mechanismDigest===swapMechanismDigest(route.mechanismPin)))throw new ApnError("APN_OPERATION_BLOCKED","This operation belongs to another mechanism.");
     if(request.command==="swap.jupiter.status")return await withDispatch(await runtime.status(request.operationId,context.clock.now()),context);
     if(request.command==="swap.jupiter.approve")return await withDispatch(await runtime.approveAndExecute(request.operationId,context.clock.now()),context);
     if(request.command==="swap.jupiter.execute")return await withDispatch(await runtime.execute(request.operationId,context.clock.now()),context);
@@ -62,5 +64,6 @@ function operationOutcome(operation:import("../model.js").SwapOperationRecord):C
 }
 async function withDispatch(operation:import("../model.js").SwapOperationRecord,context:RuntimeContext):Promise<CommandOutcome>{
  const observation=await new JupiterV1DispatchStore(context.state.root).load(operation);
- return {...operationOutcome(operation),data:observation===null?null:{dispatchObservation:observation}};
+ const failure=await new JupiterV1ExecutionFailureStore(context.state.root).load(operation);
+ return {...operationOutcome(operation),data:observation===null&&failure===null?null:{...(observation===null?{}:{dispatchObservation:observation}),...(failure===null?{}:{executionFailure:failure})}};
 }
