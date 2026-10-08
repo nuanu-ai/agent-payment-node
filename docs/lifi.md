@@ -1050,3 +1050,19 @@ completed at 09:25:11 UTC with correlated SAFE source and destination proofs:
 100000 atomic input, 99683 exact output, zero residual allowance, one bridge
 submission and finalized usage. Existing SAFE approval was reused. The earlier
 approval-only failure retains its own receipt and was never resent.
+
+Normal CLI from the fresh d606b71f installation completed the existing Base-to-
+Ethereum Across funding operation at 10:39:50 UTC: both proofs SAFE, exact
+delivery 177003711461142 wei, actual source fee 899986077215 wei, zero residual
+allowance, one send and finalized usage. The first fixed observation retained
+both proofs before the unchanged shared POST cap stopped residual observation;
+a subsequent normal resume completed the same operation without resending.
+
+Ethereum-to-Base canonical USDC operation
+`1a22ff7f91898188f3aaec67f1783d6c2e8292b04f3881585eff51dafe784add`
+completed at 10:47:20 UTC with correlated SAFE proofs: 100000 input, 99689 exact
+output, owner floor 99000, residual allowance zero and one bridge submission.
+Source gas 85529811980376 wei plus messaging value 191812223813721 wei totals
+277342035794097 wei, below the frozen 590000000000000-wei native cap. Existing
+SAFE allowance was reused without another approval. Canonical-USDC delivery
+across the three required directions is now evidenced; WBTC remains separate.
