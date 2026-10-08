@@ -50,6 +50,23 @@ test("batched public resolution retains the complete frozen message and full exe
   assert.equal(resolved.dataBase64, original.dataBase64);
  }
 });
+test("PublicNode-sized reads preserve all accounts and frozen executable proof without exceeding eight keys", async () => {
+ const ordinary = publicPort(false), bounded = publicPort(true);
+ const rpc = { ...bounded.rpc, maximumAccountsPerRead: 8 as const };
+ const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse);
+ const b = await new JupiterV1MaterialResolver(rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse);
+ assert.deepEqual(b, a);
+ const accountReads = bounded.reads.filter(r => r.method === "getMultipleAccounts");
+ assert.equal(accountReads.length, 3);
+ assert.ok(accountReads.every(r => (r.params[0] as string[]).length <= 8));
+ assert.equal(bounded.reads.length, ordinary.reads.length + 1);
+});
+test("the durable Jupiter RPC forwards the endpoint account-read bound", async t => {
+ const temp = await temporaryState(); t.after(temp.cleanup);
+ for (const endpoint of ["https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"])
+  assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc(endpoint), temp.root, "quote").maximumAccountsPerRead, 8);
+ assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc("https://api.mainnet-beta.solana.com"), temp.root, "quote").maximumAccountsPerRead, 16);
+});
 test("public ProgramData resolution retains every byte in ten bounded chunks without header-only reads",async()=>{
  const p=publicPort(false),resolved=await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse);
  const reads=p.reads.filter(r=>r.method==="getAccountInfo");assert.equal(reads.length,10);

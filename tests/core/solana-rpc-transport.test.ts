@@ -175,7 +175,8 @@ test("a batched read returns HTTP 429 after one POST without retrying", async ()
   assert.equal(budget.physicalRequests, 1);
 });
 
-for (const endpoint of ["https://api.mainnet-beta.solana.com", "https://api.mainnet-beta.solana.com/"]) test(`public mainnet account compatibility charges each single POST at ${endpoint}`, async () => {
+for (const endpoint of ["https://api.mainnet-beta.solana.com", "https://api.mainnet-beta.solana.com/",
+  "https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"]) test(`public account compatibility charges each single POST at ${endpoint}`, async () => {
   const methods: string[] = [], budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 500, wait: ms => new Promise(resolve => setTimeout(resolve, ms)) });
   const rpc = new SolanaRpc(endpoint, async (_url, init) => {
     const request = JSON.parse(String(init?.body)); assert.equal(Array.isArray(request), false); methods.push(request.method);
@@ -183,6 +184,12 @@ for (const endpoint of ["https://api.mainnet-beta.solana.com", "https://api.main
   }, budget);
   assert.deepEqual(await rpc.batch([{ method: "getAccountInfo", params: [] }, { method: "getMultipleAccounts", params: [] }]), ["getAccountInfo", "getMultipleAccounts"]);
   assert.deepEqual(methods, ["getAccountInfo", "getMultipleAccounts"]); assert.equal(budget.physicalRequests, 2); assert.equal(budget.logicalCalls, 2);
+});
+for (const endpoint of ["https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"]) test(`PublicNode account compatibility stops on its first HTTP refusal at ${endpoint}`, async () => {
+  let posts = 0; const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2 });
+  const rpc = new SolanaRpc(endpoint, async () => { posts++; return json({ error: "batch refused" }, 400); }, budget);
+  await assert.rejects(rpc.batch([{ method: "getMultipleAccounts", params: [] }, { method: "getMultipleAccounts", params: [] }]), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(posts, 1); assert.equal(budget.physicalRequests, 1); assert.equal(budget.logicalCalls, 1);
 });
 test("public mainnet account compatibility stops on its first cooldown response", async () => {
   let posts = 0; const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 500, wait: ms => new Promise(resolve => setTimeout(resolve, ms)) });

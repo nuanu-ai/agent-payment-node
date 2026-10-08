@@ -80,6 +80,7 @@ const READ_METHODS: ReadonlySet<string> = new Set<SolanaReadMethod>([
 ]);
 export interface SolanaRpcPort {
   readonly originHash: string;
+  readonly maximumAccountsPerRead?: 8 | 16;
   call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
   batch?(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
 }
@@ -104,6 +105,9 @@ export class SolanaRpc implements SolanaRpcPort {
     this.budget = budget;
   }
   get hasPersistentPacer(): boolean { return this.pacer !== undefined; }
+  get maximumAccountsPerRead(): 8 | 16 {
+    return this.endpoint === "https://solana-rpc.publicnode.com" || this.endpoint === "https://solana-rpc.publicnode.com/" ? 8 : 16;
+  }
   async call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown> {
     const id = randomUUID();
     const value = await this.request({ jsonrpc: "2.0", id, method, params }, 1, method === "sendTransaction");
@@ -123,10 +127,11 @@ export class SolanaRpc implements SolanaRpcPort {
   /** Independent read methods share one POST; results retain input order despite unordered replies. */
   async batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]> {
     if (reads.length < 1 || reads.length > 8 || reads.some(read => !READ_METHODS.has(read.method))) protocolFailure();
-    // The official public mainnet endpoint refuses account methods in JSON-RPC
-    // arrays (HTTP 429, method limit zero), while the same single reads succeed.
+    // Public mainnet refuses account methods in JSON-RPC arrays; PublicNode
+    // allows only one getMultipleAccounts per array. Single account reads work.
     // Choose compatibility before dispatch; never retry a failed HTTP request.
-    if ((this.endpoint === "https://api.mainnet-beta.solana.com" || this.endpoint === "https://api.mainnet-beta.solana.com/") &&
+    if (["https://api.mainnet-beta.solana.com", "https://api.mainnet-beta.solana.com/",
+      "https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"].includes(this.endpoint ?? "") &&
       reads.some(read => read.method === "getMultipleAccounts" || read.method === "getAccountInfo")) {
       const results: unknown[] = [];
       for (const read of reads) results.push(await this.call(read.method, read.params));
