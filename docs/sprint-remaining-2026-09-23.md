@@ -4,6 +4,8 @@
 
 The [8 October closure status](apn-closure-status-2026-10-08.md) records the new Base MetaMask and Coinbase paid receipts, the SAFE Uniswap token-input receipt with zero residual allowance, and the current Jupiter verification. CI runner inventory is removed from the current prerequisites by Tony's explicit local-only QA decision. Runtime mitigation, source tests, paid proof, distribution and installed acceptance remain separate. The 29 September 32-row status count is historical and unchanged.
 
+On 8 October Tony waived the MetaMask zero-USDC-fee requirement. C1-05 Base acceptance uses the completed receipt with 0.005101 USDC fee and zero native debit; no repeat payment is needed. This does not close the separate eight-network matrix or new APN installation acceptance.
+
 ## 7 October 2026 closure overlay
 
 The [dated closure status](apn-closure-status-2026-10-07.md) records completed source/documentation and offline QA work, current prerequisites, and remaining lanes. The 32-row status count below is the **29 September checkpoint**, carried forward unchanged: 21 done, 5 in_progress, 6 blocked. The current paid evidence below supplements these historical statuses; it does not close the whole Program. Tony removed the external Avalanche paid-GET merchant search from the current blocking work on 7 October; this changes execution priority, not an acceptance verdict or the original obligations.
