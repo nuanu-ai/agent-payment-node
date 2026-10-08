@@ -1,4 +1,4 @@
-import { utils } from "tronweb";
+import { utils } from "../../tron/utils.js";
 import { canonicalJson, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress, tronHash, tronHex } from "../../tron/codec.js";

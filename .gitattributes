@@ -1,0 +1,2 @@
+# Preserve reviewed bundle, provenance and upstream notice bytes.
+vendor/** -text

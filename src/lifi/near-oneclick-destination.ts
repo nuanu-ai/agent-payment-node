@@ -1,4 +1,4 @@
-import { utils } from "tronweb";
+import { utils } from "../tron/utils.js";
 import { sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { assertSolanaNetwork, protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaSignature, type SolanaRpcPort } from "../solana/rpc.js";

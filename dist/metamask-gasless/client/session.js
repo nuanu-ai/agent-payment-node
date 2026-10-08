@@ -1,6 +1,7 @@
+import { agentBase } from "./sdk-vendor.js";
 import { mmFail } from "../reasons.js";
 export async function hydrateSdkState(state) {
-    const sdk = await import("@metamask/agent-sdk/base");
+    const sdk = await agentBase();
     let writes = 0;
     const trap = () => { writes += 1; mmFail("mm_gasless_state_security"); };
     const sessionEnvelope = structuredClone(state.sessionEnvelope), walletEnvelope = structuredClone(state.walletEnvelope);

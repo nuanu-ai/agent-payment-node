@@ -1,5 +1,5 @@
 /** A finite, unsigned Relay quote lane. Nothing in this module signs or sends a transaction. */
-import { getOrderId } from "@relay-protocol/settlement-sdk";
+import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import { hashObject } from "../canonical.js";
 export const ETHEREUM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
