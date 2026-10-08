@@ -1,5 +1,5 @@
 /** A finite, unsigned Relay quote lane. Nothing in this module signs or sends a transaction. */
-import { getOrderId } from "@relay-protocol/settlement-sdk";
+import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Address, Hex } from "viem";
 import { hashObject } from "../canonical.js";

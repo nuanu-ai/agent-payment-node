@@ -1,0 +1,23 @@
+{
+  "bundler": {
+    "target": "node24",
+    "version": "0.28.2"
+  },
+  "entryNames": [
+    "utils"
+  ],
+  "files": {
+    "utils.mjs": {
+      "bytes": 2268227,
+      "sha256": "60be708c6a234a7c14d92c3d3d55305d2f12a974572268ddbff034e37468b2a2"
+    },
+    "utils.mjs.LEGAL.txt": {
+      "bytes": 1102,
+      "sha256": "2b8b95423fa3c243bf5d324290ba4b9339597ba7a1a3bbea33629c53783c5b71"
+    }
+  },
+  "schemaVersion": "apn.tron-utils.v1",
+  "upstreamVersions": {
+    "tronweb": "6.5.0"
+  }
+}

@@ -39,7 +39,11 @@
     "docs/stargate-v2-token-native-drop.md",
     "docs/uniswap.md",
     "docs/sunswap.md",
-    "docs/jupiter.md"
+    "docs/jupiter.md",
+    "vendor/metamask-evm-sdk/**",
+    "vendor/tron-utils/**",
+    "vendor/relay-order-id/**",
+    "docs/runtime-sdk-vendor.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",
@@ -47,41 +51,45 @@
     "build": "npm run build:ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run test:core",
-    "test:core": "npm run build:ts && npm run build:test && node --test --test-concurrency=1 dist-test/tests/core/*.test.js && node --test tests/packaging/runtime-dependency-boundary.test.mjs tests/packaging/runtime-reviewed-versions.test.mjs && node scripts/core-forbidden-surface.mjs",
+    "test:core": "npm run build:ts && npm run build:test && node --test --test-concurrency=1 dist-test/tests/core/*.test.js && node --test tests/packaging/runtime-dependency-boundary.test.mjs tests/packaging/runtime-reviewed-versions.test.mjs tests/packaging/runtime-metamask-sdk-vendor.test.mjs tests/packaging/runtime-tron-utils-vendor.test.mjs tests/packaging/runtime-relay-order-id-vendor.test.mjs && node scripts/core-forbidden-surface.mjs",
     "test:legacy-native-contract": "cargo fmt --check && cargo test --offline --locked && cargo clippy --offline --locked --all-targets -- -D warnings",
     "test:legacy-cask-syntax": "node scripts/core-package-syntax.mjs",
     "test:legacy-cask-behavior": "node --test --test-concurrency=1 tests/packaging/*.test.mjs",
     "test:supply-chain": "node --test --test-concurrency=1 tests/packaging/supply-chain.test.mjs",
     "test:source": "npm run test:core",
-    "build:test": "tsc -p tsconfig.test.json",
+    "build:test": "tsc -p tsconfig.test.json && node scripts/copy-metamask-sdk-vendor.mjs dist-test/vendor/metamask-evm-sdk && node scripts/copy-tron-utils-vendor.mjs dist-test/vendor/tron-utils && node scripts/copy-relay-order-id-vendor.mjs dist-test/vendor/relay-order-id",
     "integration:assemble-app": "node scripts/assemble-macos-app.mjs",
     "prepack": "npm run build && npm test",
-    "validate:allowlist-dataset": "node scripts/validate-allowlist-dataset.mjs && node --test scripts/validate-allowlist-dataset.test.mjs"
+    "validate:allowlist-dataset": "node scripts/validate-allowlist-dataset.mjs && node --test scripts/validate-allowlist-dataset.test.mjs",
+    "build:metamask-sdk:check": "node scripts/build-sdk-vendor.mjs --check",
+    "build:tron-utils:check": "node scripts/build-sdk-vendor.mjs --tron-utils --check",
+    "build:relay-order-id:check": "node scripts/build-sdk-vendor.mjs --relay-order-id --check"
   },
   "dependencies": {
     "@metamask/7715-permission-types": "2.0.0",
-    "@metamask/agent-sdk": "6.1.4",
     "@metamask/agent-wallet": "6.1.5",
-    "@metamask/fox-sdk": "2.7.0",
     "@metamask/smart-accounts-kit": "2.0.0",
     "@metamask/x402": "1.0.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "@relay-protocol/settlement-sdk": "0.0.143",
     "@solana-program/system": "0.14.1",
     "@solana-program/token": "0.16.1",
     "@solana/kit": "8.2.0",
-    "@toruslabs/ethereum-controllers": "9.12.0",
     "@x402/core": "2.23.0",
     "@x402/evm": "2.23.0",
     "awal": "2.12.1",
-    "tronweb": "6.5.0",
     "viem": "2.55.19",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "24.5.2",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "@metamask/agent-sdk": "6.1.4",
+    "@metamask/fox-sdk": "2.7.0",
+    "esbuild": "0.28.2",
+    "tronweb": "6.5.0",
+    "@relay-protocol/settlement-sdk": "0.0.143",
+    "@toruslabs/ethereum-controllers": "9.12.0"
   },
   "overrides": {
     "@solana/web3.js": {

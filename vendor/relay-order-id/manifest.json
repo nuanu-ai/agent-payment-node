@@ -1,0 +1,23 @@
+{
+  "bundler": {
+    "target": "node24",
+    "version": "0.28.2"
+  },
+  "entryNames": [
+    "order-id"
+  ],
+  "files": {
+    "order-id.mjs": {
+      "bytes": 7832063,
+      "sha256": "9fe5aaeca3d5a513b44c101a744b35493660bd2d5b2334c1da8c9c7aae701493"
+    },
+    "order-id.mjs.LEGAL.txt": {
+      "bytes": 11551,
+      "sha256": "7319ca760bca0e83d247cd9b489ca00a1055162a652006612be197f9add2bc58"
+    }
+  },
+  "schemaVersion": "apn.relay-order-id.v1",
+  "upstreamVersions": {
+    "settlementSdk": "0.0.143"
+  }
+}

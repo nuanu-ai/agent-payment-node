@@ -1,5 +1,5 @@
 /** Finite Relay v2 BNB native quotes to pinned Polygon or Monad recipients; no signing or submission. */
-import { getOrderId } from "@relay-protocol/settlement-sdk";
+import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Hex } from "viem";
 import { hashObject } from "../canonical.js";
