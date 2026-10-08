@@ -1,4 +1,7 @@
 {
+  "builtinSubstitutions": {
+    "punycode": "punycode.js@2.3.1"
+  },
   "bundler": {
     "target": "node24",
     "version": "0.28.2"
@@ -39,6 +42,14 @@
     "chunk-D6DBKKWT.mjs.LEGAL.txt": {
       "bytes": 290,
       "sha256": "dc6a0bce1c7fcf4569acb7059c292c383403b547183301a79cc363d114785e48"
+    },
+    "chunk-J3S6UJ6K.mjs": {
+      "bytes": 529705,
+      "sha256": "a9a7557f3377d490d458c85f2149df6f7c8455377f52d33549007c574f69ed2c"
+    },
+    "chunk-J3S6UJ6K.mjs.LEGAL.txt": {
+      "bytes": 250,
+      "sha256": "4feaf2e650e3d139cb1d2cd4e1a7a963788d26345062ac4b6b551a93a4dda530"
     },
     "chunk-KARUJRYC.mjs": {
       "bytes": 780617,
@@ -108,14 +119,6 @@
       "bytes": 5824,
       "sha256": "b01e5d0e0438b0424703ebbe05ca1542e4db674f97eeb6a1e03b78fd46b85161"
     },
-    "chunk-ZRGEL2C7.mjs": {
-      "bytes": 522051,
-      "sha256": "8b56c05a4d972b98970a111faaf58155b33680c156fa8b624b3609f5b7f4d8ca"
-    },
-    "chunk-ZRGEL2C7.mjs.LEGAL.txt": {
-      "bytes": 250,
-      "sha256": "4feaf2e650e3d139cb1d2cd4e1a7a963788d26345062ac4b6b551a93a4dda530"
-    },
     "controller.mjs": {
       "bytes": 813,
       "sha256": "114910866a9131fbeec0db150446a78c110fcb84c5a56f6978da2b5746363635"
@@ -138,11 +141,11 @@
     },
     "sdk-evm.mjs": {
       "bytes": 896,
-      "sha256": "a6add7bf72c2e3e48b40cf1afab131a93c3cd8cb323443023af8975003296aa1"
+      "sha256": "a9ad0e5c66ffa00ac819efb112632dd6125e02ee6538c85177c84a7998aa578c"
     },
     "sdk-root.mjs": {
       "bytes": 1003,
-      "sha256": "83e97f21701786f9b44f8037d0fe8e152433e231b3b1d1951b62127f130d6e6a"
+      "sha256": "3a86de77fc3fcaab49fbc4921cf76d869601c347e006d4d927ad49acbca5a303"
     },
     "secp256k1-JKIM6I6Q.mjs": {
       "bytes": 613,

@@ -712,14 +712,14 @@ test("MCP dependencies are exact and package lockfiles are byte-identical", asyn
     devDependencies: Record<string, string>;
   };
   assert.equal(packageJson.dependencies["@modelcontextprotocol/server"], "2.0.0");
-  assert.equal(packageJson.devDependencies["@modelcontextprotocol/client"], "2.0.0");
+  assert.equal(packageJson.devDependencies["@modelcontextprotocol/client"], "2.3.1");
   assert.equal(packageJson.dependencies.zod, "4.4.3");
   const packageLock = await readFile(resolve("package-lock.json"));
   const shrinkwrap = await readFile(resolve("npm-shrinkwrap.json"));
   assert.deepEqual(packageLock, shrinkwrap);
   const lock = JSON.parse(packageLock.toString("utf8")) as { packages: Record<string, { version?: string }> };
   assert.equal(lock.packages["node_modules/@modelcontextprotocol/server"]?.version, "2.0.0");
-  assert.equal(lock.packages["node_modules/@modelcontextprotocol/client"]?.version, "2.0.0");
+  assert.equal(lock.packages["node_modules/@modelcontextprotocol/client"]?.version, "2.3.1");
   assert.equal(lock.packages["node_modules/zod"]?.version, "4.4.3");
 });
 

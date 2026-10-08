@@ -1,4 +1,4 @@
-import { ALL_METAMASK_FACILITATOR_ADDRESSES, METAMASK_FACILITATOR_ADDRESSES, } from "@metamask/7715-permission-types";
+import { ALL_METAMASK_FACILITATOR_ADDRESSES, METAMASK_FACILITATOR_ADDRESSES, } from "./metamask-smart-account-vendor.js";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 export function canonicalErc7710Facilitators(extra) {

@@ -43,6 +43,7 @@ function run(loader, rejected) {
   `;
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", timeout: 30000 });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.equal(result.stderr, "", "vendor import must not write startup diagnostics");
 }
 test("shipped TRON utilities load offline without parent packages or network/native/process effects", async t => {
   const f = await fixture(t); run(f.loader, false);

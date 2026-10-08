@@ -1,0 +1,152 @@
+{
+  "builtinSubstitutions": {
+    "punycode": "punycode.js@2.3.1"
+  },
+  "bundler": {
+    "target": "node24",
+    "version": "0.28.2"
+  },
+  "entryNames": [
+    "smart-utils",
+    "smart-root",
+    "smart-actions",
+    "smart-contracts",
+    "permission-types",
+    "smart-experimental",
+    "x402-client",
+    "delegation-core"
+  ],
+  "files": {
+    "_esm-LPCAE67A.mjs": {
+      "bytes": 137452,
+      "sha256": "0a808eeda9d6be9ea92d374fe0ca37a36cd3599cce8cfd4526b0c9b704ffb032"
+    },
+    "ccip-KR6XAC7P.mjs": {
+      "bytes": 693,
+      "sha256": "73d8f198f228e02c7424a6671d1140c103dcd9ac12630f71b83952aaab80a3e9"
+    },
+    "chunk-3WSKYKKW.mjs": {
+      "bytes": 31923,
+      "sha256": "2ad30cc4f7055200f0dfa27f4c4849bade5112ddd18e6d934656e7e5b4f7d85b"
+    },
+    "chunk-DQE3KJNP.mjs": {
+      "bytes": 17228,
+      "sha256": "a76ee5bace83229cc8ff2bd74cb81c39606b3071947a04f150662f5288755434"
+    },
+    "chunk-GFNUYFFY.mjs": {
+      "bytes": 369549,
+      "sha256": "da964cff416ee3c9302c4a262d02c2273c0e9fef68f79c3e379eaf5815b4d2c0"
+    },
+    "chunk-GFNUYFFY.mjs.LEGAL.txt": {
+      "bytes": 225,
+      "sha256": "67bacbb60c8619a520067dfbf45936c59cd6a0b5ef30d23a3e8429e698cba62d"
+    },
+    "chunk-GHAODLUH.mjs": {
+      "bytes": 19972,
+      "sha256": "3c97898bc4788f7ddb87de0aaee3c191ecc55ca1698eced3f528e49a0926fb50"
+    },
+    "chunk-GQCBBNZL.mjs": {
+      "bytes": 2277,
+      "sha256": "58793c1dbc4d196efa7b437d296f0410134461f6310c3f5fab559929a30b1ad4"
+    },
+    "chunk-HMYUAAIA.mjs": {
+      "bytes": 7567,
+      "sha256": "b3eef93c2ba7533e9b5ac66e7dd2b73febc63d3d7d2ae4e43ae5fb3a7750ef7d"
+    },
+    "chunk-HMYUAAIA.mjs.LEGAL.txt": {
+      "bytes": 140,
+      "sha256": "defb38a68b2b10a8bdde44532f8aad289c8527e2d7cfc860fde73da77562fb4e"
+    },
+    "chunk-IMFZ4P7A.mjs": {
+      "bytes": 6811,
+      "sha256": "b46b117f4ec509b5f5fd6c29ed532ca0cb5b24000ad7a38d251beb24da1dfc6e"
+    },
+    "chunk-KV33L6SU.mjs": {
+      "bytes": 6739,
+      "sha256": "97449130c01782fe627ddbc0ae1f7001a93d8912b5487218ef89b354515c5415"
+    },
+    "chunk-L4R6PIP7.mjs": {
+      "bytes": 774,
+      "sha256": "b19004d82d2a4ccefc1cb381a6846116eccda478e84f1f97986519a8e5f22ca2"
+    },
+    "chunk-S2MT4VX5.mjs": {
+      "bytes": 179887,
+      "sha256": "8e152b33307ac828f5f23aeb113770d03c2675b33f2d136691e6d9a10e97a63c"
+    },
+    "chunk-SFLWBDOK.mjs": {
+      "bytes": 24350,
+      "sha256": "a02c4b5f22061738d8774fe72ffc4bc0f852fadaa6992680eb78e85f8a87a5c4"
+    },
+    "chunk-T6VOGCFD.mjs": {
+      "bytes": 242572,
+      "sha256": "6ce2220ec07fc635d0c9d76bd6a5d497fdd7e509ce2f9a151edff5283518942f"
+    },
+    "chunk-T6VOGCFD.mjs.LEGAL.txt": {
+      "bytes": 400,
+      "sha256": "527a5c4cd178fbfaa5403aa71a5c0c2c4e4ec76eed7895aa5e178bacbc2e42fe"
+    },
+    "chunk-VBXYOQOU.mjs": {
+      "bytes": 4812,
+      "sha256": "2f7bea681593bd62b4eb90cb7d71972d449207a0ee9e22fc910c36702303226e"
+    },
+    "chunk-VBXYOQOU.mjs.LEGAL.txt": {
+      "bytes": 131,
+      "sha256": "d086dfa5ea48e8128350776d25e10ae64298a77b2e31aa370c137e6b1f8393f0"
+    },
+    "chunk-XRTWDKRZ.mjs": {
+      "bytes": 600409,
+      "sha256": "d2a8181b28bc97e847addc5c53f47e97ac39a2c66d105acec963cfb85f6d938e"
+    },
+    "chunk-ZSEVIWSW.mjs": {
+      "bytes": 5824,
+      "sha256": "986077d69ae38a02f1928ec180062c5b38033601804dd02ba6d054c45a27c8a9"
+    },
+    "delegation-core.mjs": {
+      "bytes": 865,
+      "sha256": "8de0537bdcc6dc97dc821bfe5a0703ce688a5554b6c901d8a84f053b00a3d2db"
+    },
+    "permission-types.mjs": {
+      "bytes": 38887,
+      "sha256": "cc17ae4980551ce26d4a753fa777cd8a3cd8fb0e454d2759c517b7396fc24033"
+    },
+    "secp256k1-E5SA7BGW.mjs": {
+      "bytes": 64182,
+      "sha256": "f3e91f02e62ebb5736cfe6978b4850654182f58e81f59aab8be85f7cdcf03c55"
+    },
+    "secp256k1-E5SA7BGW.mjs.LEGAL.txt": {
+      "bytes": 290,
+      "sha256": "dc6a0bce1c7fcf4569acb7059c292c383403b547183301a79cc363d114785e48"
+    },
+    "smart-actions.mjs": {
+      "bytes": 912,
+      "sha256": "ce8c7462ceea8b143ce39f3794e7327b10169fc1bf6dbdfc07674ac3a5fd6375"
+    },
+    "smart-contracts.mjs": {
+      "bytes": 819,
+      "sha256": "83570d5b75c09afad041f3e9688cb6a84162b506e0765da477d3fca24742398f"
+    },
+    "smart-experimental.mjs": {
+      "bytes": 11709,
+      "sha256": "25c316de6e052127c158dcb563fddc94b316fa957a8f67eab1b256034f36966a"
+    },
+    "smart-root.mjs": {
+      "bytes": 988,
+      "sha256": "50100257208ac150be53a930b8ae584fd0fe2d8f7494a76689a6696491f81836"
+    },
+    "smart-utils.mjs": {
+      "bytes": 936,
+      "sha256": "07329d4e4c93d60e5bcfe71c4813e5d18c06609c66a89bbf68411012f0e4f173"
+    },
+    "x402-client.mjs": {
+      "bytes": 3159,
+      "sha256": "8170e116bc5762cfdfcbe032599710223bb1dac131f54de69c63a708e6453d80"
+    }
+  },
+  "schemaVersion": "apn.metamask-smart-account.v1",
+  "upstreamVersions": {
+    "delegationCore": "3.0.0",
+    "permissionTypes": "2.0.0",
+    "smartAccountsKit": "2.0.0",
+    "x402": "1.0.0"
+  }
+}

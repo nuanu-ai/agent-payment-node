@@ -1,4 +1,7 @@
 {
+  "builtinSubstitutions": {
+    "punycode": "punycode.js@2.3.1"
+  },
   "bundler": {
     "target": "node24",
     "version": "0.28.2"

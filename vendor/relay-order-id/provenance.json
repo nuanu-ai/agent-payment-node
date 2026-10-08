@@ -23,7 +23,6 @@
     "os",
     "path",
     "process",
-    "punycode",
     "stream",
     "tls",
     "tty",
@@ -3745,6 +3744,12 @@
       "file": "lib/zlib/zstream.js",
       "identity": "pako@2.2.0",
       "sha256": "5fa10c7a59ca99113cf92d1260e56cbd6282e15afa85dc8a0eb8e8d6d2321298"
+    },
+    {
+      "bytes": 12711,
+      "file": "punycode.js",
+      "identity": "punycode@2.3.1",
+      "sha256": "6052a80eac47e46bd4de17ae0095e0192c336d3d7c387d292ad2176ebfc53d04"
     },
     {
       "bytes": 5830,
@@ -8087,6 +8092,11 @@
       "license": "(MIT AND Zlib)",
       "name": "pako",
       "version": "2.2.0"
+    },
+    "punycode@2.3.1": {
+      "license": "MIT",
+      "name": "punycode",
+      "version": "2.3.1"
     },
     "ripple-address-codec@5.0.1": {
       "license": "ISC",

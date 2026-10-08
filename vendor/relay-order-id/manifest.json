@@ -1,4 +1,7 @@
 {
+  "builtinSubstitutions": {
+    "punycode": "punycode.js@2.3.1"
+  },
   "bundler": {
     "target": "node24",
     "version": "0.28.2"
@@ -8,8 +11,8 @@
   ],
   "files": {
     "order-id.mjs": {
-      "bytes": 7832063,
-      "sha256": "9fe5aaeca3d5a513b44c101a744b35493660bd2d5b2334c1da8c9c7aae701493"
+      "bytes": 7839659,
+      "sha256": "e7c11c7e433c8b936420409680f2e16712c89333e6e945606bf093bc0bb49d79"
     },
     "order-id.mjs.LEGAL.txt": {
       "bytes": 11551,

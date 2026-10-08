@@ -1,5 +1,5 @@
-import { createx402DelegationProvider } from "@metamask/smart-accounts-kit/experimental";
-import { x402Erc7710Client } from "@metamask/x402";
+import { createx402DelegationProvider } from "../metamask-smart-account-vendor.js";
+import { x402Erc7710Client } from "../metamask-smart-account-vendor.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { smartAccountEnvironment } from "../metamask-smart-account-grant.js";
 import type { Erc7710Custody, Erc7710MaterialIntent, Erc7710PaymentPayload } from "./intent.js";

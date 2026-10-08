@@ -21,7 +21,6 @@
     "node:util",
     "os",
     "path",
-    "punycode",
     "stream",
     "tls",
     "tty",
@@ -15283,6 +15282,12 @@
       "sha256": "42459bad8f9381a10b037a5de3cb67d761251f42e0305e32474a94bb7a14da6c"
     },
     {
+      "bytes": 12711,
+      "file": "punycode.js",
+      "identity": "punycode@2.3.1",
+      "sha256": "6052a80eac47e46bd4de17ae0095e0192c336d3d7c387d292ad2176ebfc53d04"
+    },
+    {
       "bytes": 1768,
       "file": "lib/internal/streams/add-abort-signal.js",
       "identity": "readable-stream@4.7.0",
@@ -28517,6 +28522,11 @@
       "license": "MIT",
       "name": "proxy-from-env",
       "version": "2.1.0"
+    },
+    "punycode@2.3.1": {
+      "license": "MIT",
+      "name": "punycode",
+      "version": "2.3.1"
     },
     "readable-stream@4.7.0": {
       "license": "MIT",

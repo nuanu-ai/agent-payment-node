@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = new URL("../../vendor/tron-utils/", import.meta.url);
-const MANIFEST_SHA256 = "87526ab76191501ab3571c3ce6395ad9f3e28b6780944ca29f854a43e2cb0e65";
+const MANIFEST_SHA256 = "cbf69134172a065d967339f8c3f432df347e55b944b83bd64cc02459647228a6";
 const MAX_BYTES = 4 * 1024 * 1024;
 const entries = new Set(["utils"]);
 let verified = false;

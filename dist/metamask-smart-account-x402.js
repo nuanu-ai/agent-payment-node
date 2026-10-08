@@ -1,6 +1,6 @@
-import { ANY_BENEFICIARY, decodeAllowedCalldataTerms, decodeERC20TransferAmountTerms, decodeRedeemerTerms, decodeTimestampTerms, decodeValueLteTerms, hashDelegation, } from "@metamask/delegation-core";
-import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "@metamask/7715-permission-types";
-import { SIGNABLE_DELEGATION_TYPED_DATA, decodeDelegations, encodeDelegations, toDelegationStruct, } from "@metamask/smart-accounts-kit/utils";
+import { ANY_BENEFICIARY, decodeAllowedCalldataTerms, decodeERC20TransferAmountTerms, decodeRedeemerTerms, decodeTimestampTerms, decodeValueLteTerms, hashDelegation, } from "./metamask-smart-account-vendor.js";
+import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "./metamask-smart-account-vendor.js";
+import { SIGNABLE_DELEGATION_TYPED_DATA, decodeDelegations, encodeDelegations, toDelegationStruct, } from "./metamask-smart-account-vendor.js";
 import { getAddress, keccak256, pad, recoverTypedDataAddress, toHex } from "viem";
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
