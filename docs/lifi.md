@@ -1001,3 +1001,26 @@ Principal 400000000000000 wei, exact delivery 394497813408405 wei, actual
 source gas 17239614285600 wei. Both chain proofs are SAFE; residual allowance
 is zero and submission attempts remain one. A failed residual observation
 was retried through normal `operation resume`, without resending.
+
+
+## Fresh account reads within a bridge invocation, 2026-10-08
+
+`BridgeRpc.account()` now reacquires the moving latest block and priority-fee
+suggestion on every call. Approval inclusion or foreground consent can change
+confirmed nonce, allowance, balance and fees within one invocation. Exact
+block-pinned reads retain caching; financial caps, executable pins, send fences
+and RPC budgets remain unchanged. A retained red control returned the previous
+block after modeled approval inclusion. Both builds and 287 tests in 16 LI.FI
+files passed, with all 1140 inputs unchanged and all 744 production JS matching
+test emission. This latent cache defect does not establish the cause of an
+earlier live RPC refusal whose precise transport failure was not retained.
+
+A second Across native funding operation
+`0d640f8a9a5dbb35eed4caaa36be8f143c1c2bf3c2021f1fd06c911b4221bda3`
+completed through normal installed observation at 08:32:33 UTC. Principal
+200000000000000 wei, exact Arbitrum delivery 195027287246397 wei, source gas
+18817999880121 wei; source and destination proofs are SAFE, allowance zero,
+submission attempts one and usage finalized. Native funding does not prove a
+USDC bridge. Explicit Arbitrum receipt configuration uses the official
+`https://arb1.arbitrum.io/rpc` reader after a retained PublicNode HTTP 403;
+the frozen primary RPC origin remains unchanged.

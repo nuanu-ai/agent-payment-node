@@ -221,10 +221,12 @@ export class BridgeRpc implements BridgeRpcPort {
       const data = encodeFunctionData({ abi: ERC20_READ, functionName: "balanceOf", args: [owner] });
       const allowanceData = encodeFunctionData({ abi: ERC20_READ, functionName: "allowance", args: [owner, spender] });
       const l1Data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [16384n] });
+      // Approval inclusion and foreground consent can change the account within this invocation.
+      // Keep exact block-pinned reads cached, but acquire a new moving head and fee suggestion each time.
       const phaseOne: Array<Omit<RpcBatchReadItem, "batchAttempt">> = [
         { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-        { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "snapshot", decoder: rpcFeeBlockValue },
-        ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "snapshot" as const, decoder: rpcQuantityValue }]),
+        { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: rpcFeeBlockValue },
+        ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none" as const, decoder: rpcQuantityValue }]),
       ];
       const head = await this.batchCall(phaseOne);
       let headOffset = 0;
