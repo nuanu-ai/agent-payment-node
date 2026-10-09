@@ -1,7 +1,7 @@
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { Hex } from "./model.js";
-import { NodeMetaMaskProcessRunner, type MetaMaskProcessResult } from "./metamask-process-runner.js";
+import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, type MetaMaskProcessResult } from "./metamask-process-runner.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
 import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices } from "./metamask-process-output.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
@@ -112,7 +112,20 @@ export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
   try {
     result = await handoffRunner.runJson(["wallet", "send-transaction", "--chain-id", String(quote.chainId), "--payload", payload,
       "--intent", `APN ${context.operationId}: native-paid fixed 1000 atomic USDC to Seller`, "--json"], remaining(context.consentExpiresAt));
-  } catch {return {disposition: "unknown", reason: "provider_private_handoff_outcome_unknown"};}
+  } catch (error) {
+    const observed = takeMetaMaskNativeProcessFailureIdentifiers(error);
+    const bound = observed !== undefined && (observed.sender === undefined || observed.sender === PAYER) &&
+      (observed.chainId === undefined || observed.chainId === quote.chainId) &&
+      (observed.vendorProjectHash === undefined || observed.vendorProjectHash === context.vendorProjectHash);
+    // Rejection remains UNKNOWN even when the real failed child emitted a recoverable identifier.
+    try {
+      if ((await readPolicy(runner, context.consentExpiresAt)).vendorProjectHash !== context.vendorProjectHash) refuse();
+      await assertMetaMaskNativeOwnedContextCurrent(scope, context); assertMetaMaskNativeOwnedScope(scope, context);
+    } catch { /* The source deadline is never extended to recover a rejected invocation. */ }
+    return {disposition: "unknown", reason: "provider_private_handoff_outcome_unknown",
+      ...(bound && observed.transactionHash !== undefined ? {transactionHash: observed.transactionHash} : {}),
+      ...(bound && observed.requestId !== undefined ? {requestId: observed.requestId} : {})};
+  }
   let hint: MetaMaskNativeSubmission;
   try { hint = submissionHint(result); } finally {result.stdout.fill(0);}
   try {

@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
+import { isPlainRecord, sha256 } from "./canonical.js";
+import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import type { Hex } from "./model.js";
 import {
   METAMASK_FOREGROUND_TIMEOUT_MS,
   METAMASK_PROCESS_TIMEOUT_MS,
@@ -8,6 +11,44 @@ import {
 } from "./metamask-package.js";
 
 const MAX_JSON_BYTES = 1024 * 1024;
+interface NativeFailureIdentifiers {
+  readonly requestId?: string;
+  readonly transactionHash?: Hex;
+  readonly sender?: string;
+  readonly chainId?: number;
+  readonly vendorProjectHash?: string;
+}
+const nativeFailureIdentifiers = new WeakMap<ApnError, NativeFailureIdentifiers>();
+/** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
+export function takeMetaMaskNativeProcessFailureIdentifiers(error: unknown): NativeFailureIdentifiers | undefined {
+  if (!(error instanceof ApnError)) return undefined;
+  const value = nativeFailureIdentifiers.get(error);
+  nativeFailureIdentifiers.delete(error);
+  return value;
+}
+function observeNativeFailure(bytes: Buffer): NativeFailureIdentifiers | undefined {
+  const parsed = parseMetaMaskProcessOutput(bytes);
+  if (parsed === null) return undefined;
+  const notice = classifyMetaMaskPendingNotices(parsed.notices);
+  if (notice.disposition === "invalid") return undefined;
+  const data = parsed.envelope?.data;
+  if (parsed.envelope !== null && !isPlainRecord(data)) return undefined;
+  if (isPlainRecord(data)) {
+    if (data.mode !== "server" || typeof data.address !== "string" || !/^0x[a-fA-F0-9]{40}$/u.test(data.address)) return undefined;
+    if (data.hash !== undefined && (typeof data.hash !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(data.hash))) return undefined;
+    if (data.pollingId !== undefined && (typeof data.pollingId !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(data.pollingId))) return undefined;
+    if (data.chainId !== undefined && (typeof data.chainId !== "number" || !Number.isSafeInteger(data.chainId) || data.chainId < 1)) return undefined;
+    if (data.projectId !== undefined && (typeof data.projectId !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(data.projectId))) return undefined;
+    if (notice.disposition === "pending" && data.pollingId !== undefined && data.pollingId !== notice.recoveryToken) return undefined;
+  }
+  const requestId = isPlainRecord(data) && typeof data.pollingId === "string" ? data.pollingId : notice.disposition === "pending" ? notice.recoveryToken : undefined;
+  const transactionHash = isPlainRecord(data) && typeof data.hash === "string" ? data.hash.toLowerCase() as Hex : undefined;
+  if (requestId === undefined && transactionHash === undefined) return undefined;
+  return Object.freeze({...(requestId === undefined ? {} : {requestId}), ...(transactionHash === undefined ? {} : {transactionHash}),
+    ...(isPlainRecord(data) ? {sender: (data.address as string).toLowerCase(),
+      ...(typeof data.chainId === "number" ? {chainId: data.chainId} : {}),
+      ...(typeof data.projectId === "string" ? {vendorProjectHash: sha256(data.projectId)} : {})} : {})});
+}
 
 interface CapturedStream {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -90,10 +131,17 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
         child.removeListener("error", onError);
         child.removeListener("close", onClose);
       };
-      const fail = (error: ApnError): void => {
+      const fail = (error: ApnError, observeIdentifiers = false): void => {
         if (settled) return;
         settled = true;
         cleanup();
+        if (observeIdentifiers) {
+          const bytes = Buffer.concat(chunks);
+          try {
+            const observation = observeNativeFailure(bytes);
+            if (observation !== undefined) nativeFailureIdentifiers.set(error, observation);
+          } finally {bytes.fill(0);}
+        }
         zero();
         reject(error);
       };
@@ -113,7 +161,7 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
         if (Buffer.isBuffer(chunk)) chunk.fill(0);
         else Buffer.from(chunk, "utf8").fill(0);
       };
-      const onError = (): void => fail(providerUnavailable("The MetaMask Agent Wallet process could not start."));
+      const onError = (): void => fail(providerUnavailable("The MetaMask Agent Wallet process could not start."), true);
       const onClose = (code: number | null): void => {
         if (settled) return;
         settled = true;
@@ -123,7 +171,7 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
         resolveResult({ exitCode: code ?? 1, stdout });
       };
       const timeout = setTimeout(() => {
-        fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."));
+        fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."), true);
         child.kill();
       }, timeoutMs);
       child.stdout.on("data", onStdout);
