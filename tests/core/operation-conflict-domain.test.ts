@@ -170,6 +170,7 @@ test("persisted Base claims serialize Mega, Sei, Relay and ordinary Base sends i
   for (const claim of claims) {
     const operations = service({});
     Object.defineProperty(operations, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [claim] : [] });
+    Object.defineProperty(operations, "relayLifecycle", { value: async () => "active" });
     await assert.rejects(operations.assertEvmAccountAvailable(PROFILE, 8453, A), blockedOn(claim.record.operationId, "evm:8453", A.toLowerCase()));
     await operations.assertEvmAccountAvailable(PROFILE, 8453, B);
     await operations.assertEvmAccountAvailable(PROFILE, 4326, A);
