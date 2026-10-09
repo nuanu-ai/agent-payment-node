@@ -1,5 +1,7 @@
+import { type SealedBurnRetirementProof } from "./burn-retirement-proof.js";
 import { type CircleOperationV1 } from "./operation-model.js";
 export interface CircleNonceRetirementProof {
+    readonly sealedBurn?: SealedBurnRetirementProof;
     readonly intentHash: string;
     readonly originalApprovalHash: string;
     readonly originalNonceAtomic: string;

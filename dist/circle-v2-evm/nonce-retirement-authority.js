@@ -1,3 +1,4 @@
+import { isSealedBurnRetirement } from "./burn-retirement.js";
 import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { circleBlocked, circleCorrupt } from "./operation-model.js";
@@ -6,7 +7,7 @@ export class CircleRetirementAuthorityStore extends SecureStateStore {
     path(id) { if (!/^[a-f0-9]{64}$/u.test(id))
         circleCorrupt("retirement_id"); return `circle-v2-nonce-retirements/${id}-authority.json`; }
     async load(op) {
-        if (op.destinationChain !== 143 || op.destinationProfile !== "default")
+        if ((op.destinationChain !== 143 || op.destinationProfile !== "default") && !isSealedBurnRetirement(op))
             circleBlocked("finite_nonce_retirement_authority_only");
         const value = await this.readJson(this.path(op.operationId));
         if (value === null)

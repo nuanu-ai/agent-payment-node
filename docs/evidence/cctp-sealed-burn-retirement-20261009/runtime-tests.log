@@ -1,0 +1,27 @@
+✔ sealed burn full production cleanupNonce cancelled: real prepare, journal and ledger (993.489625ms)
+✔ sealed burn full production cleanupNonce finalized: real prepare, journal and ledger (1598.979709ms)
+✔ sealed burn full production cleanupNonce pending: real prepare, journal and ledger (1412.142875ms)
+✔ sealed burn full production cleanupNonce included: real prepare, journal and ledger (1256.676833ms)
+✔ sealed burn full production cleanupNonce lost_reply: real prepare, journal and ledger (1263.4725ms)
+✔ sealed burn full production cleanupNonce changed_again: real prepare, journal and ledger (871.998875ms)
+✔ sealed burn full production cleanupNonce burn_race: real prepare, journal and ledger (765.516666ms)
+✔ sealed burn full production cleanupNonce principal_changed: real prepare, journal and ledger (883.753667ms)
+✔ sealed burn full production cleanupNonce fee_cap: real prepare, journal and ledger (733.622667ms)
+✔ sealed burn full production cleanupNonce tty_expired: real prepare, journal and ledger (850.10125ms)
+✔ sealed burn full production cleanupNonce after_sign_expired: real prepare, journal and ledger (1173.22425ms)
+✔ sealed burn full production cleanupNonce tls_expired: real prepare, journal and ledger (1399.2365ms)
+✔ sealed burn full production cleanupNonce policy_expired: real prepare, journal and ledger (794.304ms)
+✔ sealed burn full production cleanupNonce missing_native: real prepare, journal and ledger (807.21825ms)
+✔ sealed burn full production cleanupNonce unrelated_conflict: real prepare, journal and ledger (708.81325ms)
+✔ sealed burn full production cleanupNonce approval_reorg: real prepare, journal and ledger (859.327167ms)
+✔ sealed burn full production cleanupNonce cleanup_reorg: real prepare, journal and ledger (1303.501417ms)
+✔ sealed burn full production cleanupNonce final_principal_changed: real prepare, journal and ledger (1146.028ms)
+✔ sealed burn full production cleanupNonce final_nonce_changed: real prepare, journal and ledger (1109.922625ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20946.298375

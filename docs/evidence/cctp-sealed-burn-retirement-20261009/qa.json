@@ -1,0 +1,46 @@
+{
+  "sourceParent": "b4ce8a0494e504ee8fb6ed0c537314c500cadfba",
+  "operationId": "4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33",
+  "node": "24.15.0",
+  "typescript": "5.9.2",
+  "compiler": "strict:true, noUncheckedIndexedAccess:true, exactOptionalPropertyTypes:true; inherited production skipLibCheck:true; explicit pinned node typeRoots",
+  "runtimeTests": {
+    "passed": 19,
+    "failed": 0
+  },
+  "circleMcpDiscovery": {
+    "passed": 137,
+    "failed": 0
+  },
+  "realLedgerConsumedAtomic": [
+    "0",
+    "1116903336000",
+    "0",
+    "1310720000000",
+    "0"
+  ],
+  "legacyCase": "old unknown-approval tests passed; absent optional metadata and legacy binding/proof bodies unchanged",
+  "liveEffects": false,
+  "productionBuild": "PASS",
+  "repeatProductionEmission": {
+    "files": 2439,
+    "mismatches": []
+  },
+  "nonOwnedGeneratedDeclarationsPreservedAtParent": [
+    "dist/facilitator-gasless/receipt.d.ts",
+    "dist/facilitator-gasless/schema.d.ts",
+    "dist/facilitator-gasless/service.d.ts",
+    "dist/gasless/catalog.d.ts",
+    "dist/gasless/schema.d.ts",
+    "dist/lifi/non-evm-source-journal.d.ts",
+    "dist/lifi/receipt.d.ts",
+    "dist/lifi/rpc-adapter.d.ts",
+    "dist/lifi/rpc-batch-codec.d.ts",
+    "dist/lifi/schema.d.ts",
+    "dist/lifi/service.d.ts",
+    "dist/metamask-gasless/catalog.d.ts",
+    "dist/metamask-smart-account-vendor.d.ts",
+    "dist/relay/status.d.ts",
+    "dist/x402-network.d.ts"
+  ]
+}

@@ -1,0 +1,9 @@
+# Sealed-burn retirement source gate
+
+Only saved Sei/seller4ee is admitted by the new versioned intent/proof. Unknown original burn84 is never signed or dispatched. A new approve-zero84 is one-use fenced, current-policy authorized for60 seconds, and bounded by the original cleanup15T hold. Both original material identities, ciphertext headers and journal prefix are retained.
+
+The full production runtime tests use real repository, policy activations, owner locks, retirement sidecars, SIGN/SEND claims and AssetUsageLedger. Only wallet signer/network responses are mocked; no production prepare/retirement proof override is used.19 cases cover finalized accounting, exact old pending transaction, cancelled consent, restored journals, lost replies, expiry after sign/TLS, policy expiry/missing native admission, unrelated conflicts, original approval/canonical burn/cleanup reorgs, principal and finalized-nonce drift, and full fee cap. Negative identity/envelope/replacement-floor assertions run inside the cancelled case. Original approval/burn records/prefix/policies remain equal to the saved parent. Included/ambiguous outcomes never retire holds.
+
+Combined Circle/MCP/discovery suite137/137. This uses repository strict source checking with its existing skipLibCheck option; it is not a claim that all third-party dependency declarations pass standalone library checking. Production build and repeat emission are checked separately. Live financial acceptance remains for a separately installed consumer and independent gate; no real keys, profiles, policies, ledger or money were changed.
+
+Repeat production emission matched2,439 files byte-for-byte before preserving15 non-owned generated declaration-only changes at the parent. Owned Circle outputs remain exact fresh emissions. All owned source/test modules are below500 lines.

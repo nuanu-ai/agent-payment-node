@@ -1,4 +1,5 @@
 import { assertCircleEffectGuard } from "./lifecycle.js";
+import { isSealedBurnRetirement } from "./burn-retirement.js";
 import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction } from "viem";
@@ -19,6 +20,15 @@ export class CircleEffectStore extends SecureStateStore {
     async assertCleanupAbsent(op) { if (await this.readJson(this.path(op, "cleanup")) !== null)
         circleBlocked("retirement_unclaimed_cleanup_material_present"); }
     async assertRetirementHeaders(op) {
+        if (isSealedBurnRetirement(op)) {
+            for (const effect of op.effects.slice(0, 2)) {
+                const e = await this.readJson(this.path(op, effect.role));
+                if (!isPlainRecord(e) || !exactKeys(e, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) || e.schemaVersion !== VERSION ||
+                    e.operationId !== op.operationId || e.role !== effect.role || e.fingerprint !== op.fingerprint || e.envelopeHash !== effect.envelope.envelopeHash || typeof e.ciphertext !== "string" || e.ciphertext.length === 0)
+                    circleBlocked("retirement_burn_material_header_required");
+            }
+            return;
+        }
         const approval = op.effects[0], burn = op.effects[1];
         const value = await this.readJson(this.path(op, "approval"));
         if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) ||

@@ -1,3 +1,5 @@
+import { isSealedBurnRetirement, sealedBurnReplacement, assertSealedBurnReplacement, SEALED_BURN_HASH, SEALED_BURN_MATERIAL } from "./burn-retirement.js";
+import { sealedBurnEvidence, assertBurnReplacementAccount } from "./burn-retirement-rpc.js";
 import { CircleRetirementAuthorityStore, assertCircleRetirementWindow } from "./nonce-retirement-authority.js";
 import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { assertCircleNonceRetirementCase, retireCircleNonce } from "./nonce-retirement.js";
@@ -211,9 +213,9 @@ export class CircleEvmService {
                 await this.usage.confirm(op, frame?.policies ?? op.policies);
             },
             approve: async (op, role, deadline) => role === "cleanup" && await this.retirements.intent(op) !== null ? exactChainConsent([
-                "Agent Payment Node expired Circle approval nonce cleanup", `Operation: ${op.operationId}`,
+                isSealedBurnRetirement(op) ? "Agent Payment Node sealed Circle burn nonce retirement" : "Agent Payment Node expired Circle approval nonce cleanup", `Operation: ${op.operationId}`,
                 `Source owner: ${op.profile} / ${op.sourceCustody.walletAddress} / eip155:42161`,
-                `Original unknown approval: ${op.effects[0].transactionHash}; nonce ${op.effects[0].envelope.nonceAtomic}`,
+                isSealedBurnRetirement(op) ? `Original unknown sealed burn: ${op.effects[1].transactionHash}; nonce84. Confirmed approval83 remains historical.` : `Original unknown approval: ${op.effects[0].transactionHash}; nonce ${op.effects[0].envelope.nonceAtomic}`,
                 `One NEW approve-zero transaction: USDC ${CIRCLE_SOURCE_TOKEN}; spender ${CIRCLE_MESSENGER}; ETH value 0.`,
                 "Full signed native fee upper at most 15000000000000 wei, charged against the existing cleanup hold. Fresh authority lasts at most 60 seconds and both policy windows.",
                 `Frozen cleanup: ${canonicalJson(op.effects.find(e => e.role === "cleanup").envelope)}`,
@@ -243,9 +245,22 @@ export class CircleEvmService {
                 verifyCircleGasEnvelope(e, e.chainId);
                 await remote.identity();
                 const [latest, pending, balance] = await Promise.all([remote.call("eth_getTransactionCount", [e.from, "latest"]), remote.call("eth_getTransactionCount", [e.from, "pending"]), remote.call("eth_getBalance", [e.from, "pending"])]);
-                if (circleUint(latest).toString() !== e.nonceAtomic || circleUint(pending).toString() !== e.nonceAtomic || circleUint(balance) < BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic))
+                const intent = effect.role === "cleanup" ? await this.retirements.intent(op) : null;
+                if (isSealedBurnRetirement(op) && intent !== null) {
+                    await assertBurnReplacementAccount(source, op, String(latest), String(pending));
+                    assertSealedBurnReplacement(op, e);
+                    const evidence = await sealedBurnEvidence(source, op, allowance);
+                    if (evidence.usdcBalanceAtomic !== intent.sealedBurn?.usdcBalanceAtomic || await allowance() !== "40100")
+                        circleBlocked("retirement_source_principal_or_allowance_changed");
+                    const head = await source.block("latest"), tip = circleUint(await source.call("eth_maxPriorityFeePerGas", []));
+                    if (BigInt(e.maxPriorityFeePerGasAtomic) < tip || BigInt(e.maxFeePerGasAtomic) < circleUint(head.baseFeePerGas) * 2n + BigInt(e.maxPriorityFeePerGasAtomic))
+                        circleBlocked("retirement_replacement_network_fee_changed");
+                }
+                else if (circleUint(latest).toString() !== e.nonceAtomic || circleUint(pending).toString() !== e.nonceAtomic)
                     circleBlocked("nonce_or_native_balance_changed");
-                if (effect.role === "cleanup" && await this.retirements.intent(op) !== null && await allowance() !== "0")
+                if (circleUint(balance) < BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic))
+                    circleBlocked("nonce_or_native_balance_changed");
+                if (intent !== null && !isSealedBurnRetirement(op) && await allowance() !== "0")
                     circleBlocked("retirement_zero_allowance_changed");
                 if (effect.role === "approval" && await allowance() !== "0" || effect.role === "burn" && await allowance() !== "40100")
                     circleBlocked("exact_source_allowance_changed");
@@ -372,14 +387,24 @@ export class CircleEvmService {
                 const existing = await this.retirements.intent(op);
                 if (existing !== null)
                     return existing;
-                const account = await source.account(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), nonce = op.effects[0].envelope.nonceAtomic;
-                if (account.latestNonceAtomic !== nonce || account.pendingNonceAtomic !== nonce || account.allowanceAtomic !== "0")
+                const account = await source.account(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), nonce = op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic;
+                let evidence;
+                if (isSealedBurnRetirement(op)) {
+                    await assertBurnReplacementAccount(source, op, account.latestNonceAtomic, account.pendingNonceAtomic);
+                    if (account.allowanceAtomic !== "40100")
+                        circleBlocked("retirement_original_nonce_or_allowance_changed");
+                    evidence = await sealedBurnEvidence(source, op, allowance);
+                }
+                else if (account.latestNonceAtomic !== nonce || account.pendingNonceAtomic !== nonce || account.allowanceAtomic !== "0")
                     circleBlocked("retirement_original_nonce_or_allowance_changed");
-                const envelope = await source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), nonce);
+                const quote = await source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), nonce);
+                const envelope = isSealedBurnRetirement(op) ? sealedBurnReplacement(op, quote, circleUint(await source.call("eth_maxPriorityFeePerGas", []))) : quote;
+                if (isSealedBurnRetirement(op) && BigInt(account.nativeBalanceAtomic) < BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic))
+                    circleBlocked("retirement_native_full_upper_balance");
                 // Strict cleanup schema includes the FULL signed gas upper <=15T, never only the estimate.
                 const effect = { role: "cleanup", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null };
                 validateCircle(advanceCircle(op, { effects: [...op.effects, effect], state: "cleanup_required" }, "nonce_retirement_cleanup_frozen", this.now()));
-                return this.retirements.start(op, envelope);
+                return this.retirements.start(op, envelope, evidence);
             },
             retirementProof: async (op, intent) => {
                 await this.retirements.assertClaim(op, "sign");
@@ -399,7 +424,14 @@ export class CircleEvmService {
                 if (circleUint(nonce) <= BigInt(intent.cleanupEnvelope.nonceAtomic) || zeroAllowance !== "0" || await allowance() !== "0" || circleHex((await source.block(headTag)).hash, 32) !== circleHex(head.hash, 32))
                     circleBlocked("retirement_finalized_nonce_or_allowance_changed");
                 await this.custody.assertRetirementHeaders(op);
-                const body = { intentHash: intent.intentHash, originalApprovalHash: op.effects[0].transactionHash, originalNonceAtomic: intent.cleanupEnvelope.nonceAtomic,
+                let sealedBurn;
+                if (isSealedBurnRetirement(op)) {
+                    const evidence = await sealedBurnEvidence(source, op, allowance);
+                    if (circleUint(nonce) !== 85n || evidence.usdcBalanceAtomic !== intent.sealedBurn?.usdcBalanceAtomic || String(await source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], headTag)) !== evidence.usdcBalanceAtomic || String(await source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], String(receipt.blockNumber))) !== evidence.usdcBalanceAtomic || circleHex((await source.block(headTag)).hash, 32) !== circleHex(head.hash, 32))
+                        circleBlocked("retirement_finalized_principal_or_nonce_changed");
+                    sealedBurn = { version: "apn.circle-sealed-burn-retirement-proof.v1", originalBurnHash: SEALED_BURN_HASH, originalBurnMaterialHash: SEALED_BURN_MATERIAL, ...evidence };
+                }
+                const body = { ...(sealedBurn === undefined ? {} : { sealedBurn }), intentHash: intent.intentHash, originalApprovalHash: op.effects[0].transactionHash, originalNonceAtomic: intent.cleanupEnvelope.nonceAtomic,
                     finalizedNonceAtomic: circleUint(nonce).toString(), finalizedBlockHash: circleHex(head.hash, 32), finalizedBlockNumberAtomic: circleUint(head.number).toString(), cleanupTransactionHash: cleanup.transactionHash, actualCleanupFeeAtomic: canonicalProof.actualFeeAtomic };
                 return { ...body, proofHash: hashObject(body) };
             },
