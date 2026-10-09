@@ -84,7 +84,7 @@ export async function merchantCurrent(rpc: MerchantRpcPort): Promise<{
 }
 export function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope): void {
     if (current.nonce !== envelope.nonce || BigInt(current.gas) > BigInt(envelope.gas) || BigInt(current.maxFeePerGas) > BigInt(envelope.maxFeePerGas) || BigInt(current.maxPriorityFeePerGas) > BigInt(envelope.maxPriorityFeePerGas) ||
-        BigInt(current.native) < BigInt(envelope.maximumNativeFee) || BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
+        BigInt(current.native) < BigInt(envelope.gas) * BigInt(envelope.maxFeePerGas) || BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
         refuse("merchant_nonce_fee_balance_changed");
 }
 export function merchantHeader(value: unknown): Record<string, unknown> {

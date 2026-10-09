@@ -60,6 +60,7 @@ export interface MerchantOperation {
         readonly revision: number;
         readonly activationDigest: string;
     };
+    readonly effectBinding?: { readonly policyEndsAt: string; readonly nativeAmountAtomic: string };
     readonly createdAt: string;
     readonly expiresAt: string;
     readonly state: MerchantPhase;
@@ -86,7 +87,7 @@ export interface MerchantOperation {
 }
 export function merchantFingerprint(o: Omit<MerchantOperation, "fingerprint" | "integrityHash">): string {
     return hashObject({ schemaVersion: o.schemaVersion, kind: o.kind, operationId: o.operationId, profile: o.profile, profileHash: o.profileHash,
-        idempotencyHash: o.idempotencyHash, requestHash: o.requestHash, custody: o.custody, frozen: o.frozen, envelope: o.envelope, policy: o.policy, createdAt: o.createdAt, expiresAt: o.expiresAt });
+        idempotencyHash: o.idempotencyHash, requestHash: o.requestHash, custody: o.custody, frozen: o.frozen, envelope: o.envelope, policy: o.policy, ...(o.effectBinding === undefined ? {} : {effectBinding:o.effectBinding}), createdAt: o.createdAt, expiresAt: o.expiresAt });
 }
 export function sealMerchant(o: Omit<MerchantOperation, "integrityHash">): MerchantOperation { return validateMerchant({ ...o, integrityHash: hashObject(o) }); }
 export function merchantSnapshot(o: Pick<MerchantOperation, "state" | "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts">): string { return hashObject({ state: o.state, signingAttempts: o.signingAttempts, submissionAttempts: o.submissionAttempts, txHash: o.txHash, receipt: o.receipt, deliveryAttempts: o.deliveryAttempts }); }
@@ -97,7 +98,7 @@ export function merchantMove(o: MerchantOperation, state: MerchantPhase, at: str
     return sealMerchant({ ...body, ...changes, state, terminal: state === "delivered" || state === "reverted", events: [...o.events, event] });
 }
 export function validateMerchant(v: unknown): MerchantOperation {
-    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", "envelope", "policy", "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
+    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", "envelope", "policy", ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
         refuse("merchant_state_schema");
     const o = v as unknown as MerchantOperation, { integrityHash, ...body } = o;
     if (!["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted"].includes(o.state) || !exactKeys(o.policy as unknown as Record<string,unknown>, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
@@ -112,6 +113,7 @@ export function validateMerchant(v: unknown): MerchantOperation {
         BigInt(o.envelope.nonce) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(o.envelope.gas) < 21000n || BigInt(o.envelope.maxPriorityFeePerGas) > BigInt(o.envelope.maxFeePerGas) ||
         BigInt(o.envelope.maximumNativeFee) < BigInt(o.envelope.gas) * BigInt(o.envelope.maxFeePerGas))
         refuse("merchant_state_envelope");
+    if (o.effectBinding !== undefined && (!isPlainRecord(o.effectBinding) || !exactKeys(o.effectBinding,["policyEndsAt","nativeAmountAtomic"]) || !Number.isFinite(Date.parse(o.effectBinding.policyEndsAt)) || new Date(o.effectBinding.policyEndsAt).toISOString() !== o.effectBinding.policyEndsAt || o.effectBinding.nativeAmountAtomic !== (BigInt(o.envelope.gas)*BigInt(o.envelope.maxFeePerGas)).toString())) refuse("merchant_effect_binding");
     for (const t of [o.createdAt, o.expiresAt])
         if (!Number.isFinite(Date.parse(t)) || new Date(t).toISOString() !== t)
             refuse("merchant_state_time");

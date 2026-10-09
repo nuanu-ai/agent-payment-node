@@ -10,6 +10,14 @@ The owner policy must explicitly admit token USDm on the x402 rail with this exa
 {"chain":"eip155:4326","kind":"token","identifier":"0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7","rail":"x402","maximumPerTransferAtomic":"1000000000000000","dailyLimitAtomic":"1000000000000000","mechanism":{"provider":"x402engine-erc20-transfer-proof","reference":"megaeth-usdm-crypto-price-v1"}}
 ```
 
+The same finite x402 mechanism must additionally admit native ETH on `eip155:4326` with owner per-transfer/daily caps covering the frozen signed `gasLimit * maxFeePerGas` (at most the CLI native fee ceiling):
+
+```json
+{"chain":"eip155:4326","kind":"native","rail":"x402","maximumPerTransferAtomic":"100000000000000","dailyLimitAtomic":"100000000000000","mechanism":{"provider":"x402engine-erc20-transfer-proof","reference":"megaeth-usdm-crypto-price-v1"}}
+```
+
+This finite native row supports only this merchant gas hold and does not admit generic MegaETH direct transfers. Native wallet balance must cover the signed upper, rather than the broader unsigned owner ceiling. Successful finalized usage conservatively retains the signed upper; a proven reverted transaction charges its canonical actual gas consumption.
+
 Listing does not activate this admission. Use normal owner policy stage/activate with the other required existing admissions preserved. Funding and policy activation are separate owner actions.
 
 ```sh
@@ -22,7 +30,7 @@ apn x402 merchant status --operation <same-operation-id>
 
 Preparation freezes the full canonical v2 challenge, resource and exact selected requirement, the owner/provider binding, active policy activation, nonce and estimated MegaETH gas envelope. A 300-second local deadline and UTC-day guard apply before signature and broadcast. Foreground approval displays exact principal, payee, fee ceiling, policy and hashes and requires an eight-hex confirmation. RPC is pinned to `https://mainnet.megaeth.com/rpc`, paced through the shared provider coordinator and capped at 24 physical POSTs per invocation.
 
-Before and after confirmation, the adapter verifies current proxy/implementation storage and code, token metadata/domain, empty owner code, pending nonce, balances, real `eth_estimateGas` and fees. It reserves common asset usage, records `signing_started` before custody and stores signed bytes in create-only AES-256-GCM material. It records the transaction hash and permanent first-send fence before the paced `eth_sendRawTransaction`. Its trusted callback rechecks local expiry, owner and policy immediately before the actual POST. A crash, timeout, wrong returned hash or lost response cannot invoke custody or broadcast again.
+Before and after confirmation, the adapter verifies current proxy/implementation storage and code, token metadata/domain, empty owner code, pending nonce, balances, real `eth_estimateGas` and fees. It reserves common asset usage, records `signing_started` before custody and stores signed bytes in create-only AES-256-GCM material. It records the transaction hash and permanent first-send fence before the paced `eth_sendRawTransaction`. The entire foreground approval, key loading, signing and dispatch hold the distinct active-allowlist profile lock inside the wallet/operation/address locks. A private live authority binds the consent frame, both exact holds and signed material and ends at the earliest of the 120-second foreground interval, operation deadline or policy expiration. It is disposed on return; persisted metadata cannot create it. Its trusted callback rechecks that authority on the authenticated TLS connection immediately before request.end sends the financial body. Independent create-only fsynced signing and submission claims and a pre-key retained-material check survive restored operation/usage state. A crash, timeout, wrong returned hash or lost response cannot invoke custody or broadcast again.
 
 An observer independently checks the exact transaction envelope, canonical finalized receipt, implementation pins at the receipt block, actual fee ceiling, and exactly one matching token Transfer. Reverts remain separately proven. Only a successful finalized transfer can disclose canonical `PAYMENT-SIGNATURE` base64 JSON `{x402Version:2,payload:{txHash},resource:originalResource,accepted:originalRequirement}`. No token authorization signature is fabricated.
 
