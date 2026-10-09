@@ -124,7 +124,7 @@ export class MetaMaskGaslessRpc {
             intent.relayTo !== this.deployment.row.protocol.manager.address)
             mmFail("mm_gasless_rpc_binding");
         validateMetaMaskGaslessSnapshot(intent.initialSnapshot, { chainId: this.chainId,
-            endpointHash: frozen.endpointHash, endpointOrigin: frozen.endpointOrigin, grossAtomic: intent.request.grossAtomic });
+            endpointHash: frozen.endpointHash, endpointOrigin: frozen.endpointOrigin, grossAtomic: intent.preparedGrossAtomic ?? intent.request.grossAtomic });
         mmQuote(intent.quote, intent.request, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt");
         mmAssertStableQuote(intent.request, intent.quote, "mm_gasless_state_corrupt");
         mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,

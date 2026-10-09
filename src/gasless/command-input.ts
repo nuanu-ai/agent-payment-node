@@ -4,7 +4,7 @@ import { GASLESS_ZERO_ADDRESS, gaslessAddress, gaslessFailure, gaslessUint } fro
 /** Shared command surface only; each provider retains its own strict persisted schema. */
 export const GASLESS_COMMAND_CHAINS = [1, 10, 130, 137, 143, 1329, 8453, 42161, 43114, 59144] as const;
 export type GaslessCommandChainId = typeof GASLESS_COMMAND_CHAINS[number];
-export type GaslessCommandRequest = Omit<GaslessRequest, "chainId"> & { readonly chainId: GaslessCommandChainId };
+export type GaslessCommandRequest = Omit<GaslessRequest, "chainId"> & { readonly chainId: GaslessCommandChainId; readonly fixedNet?: { readonly netAtomic: string; readonly maxGrossAtomic: string } };
 export function gaslessCommandChain(value: number): GaslessCommandChainId {
   if (!GASLESS_COMMAND_CHAINS.includes(value as GaslessCommandChainId)) gaslessFailure("APN_INVALID_INPUT", "gasless_chain_unsupported");
   return value as GaslessCommandChainId;
@@ -18,5 +18,9 @@ export function gaslessCommandRequest(request: GaslessCommandRequest): GaslessCo
   const minimum = gaslessUint(request.minReceivedAtomic, true, "APN_INVALID_INPUT");
   gaslessUint(request.maxFeeAtomic, false, "APN_INVALID_INPUT");
   if (gross <= 0n || minimum <= 0n || minimum > gross) gaslessFailure("APN_INVALID_INPUT", "gasless_amount_bounds");
+  if (request.fixedNet) {
+    if (gaslessUint(request.fixedNet.netAtomic, true, "APN_INVALID_INPUT") !== minimum ||
+      gaslessUint(request.fixedNet.maxGrossAtomic, true, "APN_INVALID_INPUT") !== gross) gaslessFailure("APN_INVALID_INPUT", "gasless_fixed_net_bounds");
+  }
   return request;
 }

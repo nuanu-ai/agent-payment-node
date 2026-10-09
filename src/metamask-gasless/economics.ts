@@ -12,7 +12,14 @@ export function mmEconomics(request: MetaMaskGaslessRequest): { gross: bigint; c
   mmRequest(request);
   const gross = mmUint(request.grossAtomic, true), minimum = mmUint(request.minReceivedAtomic, true);
   const maximum = mmUint(request.maxFeeAtomic), cap = maximum < gross - minimum ? maximum : gross - minimum;
-  return { gross, cap, initialNet: gross - cap };
+  return { gross, cap, initialNet: request.fixedNet ? mmUint(request.fixedNet.netAtomic, true) : gross - cap };
+}
+/** Actual debit always equals the exact two-transfer batch, independent of the owner ceiling. */
+export function mmActualGross(quote: MetaMaskGaslessQuoteMaterial, reason: MetaMaskGaslessFailureReason = "mm_gasless_input"): string {
+  return (mmUint(quote.netAtomic, true, reason) + mmUint(quote.feeAtomic, false, reason)).toString();
+}
+export function mmUnusedGross(request: MetaMaskGaslessRequest, quote: MetaMaskGaslessQuoteMaterial): string {
+  return (mmUint(request.grossAtomic, true) - BigInt(mmActualGross(quote))).toString();
 }
 export function mmQuoteHash(quote: MetaMaskGaslessQuoteMaterial): string {
   return hashObject({ netAtomic: quote.netAtomic, feeAtomic: quote.feeAtomic,
@@ -24,7 +31,7 @@ export function mmQuote(value: unknown, request: MetaMaskGaslessRequest, binding
   const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash"], reason);
   const { row } = mmRegistry(request.chainId), economics = mmEconomics(request);
   const net = mmUint(q.netAtomic, true, reason), fee = mmUint(q.feeAtomic, false, reason);
-  if (q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic)) mmFail(reason);
+  if ((request.fixedNet && q.netAtomic !== request.fixedNet.netAtomic) || q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic)) mmFail(reason);
   if (fee > economics.cap) mmFail(reason === "mm_gasless_state_corrupt" ? reason : "mm_gasless_fee_cap");
   const feeRecipient = mmCanonicalAddress(q.feeRecipient, reason);
   const excluded = [MM_ZERO_ADDRESS, binding.address, row.token, ...Object.values(row.protocol).map(p => p.address)];
@@ -42,7 +49,10 @@ export function mmQuote(value: unknown, request: MetaMaskGaslessRequest, binding
 }
 export function mmAssertStableQuote(request: MetaMaskGaslessRequest, quote: MetaMaskGaslessQuote,
   reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid"): void {
-  if (mmUint(quote.netAtomic, true, reason) + mmUint(quote.feeAtomic, false, reason) !== mmUint(request.grossAtomic, true, reason)) mmFail(reason);
+  const actual = BigInt(mmActualGross(quote, reason));
+  if (request.fixedNet) {
+    if (quote.netAtomic !== request.fixedNet.netAtomic || actual > mmUint(request.fixedNet.maxGrossAtomic, true, reason)) mmFail(reason);
+  } else if (actual !== mmUint(request.grossAtomic, true, reason)) mmFail(reason);
 }
 /**
  * The owner approves a maximum, not one exact price. A quote taken after that approval is admissible when its fee
@@ -59,7 +69,8 @@ export function mmRepriceWithinCap(value: unknown, request: MetaMaskGaslessReque
 export function mmPolicyHash(profileHash: string, binding: MetaMaskGaslessBinding, request: MetaMaskGaslessRequest): string {
   return hashObject({ purpose: "apn.metamask-gasless.policy.v1", profileHash, binding,
     chainId: request.chainId, token: mmRegistry(request.chainId).row.token, recipient: request.recipient,
-    grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic });
+    grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic,
+    ...(request.fixedNet ? { fixedNet: request.fixedNet } : {}) });
 }
 export function mmAssertIntentEconomics(intent: MetaMaskGaslessIntent, profileHash: string): void {
   const r = mmRequest(intent.request, "mm_gasless_state_corrupt");

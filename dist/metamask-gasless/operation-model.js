@@ -22,6 +22,6 @@ export function mmRequestHash(profileHash, intent) {
     const r = intent.request;
     return hashObject({ kind: MM_OPERATION_KIND, profileHash, providerId: "metamask-agent-wallet",
         chainId: r.chainId, token: intent.token, recipient: r.recipient, grossAtomic: r.grossAtomic,
-        maxFeeAtomic: r.maxFeeAtomic, minReceivedAtomic: r.minReceivedAtomic });
+        maxFeeAtomic: r.maxFeeAtomic, minReceivedAtomic: r.minReceivedAtomic, ...(r.fixedNet ? { fixedNet: r.fixedNet } : {}) });
 }
 //# sourceMappingURL=operation-model.js.map

@@ -2,7 +2,7 @@ import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
 import { MetaMaskGaslessClock } from "./clock.js";
-import { mmPolicyHash } from "./economics.js";
+import { mmActualGross, mmPolicyHash } from "./economics.js";
 import { mmAssertProfileBinding } from "./identity.js";
 import { newMetaMaskGaslessOperation } from "./journal/transitions.js";
 import { MM_TTL_MS, MM_ZERO_ADDRESS } from "./model.js";
@@ -56,13 +56,13 @@ export class MetaMaskGaslessPreparation {
                 clock.check();
                 const checkedUnsigned = mmValidateUnsigned(unsigned, unsignedInput);
                 const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: checkedUnsigned.delegationHash,
-                    grossAtomic: request.grossAtomic });
+                    grossAtomic: mmActualGross(quote) });
                 clock.check(undefined, [snapshot.observedAt]);
                 const initialSnapshot = validateMetaMaskGaslessSnapshot(snapshot, { chainId: request.chainId,
-                    endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: request.grossAtomic });
+                    endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: mmActualGross(quote) });
                 const prepared = clock.fresh(initialSnapshot.observedAt), preparedAt = new Date(prepared).toISOString();
                 const intent = { profile, request, binding, ...checkedUnsigned, token: row.token, decimals: 6,
-                    deploymentEvidenceHash, initialSnapshot, quote, requestId: mmUuid(this.o.ids.next()), preparedAt,
+                    deploymentEvidenceHash, initialSnapshot, ...(request.fixedNet ? { preparedGrossAtomic: mmActualGross(quote) } : {}), quote, requestId: mmUuid(this.o.ids.next()), preparedAt,
                     expiresAt: new Date(prepared + MM_TTL_MS).toISOString(), policyHash: mmPolicyHash(profileHash, binding, request) };
                 const operation = newMetaMaskGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);
                 clock.check(operation);

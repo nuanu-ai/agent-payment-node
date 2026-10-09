@@ -515,7 +515,7 @@ recipient at or above `--min-received`. A repriced batch has its delegation
 re-derived, and that repriced batch and delegation are what the durable dispatch
 marker records and the single provider POST carries. A fee above `--max-fee`
 refuses with `APN_FEE_BUDGET_EXCEEDED / mm_gasless_fee_cap` and dispatches
-nothing. There is no unused amount or refund for a successful MetaMask batch. The
+nothing. There is no unused amount or refund for a successful exact-gross MetaMask batch. The
 recipient and fee recipient must both differ from the sender and each other.
 
 ```sh
@@ -525,6 +525,37 @@ apn gasless transfer prepare --profile metamask --chain 8453 \
   --idempotency-key <unique-key>
 apn gasless transfer approve --operation <operation-id>
 ```
+
+MetaMask server wallets also accept an explicit fixed recipient net:
+
+```sh
+apn gasless transfer prepare --profile metamask --chain 42161 \
+  --to <recipient-address> --net-amount-atomic 1000 \
+  --max-gross-atomic 25000 --max-fee-atomic 24000 \
+  --idempotency-key <unique-key>
+apn gasless transfer approve --operation <operation-id>
+```
+
+These three atomic options are required together and cannot combine with
+`--amount`, `--max-fee` or `--min-received`. Other wallet adapters refuse this
+mode. All quantities are canonical integer USDC atoms. Preparation quotes the
+exact net once and computes the estimated debit as net plus fee. Confirmation
+quotes that same net again; the fee and actual debit may change only inside both
+approved ceilings. Current safe and head balances must cover the actual debit.
+The approval screen shows the fixed net, estimated debit and fee, both ceilings
+and the original expiry. The durable dispatch records the actual quote and its
+one-use exact batch while preserving the prepared intent and approval fingerprint.
+
+Fixed-net requests persist `request.fixedNet` with exact `netAtomic` and
+`maxGrossAtomic` keys. The request's `grossAtomic` is the maximum owner budget,
+not the actual debit. `preparedGrossAtomic` binds the original snapshot to its
+quoted debit. Both additions are absent from old exact-gross records, preserving
+their hashes and meaning. Public fixed-net transfers expose
+`requested_fixed_net_atomic` and `maximum_gross_atomic`; `gross_atomic` is the
+prepared estimate before dispatch and the actual dispatched estimate afterward.
+A completed receipt proves debit equals delivered net plus fee and reports
+`unused_gross_atomic` as maximum gross minus actual debit. That unused budget
+stays in the wallet; it is not a refund or an additional transfer.
 
 Preparation does not sign or submit. Approval displays the exact USDC debit,
 recipient amount, quoted fee, fee ceiling, minimum receipt and persistent
