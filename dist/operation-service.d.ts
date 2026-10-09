@@ -1,4 +1,5 @@
 import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
+import { type CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import type { CommandOutcome } from "./commands.js";
@@ -23,6 +24,9 @@ import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from ".
 export type StoredMoneyOperation = {
     readonly kind: "sei_gaszip";
     readonly record: SeiFundingRecord;
+} | {
+    readonly kind: "circle_route";
+    readonly record: CircleOperationV1;
 } | {
     readonly kind: "permit2_production";
     readonly record: Permit2ProductionRecord;
@@ -97,6 +101,9 @@ export declare class OperationService {
     private permit2ProductionOperations;
     private permit2LegacyOperations;
     private profileOperations;
+    private circleOperations;
+    /** Both Circle signing accounts are held under their existing profile locks. */
+    assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved?: boolean): Promise<void>;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;

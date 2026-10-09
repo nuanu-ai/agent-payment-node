@@ -1,4 +1,5 @@
 import { SeiFundingService } from "./lifi/sei-gaszip-service.js";
+import { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import { createSpecialApnCore } from "./runtime-factory-special.js";
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
@@ -222,6 +223,7 @@ export function createApnCore(bound, options = {}) {
         ...(relayExecute === undefined ? {} : { relayExecute, relayExecuteConfirmation: relayExecuteConfirmation }),
         ...(relayNativeExecute === undefined ? {} : { relayNativeExecute }),
         ...(stargateNative === undefined ? {} : { stargateNative }),
+        circleEvm: options.circleEvm ?? new CircleEvmService(state, wrappingSecret, process.env, () => clock.now().getTime()),
         ...(stargateToken === undefined ? {} : { stargateToken }),
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
         ...(bound.request.command === "relay.prepare" || bound.request.command === "relay.base.prepare" ||

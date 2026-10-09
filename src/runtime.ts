@@ -1,4 +1,5 @@
 import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
+import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
@@ -89,6 +90,7 @@ export interface CoreDependencies {
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
+  readonly circleEvm?: CircleEvmService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
@@ -162,6 +164,7 @@ export class RuntimeContext {
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
+  readonly circleEvm?: CircleEvmService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
@@ -236,6 +239,7 @@ export class RuntimeContext {
     if (dependencies.relayNativeExecute !== undefined) this.relayNativeExecute = dependencies.relayNativeExecute;
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;
+    if (dependencies.circleEvm !== undefined) this.circleEvm = dependencies.circleEvm;
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
     if (dependencies.uniswapRuntime !== undefined) this.uniswapRuntime = dependencies.uniswapRuntime;

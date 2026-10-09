@@ -805,6 +805,13 @@ apn circle source submit --profile <profile> --expected-payer <base-address> --r
 apn sei funding prepare --profile <profile> --expected-payer <address> --amount-atomic <wei> --minimum-output-atomic <sei-wei> --maximum-fee-atomic <wei> --idempotency-key <key>
 apn sei funding approve --operation <operation-id>
 apn sei funding status --operation <operation-id>
+apn circle evm prepare --profile <profile> --destination-profile <profile> --destination-chain <string> --idempotency-key <idempotency_key>
+apn circle evm approve-source --operation <operation_id>
+apn circle evm approve-mint --operation <operation_id>
+apn circle evm observe --operation <operation_id>
+apn circle evm refresh-attestation --operation <operation_id>
+apn circle evm cleanup --operation <operation_id>
+apn circle evm status --operation <operation_id>
 apn oneclick source submit --lane <lane> --profile <profile> --expected-payer <evm-address> --recipient <tron-or-solana-address> --amount-atomic <origin atomic> --min-output-atomic <destination atomic> --max-quoted-loss-atomic <lane loss atomic> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>
 apn oneclick source status --operation <operation-id>
 apn gasless usdt prepare --profile <profile> --to <address> --amount <gross-USDT> --max-fee <USDT> --min-received <USDT> --idempotency-key <key>

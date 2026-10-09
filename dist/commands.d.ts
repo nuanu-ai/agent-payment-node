@@ -17,6 +17,15 @@ export type CommandRequest = {
     readonly command: "sei.funding.approve" | "sei.funding.status";
     readonly operationId: string;
 } | {
+    readonly command: "circle.evm.prepare";
+    readonly profile: string;
+    readonly destinationProfile: string;
+    readonly destinationChain: 1329 | 59144 | 143;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.status";
+    readonly operationId: string;
+} | {
     readonly command: "x402.permit2.approve";
     readonly profile: string;
     readonly url: string;

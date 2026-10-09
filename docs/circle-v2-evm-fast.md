@@ -1,0 +1,17 @@
+# Circle V2 EVM Fast runtime
+
+The separate `apn.circle-v2-evm-operation.v1` journal supports Arbitrum USDC to Sei, Linea and Monad. Each operation burns exactly 40100 atomic USDC, caps the issuer fee at 100 atomic and requires a minimum mint of 40000 atomic to the fixed recipient. Fresh deployment, fee, account, nonce, simulation and signature checks precede each effect.
+
+Prepare with `apn circle evm prepare --profile evm-live-buyer --destination-profile <owned-profile> --destination-chain <1329|59144|143> --idempotency-key <key>`. Sei and Linea require `evm-live-buyer`; Monad requires `default`. Use `approve-source --operation <id>`, `observe --operation <id>`, `approve-mint --operation <id>` and `status --operation <id>`. Financial commands require foreground physical TTY consent. MCP exposes review/status and an explicit CLI handoff for approval and cleanup.
+
+Each owner policy must admit bridge provider `circle-cctp-v2` and exact reference `circle-v2-evm-fast-42161-<destination>.v1`. Shared asset usage reserves 40100 atomic USDC, source approval 30000000000000 wei, source burn 30000000000000 wei, optional cleanup 15000000000000 wei and the destination native ceiling. The worst source reserve is 75000000000000 wei per route. Finalized usage conservatively counts approved approval/burn/destination caps; the unused cleanup reserve consumes 0. Receipt proofs retain the actual approval and burn fees separately. Monad actual fees use the full billed gas limit.
+
+Signing and broadcast have separate durable marks. A crash after a mark or a lost RPC response retains holds and permits observation only; no raw transaction is resent. Frozen custody, encrypted private material, common owner locks, operation enumeration and idempotency bind both signing profiles. A canonical included burn with consumed allowance may free its source nonce domain for the next Circle route only after independent canonical recheck and latest nonce advancement; other rails retain the source hold. Budget holds and destination conflicts remain until closure.
+
+Issuer signatures may authorize mint while source finality is pending. Success requires fresh independent source finalized and destination safe canonical observations, a bound nonce and zero residual allowance. Expired attestation uses read-only `refresh-attestation --operation <id>` for the same burn and nonce before any mint mark. There is no reburn or fallback.
+
+`cleanup --operation <id>` provides explicit zero-allowance recovery after approval without a burn attempt, or after a canonical finalized source revert. A wholly unsubmitted operation can be cancelled only after checking zero allowance and absence of every encrypted effect material. Ambiguous effects cannot be cancelled. A reverted or ambiguous destination mint remains held for observation; automatic retry is unavailable.
+
+The Circle signing domains are Arbitrum, Sei, Linea and Monad. Existing standalone Ethereum/Optimism, TRON and Solana rails have no signing-domain overlap. Sei native funding must finish before mint preparation; integration must register any native funding journal that shares the Sei owner domain.
+
+This change supplies source, generated distribution and offline adversarial tests. It does not install the runtime, change owner policies or perform payments.
