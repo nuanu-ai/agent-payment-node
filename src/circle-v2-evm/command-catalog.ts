@@ -17,6 +17,9 @@ export const CIRCLE_EVM_COMMANDS: readonly CommandDefinition[] = [
   command("refresh-attestation", [operation], "Read-only issuer refresh for the same burn and nonce before mint; never reburn.", "network_read"),
   command("cleanup", [operation], "Explicit foreground approve-zero cleanup after confirmed approval/revert, or cancellation before private entry.", "payment_submit"),
   command("cleanup-nonce", [operation], "Foreground-confirm one exact approve-zero for an expired unknown Monad approval or the retained Sei sealed burn nonce; finalized canonical retirement proof closes unused holds.", "payment_submit"),
+  command("cleanup85-prepare", [operation], "Prepare the finite retained cleanup85 recovery frame without signing or sending.", "payment_prepare"),
+  command("cleanup85-cancel", [operation], "Foreground-confirm one distinct native1wei cancellation85; the verified native backend is required.", "payment_submit"),
+  command("cleanup86-approve", [operation], "After canonical FINALIZED cancellation85, foreground-confirm distinct zero approval86 once.", "payment_submit"),
   command("status", [operation], "Read the checked durable local Circle operation with both signing profiles.", "local_read"),
 ];
 function command(action: string, options: readonly CommandOption[], summary: string, effect: CommandDefinition["effect"]["class"]): CommandDefinition {
@@ -30,13 +33,14 @@ function command(action: string, options: readonly CommandOption[], summary: str
 export function bindCircleEvmCommand(path: string, input: Readonly<Record<string, string>>): CommandRequest {
   const action = path.slice("circle evm ".length);
   if (!isPlainRecord(input)) invalid();
+  if (["cleanup85-prepare", "cleanup85-cancel", "cleanup86-approve"].includes(action) && input["--operation"] !== "4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33") invalid();
   if (action === "adopt-external-mint") { if (!exactKeys(input, ["--operation", "--transaction-hash"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]!) || !/^0x[a-f0-9]{64}$/u.test(input["--transaction-hash"]!)) invalid(); return {command:"circle.evm.adopt-external-mint",operationId:input["--operation"]!,transactionHash:input["--transaction-hash"]! as `0x${string}`}; }
   if (action === "prepare") {
     if (!exactKeys(input, ["--profile", "--destination-profile", "--destination-chain", "--idempotency-key"])) invalid();
     const chain = input["--destination-chain"]; if (chain !== "1329" && chain !== "59144" && chain !== "143") invalid();
     return { command: "circle.evm.prepare", profile: input["--profile"]!, destinationProfile: input["--destination-profile"]!, destinationChain: Number(chain) as CircleDestinationChain, idempotencyKey: input["--idempotency-key"]! };
   }
-  if (!["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "cleanup-nonce", "status"].includes(action) || !exactKeys(input, ["--operation"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]!)) invalid();
+  if (!["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "cleanup-nonce", "cleanup85-prepare", "cleanup85-cancel", "cleanup86-approve", "status"].includes(action) || !exactKeys(input, ["--operation"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]!)) invalid();
   return { command: `circle.evm.${action}` as "circle.evm.approve-source", operationId: input["--operation"]! };
 }
 function invalid(): never { throw new ApnError("APN_INVALID_INPUT", "Circle EVM options are invalid."); }

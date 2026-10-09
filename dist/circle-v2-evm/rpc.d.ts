@@ -147,7 +147,8 @@ export declare const CIRCLE_RPC_ABI: readonly [{
         readonly type: "address";
     }];
 }];
-/** Public HTTPS, DNS pinning, bounded bodies, no redirect/retry and a finite per-command physical request budget. */
+/** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
+ * retry once; anchored observations restart wholly. Financial RPC is never retried. */
 export declare class CircleRpc {
     readonly chainId: number;
     private readonly https;
@@ -155,8 +156,11 @@ export declare class CircleRpc {
     private sequence;
     private requests;
     private readonly endpoint;
+    private readonly scopes;
     constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number);
+    guarded<T>(guard: () => void, action: () => Promise<T>): Promise<T>;
     call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
+    private physicalCall;
     identity(): Promise<void>;
     read(to: Address, name: string, args?: readonly unknown[], tag?: string | {
         readonly blockHash: Hex;
@@ -164,6 +168,7 @@ export declare class CircleRpc {
     }): Promise<unknown>;
     block(tag: string): Promise<Record<string, unknown>>;
     observation(transactionHash: Hex, finalityTag: "included" | "safe" | "finalized"): Promise<CircleObservation | null>;
+    private anchoredObservation;
     account(address: Address, token: Address, spender: Address): Promise<CircleAccountPreflight>;
     envelope(from: Address, to: Address, data: Hex, nonceAtomic: string, gasLimit?: string): Promise<CircleEnvelope>;
 }

@@ -24,10 +24,10 @@ export interface Cleanup85RecoveryIntent {
   readonly evidence: ConsumedBurnEvidence;
   readonly recoveryBinding: string;
 }
-export function assertCleanup85Parent(op: CircleOperationV1): void {
+export function assertCleanup85Parent(op: CircleOperationV1, observedOriginal = false): void {
   assertConsumedBurnIdentity(op); const e = op.effects.find(x => x.role === "cleanup");
   if (op.effects.length !== 3 || e?.phase !== "unknown" || e.transactionHash !== CLEANUP85_HASH || e.materialHash !== CLEANUP85_MATERIAL || e.envelope.envelopeHash !== CLEANUP85_ENVELOPE || e.envelope.nonceAtomic !== "85" || e.proof !== null ||
-    op.transitions.some(t => /^cleanup_(?:submission|submitted)/u.test(t.reason)) || !op.transitions.some(t => t.reason === "cleanup_material_sealed")) circleBlocked("exact_unknown_cleanup85_parent_required");
+    !observedOriginal && op.transitions.some(t => /^cleanup_(?:submission|submitted)/u.test(t.reason)) || !op.transitions.some(t => t.reason === "cleanup_material_sealed")) circleBlocked("exact_unknown_cleanup85_parent_required");
 }
 export function cleanup85CancellationRequest(intent: Cleanup85RecoveryIntent): Cleanup85CancellationRequest {
   return { parentOperationId: SEALED_BURN_OPERATION, parentIntentHash: intent.parentIntentHash, recoveryBinding: intent.recoveryBinding, oldCleanupTransactionHash: CLEANUP85_HASH, oldCleanupMaterialHash: CLEANUP85_MATERIAL, oldCleanupEnvelopeHash: CLEANUP85_ENVELOPE };
@@ -59,8 +59,8 @@ export class Cleanup85RecoveryStore extends SecureStateStore {
     const intent = validateCleanup85RecoveryIntent({ ...body, recoveryBinding: hashObject(body) }, op, parent);
     await this.initialize(); await this.ensureDirectory("circle-cleanup85-recovery"); await this.writeJson(this.path(op.operationId), intent, true); return intent;
   }
-  async assertRetainedMaterialHeaders(op: CircleOperationV1): Promise<void> {
-    assertCleanup85Parent(op);
+  async assertRetainedMaterialHeaders(op: CircleOperationV1, observedOriginal = false): Promise<void> {
+    assertCleanup85Parent(op, observedOriginal);
     for (const effect of op.effects) {
       const header = await this.readJson(`circle-v2-evm-effects/${op.operationId}-${effect.role}.json`);
       if (!isPlainRecord(header) || !exactKeys(header, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) || header.schemaVersion !== "apn.circle-v2-evm-effect-envelope.v1" || header.operationId !== op.operationId || header.role !== effect.role || header.fingerprint !== op.fingerprint || header.envelopeHash !== effect.envelope.envelopeHash || typeof header.ciphertext !== "string" || header.ciphertext.length === 0) circleBlocked("cleanup85_retained_material_header_required");
