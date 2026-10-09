@@ -356,8 +356,8 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: (baseFee * 2n + priority).toString(), maxPriorityFeePerGasAtomic: priority.toString() };
   }
 
-  async submitRawTransaction(rawTransaction: Hex): Promise<Hex> {
-    try { return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction]), 32); }
+  async submitRawTransaction(rawTransaction: Hex, beforeSend?: () => void): Promise<Hex> {
+    try { return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction], beforeSend), 32); }
     catch (error) {
       if (error instanceof ApnError && (error.code === "APN_RPC_BUDGET_EXCEEDED" || error.code === "APN_PROVIDER_UNAVAILABLE")) throw error;
       if (error instanceof ApnError && error.details?.httpStatus === 429) throw error;
@@ -421,11 +421,11 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     return result.value;
   }
 
-  private async call(method: string, params: readonly unknown[]): Promise<unknown> {
+  private async call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown> {
     const id = (++this.sequence).toString();
     const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-    const raw = await this.postDirectGuarded(body, addresses, method);
+    const raw = await this.postDirectGuarded(body, addresses, method, beforeSend);
     return parseRpcResultEnvelope(raw, id, method);
   }
 
@@ -479,12 +479,12 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
   }
 
-  private async postDirectGuarded(body: string, addresses: readonly PinnedAddress[], method: string): Promise<string> {
+  private async postDirectGuarded(body: string, addresses: readonly PinnedAddress[], method: string, beforeSend?: () => void): Promise<string> {
     this.observationCounters.attempts += 1;
     const post = () => {
       if (this.abortSignal?.aborted) throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.");
       this.observationCounters.admissions += 1;
-      return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal, this.observationCounters);
+      return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal, this.observationCounters, beforeSend);
     };
     return this.directGuard === undefined ? await post() : await this.directGuard.post(this.endpoint.toString(), post);
   }

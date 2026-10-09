@@ -26,6 +26,7 @@ declare const body: z.ZodObject<{
     arbitrumDraft: z.ZodOptional<z.ZodCustom<RelayArbitrumSourceDraft, RelayArbitrumSourceDraft>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
+    policyActivationDigest: z.ZodOptional<z.ZodString>;
     approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     depositNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     amountAtomic: z.ZodString;
@@ -56,6 +57,7 @@ declare const schema: z.ZodObject<{
     arbitrumDraft: z.ZodOptional<z.ZodCustom<RelayArbitrumSourceDraft, RelayArbitrumSourceDraft>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
+    policyActivationDigest: z.ZodOptional<z.ZodString>;
     approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     depositNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     amountAtomic: z.ZodString;

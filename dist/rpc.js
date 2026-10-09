@@ -325,9 +325,9 @@ export class HttpsBaseRpc {
         const baseFee = rpcQuantity(block.baseFeePerGas);
         return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: (baseFee * 2n + priority).toString(), maxPriorityFeePerGasAtomic: priority.toString() };
     }
-    async submitRawTransaction(rawTransaction) {
+    async submitRawTransaction(rawTransaction, beforeSend) {
         try {
-            return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction]), 32);
+            return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction], beforeSend), 32);
         }
         catch (error) {
             if (error instanceof ApnError && (error.code === "APN_RPC_BUDGET_EXCEEDED" || error.code === "APN_PROVIDER_UNAVAILABLE"))
@@ -393,11 +393,11 @@ export class HttpsBaseRpc {
         }
         return result.value;
     }
-    async call(method, params) {
+    async call(method, params, beforeSend) {
         const id = (++this.sequence).toString();
         const body = JSON.stringify({ jsonrpc: "2.0", id, method, params });
         const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
-        const raw = await this.postDirectGuarded(body, addresses, method);
+        const raw = await this.postDirectGuarded(body, addresses, method, beforeSend);
         return parseRpcResultEnvelope(raw, id, method);
     }
     /** Permit2 preflight's narrow abortable observation surface. */
@@ -442,13 +442,13 @@ export class HttpsBaseRpc {
     async resolvePublicAddresses() {
         return await resolvePublicAddresses(this.endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     }
-    async postDirectGuarded(body, addresses, method) {
+    async postDirectGuarded(body, addresses, method, beforeSend) {
         this.observationCounters.attempts += 1;
         const post = () => {
             if (this.abortSignal?.aborted)
                 throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded RPC observation reached its deadline.");
             this.observationCounters.admissions += 1;
-            return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal, this.observationCounters);
+            return postJson(this.endpoint, body, addresses, this.remainingTimeoutMs(), method, false, this.abortSignal, this.observationCounters, beforeSend);
         };
         return this.directGuard === undefined ? await post() : await this.directGuard.post(this.endpoint.toString(), post);
     }

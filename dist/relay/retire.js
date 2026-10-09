@@ -59,6 +59,8 @@ export class RelayRetireService {
             if (await new RelayEffectJournalRepository(this.state.root).load(profileHash, input.operationId) !== null) {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because an effect journal exists.");
             }
+            if (op.nativeQuote !== undefined && await new RelayNativeSourceJournalRepository(this.state.root).hasEffectClaim(op))
+                throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement is refused because a permanent native effect claim exists.");
             const nativeJournal = op.nativeQuote !== undefined
                 ? await new RelayNativeSourceJournalRepository(this.state.root).load(op) : null;
             if (nativeJournal !== null && nativeJournal.phase !== "failed_before_effect") {
