@@ -28,6 +28,7 @@ export interface MegaFundingRecord {
     readonly expiresAt: string;
     readonly policyDigest: string;
     readonly policyRevision: number;
+    readonly activationDigest?: string;
     readonly plan: MegaFundingPlan;
     readonly state: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert";
     readonly terminal: boolean;

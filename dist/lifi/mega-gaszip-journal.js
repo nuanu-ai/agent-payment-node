@@ -10,6 +10,8 @@ export function validateMegaFunding(value) {
     const { integrityHash, ...body } = r;
     if (r.schemaVersion !== "apn.mega-gaszip-operation.v1" || hashObject(body) !== integrityHash)
         megaFail("record_integrity");
+    if (r.activationDigest !== undefined)
+        stateIdentifier(r.activationDigest, "GasZip policy activation");
     for (const s of [r.operationId, r.profileHash, r.idempotencyHash, r.requestHash, r.policyDigest, r.quoteDigest])
         stateIdentifier(s, "GasZip record identity");
     if (r.profile !== MEGA_FUNDING.profile || r.owner.address !== MEGA_FUNDING.owner || r.profileHash !== r.owner.profileHash || r.profile !== r.owner.profile || megaUint(r.amountAtomic) !== MEGA_FUNDING.maximumAmount ||

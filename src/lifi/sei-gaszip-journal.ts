@@ -10,7 +10,7 @@ export interface SeiFundingRecord {
   readonly idempotencyHash: string; readonly requestHash: string; readonly profile: string; readonly owner: BridgeOwner;
   readonly providerBinding: BridgeProviderBinding; readonly amountAtomic: string; readonly minimumOutputAtomic: string;
   readonly maximumFeeAtomic: string; readonly quoteDigest: string; readonly quoteExpectedAtomic: string; readonly expiresAt: string;
-  readonly policyDigest: string; readonly policyRevision: number; readonly plan: SeiFundingPlan;
+  readonly policyDigest: string; readonly policyRevision: number; readonly activationDigest?: string; readonly plan: SeiFundingPlan;
   readonly state: "prepared"|"signing_started"|"sealed"|"submitting"|"submitted"|"unknown_finality"|"completed"|"failed_before_effect"|"failed_confirmed_revert";
   readonly terminal: boolean; readonly rawTransaction: Hex|null; readonly transactionHash: Hex|null; readonly submissionAttempts: 0|1;
   readonly usageReservationId: string|null; readonly outcomeDigest: string|null; readonly sourceProof: unknown|null; readonly destinationProof: unknown|null;
@@ -20,6 +20,7 @@ export function sealSeiFunding(body: Omit<SeiFundingRecord,"integrityHash">): Se
 export function validateSeiFunding(value: unknown): SeiFundingRecord {
   const r=value as SeiFundingRecord; if(r===null || typeof r!=="object") seiFail("record"); const {integrityHash,...body}=r;
   if(r.schemaVersion!=="apn.sei-gaszip-operation.v1" || hashObject(body)!==integrityHash) seiFail("record_integrity");
+  if(r.activationDigest!==undefined)stateIdentifier(r.activationDigest,"GasZip policy activation");
   for(const s of [r.operationId,r.profileHash,r.idempotencyHash,r.requestHash,r.policyDigest,r.quoteDigest]) stateIdentifier(s,"GasZip record identity");
   if(r.profileHash!==r.owner.profileHash || r.profile!==r.owner.profile || seiUint(r.amountAtomic)<=0n || seiUint(r.amountAtomic)>SEI_FUNDING.maximumAmount ||
     seiUint(r.maximumFeeAtomic)>SEI_FUNDING.maximumFee || seiUint(r.minimumOutputAtomic)<SEI_FUNDING.minimumOutput ||

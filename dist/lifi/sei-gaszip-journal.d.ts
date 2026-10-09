@@ -28,6 +28,7 @@ export interface SeiFundingRecord {
     readonly expiresAt: string;
     readonly policyDigest: string;
     readonly policyRevision: number;
+    readonly activationDigest?: string;
     readonly plan: SeiFundingPlan;
     readonly state: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert";
     readonly terminal: boolean;

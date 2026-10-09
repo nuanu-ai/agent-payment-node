@@ -10,7 +10,7 @@ export interface MegaFundingRecord {
   readonly idempotencyHash: string; readonly requestHash: string; readonly profile: string; readonly owner: BridgeOwner;
   readonly providerBinding: BridgeProviderBinding; readonly amountAtomic: string; readonly minimumOutputAtomic: string;
   readonly maximumFeeAtomic: string; readonly quoteDigest: string; readonly quoteExpectedAtomic: string; readonly expiresAt: string;
-  readonly policyDigest: string; readonly policyRevision: number; readonly plan: MegaFundingPlan;
+  readonly policyDigest: string; readonly policyRevision: number; readonly activationDigest?: string; readonly plan: MegaFundingPlan;
   readonly state: "prepared"|"signing_started"|"sealed"|"submitting"|"submitted"|"unknown_finality"|"completed"|"failed_before_effect"|"failed_confirmed_revert";
   readonly terminal: boolean; readonly rawTransaction: Hex|null; readonly transactionHash: Hex|null; readonly submissionAttempts: 0|1;
   readonly usageReservationId: string|null; readonly outcomeDigest: string|null; readonly sourceProof: unknown|null; readonly destinationProof: unknown|null;
@@ -20,6 +20,7 @@ export function sealMegaFunding(body: Omit<MegaFundingRecord,"integrityHash">): 
 export function validateMegaFunding(value: unknown): MegaFundingRecord {
   const r=value as MegaFundingRecord; if(r===null || typeof r!=="object") megaFail("record"); const {integrityHash,...body}=r;
   if(r.schemaVersion!=="apn.mega-gaszip-operation.v1" || hashObject(body)!==integrityHash) megaFail("record_integrity");
+  if(r.activationDigest!==undefined)stateIdentifier(r.activationDigest,"GasZip policy activation");
   for(const s of [r.operationId,r.profileHash,r.idempotencyHash,r.requestHash,r.policyDigest,r.quoteDigest]) stateIdentifier(s,"GasZip record identity");
   if(r.profile!==MEGA_FUNDING.profile || r.owner.address!==MEGA_FUNDING.owner || r.profileHash!==r.owner.profileHash || r.profile!==r.owner.profile || megaUint(r.amountAtomic)!==MEGA_FUNDING.maximumAmount ||
     megaUint(r.maximumFeeAtomic)>MEGA_FUNDING.maximumFee || megaUint(r.minimumOutputAtomic)<MEGA_FUNDING.minimumOutput ||
