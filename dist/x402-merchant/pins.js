@@ -11,13 +11,14 @@ export const MERCHANT_PROXY_HASH = "0xfdf85d183a122fe611bc878683b722b2b22633e139
 export const MERCHANT_IMPLEMENTATION = getAddress("0xAC37677261885fDB372A37Ac8D5d47044196073C");
 export const MERCHANT_IMPLEMENTATION_HASH = "0x781c9c39ab69e9b7d099ec75e5a28df41dc891c8fffbe0148c94ed5adc8b0c09";
 export const MERCHANT_MECHANISM = { provider: "x402engine-erc20-transfer-proof", reference: "megaeth-usdm-crypto-price-v1" };
+export const MERCHANT_NATIVE_POLICY_ASSET = { chain: MERCHANT_CHAIN, family: "evm", networkName: "MegaETH", kind: "native", identifier: null, symbol: "ETH", decimals: 18, selectionClass: null, tokenStandard: null, eligibility: null, rails: { direct: false, gasless: false, x402: false, bridge: false, swap: false }, caps: null, evidence: { source: "docs/x402-merchant-usdm.md" }, admission: "not_admitted_owner_configuration_missing" };
 export const MERCHANT_POLICY_ASSET = { chain: MERCHANT_CHAIN, family: "evm", networkName: "MegaETH", kind: "token", identifier: MERCHANT_TOKEN,
     symbol: "USDm", decimals: 18, selectionClass: null, tokenStandard: "ERC-20", eligibility: null,
     rails: { direct: false, gasless: false, x402: false, bridge: false, swap: false }, caps: null,
     evidence: { source: "docs/x402-merchant-usdm.md" }, admission: "not_admitted_owner_configuration_missing" };
 /** This supplement grants no admission and cannot widen the generic x402 mechanism registry. */
 export function merchantPolicyAsset(input) {
-    return input.chain === MERCHANT_CHAIN && input.kind === "token" && input.identifier === MERCHANT_TOKEN && input.rail === "x402" &&
-        input.mechanisms === undefined && canonicalJson(input.mechanism ?? null) === canonicalJson(MERCHANT_MECHANISM) ? MERCHANT_POLICY_ASSET : undefined;
+    return input.chain === MERCHANT_CHAIN && (input.kind === "token" && input.identifier === MERCHANT_TOKEN || input.kind === "native" && input.identifier === undefined) && input.rail === "x402" &&
+        input.mechanisms === undefined && canonicalJson(input.mechanism ?? null) === canonicalJson(MERCHANT_MECHANISM) ? input.kind === "native" ? MERCHANT_NATIVE_POLICY_ASSET : MERCHANT_POLICY_ASSET : undefined;
 }
 //# sourceMappingURL=pins.js.map

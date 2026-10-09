@@ -80,7 +80,7 @@ export async function merchantCurrent(rpc) {
 }
 export function checkMerchantEnvelope(current, envelope) {
     if (current.nonce !== envelope.nonce || BigInt(current.gas) > BigInt(envelope.gas) || BigInt(current.maxFeePerGas) > BigInt(envelope.maxFeePerGas) || BigInt(current.maxPriorityFeePerGas) > BigInt(envelope.maxPriorityFeePerGas) ||
-        BigInt(current.native) < BigInt(envelope.maximumNativeFee) || BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
+        BigInt(current.native) < BigInt(envelope.gas) * BigInt(envelope.maxFeePerGas) || BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
         refuse("merchant_nonce_fee_balance_changed");
 }
 export function merchantHeader(value) {

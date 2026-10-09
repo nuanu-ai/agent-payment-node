@@ -63,6 +63,10 @@ export interface MerchantOperation {
         readonly revision: number;
         readonly activationDigest: string;
     };
+    readonly effectBinding?: {
+        readonly policyEndsAt: string;
+        readonly nativeAmountAtomic: string;
+    };
     readonly createdAt: string;
     readonly expiresAt: string;
     readonly state: MerchantPhase;

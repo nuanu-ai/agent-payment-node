@@ -1,0 +1,4 @@
+
+> @nuanu-ai/apn@0.5.35 build:test
+> tsc -p tsconfig.test.json && node scripts/copy-metamask-sdk-vendor.mjs dist-test/vendor/metamask-evm-sdk && node scripts/copy-tron-utils-vendor.mjs dist-test/vendor/tron-utils && node scripts/copy-relay-order-id-vendor.mjs dist-test/vendor/relay-order-id && node scripts/copy-smart-account-vendor.mjs dist-test/vendor/metamask-smart-account
+

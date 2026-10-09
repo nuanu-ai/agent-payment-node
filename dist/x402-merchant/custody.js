@@ -1,3 +1,5 @@
+import { MerchantClaims } from "./claims.js";
+import { assertMerchantAuthority } from "./authority.js";
 import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { parseTransaction, recoverTransactionAddress, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -28,19 +30,26 @@ export class MerchantCustody extends SecureStateStore {
         this.wallets = new EncryptedWalletStore(state, wrapping);
     }
     async verify(o, raw) { return await verifyMerchantRaw(o, raw); }
-    async sign(o) {
+    async sign(o, grant, controller) {
+        assertMerchantAuthority(grant, controller, o, this.now());
         if (o.state !== "signing_started" || o.signingAttempts !== 1 || o.submissionAttempts !== 0 || this.now().toISOString() >= o.expiresAt)
             refuse("merchant_signing_gate");
+        await new MerchantClaims(this.state.root).requireSign(o);
+        assertMerchantAuthority(grant, controller, o, this.now(), "sign");
         return this.state.withLocks([`custody:${o.profileHash}`], async () => {
-            const w = await this.wallets.describe(o.profile);
+            assertMerchantAuthority(grant, controller, o, this.now());
+            const w = await this.wallets.describe(o.profile, () => assertMerchantAuthority(grant, controller, o, this.now()), async (identity) => { assertMerchantAuthority(grant, controller, o, this.now()); await assertEvmNativeCustody(this.state, o.profile, o.custody, identity); assertMerchantAuthority(grant, controller, o, this.now()); });
             if (w === null)
                 refuse("merchant_encrypted_wallet_missing");
             try {
+                assertMerchantAuthority(grant, controller, o, this.now());
                 await assertEvmNativeCustody(this.state, o.profile, o.custody, w.identity);
+                assertMerchantAuthority(grant, controller, o, this.now());
                 const a = privateKeyToAccount(w.secret.privateKey);
                 if (a.address !== MERCHANT_OWNER || this.now().toISOString() >= o.expiresAt)
                     refuse("merchant_signing_identity_or_expiry");
                 const e = o.envelope;
+                assertMerchantAuthority(grant, controller, o, this.now());
                 return await a.signTransaction({ type: "eip1559", chainId: 4326, to: MERCHANT_TOKEN, data: MERCHANT_DATA, value: 0n, nonce: Number(e.nonce), gas: BigInt(e.gas), maxFeePerGas: BigInt(e.maxFeePerGas), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGas), accessList: [] });
             }
             finally {

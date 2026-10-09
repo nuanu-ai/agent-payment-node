@@ -13,6 +13,7 @@ export declare const MERCHANT_MECHANISM: {
     readonly provider: "x402engine-erc20-transfer-proof";
     readonly reference: "megaeth-usdm-crypto-price-v1";
 };
+export declare const MERCHANT_NATIVE_POLICY_ASSET: CandidateAsset;
 export declare const MERCHANT_POLICY_ASSET: CandidateAsset;
 /** This supplement grants no admission and cannot widen the generic x402 mechanism registry. */
 export declare function merchantPolicyAsset(input: {
