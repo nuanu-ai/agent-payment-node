@@ -14,6 +14,14 @@ export type CommandRequest = {
     readonly maximumFeeAtomic: string;
     readonly idempotencyKey: string;
 } | {
+    readonly command: "mega.funding.prepare";
+    readonly profile: string;
+    readonly expectedPayer: string;
+    readonly amountAtomic: string;
+    readonly minimumOutputAtomic: string;
+    readonly maximumFeeAtomic: string;
+    readonly idempotencyKey: string;
+} | {
     readonly command: "sei.funding.approve" | "sei.funding.status";
     readonly operationId: string;
 } | {
@@ -24,6 +32,9 @@ export type CommandRequest = {
     readonly idempotencyKey: string;
 } | {
     readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.status";
+    readonly operationId: string;
+} | {
+    readonly command: "mega.funding.approve" | "mega.funding.status";
     readonly operationId: string;
 } | {
     readonly command: "x402.permit2.approve";

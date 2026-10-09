@@ -1,6 +1,7 @@
 import { SeiFundingJournal, publicSeiFunding } from "./lifi/sei-gaszip-journal.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { publicCircle } from "./circle-v2-evm/operation-model.js";
+import { MegaFundingJournal, publicMegaFunding } from "./lifi/mega-gaszip-journal.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { Permit2LegacyConflictRepository } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
@@ -37,7 +38,8 @@ export class OperationService {
     facilitatorGasless;
     relayUnsigned;
     seiFunding;
-    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root), metaMaskGasless = new MetaMaskGaslessOperationRepository(state.root), smartAccountGasless = new SmartAccountGaslessOperationRepository(state.root), facilitatorGasless = new FacilitatorGaslessOperationRepository(state.root), relayUnsigned = new RelayUnsignedOperationRepository(state.root), seiFunding = new SeiFundingJournal(state.root)) {
+    megaFunding;
+    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root), metaMaskGasless = new MetaMaskGaslessOperationRepository(state.root), smartAccountGasless = new SmartAccountGaslessOperationRepository(state.root), facilitatorGasless = new FacilitatorGaslessOperationRepository(state.root), relayUnsigned = new RelayUnsignedOperationRepository(state.root), seiFunding = new SeiFundingJournal(state.root), megaFunding = new MegaFundingJournal(state.root)) {
         this.state = state;
         this.providerX402 = providerX402;
         this.rails = rails;
@@ -48,6 +50,7 @@ export class OperationService {
         this.facilitatorGasless = facilitatorGasless;
         this.relayUnsigned = relayUnsigned;
         this.seiFunding = seiFunding;
+        this.megaFunding = megaFunding;
     }
     /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
      * locks are acquired together so owner validation and durable write are atomic. */
@@ -94,6 +97,7 @@ export class OperationService {
         const matches = [
             ...(await this.seiFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "sei_gaszip", record })),
             ...(await this.circleOperations()).filter(operation => operation.idempotencyHash === idempotencyHash).map(record => ({ kind: "circle_route", record })),
+            ...(await this.megaFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "mega_gaszip", record })),
             ...(await this.relayUnsigned.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "relay_unsigned", record })),
             ...(await this.facilitatorGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "facilitator_gasless_transfer", record })),
             ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
@@ -185,6 +189,7 @@ export class OperationService {
         return [
             ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip", record })),
             ...(await this.circleOperations(profileHash)).map(record => ({ kind: "circle_route", record })),
+            ...(await this.megaFunding.listOperations(profileHash)).map(record => ({ kind: "mega_gaszip", record })),
             ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production", record })),
             ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict", record })),
             ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned", record })),
@@ -235,6 +240,7 @@ export class OperationService {
     }
     async required(operationId) {
         const canonicalId = canonicalOperationId(operationId);
+        const mega = await this.megaFunding.findOperation(canonicalId);
         const sei = await this.seiFunding.findOperation(canonicalId);
         const circle = (await this.circleOperations()).find(record => record.operationId === canonicalId) ?? null;
         const permit2 = await new Permit2ProductionRepository(this.state.root).findOperation(canonicalId);
@@ -248,10 +254,12 @@ export class OperationService {
         const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
         const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
         const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
-        if ([sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
+        if ([mega, sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
             .filter((value) => value !== null).length > 1) {
             throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
         }
+        if (mega !== null)
+            return { kind: "mega_gaszip", record: mega };
         if (sei !== null)
             return { kind: "sei_gaszip", record: sei };
         if (circle !== null)
@@ -286,6 +294,8 @@ export class OperationService {
             return publicSeiFunding(operation.record);
         if (operation.kind === "circle_route")
             return publicCircle(operation.record);
+        if (operation.kind === "mega_gaszip")
+            return publicMegaFunding(operation.record);
         if (operation.kind === "permit2_production")
             return publicPermit2Production(operation.record);
         if (operation.kind === "permit2_legacy_conflict")

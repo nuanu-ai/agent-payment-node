@@ -1,5 +1,6 @@
 import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { type CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
+import { MegaFundingJournal, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import type { CommandOutcome } from "./commands.js";
@@ -27,6 +28,9 @@ export type StoredMoneyOperation = {
 } | {
     readonly kind: "circle_route";
     readonly record: CircleOperationV1;
+} | {
+    readonly kind: "mega_gaszip";
+    readonly record: MegaFundingRecord;
 } | {
     readonly kind: "permit2_production";
     readonly record: Permit2ProductionRecord;
@@ -77,7 +81,8 @@ export declare class OperationService {
     private readonly facilitatorGasless;
     private readonly relayUnsigned;
     private readonly seiFunding;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
+    private readonly megaFunding;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation">, megaFunding?: Pick<MegaFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
     /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
      * locks are acquired together so owner validation and durable write are atomic. */
     persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation>;

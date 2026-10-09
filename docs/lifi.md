@@ -1126,3 +1126,47 @@ Source gas 85529811980376 wei plus messaging value 191812223813721 wei totals
 277342035794097 wei, below the frozen 590000000000000-wei native cap. Existing
 SAFE allowance was reused without another approval. Canonical-USDC delivery
 across the three required directions is now evidenced; WBTC remains separate.
+
+## Finite Base to Mega native funding
+
+`apn mega funding prepare`, `approve` and `status` use an independent GasZip
+journal and mechanism pin. They preserve existing Sei operation hashes and do
+not enable LI.FI GasZip execution. Only profile `default`, owner and SELF
+recipient `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`, Base source chain 8453 and
+Mega destination chain 4326 are admitted. The direct target is the official
+EOA `0x391E7C679d29bD940d63be94AD22A25d25b5A604`, whose code must be empty;
+calldata is exactly `0x010202` (short 514). Input is exactly 10000000000000 wei.
+The full Base network fee ceiling is 1000000000000 wei, including L1 and operator
+fees. A fresh balance must cover the frozen signed envelope's full fee upper
+bound even when a later estimate is lower.
+
+The active Base native bridge policy must admit
+`{ "provider": "gaszip", "reference": "v2-direct-base-mega-self-010202.1" }`.
+`APN_BASE_RPC_URL` and `APN_MEGA_RPC_URL` must be public HTTPS RPC URLs. Production
+Mega mainnet RPC is `https://mainnet.megaeth.com/rpc`; chain identity and safe
+receipt inclusion are independently checked. Minimum delivered Mega ETH is at
+least 8000000000000 wei. This floor is checked during acceptance; the source
+calldata cannot enforce it. Quote expiry, owner binding, custody, usage and
+shared Base owner conflicts are checked before the single signature/send attempt.
+
+```sh
+apn mega funding prepare --profile default --expected-payer 0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14 --amount-atomic 10000000000000 --minimum-output-atomic 8000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key mega-self-funding-01
+apn mega funding approve --operation <operation-id>
+apn mega funding status --operation <operation-id>
+```
+
+Schema `apn.mega-gaszip-operation.v1` and create-only signing/send claims are
+separate from Sei. Status never resends. Unknown source or provider delivery
+outcomes keep the principal hold. Completion requires the exact source
+transaction and safe receipt, a provider deposit mapping bound to that source
+hash/block/value/owner/short 514, and one confirmed non-refund Mega outbound.
+The outbound is independently checked for native value, sender/nonce, recipient,
+canonical safe receipt, empty recipient code and exact native credit; its hash
+can be claimed by only one Mega funding operation. Missing or changed provider
+correlation fails closed. Funding evidence does not establish USDm acquisition,
+a merchant payment or HTTP delivery.
+
+Protocol references: [GasZip direct forwarder](https://dev.gas.zip/gas/code-examples/evm-deposit/direct-forwarder),
+[quote API](https://dev.gas.zip/gas/api/quote) and
+[deposit API](https://dev.gas.zip/gas/api/deposit). Fresh unsigned RPC and quote
+reads are separate from synthetic tests and actual funding acceptance.

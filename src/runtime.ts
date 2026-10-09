@@ -1,5 +1,6 @@
 import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
 import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
+import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
@@ -121,6 +122,7 @@ export interface CoreDependencies {
   readonly circleSource?: CircleV2SourceService;
   readonly oneClickSource?: OneClickSourceService;
   readonly seiFunding?: SeiFundingService;
+  readonly megaFunding?: MegaFundingService;
   readonly directRails?: readonly DirectRailPort[];
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly railApproval?: RailApprovalPort;
@@ -195,6 +197,7 @@ export class RuntimeContext {
   readonly circleSource?: CircleV2SourceService;
   readonly oneClickSource?: OneClickSourceService;
   readonly seiFunding?: SeiFundingService;
+  readonly megaFunding?: MegaFundingService;
   readonly directRails: readonly DirectRailPort[];
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly railApproval?: RailApprovalPort;
@@ -269,6 +272,7 @@ export class RuntimeContext {
     if (dependencies.circleApproval !== undefined) this.circleApproval = dependencies.circleApproval;
     if (dependencies.circleSource !== undefined) this.circleSource = dependencies.circleSource;
     if (dependencies.seiFunding !== undefined) this.seiFunding = dependencies.seiFunding;
+    if (dependencies.megaFunding !== undefined) this.megaFunding = dependencies.megaFunding;
     if (dependencies.oneClickSource !== undefined) this.oneClickSource = dependencies.oneClickSource;
     this.directRails = dependencies.directRails ?? [];
     if (dependencies.chainAccounts !== undefined) this.chainAccounts = dependencies.chainAccounts;

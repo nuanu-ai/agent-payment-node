@@ -49,6 +49,7 @@ export class RuntimeContext {
     circleSource;
     oneClickSource;
     seiFunding;
+    megaFunding;
     directRails;
     chainAccounts;
     railApproval;
@@ -166,6 +167,8 @@ export class RuntimeContext {
             this.circleSource = dependencies.circleSource;
         if (dependencies.seiFunding !== undefined)
             this.seiFunding = dependencies.seiFunding;
+        if (dependencies.megaFunding !== undefined)
+            this.megaFunding = dependencies.megaFunding;
         if (dependencies.oneClickSource !== undefined)
             this.oneClickSource = dependencies.oneClickSource;
         this.directRails = dependencies.directRails ?? [];
