@@ -4,7 +4,7 @@ import { ApnError } from "../errors.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { CIRCLE_DEPLOYMENT_PINS, CIRCLE_IMPLEMENTATION_SLOT, CIRCLE_TOKEN_IMPLEMENTATION_SLOT, CIRCLE_MINTER, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_SOURCE_TOKEN, circleRoute } from "./catalog.js";
-import { circleHex, circleRecord, circleUint } from "./protocol.js";
+import { circleFail, circleHex, circleRecord, circleUint } from "./protocol.js";
 import { circleTokenPairKey, verifyCircleDeployments } from "./preflight.js";
 import { circleBlocked, circleEnvelope } from "./operation-model.js";
 export const CIRCLE_RPC_ABI = parseAbi([
@@ -35,10 +35,13 @@ export class CircleRpc {
             circleBlocked("rpc_url");
         this.endpoint = parsed.toString();
     }
-    async call(method, params) {
+    async call(method, params, beforeSend) {
         if (!METHODS.has(method) || ++this.requests > this.maxRequests)
             circleBlocked("rpc_method_or_budget");
-        const id = ++this.sequence, response = await this.https.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG");
+        if (method === "eth_sendRawTransaction" && beforeSend === undefined)
+            circleBlocked("financial_rpc_consent_required");
+        beforeSend?.();
+        const id = ++this.sequence, response = await this.https.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", beforeSend);
         if (response.status !== 200)
             throw new ApnError("APN_RPC_CONFIG", "Circle RPC returned an unsuccessful HTTP response.");
         const value = circleRecord(JSON.parse(response.body));
@@ -87,10 +90,10 @@ export async function readCircleDeployment(rpc, destinationChain) {
     const route = circleRoute(destinationChain), source = rpc.chainId === 42161, token = source ? CIRCLE_SOURCE_TOKEN : route.token, remoteDomain = source ? route.domain : 3, remoteToken = source ? route.token : CIRCLE_SOURCE_TOKEN, block = await rpc.block("safe"), tag = String(block.number), expected = CIRCLE_DEPLOYMENT_PINS[rpc.chainId];
     const contracts = {};
     for (const key of ["messenger", "transmitter", "minter", "token"]) {
-        const address = getAddress(expected[key].address), proxyCodeHash = keccak256(circleHex(await rpc.call("eth_getCode", [address, tag])));
+        const address = getAddress(expected[key].address), proxyCodeHash = keccak256(circleRuntimeBytecode(await rpc.call("eth_getCode", [address, tag])));
         const slot = key === "token" ? CIRCLE_TOKEN_IMPLEMENTATION_SLOT : CIRCLE_IMPLEMENTATION_SLOT;
         const storage = circleHex(await rpc.call("eth_getStorageAt", [address, slot, tag]), 32), implementation = getAddress(`0x${storage.slice(-40)}`), zero = `0x${"0".repeat(40)}`;
-        const implementationCodeHash = implementation.toLowerCase() === zero ? null : keccak256(circleHex(await rpc.call("eth_getCode", [implementation, tag])));
+        const implementationCodeHash = implementation.toLowerCase() === zero ? null : keccak256(circleRuntimeBytecode(await rpc.call("eth_getCode", [implementation, tag])));
         contracts[key] = { address, proxyCodeHash, implementation, implementationCodeHash };
     }
     const values = await Promise.all([rpc.read(CIRCLE_TRANSMITTER, "localDomain", [], tag), rpc.read(CIRCLE_MESSENGER, "remoteTokenMessengers", [remoteDomain], tag),
@@ -121,4 +124,10 @@ export async function readCircleAttesters(rpc, deploymentDigest) {
     return { threshold, enabledAttesters, chainId: rpc.chainId, transmitter: CIRCLE_TRANSMITTER, blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(), deploymentDigest };
 }
 export const circleRpcTransaction = (e) => ({ from: e.from, to: e.to, data: e.data, value: "0x0", nonce: hexQuantity(e.nonceAtomic), gas: hexQuantity(e.gasLimitAtomic), maxFeePerGas: hexQuantity(e.maxFeePerGasAtomic), maxPriorityFeePerGas: hexQuantity(e.maxPriorityFeePerGasAtomic) });
+/** EIP-170 runtime code is a distinct field domain from CCTP messages and sealed transactions. */
+export function circleRuntimeBytecode(value) {
+    if (typeof value !== "string" || !/^0x(?:[a-fA-F0-9]{2})*$/u.test(value) || value.length > 2 + 24_576 * 2)
+        circleFail("runtime_bytecode");
+    return value.toLowerCase();
+}
 //# sourceMappingURL=rpc.js.map

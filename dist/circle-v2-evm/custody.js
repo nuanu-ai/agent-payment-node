@@ -91,24 +91,31 @@ export class LocalCircleCustody {
         this.material = new CircleEffectStore(state.root, wrapping);
     }
     async load(op, effect) { return await this.material.load(op, effect); }
-    async seal(op, effect) {
+    async seal(op, effect, guard) {
+        guard();
         if (op.terminal || effect.phase !== "signing_started")
             circleBlocked("signing_gate");
         const destination = effect.role === "mint", profile = destination ? op.destinationProfile : op.profile, custody = destination ? op.destinationCustody : op.sourceCustody;
         return this.state.withLocks([`custody:${custody.profileHash}`], async () => {
+            guard();
             await assertEvmNativeCustody(this.state, profile, custody);
+            guard();
             const existing = await this.material.load(op, effect);
+            guard();
             if (existing !== null)
                 return existing;
-            const wallet = await this.wallets.describe(profile, undefined, identity => assertEvmNativeCustody(this.state, profile, custody, identity));
+            const wallet = await this.wallets.describe(profile, undefined, identity => { guard(); return assertEvmNativeCustody(this.state, profile, custody, identity); });
             if (wallet === null)
                 circleBlocked("encrypted_wallet_missing");
             try {
+                guard();
                 const account = privateKeyToAccount(wallet.secret.privateKey);
                 if (account.address !== custody.walletAddress)
                     circleBlocked("derived_owner_mismatch");
+                guard();
                 const e = effect.envelope, rawTransaction = await account.signTransaction({ type: "eip1559", chainId: e.chainId, to: e.to, data: e.data,
                     value: 0n, nonce: Number(e.nonceAtomic), gas: BigInt(e.gasLimitAtomic), maxFeePerGas: BigInt(e.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGasAtomic), accessList: [] });
+                guard();
                 const body = { schemaVersion: "apn.circle-v2-evm-effect.v1", operationId: op.operationId, role: effect.role, fingerprint: op.fingerprint,
                     envelopeHash: e.envelopeHash, rawTransaction, transactionHash: keccak256(rawTransaction) };
                 return await this.material.save(op, effect, { ...body, materialHash: hashObject(body) });

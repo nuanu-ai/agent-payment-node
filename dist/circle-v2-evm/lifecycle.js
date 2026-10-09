@@ -1,5 +1,26 @@
+import { hashObject } from "../canonical.js";
 import { advanceCircle, circleBlocked, circleCorrupt, circleSame, validateCircle } from "./operation-model.js";
 import { assertCircleAttestation } from "./protocol.js";
+const authorities = new WeakMap();
+const consentBinding = (op) => hashObject({ operationId: op.operationId, fingerprint: op.fingerprint, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
+async function consent(op, role, ports) {
+    const deadline = Math.min(ports.now() + 60_000, role === "source" ? Date.parse(op.expiresAt) : Infinity);
+    if (ports.now() >= deadline)
+        circleBlocked("consent_expired");
+    await ports.approve(op, role, new Date(deadline).toISOString());
+    if (ports.now() >= deadline)
+        circleBlocked("consent_expired_after_tty");
+    const token = () => { };
+    authorities.set(token, { ports, binding: consentBinding(op), deadline, envelopes: new Map(op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role).map(e => [e.role, e.envelope.envelopeHash])), claimed: new Set(), active: null });
+    return token;
+}
+function checkConsent(token, op, ports, effect) {
+    const authority = token === undefined ? undefined : authorities.get(token);
+    if (authority === undefined || authority.ports !== ports || authority.binding !== consentBinding(op) || ports.now() >= authority.deadline ||
+        effect !== undefined && (authority.active !== effect.role || authority.envelopes.get(effect.role) !== effect.envelope.envelopeHash))
+        circleBlocked("fresh_exact_effect_consent_required");
+    return authority;
+}
 async function persist(op, patch, reason, ports) {
     const next = advanceCircle(op, patch, reason, ports.now());
     validateCircle(next);
@@ -20,13 +41,14 @@ export async function approveCircleSource(input, ports) {
     if (ports.now() >= Date.parse(op.expiresAt))
         circleBlocked("source_preparation_expired");
     await ports.assertOwnerPolicyAndConflicts(op);
-    await ports.approve(op, "source");
+    const token = await consent(op, "source", ports);
     await ports.assertOwnerPolicyAndConflicts(op);
+    checkConsent(token, op, ports);
     for (const role of ["approval", "burn"]) {
         const effect = op.effects.find(e => e.role === role);
         if (["confirmed", "reverted"].includes(effect.phase))
             continue;
-        op = await executeCircleEffect(op, role, ports);
+        op = await executeCircleEffect(op, role, ports, token);
         op = await observeCircle(op, ports);
         if (op.effects.find(e => e.role === role)?.phase !== "confirmed")
             return op;
@@ -34,43 +56,61 @@ export async function approveCircleSource(input, ports) {
     return op;
 }
 /** Each marker is fsynced before crossing its boundary. Marked recovery never enters signing or broadcast again. */
-export async function executeCircleEffect(input, role, ports) {
+export async function executeCircleEffect(input, role, ports, token) {
     let op = input, effect = op.effects.find(e => e.role === role);
     if (effect === undefined)
         circleCorrupt("missing_effect");
     if (!["prepared", "sealed"].includes(effect.phase))
         return op;
-    await ports.assertOwnerPolicyAndConflicts(op);
-    await ports.preflight(op, effect);
-    if (effect.phase === "prepared") {
-        op = await persist(op, { effects: updateEffect(op, role, { phase: "signing_started" }), state: role === "mint" ? "mint_unknown" : role === "cleanup" ? "cleanup_required" : "source_unknown" }, `${role}_signing_fence`, ports);
-        effect = op.effects.find(e => e.role === role);
-        try {
-            const material = await ports.seal(op, effect);
+    const authority = checkConsent(token, op, ports);
+    if (authority.claimed.has(role) || authority.active !== null || authority.envelopes.get(role) !== effect.envelope.envelopeHash)
+        circleBlocked("consent_effect_reuse_or_mismatch");
+    authority.claimed.add(role);
+    authority.active = role;
+    const guard = () => { checkConsent(token, op, ports, effect); };
+    try {
+        guard();
+        await ports.assertOwnerPolicyAndConflicts(op);
+        guard();
+        await ports.preflight(op, effect);
+        guard();
+        if (effect.phase === "prepared") {
+            guard();
+            op = await persist(op, { effects: updateEffect(op, role, { phase: "signing_started" }), state: role === "mint" ? "mint_unknown" : role === "cleanup" ? "cleanup_required" : "source_unknown" }, `${role}_signing_fence`, ports);
+            effect = op.effects.find(e => e.role === role);
+            guard();
+            const material = await ports.seal(op, effect, guard);
+            guard();
             op = await persist(op, { effects: updateEffect(op, role, { phase: "sealed", transactionHash: material.transactionHash, materialHash: material.materialHash }) }, `${role}_material_sealed`, ports);
         }
-        catch {
-            return await persist(op, { effects: updateEffect(op, role, { phase: "unknown" }) }, `${role}_signing_unknown_observe_only`, ports);
-        }
-    }
-    effect = op.effects.find(e => e.role === role);
-    const material = await ports.loadMaterial(op, effect);
-    if (material === null)
-        circleCorrupt("sealed_material_missing");
-    await ports.assertOwnerPolicyAndConflicts(op);
-    await ports.preflight(op, effect);
-    // The journal already holds every asset reserve. Unknown usage holds precede any broadcast.
-    const usage = await ports.usage(op, "unknown_finality");
-    op = await persist(op, { usage, effects: updateEffect(op, role, { phase: "submission_started" }) }, `${role}_submission_fence`, ports);
-    effect = op.effects.find(e => e.role === role);
-    try {
-        const returned = await ports.broadcast(effect, material.rawTransaction);
+        effect = op.effects.find(e => e.role === role);
+        guard();
+        const material = await ports.loadMaterial(op, effect);
+        guard();
+        if (material === null)
+            circleCorrupt("sealed_material_missing");
+        await ports.assertOwnerPolicyAndConflicts(op);
+        guard();
+        await ports.preflight(op, effect);
+        guard();
+        const usage = await ports.usage(op, "unknown_finality");
+        guard();
+        op = await persist(op, { usage, effects: updateEffect(op, role, { phase: "submission_started" }) }, `${role}_submission_fence`, ports);
+        effect = op.effects.find(e => e.role === role);
+        guard();
+        const returned = await ports.broadcast(effect, material.rawTransaction, guard);
+        guard();
         if (returned !== effect.transactionHash)
             throw new Error("transaction hash mismatch");
         return await persist(op, { effects: updateEffect(op, role, { phase: "submitted" }) }, `${role}_submitted_once`, ports);
     }
-    catch {
-        return await persist(op, { effects: updateEffect(op, role, { phase: "unknown" }) }, `${role}_broadcast_unknown_observe_only`, ports);
+    catch (error) {
+        if (op.effects.find(e => e.role === role).phase === "prepared")
+            throw error;
+        return await persist(op, { effects: updateEffect(op, role, { phase: "unknown" }) }, `${role}_fenced_unknown_observe_only`, ports);
+    }
+    finally {
+        authority.active = null;
     }
 }
 export async function approveCircleMint(input, ports) {
@@ -88,9 +128,10 @@ export async function approveCircleMint(input, ports) {
         const envelope = await ports.mintEnvelope(op);
         op = await persist(op, { effects: [...op.effects, { role: "mint", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "mint_envelope_frozen", ports);
     }
-    await ports.approve(op, "mint");
+    const token = await consent(op, "mint", ports);
     await ports.assertOwnerPolicyAndConflicts(op);
-    op = await executeCircleEffect(op, "mint", ports);
+    checkConsent(token, op, ports);
+    op = await executeCircleEffect(op, "mint", ports, token);
     return observeCircle(op, ports);
 }
 export async function observeCircle(input, ports) {
@@ -178,13 +219,15 @@ export async function cleanupCircle(input, ports) {
                 circleBlocked("unsubmitted_cancel_private_material_present");
         if (await ports.allowance(op) !== "0")
             circleBlocked("unsubmitted_cancel_nonzero_allowance");
-        await ports.approve(op, "cleanup");
+        const token = await consent(op, "cleanup", ports);
+        checkConsent(token, op, ports);
         return persist(op, { usage: await ports.usage(op, "failed_before_effect"), usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "explicit_no_private_entry_cancellation", ports);
     }
     if (!["prepared", "reverted"].includes(burn.phase) || !["confirmed", "reverted"].includes(approval.phase) || op.source !== null)
         circleBlocked("cleanup_requires_confirmed_approval_and_no_burn_attempt");
     if (approval.phase === "reverted" && await ports.allowance(op) === "0") {
-        await ports.approve(op, "cleanup");
+        const token = await consent(op, "cleanup", ports);
+        checkConsent(token, op, ports);
         return persist(op, { usage: await ports.usage(op, "failed_confirmed_revert"), usageFinalized: true, residualAllowanceAtomic: "0", state: "cleaned", terminal: true }, "confirmed_revert_zero_allowance_recovery", ports);
     }
     let cleanup = op.effects.find(e => e.role === "cleanup");
@@ -195,8 +238,9 @@ export async function cleanupCircle(input, ports) {
     cleanup = op.effects.find(e => e.role === "cleanup");
     if (["prepared", "sealed"].includes(cleanup.phase)) {
         await ports.assertOwnerPolicyAndConflicts(op);
-        await ports.approve(op, "cleanup");
-        op = await executeCircleEffect(op, "cleanup", ports);
+        const token = await consent(op, "cleanup", ports);
+        checkConsent(token, op, ports);
+        op = await executeCircleEffect(op, "cleanup", ports, token);
     }
     op = await observeCircle(op, ports);
     cleanup = op.effects.find(e => e.role === "cleanup");

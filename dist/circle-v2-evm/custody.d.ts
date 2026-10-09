@@ -26,6 +26,6 @@ export declare class LocalCircleCustody {
     private readonly material;
     constructor(state: StateStore, wrapping: WrappingSecretPort);
     load(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null>;
-    seal(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial>;
+    seal(op: CircleOperationV1, effect: CircleEffect, guard: () => void): Promise<CircleMaterial>;
 }
 export declare function verifyCircleMaterial(op: CircleOperationV1, effect: CircleEffect, input: unknown): Promise<CircleMaterial>;
