@@ -12,7 +12,7 @@ export function assertSealedBurnRetirement(op: CircleOperationV1): void {
     a.envelope.nonceAtomic !== "83" || a.proof === null || a.proof.actualFeeAtomic !== "1116903336000" ||
     b.phase !== "unknown" || b.transactionHash !== SEALED_BURN_HASH || b.materialHash !== SEALED_BURN_MATERIAL || b.proof !== null || b.envelope.nonceAtomic !== "84" || b.envelope.gasLimitAtomic !== "600000" || b.envelope.maxFeePerGasAtomic !== "40000000" || b.envelope.maxPriorityFeePerGasAtomic !== "0" ||
     op.source !== null || op.attestation !== null || op.destination !== null || op.effects.some(e => e.role === "mint") || op.usage.length !== 5 ||
-    !op.transitions.some(t => t.reason === "burn_material_sealed")) circleBlocked("exact_sealed_sei_burn_retirement_required");
+    !op.transitions.some(t => t.reason === "burn_material_sealed") || op.transitions.some(t => /^burn_(?:submission|submitted)/u.test(t.reason))) circleBlocked("exact_sealed_sei_burn_retirement_required");
 }
 export function sealedBurnBinding(op: CircleOperationV1): string {
   return hashObject({ version: "sealed-burn.v1", operationId: op.operationId, fingerprint: op.fingerprint, sourceCustody: op.sourceCustody,

@@ -30,7 +30,7 @@ The explicit nonce cleanup captures a create-only current authority sidecar unde
 
 ### Retained Sei sealed-burn nonce retirement
 
-The same foreground `cleanup-nonce` command additionally recognizes only retained Sei/seller operation `4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33`. Its approval83 is confirmed and burn84 is sealed/unknown. It creates a versioned retirement intent binding both original material identities and a canonical approval receipt, permanently disables both original source effects, and signs one new USDC approve-zero at84. The original burn is never continued or replayed.
+The same foreground `cleanup-nonce` command additionally recognizes only retained Sei/seller operation `4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33`. Its approval83 is confirmed and burn84 is sealed/unknown with no original burn submission or submitted marker. Any such original marker refuses this finite variant. It creates a versioned retirement intent binding both original material identities and a canonical approval receipt, permanently disables both original source effects, and signs one new USDC approve-zero at84. The original burn is never continued or replayed.
 
 The frozen replacement uses a fee ceiling at least50,000,000 wei and a rounded-up12.5 percent bump over the old burn ceiling, priority fee at least1/current quoted minimum, and the existing full15T cleanup hold. Pendingnonce85 is accepted only while the exact retained burn84 is publicly pending and has no receipt. Any consumed nonce, changed principal, policy activation or underpriced/lost submission stops financial continuation. No automatic fee bump, nonce change or resend is available.
 
