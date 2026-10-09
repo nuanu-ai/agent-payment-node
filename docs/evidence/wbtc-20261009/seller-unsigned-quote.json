@@ -1,0 +1,154 @@
+{
+  "moneyEffects": false,
+  "profileIdentityVerified": false,
+  "request": {
+    "profile": "evm-live-seller",
+    "account": "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04",
+    "recipient": "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04",
+    "outputToken": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+    "amountAtomic": "400000000000000",
+    "slippageBps": 50,
+    "ownerSlippageCapBps": 100,
+    "deadline": 1791516811,
+    "maxGasLimit": "300000",
+    "maxFeePerGas": "209813250",
+    "maxPriorityFeePerGas": "5000000",
+    "now": "2026-10-09T03:13:31.478Z"
+  },
+  "preRead": {
+    "block": "26152086",
+    "balanceWei": "483497159594592",
+    "baseFeePerGas": "102406625"
+  },
+  "result": {
+    "quoteHash": "01fad829fbd9a7f3e79ec4a888c4b381994494b984910d64f5bb84a838fc260b",
+    "quote": {
+      "schemaVersion": "apn.swap-quote.v1",
+      "profile": "evm-live-seller",
+      "account": "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04",
+      "recipient": "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04",
+      "sourceAsset": {
+        "chain": "eip155:1",
+        "kind": "native",
+        "identifier": null
+      },
+      "destinationAsset": {
+        "chain": "eip155:1",
+        "kind": "token",
+        "identifier": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
+      },
+      "inputAmountAtomic": "400000000000000",
+      "expectedOutputAtomic": "1209",
+      "minimumOutputAtomic": "1203",
+      "slippageBps": 50,
+      "effectiveAt": "2026-10-09T03:13:31.478Z",
+      "expiresAt": "2026-10-09T03:33:31.000Z",
+      "providerResponseHash": "40d8271632068da56d3c235e3b6bf292ab56e890135f0ddb1260c0b78d3afa69",
+      "routeHash": "936f9a2d40b75db2d69f6ab77953f3236045746b30e935300c9bc8c77dd48e89",
+      "unsignedTransactionPayloadHash": "41da3bdac39107132a55cbab668b5825135bb1832a55f4d5d0b34c0fba9b4b49",
+      "simulation": {
+        "requestHash": "2519cfc388385491070e41bf430f1c8fd1605821a31149e27c2649a3c4c5eedd",
+        "resultHash": "b7abcea461f9e71195a8f7f775246c7aa2f92ce5c9eb645fa6d27b55ac5413ac",
+        "success": true,
+        "blockNumber": "26152086",
+        "blockHash": "0x255f35794b04640f5af22859710bb26d5d36a900f27f7a4b3991bd1be083bbe0",
+        "headBlockNumber": "26152087",
+        "maxHeadDrift": 64,
+        "gasEstimate": "155419"
+      },
+      "profileHash": "0a28ff31f3dedbe0d3535d058052a1edd19c062673c9ca52aedffd13ee08625e",
+      "quoteHash": "01fad829fbd9a7f3e79ec4a888c4b381994494b984910d64f5bb84a838fc260b"
+    },
+    "unsignedTransaction": {
+      "from": "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04",
+      "to": "0x0542093271A31f6FC1DADB232bd59eeb27de780F",
+      "data": "0x3593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006ac8608b00000000000000000000000000000000000000000000000000000000000000020b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000016bcc41e900000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000991e254b5c8e0aaf6c244eaa2706bad059809b0400000000000000000000000000000000000000000000000000016bcc41e9000000000000000000000000000000000000000000000000000000000000000004b300000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000120000000000000000000000000000000000000000000000000000000000000002bc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000bb82260fac5e5542a773aa44fbcfedf7c193bc2c5990000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "value": "400000000000000",
+      "gasLimit": "194274",
+      "chainId": 1,
+      "maxFeePerGas": "209813250",
+      "maxPriorityFeePerGas": "5000000"
+    },
+    "approvalCapAtomic": "0",
+    "gas": {
+      "gasLimit": "194274",
+      "maxFeePerGas": "209813250",
+      "maxPriorityFeePerGas": "5000000",
+      "maximumGasCostWei": "40761259330500"
+    },
+    "price": {
+      "source": "uniswap_v3_quoter_v2_and_pool_slot0",
+      "pool": "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD",
+      "feeTier": 3000,
+      "block": "26152086",
+      "blockHash": "0x255f35794b04640f5af22859710bb26d5d36a900f27f7a4b3991bd1be083bbe0",
+      "sqrtPriceX96": "45493678889732345214047121458593792",
+      "spotOutputPerEthAtomic": "3032892",
+      "expectedOutputAtomic": "1209",
+      "minimumOutputAtomic": "1203",
+      "slippageBps": 50,
+      "priceImpactBps": 0,
+      "outputSymbol": "WBTC",
+      "outputDecimals": 8
+    },
+    "mechanism": {
+      "pin": {
+        "schemaVersion": "apn.swap-mechanism-pin.v1",
+        "protocolFamily": "uniswap_ethereum",
+        "networkFamily": "evm",
+        "chain": "eip155:1",
+        "protocolVersion": "2.2.0",
+        "constructorKind": "sdk",
+        "constructorIdentity": "apn.uniswap-v3.quoter-v2.local-encoder",
+        "constructorVersion": "1.1.0",
+        "routerProgramIdentity": "0x0542093271A31f6FC1DADB232bd59eeb27de780F",
+        "auxiliaryContractProgramIdentities": [
+          "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+          "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+          "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+          "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD"
+        ],
+        "quoteSchemaVersion": "quoter-v2.quote-exact-input-single.1",
+        "transactionSchemaVersion": "universal-router-2.2.0.wrap-eth-v3-exact-in.1",
+        "validationPolicyIdentity": "apn.uniswap.ethereum-native-wbtc-v3-keyless",
+        "validationPolicyVersion": "1.0.0"
+      },
+      "digest": "b5524ff02dee36f5aacfdffd2e7281287e21764c6bdc79bc9f77d1a369fd7131"
+    },
+    "codePins": [
+      {
+        "role": "universal_router_2_2_0",
+        "address": "0x0542093271A31f6FC1DADB232bd59eeb27de780F",
+        "codeHash": "0x1b37035dac8ecda2e578a0047748e495aa397ee4bc7640468a5b60c1c55d824c"
+      },
+      {
+        "role": "quoter_v2",
+        "address": "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+        "codeHash": "0x06148f47d0f41a68d3bc970030a7150e5d608cfbc28d372440a2e41ce543d92b"
+      },
+      {
+        "role": "v3_factory",
+        "address": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+        "codeHash": "0x4d7b8525cd5d14343fa67a732fba5b24cddba11620ca88392f4ec6c52f91fd69"
+      },
+      {
+        "role": "weth9",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "codeHash": "0xd0a06b12ac47863b5c7be4185c2deaad1c61557033f56c7d4ea74429cbb25e23"
+      },
+      {
+        "role": "wbtc",
+        "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+        "codeHash": "0x131ff5c755b710d543ea70fede2eb38e5d15b1456df0ae932ba12e2786f7e5df"
+      },
+      {
+        "role": "pool_wbtc_weth_3000",
+        "address": "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD",
+        "codeHash": "0x385084b66be309c0ba96c1488cf8999e306533675a3826b64bf5b3c8f4949ae1"
+      }
+    ],
+    "signed": false,
+    "broadcast": false
+  }
+}

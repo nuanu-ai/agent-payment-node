@@ -1,3 +1,4 @@
+import { reviewedWbtcPolicyAsset } from "./canonical-wbtc-policy-assets.js";
 import { getAddress } from "viem";
 import { resolveAllowlistAsset } from "./allowlist-inventory.js";
 /** Historical C1-12 direct-transfer identities. This is separate from the sealed market-cap inventory. */
@@ -20,6 +21,9 @@ export function directEvmSupplementalAsset(chain, identifier) {
 }
 /** Only a direct policy admission can resolve a supplemental identity. */
 export function resolveDirectPolicyAsset(input, inventory) {
+    const wbtc = reviewedWbtcPolicyAsset(input);
+    if (wbtc !== undefined)
+        return wbtc;
     if (input.rail === "direct" && input.kind === "token" && input.identifier !== undefined && input.chain.startsWith("eip155:")) {
         let canonical;
         try {

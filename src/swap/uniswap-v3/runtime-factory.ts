@@ -18,7 +18,8 @@ import { UniswapLocalOwnerAdmission } from "./admission.js";
 import { KeylessUniswapQuoteBuilder, type UniswapKeylessQuoteRequest } from "./builder.js";
 import { SavedUniswapQuoteStore } from "./material.js";
 import { scalarUniswapRpcCall, type NativeBatchCall } from "./native-rpc.js";
-import { UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, type UniswapV3PinVerifier } from "./pins.js";
+import { ETHEREUM_WBTC, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_MECHANISM_PIN, verifyUniswapWbtcCodePins, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, type UniswapV3PinVerifier } from "./pins.js";
+import { swapMechanismDigest } from "../pin.js";
 import { TtyUniswapSwapApproval } from "./tty.js";
 
 /** Only the foreground CLI approve command receives a terminal; every other surface refuses consent outright. */
@@ -60,7 +61,8 @@ export function lazyEthereumRpcCall(environment: Readonly<Record<string, string 
   return call;
 }
 
-export function createUniswapKeylessRuntime(options: UniswapKeylessRuntimeOptions): GuardedSwapRuntime<UniswapKeylessQuoteRequest> {
+function createRouteRuntime(options: UniswapKeylessRuntimeOptions, wbtc = false): GuardedSwapRuntime<UniswapKeylessQuoteRequest> {
+  const protocolRegistry = wbtc ? UNISWAP_WBTC_PROTOCOL_REGISTRY : UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY;
   const { state, wrapping, clock, call } = options, root = state.root;
   const executionCall = scalarUniswapRpcCall(call);
   const quotes = new SavedUniswapQuoteStore(root), operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root);
@@ -68,11 +70,32 @@ export function createUniswapKeylessRuntime(options: UniswapKeylessRuntimeOption
   const signer = new LocalUniswapEthereumSigner(state, wrapping, effects), sender = new UniswapSingleSendAdapter(effects, call);
   const observer = new UniswapEthereumReceiptObserver(call, () => clock.now(), new UniswapBalanceEvidenceStore(root));
   const execution = new UniswapEthereumExecutionDriver({ core: new GuardedSwapService(operations, usage),
-    protocolRegistry: UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, admission, guard: new UniswapExecutionGuard(executionCall, clock, options.verifyPins),
+    protocolRegistry, admission, guard: new UniswapExecutionGuard(executionCall, clock, options.verifyPins),
     bindings: new UniswapExecutionBindingStore(root), signer, sender, observer, effects, clock });
   const foregroundApproval = options.foreground === "tty" ? new TtyUniswapSwapApproval(quotes, clock, options.tty) : options.foreground;
   return new GuardedSwapRuntime<UniswapKeylessQuoteRequest>({ chain: "eip155:1", builder: new KeylessUniswapQuoteBuilder(call, quotes, options.verifyPins),
-    policy: options.policy, clock, protocolRegistry: UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, usage, operations, ownerAdmission: admission,
+    policy: options.policy, clock, protocolRegistry, usage, operations, ownerAdmission: admission,
     foregroundApproval, execution, approvals: new GuardedSwapApprovalRepository(root), rpc: { call }, effectStore: effects, signer, sender,
     observer, caps: { approvalCapAtomic: "0" } });
+}
+
+/** Route old operations through their original immutable registry; WBTC has its own digest and lifecycle. */
+export function createUniswapKeylessRuntime(options: UniswapKeylessRuntimeOptions): GuardedSwapRuntime<UniswapKeylessQuoteRequest> {
+  const stable = createRouteRuntime(options), wbtc = createRouteRuntime({ ...options, verifyPins: verifyUniswapWbtcCodePins }, true);
+  const quotes = new SavedUniswapQuoteStore(options.state.root), operations = new SwapOperationRepository(options.state.root);
+  const digest = swapMechanismDigest(UNISWAP_WBTC_MECHANISM_PIN);
+  return new Proxy(stable, { get(target, property) {
+    if (property === "quote") return (request: UniswapKeylessQuoteRequest, now: Date) =>
+      (request.outputToken === ETHEREUM_WBTC ? wbtc : stable).quote(request, now);
+    if (property === "prepare") return async (request: Parameters<typeof stable.prepare>[0], now: Date) => {
+      const quote = await quotes.load(request.quoteHash);
+      return (quote?.quote.destinationAsset.identifier === ETHEREUM_WBTC ? wbtc : stable).prepare(request, now);
+    };
+    if (["status", "approve", "approveAndExecute", "execute"].includes(String(property))) return async (id: string, now: Date) => {
+      const op = await operations.loadAny(id), runtime = op?.mechanismDigest === digest ? wbtc : stable;
+      const method = property as "status" | "approve" | "approveAndExecute" | "execute";
+      return runtime[method](id, now);
+    };
+    const value = Reflect.get(target, property); return typeof value === "function" ? value.bind(target) : value;
+  } });
 }

@@ -3,6 +3,7 @@ import { address as solanaAddress } from "@solana/kit";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "../allowlist-inventory.js";
+import { CANONICAL_WBTC_POLICY_ASSETS } from "../canonical-wbtc-policy-assets.js";
 import { parseAtomic } from "../money.js";
 import { tronAddress } from "../tron/codec.js";
 export const SWAP_QUOTE_SCHEMA = "apn.swap-quote.v1";
@@ -34,7 +35,9 @@ export function validateSwapQuote(value, mode = "stored") {
     const sourceAsset = asset(record.sourceAsset, mode), destinationAsset = asset(record.destinationAsset, mode);
     if (sourceAsset.chain !== destinationAsset.chain)
         fail("Swap assets must use the same exact network identity.");
-    const source = resolveInventory(sourceAsset, mode), destination = resolveInventory(destinationAsset, mode);
+    const wbtc = sourceAsset.chain === "eip155:1" && sourceAsset.kind === "native" && sourceAsset.identifier === null && destinationAsset.kind === "token"
+        ? CANONICAL_WBTC_POLICY_ASSETS.find(row => row.chain === "eip155:1" && row.identifier === destinationAsset.identifier) : undefined;
+    const source = resolveInventory(sourceAsset, mode), destination = wbtc ?? resolveInventory(destinationAsset, mode);
     if (source.family !== destination.family)
         fail("Swap asset network families do not match.");
     const account = canonicalParty(source.family, record.account, mode), recipient = canonicalParty(source.family, record.recipient, mode);
@@ -42,6 +45,8 @@ export function validateSwapQuote(value, mode = "stored") {
         fail("Swap owner or recipient is not canonical.");
     const input = atomic(record.inputAmountAtomic, true, mode), expected = atomic(record.expectedOutputAtomic, true, mode);
     const minimum = atomic(record.minimumOutputAtomic, true, mode);
+    if (wbtc !== undefined && minimum < 1000n)
+        fail("WBTC acquisition floor is below 1000 atomic.");
     if (minimum > expected)
         fail("Swap minimum output exceeds expected output.");
     const minimumAllowed = (expected * BigInt(10_000 - record.slippageBps) + 9999n) / 10000n;

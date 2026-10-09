@@ -1,0 +1,22 @@
+{
+  "chain": 42161,
+  "block": "513075221",
+  "blockHash": "0xb79de931409b4b165f113cd32969d209308f5249c4e589f7a294843e3200df68",
+  "decimals": 8,
+  "implementation": "0x3f770Ac673856F105b586bb393d122721265aD46",
+  "beaconSlot": "0x000000000000000000000000e72ba9418b5f2ce0a6a40501fe77c6839aa37333",
+  "codes": [
+    {
+      "address": "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f",
+      "codeHash": "0x9bb54fba14f3f66acb4acfdcb38af3737d65543274ad5e9bc794080b876ddf18"
+    },
+    {
+      "address": "0xE72ba9418b5f2Ce0A6a40501Fe77c6839Aa37333",
+      "codeHash": "0x335bc199b68d92971edf04b2d907a18617249dc49f86d7699c4eec68cb882d6c"
+    },
+    {
+      "address": "0x3f770Ac673856F105b586bb393d122721265aD46",
+      "codeHash": "0xc62ae99da1e885d46423d6b467371cda77d1711f0201343950722f6052ddbdfb"
+    }
+  ]
+}

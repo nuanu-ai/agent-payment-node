@@ -24,4 +24,5 @@ export interface UniswapKeylessRuntimeOptions {
 }
 /** Resolves APN_ETHEREUM_RPC_URL on first use, so offline commands never need it and online ones fail closed without it. */
 export declare function lazyEthereumRpcCall(environment: Readonly<Record<string, string | undefined>>, transport?: Pick<BridgeHttps, "request">): NativeBatchCall;
+/** Route old operations through their original immutable registry; WBTC has its own digest and lifecycle. */
 export declare function createUniswapKeylessRuntime(options: UniswapKeylessRuntimeOptions): GuardedSwapRuntime<UniswapKeylessQuoteRequest>;

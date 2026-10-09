@@ -1,0 +1,81 @@
+{
+  "block": "26152042",
+  "blockHash": "0xe1c46b2e0d587763b010a6dd0ef6e2af095c34ae3f6951312502049183227bb2",
+  "chain": 1,
+  "pool": "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD",
+  "token": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+  "token0": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+  "token1": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  "factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+  "fee": 3000,
+  "decimals": 8,
+  "symbol": "WBTC",
+  "factoryPool": "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD",
+  "code": [
+    {
+      "address": "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD",
+      "codeHash": "0x385084b66be309c0ba96c1488cf8999e306533675a3826b64bf5b3c8f4949ae1"
+    },
+    {
+      "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+      "codeHash": "0x131ff5c755b710d543ea70fede2eb38e5d15b1456df0ae932ba12e2786f7e5df"
+    },
+    {
+      "address": "0x0542093271A31f6FC1DADB232bd59eeb27de780F",
+      "codeHash": "0x1b37035dac8ecda2e578a0047748e495aa397ee4bc7640468a5b60c1c55d824c"
+    },
+    {
+      "address": "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+      "codeHash": "0x06148f47d0f41a68d3bc970030a7150e5d608cfbc28d372440a2e41ce543d92b"
+    },
+    {
+      "address": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+      "codeHash": "0x4d7b8525cd5d14343fa67a732fba5b24cddba11620ca88392f4ec6c52f91fd69"
+    },
+    {
+      "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "codeHash": "0xd0a06b12ac47863b5c7be4185c2deaad1c61557033f56c7d4ea74429cbb25e23"
+    }
+  ],
+  "quote": [
+    "1209",
+    "45493679810323368769151825411638984",
+    1,
+    "82144"
+  ],
+  "productionVerifier": {
+    "allCodeAndIdentityChecksPassed": true,
+    "pins": [
+      {
+        "role": "universal_router_2_2_0",
+        "address": "0x0542093271A31f6FC1DADB232bd59eeb27de780F",
+        "codeHash": "0x1b37035dac8ecda2e578a0047748e495aa397ee4bc7640468a5b60c1c55d824c"
+      },
+      {
+        "role": "quoter_v2",
+        "address": "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+        "codeHash": "0x06148f47d0f41a68d3bc970030a7150e5d608cfbc28d372440a2e41ce543d92b"
+      },
+      {
+        "role": "v3_factory",
+        "address": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+        "codeHash": "0x4d7b8525cd5d14343fa67a732fba5b24cddba11620ca88392f4ec6c52f91fd69"
+      },
+      {
+        "role": "weth9",
+        "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "codeHash": "0xd0a06b12ac47863b5c7be4185c2deaad1c61557033f56c7d4ea74429cbb25e23"
+      },
+      {
+        "role": "wbtc",
+        "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+        "codeHash": "0x131ff5c755b710d543ea70fede2eb38e5d15b1456df0ae932ba12e2786f7e5df"
+      },
+      {
+        "role": "pool_wbtc_weth_3000",
+        "address": "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD",
+        "codeHash": "0x385084b66be309c0ba96c1488cf8999e306533675a3826b64bf5b3c8f4949ae1"
+      }
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import { reviewedWbtcPolicyAsset } from "./canonical-wbtc-policy-assets.js";
 import { getAddress } from "viem";
 import type { AllowlistInventory, CandidateAsset } from "./allowlist-inventory.js";
 import { resolveAllowlistAsset } from "./allowlist-inventory.js";
@@ -25,7 +26,9 @@ export function directEvmSupplementalAsset(chain: string, identifier: string | n
 
 /** Only a direct policy admission can resolve a supplemental identity. */
 export function resolveDirectPolicyAsset(input: { readonly chain: string; readonly kind: "native" | "token";
-  readonly identifier?: string; readonly rail: string }, inventory: AllowlistInventory): CandidateAsset {
+  readonly identifier?: string; readonly rail: string; readonly mechanism?: unknown; readonly mechanisms?: unknown }, inventory: AllowlistInventory): CandidateAsset {
+  const wbtc = reviewedWbtcPolicyAsset(input);
+  if (wbtc !== undefined) return wbtc;
   if (input.rail === "direct" && input.kind === "token" && input.identifier !== undefined && input.chain.startsWith("eip155:")) {
     let canonical: string | undefined;
     try { canonical = getAddress(input.identifier); } catch { /* The frozen resolver classifies invalid identities. */ }
