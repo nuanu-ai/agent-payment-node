@@ -42,6 +42,7 @@ export function conflictDomainKey(domain: MoneyConflictDomain): string {
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
 export function storedOperationDomains(operation: StoredMoneyOperation): readonly MoneyConflictDomain[] | null {
   try {
+    if (operation.kind === "sei_gaszip") return [evmConflictDomain(8453, operation.record.owner.address)];
     if (operation.kind === "permit2_production") return [evmConflictDomain(43114, operation.record.material.wallet.account)];
     if (operation.kind === "permit2_legacy_conflict") return [evmConflictDomain(operation.record.chainId, operation.record.account)];
     if (operation.kind === "relay_unsigned") return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];

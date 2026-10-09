@@ -318,6 +318,14 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "1Click source runtime is unavailable.");
                 return dataOutcome(await service.status(request.operationId), "oneclick_source_and_provider_observation_untrusted");
             }
+            case "sei.funding.prepare":
+            case "sei.funding.approve":
+            case "sei.funding.status": {
+                const service = this.context.seiFunding;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Sei funding runtime unavailable.");
+                return dataOutcome(request.command === "sei.funding.prepare" ? await service.prepare(request) : request.command === "sei.funding.approve" ? await service.approve(request.operationId) : await service.status(request.operationId), "sei_gaszip_durable_operation");
+            }
             case "circle.source.submit": {
                 const service = this.context.circleSource;
                 if (service === undefined)

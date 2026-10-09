@@ -1,3 +1,4 @@
+import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import type { CommandOutcome } from "./commands.js";
@@ -20,6 +21,9 @@ import { type FacilitatorGaslessRepositoryPort } from "./facilitator-gasless/ope
 import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation-model.js";
 import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 export type StoredMoneyOperation = {
+    readonly kind: "sei_gaszip";
+    readonly record: SeiFundingRecord;
+} | {
     readonly kind: "permit2_production";
     readonly record: Permit2ProductionRecord;
 } | {
@@ -68,7 +72,8 @@ export declare class OperationService {
     private readonly smartAccountGasless;
     private readonly facilitatorGasless;
     private readonly relayUnsigned;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository);
+    private readonly seiFunding;
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
     /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
      * locks are acquired together so owner validation and durable write are atomic. */
     persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation>;

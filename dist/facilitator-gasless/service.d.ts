@@ -99,13 +99,13 @@ export declare class FacilitatorGaslessService {
             requirement_hash: string;
             verify: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
             settle: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
@@ -189,13 +189,13 @@ export declare class FacilitatorGaslessService {
             requirement_hash: string;
             verify: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
             settle: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
@@ -279,13 +279,13 @@ export declare class FacilitatorGaslessService {
             requirement_hash: string;
             verify: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
             settle: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
@@ -369,13 +369,13 @@ export declare class FacilitatorGaslessService {
             requirement_hash: string;
             verify: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
             settle: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
@@ -461,13 +461,13 @@ export declare class FacilitatorGaslessService {
             requirement_hash: string;
             verify: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;
             settle: {
                 started_at: string;
-                outcome: "unknown" | "accepted" | "pending" | "rejected";
+                outcome: "unknown" | "pending" | "rejected" | "accepted";
                 response_hash: string | null;
                 transaction_hash: `0x${string}` | null;
             } | null;

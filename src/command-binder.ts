@@ -1,4 +1,5 @@
 import { coinbaseObservationPreset } from "./coinbase-gasless-observation-source.js";
+import { bindSeiFundingCommand } from "./lifi/sei-gaszip-command-catalog.js";
 import { isPlainRecord } from "./canonical.js";
 import {
   parseCatalogArgv,
@@ -137,6 +138,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     ...(parsed.command.path.join(" ") === "gasless transfer quote" ? { rpcUrl: value(options, "--rpc-url") } : {}) };
   if (parsed.command.path[0] === "bridge") return { request: bindBridgeCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "oneclick") return { request: bindOneClickCommand(parsed.command.path.join(" "), options) };
+  if (parsed.command.path[0] === "sei") return { request: bindSeiFundingCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "circle") return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
   switch (parsed.command.path.join(" ")) {
     case "--version": return { request: { command: "version" } };

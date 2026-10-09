@@ -399,8 +399,8 @@ export declare const failureSchema: z.ZodObject<{
         rpcOrigin: z.ZodString;
     }, z.core.$strict>>;
     residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-        observed: "observed";
         unavailable: "unavailable";
+        observed: "observed";
     }>>;
     preSignRpc: z.ZodOptional<z.ZodObject<{
         schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
@@ -565,9 +565,9 @@ export declare const phaseSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     submitted_pending: "submitted_pending";
     signing_started: "signing_started";
+    sealed: "sealed";
     submitting: "submitting";
     unsealed: "unsealed";
-    sealed: "sealed";
     included_success: "included_success";
     included_revert: "included_revert";
     safe_success: "safe_success";
@@ -621,9 +621,9 @@ export declare const effectSchema: z.ZodObject<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
         signing_started: "signing_started";
+        sealed: "sealed";
         submitting: "submitting";
         unsealed: "unsealed";
-        sealed: "sealed";
         included_success: "included_success";
         included_revert: "included_revert";
         safe_success: "safe_success";
@@ -749,9 +749,9 @@ export declare const transitionSchema: z.ZodObject<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
             signing_started: "signing_started";
+            sealed: "sealed";
             submitting: "submitting";
             unsealed: "unsealed";
-            sealed: "sealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -1028,8 +1028,8 @@ export declare const transitionSchema: z.ZodObject<{
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
         residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-            observed: "observed";
             unavailable: "unavailable";
+            observed: "observed";
         }>>;
         preSignRpc: z.ZodOptional<z.ZodObject<{
             schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
@@ -1272,9 +1272,9 @@ export declare const operationSchema: z.ZodObject<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
             signing_started: "signing_started";
+            sealed: "sealed";
             submitting: "submitting";
             unsealed: "unsealed";
-            sealed: "sealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -1527,9 +1527,9 @@ export declare const operationSchema: z.ZodObject<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
                 signing_started: "signing_started";
+                sealed: "sealed";
                 submitting: "submitting";
                 unsealed: "unsealed";
-                sealed: "sealed";
                 included_success: "included_success";
                 included_revert: "included_revert";
                 safe_success: "safe_success";
@@ -1806,8 +1806,8 @@ export declare const operationSchema: z.ZodObject<{
                 rpcOrigin: z.ZodString;
             }, z.core.$strict>>;
             residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-                observed: "observed";
                 unavailable: "unavailable";
+                observed: "observed";
             }>>;
             preSignRpc: z.ZodOptional<z.ZodObject<{
                 schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
@@ -2151,8 +2151,8 @@ export declare const operationSchema: z.ZodObject<{
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
         residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-            observed: "observed";
             unavailable: "unavailable";
+            observed: "observed";
         }>>;
         preSignRpc: z.ZodOptional<z.ZodObject<{
             schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;

@@ -33,6 +33,66 @@ chain, asset, tool, allowlist, signer, sender and observer paths. Source and
 destination contract proofs, observer and recovery behavior, and active owner
 policy are still required before any execution design or funding attempt.
 
+## Finite GasZip direct funding for Sei
+
+`sei funding` adds one separate local-wallet funding route: native Base ETH
+(chain 8453) to the same owner's native Sei SEI (chain 1329). The source sends
+at most 10000000000000 wei ETH to the official GasZip V2 direct deposit address
+`0x391E7C679d29bD940d63be94AD22A25d25b5A604` with exactly `0x0100f6`.
+APN requires that target to have empty code. The calldata selects the source
+sender as recipient and GasZip short chain ID 246. No approval is involved.
+The LI.FI Sei inspection described above keeps its existing execution block.
+
+The active Base native bridge admission must name exactly
+`{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`.
+Preparation refuses an output floor below 250000000000000000 wei SEI or a total
+source fee ceiling above 1000000000000 wei ETH. Base fee quotes include L2 gas,
+the OP GasPriceOracle L1 data fee upper bound for 512 signed bytes, and the
+operator fee. This version admits only the observed zero operator fee. The
+signed EIP-1559 gas price limits the L2 component; the Base total is a quoted
+ceiling, not an on-chain total fee cap. The destination floor is an acceptance
+requirement and is not enforced by the source transaction.
+
+Set `APN_BASE_RPC_URL` and `APN_SEI_RPC_URL` to public HTTPS RPC endpoints. Each
+RPC must return its exact chain ID, hash-pinned state and safe blocks. The API
+origin is fixed to `https://backend.gas.zip`. Integer JSON lexemes are preserved
+as exact decimal strings before any native output comparison.
+
+```text
+apn sei funding prepare --profile evm-live-buyer --expected-payer <owner-address> --amount-atomic 10000000000000 --minimum-output-atomic 250000000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key <new-key>
+apn sei funding approve --operation <saved-operation-id>
+apn sei funding status --operation <saved-operation-id>
+```
+
+Preparation saves the quote expiry, exact owner and provider binding, active
+policy digest, source nonce and fee plan. Approval needs a foreground terminal
+and fresh source checks. Create-only signing and sending claims precede their
+respective effects. The operation joins the shared EVM conflict and idempotency
+registry, so its unresolved Base spend blocks another operation for that owner
+on Base. Status never signs or resends. An expired unsigned preparation becomes
+`failed_before_effect`; a signing interruption retains its hold.
+
+Completion requires a successful canonical source transaction and receipt at
+or below Base's safe head, including the exact sender, nonce, calldata, value
+and signed fee pair. The provider's `/v2/deposit/<source-hash>` response must map
+that source to exactly one successful, unrefunded Sei transaction. Sei RPC then
+independently verifies the mapped transaction's sender, recipient, nonce, native
+value, receipt, safe inclusion and exact recipient balance delta across its
+inclusion block. A destination hash has one create-only operation claim. The
+source receipt and the provider's status alone cannot complete this operation.
+Missing, ambiguous, refunded or changed provider data retain the hold. Only an
+independently safe source revert releases the principal as
+`failed_confirmed_revert`; consumed source network fees remain separate.
+
+Primary protocol contracts:
+[direct deposit format](https://dev.gas.zip/gas/code-examples/evm-deposit/direct-forwarder),
+[quote and expiry](https://dev.gas.zip/gas/api/quote),
+[deposit correlation](https://dev.gas.zip/gas/api/deposit) and
+[outbound correlation](https://dev.gas.zip/gas/api/outbound).
+Local synthetic tests verify these guards and recovery states. Real funding,
+installed consumer proof and the subsequent Sei direct receipt require their
+own evidence.
+
 This APN 0.5.26 package includes local-wallet route selection and execution for
 the admitted assets between Ethereum, Base, Arbitrum One and the finite native
 destinations below. It implements
