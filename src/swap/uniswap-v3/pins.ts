@@ -1,4 +1,4 @@
-import { getAddress, keccak256, type Hex } from "viem";
+import { getAddress, keccak256, encodeFunctionData, decodeFunctionResult, parseAbi, type Hex } from "viem";
 import { ApnError } from "../../errors.js";
 import type { EvmRpcCall } from "../../evm-ports.js";
 import { evmRpcHex } from "../../evm-rpc-codec.js";
@@ -69,8 +69,47 @@ export const UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY: SwapProtocolRegistry = compil
   registryVersion: "uniswap-v3-keyless.2026-09-18", pins: [UNISWAP_V3_KEYLESS_MECHANISM_PIN],
 });
 
+/** Separate finite WBTC route; old mechanism and registry constants remain byte-for-byte stable. */
+export const ETHEREUM_WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599" as const;
+export const UNISWAP_V3_WBTC_WETH_3000 = "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD" as const;
+export const UNISWAP_WBTC_PAIR: UniswapV3PairPin = { outputToken: ETHEREUM_WBTC, outputSymbol: "WBTC", outputDecimals: 8,
+  pool: UNISWAP_V3_WBTC_WETH_3000, fee: 3000, wethIsToken0: false };
+export const UNISWAP_WBTC_MECHANISM_PIN: SwapMechanismPin = validateSwapMechanismPin({ ...UNISWAP_V3_KEYLESS_MECHANISM_PIN,
+  constructorVersion: "1.1.0", auxiliaryContractProgramIdentities: [UNISWAP_V3_QUOTER_V2, UNISWAP_V3_FACTORY, UNISWAP_WETH9, ETHEREUM_WBTC, UNISWAP_V3_WBTC_WETH_3000],
+  validationPolicyIdentity: "apn.uniswap.ethereum-native-wbtc-v3-keyless", validationPolicyVersion: "1.0.0" });
+export const UNISWAP_WBTC_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "uniswap-wbtc-keyless.2026-10-09", pins: [UNISWAP_WBTC_MECHANISM_PIN] });
+export const UNISWAP_WBTC_CODE_PINS: readonly UniswapV3CodePin[] = [...UNISWAP_V3_CODE_PINS.slice(0, 4),
+  { role: "wbtc", address: ETHEREUM_WBTC, codeHash: "0x131ff5c755b710d543ea70fede2eb38e5d15b1456df0ae932ba12e2786f7e5df" },
+  { role: "pool_wbtc_weth_3000", address: UNISWAP_V3_WBTC_WETH_3000, codeHash: "0x385084b66be309c0ba96c1488cf8999e306533675a3826b64bf5b3c8f4949ae1" }];
+export async function verifyUniswapWbtcCodePins(call: EvmRpcCall, tag: Hex): Promise<readonly UniswapV3CodePin[]> {
+  const requests = UNISWAP_WBTC_CODE_PINS.map(pin => ({ method: "eth_getCode", params: [pin.address, tag] }));
+  const values: unknown[] = [];
+  for (let i = 0; i < requests.length; i += 3) values.push(...await nativeReads(call, requests.slice(i, i + 3)));
+  UNISWAP_WBTC_CODE_PINS.forEach((pin, i) => verifyCodeValue(values[i], pin));
+  const abi = parseAbi(["function token0() view returns(address)", "function token1() view returns(address)",
+    "function fee() view returns(uint24)", "function factory() view returns(address)", "function decimals() view returns(uint8)",
+    "function getPool(address,address,uint24) view returns(address)"]);
+  const facts = [{ to: UNISWAP_V3_WBTC_WETH_3000, fn: "token0", expected: ETHEREUM_WBTC },
+    { to: UNISWAP_V3_WBTC_WETH_3000, fn: "token1", expected: UNISWAP_WETH9 },
+    { to: UNISWAP_V3_WBTC_WETH_3000, fn: "fee", expected: 3000 },
+    { to: UNISWAP_V3_WBTC_WETH_3000, fn: "factory", expected: UNISWAP_V3_FACTORY },
+    { to: ETHEREUM_WBTC, fn: "decimals", expected: 8 }] as const;
+  const identityRequests: { method: string; params: readonly unknown[] }[] = facts.map(fact => ({ method: "eth_call", params: [{ to: fact.to, data: encodeFunctionData({ abi, functionName: fact.fn }) }, tag] }));
+  const factoryData = encodeFunctionData({ abi, functionName: "getPool", args: [ETHEREUM_WBTC, UNISWAP_WETH9, 3000] });
+  identityRequests.push({ method: "eth_call", params: [{ to: UNISWAP_V3_FACTORY, data: factoryData }, tag] });
+  const identityValues: unknown[] = [];
+  for (let i = 0; i < identityRequests.length; i += 3) identityValues.push(...await nativeReads(call, identityRequests.slice(i, i + 3)));
+  facts.forEach((fact, i) => {
+    if (decodeFunctionResult({ abi, functionName: fact.fn, data: evmRpcHex(identityValues[i]) }) !== fact.expected)
+      blocked("WBTC deployment or pool identity changed.", "uniswap_code_pin_drift");
+  });
+  if (decodeFunctionResult({ abi, functionName: "getPool", data: evmRpcHex(identityValues[5]) }) !== UNISWAP_V3_WBTC_WETH_3000)
+    blocked("WBTC factory pool changed.", "uniswap_code_pin_drift");
+  return UNISWAP_WBTC_CODE_PINS;
+}
+
 export function uniswapV3Pair(outputToken: string): UniswapV3PairPin {
-  const pair = UNISWAP_V3_PAIRS.find((row) => row.outputToken === outputToken);
+  const pair = outputToken === ETHEREUM_WBTC ? UNISWAP_WBTC_PAIR : UNISWAP_V3_PAIRS.find((row) => row.outputToken === outputToken);
   if (pair === undefined) blocked("The keyless Uniswap pair is not pinned.", "uniswap_pair_unpinned");
   return pair;
 }

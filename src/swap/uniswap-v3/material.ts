@@ -7,8 +7,9 @@ import type { GuardedSwapPreparedMaterial } from "../runtime.js";
 import type { UniswapTransactionEnvelope } from "../uniswap-codec.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
 import { decodeUniswapRouterCalldataFor } from "../uniswap-router.js";
+import { encodeUniswapV3ExactInput } from "./encoder.js";
 import type { UniswapV3PoolQuote } from "./onchain.js";
-import { uniswapV3Pair, type UniswapV3CodePin } from "./pins.js";
+import { ETHEREUM_WBTC, UNISWAP_WBTC_CODE_PINS, uniswapV3Pair, type UniswapV3CodePin } from "./pins.js";
 
 export const UNISWAP_KEYLESS_EXECUTION_SCHEMA = "apn.uniswap-v3-keyless-execution.v1" as const;
 export const UNISWAP_KEYLESS_EVIDENCE_DOMAIN = "apn.uniswap-v3-onchain-evidence.v1" as const;
@@ -53,6 +54,7 @@ export function validateUniswapKeylessMaterial(value: unknown, mode: "input" | "
   if (quote.sourceAsset.chain !== UNISWAP_CHAIN || quote.sourceAsset.kind !== "native" || quote.destinationAsset.kind !== "token" ||
       quote.destinationAsset.identifier === null) fail("Uniswap material is not a pinned native exact-input pair.");
   const pair = uniswapV3Pair(quote.destinationAsset.identifier!);
+  if (pair.outputToken === ETHEREUM_WBTC && BigInt(quote.minimumOutputAtomic) < 1000n) fail("WBTC output floor is below 1000 atomic.");
   if (!exactKeys(envelope as unknown as Record<string, unknown>, ["from", "to", "data", "value", "gasLimit", "chainId", "maxFeePerGas", "maxPriorityFeePerGas"]) ||
       envelope.from !== quote.account || envelope.to !== UNISWAP_ROUTER || envelope.chainId !== 1 || envelope.value !== quote.inputAmountAtomic ||
       typeof envelope.data !== "string" || !/^0x(?:[0-9a-f]{2})+$/u.test(envelope.data) || envelope.data.length > 131_074 ||
@@ -63,6 +65,7 @@ export function validateUniswapKeylessMaterial(value: unknown, mode: "input" | "
   if (canonicalJson(record.gasOrEnergy) !== canonicalJson(uniswapGasDisplay(envelope))) fail("Uniswap gas display is not bound to the envelope.");
   const route = decodeUniswapRouterCalldataFor(envelope.data, { recipient: quote.recipient, inputAmountAtomic: quote.inputAmountAtomic,
     minimumOutputAtomic: quote.minimumOutputAtomic, deadline, outputToken: pair.outputToken });
+  if (pair.outputToken === ETHEREUM_WBTC && (quote.destinationAsset.chain !== UNISWAP_CHAIN || envelope.data !== encodeUniswapV3ExactInput({ recipient: quote.recipient, inputAmountAtomic: quote.inputAmountAtomic, minimumOutputAtomic: quote.minimumOutputAtomic, deadline, pair }).data)) fail("WBTC requires the exact single pinned V3 path.");
   if (route.routeHash !== quote.routeHash || route.minimumOutputAtomic !== quote.minimumOutputAtomic) fail("Uniswap route is not bound to its quote.");
   if (!exactKeys(evidence as unknown as Record<string, unknown>, ["chainId", "blockNumber", "blockHash", "baseFeePerGas", "accountBalanceWei", "codePins", "pool"]) ||
       evidence.chainId !== 1 || evidence.blockNumber !== quote.simulation.blockNumber || evidence.blockHash !== quote.simulation.blockHash ||
@@ -70,6 +73,7 @@ export function validateUniswapKeylessMaterial(value: unknown, mode: "input" | "
       evidence.pool.amountOutAtomic !== quote.expectedOutputAtomic || uniswapEvidenceHash(evidence) !== quote.providerResponseHash) {
     fail("Uniswap on-chain quote evidence is not bound to its quote.");
   }
+  if (pair.outputToken === ETHEREUM_WBTC && canonicalJson(evidence.codePins) !== canonicalJson(UNISWAP_WBTC_CODE_PINS)) fail("WBTC code pin evidence is not the reviewed route.");
   if (getAddress(pair.pool) !== pair.pool) fail("Uniswap pair pin is not canonical.");
   return value as unknown as UniswapKeylessMaterial;
 }

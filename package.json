@@ -38,6 +38,8 @@
     "docs/stargate-v2-native-execution.md",
     "docs/stargate-v2-token-native-drop.md",
     "docs/uniswap.md",
+    "docs/wbtc-acquisition.md",
+    "docs/evidence/wbtc-20261009/**",
     "docs/sunswap.md",
     "docs/jupiter.md",
     "vendor/metamask-evm-sdk/**",
