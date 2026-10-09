@@ -12,7 +12,7 @@ function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay na
 /** Source inclusion is required to match the signed, saved native deposit envelope. */
 export function verifyRelayNativeSourceObservation(op, hash, observation) {
     const tx = observation.transaction, receipt = observation.receipt, deposit = op.nativeQuote.deposit;
-    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== 56 ||
+    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== op.sourceChainId ||
         !same(tx.from, op.sourceAccount) || !same(tx.to ?? "", deposit.to) ||
         !same(tx.input, deposit.data) || tx.value !== BigInt(deposit.value) ||
         !same(receipt.blockHash, observation.canonicalBlockHash) || receipt.blockNumber < 0n ||
@@ -72,7 +72,7 @@ export class RelayNativeObserveService {
         const hash = journal.transactionHash;
         let source;
         try {
-            source = await this.source.finalizedDeposit(hash);
+            source = await (typeof this.source === "function" ? this.source(op.sourceChainId) : this.source).finalizedDeposit(hash);
         }
         catch {
             return this.result(op.operationId, "source_unproven", "source_rpc_unavailable");
@@ -89,7 +89,7 @@ export class RelayNativeObserveService {
         if (journal.phase !== "submitting" && journal.phase !== outcome)
             blocked("source_journal_receipt_conflict");
         const usage = new AssetUsageLedger(this.state.root);
-        const identity = { account: getAddress(op.sourceAccount), chain: "eip155:56",
+        const identity = { account: getAddress(op.sourceAccount), chain: `eip155:${op.sourceChainId}`,
             asset: { kind: "native", identifier: null } };
         const reservationId = assetUsageReservationId(identity, `relay-native-execute:${op.operationId}`);
         await this.state.withLocks([`relay-native-source:${op.operationId}`, evmAddressLock(op.sourceAccount)], async () => {

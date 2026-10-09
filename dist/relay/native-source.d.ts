@@ -47,8 +47,8 @@ export declare function dispatchRelayNativeDepositOnce(op: RelayUnsignedOperatio
 export interface RelayNativeSourcePorts {
     readonly confirm: (summary: {
         operationId: string;
-        sourceChainId: 56;
-        destinationChainId: 137 | 143;
+        sourceChainId: 56 | 8453;
+        destinationChainId: 137 | 143 | 4326;
         sourceAccount: string;
         recipient: string;
         amountAtomic: string;

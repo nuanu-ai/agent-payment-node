@@ -15,8 +15,8 @@ export class AssetUsageLedger extends SecureStateStore {
     async withNoMatchingRelayReservation(account, policyDigest, amountAtomic, action, sourceChainId = 1, allowFailedBeforeEffectReservationId) {
         if (policyDigest !== undefined)
             digest(policyDigest, "Policy digest");
-        const identity = validateIdentity(sourceChainId === 56
-            ? { account: getAddress(account), chain: "eip155:56", asset: { kind: "native", identifier: null } }
+        const identity = validateIdentity(sourceChainId !== 1
+            ? { account: getAddress(account), chain: `eip155:${sourceChainId}`, asset: { kind: "native", identifier: null } }
             : { account: getAddress(account), chain: "eip155:1",
                 asset: { kind: "token", identifier: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" } });
         await this.ready();

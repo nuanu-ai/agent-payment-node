@@ -1,6 +1,6 @@
 /** Bounded, keyless JSON-RPC adapters. Every batchCall here is one physical POST. */
-import { keccak256 } from "viem";
-import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
+import { encodeFunctionData, parseAbi, keccak256 } from "viem";
+import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcWord, evmRpcRecord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc } from "../rpc.js";
@@ -63,11 +63,11 @@ export class RelayEthereumFinalityRpc {
         const inclusion = `0x${number.toString(16)}`;
         const [rawBlock, rawFinalized] = await this.read(guard, [
             { method: "eth_getBlockByNumber", params: [inclusion, false] },
-            { method: "eth_getBlockByNumber", params: [this.expectedChainId === 1 ? "finalized" : "latest", false] },
+            { method: "eth_getBlockByNumber", params: [this.expectedChainId === 1 ? "finalized" : this.expectedChainId === 8453 ? "safe" : "latest", false] },
         ]);
         if (rawBlock === null || rawFinalized === null)
             return null;
-        const included = evmRpcBlockResult(rawBlock, inclusion), finalized = evmRpcBlockResult(rawFinalized, this.expectedChainId === 1 ? "finalized" : "latest");
+        const included = evmRpcBlockResult(rawBlock, inclusion), finalized = evmRpcBlockResult(rawFinalized, this.expectedChainId === 1 ? "finalized" : this.expectedChainId === 8453 ? "safe" : "latest");
         if (BigInt(finalized.number) < number + (this.expectedChainId === 56 ? 15n : 0n))
             return null;
         const [rawIncludedAgain, rawFinalizedAgain] = await this.read(guard, [
@@ -125,7 +125,7 @@ export class RelayBnbReadOnlyRpc {
         const receipt = evmRpcRecord(value);
         const transactionHash = evmRpcHex(receipt.transactionHash, 32), blockHash = evmRpcHex(receipt.blockHash, 32);
         const blockNumber = evmRpcQuantity(receipt.blockNumber);
-        if ((this.expectedChainId === 8453 && !Array.isArray(receipt.logs)) ||
+        if (([8453, 4326].includes(this.expectedChainId) && !Array.isArray(receipt.logs)) ||
             (Array.isArray(receipt.logs) && receipt.logs.length > 256))
             throw new ApnError("APN_RPC_PROTOCOL", "Relay receipt logs are invalid.");
         const logs = (Array.isArray(receipt.logs) ? receipt.logs : []).map(value => {
@@ -144,7 +144,7 @@ export class RelayBnbReadOnlyRpc {
         return block(await this.read("eth_getBlockByNumber", [tag, false]), tag);
     }
     async finalityCheckpoint() {
-        if (this.expectedChainId === 56 || this.expectedChainId === 8453)
+        if (this.expectedChainId === 56 || this.expectedChainId === 8453 || this.expectedChainId === 4326)
             return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
         // A 15-block canonical checkpoint is used on native Relay destination lanes.
         const latest = block(await this.read("eth_getBlockByNumber", ["latest", false]), "latest");
@@ -156,6 +156,32 @@ export class RelayBnbReadOnlyRpc {
     async routerCodeHash(address, blockNumber) {
         const code = evmRpcHex(await this.read("eth_getCode", [address, `0x${blockNumber.toString(16)}`]));
         return keccak256(code);
+    }
+    async tokenIdentityAndBalances(token, recipient, number, expectedHash) {
+        if (this.expectedChainId !== 4326 || number === 0n)
+            throw new ApnError("APN_RPC_PROTOCOL", "Mega token observation lane is invalid.");
+        const tag = `0x${number.toString(16)}`, beforeTag = `0x${(number - 1n).toString(16)}`;
+        const data = encodeFunctionData({ abi: parseAbi(["function balanceOf(address) view returns(uint256)"]), functionName: "balanceOf", args: [recipient] });
+        const [code, slot, before, after, rawBefore, rawBlock] = await this.readBatch([
+            { method: "eth_getCode", params: [token, tag] },
+            { method: "eth_getStorageAt", params: [token, "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc", tag] },
+            { method: "eth_call", params: [{ to: token, data }, beforeTag] },
+            { method: "eth_call", params: [{ to: token, data }, tag] },
+            { method: "eth_getBlockByNumber", params: [beforeTag, false] },
+            { method: "eth_getBlockByNumber", params: [tag, false] },
+        ]);
+        const block = evmRpcBlockResult(rawBlock, tag), previous = evmRpcBlockResult(rawBefore, beforeTag);
+        const storage = evmRpcHex(slot, 32);
+        if (!same(block.hash, expectedHash) || !same(evmRpcHex(block.raw.parentHash, 32), previous.hash) ||
+            storage.slice(2, 26) !== "0".repeat(24))
+            throw new ApnError("APN_RPC_PROTOCOL", "Mega token state block binding failed.");
+        const implementation = `0x${storage.slice(-40)}`;
+        const [implCode, again] = await this.readBatch([{ method: "eth_getCode", params: [implementation, tag] },
+            { method: "eth_getBlockByNumber", params: [tag, false] }]);
+        if (!same(evmRpcBlockResult(again, tag).hash, expectedHash))
+            throw new ApnError("APN_RPC_PROTOCOL", "Mega token block changed.");
+        return { proxyHash: keccak256(evmRpcHex(code)), implementation, implementationHash: keccak256(evmRpcHex(implCode)),
+            before: evmRpcWord(before), after: evmRpcWord(after) };
     }
     async adjacentBalances(address, blockNumber, expectedBlockHash) {
         if (blockNumber === 0n)

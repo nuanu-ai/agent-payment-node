@@ -731,11 +731,11 @@ apn relay arbitrum deposit-dispatch --profile default --operation <operation-id>
 apn relay base prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
 apn relay base observe --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
 apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay native prepare --profile <bnb-owner-profile> --recipient <pinned-destination-address> --amount-atomic <bnb-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <bnb-wei> --idempotency-key <key>
+apn relay native prepare --profile <fixed-owner-profile> --recipient <pinned-destination-address> --amount-atomic <source-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <source-wei> --idempotency-key <key>
 apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>
 apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>
-apn relay native execute --operation <operation-id> --rpc-url <bnb-rpc>
-apn relay retire --profile <default|evm-live-buyer> --operation <operation-id>
+apn relay native execute --operation <operation-id> --rpc-url <source-rpc>
+apn relay retire --profile <default|evm-live-buyer|evm-live-seller> --operation <operation-id>
 apn relay status --operation <operation-id>
 apn relay observe --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
@@ -1007,3 +1007,5 @@ The former signed-app/Cask path is retained only as a deferred historical
 track under `packaging/`; it is not required by the Formula installation.
 
 Licensed under the MIT License.
+
+Finite seller Base ETH funding to MegaETH USDm and Polygon POL uses the existing durable Relay native commands; see [the fixed routes and fee checks](docs/relay-base-native.md).

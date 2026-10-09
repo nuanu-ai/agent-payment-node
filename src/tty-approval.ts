@@ -144,23 +144,24 @@ export class TtyRelayNativeExecuteConfirmation {
   constructor(private readonly options: TtyTransferApprovalOptions = {}) {}
   async confirm(summary: Parameters<RelayNativeSourcePorts["confirm"]>[0]): Promise<boolean> {
     const expiresAt = new Date(Math.min(Date.parse(summary.deadline), Date.now() + TTY_APPROVAL_DEADLINE_MS)).toISOString();
-    const destination = summary.destinationChainId === 143 ? "Monad (eip155:143)" : "Polygon (eip155:137)";
-    const outputSymbol = summary.destinationChainId === 143 ? "MON" : "POL";
+    const sourceName = summary.sourceChainId === 8453 ? "Base ETH" : "BNB Chain";
+    const destination = summary.destinationChainId === 4326 ? "MegaETH (eip155:4326)" : summary.destinationChainId === 143 ? "Monad (eip155:143)" : "Polygon (eip155:137)";
+    const outputSymbol = summary.destinationChainId === 4326 ? "USDm" : summary.destinationChainId === 143 ? "MON" : "POL";
     try {
       await exactChainConsent([
-        "Agent Payment Node Relay BNB native source execution",
+        `Agent Payment Node Relay ${sourceName} native source execution`,
         `Operation: ${summary.operationId}`,
-        "Source chain: BNB Chain (eip155:56)",
+        `Source chain: ${sourceName} (eip155:${summary.sourceChainId})`,
         `Destination chain: ${destination}`,
         `Source account: ${summary.sourceAccount}`,
-        `Native BNB value: ${summary.valueWei} wei`,
+        `Native source value: ${summary.valueWei} wei`,
         `Depository: ${summary.depository}`,
         `Recipient: ${summary.recipient}`,
-        `Minimum native ${outputSymbol} output: ${summary.minOutputAtomic} wei`,
+        `Minimum ${summary.destinationChainId === 4326 ? "" : "native "}${outputSymbol} output: ${summary.minOutputAtomic} wei`,
         `Quote deadline: ${summary.deadline}`,
         `Network fee ceiling: ${summary.depositNetworkFeeCeilingWei} wei`,
         `Quote digest: ${summary.quoteDigest}`,
-        `This confirms only the BNB source deposit; ${destination} delivery and paid acceptance require separate proof.`,
+        `This confirms only the ${sourceName} source deposit; ${destination} delivery and paid acceptance require separate proof.`,
       ], approvalCode("bridge", summary.operationId, summary.quoteDigest), expiresAt, this.options);
       return true;
     } catch (error) {

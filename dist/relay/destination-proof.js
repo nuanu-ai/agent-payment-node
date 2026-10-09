@@ -1,7 +1,7 @@
 import { validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { verifyDepositObservation } from "./deposit-effect.js";
 import { BNB_NATIVE } from "./quote.js";
-import { relayNativeRoute } from "./native-quote.js";
+import { relayNativeRoute, RELAY_MEGA_USDM } from "./native-quote.js";
 const HASH = /^0x[0-9a-fA-F]{64}$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const same = (left, right) => left.toLowerCase() === right.toLowerCase();
@@ -108,7 +108,7 @@ export async function proveRelayBaseDestination(operation, candidateHashes, port
 /** A provider candidate is only a discovery hint; even a real native credit is not causal proof. */
 export async function proveRelayNativeDestination(operation, sourceHash, candidateHashes, ports) {
     const op = validateRelayUnsignedOperation(operation), quote = op.nativeQuote;
-    if (!quote || op.sourceChainId !== 56 || ![137, 143].includes(op.destinationChainId) ||
+    if (!quote || op.sourceChainId !== relayNativeRoute(op.sourceAccount, op.recipient).sourceChainId || ![137, 143, 4326].includes(op.destinationChainId) ||
         quote.routeReference !== relayNativeRoute(op.sourceAccount, op.recipient).reference ||
         quote.recipient.toLowerCase() !== op.recipient.toLowerCase() ||
         BigInt(quote.minimumOutputWei) < BigInt(op.minOutputAtomic))
@@ -160,7 +160,34 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
         return pending("destination_not_safe");
     const minimum = BigInt(op.minOutputAtomic);
     let credited, method;
-    if (tx.to !== null && same(tx.to, op.recipient)) {
+    if (expectedChainId === 4326) {
+        if (!ports.tokenIdentityAndBalances || receipt.blockNumber === 0n || !receipt.logs)
+            return unproven("mega_token_ports_unavailable");
+        const topic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+        const recipientTopic = `0x${op.recipient.slice(2).toLowerCase().padStart(64, "0")}`;
+        const credits = receipt.logs.filter(log => same(log.address, RELAY_MEGA_USDM) && log.topics.length === 3 &&
+            same(log.topics[0], topic) && same(log.topics[2], recipientTopic) && /^0x[0-9a-fA-F]{64}$/u.test(log.data));
+        if (credits.length !== 1)
+            return unproven("mega_token_credit_missing_or_ambiguous");
+        credited = BigInt(credits[0].data);
+        if (credited < minimum)
+            return mismatch("destination_value_below_minimum");
+        let token;
+        try {
+            token = await ports.tokenIdentityAndBalances(RELAY_MEGA_USDM, op.recipient, receipt.blockNumber, receipt.blockHash);
+        }
+        catch {
+            return unproven("mega_token_state_unavailable");
+        }
+        if (!same(token.proxyHash, "0xfdf85d183a122fe611bc878683b722b2b22633e13900c4b13767742b9f5f5a90") ||
+            !same(token.implementation, "0xAC37677261885fDB372A37Ac8D5d47044196073C") ||
+            !same(token.implementationHash, "0x781c9c39ab69e9b7d099ec75e5a28df41dc891c8fffbe0148c94ed5adc8b0c09"))
+            return mismatch("mega_token_runtime_identity");
+        if (token.before < 0n || token.after - token.before !== credited)
+            return unproven("mega_token_balance_delta_ambiguous");
+        method = "pinned_erc20_transfer_balance";
+    }
+    else if (tx.to !== null && same(tx.to, op.recipient)) {
         if (tx.valueWei < minimum)
             return mismatch("destination_value_below_minimum");
         credited = tx.valueWei;

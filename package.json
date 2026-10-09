@@ -46,7 +46,8 @@
     "vendor/tron-utils/**",
     "vendor/relay-order-id/**",
     "docs/runtime-sdk-vendor.md",
-    "vendor/metamask-smart-account/**"
+    "vendor/metamask-smart-account/**",
+    "docs/relay-base-native.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",

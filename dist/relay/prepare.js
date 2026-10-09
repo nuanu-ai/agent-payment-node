@@ -13,7 +13,7 @@ import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../r
 import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote } from "./quote.js";
-import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, relayNativeRoute, requestRelayNativeQuote } from "./native-quote.js";
+import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, RELAY_BASE_SOURCE, RELAY_BASE_FULL_FEE, relayNativeRoute, requestRelayNativeQuote } from "./native-quote.js";
 import { createRelayArbitrumSourceDraft } from "./arbitrum-usdc-source-draft.js";
 import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT } from "./arbitrum-usdc-ethereum-quote.js";
 import { relayStatusLocator } from "./quote.js";
@@ -187,7 +187,7 @@ export class RelayUnsignedPrepareService {
         }
         allowlistProfileHash(input.profile);
         const expectedPayer = input.profile === "evm-live-buyer" ? RELAY_BNB_SOURCE :
-            input.profile === "default" ? RELAY_BNB_DEFAULT_SOURCE : null;
+            input.profile === "default" ? RELAY_BNB_DEFAULT_SOURCE : input.profile === "evm-live-seller" ? RELAY_BASE_SOURCE : null;
         if (expectedPayer === null)
             refuse("relay_native_profile_route_mismatch");
         let route;
@@ -197,6 +197,8 @@ export class RelayUnsignedPrepareService {
         catch {
             throw new ApnError("APN_INVALID_INPUT", "Relay native payer and recipient are outside admitted routes.");
         }
+        if (route.sourceChainId === 8453 && BigInt(input.maxDepositNetworkFeeWei) !== RELAY_BASE_FULL_FEE)
+            throw new ApnError("APN_INVALID_INPUT", "Finite Base Relay requires a 1000000000000 wei full native fee budget.");
         const profileHash = this.state.profileHash(input.profile);
         const operationId = this.state.operationId(input.profile, input.idempotencyKey);
         const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
@@ -225,13 +227,12 @@ export class RelayUnsignedPrepareService {
         if (publicAccount?.toLowerCase() !== payer)
             refuse("relay_public_profile_owner_mismatch");
         const usage = await (this.ports.dailyUsage?.(active.accounts.evm, now) ?? new AssetUsageLedger(this.state.root).usage({
-            account: active.accounts.evm, chain: "eip155:56", asset: { kind: "native", identifier: null },
+            account: active.accounts.evm, chain: `eip155:${route.sourceChainId}`, asset: { kind: "native", identifier: null },
         }, now).then(value => value.amountAtomic));
-        const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:56",
-            asset: { kind: "native", identifier: null }, rail: "bridge", amountAtomic: input.amountAtomic,
+        const admission = evaluateAssetPolicy(active.registry, { chain: `eip155:${route.sourceChainId}`,
+            asset: { kind: "native", identifier: null }, rail: "bridge", mechanism: { provider: "relay", reference: route.reference }, amountAtomic: input.amountAtomic,
             dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        const pin = admission.asset.mechanismPins?.bridge;
-        if (pin?.provider !== "relay" || pin.reference !== route.reference)
+        if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: route.reference }))
             refuse("relay_native_route_pin_required");
         await this.state.initialize();
         const checkOwner = async () => this.state.withLocks([evmAddressLock(payer)], async () => assertExclusiveEvmOwner(this.state, payer, profileHash));
@@ -251,7 +252,7 @@ export class RelayUnsignedPrepareService {
         }
         const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
             kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-            requestHash, sourceChainId: 56, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
+            requestHash, sourceChainId: route.sourceChainId, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
             quoteDigest, nativeQuote: quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
             policyDigest: active.digest, policyRevision: active.revision,
             depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
