@@ -247,11 +247,11 @@ export class SeiFundingService {
             const d = inspectSeiDelivery(seiJson(response.body), r.transactionHash, r.owner.address, r.amountAtomic, source.blockNumber);
             if (d === null)
                 return publicSeiFunding(r);
-            if (BigInt(d.amount) < BigInt(r.minimumOutputAtomic))
-                seiFail("delivery_owner_floor");
             const proof = await proveSeiDelivery(this.rpc("destination"), r.owner.address, d);
             if (proof === null)
                 return publicSeiFunding(r);
+            if (BigInt(proof.amount) < BigInt(r.minimumOutputAtomic))
+                seiFail("delivery_owner_floor");
             destination = { ...proof, providerDigest: d.providerDigest };
             claimHash = d.hash;
         }
