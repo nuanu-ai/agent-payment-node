@@ -1,6 +1,7 @@
 import { type HeldCleanup85Scope } from "./circle-cleanup85-financial-scope.js";
 import type { Cleanup85CancellationRequest } from "./circle-cleanup85-cancellation-contract.js";
 import { type Cleanup85RecoveryIntent } from "./circle-v2-evm/cleanup85-recovery-store.js";
+import { type VerifiedCleanup85RecoveryAdmission } from "./circle-v2-evm/cleanup85-recovery-admission.js";
 import type { CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
 import type { CircleRpc } from "./circle-v2-evm/rpc.js";
 import type { StateStore } from "./state.js";
@@ -20,6 +21,7 @@ export interface VerifiedCleanup85SuccessorFinancialAdmission {
 export interface Cleanup85SuccessorFinancialAdmission {
     readonly lineage: Cleanup85NativeLineage;
     readonly readmission: Cleanup85RecoveryIntent;
+    readonly originalAdmission: VerifiedCleanup85RecoveryAdmission;
 }
 export declare function resolveCleanup85NativeLineage(state: StateStore, request: Cleanup85CancellationRequest): Promise<VerifiedCleanup85NativeLineage>;
 export declare function verifiedCleanup85NativeLineage(token: VerifiedCleanup85NativeLineage, state: StateStore, request: Cleanup85CancellationRequest): Cleanup85NativeLineage;
