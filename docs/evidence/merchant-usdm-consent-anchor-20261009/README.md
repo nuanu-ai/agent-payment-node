@@ -9,3 +9,5 @@ The original expensive unsigned preflight remains before TTY. Required fresh pos
 Witnesses include post-TTY async delay of 60,001ms (zero custody/sign/send), delayed issuer invocation, queued dispatch with operation TTL still valid (zero POST/no resend), production beforeKeyLoad expiration (zero decrypt/sign), and a delayed TLS handshake checking the actual private grant (zero request.end body dispatch). All state and HTTPS requests in these tests are temporary/synthetic. No positive real default-wallet signature is claimed.
 
 Compilation and test execution use pinned Node24.15.0. Production rebuild parity covers 2,286 dist files with zero changed SHA-256 bytes. Shipping forbidden-surface/500-line scan passes 762 files. Receipt membership/reobservation remains with the separate integration packet and is not changed here.
+
+Final QA: pinned Node24 production build and strict focused test compilation passed with inherited compiler options unchanged. All 48 merchant tests passed from that final compiler output. `git diff --check` passed.
