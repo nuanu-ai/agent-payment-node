@@ -104,27 +104,28 @@ export class MerchantService {
     }
     async status(id) { return await this.required(id); }
     async observeLocked(o, deliver) {
-        if (o.state === "delivered" || o.state === "reverted") {
-            await this.owner.follow(o, o.state === "delivered" ? "finalized" : "failed_confirmed_revert");
-            return o;
-        }
         if (o.submissionAttempts !== 1 || o.txHash === null)
             refuse("merchant_observer_has_no_transaction_claim");
+        let receipt;
+        try {
+            receipt = await merchantReceipt(this.ports.rpc, o);
+        }
+        catch (error) {
+            const reason = error instanceof ApnError && typeof error.details?.reason === "string" ? error.details.reason : "merchant_canonical_unavailable";
+            return await this.canonicalAudit(o, reason.startsWith("merchant_receipt_") ? "mismatch" : "unavailable", reason, null);
+        }
+        if (receipt === null)
+            return await this.canonicalAudit(o, "unavailable", "merchant_canonical_not_finalized", null);
+        if (o.receipt !== null && !sameReceiptEffect(o.receipt, receipt))
+            return await this.canonicalAudit(o, "mismatch", "merchant_saved_receipt_changed", receipt);
         if (o.receipt === null) {
-            let receipt;
-            try {
-                receipt = await merchantReceipt(this.ports.rpc, o);
-            }
-            catch {
-                return o;
-            }
-            if (receipt === null)
-                return o;
             o = merchantMove(o, receipt.status === "success" ? "payment_finalized" : "reverted", this.at(), { receipt });
             await this.records.persist(o);
         }
-        await this.owner.follow(o, o.receipt.status === "success" ? "finalized" : "failed_confirmed_revert");
-        if (o.receipt.status !== "success" || !deliver)
+        o = await this.canonicalAudit(o, "verified", "merchant_canonical_verified", receipt);
+        // Never infer new finalization from an old saved receipt. The original receipt and verdict remain immutable.
+        await this.owner.follow(o, receipt.status === "success" ? "finalized" : "failed_confirmed_revert");
+        if (o.terminal || receipt.status !== "success" || !deliver)
             return o;
         if (o.deliveryAttempts.length % 2 === 1) {
             const dangling = o.deliveryAttempts.at(-1);
@@ -134,6 +135,11 @@ export class MerchantService {
         // Only this explicit observer flag retries delivery. It always uses the original transaction, never pays again.
         if (o.deliveryAttempts.length >= 16)
             refuse("merchant_delivery_retry_limit");
+        // Reobserve after accounting awaits and immediately before disclosing the original proof.
+        const beforeDelivery = await this.refreshCanonical(o);
+        o = beforeDelivery.operation;
+        if (!beforeDelivery.verified)
+            return o;
         const proof = merchantProof(o.frozen, o.txHash), proofHash = hashObject(proof), at = this.at();
         o = merchantMove(o, "delivery_unknown", at, { deliveryAttempts: [...o.deliveryAttempts, { at, proofHash, outcome: "started" }] });
         await this.records.persist(o);
@@ -147,7 +153,42 @@ export class MerchantService {
             o = merchantMove(o, "delivery_unknown", this.at(), { deliveryAttempts: [...o.deliveryAttempts, { at: this.at(), proofHash, outcome: "unknown", ...(response === undefined ? {} : { httpStatus: response.status, bodyHash: hashObject(Buffer.from(response.bodyBytes).toString("base64")), headers: response.rawHeaderPairs }) }] });
         }
         await this.records.persist(o);
-        return o;
+        // Keep a successful HTTP200 fact even if a subsequent chain proof changes.
+        return (await this.refreshCanonical(o)).operation;
+    }
+    async refreshCanonical(o) {
+        try {
+            const fresh = await merchantReceipt(this.ports.rpc, o);
+            if (fresh === null)
+                return { operation: await this.canonicalAudit(o, "unavailable", "merchant_canonical_not_finalized", null), verified: false };
+            const verified = o.receipt !== null && sameReceiptEffect(o.receipt, fresh);
+            return { operation: await this.canonicalAudit(o, verified ? "verified" : "mismatch", verified ? "merchant_canonical_verified" : "merchant_saved_receipt_changed", fresh), verified };
+        }
+        catch (error) {
+            const reason = error instanceof ApnError && typeof error.details?.reason === "string" ? error.details.reason : "merchant_canonical_unavailable";
+            return { operation: await this.canonicalAudit(o, reason.startsWith("merchant_receipt_") ? "mismatch" : "unavailable", reason, null), verified: false };
+        }
+    }
+    async canonicalAudit(o, result, reason, receipt) {
+        if (o.receipt === null)
+            return o;
+        const body = { result, reason, chain: "eip155:4326", origin: "https://mainnet.megaeth.com",
+            priorReceiptHash: hashObject(o.receipt), deliveryCount: o.deliveryAttempts.length, priorDeliveryHash: hashObject(o.deliveryAttempts),
+            currentReceiptHash: receipt === null ? null : hashObject(receipt), currentAnchors: receipt?.canonical ?? null };
+        const prior = o.canonicalObservations?.at(-1);
+        if (prior !== undefined) {
+            const { at: _, previousHash: __, observationHash: ___, ...priorBody } = prior;
+            if (canonicalJson(priorBody) === canonicalJson(body))
+                return o;
+        }
+        const observations = o.canonicalObservations ?? [];
+        if (observations.length >= 128)
+            refuse("merchant_canonical_audit_limit");
+        const audit = { ...body, at: this.at(), previousHash: prior?.observationHash ?? null };
+        const { integrityHash: _, ...original } = o;
+        const updated = sealMerchant({ ...original, canonicalObservations: [...observations, { ...audit, observationHash: hashObject(audit) }] });
+        await this.records.persist(updated);
+        return updated;
     }
     async revalidate(o) {
         this.fresh(o);
@@ -172,5 +213,11 @@ export class MerchantService {
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Pinned merchant operation was not found.");
         return o;
     }
+}
+export function sameReceiptEffect(saved, fresh) {
+    for (const key of ["transactionHash", "blockNumber", "blockHash", "status", "networkFeeWei"])
+        if (saved[key] !== fresh[key])
+            return false;
+    return saved.canonical === undefined || saved.canonical.transactionIndex === fresh.canonical?.transactionIndex && saved.canonical.blockHeaderHash === fresh.canonical?.blockHeaderHash;
 }
 //# sourceMappingURL=service.js.map

@@ -17,6 +17,27 @@ export interface MerchantReceipt {
     readonly status: "success" | "reverted";
     readonly evidenceHash: string;
     readonly networkFeeWei: string;
+    readonly canonical?: {
+        readonly transactionIndex: string;
+        readonly blockHeaderHash: string;
+        readonly finalizedNumber: string;
+        readonly finalizedHash: Hex;
+        readonly finalizedHeaderHash: string;
+    };
+}
+export interface MerchantCanonicalObservation {
+    readonly at: string;
+    readonly result: "verified" | "mismatch" | "unavailable";
+    readonly reason: string;
+    readonly chain: "eip155:4326";
+    readonly origin: "https://mainnet.megaeth.com";
+    readonly priorReceiptHash: string;
+    readonly deliveryCount: number;
+    readonly priorDeliveryHash: string;
+    readonly currentReceiptHash: string | null;
+    readonly currentAnchors: NonNullable<MerchantReceipt["canonical"]> | null;
+    readonly previousHash: string | null;
+    readonly observationHash: string;
 }
 export interface MerchantEvent {
     readonly at: string;
@@ -64,6 +85,7 @@ export interface MerchantOperation {
     }[];
     readonly events: readonly MerchantEvent[];
     readonly integrityHash: string;
+    readonly canonicalObservations?: readonly MerchantCanonicalObservation[];
 }
 export declare function merchantFingerprint(o: Omit<MerchantOperation, "fingerprint" | "integrityHash">): string;
 export declare function sealMerchant(o: Omit<MerchantOperation, "integrityHash">): MerchantOperation;
@@ -91,6 +113,7 @@ export declare function publicMerchant(o: MerchantOperation): {
     expiresAt: string;
     amountAtomic: unknown;
     feeCeilingWei: string;
+    currentCanonicalProof: MerchantCanonicalObservation | null;
     result: Record<string, unknown> | null | undefined;
     receipt: MerchantReceipt | null;
 };

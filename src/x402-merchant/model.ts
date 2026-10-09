@@ -20,6 +20,21 @@ export interface MerchantReceipt {
     readonly status: "success" | "reverted";
     readonly evidenceHash: string;
     readonly networkFeeWei: string;
+    readonly canonical?: { readonly transactionIndex: string; readonly blockHeaderHash: string; readonly finalizedNumber: string; readonly finalizedHash: Hex; readonly finalizedHeaderHash: string };
+}
+export interface MerchantCanonicalObservation {
+    readonly at: string;
+    readonly result: "verified" | "mismatch" | "unavailable";
+    readonly reason: string;
+    readonly chain: "eip155:4326";
+    readonly origin: "https://mainnet.megaeth.com";
+    readonly priorReceiptHash: string;
+    readonly deliveryCount: number;
+    readonly priorDeliveryHash: string;
+    readonly currentReceiptHash: string | null;
+    readonly currentAnchors: NonNullable<MerchantReceipt["canonical"]> | null;
+    readonly previousHash: string | null;
+    readonly observationHash: string;
 }
 export interface MerchantEvent {
     readonly at: string;
@@ -67,6 +82,7 @@ export interface MerchantOperation {
     }[];
     readonly events: readonly MerchantEvent[];
     readonly integrityHash: string;
+    readonly canonicalObservations?: readonly MerchantCanonicalObservation[];
 }
 export function merchantFingerprint(o: Omit<MerchantOperation, "fingerprint" | "integrityHash">): string {
     return hashObject({ schemaVersion: o.schemaVersion, kind: o.kind, operationId: o.operationId, profile: o.profile, profileHash: o.profileHash,
@@ -81,7 +97,7 @@ export function merchantMove(o: MerchantOperation, state: MerchantPhase, at: str
     return sealMerchant({ ...body, ...changes, state, terminal: state === "delivered" || state === "reverted", events: [...o.events, event] });
 }
 export function validateMerchant(v: unknown): MerchantOperation {
-    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", "envelope", "policy", "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash"]))
+    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", "envelope", "policy", "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
         refuse("merchant_state_schema");
     const o = v as unknown as MerchantOperation, { integrityHash, ...body } = o;
     if (!["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted"].includes(o.state) || !exactKeys(o.policy as unknown as Record<string,unknown>, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
@@ -112,8 +128,14 @@ export function validateMerchant(v: unknown): MerchantOperation {
         refuse("merchant_state_attempt");
     if (o.state === "prepared" && (o.signingAttempts !== 0 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null || o.deliveryAttempts.length !== 0) || o.state === "signing_started" && (o.signingAttempts !== 1 || o.submissionAttempts !== 0) || ["submission_started", "payment_finalized", "delivery_unknown", "delivered", "reverted"].includes(o.state) && o.submissionAttempts !== 1 || o.state === "unknown_finality" && o.signingAttempts !== 1)
         refuse("merchant_phase_attempt_binding");
-    if (o.receipt !== null && (!exactKeys(o.receipt as unknown as Record<string,unknown>, ["transactionHash", "blockNumber", "blockHash", "finality", "status", "evidenceHash", "networkFeeWei"]) || !/^[0-9]+$/u.test(o.receipt.blockNumber) || !/^0x[0-9a-f]{64}$/u.test(o.receipt.blockHash) || !/^(0|[1-9][0-9]*)$/u.test(o.receipt.networkFeeWei) || !["success", "reverted"].includes(o.receipt.status) || o.receipt.transactionHash !== o.txHash || o.receipt.finality !== "finalized" || !/^[a-f0-9]{64}$/u.test(o.receipt.evidenceHash)))
+    if (o.receipt !== null && (!exactKeys(o.receipt as unknown as Record<string,unknown>, ["transactionHash", "blockNumber", "blockHash", "finality", "status", "evidenceHash", "networkFeeWei", ...(o.receipt.canonical === undefined ? [] : ["canonical"])]) || !/^[0-9]+$/u.test(o.receipt.blockNumber) || !/^0x[0-9a-f]{64}$/u.test(o.receipt.blockHash) || !/^(0|[1-9][0-9]*)$/u.test(o.receipt.networkFeeWei) || !["success", "reverted"].includes(o.receipt.status) || o.receipt.transactionHash !== o.txHash || o.receipt.finality !== "finalized" || !/^[a-f0-9]{64}$/u.test(o.receipt.evidenceHash)))
         refuse("merchant_state_receipt");
+    if (o.receipt?.canonical !== undefined) {
+        const c = o.receipt.canonical;
+        if (!isPlainRecord(c) || !exactKeys(c, ["transactionIndex", "blockHeaderHash", "finalizedNumber", "finalizedHash", "finalizedHeaderHash"]) ||
+            !/^(0|[1-9][0-9]*)$/u.test(c.transactionIndex) || !/^(0|[1-9][0-9]*)$/u.test(c.finalizedNumber) ||
+            ![c.blockHeaderHash, c.finalizedHeaderHash].every(h => /^[a-f0-9]{64}$/u.test(h)) || !/^0x[0-9a-f]{64}$/u.test(c.finalizedHash) || BigInt(c.finalizedNumber) < BigInt(o.receipt.blockNumber)) refuse("merchant_canonical_receipt_shape");
+    }
     if (["payment_finalized", "delivery_unknown", "delivered"].includes(o.state) && o.receipt?.status !== "success" || o.state === "reverted" && o.receipt?.status !== "reverted" || o.state === "delivered" && o.deliveryAttempts.at(-1)?.outcome !== "delivered")
         refuse("merchant_state_completion");
     if (o.deliveryAttempts.length > 16)
@@ -123,6 +145,31 @@ export function validateMerchant(v: unknown): MerchantOperation {
         if (!/^[a-f0-9]{64}$/u.test(a.proofHash) || !Number.isFinite(Date.parse(a.at)) || (i % 2 === 0 ? a.outcome !== "started" : a.outcome === "started" || a.proofHash !== o.deliveryAttempts[i - 1]!.proofHash))
             refuse("merchant_delivery_append_shape");
     }
+    if (o.canonicalObservations !== undefined) {
+        if (!Array.isArray(o.canonicalObservations) || o.canonicalObservations.length < 1 || o.canonicalObservations.length > 128 || o.receipt === null) refuse("merchant_canonical_audit_shape");
+        let previousAudit: string | null = null, auditAt = o.createdAt, priorAuditBody: string | null = null;
+        for (const entry of o.canonicalObservations) {
+            if (!isPlainRecord(entry) || !exactKeys(entry, ["at", "result", "reason", "chain", "origin", "priorReceiptHash", "deliveryCount", "priorDeliveryHash", "currentReceiptHash", "currentAnchors", "previousHash", "observationHash"])) refuse("merchant_canonical_audit_shape");
+            const a = entry as unknown as MerchantCanonicalObservation;
+            const { observationHash, ...body } = a;
+            if (observationHash !== hashObject(body) || a.previousHash !== previousAudit || !["verified", "mismatch", "unavailable"].includes(a.result) ||
+                typeof a.reason !== "string" || !/^[a-z0-9_]{1,96}$/u.test(a.reason) || a.chain !== "eip155:4326" || a.origin !== "https://mainnet.megaeth.com" ||
+                a.priorReceiptHash !== hashObject(o.receipt) || !Number.isSafeInteger(a.deliveryCount) || a.deliveryCount < 0 || a.deliveryCount > o.deliveryAttempts.length ||
+                a.priorDeliveryHash !== hashObject(o.deliveryAttempts.slice(0, a.deliveryCount)) || !Number.isFinite(Date.parse(a.at)) || new Date(a.at).toISOString() !== a.at || a.at < auditAt ||
+                a.currentReceiptHash !== null && !/^[a-f0-9]{64}$/u.test(a.currentReceiptHash) || a.result === "verified" && (a.currentReceiptHash === null || a.currentAnchors === null)) refuse("merchant_canonical_audit_binding");
+            if (a.currentAnchors !== null) {
+                const c = a.currentAnchors;
+                if (!isPlainRecord(c as unknown) || !exactKeys(c as unknown as Record<string, unknown>, ["transactionIndex", "blockHeaderHash", "finalizedNumber", "finalizedHash", "finalizedHeaderHash"]) ||
+                    !/^(0|[1-9][0-9]*)$/u.test(c.transactionIndex) || !/^(0|[1-9][0-9]*)$/u.test(c.finalizedNumber) ||
+                    ![c.blockHeaderHash, c.finalizedHeaderHash].every(h => /^[a-f0-9]{64}$/u.test(h)) || !/^0x[0-9a-f]{64}$/u.test(c.finalizedHash)) refuse("merchant_canonical_audit_anchor");
+            }
+            const { at: _, previousHash: __, observationHash: ___, ...semantic } = a;
+            const semanticHash = hashObject(semantic);
+            if (semanticHash === priorAuditBody) refuse("merchant_canonical_audit_duplicate");
+            priorAuditBody = semanticHash;
+            previousAudit = observationHash; auditAt = a.at;
+        }
+    }
     return o;
 }
 export function publicMerchant(o: MerchantOperation) {
@@ -130,5 +177,5 @@ export function publicMerchant(o: MerchantOperation) {
     return { kind: o.kind, operationId: o.operationId, state: o.state, terminal: o.terminal,
         mechanism: "x402engine-erc20-transfer-proof", provider: { id:"x402engine-erc20-transfer-proof", reference:"megaeth-usdm-crypto-price-v1", protocolSnapshot:"vendor/x402engine-transfer-proof/protocol-v1.json", assetTransferMethod:"erc20-transfer-proof", eip3009:false, gasless:false }, paymentFinalized: o.receipt?.status === "success", merchantDelivered: o.state === "delivered", transactionHash: o.txHash,
         challengeHash: o.frozen.challengeHash, expiresAt: o.expiresAt, amountAtomic: o.frozen.accepted.amount, feeCeilingWei: o.envelope.maximumNativeFee,
-        result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
+        currentCanonicalProof: o.canonicalObservations?.at(-1) ?? null, result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
 }
