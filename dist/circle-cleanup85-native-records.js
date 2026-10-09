@@ -1,7 +1,44 @@
-import { canonicalJson } from "./canonical.js";
+import { canonicalJson, domainHash } from "./canonical.js";
 import { SecureStateStore } from "./secure-state-store.js";
 import { cleanup85Blocked } from "./circle-cleanup85-native-codec.js";
 export class Cleanup85NativePublicRecords extends SecureStateStore {
+    /** Existing-only audit peek: bound filenames BEFORE operation decoding; never initializes. */
+    async hasAnyCleanup85BuyerOperation(state) {
+        if (state.root !== this.root)
+            cleanup85Blocked("absent_roster_root");
+        const profile = state.profileHash("evm-live-buyer"), entries = await this.readDirectory(`operations/${profile}`);
+        if (entries.length > 256)
+            cleanup85Blocked("absent_roster_overflow");
+        let present = false;
+        for (const entry of entries) {
+            if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name))
+                cleanup85Blocked("absent_roster_shape");
+            const o = await state.loadOperation(profile, entry.name.slice(0, -5));
+            if (o === null || o.profileHash !== profile || o.operationId !== entry.name.slice(0, -5))
+                cleanup85Blocked("absent_roster_operation_path");
+            if (o.evm?.cleanup85Cancellation !== undefined)
+                present = true;
+        }
+        return present;
+    }
+    /** DENY-only metadata projection. No private capability, current admission or nested ledger lock. */
+    async successorProtectionLineage(state, request, original) {
+        if (state.root !== this.root)
+            cleanup85Blocked("protection_root");
+        const proof = await new Cleanup85UnsignedRetirementStore(this.root).load();
+        if (proof === null || canonicalJson(proof.original.evm.cleanup85Cancellation.request) !== canonicalJson(request) || canonicalJson(original) !== canonicalJson(cleanup85UnsignedTerminal(proof)))
+            cleanup85Blocked("protection_retirement_terminal");
+        if (canonicalJson(await this.load(request.parentOperationId, "slot")) !== canonicalJson(proof.slot) || canonicalJson(await this.readJson(`direct-public-effects/${original.profileHash}/${original.operationId}.prepared.json`)) !== canonicalJson(proof.prepared))
+            cleanup85Blocked("protection_retained_original");
+        await new DirectPublicEffectJournal(state).prepared(original);
+        if (await this.readJson(`direct-public-effects/${original.profileHash}/${original.operationId}.signing.json`) !== null || await this.readJson(`direct-public-effects/${original.profileHash}/${original.operationId}.signed.json`) !== null || await new EvmDirectSubmissionJournal(this.root).exists(original))
+            cleanup85Blocked("protection_original_effect_claim");
+        const identity = { account: original.walletAddress, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, bucket = domainHash("apn.asset-usage-bucket.v1", canonicalJson(identity));
+        if (await this.readJson(`asset-usage/${bucket}/${original.evm.cleanup85Cancellation.nativeReservationId}.json`) !== null)
+            cleanup85Blocked("protection_original_reservation_present");
+        const namespace = `cleanup85-native-successor:${request.recoveryBinding}:${proof.proofHash}`;
+        return Object.freeze({ originalOperationId: original.operationId, operationId: state.operationId("evm-live-buyer", namespace), namespace, retirementProofHash: proof.proofHash, readmission: proof.readmission });
+    }
     async load(id, kind) { if (!/^[a-f0-9]{64}$/u.test(id))
         cleanup85Blocked("public_record_id"); return this.readJson(`circle-cleanup85-native/${id}-${kind}.json`); }
     async publish(id, kind, body) {
@@ -20,22 +57,41 @@ export class Cleanup85NativePublicRecords extends SecureStateStore {
 }
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { CLEANUP85_REQUEST } from "./circle-cleanup85-native-codec.js";
-import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
+import { cleanup85NativeSlotBody, assertCleanup85NativeLineageOperation } from "./circle-cleanup85-native-lineage.js";
+import { Cleanup85UnsignedRetirementStore, cleanup85UnsignedTerminal } from "./circle-cleanup85-unsigned-retirement-store.js";
+import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
+import { DirectPublicEffectJournal } from "./direct-public-effect.js";
 /** Public deny/reconciliation lookup only. It never grants reservation, settlement or dispatch.
  * The one fixed create-only slot permits exact lookup without profile scans or chain requests. */
 export async function loadCleanup85NativeReservationIdentity(state) {
-    const slot = await new Cleanup85NativePublicRecords(state.root).load(CLEANUP85_REQUEST.parentOperationId, "slot");
-    if (slot === null)
+    const records = new Cleanup85NativePublicRecords(state.root), original = await records.load(CLEANUP85_REQUEST.parentOperationId, "slot");
+    if (original === null)
         return null;
-    if (!isPlainRecord(slot) || !exactKeys(slot, ["version", "parentOperationId", "oldCleanupMaterialHash", "requestBinding", "operationId", "fingerprint"]) || slot.version !== "apn.cleanup85-single-cancellation.v1" || slot.parentOperationId !== CLEANUP85_REQUEST.parentOperationId || slot.oldCleanupMaterialHash !== CLEANUP85_REQUEST.oldCleanupMaterialHash || ![slot.requestBinding, slot.operationId, slot.fingerprint].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)))
-        cleanup85Blocked("reservation_slot_public_binding");
-    const operationId = slot.operationId, o = await state.findOperation(operationId);
-    if (o === null || o.fingerprint !== slot.fingerprint)
+    if (!isPlainRecord(original) || !exactKeys(original, ["version", "parentOperationId", "oldCleanupMaterialHash", "requestBinding", "operationId", "fingerprint"]) || original.version !== "apn.cleanup85-single-cancellation.v1" || typeof original.operationId !== "string")
+        cleanup85Blocked("reservation_original_slot_public_binding");
+    const originalOperation = await state.findOperation(original.operationId);
+    if (originalOperation?.evm?.cleanup85Cancellation === undefined)
+        cleanup85Blocked("reservation_original_operation");
+    const request = originalOperation.evm.cleanup85Cancellation.request, namespace = `cleanup85-native:${request.recoveryBinding}`;
+    // Original public denial lookup keeps legacy accounting compatibility; it grants no effect.
+    if (!originalOperation.terminal || originalOperation.state !== "failed_before_effect") {
+        const lineage = { originalOperationId: state.operationId("evm-live-buyer", namespace), operationId: state.operationId("evm-live-buyer", namespace), namespace, retirementProofHash: null, readmission: null };
+        assertCleanup85NativeLineageOperation(state, originalOperation, lineage);
+        if (canonicalJson(original) !== canonicalJson(cleanup85NativeSlotBody(originalOperation, lineage)))
+            cleanup85Blocked("reservation_original_slot_binding");
+        return Object.freeze({ operationId: originalOperation.operationId, fingerprint: originalOperation.fingerprint, nativeReservationId: originalOperation.evm.cleanup85Cancellation.nativeReservationId });
+    }
+    const lineage = await records.successorProtectionLineage(state, request, originalOperation), slot = await records.load(CLEANUP85_REQUEST.parentOperationId, "successor-slot"), o = await state.loadOperation(state.profileHash("evm-live-buyer"), lineage.operationId);
+    if (slot === null) {
+        if (o !== null)
+            cleanup85Blocked("reservation_successor_slot_missing");
+        return null;
+    }
+    if (o === null)
         cleanup85Blocked("reservation_slot_durable_operation");
-    cleanup85OperationEnvelope(o);
-    const b = o.evm.cleanup85Cancellation;
-    if (hashObject(b.request) !== slot.requestBinding || operationId !== state.operationId("evm-live-buyer", `cleanup85-native:${b.request.recoveryBinding}`) || o.requestHash !== hashObject({ method: "apn.cleanup85-native.v1", request: b.request }))
+    assertCleanup85NativeLineageOperation(state, o, lineage);
+    if (canonicalJson(slot) !== canonicalJson(cleanup85NativeSlotBody(o, lineage)))
         cleanup85Blocked("reservation_slot_request_identity");
-    return Object.freeze({ operationId, fingerprint: o.fingerprint, nativeReservationId: b.nativeReservationId });
+    return Object.freeze({ operationId: o.operationId, fingerprint: o.fingerprint, nativeReservationId: o.evm.cleanup85Cancellation.nativeReservationId });
 }
 //# sourceMappingURL=circle-cleanup85-native-records.js.map

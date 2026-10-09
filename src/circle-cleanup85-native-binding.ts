@@ -5,7 +5,8 @@ import { validateEvmNativeCustody, type EvmNativeCustody } from "./evm-native-cu
 import type { OperationRecord } from "./model.js";
 
 export interface Cleanup85NativeBinding {
-  readonly version: "apn.circle-cleanup85-native-binding.v1";
+  readonly version: "apn.circle-cleanup85-native-binding.v1" | "apn.circle-cleanup85-native-binding.v2";
+  readonly successor?: { readonly originalOperationId: string; readonly retirementProofHash: string };
   readonly request: Cleanup85CancellationRequest;
   readonly recipientCustody: EvmNativeCustody;
   readonly activationDigest: string;
@@ -16,10 +17,12 @@ export interface Cleanup85NativeBinding {
   readonly recipientDelegateCodeHash: typeof CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH;
 }
 export function validateCleanup85NativeBinding(value: unknown): Cleanup85NativeBinding {
-  if (!isPlainRecord(value) || !exactKeys(value, ["version", "request", "recipientCustody", "activationDigest", "nativeReservationId", "nativeReserveAtomic","senderCode","recipientCode","recipientDelegateCodeHash"]) ||
-    value.version !== "apn.circle-cleanup85-native-binding.v1" || value.nativeReserveAtomic !== "2000000000000" ||
+  const successor=isPlainRecord(value)&&value.version==="apn.circle-cleanup85-native-binding.v2";
+  if (!isPlainRecord(value) || !exactKeys(value, ["version", "request", "recipientCustody", "activationDigest", "nativeReservationId", "nativeReserveAtomic","senderCode","recipientCode","recipientDelegateCodeHash",...(successor?["successor"]:[])]) ||
+    !["apn.circle-cleanup85-native-binding.v1","apn.circle-cleanup85-native-binding.v2"].includes(value.version as string) || value.nativeReserveAtomic !== "2000000000000" ||
     value.senderCode!=="0x"||value.recipientCode!==CLEANUP85_RECIPIENT_CODE||value.recipientDelegateCodeHash!==CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH||
     ![value.activationDigest, value.nativeReservationId].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x))) cleanup85Blocked("native_binding_shape");
+  if(successor&&(!isPlainRecord(value.successor)||!exactKeys(value.successor,["originalOperationId","retirementProofHash"])||![value.successor.originalOperationId,value.successor.retirementProofHash].every(x=>typeof x==="string"&&/^[a-f0-9]{64}$/u.test(x))))cleanup85Blocked("native_successor_binding");
   validateCleanup85Request(value.request);
   const custody = validateEvmNativeCustody(value.recipientCustody);
   if (custody.walletAddress !== CLEANUP85_RECIPIENT) cleanup85Blocked("recipient_custody");

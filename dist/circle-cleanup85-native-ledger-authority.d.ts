@@ -1,3 +1,4 @@
+import { type HeldCleanup85Scope } from "./circle-cleanup85-financial-scope.js";
 import { type ActiveAssetPolicy } from "./allowlist-active-policy.js";
 import type { Cleanup85NativeRpc } from "./circle-cleanup85-native-rpc.js";
 import type { CircleRpc } from "./circle-v2-evm/rpc.js";
@@ -40,7 +41,7 @@ export declare function verifiedCleanup85NativeSettlement(token: VerifiedCleanup
 };
 /** Under canonical wallet/address/operation outer locks and TRUE allowlist profile inner lock.
  * Fresh full public A admission and the saved unsigned native operation precede reservation. */
-export declare function verifyCleanup85NativeReservation(state: StateStore, id: string, source: CircleRpc, destination: CircleRpc, native: Cleanup85NativeRpc, now: () => Date): Promise<VerifiedCleanup85NativeReservation>;
+export declare function verifyCleanup85NativeReservation(state: StateStore, id: string, source: CircleRpc, destination: CircleRpc, native: Cleanup85NativeRpc, now: () => Date, scope: HeldCleanup85Scope): Promise<VerifiedCleanup85NativeReservation>;
 /** Only a freshly independently verified FINALIZED receipt for this root's durable operation mints settlement.
  * Moving finalized anchors never enter the stable accounting digest. */
 export declare function verifyCleanup85NativeSettlement(state: StateStore, id: string, native: Cleanup85NativeRpc): Promise<VerifiedCleanup85NativeSettlement>;

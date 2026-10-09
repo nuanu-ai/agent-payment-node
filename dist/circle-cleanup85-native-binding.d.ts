@@ -3,7 +3,11 @@ import { CLEANUP85_RECIPIENT_CODE, CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH } from
 import { type EvmNativeCustody } from "./evm-native-custody.js";
 import type { OperationRecord } from "./model.js";
 export interface Cleanup85NativeBinding {
-    readonly version: "apn.circle-cleanup85-native-binding.v1";
+    readonly version: "apn.circle-cleanup85-native-binding.v1" | "apn.circle-cleanup85-native-binding.v2";
+    readonly successor?: {
+        readonly originalOperationId: string;
+        readonly retirementProofHash: string;
+    };
     readonly request: Cleanup85CancellationRequest;
     readonly recipientCustody: EvmNativeCustody;
     readonly activationDigest: string;

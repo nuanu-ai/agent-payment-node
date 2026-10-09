@@ -29,9 +29,7 @@ export declare class Cleanup85NativeCancellation implements Cleanup85Cancellatio
     private readonly accounting;
     private readonly records;
     constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, options?: Cleanup85NativeCancellationOptions);
-    private id;
     private identity;
-    private locks;
     private readers;
     private policy;
     private load;

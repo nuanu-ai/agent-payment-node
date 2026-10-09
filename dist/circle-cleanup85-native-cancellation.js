@@ -1,16 +1,19 @@
+import { Cleanup85UnsignedRetirementStore } from "./circle-cleanup85-unsigned-retirement-store.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject, canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { APPROVAL_WINDOW_MS, STATE_VERSION } from "./constants.js";
 import { activeAssetPolicyFromState } from "./allowlist-active-policy.js";
 import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
-import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 import { evaluateAssetPolicy } from "./asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "./asset-usage-ledger.js";
+import { withCleanup85FinancialScope } from "./circle-cleanup85-financial-scope.js";
+import { cleanup85NativeLineage, cleanup85NativeSlotKind, cleanup85NativeSlotBody, cleanup85NativeRequestHash, assertCleanup85NativeLineageOperation } from "./circle-cleanup85-native-lineage.js";
+import { verifyCleanup85SuccessorFinancialAdmission, verifiedCleanup85SuccessorFinancialAdmission } from "./circle-cleanup85-unsigned-retirement.js";
 import { approvalCode } from "./approval-code.js";
 import { ApnError } from "./errors.js";
-import { EncryptedWalletStore, walletCustodyLock } from "./encrypted-wallet-store.js";
+import { EncryptedWalletStore } from "./encrypted-wallet-store.js";
 import { assertEvmNativeCustody, evmNativeCustody, validateEvmNativeCustody } from "./evm-native-custody.js";
-import { assertExclusiveEvmRawSigner, evmAddressLock } from "./evm-address-ownership.js";
+import { assertExclusiveEvmRawSigner } from "./evm-address-ownership.js";
 import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
 import { publishDirectPublicEffect } from "./direct-public-attestation.js";
 import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
@@ -54,9 +57,7 @@ export class Cleanup85NativeCancellation {
         this.accounting = options.ledger ?? this.ledger;
         this.records = new PublicRecords(state.root);
     }
-    id(r) { return this.state.operationId("evm-live-buyer", `cleanup85-native:${r.recoveryBinding}`); }
     identity() { return { account: CLEANUP85_OWNER, chain: "eip155:42161", asset: { kind: "native", identifier: null } }; }
-    locks(id) { return [`profile:${this.state.profileHash("evm-live-buyer")}`, `profile:${this.state.profileHash("default")}`, `operation:${id}`, `operation:${"4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33"}`, evmAddressLock(CLEANUP85_OWNER), evmAddressLock(CLEANUP85_RECIPIENT)]; }
     readers() {
         let requests = 0;
         const counts = new Map();
@@ -78,24 +79,31 @@ export class Cleanup85NativeCancellation {
         evaluateAssetPolicy(p.registry, { chain: "eip155:42161", asset: { kind: "native", identifier: null }, rail: "direct", amountAtomic: b.nativeReserveAtomic, dailyUsageAtomic: (BigInt(usage.amountAtomic) - (own === null ? 0n : BigInt(own.amountAtomic))).toString(), asOfDate: new Date(this.now()).toISOString().slice(0, 10), asOf: new Date(this.now()).toISOString() });
         return p;
     }
-    async load(r) {
-        const o = await this.state.findOperation(this.id(r));
+    async load(r, lineage) {
+        const o = await this.state.findOperation(lineage.operationId);
         if (o !== null && (o.evm?.cleanup85Cancellation === undefined || hashObject(o.evm.cleanup85Cancellation.request) !== hashObject(r)))
             cleanup85Blocked("saved_request_drift");
+        if (o !== null)
+            assertCleanup85NativeLineageOperation(this.state, o, lineage);
         return o;
     }
     async execute(input) {
-        const r = validateCleanup85Request(input), id = this.id(r), read = this.readers();
+        const r = validateCleanup85Request(input), read = this.readers();
         await this.state.initialize();
-        const existing = await this.load(r);
+        const lineage = await cleanup85NativeLineage(this.state, r), id = lineage.operationId;
+        const existing = await this.load(r, lineage);
         if (existing !== null && existing.state !== "awaiting_approval")
             return this.inspect(r);
-        return this.state.withLocks([walletCustodyLock(this.state, "evm-live-buyer"), walletCustodyLock(this.state, "default")], () => this.state.withLocks(this.locks(id), () => this.state.withLocks([`profile:${allowlistProfileHash("evm-live-buyer")}`], async () => {
-            const savedPrepared = await this.load(r);
+        return withCleanup85FinancialScope(this.state, r, id, async (scope) => {
+            const savedPrepared = await this.load(r, lineage);
             if (savedPrepared !== null && savedPrepared.state !== "awaiting_approval")
                 return this.status(savedPrepared, r);
-            const admission = await verifyCleanup85RecoveryAdmission(this.state, read.source, read.destination, r), verified = verifiedCleanup85RecoveryAdmission(admission, r);
-            assertCleanup85Window(verified.intent, this.now());
+            const fresh = lineage.retirementProofHash === null ? null : verifiedCleanup85SuccessorFinancialAdmission(await verifyCleanup85SuccessorFinancialAdmission(this.state, read.source, read.destination, r, this.now, scope), this.state, r);
+            const admission = fresh?.originalAdmission ?? await verifyCleanup85RecoveryAdmission(this.state, read.source, read.destination, r), verified = verifiedCleanup85RecoveryAdmission(admission, r);
+            if (fresh !== null && canonicalJson(fresh.lineage) !== canonicalJson(lineage))
+                cleanup85Blocked("successor_financial_lineage_changed");
+            const intent = fresh?.readmission ?? verified.intent;
+            assertCleanup85Window(intent, this.now());
             await new OperationService(this.state).assertCleanup85NativeAccountAvailable(admission, r, savedPrepared ?? undefined);
             await assertExclusiveEvmRawSigner(this.state, CLEANUP85_OWNER, verified.parent.profileHash);
             await assertExclusiveEvmRawSigner(this.state, CLEANUP85_RECIPIENT, this.state.profileHash("default"));
@@ -109,19 +117,19 @@ export class Cleanup85NativeCancellation {
                 if (p === null || p.accounts.evm !== CLEANUP85_OWNER)
                     cleanup85Blocked("prepare_native_policy");
                 const e = snapshot.envelope, economics = validateEconomics("85", { gasLimitAtomic: e.gasLimitAtomic, maxFeePerGasAtomic: e.maxFeePerGasAtomic, maxPriorityFeePerGasAtomic: e.maxPriorityFeePerGasAtomic });
-                const preparedAt = new Date(Math.floor(this.now() / 1000) * 1000).toISOString(), expiresAt = new Date(Math.min(Date.parse(preparedAt) + APPROVAL_WINDOW_MS, Date.parse(p.registry.expiresAt ?? new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString()), Date.parse(verified.intent.windowEndsAt ?? new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString()))).toISOString();
+                const preparedAt = new Date(Math.floor(this.now() / 1000) * 1000).toISOString(), expiresAt = new Date(Math.min(Date.parse(preparedAt) + APPROVAL_WINDOW_MS, Date.parse(p.registry.expiresAt ?? new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString()), Date.parse(intent.windowEndsAt ?? new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString()))).toISOString();
                 const evm = { schemaVersion: "apn.evm-direct.v1", asset: resolveEvmAsset({ chainId: 42161, token: "native" }, 18), transactionTo: CLEANUP85_RECIPIENT, valueAtomic: "1", maxFeeWei: "2000000000000",
                     feeQuote: { chainId: 42161, l1DataFeeUpperWei: "0", operatorFeeUpperWei: "0", maximumExecutionFeeWei: economics.maximumGasCostAtomic, totalQuoteWei: economics.maximumGasCostAtomic, totalFeeEnforcedOnchain: false, feeModel: "arbitrum-inclusive", blockNumberAtomic: snapshot.blockNumberAtomic, blockHash: snapshot.blockHash, rpcOrigin: new URL(read.sourceUrl).origin, observedAt: new Date(this.now()).toISOString() },
-                    nativeCustody: await evmNativeCustody(this.state, "evm-live-buyer"), cleanup85Cancellation: { version: "apn.circle-cleanup85-native-binding.v1", request: r, recipientCustody: verified.intent.recipientCustody, activationDigest: p.activationDigest, nativeReservationId: assetUsageReservationId(this.identity(), `apn.cleanup85-native:${id}`), nativeReserveAtomic: "2000000000000", senderCode: snapshot.senderCode, recipientCode: snapshot.recipientCode, recipientDelegateCodeHash: snapshot.recipientDelegateCodeHash } };
+                    nativeCustody: await evmNativeCustody(this.state, "evm-live-buyer"), cleanup85Cancellation: { version: lineage.retirementProofHash === null ? "apn.circle-cleanup85-native-binding.v1" : "apn.circle-cleanup85-native-binding.v2", ...(lineage.retirementProofHash === null ? {} : { successor: { originalOperationId: lineage.originalOperationId, retirementProofHash: lineage.retirementProofHash } }), request: r, recipientCustody: intent.recipientCustody, activationDigest: p.activationDigest, nativeReservationId: assetUsageReservationId(this.identity(), `apn.cleanup85-native:${id}`), nativeReserveAtomic: "2000000000000", senderCode: snapshot.senderCode, recipientCode: snapshot.recipientCode, recipientDelegateCodeHash: snapshot.recipientDelegateCodeHash } };
                 const frozen = { operationId: id, profile: "evm-live-buyer", chainId: 42161, token: evm.asset.address, walletAddress: CLEANUP85_OWNER, recipient: CLEANUP85_RECIPIENT, amountAtomic: "1", transactionData: "0x", economics, preparedAt, expiresAt, evm };
-                o = sealOperation({ ...frozen, schemaVersion: STATE_VERSION, profileHash: this.state.profileHash(frozen.profile), idempotencyHash: this.state.idempotencyHash(`cleanup85-native:${r.recoveryBinding}`), requestHash: hashObject({ method: "apn.cleanup85-native.v1", request: r }), fingerprint: evmDirectFingerprint(frozen), amountDecimal: "0.000000000000000001", preparedBlockNumberAtomic: snapshot.blockNumberAtomic, allowlist: { schemaVersion: "apn.direct-allowlist.v1", policyDigest: p.digest, policyRevision: p.revision }, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect", transitions: appendTransition([], { at: preparedAt, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect" }) });
+                o = sealOperation({ ...frozen, schemaVersion: STATE_VERSION, profileHash: this.state.profileHash(frozen.profile), idempotencyHash: this.state.idempotencyHash(lineage.namespace), requestHash: cleanup85NativeRequestHash(r, lineage), fingerprint: evmDirectFingerprint(frozen), amountDecimal: "0.000000000000000001", preparedBlockNumberAtomic: snapshot.blockNumberAtomic, allowlist: { schemaVersion: "apn.direct-allowlist.v1", policyDigest: p.digest, policyRevision: p.revision }, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect", transitions: appendTransition([], { at: preparedAt, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect" }) });
                 await this.policy(o);
-                await this.records.publish(r.parentOperationId, "slot", { version: "apn.cleanup85-single-cancellation.v1", parentOperationId: r.parentOperationId, oldCleanupMaterialHash: r.oldCleanupMaterialHash, requestBinding: hashObject(r), operationId: id, fingerprint: o.fingerprint });
+                await this.records.publish(r.parentOperationId, cleanup85NativeSlotKind(lineage), cleanup85NativeSlotBody(o, lineage));
                 await this.persist(o);
                 await new DirectPublicEffectJournal(this.state).prepare(o);
             }
             const p = await this.policy(o), e = cleanup85OperationEnvelope(o), custody = o.evm.nativeCustody, binding = o.evm.cleanup85Cancellation;
-            const reserve = await verifyCleanup85NativeReservation(this.state, id, read.source, read.destination, read.native, () => new Date(this.now()));
+            const reserve = await verifyCleanup85NativeReservation(this.state, id, read.source, read.destination, read.native, () => new Date(this.now()), scope);
             await this.accounting.reserveCleanup85Native(reserve, new Date(this.now()));
             return withCleanup85NativeAuthority(o.fingerprint, o.expiresAt, this.now, async () => {
                 if (this.options.approve !== undefined)
@@ -131,17 +139,20 @@ export class Cleanup85NativeCancellation {
             }, async (authority) => {
                 let witnessAt = 0;
                 const check = async (fresh) => {
-                    const slot = await this.records.load(r.parentOperationId, "slot");
-                    if (canonicalJson(slot) !== canonicalJson({ version: "apn.cleanup85-single-cancellation.v1", parentOperationId: r.parentOperationId, oldCleanupMaterialHash: r.oldCleanupMaterialHash, requestBinding: hashObject(r), operationId: id, fingerprint: o.fingerprint }))
+                    const currentLineage = await cleanup85NativeLineage(this.state, r);
+                    if (canonicalJson(currentLineage) !== canonicalJson(lineage))
+                        cleanup85Blocked("execution_lineage_changed");
+                    const slot = await this.records.load(r.parentOperationId, cleanup85NativeSlotKind(lineage));
+                    if (canonicalJson(slot) !== canonicalJson(cleanup85NativeSlotBody(o, lineage)))
                         cleanup85Blocked("permanent_cancellation_slot");
-                    const saved = await this.load(r);
+                    const saved = await this.load(r, lineage);
                     if (saved?.integrityHash !== o.integrityHash)
                         cleanup85Blocked("execution_operation_changed");
                     await assertEvmNativeCustody(this.state, o.profile, custody);
                     await assertEvmNativeCustody(this.state, "default", binding.recipientCustody);
                     const active = await this.policy(o);
                     authority.assert(o.fingerprint, active.registry.expiresAt ?? o.expiresAt);
-                    assertCleanup85Window(verified.intent, this.now());
+                    assertCleanup85Window(intent, this.now());
                     await new OperationService(this.state).assertCleanup85NativeAccountAvailable(admission, r, o);
                     if (fresh) {
                         await Promise.all([assertReadWriteAnchorAfterSnapshot(read.source, read.native, e), reanchorCleanup85Recovery(read.source, read.destination, verified)]);
@@ -208,15 +219,19 @@ export class Cleanup85NativeCancellation {
                     return this.status(o, r);
                 }
             });
-        })));
+        });
     }
     async inspect(input) {
-        const r = validateCleanup85Request(input), id = this.id(r), url = this.options.nativeRpcUrl ?? this.environment.APN_ARBITRUM_RPC_URL;
+        const r = validateCleanup85Request(input), originalId = this.state.operationId("evm-live-buyer", `cleanup85-native:${r.recoveryBinding}`);
+        // Audit-only absent lookup cannot create a lineage, claim, hold or authority.
+        if (await this.state.loadOperation(this.state.profileHash("evm-live-buyer"), originalId) === null && await this.records.load(r.parentOperationId, "slot") === null && await this.records.load(r.parentOperationId, "successor-slot") === null && await new Cleanup85UnsignedRetirementStore(this.state.root).load() === null && !(await this.records.hasAnyCleanup85BuyerOperation(this.state)))
+            return { operationId: null, phase: "absent", transactionHash: null, proof: null };
+        const lineage = await cleanup85NativeLineage(this.state, r), id = lineage.operationId, url = this.options.nativeRpcUrl ?? this.environment.APN_ARBITRUM_RPC_URL;
         if (url === undefined)
             cleanup85Blocked("rpc_configuration");
         const read = { native: new Cleanup85NativeRpc(url, this.options.https ?? new BridgeHttps(), 224, this.now) };
-        return this.state.withLocks(this.locks(id), async () => {
-            let o = await this.load(r);
+        return withCleanup85FinancialScope(this.state, r, id, async () => {
+            let o = await this.load(r, lineage);
             if (o === null)
                 return { operationId: null, phase: "absent", transactionHash: null, proof: null };
             const existingProof = await this.records.load(id, "proof");
