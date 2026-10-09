@@ -814,6 +814,7 @@ apn sei funding approve --operation <operation-id>
 apn sei funding status --operation <operation-id>
 apn circle evm prepare --profile <profile> --destination-profile <profile> --destination-chain <string> --idempotency-key <idempotency_key>
 apn circle evm approve-source --operation <operation_id>
+apn circle evm adopt-external-mint --operation <operation_id> --transaction-hash <string>
 apn circle evm approve-mint --operation <operation_id>
 apn circle evm observe --operation <operation_id>
 apn circle evm refresh-attestation --operation <operation_id>

@@ -89,7 +89,7 @@ const EXPECTED_COMMANDS = [
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
   "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
   "sei funding prepare", "sei funding approve", "sei funding status",
-  "circle evm prepare", "circle evm approve-source", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm cleanup-nonce", "circle evm status",
+  "circle evm prepare", "circle evm approve-source", "circle evm adopt-external-mint", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm cleanup-nonce", "circle evm status",
   "mega funding prepare", "mega funding approve", "mega funding status",
   "oneclick source submit", "oneclick source status",
   "gasless usdt prepare", "gasless usdt status", "gasless usdt resume", "gasless usdt execute", "gasless usdt execution-status", "gasless usdt observe",

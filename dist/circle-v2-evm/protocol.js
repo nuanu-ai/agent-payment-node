@@ -102,7 +102,7 @@ export function verifyCircleObservation(input, expected) {
         finalityBlockNumberAtomic: circleUint(head.number).toString(), transactionHashBinding: hashObject(t), finalityTag: input.finalityTag, receiptHash: hashObject(r),
         logsHash: hashObject(r.logs), actualFeeAtomic: fee.toString() };
 }
-function oneEvent(observation, name, emitter) {
+export function oneEvent(observation, name, emitter) {
     const logs = circleRecord(observation.receipt).logs, event = CIRCLE_ABI.find(x => x.type === "event" && x.name === name);
     const matching = logs.map(circleRecord).filter(l => addressEquals(l.address, emitter) && Array.isArray(l.topics) && circleHex(l.topics[0], 32) === toEventSelector(event));
     if (matching.length !== 1)

@@ -58,6 +58,7 @@ export function validateCircleAdvance(previous: CircleOperationV1, next: CircleO
   if (previous.destination !== null && !circleSame(previous.destination, next.destination)) circleCorrupt("destination_replacement");
   if (previous.usage.length > 0 && !circleSame(previous.usage.map(x => ({ id: x.reservationId, account: x.account, amount: x.amountAtomic })),
     next.usage.map(x => ({ id: x.reservationId, account: x.account, amount: x.amountAtomic })))) circleCorrupt("usage_replacement");
+  if (previous.externalFulfillment !== undefined && !circleSame(previous.externalFulfillment, next.externalFulfillment)) circleCorrupt("external_fulfillment_replacement");
   if (previous.nonceRetirement !== undefined && !circleSame(previous.nonceRetirement, next.nonceRetirement)) circleCorrupt("retirement_replacement");
   if (previous.usageFinalized && !next.usageFinalized) circleCorrupt("usage_regression");
   if (Buffer.byteLength(canonicalJson(next)) > 1024 * 1024) circleCorrupt("capacity");

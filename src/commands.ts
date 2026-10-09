@@ -10,6 +10,7 @@ export type CommandRequest =
   | { readonly command: "sei.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "mega.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "sei.funding.approve" | "sei.funding.status"; readonly operationId: string }
+  | { readonly command: "circle.evm.adopt-external-mint"; readonly operationId: string; readonly transactionHash: `0x${string}` }
   | { readonly command: "circle.evm.prepare"; readonly profile: string; readonly destinationProfile: string; readonly destinationChain: 1329 | 59144 | 143; readonly idempotencyKey: string }
   | { readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.status"; readonly operationId: string }
   | { readonly command: "mega.funding.approve" | "mega.funding.status"; readonly operationId: string }

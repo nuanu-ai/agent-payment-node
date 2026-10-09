@@ -25,6 +25,10 @@ export type CommandRequest = {
     readonly command: "sei.funding.approve" | "sei.funding.status";
     readonly operationId: string;
 } | {
+    readonly command: "circle.evm.adopt-external-mint";
+    readonly operationId: string;
+    readonly transactionHash: `0x${string}`;
+} | {
     readonly command: "circle.evm.prepare";
     readonly profile: string;
     readonly destinationProfile: string;

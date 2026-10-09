@@ -11,6 +11,7 @@ export const CIRCLE_EVM_COMMANDS: readonly CommandDefinition[] = [
   command("prepare", [option("--profile", "profile", ["evm-live-buyer"]), option("--destination-profile", "profile", ["explicit_owned_gas_profile"]),
     option("--destination-chain", "string", ["1329_or_59144_or_143"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])], "Freeze exact 40100 USDC Fast burn with max fee 100, minimum mint 40000 and both owner policy holds.", "payment_prepare"),
   command("approve-source", [operation], "Foreground-confirm, sign and send exact bounded approval and burn at most once.", "payment_submit"),
+  command("adopt-external-mint", [operation, option("--transaction-hash", "string", ["0x_64_lowercase_hex_characters"])], "Verify one explicit third-party mint and close unused holds without signing or sending.", "recovery"),
   command("approve-mint", [operation], "Foreground-confirm the destination gas owner and mint the issuer-verified same burn nonce once.", "payment_submit"),
   command("observe", [operation], "Observe canonical source, issuer signature, destination mint and independent finality without signing or resending.", "network_read"),
   command("refresh-attestation", [operation], "Read-only issuer refresh for the same burn and nonce before mint; never reburn.", "network_read"),
@@ -23,12 +24,13 @@ function command(action: string, options: readonly CommandOption[], summary: str
   return { path: ["circle", "evm", action], synopsis: `apn circle evm ${action}${options.map(o => ` ${o.name} <${o.type}>`).join("")}`, summary, options,
     effect: { class: effect, summary }, approval: { class: foreground ? "foreground_tty" : "none", when: foreground ? "Exact physical foreground TTY consent before signing; MCP provides the CLI handoff." : "No financial effect." },
     output: { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1, success: "Checked Circle operation, receipts and usage state.", failures: ["Classified refusal; ambiguous effects hold all reservations and are never resent."] },
-    states: { terminal: ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired"], non_terminal: ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required"] },
+    states: { terminal: ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"], non_terminal: ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required"] },
     recovery: [{ command_path: ["circle", "evm", "observe"], when: "Any prior effect marker exists." }], examples: [`apn circle evm ${action}`] };
 }
 export function bindCircleEvmCommand(path: string, input: Readonly<Record<string, string>>): CommandRequest {
   const action = path.slice("circle evm ".length);
   if (!isPlainRecord(input)) invalid();
+  if (action === "adopt-external-mint") { if (!exactKeys(input, ["--operation", "--transaction-hash"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]!) || !/^0x[a-f0-9]{64}$/u.test(input["--transaction-hash"]!)) invalid(); return {command:"circle.evm.adopt-external-mint",operationId:input["--operation"]!,transactionHash:input["--transaction-hash"]! as `0x${string}`}; }
   if (action === "prepare") {
     if (!exactKeys(input, ["--profile", "--destination-profile", "--destination-chain", "--idempotency-key"])) invalid();
     const chain = input["--destination-chain"]; if (chain !== "1329" && chain !== "59144" && chain !== "143") invalid();

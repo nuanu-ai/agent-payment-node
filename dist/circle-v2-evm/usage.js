@@ -1,3 +1,5 @@
+import { CircleRepository } from "./repository.js";
+import { CircleExternalStore } from "./external-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
@@ -132,6 +134,29 @@ export class CircleUsage {
             if (reservation.state !== "reserved")
                 circleBlocked("reserve_replay_already_exposed");
             result.push(reservation);
+        }
+        return result;
+    }
+    async followExternalFulfillment(op) {
+        if (op.externalFulfillment === undefined || op.source?.finalityTag !== "finalized" || op.residualAllowanceAtomic !== "0" || op.usage.length !== 5)
+            circleBlocked("external_settlement_proof_required");
+        const durable = await new CircleRepository(this.state.root).load(op.operationId), claim = await new CircleExternalStore(this.state.root).readClaim(op);
+        if (durable?.externalFulfillment === undefined || claim === null || hashObject(durable.externalFulfillment) !== hashObject(op.externalFulfillment) || hashObject(claim) !== hashObject(op.externalFulfillment))
+            circleBlocked("external_durable_settlement_binding");
+        const result = [];
+        for (const [index, row] of op.usage.entries()) {
+            const current = await this.ledger.load(row, row.reservationId);
+            if (current === null)
+                circleCorrupt("external_usage_missing");
+            const state = index < 3 ? "finalized" : "released_unsubmitted";
+            const outcomeDigest = hashObject({ kind: "circle_external_mint_fulfillment", operationId: op.operationId, fingerprint: op.fingerprint, proofHash: op.externalFulfillment.proofHash, reservationId: row.reservationId, index, state });
+            if (current.state === state) {
+                if (current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== undefined)
+                    circleBlocked("external_usage_outcome_changed");
+                result.push(current);
+                continue;
+            }
+            result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state, now: new Date(this.now()), outcomeDigest, expectedCurrentStates: index < 3 ? ["reserved", "submitted", "unknown_finality"] : ["reserved", "unknown_finality"] }));
         }
         return result;
     }

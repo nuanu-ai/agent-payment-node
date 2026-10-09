@@ -7,6 +7,13 @@ import { confirmCircleApproval } from "./lifi/circle-v2-approval-tty.js";
 /** Dispatch preserves the distinct legacy approval and finite EVM operation boundaries. */
 export async function executeCircleCommand(request, context) {
     switch (request.command) {
+        case "circle.evm.adopt-external-mint": {
+            const service = context.circleEvm;
+            if (service === undefined)
+                throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle EVM runtime unavailable.");
+            const op = await service.adoptExternalMint(request.operationId, request.transactionHash);
+            return { ...operationOutcome(publicCircle(op)), proofClass: "circle_external_mint_fulfillment", receipt: op.externalFulfillment ?? null };
+        }
         case "circle.evm.prepare": {
             const service = context.circleEvm;
             if (service === undefined)
