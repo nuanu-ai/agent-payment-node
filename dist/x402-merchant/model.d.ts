@@ -1,3 +1,4 @@
+import { type MerchantFeeContext } from "./mega-fee.js";
 import type { Hex } from "viem";
 import type { EvmNativeCustody } from "../evm-native-custody.js";
 import { type FrozenMerchantChallenge } from "./protocol.js";
@@ -17,6 +18,20 @@ export interface MerchantReceipt {
     readonly status: "success" | "reverted";
     readonly evidenceHash: string;
     readonly networkFeeWei: string;
+    readonly fullFee?: {
+        readonly executionWei: string;
+        readonly l1Wei: string;
+        readonly operatorWei: "0";
+        readonly signedExecutionCapWei: string;
+        readonly admissionEstimatedUpperWei: string;
+        readonly payerDebit: {
+            readonly before: string;
+            readonly after: string;
+            readonly aggregateDebit: string;
+            readonly transactionHashes: readonly Hex[];
+            readonly evidenceHash: string;
+        };
+    };
     readonly canonical?: {
         readonly transactionIndex: string;
         readonly blockHeaderHash: string;
@@ -63,6 +78,7 @@ export interface MerchantOperation {
         readonly revision: number;
         readonly activationDigest: string;
     };
+    readonly feeContext?: MerchantFeeContext;
     readonly effectBinding?: {
         readonly policyEndsAt: string;
         readonly nativeAmountAtomic: string;
@@ -97,6 +113,13 @@ export declare function merchantSnapshot(o: Pick<MerchantOperation, "state" | "s
 export declare function merchantMove(o: MerchantOperation, state: MerchantPhase, at: string, changes?: Partial<Pick<MerchantOperation, "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts">>): MerchantOperation;
 export declare function validateMerchant(v: unknown): MerchantOperation;
 export declare function publicMerchant(o: MerchantOperation): {
+    currentCanonicalProof: MerchantCanonicalObservation | null;
+    result: Record<string, unknown> | null | undefined;
+    receipt: MerchantReceipt | null;
+    feeBudgetSemantics?: string;
+    signedExecutionCapWei?: string;
+    admissionEstimatedUpperWei?: string;
+    l1EstimatedUpperWei?: string;
     kind: "merchant_x402";
     operationId: string;
     state: MerchantPhase;
@@ -117,7 +140,4 @@ export declare function publicMerchant(o: MerchantOperation): {
     expiresAt: string;
     amountAtomic: unknown;
     feeCeilingWei: string;
-    currentCanonicalProof: MerchantCanonicalObservation | null;
-    result: Record<string, unknown> | null | undefined;
-    receipt: MerchantReceipt | null;
 };

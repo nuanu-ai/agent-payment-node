@@ -1,3 +1,4 @@
+import { type MerchantFeeContext } from "./mega-fee.js";
 import { type Hex } from "viem";
 import { BridgeHttps } from "../lifi/https.js";
 import type { StateStore } from "../state.js";
@@ -32,15 +33,16 @@ export declare function rpcTransaction(): {
     value: string;
 };
 /** Fresh runtime, proxy implementation, real domain, balances and pending nonce at one rechecked anchor. */
-export declare function merchantCurrent(rpc: MerchantRpcPort): Promise<{
+export declare function merchantCurrent(rpc: MerchantRpcPort, frozenEnvelope?: MerchantEnvelope, maximumNativeFee?: string): Promise<{
     nonce: string;
     gas: string;
     maxFeePerGas: string;
     maxPriorityFeePerGas: string;
     native: string;
     token: string;
+    feeContext: MerchantFeeContext;
 }>;
-export declare function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope): void;
+export declare function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope, feeContext?: MerchantFeeContext): void;
 export declare function merchantHeader(value: unknown): Record<string, unknown>;
 /** Independent canonical finalized receipt + full transaction + exact token Transfer. No HTTP settlement inference. */
 export declare function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation): Promise<MerchantReceipt | null>;
