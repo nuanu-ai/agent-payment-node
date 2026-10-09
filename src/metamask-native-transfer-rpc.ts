@@ -37,6 +37,10 @@ function productionRpc(chainId: MetaMaskNativeFeeChainId): EvmRpc {
   if (url.search !== "" || url.hash !== "") throw new ApnError("APN_RPC_CONFIG", "RPC URL must have no query or fragment.");
   return new HttpsBaseRpc(endpoint, { totalDeadlineMs: 120000 }).evm;
 }
+/** Recheck the fixed owner's current pending nonce before a private signing handoff. */
+export async function readFixedMetaMaskNativeNonce(chainId: MetaMaskNativeFeeChainId): Promise<string> {
+  return await productionRpc(chainId).nonce(fixedChain(chainId), METAMASK_NATIVE_FIXED_SENDER, "pending");
+}
 export async function readFixedMetaMaskNativeBalances(chainId: MetaMaskNativeFeeChainId): Promise<EvmBalanceSnapshot> {
   return await productionRpc(chainId).balance(METAMASK_NATIVE_FIXED_SENDER, { chainId, token: token(chainId), decimals: 6 });
 }
