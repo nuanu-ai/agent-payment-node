@@ -8,7 +8,7 @@ import { encodeFunctionResult } from "viem";
 import { StateStore } from "../../src/state.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { evmNativeCustody } from "../../src/evm-native-custody.js";
-import { verifyCircleNativeAdmission, recheckCircleNativeAdmission } from "../../src/circle-native-admission.js";
+import { verifyCircleNativeAdmission, recheckCircleNativeAdmission, verifiedCircleNativeSources, circleNativeSourceIdentity } from "../../src/circle-native-admission.js";
 import { OperationService } from "../../src/operation-service.js";
 import { sealCircle, advanceCircle } from "../../src/circle-v2-evm/operation-model.js";
 import { sourceReady } from "./circle-native-admission-fixture.js";
@@ -142,4 +142,30 @@ test("normal prepare waits for the existing Circle profile controller lock; late
     s.rpc.nonceAtomic = (BigInt(operation.economics!.nonceAtomic) + 1n).toString();
     await assert.rejects(recheckCircleNativeAdmission(s.state, operation, s.port)); assert.equal(s.rpc.broadcastCount, 0);
   } finally { await rm(s.root, { recursive: true, force: true }); }
+});
+
+
+test("caller-visible proof mutations cannot alter the detached one-source private authority", async () => {
+  for (const mutation of ["append", "index", "entry", "custody"] as const) {
+    const s = await setup(); try {
+      const service = new OperationService(s.state), result = (await verifyCircleNativeAdmission(s.state, s.port, s.buyer, CIRCLE_SOURCE_OWNER, s.recipient))!;
+      const other = advanceCircle(sealCircle({ ...s.op, operationId: "8".repeat(64), idempotencyHash: "8".repeat(64) }), {}, "second_settled", Date.parse(s.op.preparedAt));
+      await writeFile(join(s.root, "circle-v2-evm", `${other.operationId}.json`), canonicalJson(other), { mode: 0o600 });
+      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, result.token));
+      const publicBinding = result.binding as unknown as { sources: { operationId: string; sourceIdentityHash: string }[]; recipientCustody: { profileHash: string; walletAddress: string; walletBindingHash: string } };
+      const second = { operationId: other.operationId, sourceIdentityHash: circleNativeSourceIdentity(other) };
+      if (mutation === "append") publicBinding.sources.push(second);
+      if (mutation === "index") publicBinding.sources[0] = second;
+      if (mutation === "entry") Object.assign(publicBinding.sources[0]!, second);
+      if (mutation === "custody") Object.assign(publicBinding.recipientCustody, { profileHash: "e".repeat(64), walletAddress: CIRCLE_SOURCE_OWNER, walletBindingHash: "f".repeat(64) });
+      assert.deepEqual([...verifiedCircleNativeSources(result.token, s.op.profileHash, CIRCLE_SOURCE_OWNER)], [[s.op.operationId, circleNativeSourceIdentity(s.op)]]);
+      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, result.token));
+      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable("e".repeat(64), CIRCLE_SOURCE_OWNER, result.token));
+      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, { ...result.token }));
+      // Mutating a returned map is also harmless: each getter returns a fresh detached map.
+      (verifiedCircleNativeSources(result.token, s.op.profileHash, CIRCLE_SOURCE_OWNER) as Map<string, string>).set(second.operationId, second.sourceIdentityHash);
+      assert.equal(verifiedCircleNativeSources(result.token, s.op.profileHash, CIRCLE_SOURCE_OWNER).size, 1);
+      assert.equal(s.rpc.broadcastCount, 0);
+    } finally { await rm(s.root, { recursive: true, force: true }); }
+  }
 });
