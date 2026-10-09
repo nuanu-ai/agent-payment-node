@@ -5,7 +5,7 @@ import { parsePublicHttpsUrl } from "../network-policy.js";
 import { circleBlocked } from "./operation-model.js";
 import { circleRecord } from "./protocol.js";
 import { CircleRpc } from "./rpc.js";
-const METHODS = new Set(["eth_chainId","eth_getBlockByNumber","eth_getBalance","eth_getCode","eth_getStorageAt","eth_call","eth_getTransactionReceipt","eth_getTransactionByHash","eth_getLogs"]);
+const METHODS = new Set(["eth_chainId","eth_getBlockByNumber","eth_getBalance","eth_getCode","eth_getStorageAt","eth_call","eth_getTransactionReceipt","eth_getTransactionByHash","eth_getTransactionCount","eth_getLogs"]);
 /** One shared physical POST/deadline/concurrency budget for both public chains. No signing methods or retries. */
 export class CircleExternalRpcBudget {
   private requests=0; private inFlight=0; private waiters:(()=>void)[]=[];
