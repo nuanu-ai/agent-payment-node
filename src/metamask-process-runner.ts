@@ -27,7 +27,24 @@ export function takeMetaMaskNativeProcessFailureIdentifiers(error: unknown): Nat
   return value;
 }
 function observeNativeFailure(bytes: Buffer): NativeFailureIdentifiers | undefined {
-  const parsed = parseMetaMaskProcessOutput(bytes);
+  let parsed = parseMetaMaskProcessOutput(bytes);
+  if (parsed === null) {
+    const text = bytes.toString("utf8"), boundary = text.lastIndexOf("\n");
+    if (boundary < 0) return undefined;
+    const tail = text.slice(boundary + 1).trim();
+    if (!tail.startsWith("{")) return undefined;
+    try {JSON.parse(tail); return undefined;}
+    catch (error) {
+      if (!(error instanceof SyntaxError)) return undefined;
+      const atEnd = error.message === "Unexpected end of JSON input" ||
+        / at position ([0-9]+) /u.exec(error.message)?.[1] === String(tail.length);
+      if (!atEnd) return undefined;
+    }
+    const prefix = Buffer.from(text.slice(0, boundary), "utf8");
+    try {parsed = parseMetaMaskProcessOutput(prefix);} finally {prefix.fill(0);}
+    // Only complete normal notice frames before a cut final frame can supply IDs.
+    if (parsed === null || parsed.envelope !== null || parsed.notices.length === 0) return undefined;
+  }
   if (parsed === null) return undefined;
   const notice = classifyMetaMaskPendingNotices(parsed.notices);
   if (notice.disposition === "invalid") return undefined;

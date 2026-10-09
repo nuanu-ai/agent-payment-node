@@ -9,6 +9,9 @@ import type { MetaMaskNativeOwnedScope, MetaMaskNativeOwnedContext } from "../..
 const PAYER = "0xf41170df51aab52aaa04fbc3ff325cf051644aca";
 const HASH = "e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a";
 const POLICY = "# Mimir Wallet Policy\nschema_version: 1\nwallet_address: \"0xf41170df51aab52aaa04fbc3ff325cf051644aca\"\n\naddresses:\n  allowlist:\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1329\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 137\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 143\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 59144\n    - address: \"0x823a3a5bab1186141b32fc65f8e25ca24c679ce7\"\n      chain_id: 8453\n  blocklist: []\n\nevm:\n  allowed_chains:\n    - 1\n    - 10\n    - 56\n    - 137\n    - 143\n    - 999\n    - 1329\n    - 4326\n    - 4663\n    - 8453\n    - 42161\n    - 43114\n    - 46630\n    - 59144\n    - 84532\n    - 11155111\n  outflow_limits_usd:\n    rolling_24h: 0.5\n";
+const OP_POLICY = "# Mimir Wallet Policy\nschema_version: 1\nwallet_address: \"0xf41170df51aab52aaa04fbc3ff325cf051644aca\"\n\naddresses:\n  allowlist:\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 10\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1329\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 137\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 143\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 59144\n    - address: \"0x823a3a5bab1186141b32fc65f8e25ca24c679ce7\"\n      chain_id: 8453\n  blocklist: []\n\nevm:\n  allowed_chains:\n    - 1\n    - 10\n    - 56\n    - 137\n    - 143\n    - 999\n    - 1329\n    - 4326\n    - 4663\n    - 8453\n    - 42161\n    - 43114\n    - 46630\n    - 59144\n    - 84532\n    - 11155111\n  outflow_limits_usd:\n    rolling_24h: 0.5\n";
+const OP_HASH = "7e5d5899170740ccaa05fb45415c9ef5320815e446788719f3523eb0fd58ee37";
+let postPolicy: string | undefined;
 const TX = `0x${"a".repeat(64)}`;
 const PROJECT = "11111111-2222-4333-8444-555555555555";
 const PROJECT_HASH = sha256(PROJECT);
@@ -22,7 +25,7 @@ mock.module("../../src/metamask-package.js", {namedExports: {resolveMetaMaskBin:
 mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
   async runJson(argv:readonly string[], timeout?:number) {
     calls.push({argv, ...(timeout === undefined ? {} : {timeout})});
-    const value = queue.shift(); assert.ok(value, "unexpected child call"); if (argv[1] === "send-transaction") policyQueue({project:postProject??PROJECT}); return value;
+    const value = queue.shift(); assert.ok(value, "unexpected child call"); if (argv[1] === "send-transaction") policyQueue({project:postProject??PROJECT,policy:postPolicy??POLICY}); return value;
   }
 }}});
 mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
@@ -38,7 +41,7 @@ mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
 }});
 const {readFixedMetaMaskNativePolicy, submitOwnedMetaMaskNative, readFixedMetaMaskNativeRequest} = await import("../../src/metamask-native-transfer-adapter.js");
 function result(data:unknown, exitCode=0) {const stdout=Buffer.from(JSON.stringify({ok:true,data})); buffers.push(stdout); return {exitCode,stdout};}
-function setup() {queue=[];calls=[];buffers.length=0;allowTransport=false;currentChecks=0;rejectAfterHandoff=false;postProject=undefined;}
+function setup() {queue=[];calls=[];buffers.length=0;allowTransport=false;currentChecks=0;rejectAfterHandoff=false;postProject=undefined;postPolicy=undefined;}
 function policyQueue(overrides: {policy?:string;mode?:string;address?:string;lastAddress?:string;exit?:number;project?:string;lastProject?:string} = {}) {
   queue.push(result({authenticated:true,summary:{mode:"session",projectId:overrides.project??PROJECT}}),result({mode:"server",chainNamespace:"evm",address:PAYER}),
     result({mode:overrides.mode??"guard",address:PAYER}),
@@ -63,7 +66,7 @@ test("fixed normal policy reads corroborate selected address, Guard and exact ap
  assert.deepEqual(calls.map(c=>c.argv.slice(0,3)),[["auth","status","--json"],["wallet","address","--chain-namespace"],["wallet","trading-mode","get"],["wallet","policy","get"],["wallet","address","--chain-namespace"],["auth","status","--json"]]);
  assert.ok(buffers.every(b=>b.every(byte=>byte===0)));
 });
-test("OP Seller absence refuses before any normal child", async()=>{setup();await assert.rejects(readFixedMetaMaskNativePolicy(10));assert.equal(calls.length,0);});
+test("old policy OP Seller absence refuses before any financial child", async()=>{setup();policyQueue();await assert.rejects(readFixedMetaMaskNativePolicy(10));assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));});
 for (const [name, change] of Object.entries({empty:{policy:""},drift:{policy:POLICY+"\n"},beast:{mode:"beast"},wrongPayer:{address:"0x1111111111111111111111111111111111111111"},selectedDrift:{lastAddress:"0x1111111111111111111111111111111111111111"},failedRead:{exit:1}})) {
  test(`policy ${name} refuses unsigned`,async()=>{setup();policyQueue(change);await assert.rejects(readFixedMetaMaskNativePolicy(1));assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));});
 }
@@ -98,3 +101,10 @@ test("service denial never proves no effect or releases a hold",async()=>{setup(
 test("request invalid input refuses before any normal child",async()=>{setup();assert.equal((await readFixedMetaMaskNativeRequest("",PROJECT_HASH)).disposition,"unknown");assert.equal(calls.length,0);});
 
 test("malformed present request hash cannot fall back to another valid hash",async()=>{setup();requestQueue({...request(),txHash:"malformed"},{txHash:TX});assert.equal((await readFixedMetaMaskNativeRequest(RID,PROJECT_HASH)).disposition,"unknown");});
+
+test("exact prospective policy admits OP for READ only",async()=>{setup();policyQueue({policy:OP_POLICY});const v=await readFixedMetaMaskNativePolicy(10);assert.equal(v.vendorPolicyHash,OP_HASH);assert.equal(v.policyBytes,945);assert.equal(v.vendorProjectHash,PROJECT_HASH);assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));});
+test("exact prospective policy retains other selected chains for READ only",async()=>{setup();policyQueue({policy:OP_POLICY});const v=await readFixedMetaMaskNativePolicy(1);assert.equal(v.vendorPolicyHash,OP_HASH);assert.equal(v.policyBytes,945);assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));});
+test("prospective policy whitespace drift refuses unsigned",async()=>{setup();policyQueue({policy:OP_POLICY+"\n"});await assert.rejects(readFixedMetaMaskNativePolicy(10));assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));});
+test("same-length malformed prospective policy cannot pass its exact hash",async()=>{setup();policyQueue({policy:OP_POLICY.replace("chain_id: 10","chain_id: 11")});await assert.rejects(readFixedMetaMaskNativePolicy(10));assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));});
+test("prospective policy project drift refuses unsigned",async()=>{setup();policyQueue({policy:OP_POLICY,lastProject:"different-project"});await assert.rejects(readFixedMetaMaskNativePolicy(10));});
+test("post-private policy variant drift remains UNKNOWN with actual hash",async()=>{setup();allowTransport=true;postPolicy=OP_POLICY;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:TX}));const v=await submitOwnedMetaMaskNative(scope,context());assert.equal(v.disposition,"unknown");assert.equal(v.transactionHash,TX);});
