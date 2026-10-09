@@ -21,6 +21,9 @@ import { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, validateAssetUsageR
   expectedStates, assetUsageReservationId, reservationIdFor, seal, sumUsage, assertReplay, assertBucketWindow, assertTransition,
   validateIdentity, exactIdentity, exactAsset, withoutDigest, canonicalAccount, idempotency, atomic, instant, digest, invalid, blocked, corrupt,
 } from "./asset-usage-ledger-record.js";
+import { Cleanup85NativePublicRecords } from "./circle-cleanup85-native-records.js";
+import { DirectPublicEffectJournal } from "./direct-public-effect.js";
+import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, assetUsageReservationId, validateAssetUsageReservation } from "./asset-usage-ledger-record.js";
 
 export type AssetUsageState =
@@ -165,7 +168,12 @@ export class AssetUsageLedger extends SecureStateStore {
       const reservations = await this.loadBucket(identity);
       if (cleanup !== undefined) {
         const active=activeAssetPolicyFromState(await new AllowlistPolicyStore(this.root).readUnderProfileLock(cleanup.operation.profile),input.now);
-        if(at>=cleanup.operation.expiresAt||active===null||active.digest!==cleanup.policy.digest||active.activationDigest!==cleanup.policy.activationDigest||active.revision!==cleanup.policy.revision||!sameCleanup85LedgerOperation(cleanup.operation,await new StateStore(this.root).findOperation(cleanup.operation.operationId)))throw blocked("Cleanup85 durable reservation operation or policy changed.");
+        if(at>=cleanup.authorizationExpiresAt||active===null||active.digest!==cleanup.policy.digest||active.activationDigest!==cleanup.policy.activationDigest||active.revision!==cleanup.policy.revision||!sameCleanup85LedgerOperation(cleanup.operation,await new StateStore(this.root).findOperation(cleanup.operation.operationId)))throw blocked("Cleanup85 durable reservation operation or policy changed.");
+      }
+      if(cleanup?.unsignedContinuation){
+        await new DirectPublicEffectJournal(new StateStore(this.root)).assertUnstarted(cleanup.operation);
+        if(await new EvmDirectSubmissionJournal(this.root).exists(cleanup.operation)||await new Cleanup85NativePublicRecords(this.root).load(cleanup.operation.operationId,"material")!==null||reservations.some(entry=>entry.reservationId===reservationId))throw blocked("Cleanup85 unsigned continuation has an existing effect or reservation.");
+        verifiedCleanup85NativeReservation(authority!,this.root);
       }
       const existing = reservations.find((entry) => entry.reservationId === reservationId);
       if (existing !== undefined) {

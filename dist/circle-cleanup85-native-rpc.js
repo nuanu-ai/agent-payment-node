@@ -127,6 +127,15 @@ export class Cleanup85NativeRpc {
             cleanup85Blocked("finalized_consumed_nonce");
         await this.identity();
     }
+    /** Still nonce85 at a fresh canonical FINALIZED anchor; no authority minted here. */
+    async unsignedFinalizedAccount() {
+        await this.identity();
+        const head = await this.block("finalized"), tag = { blockHash: head.hash, requireCanonical: true };
+        if (evmRpcQuantity(await this.call("eth_getTransactionCount", [CLEANUP85_OWNER, tag])) !== 85n || (await this.block(head.tag)).hash !== head.hash)
+            cleanup85Blocked("continuation_finalized_nonce_or_anchor");
+        await this.identity();
+        return { number: head.number, hash: head.hash };
+    }
     async finalizedAccount(observation) {
         const head = evmRpcBlockResult(observation.finalityHead, "finalized"), tag = { blockHash: head.hash, requireCanonical: true };
         const [nonce, balance, allowance] = await Promise.all([this.call("eth_getTransactionCount", [CLEANUP85_OWNER, tag]), this.call("eth_call", [{ to: CIRCLE_SOURCE_TOKEN, data: balanceData }, tag]), this.call("eth_call", [{ to: CIRCLE_SOURCE_TOKEN, data: allowanceData }, tag])]);

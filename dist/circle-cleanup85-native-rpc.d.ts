@@ -35,5 +35,10 @@ export declare class Cleanup85NativeRpc {
     private snapshotOnce;
     observation(hash: Hex): Promise<CircleObservation | null>;
     finalizedConsumedAccount(observation: CircleObservation): Promise<void>;
+    /** Still nonce85 at a fresh canonical FINALIZED anchor; no authority minted here. */
+    unsignedFinalizedAccount(): Promise<{
+        number: string;
+        hash: Hex;
+    }>;
     finalizedAccount(observation: CircleObservation): Promise<void>;
 }
