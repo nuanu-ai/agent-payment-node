@@ -16,7 +16,7 @@ function leases(op: CircleOperationV1): readonly Lease[] {
     { key: "approval-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
     { key: "burn-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
     { key: "cleanup-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "15000000000000" },
-    { key: "mint-native", profile: op.destinationProfile, identity: { account: destination, chain: `eip155:${op.destinationChain}`, asset: { kind: "native", identifier: null } }, amount: circleRoute(op.destinationChain).destinationNativeCap }];
+    { key: "mint-native", profile: op.destinationProfile, identity: { account: destination, chain: `eip155:${op.destinationChain}`, asset: { kind: "native", identifier: null } }, amount: circleRoute(op.destinationChain, op.destinationProfile).destinationNativeCap }];
 }
 export class CircleUsage {
   private readonly ledger: AssetUsageLedger;

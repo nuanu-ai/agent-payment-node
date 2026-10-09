@@ -30,7 +30,7 @@ export class CircleEvmService {
     this.repo = new CircleRepository(state.root); this.usage = new CircleUsage(state, now); this.custody = new LocalCircleCustody(state, wrapping); this.operations = new OperationService(state);
   }
   async prepare(input: CirclePrepareInput): Promise<CircleOperationV1> {
-    const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile), route = circleRoute(input.destinationChain);
+    const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile), route = circleRoute(input.destinationChain, destinationProfile);
     if (profile !== "evm-live-buyer" || destinationProfile !== route.gasPayerProfile || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(input.idempotencyKey)) circleBlocked("finite_route_profile_or_idempotency");
     await this.state.initialize(); const [sourceCustody, destinationCustody] = await Promise.all([evmNativeCustody(this.state, profile), evmNativeCustody(this.state, destinationProfile)]);
     if (sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || destinationCustody.walletAddress !== route.gasPayer) circleBlocked("finite_route_owner");
@@ -48,7 +48,7 @@ export class CircleEvmService {
       const sourceAccount = await source.account(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), src = verifyCircleSourceAccount(sourceAccount);
       // This lane starts at zero allowance. Pre-existing grants require normal cleanup before preparing.
       if (!src.approvalRequired) circleBlocked("initial_zero_allowance_required");
-      const dst = verifyCircleDestinationAccount(await destination.account(destinationCustody.walletAddress, route.token, CIRCLE_TRANSMITTER), route.chainId);
+      const dst = verifyCircleDestinationAccount(await destination.account(destinationCustody.walletAddress, route.token, CIRCLE_TRANSMITTER), route.chainId, destinationProfile);
       void dst;
       const approvalEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(), src.nonceAtomic);
       const burnEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_MESSENGER, encodeCircleBurn(route.chainId), (BigInt(src.nonceAtomic) + 1n).toString(), "600000");
@@ -102,7 +102,7 @@ export class CircleEvmService {
   }
   private async fee(chain: CircleDestinationChain) { const value = await this.api(`/v2/burn/USDC/fees/3/${circleRoute(chain).domain}`); return quoteCircleFastFee(chain, value, this.now(), this.now()); }
   private ports(initial: CircleOperationV1): CircleLifecyclePorts {
-    const { source, destination } = this.remotes(initial.destinationChain), route = circleRoute(initial.destinationChain);
+    const { source, destination } = this.remotes(initial.destinationChain), route = circleRoute(initial.destinationChain, initial.destinationProfile);
     const rpc = (e: CircleEffect) => e.role === "mint" ? destination : source;
     const allowance = async (tag = "latest") => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag));
     const deployments = () => currentCircleDeployments(source, destination, initial.destinationChain);
@@ -157,7 +157,7 @@ export class CircleEvmService {
         if (effect.role === "approval" || effect.role === "cleanup") return verifyCircleApproval(observation, effect.role === "cleanup", await allowance(String(circleRecord(observation.receipt).blockNumber)));
         if (effect.role === "burn") return decodeCircleSource(observation, op.destinationChain);
         if (op.source === null || op.attestation === null) circleCorrupt("mint_proof_without_source");
-        return decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))));
+        return decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))), op.destinationProfile);
       },
       observeSource: async (op, finalized) => {
         const hash = op.effects.find(e => e.role === "burn")!.transactionHash; if (hash === null) return null;
@@ -170,7 +170,7 @@ export class CircleEvmService {
         if (hash === null || hash === undefined || op.source === null || op.attestation === null) return null;
         const observation = await destination.observation(hash, "safe"); if (observation === null) return null;
         assertObservedEnvelope(op.effects.find(e => e.role === "mint")!, observation.transaction);
-        const proof = decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))));
+        const proof = decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))), op.destinationProfile);
         if (op.destination !== null && (proof.blockHash !== op.destination.blockHash || proof.receiptHash !== op.destination.receiptHash || proof.transactionHash !== op.destination.transactionHash)) circleBlocked("destination_reorg_holds_required");
         return op.destination ?? proof;
       }, allowance: async () => allowance(),
@@ -180,7 +180,7 @@ export class CircleEvmService {
         const snapshot = await readCircleAttesters(destination, (await deployments()).digest);
         return bindCircleAttestation(op.source, { ...response, sourceTxHash: op.source.transactionHash }, snapshot);
       },
-      mintEnvelope: async op => { if (op.attestation === null) circleCorrupt("attestation_missing"); const account = await destination.account(route.gasPayer, route.token, CIRCLE_TRANSMITTER), nonce = verifyCircleDestinationAccount(account, op.destinationChain);
+      mintEnvelope: async op => { if (op.attestation === null) circleCorrupt("attestation_missing"); const account = await destination.account(route.gasPayer, route.token, CIRCLE_TRANSMITTER), nonce = verifyCircleDestinationAccount(account, op.destinationChain, op.destinationProfile);
         return destination.envelope(route.gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(op.attestation), nonce); },
       cleanupEnvelope: async op => { const nonce = circleUint(await source.call("eth_getTransactionCount", [CIRCLE_SOURCE_OWNER, "pending"])).toString(); return source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), nonce); },
       usage: (op, target) => this.usage.follow(op, target),

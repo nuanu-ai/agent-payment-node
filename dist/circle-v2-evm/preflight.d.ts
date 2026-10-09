@@ -60,7 +60,7 @@ export declare function verifyCircleSourceAccount(account: CircleAccountPrefligh
     readonly approvalRequired: boolean;
     readonly nonceAtomic: string;
 };
-export declare function verifyCircleDestinationAccount(account: CircleAccountPreflight, chain: CircleDestinationChain): string;
+export declare function verifyCircleDestinationAccount(account: CircleAccountPreflight, chain: CircleDestinationChain, destinationProfile?: string): string;
 export interface CircleGasEnvelope {
     readonly gasLimitAtomic: string;
     readonly maxFeePerGasAtomic: string;

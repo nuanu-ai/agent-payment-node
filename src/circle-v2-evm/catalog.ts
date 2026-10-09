@@ -6,6 +6,7 @@ export const CIRCLE_AMOUNT = 40_100n;
 export const CIRCLE_MAX_FEE = 100n;
 export const CIRCLE_MIN_MINT = 40_000n;
 export const CIRCLE_SOURCE_OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
+export const CIRCLE_SEI_SELLER = getAddress("0x991e254B5C8e0AAf6c244eaa2706BAd059809b04");
 export const CIRCLE_SOURCE_TOKEN = getAddress("0xaf88d065e77c8cC2239327C5EDb3A432268e5831");
 export const CIRCLE_RECIPIENT = getAddress("0xf41170df51aab52aaa04fbc3ff325cf051644aca");
 export const CIRCLE_MESSENGER = getAddress("0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d");
@@ -14,7 +15,7 @@ export const CIRCLE_MINTER = getAddress("0xfd78EE919681417d192449715b2594ab58f5D
 export const CIRCLE_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 export const CIRCLE_TOKEN_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
 export interface CircleRoute { readonly chainId: CircleDestinationChain; readonly domain: 16 | 11 | 15;
-  readonly token: Address; readonly gasPayer: Address; readonly gasPayerProfile: "evm-live-buyer" | "default";
+  readonly token: Address; readonly gasPayer: Address; readonly gasPayerProfile: "evm-live-buyer" | "evm-live-seller" | "default";
   readonly destinationNativeCap: string; readonly rpcEnvironment: string; readonly rpcDefault: string; }
 const routes: Readonly<Record<CircleDestinationChain, CircleRoute>> = {
   1329: { chainId: 1329, domain: 16, token: getAddress("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"), gasPayer: CIRCLE_SOURCE_OWNER,
@@ -24,8 +25,13 @@ const routes: Readonly<Record<CircleDestinationChain, CircleRoute>> = {
   143: { chainId: 143, domain: 15, token: getAddress("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"), gasPayer: getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"),
     gasPayerProfile: "default", destinationNativeCap: "100000000000000000", rpcEnvironment: "APN_MONAD_RPC_URL", rpcDefault: "https://rpc.monad.xyz" },
 };
-export function circleRoute(chain: CircleDestinationChain): CircleRoute {
-  const route = routes[chain]; if (route === undefined) throw new Error("Unsupported finite Circle destination."); return route;
+const seiSeller: CircleRoute = { ...routes[1329], gasPayer: CIRCLE_SEI_SELLER, gasPayerProfile: "evm-live-seller" };
+/** An omitted selector retains the historical buyer route. Only Sei has a second finite owner. */
+export function circleRoute(chain: CircleDestinationChain, destinationProfile?: string): CircleRoute {
+  const route = routes[chain]; if (route === undefined) throw new Error("Unsupported finite Circle destination.");
+  if (destinationProfile === undefined || destinationProfile === route.gasPayerProfile) return route;
+  if (chain === 1329 && destinationProfile === "evm-live-seller") return seiSeller;
+  throw new Error("Unsupported finite Circle destination profile.");
 }
 export const CIRCLE_DEPLOYMENT_PINS = {
   "42161": {

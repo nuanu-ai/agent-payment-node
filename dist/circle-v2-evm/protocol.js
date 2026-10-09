@@ -215,9 +215,9 @@ export function encodeCircleMint(attested) {
     return encodeFunctionData({ abi: CIRCLE_ABI,
         functionName: "receiveMessage", args: [attested.bytes, attested.attestation] });
 }
-export function decodeCircleDestination(source, attested, input, usedNonceAtomic) {
+export function decodeCircleDestination(source, attested, input, usedNonceAtomic, destinationProfile) {
     assertCircleAttestation(source, attested);
-    const route = circleRoute(source.destinationChain);
+    const route = circleRoute(source.destinationChain, destinationProfile);
     const receipt = verifyCircleObservation(input, { chain: route.chainId, from: route.gasPayer, to: CIRCLE_TRANSMITTER,
         data: encodeCircleMint(attested), maxNativeDebitAtomic: BigInt(route.destinationNativeCap), maxGasAtomic: 600000n });
     const received = oneEvent(input, "MessageReceived", CIRCLE_TRANSMITTER).args, mint = oneEvent(input, "MintAndWithdraw", CIRCLE_MESSENGER).args, transfer = oneEvent(input, "Transfer", route.token).args;

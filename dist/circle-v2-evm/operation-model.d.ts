@@ -73,7 +73,7 @@ export declare function circleCorrupt(reason: string): never;
 export declare function sealCircle(input: Omit<CircleOperationV1, "integrityHash"> | CircleOperationV1): CircleOperationV1;
 export declare function advanceCircle(op: CircleOperationV1, patch: Partial<CircleOperationV1>, reason: string, now: number): CircleOperationV1;
 export declare function circleEnvelope(input: Omit<CircleEnvelope, "envelopeHash">): CircleEnvelope;
-export declare function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null): void;
+export declare function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, destinationProfile?: string): void;
 export declare function validateCircle(value: unknown): CircleOperationV1;
 export declare function publicCircle(op: CircleOperationV1): {
     operation_id: string;
