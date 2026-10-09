@@ -18,7 +18,7 @@ export declare class CircleEffectStore extends SecureStateStore {
     constructor(root: string, wrapping: WrappingSecretPort);
     private path;
     /** Public historical verification only: returns headers, never ciphertext, tag or plaintext. */
-    historicalPaidHeaders(op: CircleOperationV1): Promise<readonly {
+    historicalPaidHeaders(op: CircleOperationV1, includeMint?: boolean): Promise<readonly {
         readonly schemaVersion: string;
         readonly operationId: string;
         readonly role: CircleRole;

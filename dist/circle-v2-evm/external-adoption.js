@@ -1,3 +1,5 @@
+import { observeHistoricalPaidCircle } from "./historical-paid-observe.js";
+import { HISTORICAL_MONAD_OPERATION } from "./historical-paid-source.js";
 import { readCircleMintFeeRecipient } from "./mint-fee-recipient.js";
 import { decodeEventLog, encodeEventTopics, erc20Abi, getAddress } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
@@ -61,6 +63,8 @@ async function notControlled(state, caller) {
     }
 }
 export async function adoptCircleExternalMint(state, repo, usage, env, now, https, id, txHash) {
+    if (id === HISTORICAL_MONAD_OPERATION)
+        return observeHistoricalPaidCircle(state, repo, usage, env, now, https, id, txHash);
     const initial = await repo.load(id);
     if (initial === null)
         circleBlocked("external_operation_not_found");

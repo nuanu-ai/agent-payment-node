@@ -1,3 +1,5 @@
+import { observeHistoricalPaidCircle } from "./historical-paid-observe.js";
+import { HISTORICAL_MONAD_OPERATION } from "./historical-paid-source.js";
 import { readCircleMintFeeRecipient } from "./mint-fee-recipient.js";
 import { decodeEventLog, encodeEventTopics, erc20Abi, getAddress, type Hex } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
@@ -40,6 +42,7 @@ async function notControlled(state:StateStore,caller:string):Promise<void>{
  for(const entry of await state.profileImportEntries()){if(!entry.isDirectory()||entry.isSymbolicLink()||!/^[a-f0-9]{64}$/u.test(entry.name))circleBlocked("external_profile_directory");const p=await state.loadProviderProfile(entry.name);if(p===null)circleBlocked("external_profile_disappeared");if(p.public_address.toLowerCase()===caller.toLowerCase())circleBlocked("external_caller_controlled");}
 }
 export async function adoptCircleExternalMint(state:StateStore,repo:CircleRepository,usage:CircleUsage,env:NodeJS.ProcessEnv,now:()=>number,https:Pick<BridgeHttps,"request">,id:string,txHash:Hex):Promise<CircleOperationV1>{
+ if(id===HISTORICAL_MONAD_OPERATION)return observeHistoricalPaidCircle(state,repo,usage,env,now,https,id,txHash);
  const initial=await repo.load(id);if(initial===null)circleBlocked("external_operation_not_found");if(initial.destinationChain!==143)circleBlocked("external_monad_only");if(initial.source===null||initial.attestation===null)circleBlocked("external_verified_source_required");
  const key=externalClaimKey(initial),sourceKey=hashObject({sourceTransactionHash:initial.source.transactionHash,sourceMessageHash:initial.source.sourceMessageHash});
  await state.initialize();return state.withLocks([`profile:${initial.profileHash}`,`profile:${initial.destinationProfileHash}`,`custody:${initial.profileHash}`,`custody:${initial.destinationProfileHash}`,`operation:${id}`,`operation:idempotency:${initial.idempotencyHash}`,evmAddressLock(initial.sourceCustody.walletAddress),evmAddressLock(initial.destinationCustody.walletAddress),`circle-external-nonce:${key}`,`circle-external-message:${sourceKey}`],async()=>{

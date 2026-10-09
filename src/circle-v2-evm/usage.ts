@@ -1,3 +1,4 @@
+import { consumeHistoricalPaidClosure, type VerifiedHistoricalPaidClosure } from "./historical-paid-closure.js";
 import { consumeCleanup85Settlement, type VerifiedCleanup85Settlement } from "./cleanup85-settlement-authority.js";
 import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
 import { Cleanup85RecoveryStore } from "./cleanup85-recovery-store.js";
@@ -108,6 +109,26 @@ export class CircleUsage {
       const reservation = await this.ledger.reserve({ ...lease.identity, registry: active.registry, rail: "bridge", mechanism: circleMechanism(op.destinationChain), amountAtomic: lease.amount,
         idempotencyKey: `circle-v2-evm.v1:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
       if (reservation.state !== "reserved") circleBlocked("reserve_replay_already_exposed"); result.push(reservation);
+    }
+    return result;
+  }
+  /** Finite historical completion consumes fresh private source+destination provenance before ledger access. */
+  async closeHistoricalPaid(op: CircleOperationV1, authority: VerifiedHistoricalPaidClosure): Promise<readonly AssetUsageReservation[]> {
+    const bound = await consumeHistoricalPaidClosure(authority, this.state, op), frame = bound.closure;
+    const rows: AssetUsageReservation[] = [];
+    for (const planned of frame.outcomes) {
+      const row = planned.reservation, current = await this.ledger.load(row, row.reservationId); if (current === null) circleBlocked("historical_paid_ledger_missing");
+      for (const key of ["schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "rail", "amountAtomic", "account", "chain", "reservedAt"] as const) if (current[key] !== row[key]) circleBlocked("historical_paid_ledger_binding");
+      if (canonicalJson(current.asset) !== canonicalJson(row.asset)) circleBlocked("historical_paid_ledger_binding");
+      if (current.state === planned.state) { if (current.outcomeDigest !== planned.outcomeDigest || (current.consumedAtomic ?? null) !== planned.consumedAtomic) circleBlocked("historical_paid_ledger_outcome"); }
+      else if (bound.operation.terminal || !["reserved", "submitted", "unknown_finality"].includes(current.state)) circleBlocked("historical_paid_ledger_state");
+      rows.push(current);
+    }
+    const result: AssetUsageReservation[] = [];
+    for (const [index, planned] of frame.outcomes.entries()) {
+      if (rows[index]!.state === planned.state) { result.push(rows[index]!); continue; }
+      const row = planned.reservation;
+      result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state: planned.state, now: new Date(this.now()), outcomeDigest: planned.outcomeDigest, ...(planned.consumedAtomic === null ? {} : { consumedAtomic: planned.consumedAtomic }), expectedCurrentStates: ["reserved", "submitted", "unknown_finality"] }));
     }
     return result;
   }

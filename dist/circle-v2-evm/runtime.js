@@ -1,3 +1,5 @@
+import { observeHistoricalPaidCircle } from "./historical-paid-observe.js";
+import { HISTORICAL_LINEA_OPERATION, HISTORICAL_MONAD_OPERATION } from "./historical-paid-source.js";
 import { reconcileOriginalCleanup85 } from "./cleanup85-public-reconcile.js";
 import { CLEANUP85_HASH } from "./cleanup85-recovery-store.js";
 import { prepareCleanup85Recovery } from "./cleanup85-recovery-prepare.js";
@@ -127,6 +129,8 @@ export class CircleEvmService {
     async approveMint(id) { return this.run(id, approveCircleMint); }
     async observe(id) {
         const saved = await this.required(id);
+        if (id === HISTORICAL_LINEA_OPERATION || id === HISTORICAL_MONAD_OPERATION && saved.state === "external_fulfilled")
+            return observeHistoricalPaidCircle(this.state, this.repo, this.usage, this.env, this.now, this.https, id);
         if (saved.state === "nonce_retired" && saved.nonceRetirement?.cleanup85Recovery === undefined)
             return saved;
         if (saved.operationId === SEALED_BURN_OPERATION && await new Cleanup85RecoveryStore(this.state.root).publicRecord(saved, "cleanup86-intent") !== null)
