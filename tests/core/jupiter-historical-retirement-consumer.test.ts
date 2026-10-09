@@ -1,6 +1,6 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { link, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalJson, domainHash, hashObject, sha256 } from "../../src/canonical.js";
@@ -212,6 +212,20 @@ async function stageExactAccountingTemp(f: Awaited<ReturnType<typeof fixture>>, 
   return { target, temporary };
 }
 
+async function stageExactProjectionTemp(f: Awaited<ReturnType<typeof fixture>>, namespace: string,
+  linkTarget: boolean): Promise<{ target: string; temporary: string; expectedBytes: Buffer }> {
+  const operationId = f.context.operation.operationId;
+  const target = join(f.context.state.root, namespace, `${operationId}.json`);
+  const expectedBytes = await readFile(target);
+  const temporary = join(f.context.state.root, namespace, `.${sha256(target).slice(0, 12)}.${"b".repeat(24)}.tmp`);
+  if (linkTarget) await link(target, temporary);
+  else {
+    await unlink(target);
+    await writeFile(temporary, expectedBytes, { mode: 0o600, flag: "wx" });
+  }
+  return { target, temporary, expectedBytes };
+}
+
 async function runConsumer(f: Awaited<ReturnType<typeof fixture>>) {
   activate(f);
   return await consumeJupiterHistoricalRetirement(f.token as never, f.context as never);
@@ -381,6 +395,57 @@ test("TEST-MOCKED recovery removes an exact temp-only record before fresh author
   assert.equal(result.status, "retired_unknown");
   assert.equal(result.idempotentRecovered, false);
   assert.deepEqual(await readdir(join(tmp.root, recordNamespace)), [`${f.context.operation.operationId}.json`]);
+  await assertOriginalBytes(f);
+});
+
+for (const namespace of ["jupiter-historical-retirement-journals", "jupiter-historical-retirement-receipts"]) {
+  test(`TEST-MOCKED recovery reconciles the exact ${namespace.split("-").at(-1)} target-plus-temp hardlink`, async t => {
+    const tmp = await temporaryState(); t.after(tmp.cleanup);
+    const f = await fixture(tmp.root); const result = await runConsumer(f);
+    const { target, temporary, expectedBytes } = await stageExactProjectionTemp(f, namespace, true);
+    const recovered = await recoverCommittedJupiterHistoricalRetirement(result.operationId, f.state as never);
+    assert.equal(recovered?.idempotentRecovered, true);
+    assert.deepEqual(await readdir(join(tmp.root, namespace)), [`${result.operationId}.json`]);
+    await assert.rejects(readFile(temporary), { code: "ENOENT" });
+    assert.deepEqual(await readFile(target), expectedBytes);
+    await assertOriginalBytes(f);
+  });
+
+  test(`TEST-MOCKED recovery cleans the exact ${namespace.split("-").at(-1)} temp-only prefix before create`, async t => {
+    const tmp = await temporaryState(); t.after(tmp.cleanup);
+    const f = await fixture(tmp.root); const result = await runConsumer(f);
+    const { target, temporary, expectedBytes } = await stageExactProjectionTemp(f, namespace, false);
+    const recovered = await recoverCommittedJupiterHistoricalRetirement(result.operationId, f.state as never);
+    assert.equal(recovered?.idempotentRecovered, true);
+    assert.deepEqual(await readdir(join(tmp.root, namespace)), [`${result.operationId}.json`]);
+    await assert.rejects(readFile(temporary), { code: "ENOENT" });
+    assert.deepEqual(await readFile(target), expectedBytes);
+    await assertOriginalBytes(f);
+  });
+}
+
+test("TEST-MOCKED recovery refuses a same-bytes projection tempfile on a different inode", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const f = await fixture(tmp.root); const result = await runConsumer(f);
+  const namespace = "jupiter-historical-retirement-journals";
+  const { target, temporary, expectedBytes } = await stageExactProjectionTemp(f, namespace, false);
+  // Recreate the existing target so target and temp contain matching bytes but are separate inodes.
+  await writeFile(target, expectedBytes, { mode: 0o600, flag: "wx" });
+  await assert.rejects(recoverCommittedJupiterHistoricalRetirement(result.operationId, f.state as never));
+  assert.deepEqual(await readFile(target), expectedBytes);
+  assert.deepEqual(await readFile(temporary), expectedBytes);
+  await assertOriginalBytes(f);
+});
+
+test("TEST-MOCKED recovery refuses an unknown projection namespace entry", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const f = await fixture(tmp.root); const result = await runConsumer(f);
+  const namespace = "jupiter-historical-retirement-receipts";
+  const foreign = join(tmp.root, namespace, ".unrecognized-projection.tmp");
+  const existing = await readFile(join(tmp.root, namespace, `${result.operationId}.json`));
+  await writeFile(foreign, existing, { mode: 0o600, flag: "wx" });
+  await assert.rejects(recoverCommittedJupiterHistoricalRetirement(result.operationId, f.state as never));
+  assert.deepEqual(await readFile(foreign), existing);
   await assertOriginalBytes(f);
 });
 
