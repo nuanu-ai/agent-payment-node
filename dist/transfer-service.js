@@ -155,6 +155,8 @@ export class TransferService {
         if (found.providerDirect !== undefined)
             return await this.providerDirect.approve(operationId);
         const localFound = requiredLocal(found);
+        if (localFound.evm?.cleanup85Cancellation !== undefined)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Finite cleanup85 cancellation requires its dedicated foreground controller; observation cannot grant signing.");
         const { profile, profileHash } = localFound;
         return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, ...(localFound.evm?.circleNativeAdmission === undefined ? [] : [`profile:${localFound.evm.circleNativeAdmission.recipientCustody.profileHash}`])], async () => {
             let operation = requiredLocal(await this.requiredOperation(operationId));
@@ -202,6 +204,9 @@ export class TransferService {
         });
     }
     async resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc) {
+        const saved = await this.context.state.findOperation(canonicalOperationId(operationId));
+        if (saved?.evm?.cleanup85Cancellation !== undefined)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Finite cleanup85 cancellation requires its finalized public observer; generic safe settlement cannot close it.");
         return await this.observation.resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc);
     }
     async recoverProviderRequest(operationId, providerRequestId) {
