@@ -17,7 +17,7 @@ node scripts/local-release.mjs verify --version 0.5.36 --commit "$COMMIT" --outp
 
 The source test command enables Node24's official module-mock API with `--experimental-test-module-mocks` directly on `node --test`; Node24 rejects that flag in `NODE_OPTIONS`. Compiler settings remain unchanged.
 
-Core test concurrency defaults to one worker. For the reviewed local release lane, set `APN_CORE_TEST_CONCURRENCY=4` on `prepare` to run the same complete core file list with four workers. Only `1` and `4` are accepted; an empty or different value refuses before the test child starts. The runner logs the selected concurrency and exact file list into gate-1 evidence, preserves the direct module-mock flag and propagates test failures. All seven preparation gates still run.
+Core test concurrency defaults to one worker. For the reviewed local release lane, set `APN_CORE_TEST_CONCURRENCY=4` on `prepare` to run the same complete core file list with four workers. Only `1` and `4` are accepted; an empty or different value refuses before the test child starts. The runner logs the selected concurrency and exact file list into gate-1 evidence, preserves the direct module-mock flag and propagates test failures. All seven preparation gates still run. The child environment retains task variables and removes only Node's internal `NODE_TEST_CONTEXT` marker, which would otherwise skip a nested runner; the requested files must actually execute.
 
 ```sh
 APN_CORE_TEST_CONCURRENCY=4 node scripts/local-release.mjs prepare --version 0.5.36 --commit "$COMMIT" --output /tmp/apn-0.5.36-release
