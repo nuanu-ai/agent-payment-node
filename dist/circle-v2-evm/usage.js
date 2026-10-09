@@ -69,11 +69,21 @@ export class CircleUsage {
         }
         return result;
     }
+    /** Capture new cleanup authority without reserving or counting historical holds twice. */
+    async retirementPolicies(op) {
+        const result = [];
+        for (const profile of [op.profile, op.destinationProfile]) {
+            const account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
+            const active = await this.active(profile, account);
+            result.push({ profile, profileHash: this.state.profileHash(profile), policyDigest: active.digest, revision: active.revision, activationDigest: active.activationDigest });
+        }
+        return result;
+    }
     /** Readonly authority window from both exact owner activations while their locks remain held. */
-    async authorizationDeadline(op) {
+    async authorizationDeadline(op, policies = op.policies) {
         let end = Infinity;
         for (const profile of new Set([op.profile, op.destinationProfile])) {
-            const frozen = op.policies.find(p => p.profile === profile), account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
+            const frozen = policies.find(p => p.profile === profile), account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
             const active = await this.active(profile, account), at = this.now();
             if (frozen?.activationDigest === undefined || active.activationDigest !== frozen.activationDigest || active.digest !== frozen.policyDigest || active.revision !== frozen.revision)
                 circleBlocked("owner_policy_changed");
@@ -86,8 +96,8 @@ export class CircleUsage {
             circleBlocked("owner_policy_window_expired");
         return end === Infinity ? null : new Date(end).toISOString();
     }
-    async confirm(op) {
-        for (const policy of op.policies) {
+    async confirm(op, policies = op.policies) {
+        for (const policy of policies) {
             const account = policy.profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
             const active = await this.active(policy.profile, account);
             if (policy.activationDigest === undefined || active.activationDigest !== policy.activationDigest || active.digest !== policy.policyDigest || active.revision !== policy.revision)

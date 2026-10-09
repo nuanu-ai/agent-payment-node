@@ -17,9 +17,11 @@ export declare class CircleUsage {
     withPolicyLocks<T>(profiles: readonly string[], action: () => Promise<T>): Promise<T>;
     private active;
     policies(op: CircleOperationV1): Promise<readonly CirclePolicy[]>;
+    /** Capture new cleanup authority without reserving or counting historical holds twice. */
+    retirementPolicies(op: CircleOperationV1): Promise<readonly CirclePolicy[]>;
     /** Readonly authority window from both exact owner activations while their locks remain held. */
-    authorizationDeadline(op: CircleOperationV1): Promise<string | null>;
-    confirm(op: CircleOperationV1): Promise<void>;
+    authorizationDeadline(op: CircleOperationV1, policies?: readonly CirclePolicy[]): Promise<string | null>;
+    confirm(op: CircleOperationV1, policies?: readonly CirclePolicy[]): Promise<void>;
     reserve(op: CircleOperationV1): Promise<readonly AssetUsageReservation[]>;
     follow(op: CircleOperationV1, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<readonly AssetUsageReservation[]>;
 }

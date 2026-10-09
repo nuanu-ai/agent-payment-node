@@ -3,7 +3,7 @@ import { advanceCircle, circleBlocked, circleCorrupt, circleSame, validateCircle
 import { assertCircleAttestation } from "./protocol.js";
 const authorities = new WeakMap();
 const effectGuards = new WeakMap();
-const consentBinding = (op) => hashObject({ operationId: op.operationId, fingerprint: op.fingerprint, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
+const consentBinding = (op, ports) => hashObject({ context: ports.consentContext?.() ?? null, operationId: op.operationId, fingerprint: op.fingerprint, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
 async function consent(op, role, ports) {
     const policyDeadline = await ports.authorizationDeadline(op);
     if (policyDeadline !== null && (!Number.isFinite(Date.parse(policyDeadline)) || new Date(policyDeadline).toISOString() !== policyDeadline))
@@ -15,12 +15,12 @@ async function consent(op, role, ports) {
     if (ports.now() >= deadline)
         circleBlocked("consent_expired_after_tty");
     const token = () => { };
-    authorities.set(token, { ports, binding: consentBinding(op), deadline, envelopes: new Map(op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role).map(e => [e.role, e.envelope.envelopeHash])), claimed: new Set(), active: null });
+    authorities.set(token, { ports, binding: consentBinding(op, ports), deadline, envelopes: new Map(op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role).map(e => [e.role, e.envelope.envelopeHash])), claimed: new Set(), active: null });
     return token;
 }
 async function cancellationConsent(op, ports) {
-    const deadline = ports.now() + 60_000, binding = consentBinding(op);
-    const guard = () => { if (ports.now() >= deadline || consentBinding(op) !== binding)
+    const deadline = ports.now() + 60_000, binding = consentBinding(op, ports);
+    const guard = () => { if (ports.now() >= deadline || consentBinding(op, ports) !== binding)
         circleBlocked("cancellation_consent_expired"); };
     await ports.approve(op, "cancel", new Date(deadline).toISOString());
     guard();
@@ -29,7 +29,7 @@ async function cancellationConsent(op, ports) {
 }
 function checkConsent(token, op, ports, effect) {
     const authority = token === undefined ? undefined : authorities.get(token);
-    if (authority === undefined || authority.ports !== ports || authority.binding !== consentBinding(op) || ports.now() >= authority.deadline ||
+    if (authority === undefined || authority.ports !== ports || authority.binding !== consentBinding(op, ports) || ports.now() >= authority.deadline ||
         effect !== undefined && (authority.active !== effect.role || authority.envelopes.get(effect.role) !== effect.envelope.envelopeHash))
         circleBlocked("fresh_exact_effect_consent_required");
     return authority;
@@ -80,7 +80,7 @@ export async function executeCircleEffect(input, role, ports, token) {
         circleBlocked("consent_effect_reuse_or_mismatch");
     authority.claimed.add(role);
     authority.active = role;
-    const guard = () => { checkConsent(token, op, ports, effect); };
+    const guard = () => { checkConsent(token, op, ports, effect); ports.effectAuthorityGuard?.(op); };
     effectGuards.set(guard, { token: token, ports, role });
     try {
         guard();

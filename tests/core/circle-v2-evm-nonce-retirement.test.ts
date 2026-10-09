@@ -1,3 +1,4 @@
+import { CircleRetirementAuthorityStore, assertCircleRetirementWindow } from "../../src/circle-v2-evm/nonce-retirement-authority.js";
 import https from "node:https";
 import { EventEmitter } from "node:events";
 import { syncBuiltinESMExports } from "node:module";
@@ -5,12 +6,12 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import { BridgeHttps } from "../../src/lifi/https.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { Hex } from "viem";
 import { StateStore } from "../../src/state.js";
-import { hashObject } from "../../src/canonical.js";
+import { hashObject, canonicalJson } from "../../src/canonical.js";
 import { seal as sealUsage, reservationIdFor, idempotency } from "../../src/asset-usage-ledger-record.js";
 import { CircleRepository, validateCircleAdvance } from "../../src/circle-v2-evm/repository.js";
 import { advanceCircle, circleEnvelope, sealCircle, validateCircle, type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
@@ -53,6 +54,7 @@ async function fixture(overrides: Partial<CircleNonceRetirementPorts> = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "circle-retirement-"))), state = new StateStore(root), store = new CircleNonceRetirementStore(root);
   let op = unknown(root), now = at + 600001, signs = 0, sends = 0, releases = 0;
   const original = op;
+  await new CircleRetirementAuthorityStore(root).capture(op, op.policies.map(p => ({ ...p, activationDigest: "e".repeat(64), revision: 35 })), new Date(now + 3600000).toISOString(), now);
   const ports: CircleNonceRetirementPorts = { now: () => now, save: async next => { validateCircleAdvance(op, next); op = next; },
     assertOwnerPolicyAndConflicts: async () => {}, authorizationDeadline: async () => null, approve: async () => {}, preflight: async () => {},
     seal: async (o, e, guard) => { guard(); await store.claim(o, "sign"); guard(); signs++; return { schemaVersion: "apn.circle-v2-evm-effect.v1", operationId: o.operationId, role: "cleanup", fingerprint: o.fingerprint, envelopeHash: e.envelope.envelopeHash, rawTransaction: "0x02", transactionHash: cleanupTx, materialHash: "c".repeat(64) }; },
@@ -160,5 +162,35 @@ test("expiration between SIGN claim and custody signing produces zero signatures
     f.ports.observeEffect = async () => null; f.ports.seal = async (o, _e, guard) => { await f.store.claim(o, "sign"); f.advanceTime(60000); guard(); throw Error("unreachable signer"); };
     const result = await retireCircleNonce(f.get(), f.ports); assert.equal(result.effects[2]!.phase, "unknown"); assert.deepEqual(f.counts(), { signs: 0, sends: 0, releases: 0 });
     await retireCircleNonce(result, f.ports); assert.deepEqual(f.counts(), { signs: 0, sends: 0, releases: 0 });
+  } finally { await f.dispose(); }
+});
+
+test("fresh current authority is create-only, parent-bound and distinct from historical r33 policies", async () => {
+  const f = await fixture(); try {
+    const store = new CircleRetirementAuthorityStore(f.root), parent = JSON.stringify(f.original), frame = await store.load(f.original);
+    assert.equal(frame!.policies[0]!.revision, 35); assert.equal(f.original.policies[0]!.revision, 1);
+    const unchanged = await store.capture(f.original, frame!.policies.map(p => ({ ...p, revision: 36 })), null, at + 700000);
+    assert.equal(unchanged.authorityHash, frame!.authorityHash); assert.equal(JSON.stringify(f.original), parent);
+    await assert.rejects(store.load({ ...f.original, sourceCustody: { ...f.original.sourceCustody, walletBindingHash: "d".repeat(64) } }), /authority_binding/);
+    await assert.rejects(store.load({ ...f.original, effects: f.original.effects.map(e => e.role === "approval" ? { ...e, envelope: circleEnvelope({ ...e.envelope, nonceAtomic: "80" }) } : e) }), /authority_binding/);
+  } finally { await f.dispose(); }
+});
+
+test("retirement current policy window refuses expired or backwards-clock grants", async () => {
+  const f = await fixture(); try {
+    const frame = (await new CircleRetirementAuthorityStore(f.root).load(f.original))!;
+    assert.throws(() => assertCircleRetirementWindow(frame, Date.parse(frame.windowEndsAt!)), /window_expired/);
+    assert.throws(() => assertCircleRetirementWindow(frame, Date.parse(frame.capturedAt) - 1), /window_expired/);
+  } finally { await f.dispose(); }
+});
+
+test("restored or replaced authority sidecar cannot refresh permanent claims", async () => {
+  const f = await fixture(); try {
+    const done = await retireCircleNonce(f.get(), f.ports), store = new CircleRetirementAuthorityStore(f.root), frame = (await store.load(done))!;
+    const { authorityHash: _hash, ...body } = frame, replacement = { ...body, policies: body.policies.map(p => ({ ...p, revision: 36 })) };
+    await writeFile(join(f.root, "circle-v2-nonce-retirements", `${done.operationId}-authority.json`), canonicalJson({ ...replacement, authorityHash: hashObject(replacement) }) + "\n", { mode: 0o600 });
+    await assert.rejects(f.store.assertClaim(done, "sign"), /durable_claim_required/);
+    await assert.rejects(f.store.assertClaim(done, "send"), /durable_claim_required/);
+    assert.deepEqual(f.counts(), { signs: 1, sends: 1, releases: 1 });
   } finally { await f.dispose(); }
 });

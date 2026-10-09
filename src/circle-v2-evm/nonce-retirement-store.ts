@@ -1,3 +1,4 @@
+import { CircleRetirementAuthorityStore } from "./nonce-retirement-authority.js";
 import { hashObject, exactKeys, isPlainRecord } from "../canonical.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { circleBlocked, circleCorrupt, validateCircleEnvelope, type CircleEnvelope, type CircleOperationV1 } from "./operation-model.js";
@@ -43,16 +44,19 @@ export class CircleNonceRetirementStore extends SecureStateStore {
     const intent = await this.intent(op); if (intent === null) circleBlocked("retirement_intent_required");
     const effect = op.effects.find(x => x.role === "cleanup");
     if (effect?.envelope.envelopeHash !== intent.cleanupEnvelope.envelopeHash) circleBlocked("retirement_cleanup_envelope_changed");
+    const authority = await new CircleRetirementAuthorityStore(this.root).load(op);
+    if (authority === null) circleBlocked("retirement_current_authority_required");
     const path = this.path(op.operationId, boundary);
     if (await this.readJson(path) !== null) circleBlocked(`retirement_${boundary}_already_claimed_observe_only`);
     if (boundary === "sign" && effect.phase !== "signing_started" || boundary === "send" && (effect.phase !== "submission_started" || effect.transactionHash === null || effect.materialHash === null)) circleBlocked("retirement_claim_boundary_changed");
     if (boundary === "send") await this.assertClaim(op, "sign");
-    await this.writeJson(path, { version: "apn.circle-retirement-claim.v1", boundary, operationId: op.operationId, intentHash: intent.intentHash, ...(boundary === "send" ? { transactionHash: effect.transactionHash, materialHash: effect.materialHash } : {}) }, true);
+    await this.writeJson(path, { version: "apn.circle-retirement-claim.v1", boundary, operationId: op.operationId, intentHash: intent.intentHash, authorityHash: authority.authorityHash, ...(boundary === "send" ? { transactionHash: effect.transactionHash, materialHash: effect.materialHash } : {}) }, true);
   }
   async assertClaim(op: CircleOperationV1, boundary: "sign" | "send"): Promise<void> {
+    const authority = await new CircleRetirementAuthorityStore(this.root).load(op);
     const intent = await this.intent(op), value = await this.readJson(this.path(op.operationId, boundary));
-    if (intent === null || !isPlainRecord(value) || !exactKeys(value, ["version", "boundary", "operationId", "intentHash", ...(boundary === "send" ? ["transactionHash", "materialHash"] : [])]) ||
-      value.version !== "apn.circle-retirement-claim.v1" || value.boundary !== boundary || value.operationId !== op.operationId || value.intentHash !== intent.intentHash || boundary === "send" && (value.transactionHash !== op.effects.find(x => x.role === "cleanup")?.transactionHash || value.materialHash !== op.effects.find(x => x.role === "cleanup")?.materialHash)) circleBlocked("retirement_durable_claim_required");
+    if (intent === null || !isPlainRecord(value) || !exactKeys(value, ["version", "boundary", "operationId", "intentHash", "authorityHash", ...(boundary === "send" ? ["transactionHash", "materialHash"] : [])]) ||
+      value.version !== "apn.circle-retirement-claim.v1" || value.boundary !== boundary || value.operationId !== op.operationId || value.intentHash !== intent.intentHash || authority === null || value.authorityHash !== authority.authorityHash || boundary === "send" && (value.transactionHash !== op.effects.find(x => x.role === "cleanup")?.transactionHash || value.materialHash !== op.effects.find(x => x.role === "cleanup")?.materialHash)) circleBlocked("retirement_durable_claim_required");
   }
   async hasClaim(op: CircleOperationV1, boundary: "sign" | "send"): Promise<boolean> {
     if (await this.readJson(this.path(op.operationId, boundary)) === null) return false;

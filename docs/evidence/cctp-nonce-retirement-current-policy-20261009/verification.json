@@ -1,0 +1,15 @@
+{
+  "node": "24.15.0",
+  "productionStrictBuild": true,
+  "combinedFocusedStrictCompile": true,
+  "typeRootsPinned": "/Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-nonce-cleanup-20261009/node_modules/@types",
+  "distFiles": 2409,
+  "distChangedOnRepeat": [],
+  "sourceFiles": 803,
+  "maximumSourceLines": 500,
+  "sourceOver500": {},
+  "circleAndMcpRuntimeTests": {
+    "passed": 98,
+    "failed": 0
+  }
+}
