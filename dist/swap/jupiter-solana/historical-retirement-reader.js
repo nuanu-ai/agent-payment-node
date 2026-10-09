@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { canonicalJson, hashObject, sha256 } from "../../canonical.js";
-import { SecureStateStore, validateDirectory } from "../../secure-state-store.js";
+import { SecureStateStore, stateIdentifier, validateDirectory } from "../../secure-state-store.js";
 import { SwapOperationRepository } from "../repository.js";
 import { HISTORICAL_JUPITER_IDS } from "./historical-pins.js";
 import { HISTORICAL_RETIREMENT_IDENTITY, HISTORICAL_RETIREMENT_NAMESPACE, assertHistoricalRetirementBindings, hashBucket, sameIdentity, validateHistoricalRetirementRecord } from "./historical-retirement-record.js";
@@ -26,7 +26,7 @@ export class JupiterHistoricalRetirementReader extends SecureStateStore {
             const row = rows.find(r => r.reservationId === record.originalOperation.usageLease.reservationId);
             if (row === undefined)
                 corrupt();
-            const rawHash = await this.originalRowRawHash(identity, row.reservationId), operation = await new SwapOperationRepository(this.root).loadAny(record.operationId);
+            const rawHash = await this.originalReservationRawHash(identity, row.reservationId), operation = await new SwapOperationRepository(this.root).loadAny(record.operationId);
             assertHistoricalRetirementBindings(record, rootSnapshotHash, operation, row, rawHash);
             records.push(record);
         }
@@ -35,7 +35,11 @@ export class JupiterHistoricalRetirementReader extends SecureStateStore {
         return Object.freeze(records);
     }
     async writeJson() { corrupt(); }
-    async originalRowRawHash(identity, id) {
+    /** Narrow authenticated read for C2's create-only accounting record; never returns row bytes. */
+    async originalReservationRawHash(identity, id) {
+        if (!sameIdentity(identity, HISTORICAL_RETIREMENT_IDENTITY))
+            corrupt();
+        stateIdentifier(id, "Historical Jupiter reservation");
         const path = this.resolveRelative(`asset-usage/${hashBucket(identity)}/${id}.json`);
         await this.assertNoSymlinkAncestors(path);
         const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);

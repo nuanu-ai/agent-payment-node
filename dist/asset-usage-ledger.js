@@ -162,6 +162,11 @@ export class AssetUsageLedger extends SecureStateStore {
             : expectedStates(input.expectedCurrentStates);
         await this.ready();
         return await this.withLocks([this.bucketLock(identity)], async () => {
+            const bucketRecords = await this.loadBucket(identity);
+            const retirements = await new JupiterHistoricalRetirementReader(this.root).forBucket(identity, bucketRecords);
+            if (retirements.some(record => record.originalOperation.usageLease?.reservationId === reservationId)) {
+                throw blocked("A committed Jupiter historical retirement keeps its original reservation immutable.");
+            }
             const value = await this.readJson(this.recordPath(identity, reservationId));
             if (value === null)
                 throw blocked("The usage reservation does not exist.");
