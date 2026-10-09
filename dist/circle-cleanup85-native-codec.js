@@ -78,7 +78,18 @@ function transactionWire(t) {
     if (parity > 1n)
         cleanup85Blocked("wire_parity");
     return serializeTransaction({ type: "eip1559", chainId: Number(quantity(t.chainId)), nonce: Number(quantity(t.nonce)), to: address(t.to),
-        data: hex(t.input), value: quantity(t.value), gas: quantity(t.gas), maxFeePerGas: quantity(t.maxFeePerGas), maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGas), accessList: [] }, { r: hex(t.r, 32), s: hex(t.s, 32), yParity: Number(parity) });
+        data: hex(t.input), value: quantity(t.value), gas: quantity(t.gas), maxFeePerGas: quantity(t.maxFeePerGas), maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGas), accessList: [] }, { r: evmRpcSignatureScalar(t.r), s: evmRpcSignatureScalar(t.s), yParity: Number(parity) });
+}
+/** RPC transaction signature values are QUANTITYs. Accept fixed-width DATA only for providers retaining the legacy word form. */
+export function evmRpcSignatureScalar(value) {
+    if (typeof value === "string" && /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/u.test(value))
+        return `0x${value.slice(2).padStart(64, "0")}`;
+    try {
+        return hex(value, 32);
+    }
+    catch {
+        cleanup85Blocked("signature_scalar");
+    }
 }
 /** Finalized evidence must contain the exact signed transaction once, at its exact receipt index. */
 export async function verifyCleanup85Observation(e, expectedHash, input) {

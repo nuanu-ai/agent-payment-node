@@ -5,8 +5,9 @@ import { temporaryState } from "./helpers.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { privateKeyToAccount } from "viem/accounts";
-import { keccak256, type Hex } from "viem";
-import { cleanup85Envelope, validateCleanup85Envelope, verifyCleanup85Raw, verifyNativeCancellationRawFields, validateCleanup85Request, CLEANUP85_REQUEST } from "../../src/circle-cleanup85-native-codec.js";
+import { keccak256, parseTransaction, serializeTransaction, type Hex } from "viem";
+import { cleanup85Envelope, evmRpcSignatureScalar, validateCleanup85Envelope, verifyCleanup85Raw, verifyCleanup85Observation, verifyNativeCancellationRawFields, validateCleanup85Request, CLEANUP85_REQUEST, CLEANUP85_OWNER } from "../../src/circle-cleanup85-native-codec.js";
+import type { CircleObservation } from "../../src/circle-v2-evm/protocol.js";
 import { assertCleanup85PhysicalGuard, withCleanup85NativeAuthority } from "../../src/circle-cleanup85-native-authority.js";
 import { verifiedCleanup85NativeReservation, verifiedCleanup85NativeSettlement } from "../../src/circle-cleanup85-native-ledger-authority.js";
 import { Cleanup85NativeRpc } from "../../src/circle-cleanup85-native-rpc.js";
@@ -17,6 +18,53 @@ const actualExpected={...e,from:account.address};
 const transaction={type:"eip1559" as const,chainId:42161,to:e.to,value:1n,data:"0x" as Hex,nonce:85,gas:21470n,maxFeePerGas:45000000n,maxPriorityFeePerGas:1n,accessList:[]};
 test("real viem signing roundtrip through pure production cryptographic comparator; fixed owner wrapper still refuses",async()=>{
  const raw=await account.signTransaction(transaction);assert.equal(await verifyNativeCancellationRawFields(actualExpected,raw),keccak256(raw));await assert.rejects(verifyCleanup85Raw(e,raw),/signed_wire_binding/);
+});
+test("RPC signature scalars normalize canonical quantities and exact legacy words only",()=>{
+ assert.equal(evmRpcSignatureScalar("0x1"),`0x${"0".repeat(63)}1`);
+ assert.equal(evmRpcSignatureScalar(`0x${"1".repeat(63)}`),`0x${"0"}${"1".repeat(63)}`);
+ assert.equal(evmRpcSignatureScalar(`0x${"f".repeat(64)}`),`0x${"f".repeat(64)}`);
+ assert.equal(evmRpcSignatureScalar(`0x${"00".repeat(31)}01`),`0x${"00".repeat(31)}01`);
+ assert.equal(evmRpcSignatureScalar(`0x${"AB".repeat(32)}`),`0x${"ab".repeat(32)}`);
+ for(const value of [undefined,"0x01","0X01","0xA",`0x0${"1".repeat(62)}`,`0x1${"0".repeat(64)}`,`0x${"1".repeat(65)}`]) assert.throws(()=>evmRpcSignatureScalar(value));
+});
+test("signature scalar reconstruction verifies synthetic minimal quantity and refuses zero or out-of-range scalars",async()=>{
+ const vectors=[
+  {maxFee:45000027n,rNibbles:63,hash:"0xf9f3f4dfbb4c9a4a7e5d94f35839bae1cd1a1d0e290aa17c54b3892f8552f60e" as Hex},
+  {maxFee:45000047n,rNibbles:62,hash:"0xb7cae0f879f2c1688549328d65ddaf60e307fc2ce285069a2de6f6416dc22e70" as Hex},
+ ];
+ let parsed63:ReturnType<typeof parseTransaction>|undefined,envelope63:ReturnType<typeof cleanup85Envelope>|undefined;
+ for(const vector of vectors){
+  const envelope=cleanup85Envelope("21470",vector.maxFee.toString(),"0"),raw=await account.signTransaction({...transaction,maxFeePerGas:vector.maxFee}),parsed=parseTransaction(raw);
+  const r=`0x${BigInt(parsed.r!).toString(16)}` as Hex,s=`0x${BigInt(parsed.s!).toString(16)}` as Hex;
+  assert.equal(r.length,vector.rNibbles+2);assert.equal(evmRpcSignatureScalar(r),parsed.r);assert.equal(evmRpcSignatureScalar(s),parsed.s);
+  const unsigned={type:"eip1559" as const,chainId:parsed.chainId!,nonce:parsed.nonce!,to:parsed.to!,data:parsed.data!,value:parsed.value!,gas:parsed.gas!,maxFeePerGas:parsed.maxFeePerGas!,maxPriorityFeePerGas:parsed.maxPriorityFeePerGas!,accessList:parsed.accessList??[]};
+  const reconstructed=serializeTransaction(unsigned,{r:evmRpcSignatureScalar(r),s:evmRpcSignatureScalar(s),yParity:parsed.yParity!});
+  assert.equal(reconstructed,raw);assert.equal(keccak256(raw),vector.hash);assert.equal(await verifyNativeCancellationRawFields({...envelope,from:account.address},reconstructed),vector.hash);
+  if(vector.rNibbles===63){parsed63=parsed;envelope63=envelope;}
+ }
+ assert.ok(parsed63&&envelope63);
+ const parsed=parsed63!,envelope=envelope63!,unsigned={type:"eip1559" as const,chainId:parsed.chainId!,nonce:parsed.nonce!,to:parsed.to!,data:parsed.data!,value:parsed.value!,gas:parsed.gas!,maxFeePerGas:parsed.maxFeePerGas!,maxPriorityFeePerGas:parsed.maxPriorityFeePerGas!,accessList:parsed.accessList??[]};
+ const oneNibble=serializeTransaction(unsigned,{r:evmRpcSignatureScalar("0x1"),s:parsed.s!,yParity:parsed.yParity!});
+ await assert.rejects(verifyNativeCancellationRawFields({...envelope,from:account.address},oneNibble));
+ const curveOrder=`0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141` as Hex;
+ for(const signature of [{r:`0x${"0".repeat(64)}` as Hex,s:parsed.s!},{r:curveOrder,s:parsed.s!},{r:parsed.r!,s:curveOrder}]){
+  const invalid=serializeTransaction(unsigned,{...signature,yParity:parsed.yParity!});
+  await assert.rejects(verifyNativeCancellationRawFields({...envelope,from:account.address},invalid));
+ }
+});
+test("finalized native observation parses quantity and exact-word signature encodings before sender verification",async()=>{
+ const envelope=cleanup85Envelope("21470","45000027","0"),raw=await account.signTransaction({...transaction,maxFeePerGas:45000027n}),parsed=parseTransaction(raw),hash=keccak256(raw);
+ const blockHash=keccak256("0x01"),blockNumber="0x1e960000",timestamp="0x6b000000",headHash=keccak256("0x02");
+ const baseTx={hash,blockHash,blockNumber,from:CLEANUP85_OWNER,transactionIndex:"0x0",type:"0x2",chainId:"0xa4b1",nonce:"0x55",to:envelope.to,input:"0x",value:"0x1",gas:"0x53de",maxFeePerGas:"0x2aea55b",maxPriorityFeePerGas:"0x1",accessList:[],yParity:`0x${parsed.yParity!.toString(16)}`};
+ const receipt={transactionHash:hash,blockHash,blockNumber,transactionIndex:"0x0",type:"0x2",status:"0x1",from:CLEANUP85_OWNER,to:envelope.to,gasUsed:"0x5208",effectiveGasPrice:"0x1",logs:[]};
+ const block={hash:blockHash,number:blockNumber,timestamp,transactions:[hash]},head={hash:headHash,number:"0x1e960001",timestamp:"0x6b000001"};
+ const observationFor=(r:string,s:string,patch:Record<string,unknown>={})=>({chainId:42161,finalityTag:"finalized",transaction:{...baseTx,r,s,...patch},receipt,canonicalBlock:block,recheckedBlock:block,finalityHead:head} as unknown as CircleObservation);
+ const quantityR=`0x${BigInt(parsed.r!).toString(16)}`,quantityS=`0x${BigInt(parsed.s!).toString(16)}`;
+ for(const [name,r,s] of [["quantity",quantityR,quantityS],["legacy word",parsed.r!,parsed.s!]] as const){
+  await assert.rejects(verifyCleanup85Observation(envelope,hash,observationFor(r,s)),/signed_wire_binding/,name);
+ }
+ await assert.rejects(verifyCleanup85Observation(envelope,hash,observationFor(quantityR,quantityS,{input:"0x1"})),/malformed bytes/);
+ await assert.rejects(verifyCleanup85Observation(envelope,hash,observationFor(quantityR,quantityS,{hash:"0x01"})),/malformed bytes/);
 });
 for(const [name,change]of Object.entries({value:{value:0n},priority:{maxPriorityFeePerGas:0n},gas:{gas:21471n},fee:{maxFeePerGas:45000001n},nonce:{nonce:86},chain:{chainId:1},data:{data:"0x00"},to:{to:account.address},accessList:{accessList:[{address:account.address,storageKeys:[]}]}}))test(`actual signed wire ${name} mismatch refused`,async()=>{
  const raw=await account.signTransaction({...transaction,...change} as typeof transaction);await assert.rejects(verifyNativeCancellationRawFields(actualExpected,raw));
