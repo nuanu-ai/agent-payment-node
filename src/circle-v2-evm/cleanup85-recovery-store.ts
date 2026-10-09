@@ -40,7 +40,7 @@ export function validateCleanup85RecoveryIntent(value: unknown, op: CircleOperat
   if (i.version !== "apn.circle-cleanup85-recovery.v1" || i.parentOperationId !== SEALED_BURN_OPERATION || i.parentIntentHash !== parent.intentHash || parent.version !== "apn.circle-consumed-burn-retirement.v1" || parent.cleanupEnvelope.envelopeHash !== CLEANUP85_ENVELOPE || i.parentBinding !== circleRetirementBinding(op) || recoveryBinding !== hashObject(body) ||
     !Array.isArray(i.parentPrefix) || i.parentPrefix.length < 14 || i.parentPrefix.some((x, n) => x !== op.transitions[n]?.snapshotHash) || hashObject(i.sourceCustody) !== hashObject(op.sourceCustody) || hashObject(i.destinationCustody) !== hashObject(op.destinationCustody) ||
     !instant(i.capturedAt) || i.windowEndsAt !== null && !instant(i.windowEndsAt) || !Array.isArray(i.policies) || i.policies.length !== 2 || new Set(i.policies.map(p => p.profileHash)).size !== 2) circleBlocked("cleanup85_recovery_intent_binding");
-  for (const p of i.policies) if (!isPlainRecord(p) || !exactKeys(p, ["profile", "profileHash", "policyDigest", "revision", "activationDigest"]) || ![op.profile, op.destinationProfile].includes(p.profile) || p.profileHash !== (p.profile === op.profile ? op.profileHash : op.destinationProfileHash) || ![p.policyDigest, p.activationDigest].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)) || !Number.isSafeInteger(p.revision) || p.revision < 1) circleBlocked("cleanup85_recovery_policy_shape");
+  for (const p of i.policies) if (!isPlainRecord(p) || !exactKeys(p, ["profile", "profileHash", "policyDigest", "revision", "activationDigest"]) || typeof p.profile !== "string" || ![op.profile, op.destinationProfile].includes(p.profile) || p.profileHash !== (p.profile === op.profile ? op.profileHash : op.destinationProfileHash) || ![p.policyDigest, p.activationDigest].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)) || typeof p.revision !== "number" || !Number.isSafeInteger(p.revision) || p.revision < 1) circleBlocked("cleanup85_recovery_policy_shape");
   validateEvmNativeCustody(i.recipientCustody);
   if (i.recipientCustody.walletAddress !== "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14" || i.recipientCustody.profileHash !== sha256("profile\0default")) circleBlocked("cleanup85_default_recipient_changed");
   assertConsumedBurnEvidence(i.evidence, op); return i;
@@ -58,6 +58,13 @@ export class Cleanup85RecoveryStore extends SecureStateStore {
     const body = { version: "apn.circle-cleanup85-recovery.v1" as const, parentOperationId: SEALED_BURN_OPERATION, parentIntentHash: parent.intentHash, parentBinding: circleRetirementBinding(op), parentPrefix: op.transitions.map(t => t.snapshotHash), ...frame };
     const intent = validateCleanup85RecoveryIntent({ ...body, recoveryBinding: hashObject(body) }, op, parent);
     await this.initialize(); await this.ensureDirectory("circle-cleanup85-recovery"); await this.writeJson(this.path(op.operationId), intent, true); return intent;
+  }
+  async assertRetainedMaterialHeaders(op: CircleOperationV1): Promise<void> {
+    assertCleanup85Parent(op);
+    for (const effect of op.effects) {
+      const header = await this.readJson(`circle-v2-evm-effects/${op.operationId}-${effect.role}.json`);
+      if (!isPlainRecord(header) || !exactKeys(header, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) || header.schemaVersion !== "apn.circle-v2-evm-effect-envelope.v1" || header.operationId !== op.operationId || header.role !== effect.role || header.fingerprint !== op.fingerprint || header.envelopeHash !== effect.envelope.envelopeHash || typeof header.ciphertext !== "string" || header.ciphertext.length === 0) circleBlocked("cleanup85_retained_material_header_required");
+    }
   }
   async publicRecord(op: CircleOperationV1, suffix: string): Promise<unknown> { return this.readJson(this.path(op.operationId, suffix)); }
   async createPublicRecord(op: CircleOperationV1, suffix: string, value: unknown): Promise<void> {
