@@ -51,7 +51,7 @@ export function validateCircle(value) {
     if (op.policies.length !== new Set([op.profileHash, op.destinationProfileHash]).size || new Set(op.policies.map(p => p.profileHash)).size !== op.policies.length)
         circleCorrupt("policy_count");
     for (const p of op.policies)
-        if (!shape(p, ["profile", "profileHash", "policyDigest", "revision"]) || ![op.profile, op.destinationProfile].includes(p.profile) || ![op.profileHash, op.destinationProfileHash].includes(p.profileHash) || !/^[a-f0-9]{64}$/u.test(p.policyDigest) || !Number.isSafeInteger(p.revision) || p.revision < 1)
+        if (!shape(p, ["profile", "profileHash", "policyDigest", "revision", ...(p.activationDigest === undefined ? [] : ["activationDigest"])]) || ![op.profile, op.destinationProfile].includes(p.profile) || ![op.profileHash, op.destinationProfileHash].includes(p.profileHash) || !/^[a-f0-9]{64}$/u.test(p.policyDigest) || !Number.isSafeInteger(p.revision) || p.revision < 1 || p.activationDigest !== undefined && !/^[a-f0-9]{64}$/u.test(p.activationDigest))
             circleCorrupt("policy_binding");
     if (op.usage.length > 5 || op.state !== "cancelled_unsubmitted" && ![0, 5].includes(op.usage.length))
         circleCorrupt("usage_count");

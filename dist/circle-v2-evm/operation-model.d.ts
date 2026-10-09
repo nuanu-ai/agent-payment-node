@@ -30,6 +30,7 @@ export interface CirclePolicy {
     readonly profileHash: string;
     readonly policyDigest: string;
     readonly revision: number;
+    readonly activationDigest?: string;
 }
 export interface CircleOperationV1 {
     readonly schemaVersion: "apn.circle-v2-evm-operation.v1";
