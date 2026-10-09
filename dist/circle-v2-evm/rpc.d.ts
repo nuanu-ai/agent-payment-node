@@ -156,7 +156,7 @@ export declare class CircleRpc {
     private requests;
     private readonly endpoint;
     constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number);
-    call(method: string, params: readonly unknown[]): Promise<unknown>;
+    call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
     identity(): Promise<void>;
     read(to: Address, name: string, args?: readonly unknown[], tag?: string): Promise<unknown>;
     block(tag: string): Promise<Record<string, unknown>>;
@@ -181,3 +181,5 @@ export declare const circleRpcTransaction: (e: CircleEnvelope) => {
     maxFeePerGas: string;
     maxPriorityFeePerGas: string;
 };
+/** EIP-170 runtime code is a distinct field domain from CCTP messages and sealed transactions. */
+export declare function circleRuntimeBytecode(value: unknown): Hex;

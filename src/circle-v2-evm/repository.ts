@@ -38,7 +38,7 @@ const immutable = (op: CircleOperationV1) => ({ schemaVersion: op.schemaVersion,
   idempotencyHash: op.idempotencyHash, requestHash: op.requestHash, fingerprint: op.fingerprint, destinationChain: op.destinationChain,
   sourceCustody: op.sourceCustody, destinationCustody: op.destinationCustody, policies: op.policies, preparedAt: op.preparedAt,
   expiresAt: op.expiresAt, deploymentDigest: op.deploymentDigest, feeQuoteAtomic: op.feeQuoteAtomic });
-const phases = { prepared: ["signing_started"], signing_started: ["sealed", "unknown"], sealed: ["submission_started"],
+const phases = { prepared: ["signing_started"], signing_started: ["sealed", "unknown"], sealed: ["submission_started", "unknown"],
   submission_started: ["submitted", "unknown", "confirmed", "reverted"], submitted: ["unknown", "confirmed", "reverted"], unknown: ["unknown", "confirmed", "reverted"], confirmed: [], reverted: [] } as const;
 export function validateCircleAdvance(previous: CircleOperationV1, next: CircleOperationV1): void {
   if (previous.terminal || !circleSame(immutable(previous), immutable(next)) || next.transitions.length !== previous.transitions.length + 1 ||

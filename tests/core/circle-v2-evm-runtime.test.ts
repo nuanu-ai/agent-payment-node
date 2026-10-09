@@ -1,3 +1,4 @@
+import { circleRuntimeBytecode } from "../../src/circle-v2-evm/rpc.js";
 import { verifyCircleFinalizedRevert } from "../../src/circle-v2-evm/revert-proof.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -12,7 +13,7 @@ import { CircleRepository, validateCircleAdvance } from "../../src/circle-v2-evm
 import { advanceCircle, circleEnvelope, sealCircle, validateCircle, type CircleOperationV1, type CircleEffect, type CircleRole } from "../../src/circle-v2-evm/operation-model.js";
 import { approveCircleSource, approveCircleMint, executeCircleEffect, observeCircle, cleanupCircle, type CircleLifecyclePorts } from "../../src/circle-v2-evm/lifecycle.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_RECIPIENT, circleRoute } from "../../src/circle-v2-evm/catalog.js";
-import { decodeCircleSource, bindCircleAttestation, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, circleWord } from "../../src/circle-v2-evm/protocol.js";
+import { decodeCircleSource, bindCircleAttestation, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, circleWord, circleHex } from "../../src/circle-v2-evm/protocol.js";
 import { OperationService } from "../../src/operation-service.js";
 import { storedOperationDomains } from "../../src/operation-conflict-domain.js";
 import { source, iris, snapshot, event, observation } from "./circle-v2-evm-runtime-fixtures.js";
@@ -48,7 +49,7 @@ function ports(start: CircleOperationV1, overrides: Partial<CircleLifecyclePorts
 }
 test("lost broadcast holds a durable submission fence and explicit replay observes without signing or sending", async () => {
   let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const p = ports(op, { broadcast: async () => { throw new Error("lost RPC"); } });
-  op = await executeCircleEffect(op, "approval", p.p); assert.equal(op.effects[0]!.phase, "unknown"); assert.equal(p.signs(), 1);
+  op = await approveCircleSource(op, p.p); assert.equal(op.effects[0]!.phase, "unknown"); assert.equal(p.signs(), 1);
   assert.ok(p.saved.some(x => x.effects[0]!.phase === "submission_started")); assert.ok(op.usage.every(x => x.state === "unknown_finality"));
   await approveCircleSource(op, p.p); assert.equal(p.signs(), 1); assert.equal(p.sends(), 0);
 });
@@ -142,4 +143,44 @@ test("unsubmitted explicit cancellation releases reserves only after proving no 
   const p = ports(op, { loadMaterial: async () => null, usage: async (_op, target) => { assert.equal(target, "failed_before_effect"); return cancelledUsage; } });
   const cancelled = await cleanupCircle(op, p.p); assert.equal(cancelled.state, "cancelled_unsubmitted"); assert.equal(cancelled.terminal, true); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
   const hostile = ports(op); await assert.rejects(cleanupCircle(op, hostile.p), /private_material_present/);
+});
+
+test("runtime bytecode has the EIP-170 bound while wire fields retain their narrower bound", () => {
+  const actualTransmitterLength = `0x${"ab".repeat(16882)}`; assert.equal(actualTransmitterLength.length, 33766); assert.equal(circleRuntimeBytecode(actualTransmitterLength), actualTransmitterLength);
+  assert.equal(circleRuntimeBytecode(`0x${"AB".repeat(24576)}`), `0x${"ab".repeat(24576)}`);
+  for (const value of [`0x${"ab".repeat(24577)}`, "0xabc", "0xz1", "0X00", null, "00"]) assert.throws(() => circleRuntimeBytecode(value), /runtime_bytecode/);
+  assert.equal(circleRuntimeBytecode("0x"), "0x"); assert.throws(() => circleHex(actualTransmitterLength), /hex/); assert.equal(circleHex(`0x${"ab".repeat(16384)}`).length, 32770);
+});
+test("expired TTY and first preflight fail before any private marker", async () => {
+  for (const delayed of ["tty", "preflight"] as const) {
+    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at);
+    const p = ports(op, { now: () => now, approve: async () => { if (delayed === "tty") now += 60000; }, preflight: async () => { if (delayed === "preflight") now += 60000; } });
+    await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0); assert.equal(p.current().effects[0]!.phase, "prepared");
+  }
+  let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); let now = Date.parse(op.expiresAt) - 1;
+  const p = ports(op, { now: () => now, approve: async () => { now += 2; } }); await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0);
+});
+test("expiry after signing or submission fences becomes unknown and never signs or sends again", async () => {
+  for (const delayed of ["signing_fence", "sign", "sign_result", "material_sealed", "submission_fence", "dispatch"] as const) {
+    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const p = ports(op, { now: () => now });
+    const save = p.p.save, seal = p.p.seal, broadcast = p.p.broadcast;
+    p.p.save = async next => { await save(next); const reason = next.transitions.at(-1)!.reason; if (delayed === "signing_fence" && reason === "approval_signing_fence" || delayed === "material_sealed" && reason === "approval_material_sealed" || delayed === "submission_fence" && reason === "approval_submission_fence") now += 60000; };
+    p.p.seal = async (current, effect, guard) => { if (delayed === "sign") { now += 60000; guard(); } const result = await seal(current, effect, guard); if (delayed === "sign_result") now += 60000; return result; };
+    p.p.broadcast = async (effect, raw, guard) => { if (delayed === "dispatch") now += 60000; guard(); return broadcast(effect, raw, guard); };
+    op = await approveCircleSource(op, p.p); assert.equal(op.effects[0]!.phase, "unknown", delayed); assert.equal(p.sends(), 0, delayed);
+    const signed = p.signs(); await approveCircleSource(op, p.p); assert.equal(p.signs(), signed, delayed); assert.equal(p.sends(), 0, delayed);
+  }
+});
+test("private consent cannot be forged, reused after controller return or applied to another effect", async () => {
+  let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const p = ports(op);
+  await assert.rejects(executeCircleEffect(op, "approval", p.p), /consent/); await assert.rejects(executeCircleEffect(op, "burn", p.p, () => {}), /consent/);
+  let captured: (() => void) | undefined; const broadcast = p.p.broadcast; p.p.broadcast = async (effect, raw, guard) => { captured = guard; return broadcast(effect, raw, guard); };
+  op = await approveCircleSource(op, p.p); assert.equal(p.sends(), 1); assert.ok(captured); assert.throws(() => captured!(), /consent/);
+  await assert.rejects(executeCircleEffect(op, "burn", p.p, captured), /consent/); assert.equal(p.sends(), 1);
+});
+test("mint and no-effect cancellation have fresh finite TTY authority", async () => {
+  const mint = await sourceReady(); let now = at + 1, p = ports(mint, { now: () => now, approve: async () => { now += 60000; } });
+  await assert.rejects(approveCircleMint(mint, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+  let cancelled = initial(); cancelled = advanceCircle(cancelled, { usage: usage(cancelled) }, "reserved", at); now = at + 1;
+  p = ports(cancelled, { now: () => now, loadMaterial: async () => null, approve: async () => { now += 60000; } }); await assert.rejects(cleanupCircle(cancelled, p.p), /consent/); assert.equal(p.current().terminal, false);
 });

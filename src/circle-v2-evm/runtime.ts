@@ -113,14 +113,14 @@ export class CircleEvmService {
         await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash);
         await this.operations.assertCircleAccountsAvailable(op, true); await this.usage.confirm(op);
       },
-      approve: async (op, role) => exactChainConsent([
+      approve: async (op, role, deadline) => exactChainConsent([
         `Agent Payment Node Circle CCTP V2 Fast ${role} approval`, `Operation: ${op.operationId}`, `Source: ${op.profile} / ${op.sourceCustody.walletAddress} / eip155:42161`,
         `Destination gas owner: ${op.destinationProfile} / ${op.destinationCustody.walletAddress} / eip155:${op.destinationChain}`, `Recipient: 0xf41170df51aab52aaa04fbc3ff325cf051644aca`,
         "Exact burn: 40100 atomic USDC; issuer maximum fee: 100; minimum mint: 40000; minFinalityThreshold: 1000 (FAST)", "Source approval and burn each cost at most 30000000000000 wei ETH; cleanup only if needed costs at most 15000000000000 wei ETH. Total route source capacity: 75000000000000 wei ETH.",
         `Destination mint gas at most 600000 and native debit at most ${route.destinationNativeCap} atomic.`,
         `Policies: ${op.policies.map(p => `${p.profile}:${p.policyDigest}:${p.revision}`).join(", ")}`, `Effects: ${canonicalJson(op.effects.filter(e => role === "source" ? ["approval", "burn"].includes(e.role) : e.role === role).map(e => e.envelope))}`,
         "Every financial boundary is durably fenced. Ambiguous broadcast is observed without resending. Final success requires independent canonical source finality, destination mint and zero allowance.",
-      ], approvalCode("bridge", op.operationId, op.integrityHash, role), role === "source" ? op.expiresAt : new Date(this.now() + 60_000).toISOString(), this.ttyOptions),
+      ], approvalCode("bridge", op.operationId, op.integrityHash, role), deadline, this.ttyOptions),
       preflight: async (op, effect) => {
         await deployments();
         if (effect.role !== "mint") await this.assertPriorSourcesCanonical(source, op.operationId);
@@ -143,8 +143,8 @@ export class CircleEvmService {
           verifyCircleMintPreflight(op.source, op.attestation, { destinationBlockAtomic: circleUint(block.number).toString(), usedNonceAtomic: used, attesterConfigurationHash: circleAttesterConfigurationHash(snapshot), transactionSimulationResult: simulated });
         }
       },
-      seal: (op, effect) => this.custody.seal(op, effect), loadMaterial: (op, effect) => this.custody.load(op, effect),
-      broadcast: async (effect, raw) => { const result = circleHex(await rpc(effect).call("eth_sendRawTransaction", [raw]), 32); if (result !== keccak256(raw)) circleBlocked("broadcast_hash_changed"); return result; },
+      seal: (op, effect, guard) => this.custody.seal(op, effect, guard), loadMaterial: (op, effect) => this.custody.load(op, effect),
+      broadcast: async (effect, raw, guard) => { guard(); if (keccak256(raw) !== effect.transactionHash) circleBlocked("sealed_broadcast_hash_changed"); const result = circleHex(await rpc(effect).call("eth_sendRawTransaction", [raw], guard), 32); if (result !== keccak256(raw)) circleBlocked("broadcast_hash_changed"); return result; },
       observeEffect: async (op, effect) => {
         if (effect.transactionHash === null) return null;
         const tag = effect.role === "mint" ? "safe" : effect.role === "cleanup" ? "finalized" : "included", observation = await rpc(effect).observation(effect.transactionHash, tag); if (observation === null) return null;

@@ -51,18 +51,18 @@ export class LocalCircleCustody {
   private readonly wallets: EncryptedWalletStore; private readonly material: CircleEffectStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort) { this.wallets = new EncryptedWalletStore(state, wrapping); this.material = new CircleEffectStore(state.root, wrapping); }
   async load(op: CircleOperationV1, effect: CircleEffect) { return await this.material.load(op, effect); }
-  async seal(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial> {
-    if (op.terminal || effect.phase !== "signing_started") circleBlocked("signing_gate");
+  async seal(op: CircleOperationV1, effect: CircleEffect, guard: () => void): Promise<CircleMaterial> {
+    guard(); if (op.terminal || effect.phase !== "signing_started") circleBlocked("signing_gate");
     const destination = effect.role === "mint", profile = destination ? op.destinationProfile : op.profile, custody = destination ? op.destinationCustody : op.sourceCustody;
     return this.state.withLocks([`custody:${custody.profileHash}`], async () => {
-      await assertEvmNativeCustody(this.state, profile, custody); const existing = await this.material.load(op, effect); if (existing !== null) return existing;
-      const wallet = await this.wallets.describe(profile, undefined, identity => assertEvmNativeCustody(this.state, profile, custody, identity));
+      guard(); await assertEvmNativeCustody(this.state, profile, custody); guard(); const existing = await this.material.load(op, effect); guard(); if (existing !== null) return existing;
+      const wallet = await this.wallets.describe(profile, undefined, identity => { guard(); return assertEvmNativeCustody(this.state, profile, custody, identity); });
       if (wallet === null) circleBlocked("encrypted_wallet_missing");
       try {
-        const account = privateKeyToAccount(wallet.secret.privateKey); if (account.address !== custody.walletAddress) circleBlocked("derived_owner_mismatch");
-        const e = effect.envelope, rawTransaction = await account.signTransaction({ type: "eip1559", chainId: e.chainId, to: e.to, data: e.data,
+        guard(); const account = privateKeyToAccount(wallet.secret.privateKey); if (account.address !== custody.walletAddress) circleBlocked("derived_owner_mismatch");
+        guard(); const e = effect.envelope, rawTransaction = await account.signTransaction({ type: "eip1559", chainId: e.chainId, to: e.to, data: e.data,
           value: 0n, nonce: Number(e.nonceAtomic), gas: BigInt(e.gasLimitAtomic), maxFeePerGas: BigInt(e.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGasAtomic), accessList: [] });
-        const body = { schemaVersion: "apn.circle-v2-evm-effect.v1" as const, operationId: op.operationId, role: effect.role, fingerprint: op.fingerprint,
+        guard(); const body = { schemaVersion: "apn.circle-v2-evm-effect.v1" as const, operationId: op.operationId, role: effect.role, fingerprint: op.fingerprint,
           envelopeHash: e.envelopeHash, rawTransaction, transactionHash: keccak256(rawTransaction) };
         return await this.material.save(op, effect, { ...body, materialHash: hashObject(body) });
       } finally { this.wallets.clear(wallet.secret); }

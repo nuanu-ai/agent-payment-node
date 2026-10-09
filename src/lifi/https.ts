@@ -19,7 +19,7 @@ export class BridgeHttps {
     this.#lifiApiKey = lifiApiKey === undefined || lifiApiKey === "" ? undefined : lifiApiKey;
   }
   async request(endpointInput: string, method: "GET" | "POST", body: string | null, maximumBytes: number,
-    code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<LifiResponse> {
+    code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void): Promise<LifiResponse> {
     const endpoint = parsePublicHttpsUrl(endpointInput, code, "Bridge endpoint", 2048);
     if (body !== null && Buffer.byteLength(body, "utf8") > 256 * 1024) throw failure(code, "request_size");
     if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 4 * 1024 * 1024) throw failure(code, "response_bound");
@@ -38,7 +38,7 @@ export class BridgeHttps {
       const remaining = deadline - Date.now();
       if (remaining < 1) throw failure(code, "request_deadline");
       return await send(endpoint, method, body, addresses, maximumBytes, remaining, code,
-        isLifiApiEndpoint(endpoint) ? this.#lifiApiKey : undefined);
+        isLifiApiEndpoint(endpoint) ? this.#lifiApiKey : undefined, beforeSend);
     } finally {
       clearTimeout(timeout);
       const release = this.waiting.shift();
@@ -56,7 +56,7 @@ function failure(code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", reason: string): Ap
   return new ApnError(error, `Bridge transport failed: ${reason}.`, { transportReason: reason });
 }
 function send(endpoint: URL, method: "GET" | "POST", body: string | null, addresses: readonly PinnedAddress[],
-  maximumBytes: number, remaining: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", lifiApiKey?: string): Promise<LifiResponse> {
+  maximumBytes: number, remaining: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", lifiApiKey?: string, beforeSend?: () => void): Promise<LifiResponse> {
   return new Promise((resolve, reject) => {
     const selected = addresses[0];
     if (selected === undefined) { reject(failure(code, "DNS_empty")); return; }
@@ -66,6 +66,7 @@ function send(endpoint: URL, method: "GET" | "POST", body: string | null, addres
       if (error !== null) reject(error instanceof ApnError ? error : failure(code, "request_interrupted"));
       else resolve(value!);
     };
+    try { beforeSend?.(); } catch (error) { reject(error); return; }
     const request = httpsRequest(endpoint, { method, agent: false, family: selected.family,
       headers: { accept: "application/json", "accept-encoding": "identity", ...(lifiApiKey === undefined ? {} : {
         "x-lifi-api-key": lifiApiKey,
@@ -105,6 +106,10 @@ function send(endpoint: URL, method: "GET" | "POST", body: string | null, addres
       }
     }));
     request.on("error", () => finish(failure(code, "request_interrupted")));
-    request.end(body ?? undefined);
+    if (beforeSend === undefined) request.end(body ?? undefined);
+    else request.on("socket", socket => socket.once("secureConnect", () => {
+      try { beforeSend(); request.end(body ?? undefined); }
+      catch (error) { request.destroy(); finish(error); }
+    }));
   });
 }

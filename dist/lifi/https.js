@@ -18,7 +18,7 @@ export class BridgeHttps {
         }
         this.#lifiApiKey = lifiApiKey === undefined || lifiApiKey === "" ? undefined : lifiApiKey;
     }
-    async request(endpointInput, method, body, maximumBytes, code) {
+    async request(endpointInput, method, body, maximumBytes, code, beforeSend) {
         const endpoint = parsePublicHttpsUrl(endpointInput, code, "Bridge endpoint", 2048);
         if (body !== null && Buffer.byteLength(body, "utf8") > 256 * 1024)
             throw failure(code, "request_size");
@@ -43,7 +43,7 @@ export class BridgeHttps {
             const remaining = deadline - Date.now();
             if (remaining < 1)
                 throw failure(code, "request_deadline");
-            return await send(endpoint, method, body, addresses, maximumBytes, remaining, code, isLifiApiEndpoint(endpoint) ? this.#lifiApiKey : undefined);
+            return await send(endpoint, method, body, addresses, maximumBytes, remaining, code, isLifiApiEndpoint(endpoint) ? this.#lifiApiKey : undefined, beforeSend);
         }
         finally {
             clearTimeout(timeout);
@@ -63,7 +63,7 @@ function failure(code, reason) {
     const error = code === "APN_RPC_CONFIG" ? "APN_RPC_AMBIGUOUS" : "APN_PROVIDER_UNAVAILABLE";
     return new ApnError(error, `Bridge transport failed: ${reason}.`, { transportReason: reason });
 }
-function send(endpoint, method, body, addresses, maximumBytes, remaining, code, lifiApiKey) {
+function send(endpoint, method, body, addresses, maximumBytes, remaining, code, lifiApiKey, beforeSend) {
     return new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -81,6 +81,13 @@ function send(endpoint, method, body, addresses, maximumBytes, remaining, code, 
             else
                 resolve(value);
         };
+        try {
+            beforeSend?.();
+        }
+        catch (error) {
+            reject(error);
+            return;
+        }
         const request = httpsRequest(endpoint, { method, agent: false, family: selected.family,
             headers: { accept: "application/json", "accept-encoding": "identity", ...(lifiApiKey === undefined ? {} : {
                     "x-lifi-api-key": lifiApiKey,
@@ -132,7 +139,19 @@ function send(endpoint, method, body, addresses, maximumBytes, remaining, code, 
             }
         }));
         request.on("error", () => finish(failure(code, "request_interrupted")));
-        request.end(body ?? undefined);
+        if (beforeSend === undefined)
+            request.end(body ?? undefined);
+        else
+            request.on("socket", socket => socket.once("secureConnect", () => {
+                try {
+                    beforeSend();
+                    request.end(body ?? undefined);
+                }
+                catch (error) {
+                    request.destroy();
+                    finish(error);
+                }
+            }));
     });
 }
 //# sourceMappingURL=https.js.map

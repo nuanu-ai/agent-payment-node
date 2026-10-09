@@ -1,0 +1,35 @@
+✔ expired DNS authority produces zero physical POST requests (8.750708ms)
+✔ expired queue authority produces zero physical POST requests after a slot frees (3.845458ms)
+✔ expired TLS authority writes no POST body; valid TLS authority writes exact bytes once (1.69525ms)
+✔ Circle raw-send RPC requires a private dispatch guard before touching transport (0.279875ms)
+✔ lost broadcast holds a durable submission fence and explicit replay observes without signing or sending (11.751334ms)
+✔ crash immediately after signing mark cannot re-enter custody even if no sealed bytes were saved (2.1465ms)
+✔ unknown signing can recover encrypted material only for observation (2.227709ms)
+✔ issuer Fast attestation permits one mint while source finality pending, but cannot complete or finalize usage (22.241792ms)
+✔ source reorg refuses mint and preserves all holds (11.414875ms)
+✔ both Circle account domains are exposed to shared cross-rail conflicts and global idempotency (72.974291ms)
+✔ journal forbids source nonce, fee ceiling, destination payer and terminal-finality forgery (1.161375ms)
+✔ shared profile and operation locks allow exactly one concurrent financial claim (137.783ms)
+✔ destination safe mint leaves usage held until independently finalized source is observed (17.126791ms)
+✔ only a canonical finalized reverted source effect can enter explicit cleanup (6.477167ms)
+✔ a different Circle route queues after source inclusion; other money rails retain the source hold (53.710166ms)
+✔ unsubmitted explicit cancellation releases reserves only after proving no private material and zero allowance (2.079208ms)
+✔ runtime bytecode has the EIP-170 bound while wire fields retain their narrower bound (0.41525ms)
+✔ expired TTY and first preflight fail before any private marker (1.878875ms)
+✔ expiry after signing or submission fences becomes unknown and never signs or sends again (16.134042ms)
+✔ private consent cannot be forged, reused after controller return or applied to another effect (2.964167ms)
+✔ mint and no-effect cancellation have fresh finite TTY authority (7.632125ms)
+✔ correlates source, Iris, and finalized receive/mint with separate hashes and untrusted provenance (18.77775ms)
+✔ rejects source/attested message mutation outside Circle populated fields (33.175292ms)
+✔ rejects inconsistent source transaction and Iris burn fields (19.889458ms)
+✔ rejects attestation, CPI, finality, error, and ALT mismatches (28.070875ms)
+✔ one bridge invocation rereads the latest account block after an approval is included (12.696708ms)
+✔ a stable account block still observes a new pending nonce within the same command (1.292042ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1338.370833
