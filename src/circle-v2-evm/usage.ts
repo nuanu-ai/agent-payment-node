@@ -1,3 +1,5 @@
+import { assertHeldCleanup85Scope, type HeldCleanup85Scope } from "../circle-cleanup85-financial-scope.js";
+import type { Cleanup85CancellationRequest } from "../circle-cleanup85-cancellation-contract.js";
 import { consumeHistoricalPaidClosure, type VerifiedHistoricalPaidClosure } from "./historical-paid-closure.js";
 import { consumeCleanup85Settlement, type VerifiedCleanup85Settlement } from "./cleanup85-settlement-authority.js";
 import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
@@ -28,7 +30,7 @@ function leases(op: CircleOperationV1): readonly Lease[] {
 export class CircleUsage {
   private readonly ledger: AssetUsageLedger;
   private readonly policiesStore: AllowlistPolicyStore;
-  private readonly policyScope = new AsyncLocalStorage<{ readonly profiles: ReadonlySet<string>; active: boolean }>();
+  private readonly policyScope = new AsyncLocalStorage<{ readonly profiles: ReadonlySet<string>; active: boolean; guard?: () => void }>();
   constructor(private readonly state: StateStore, private readonly now: () => number) { this.ledger = new AssetUsageLedger(state.root); this.policiesStore = new AllowlistPolicyStore(state.root); }
   /** Wallet/operation/address locks are outermost; policy locks are held through every effect. */
   async withPolicyLocks<T>(profiles: readonly string[], action: () => Promise<T>): Promise<T> {
@@ -39,10 +41,17 @@ export class CircleUsage {
       return this.policyScope.run(scope, async () => { try { return await action(); } finally { scope.active = false; } });
     });
   }
+  /** Finite cleanup scope only: the private wrapper already owns every policy lock. */
+  async withCleanup85HeldPolicyScope<T>(held:HeldCleanup85Scope,request:Cleanup85CancellationRequest,operationId:string,action:()=>Promise<T>):Promise<T>{
+    if(this.policyScope.getStore()!==undefined)circleBlocked("policy_lock_scope_reentry");
+    const guard=()=>assertHeldCleanup85Scope(held,this.state,request,operationId);guard();
+    const scope={profiles:new Set(["evm-live-buyer","evm-live-seller","default"]),active:true,guard};
+    return this.policyScope.run(scope,async()=>{try{return await action();}finally{scope.active=false;}});
+  }
   private async active(profile: string, account: string): Promise<ActiveAssetPolicy> {
     const scope = this.policyScope.getStore();
     if (scope?.active !== true || !scope.profiles.has(profile)) circleBlocked("owner_policy_lock_required");
-    const stored = await this.policiesStore.readUnderProfileLock(profile);
+    scope.guard?.(); const stored = await this.policiesStore.readUnderProfileLock(profile); scope.guard?.();
     if (!scope.active) circleBlocked("owner_policy_lock_required");
     const active = activeAssetPolicyFromState(stored, new Date(this.now()));
     if (active === null || active.accounts.evm !== account) circleBlocked("active_owner_asset_policy_required"); return active;
