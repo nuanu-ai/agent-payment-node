@@ -1,5 +1,6 @@
+import { CircleRetirementAuthorityStore, assertCircleRetirementWindow, type CircleRetirementAuthority } from "./nonce-retirement-authority.js";
 import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
-import { retireCircleNonce, type CircleNonceRetirementPorts } from "./nonce-retirement.js";
+import { assertCircleNonceRetirementCase, retireCircleNonce, type CircleNonceRetirementPorts } from "./nonce-retirement.js";
 import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256, type Hex } from "viem";
 import { approvalCode } from "../approval-code.js";
@@ -72,16 +73,30 @@ export class CircleEvmService {
   async approveMint(id: string) { return this.run(id, approveCircleMint); }
   async observe(id: string) { return this.run(id, async (op, ports) => await this.retirements.intent(op) === null ? observeCircle(op, ports) : retireCircleNonce(op, ports as CircleNonceRetirementPorts, false)); }
   async refreshAttestation(id: string) { return this.run(id, refreshCircleAttestation); }
-  async cleanupNonce(id: string) { return this.run(id, (op, ports) => retireCircleNonce(op, ports as CircleNonceRetirementPorts)); }
+  async cleanupNonce(id: string) { return this.run(id, async (op, ports) => {
+    if (op.state === "nonce_retired") return op;
+    assertCircleNonceRetirementCase(op, this.now());
+    const authorityStore = new CircleRetirementAuthorityStore(this.state.root);
+    if (await authorityStore.load(op) === null) {
+      if (await this.retirements.hasClaim(op, "sign") || await this.retirements.hasClaim(op, "send")) circleBlocked("retirement_claim_without_current_authority");
+      await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody); await assertEvmNativeCustody(this.state, op.destinationProfile, op.destinationCustody);
+      await this.custody.assertRetirementHeaders(op);
+      await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash);
+      await this.operations.assertCircleAccountsAvailable(op, true, "cleanup");
+      const policies = await this.usage.retirementPolicies(op); await this.usage.confirm(op, policies);
+      await authorityStore.capture(op, policies, await this.usage.authorizationDeadline(op, policies), this.now());
+    }
+    return retireCircleNonce(op, ports as CircleNonceRetirementPorts);
+  }, true); }
   async cleanup(id: string) { return this.run(id, async (op, ports) => { if (await this.retirements.intent(op) !== null) circleBlocked("explicit_nonce_retirement_cleanup_required"); return cleanupCircle(op, ports); }); }
   private async required(id: string) { const op = await this.repo.load(id); if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Circle EVM operation was not found."); return op; }
-  private async run(id: string, action: (op: CircleOperationV1, ports: CircleLifecyclePorts) => Promise<CircleOperationV1>) {
+  private async run(id: string, action: (op: CircleOperationV1, ports: CircleLifecyclePorts) => Promise<CircleOperationV1>, retirementOnly = false) {
     const initial = await this.required(id); await this.state.initialize();
     return this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
       evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
       let op = await this.required(id);
       if (action !== cleanupCircle && op.usage.length === 0 && op.effects.every(e => e.phase === "prepared")) { op = advanceCircle(op, { usage: await this.usage.reserve(op) }, "interrupted_prepare_reserves_repaired", this.now()); await this.repo.save(op); }
-      return action(op, this.ports(op));
+      return action(op, this.ports(op, retirementOnly));
     }));
   }
   private async assertPriorSourcesCanonical(source: CircleRpc, exceptOperationId?: string): Promise<void> {
@@ -106,17 +121,28 @@ export class CircleEvmService {
     if (response.status !== 200) throw new ApnError("APN_HTTP_CONFIG", "Circle issuer API response is unavailable."); return JSON.parse(response.body) as unknown;
   }
   private async fee(chain: CircleDestinationChain) { const value = await this.api(`/v2/burn/USDC/fees/3/${circleRoute(chain).domain}`); return quoteCircleFastFee(chain, value, this.now(), this.now()); }
-  private ports(initial: CircleOperationV1): CircleNonceRetirementPorts {
+  private ports(initial: CircleOperationV1, retirementOnly = false): CircleNonceRetirementPorts {
     const { source, destination } = this.remotes(initial.destinationChain), route = circleRoute(initial.destinationChain, initial.destinationProfile);
     const rpc = (e: CircleEffect) => e.role === "mint" ? destination : source;
     const allowance = async (tag = "latest") => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag));
     const deployments = () => this.preflightDeployments(source, destination, initial.destinationChain);
+    let currentAuthority: CircleRetirementAuthority | null = null;
+    const authority = async (op: CircleOperationV1) => {
+      const retirement = retirementOnly || await this.retirements.intent(op) !== null;
+      currentAuthority = retirement ? await new CircleRetirementAuthorityStore(this.state.root).load(op) : null;
+      if (retirement && currentAuthority === null) circleBlocked("retirement_current_authority_required"); return currentAuthority;
+    };
     return {
-      now: this.now, save: op => this.repo.save(op), authorizationDeadline: op => this.usage.authorizationDeadline(op),
+      now: this.now, save: op => this.repo.save(op),
+      consentContext: () => currentAuthority?.authorityHash ?? null,
+      effectAuthorityGuard: op => { if (currentAuthority !== null) { assertCircleRetirementWindow(currentAuthority, this.now()); if (currentAuthority.operationId !== op.operationId) circleBlocked("retirement_authority_operation_changed"); } },
+      authorizationDeadline: async op => { const frame = await authority(op); if (frame !== null) assertCircleRetirementWindow(frame, this.now()); return this.usage.authorizationDeadline(op, frame?.policies ?? op.policies); },
       assertOwnerPolicyAndConflicts: async (op, effectRole) => {
         await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody); await assertEvmNativeCustody(this.state, op.destinationProfile, op.destinationCustody);
         await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash);
-        await this.operations.assertCircleAccountsAvailable(op, true, effectRole); await this.usage.confirm(op);
+        await this.operations.assertCircleAccountsAvailable(op, true, effectRole);
+        const frame = await authority(op); if (frame !== null) { assertCircleRetirementWindow(frame, this.now()); if (effectRole !== undefined && effectRole !== "cleanup") circleBlocked("retirement_cleanup_authority_only"); }
+        await this.usage.confirm(op, frame?.policies ?? op.policies);
       },
       approve: async (op, role, deadline) => role === "cleanup" && await this.retirements.intent(op) !== null ? exactChainConsent([
         "Agent Payment Node expired Circle approval nonce cleanup", `Operation: ${op.operationId}`,
@@ -125,10 +151,10 @@ export class CircleEvmService {
         `One NEW approve-zero transaction: USDC ${CIRCLE_SOURCE_TOKEN}; spender ${CIRCLE_MESSENGER}; ETH value 0.`,
         "Full signed native fee upper at most 15000000000000 wei, charged against the existing cleanup hold. Fresh authority lasts at most 60 seconds and both policy windows.",
         `Frozen cleanup: ${canonicalJson(op.effects.find(e => e.role === "cleanup")!.envelope)}`,
-        `Held owner policies: ${op.policies.map(p => `${p.profile}:${p.activationDigest}:${p.revision}`).join(", ")}`,
+        `Current cleanup owner policies: ${(currentAuthority?.policies ?? op.policies).map(p => `${p.profile}:${p.activationDigest}:${p.revision}`).join(", ")}`,
         "Original approval and burn are permanently disabled. This action retires the source nonce; it does not burn USDC or pay the destination.",
         "Unknown send is observed without resending. Unused holds close only after finalized exact cleanup, consumed nonce and zero allowance proof.",
-      ], approvalCode("bridge", op.operationId, op.integrityHash, "nonce-cleanup"), deadline, this.ttyOptions) : role === "cancel" ? exactChainConsent([
+      ], approvalCode("bridge", op.operationId, hashObject({ integrityHash: op.integrityHash, authorityHash: currentAuthority?.authorityHash ?? null }), "nonce-cleanup"), deadline, this.ttyOptions) : role === "cancel" ? exactChainConsent([
         "Agent Payment Node Circle unsubmitted cancellation", `Operation: ${op.operationId}`,
         `Owners: ${op.profile}/${op.sourceCustody.walletAddress}; ${op.destinationProfile}/${op.destinationCustody.walletAddress}`,
         "Release only verified unspent reservations after zero allowance and absence of private material or transaction markers.",

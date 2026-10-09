@@ -124,3 +124,39 @@ test("expired owner policy can release only the existing proven-unspent reservat
     assert.equal(released.length, 5); for (const row of released) { assert.equal(row.state, "failed_before_effect"); assert.equal(row.consumedAtomic, undefined); assert.equal((await new AssetUsageLedger(temporary.root).usageReadOnly(row, new Date(expires))).amountAtomic, "0"); }
   });
 });
+
+test("fresh compatible current cleanup activation admits historical holds without rebinding the parent", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143, new Date(now.getTime() + 60000).toISOString());
+  const held = await f.usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => {
+    const policies = await f.usage.policies(f.op), op = { ...f.op, operationId: "d".repeat(64), policies }; return { ...op, usage: await f.usage.reserve(op) };
+  });
+  const parentBytes = JSON.stringify(held), head = f.heads.get(held.profile)!;
+  await f.store.appendDecision(held.profile, head.entryDigest, { status: "active", revision: head.revision, stagedRecordDigest: head.stagedRecordDigest, policyDigest: head.policyDigest, registry: head.registry!, approvalFingerprint: hashObject("fresh-cleanup"), decidedAt: now.toISOString() });
+  const frame = await f.usage.withPolicyLocks([held.profile, held.destinationProfile], async () => {
+    await assert.rejects(f.usage.confirm(held), /owner_policy_changed/);
+    const policies = await f.usage.retirementPolicies(held); await f.usage.confirm(held, policies);
+    assert.equal(await f.usage.authorizationDeadline(held, policies), new Date(now.getTime() + 60000).toISOString()); return policies;
+  });
+  assert.notEqual(frame[0]!.activationDigest, held.policies[0]!.activationDigest); assert.equal(JSON.stringify(held), parentBytes);
+  const state = await f.store.read(held.profile), current = state.entries.at(-1)!;
+  await f.store.appendDecision(held.profile, current.entryDigest, { status: "active", revision: current.revision, stagedRecordDigest: current.stagedRecordDigest, policyDigest: current.policyDigest, registry: current.registry!, approvalFingerprint: hashObject("changed-again"), decidedAt: now.toISOString() });
+  await assert.rejects(f.usage.withPolicyLocks([held.profile, held.destinationProfile], () => f.usage.confirm(held, frame)), /owner_policy_changed/);
+});
+
+for (const variant of ["missing_native", "wrong_owner", "closed_hold"] as const) test(`current cleanup authority refuses ${variant} with actual policy/ledger state`, async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143);
+  const held = await f.usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => {
+    const op = { ...f.op, operationId: "e".repeat(64), policies: await f.usage.policies(f.op) }; return { ...op, usage: await f.usage.reserve(op) };
+  });
+  if (variant === "wrong_owner") {
+    await assert.rejects(f.usage.withPolicyLocks([held.profile, held.destinationProfile], () => f.usage.retirementPolicies({ ...held, sourceCustody: { ...held.sourceCustody, walletAddress: circleRoute(143).gasPayer } })), /active_owner_asset_policy_required/); return;
+  }
+  if (variant === "closed_hold") {
+    const row = held.usage[3]!;
+    await new AssetUsageLedger(temporary.root).transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state: "failed_before_effect", outcomeDigest: hashObject("closed"), now });
+  } else {
+    const record = await f.store.stage({ profile: held.profile, expectedRevision: 1, now, policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "fresh-cleanup-negative", accounts: { evm: CIRCLE_SOURCE_OWNER }, effectiveAt: now.toISOString(), admissions: [{ chain: "eip155:42161", kind: "token", identifier: CIRCLE_SOURCE_TOKEN, rail: "bridge", maximumPerTransferAtomic: "100000", dailyLimitAtomic: "1000000", mechanism: circleMechanism(143) }] } });
+    await f.store.appendDecision(held.profile, f.heads.get(held.profile)!.entryDigest, { status: "active", revision: record.revision, stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest, registry: record.registry, approvalFingerprint: hashObject(variant), decidedAt: now.toISOString() });
+  }
+  await assert.rejects(f.usage.withPolicyLocks([held.profile, held.destinationProfile], async () => f.usage.confirm(held, await f.usage.retirementPolicies(held))), variant === "closed_hold" ? /asset_usage_hold_changed/ : /asset is not listed for this network/);
+});

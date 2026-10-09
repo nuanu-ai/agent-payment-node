@@ -4,6 +4,8 @@ import { type CircleEffect, type CircleEnvelope, type CircleOperationV1, type Ci
 import { type CircleAttestation, type CircleSourceProof, type CircleReceiptProof, type decodeCircleDestination } from "./protocol.js";
 export interface CircleLifecyclePorts {
     readonly now: () => number;
+    consentContext?(): string | null;
+    effectAuthorityGuard?(op: CircleOperationV1): void;
     save(op: CircleOperationV1): Promise<void>;
     assertOwnerPolicyAndConflicts(op: CircleOperationV1, effectRole?: CircleRole): Promise<void>;
     authorizationDeadline(op: CircleOperationV1): Promise<string | null>;
