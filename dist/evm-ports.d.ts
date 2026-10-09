@@ -66,7 +66,7 @@ export interface EvmRpcPort {
     evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
     confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
 }
-export type EvmRpcCall = (method: string, params: readonly unknown[]) => Promise<unknown>;
+export type EvmRpcCall = (method: string, params: readonly unknown[], beforeSend?: () => Promise<void>) => Promise<unknown>;
 export type EvmRpcBatchCall = (calls: readonly {
     readonly method: string;
     readonly params: readonly unknown[];

@@ -63,7 +63,8 @@ function failure(code, reason) {
     const error = code === "APN_RPC_CONFIG" ? "APN_RPC_AMBIGUOUS" : "APN_PROVIDER_UNAVAILABLE";
     return new ApnError(error, `Bridge transport failed: ${reason}.`, { transportReason: reason });
 }
-function send(endpoint, method, body, addresses, maximumBytes, remaining, code, lifiApiKey, beforeSend) {
+async function send(endpoint, method, body, addresses, maximumBytes, remaining, code, lifiApiKey, beforeSend) {
+    await beforeSend?.();
     return new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
@@ -81,13 +82,6 @@ function send(endpoint, method, body, addresses, maximumBytes, remaining, code, 
             else
                 resolve(value);
         };
-        try {
-            beforeSend?.();
-        }
-        catch (error) {
-            reject(error);
-            return;
-        }
         const request = httpsRequest(endpoint, { method, agent: false, family: selected.family,
             headers: { accept: "application/json", "accept-encoding": "identity", ...(lifiApiKey === undefined ? {} : {
                     "x-lifi-api-key": lifiApiKey,
@@ -142,10 +136,11 @@ function send(endpoint, method, body, addresses, maximumBytes, remaining, code, 
         if (beforeSend === undefined)
             request.end(body ?? undefined);
         else
-            request.on("socket", socket => socket.once("secureConnect", () => {
+            request.on("socket", socket => socket.once("secureConnect", async () => {
                 try {
-                    beforeSend();
-                    request.end(body ?? undefined);
+                    await beforeSend();
+                    if (!settled && !request.destroyed)
+                        request.end(body ?? undefined);
                 }
                 catch (error) {
                     request.destroy();

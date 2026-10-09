@@ -17,6 +17,7 @@ export interface BridgeAllowlistBinding {
     readonly schemaVersion: typeof BRIDGE_ALLOWLIST_SCHEMA;
     readonly policyDigest: string;
     readonly policyRevision: number;
+    readonly activationDigest?: string;
     readonly account: string;
     readonly chain: string;
     readonly asset: AssetUsageIdentity["asset"];
@@ -27,8 +28,9 @@ export interface BridgeAllowlistBinding {
 export type BridgeUsageTarget = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
 export declare class BridgeAllowlistGate {
     private readonly context;
+    private readonly underProfileLock;
     private readonly ledger;
-    constructor(context: Pick<RuntimeContext, "state" | "clock">);
+    constructor(context: Pick<RuntimeContext, "state" | "clock">, underProfileLock?: boolean);
     admit(profile: string, owner: string, request: BridgeRouteRequest, tool: string): Promise<BridgeAllowlistBinding>;
     confirm(profile: string, request: BridgeRouteRequest, tool: string, bindingValue: unknown): Promise<ActiveAssetPolicy>;
     reserve(op: BridgeOperationRecord): Promise<AssetUsageReservation>;

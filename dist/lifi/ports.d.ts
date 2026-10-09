@@ -1,3 +1,4 @@
+import type { BridgeAuthorityCheck } from "./effect-authority.js";
 import type { BridgeChainId } from "./chains.js";
 import type { RpcReadSession, RpcReadTelemetry } from "./rpc.js";
 import type { EvmFeeQuote } from "../evm-ports.js";
@@ -37,7 +38,7 @@ export interface BridgeRpcPort {
     estimate(transaction: BridgeTransaction): Promise<FeeEstimate>;
     feeQuote(envelope: Pick<BridgeEnvelope, "economics">): Promise<EvmFeeQuote>;
     feeQuotes?(envelopes: readonly Pick<BridgeEnvelope, "economics">[]): Promise<readonly EvmFeeQuote[]>;
-    send(rawTransaction: Hex): Promise<Hex>;
+    send(rawTransaction: Hex, beforeSend?: BridgeAuthorityCheck): Promise<Hex>;
     observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{
         recipient: Address;
         from: Address;
@@ -80,7 +81,7 @@ export interface BridgeSealedMaterial {
 }
 export interface BridgeCustodyPort {
     load(operation: BridgeOperationRecord, role: "approval" | "bridge"): Promise<BridgeSealedMaterial | null>;
-    seal(operation: BridgeOperationRecord, role: "approval" | "bridge", owner: BridgeOwner): Promise<BridgeSealedMaterial>;
+    seal(operation: BridgeOperationRecord, role: "approval" | "bridge", owner: BridgeOwner, beforeSign?: BridgeAuthorityCheck): Promise<BridgeSealedMaterial>;
 }
 export interface BridgeApprovalPort {
     confirm(input: {
