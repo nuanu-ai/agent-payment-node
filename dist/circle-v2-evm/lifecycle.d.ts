@@ -31,4 +31,8 @@ export declare function approveCircleMint(input: CircleOperationV1, ports: Circl
 export declare function observeCircle(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
 export declare function refreshCircleAttestation(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
 export declare function cleanupCircle(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
+/** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
+export declare function executeCircleCleanupWithConsent(op: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
+/** Production retirement custody accepts only the private controller's currently active exact guard. */
+export declare function assertCircleEffectGuard(op: CircleOperationV1, effect: CircleEffect, guard: () => void): void;
 export {};

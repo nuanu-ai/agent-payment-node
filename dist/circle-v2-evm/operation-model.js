@@ -1,3 +1,4 @@
+import { validateCircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { getAddress } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -34,7 +35,7 @@ export function validateCircleEnvelope(e, role, chain, attestation, destinationP
         circleCorrupt("envelope_fee_cap");
 }
 export function validateCircle(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "profile", "profileHash", "destinationProfile", "destinationProfileHash", "idempotencyHash", "requestHash", "fingerprint", "destinationChain", "sourceCustody", "destinationCustody", "policies", "preparedAt", "expiresAt", "deploymentDigest", "feeQuoteAtomic", "state", "terminal", "effects", "source", "attestation", "destination", "residualAllowanceAtomic", "usage", "usageFinalized", "transitions", "integrityHash"]))
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "profile", "profileHash", "destinationProfile", "destinationProfileHash", "idempotencyHash", "requestHash", "fingerprint", "destinationChain", "sourceCustody", "destinationCustody", "policies", "preparedAt", "expiresAt", "deploymentDigest", "feeQuoteAtomic", "state", "terminal", "effects", "source", "attestation", "destination", "residualAllowanceAtomic", "usage", "usageFinalized", "transitions", "integrityHash", ...(value.nonceRetirement === undefined ? [] : ["nonceRetirement"])]))
         circleCorrupt("shape");
     const op = value, { integrityHash, ...body } = op;
     if (op.schemaVersion !== "apn.circle-v2-evm-operation.v1" || hashObject(body) !== integrityHash || ![op.operationId, op.profileHash, op.destinationProfileHash, op.idempotencyHash, op.requestHash, op.fingerprint, op.deploymentDigest].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)))
@@ -44,7 +45,7 @@ export function validateCircle(value) {
     validateEvmNativeCustody(op.destinationCustody);
     if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||
         op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > 100n ||
-        !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted"].includes(op.state) ||
+        !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired"].includes(op.state) ||
         !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
         !/^(?:0|40100)$/u.test(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies))
         circleCorrupt("intent");
@@ -105,6 +106,12 @@ export function validateCircle(value) {
         circleCorrupt("completion_finality");
     if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)))
         circleCorrupt("cancel_private_entry");
+    if (op.nonceRetirement !== undefined)
+        validateCircleNonceRetirementProof(op.nonceRetirement, op);
+    if (op.state === "nonce_retired" && (op.nonceRetirement === undefined || op.source !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized))
+        circleCorrupt("nonce_retirement_terminal");
+    if (op.state !== "nonce_retired" && op.nonceRetirement !== undefined)
+        circleCorrupt("nonce_retirement_metadata_state");
     if (op.state === "cleaned" && (op.residualAllowanceAtomic !== "0" || op.source !== null || !op.usageFinalized))
         circleCorrupt("cleanup_completion");
     if (!Array.isArray(op.transitions) || op.transitions.length < 1 || op.transitions.length > 500)
@@ -122,7 +129,7 @@ export function publicCircle(op) {
         source_profile: op.profile, destination_profile: op.destinationProfile, destination_chain: op.destinationChain, amount_atomic: "40100", minimum_output_atomic: "40000",
         effects: op.effects.map(e => ({ role: e.role, phase: e.phase, transaction_hash: e.transactionHash, actual_fee_atomic: e.proof?.actualFeeAtomic ?? null })),
         source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? null, nonce: op.attestation?.nonce ?? null,
-        residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash,
+        residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash, ...(op.nonceRetirement === undefined ? {} : { cleanup_retirement_receipt: op.nonceRetirement }),
         next_actions: op.terminal ? [] : [`apn circle evm observe --operation ${op.operationId}`] };
 }
 export function circleSame(a, b) { return canonicalJson(a) === canonicalJson(b); }

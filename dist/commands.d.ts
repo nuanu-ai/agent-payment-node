@@ -31,7 +31,7 @@ export type CommandRequest = {
     readonly destinationChain: 1329 | 59144 | 143;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.status";
+    readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.status";
     readonly operationId: string;
 } | {
     readonly command: "mega.funding.approve" | "mega.funding.status";

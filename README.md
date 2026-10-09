@@ -817,6 +817,7 @@ apn circle evm approve-mint --operation <operation_id>
 apn circle evm observe --operation <operation_id>
 apn circle evm refresh-attestation --operation <operation_id>
 apn circle evm cleanup --operation <operation_id>
+apn circle evm cleanup-nonce --operation <operation_id>
 apn circle evm status --operation <operation_id>
 apn mega funding prepare --profile <profile> --expected-payer <address> --amount-atomic <wei> --minimum-output-atomic <mega-wei> --maximum-fee-atomic <wei> --idempotency-key <key>
 apn mega funding approve --operation <operation-id>

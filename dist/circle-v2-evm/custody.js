@@ -1,3 +1,5 @@
+import { assertCircleEffectGuard } from "./lifecycle.js";
+import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -14,6 +16,16 @@ export class CircleEffectStore extends SecureStateStore {
         this.wrapping = wrapping;
     }
     path(op, role) { validateCircle(op); return `circle-v2-evm-effects/${op.operationId}-${role}.json`; }
+    async assertCleanupAbsent(op) { if (await this.readJson(this.path(op, "cleanup")) !== null)
+        circleBlocked("retirement_unclaimed_cleanup_material_present"); }
+    async assertRetirementHeaders(op) {
+        const approval = op.effects[0], burn = op.effects[1];
+        const value = await this.readJson(this.path(op, "approval"));
+        if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) ||
+            value.schemaVersion !== VERSION || value.operationId !== op.operationId || value.role !== "approval" || value.fingerprint !== op.fingerprint || value.envelopeHash !== approval.envelope.envelopeHash ||
+            typeof value.ciphertext !== "string" || value.ciphertext.length === 0 || await this.readJson(this.path(op, burn.role)) !== null)
+            circleBlocked("retirement_original_material_or_burn_guard");
+    }
     async load(op, effect) {
         const value = await this.readJson(this.path(op, effect.role));
         if (value === null)
@@ -90,8 +102,18 @@ export class LocalCircleCustody {
         this.wallets = new EncryptedWalletStore(state, wrapping);
         this.material = new CircleEffectStore(state.root, wrapping);
     }
+    async assertCleanupAbsent(op) { return this.material.assertCleanupAbsent(op); }
+    async assertRetirementHeaders(op) { return this.material.assertRetirementHeaders(op); }
     async load(op, effect) { return await this.material.load(op, effect); }
     async seal(op, effect, guard) {
+        guard();
+        if (effect.role === "approval" || effect.role === "burn")
+            await new CircleNonceRetirementStore(this.state.root).assertOriginalEffectsAvailable(op.operationId);
+        guard();
+        if (effect.role === "cleanup" && await new CircleNonceRetirementStore(this.state.root).intent(op) !== null) {
+            assertCircleEffectGuard(op, effect, guard);
+            await new CircleNonceRetirementStore(this.state.root).assertClaim(op, "sign");
+        }
         guard();
         if (op.terminal || effect.phase !== "signing_started")
             circleBlocked("signing_gate");

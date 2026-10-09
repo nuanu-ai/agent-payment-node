@@ -2,6 +2,7 @@ import { hashObject } from "../canonical.js";
 import { advanceCircle, circleBlocked, circleCorrupt, circleSame, validateCircle } from "./operation-model.js";
 import { assertCircleAttestation } from "./protocol.js";
 const authorities = new WeakMap();
+const effectGuards = new WeakMap();
 const consentBinding = (op) => hashObject({ operationId: op.operationId, fingerprint: op.fingerprint, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
 async function consent(op, role, ports) {
     const policyDeadline = await ports.authorizationDeadline(op);
@@ -80,6 +81,7 @@ export async function executeCircleEffect(input, role, ports, token) {
     authority.claimed.add(role);
     authority.active = role;
     const guard = () => { checkConsent(token, op, ports, effect); };
+    effectGuards.set(guard, { token: token, ports, role });
     try {
         guard();
         await ports.assertOwnerPolicyAndConflicts(op, role);
@@ -122,6 +124,7 @@ export async function executeCircleEffect(input, role, ports, token) {
         return await persist(op, { effects: updateEffect(op, role, { phase: "unknown" }) }, `${role}_fenced_unknown_observe_only`, ports);
     }
     finally {
+        effectGuards.delete(guard);
         authority.active = null;
     }
 }
@@ -266,5 +269,24 @@ export async function cleanupCircle(input, ports) {
         op = await persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cleaned", terminal: true }, "explicit_zero_allowance_cleanup_finalized", ports);
     }
     return op;
+}
+/** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
+export async function executeCircleCleanupWithConsent(op, ports) {
+    await ports.assertOwnerPolicyAndConflicts(op);
+    const token = await consent(op, "cleanup", ports);
+    try {
+        return await executeCircleEffect(op, "cleanup", ports, token);
+    }
+    finally {
+        authorities.delete(token);
+    }
+}
+/** Production retirement custody accepts only the private controller's currently active exact guard. */
+export function assertCircleEffectGuard(op, effect, guard) {
+    const record = effectGuards.get(guard);
+    if (record === undefined || record.role !== effect.role)
+        circleBlocked("private_exact_effect_guard_required");
+    checkConsent(record.token, op, record.ports, effect);
+    guard();
 }
 //# sourceMappingURL=lifecycle.js.map

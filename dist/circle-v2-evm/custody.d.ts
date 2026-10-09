@@ -17,6 +17,8 @@ export declare class CircleEffectStore extends SecureStateStore {
     private readonly wrapping;
     constructor(root: string, wrapping: WrappingSecretPort);
     private path;
+    assertCleanupAbsent(op: CircleOperationV1): Promise<void>;
+    assertRetirementHeaders(op: CircleOperationV1): Promise<void>;
     load(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null>;
     save(op: CircleOperationV1, effect: CircleEffect, material: CircleMaterial): Promise<CircleMaterial>;
 }
@@ -25,6 +27,8 @@ export declare class LocalCircleCustody {
     private readonly wallets;
     private readonly material;
     constructor(state: StateStore, wrapping: WrappingSecretPort);
+    assertCleanupAbsent(op: CircleOperationV1): Promise<void>;
+    assertRetirementHeaders(op: CircleOperationV1): Promise<void>;
     load(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null>;
     seal(op: CircleOperationV1, effect: CircleEffect, guard: () => void): Promise<CircleMaterial>;
 }
