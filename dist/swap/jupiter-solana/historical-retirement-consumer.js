@@ -1,6 +1,7 @@
-import { lstat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { canonicalJson, domainHash, hashObject } from "../../canonical.js";
+import { canonicalJson, domainHash, hashObject, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { AllowlistPolicyStore } from "../../allowlist-policy-store.js";
 import { activeAssetPolicyFromState } from "../../allowlist-active-policy.js";
@@ -39,9 +40,11 @@ const USDC_IDENTITY = Object.freeze({
 /** Create-only, separately namespaced durability after the accounting record commits. */
 class HistoricalRetirementStore extends SecureStateStore {
     guard;
-    constructor(root, guard) {
+    publication;
+    constructor(root, guard, publication) {
         super(root);
         this.guard = guard;
+        this.publication = publication;
     }
     async read(relativePath) {
         await this.guard.check();
@@ -64,6 +67,114 @@ class HistoricalRetirementStore extends SecureStateStore {
         await this.guard.check([parent]);
         await this.writeJson(relativePath, value, true);
         await this.guard.check([parent]);
+    }
+    async beforeCreateOnlyPublication(relativePath, value) {
+        if (!relativePath.startsWith(`${HISTORICAL_RETIREMENT_NAMESPACE}/`))
+            return;
+        const frame = this.publication;
+        if (frame === undefined || relativePath !== `${HISTORICAL_RETIREMENT_NAMESPACE}/${frame.record.operationId}.json`)
+            refuse();
+        const record = validateHistoricalRetirementRecord(value);
+        if (canonicalJson(record) !== canonicalJson(frame.record))
+            corrupt();
+        await assertAccountingPublication(frame.token, frame.context, record);
+    }
+    /** Reconcile only the exact staged inode that the create-only writer can leave at a crash boundary. */
+    async recoverExactAccountingTemp(operationId, rows) {
+        if (!HISTORICAL_JUPITER_IDS.some(id => id === operationId))
+            refuse();
+        const entries = await this.entries(HISTORICAL_RETIREMENT_NAMESPACE);
+        const targetRelative = `${HISTORICAL_RETIREMENT_NAMESPACE}/${operationId}.json`;
+        const targetPath = resolve(this.root, targetRelative);
+        const prefix = `.${sha256(targetPath).slice(0, 12)}.`;
+        const candidates = entries.filter(entry => entry.name.startsWith(prefix));
+        if (candidates.length === 0)
+            return;
+        if (candidates.length !== 1 || !/^\.[a-f0-9]{12}\.[a-f0-9]{24}\.tmp$/u.test(candidates[0].name))
+            corrupt();
+        const temporaryPath = resolve(this.root, HISTORICAL_RETIREMENT_NAMESPACE, candidates[0].name);
+        const parentPath = dirname(targetPath), parent = await lstat(parentPath, { bigint: true });
+        if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== BigInt(process.geteuid?.() ?? -1) ||
+            (parent.mode & 511n) !== 448n)
+            corrupt();
+        const targetStat = await lstatOptional(targetPath);
+        const expectedLinks = targetStat === null ? 1n : 2n;
+        const temporary = await this.readOwnedRetirementFile(temporaryPath, parent.dev, expectedLinks);
+        let record = temporary.record;
+        if (targetStat !== null) {
+            const target = await this.readOwnedRetirementFile(targetPath, parent.dev, 2n);
+            if (targetStat.dev !== target.dev || targetStat.ino !== target.ino || temporary.dev !== target.dev || temporary.ino !== target.ino ||
+                !Buffer.from(temporary.bytes).equals(target.bytes) || sha256(temporary.bytes) !== sha256(target.bytes) ||
+                canonicalJson(target.record) !== canonicalJson(temporary.record))
+                corrupt();
+            record = target.record;
+        }
+        if (record.operationId !== operationId || record.authentication.rootBinding !== hashObject({ root: this.root }))
+            corrupt();
+        const rootSnapshot = await historicalRetirementRootSnapshot(this.root);
+        const lease = record.originalOperation.usageLease;
+        if (lease === null)
+            corrupt();
+        const row = bucketRowsOriginal(rows, lease.reservationId, lease);
+        const operation = await new SwapOperationRepository(this.root).loadAny(operationId);
+        const rawHash = await new JupiterHistoricalRetirementReader(this.root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
+        assertHistoricalRetirementBindings(record, rootSnapshot, operation, row, rawHash);
+        const latest = await lstat(temporaryPath, { bigint: true });
+        if (latest.dev !== temporary.dev || latest.ino !== temporary.ino || latest.nlink !== expectedLinks ||
+            latest.uid !== BigInt(process.geteuid?.() ?? -1) || (latest.mode & 511n) !== 384n || BigInt(latest.size) !== BigInt(temporary.bytes.byteLength))
+            corrupt();
+        await this.guard.check([HISTORICAL_RETIREMENT_NAMESPACE]);
+        await unlink(temporaryPath);
+        const directory = await open(parentPath, constants.O_RDONLY);
+        try {
+            await directory.sync();
+        }
+        finally {
+            await directory.close();
+        }
+        await this.guard.check([HISTORICAL_RETIREMENT_NAMESPACE]);
+    }
+    async readOwnedRetirementFile(path, parentDev, expectedLinks) {
+        await this.assertNoSymlinkAncestors(path);
+        const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+            const before = await handle.stat({ bigint: true });
+            const leaf = await lstat(path, { bigint: true });
+            const valid = (value) => value.isFile() && !value.isSymbolicLink() &&
+                value.uid === BigInt(process.geteuid?.() ?? -1) && (value.mode & 511n) === 384n &&
+                value.dev === parentDev && value.nlink === expectedLinks && value.size > 0n && value.size <= 1048576n;
+            const facts = (value) => canonicalJson({ dev: String(value.dev), ino: String(value.ino),
+                uid: String(value.uid), mode: String(value.mode), nlink: String(value.nlink), size: String(value.size),
+                mtimeNs: String(value.mtimeNs), ctimeNs: String(value.ctimeNs) });
+            if (!valid(before) || !valid(leaf) || facts(before) !== facts(leaf))
+                corrupt();
+            const bytes = await handle.readFile();
+            const after = await lstat(path, { bigint: true });
+            await this.assertNoSymlinkAncestors(path);
+            if (!valid(after) || facts(before) !== facts(after) || bytes.byteLength !== Number(before.size))
+                corrupt();
+            let text;
+            try {
+                text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+            }
+            catch {
+                corrupt();
+            }
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            }
+            catch {
+                corrupt();
+            }
+            const record = validateHistoricalRetirementRecord(parsed);
+            if (text !== `${canonicalJson(record)}\n`)
+                corrupt();
+            return { record, dev: before.dev, ino: before.ino, bytes };
+        }
+        finally {
+            await handle.close();
+        }
     }
     async pinIfPresent(relativePath) {
         if (relativePath === ".")
@@ -221,6 +332,61 @@ function bucketRowsOriginal(rows, reservationId, expected) {
         corrupt();
     return row;
 }
+async function assertAccountingPublication(token, context, record) {
+    await assertScope(token, context);
+    if (record.operationId !== context.operation.operationId || record.authentication.rootBinding !== hashObject({ root: context.state.root }) ||
+        record.accountingAt.slice(0, 10) !== new Date().toISOString().slice(0, 10))
+        refuse();
+    const root = context.state.root;
+    const currentAt = new Date();
+    const currentPolicy = await activePolicy(root, context, currentAt);
+    await assertScope(token, context);
+    if (canonicalJson(record.currentPolicy) !== canonicalJson({ registry: currentPolicy.registry,
+        activationDigest: currentPolicy.activationDigest, revision: currentPolicy.revision, activatedAt: currentPolicy.activatedAt }))
+        refuse();
+    const rootSnapshot = await historicalRetirementRootSnapshot(root);
+    const guard = context.state.directoryGuard(), buckets = new HistoricalUsageBucketReader(root, guard);
+    const native = await buckets.load(NATIVE_IDENTITY), usdc = await buckets.load(USDC_IDENTITY);
+    await guard.check([HISTORICAL_RETIREMENT_NAMESPACE]);
+    const retirements = await new JupiterHistoricalRetirementReader(root)
+        .forBucketDuringPublication(NATIVE_IDENTITY, native, record);
+    await guard.check([HISTORICAL_RETIREMENT_NAMESPACE]);
+    const operation = await new SwapOperationRepository(root).loadAny(record.operationId);
+    const lease = record.originalOperation.usageLease;
+    if (lease === null)
+        corrupt();
+    const row = bucketRowsOriginal(native, lease.reservationId, lease);
+    if (retirements.some(value => value.operationId === record.operationId))
+        refuse();
+    const accountingAt = new Date(record.accountingAt);
+    if (accountingAt.toISOString().slice(0, 10) !== currentAt.toISOString().slice(0, 10))
+        refuse();
+    const nativeUsage = historicalRetirementUsage(native, retirements, accountingAt);
+    const usdcUsage = sumUsage(usdc, accountingAt);
+    const admission = calculateHistoricalRetirementPolicy(currentPolicy, record.operationId, nativeUsage, usdcUsage, record.originalOperation.quote.minimumOutputAtomic, accountingAt);
+    if (canonicalJson(admission) !== canonicalJson(record.policyAdmission))
+        refuse();
+    if (rootSnapshot !== record.rootSnapshotHash || operation === null || canonicalJson(operation) !== canonicalJson(record.originalOperation))
+        corrupt();
+    await guard.check([HISTORICAL_RETIREMENT_NAMESPACE, "asset-usage"]);
+    await assertScope(token, context);
+    const rawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
+    assertHistoricalRetirementBindings(record, rootSnapshot, operation, row, rawHash);
+    // The raw lease hash is deliberately the final asynchronous read before link(2) publication.
+    scopeDeadline(context);
+    if (record.accountingAt.slice(0, 10) !== new Date().toISOString().slice(0, 10))
+        refuse();
+}
+async function lstatOptional(path) {
+    try {
+        return await lstat(path, { bigint: true });
+    }
+    catch (error) {
+        if (isCode(error, "ENOENT"))
+            return null;
+        throw error;
+    }
+}
 async function loadRetirements(root, rows) {
     return await new JupiterHistoricalRetirementReader(root).forBucket(NATIVE_IDENTITY, rows);
 }
@@ -358,7 +524,8 @@ export async function consumeJupiterHistoricalRetirement(token, context) {
         });
         assertHistoricalRetirementBindings(record, rootSnapshot, finalOperation, finalRow, finalRawHash);
         await assertScope(token, context);
-        await store.createOnly(`${HISTORICAL_RETIREMENT_NAMESPACE}/${opId}.json`, record);
+        const accountingStore = new HistoricalRetirementStore(root, guard, { token, context, record });
+        await accountingStore.createOnly(`${HISTORICAL_RETIREMENT_NAMESPACE}/${opId}.json`, record);
         await assertScope(token, context);
         await finishPostCommit(record, store, () => assertScope(token, context));
         await assertScope(token, context);
@@ -377,6 +544,7 @@ export async function recoverCommittedJupiterHistoricalRetirement(operationId, s
     return await state.withLocks([lockKey(NATIVE_IDENTITY)], async () => {
         await guard.check();
         const buckets = new HistoricalUsageBucketReader(root, guard), rows = await buckets.load(NATIVE_IDENTITY);
+        await store.recoverExactAccountingTemp(operationId, rows);
         const records = await loadRetirements(root, rows);
         const record = records.find(value => value.operationId === operationId);
         if (record === undefined) {
