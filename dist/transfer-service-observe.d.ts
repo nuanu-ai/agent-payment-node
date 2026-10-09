@@ -19,7 +19,7 @@ export declare class TransferServiceObservation {
     constructor(context: RuntimeContext, providerDirect: ProviderDirectTransferService, lifecycle: TransferObserveLifecycle);
     submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord>;
     private dispatchAndInspect;
-    resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true): Promise<unknown>;
+    resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
     recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;
     status(operationIdInput: string): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;

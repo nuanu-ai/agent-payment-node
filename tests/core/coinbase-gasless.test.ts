@@ -1,3 +1,5 @@
+import { assertCoinbaseObservationRequest } from "../../src/coinbase-gasless-observation-source.js";
+import { bindArgv } from "../../src/command-binder.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -78,7 +80,7 @@ class CoinbaseRpcFixture implements RpcPort {
   implementationCodeDriftAtInclusion = false;
   transactionBlock = BLOCK_100;
   block110 = BLOCK_110;
-  readonly rpcOrigin = "https://rpc.example";
+  readonly rpcOrigin: string = "https://rpc.example";
   readonly callLog: Array<{ method: string; params: readonly unknown[] }> = [];
   readonly userOp = { sender: SENDER, nonce: 7n, initCode: "0x" as Hex,
     callData: encodeFunctionData({ abi: ACCOUNT_ABI, functionName: "executeBatch", args: [[{ target: BASE_USDC, value: 0n,
@@ -102,7 +104,7 @@ class CoinbaseRpcFixture implements RpcPort {
     ];
   }
   async assertBaseChain() { return { chainId: 8453 as const, rpcOrigin: this.rpcOrigin }; }
-  async coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]) {
+  async coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown> {
     this.callLog.push({ method, params }); const arg = params[0];
     if (method === "eth_getBlockByNumber") {
       if (arg === "safe") return blockRaw(this.safeBlock, []);
@@ -110,6 +112,7 @@ class CoinbaseRpcFixture implements RpcPort {
       if (number === 90n) return blockRaw(BLOCK_90, []);
       if (number === BigInt(this.transactionBlock.numberAtomic)) return blockRaw(this.transactionBlock, [TX]);
       if (number === 110n) return blockRaw(this.block110, []);
+      if (number === BigInt(this.safeBlock.numberAtomic)) return blockRaw(this.safeBlock, []);
       return blockRaw({ numberAtomic: number.toString(), hash: `0x${number.toString(16).padStart(64, "0")}` as Hex, timestampAtomic: number.toString() }, []);
     }
     if (method === "eth_getTransactionByHash") return arg === TX ? this.transaction : null;
@@ -638,3 +641,119 @@ function word(value: Address): Hex { return `0x${value.slice(2).toLowerCase().pa
 function wordUint(value: bigint): Hex { return `0x${value.toString(16).padStart(64, "0")}`; }
 function blockRaw(value: typeof BLOCK_90, transactions: readonly Hex[]) { return { number: `0x${BigInt(value.numberAtomic).toString(16)}`,
   hash: value.hash, timestamp: `0x${BigInt(value.timestampAtomic).toString(16)}`, transactions }; }
+
+
+class SecondaryCoinbaseRpc extends CoinbaseRpcFixture {
+  override readonly rpcOrigin: string = "https://base-rpc.publicnode.com";
+  readonly windows: Readonly<Record<string, unknown>>[] = [];
+  override async coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>) {
+    this.windows.push(filter);
+    const rows = await super.coinbaseGaslessLogs(filter);
+    return rows.filter(row => BigInt((row as { blockNumber: string }).blockNumber) >= BigInt(filter.fromBlock as string) &&
+      BigInt((row as { blockNumber: string }).blockNumber) <= BigInt(filter.toBlock as string));
+  }
+}
+
+test("Coinbase fixed secondary scans complete bounded window despite primary 429, keeps state reads primary and hashes source", async () => {
+  const primary = new CoinbaseRpcFixture(), secondary = new SecondaryCoinbaseRpc();
+  primary.coinbaseGaslessLogs = async () => { throw new Error("HTTP 429"); };
+  primary.safeBlock = { numberAtomic: "400", hash: `0x${"f".repeat(64)}`, timestampAtomic: "400" };
+  secondary.safeBlock = primary.safeBlock;
+  const operation = makeOperation(primary, { schemaVersion: "apn.coinbase-gasless-locator.v1", hash: primary.userOperationHash,
+    provenance: "awal_error_text_hint" });
+  assert.equal((await observeCoinbaseGasless(primary, operation)).status, "unresolved");
+  const observed = await observeCoinbaseGasless(primary, operation, secondary);
+  assert.equal(observed.status, "safe");
+  assert.equal(secondary.windows.length, 52, "both user-op and transfer scans cover all 26 windows");
+  assert.equal(secondary.windows.at(-1)!.toBlock, "0x15a");
+  assert.ok(secondary.windows.every(filter => BigInt(filter.toBlock as string) - BigInt(filter.fromBlock as string) < 10n));
+  assert.ok(secondary.callLog.every(row => row.method === "eth_getBlockByNumber"), "secondary never reads code, storage, transaction or receipt");
+  if (observed.status !== "safe") return;
+  assert.deepEqual(observed.settlement.observationSource, { policy: "apn.coinbase-gasless.observation-source.v1",
+    callRpcOrigin: primary.rpcOrigin, logsRpcOrigin: secondary.rpcOrigin, preset: "publicnode-base" });
+  const { evidenceHash, ...body } = observed.settlement;
+  assert.equal(evidenceHash, hashObject(body));
+});
+
+test("Coinbase secondary refuses duplicate, wrong amount, hint-only match, deployment and anchor drift", async () => {
+  for (const kind of ["duplicate", "amount", "hint", "code", "anchor", "safe", "end", "origin", "chain"] as const) {
+    const primary = new CoinbaseRpcFixture(), secondary = new SecondaryCoinbaseRpc();
+    if (kind === "duplicate") secondary.extraCandidate = true;
+    if (kind === "amount") primary.userOp.callData = encodeFunctionData({ abi: ACCOUNT_ABI, functionName: "executeBatch",
+      args: [[{ target: BASE_USDC, value: 0n, data: encodeFunctionData({ abi: TOKEN_ABI, functionName: "transfer", args: [RECIPIENT, 999n] }) }]] });
+    if (kind === "hint") { primary.noCandidate = true; secondary.noCandidate = true; }
+    if (kind === "code") primary.implementationCodeDriftAtInclusion = true;
+    if (kind === "origin") secondary.assertBaseChain = async () => ({ chainId: 8453, rpcOrigin: "https://other.example" });
+    if (kind === "chain") secondary.assertBaseChain = async () => ({ chainId: 1 as 8453, rpcOrigin: secondary.rpcOrigin });
+    if (kind === "safe" || kind === "end") {
+      primary.safeBlock = { numberAtomic: "400", hash: `0x${"f".repeat(64)}`, timestampAtomic: "400" };
+      secondary.safeBlock = primary.safeBlock;
+    }
+    if (["anchor", "safe", "end"].includes(kind)) {
+      const original = secondary.coinbaseGaslessCall.bind(secondary);
+      secondary.coinbaseGaslessCall = async (method, params) => {
+        const value = await original(method, params);
+        const target = kind === "anchor" ? "0x5a" : kind === "safe" ? "0x190" : "0x15a";
+        return method === "eth_getBlockByNumber" && params[0] === target ? { ...(value as object), hash: `0x${"e".repeat(64)}` } : value;
+      };
+    }
+    const operation = makeOperation(primary, { schemaVersion: "apn.coinbase-gasless-locator.v1", hash: primary.userOperationHash,
+      provenance: "awal_error_text_hint" });
+    assert.notEqual((await observeCoinbaseGasless(primary, operation, secondary)).status, "safe", kind);
+  }
+});
+
+
+test("Coinbase normal resume preset rejects arbitrary URLs, non-AWAL and pre-effect states without RPC or provider effects", async t => {
+  const bound = bindArgv(["operation", "resume", "--operation", "a".repeat(64), "--rpc-url", "https://rpc.example",
+    "--coinbase-observation-rpc", "publicnode-base"]);
+  assert.equal(bound.request.command, "operation.resume");
+  if (bound.request.command === "operation.resume") assert.equal(bound.request.coinbaseObservationRpc, "publicnode-base");
+  for (const preset of ["unknown", "https://base-rpc.publicnode.com"]) assert.throws(() => bindArgv(["operation", "resume",
+    "--operation", "a".repeat(64), "--rpc-url", "https://rpc.example", "--coinbase-observation-rpc", preset]));
+  const operation = makeOperation(new CoinbaseRpcFixture());
+  assert.doesNotThrow(() => assertCoinbaseObservationRequest(operation, "publicnode-base", false));
+  const { providerDirect: _provider, ...localOperation } = operation;
+  for (const record of [{ ...operation, state: "awaiting_approval" as const }, localOperation,
+    { ...operation, providerDirect: { ...operation.providerDirect!, providerId: "other" } }]) {
+    assert.throws(() => assertCoinbaseObservationRequest(record, "publicnode-base", false));
+  }
+  assert.throws(() => assertCoinbaseObservationRequest(operation, "publicnode-base", true));
+  const s = await policyFixture(t);
+  await activateCoinbasePolicy(s.root, "coinbase-policy");
+  assert.equal((await s.core.execute(s.request("preset-awaiting"))).ok, true);
+  const before = s.rpc.callLog.length;
+  const result = await s.core.execute({ command: "operation.resume", operationId: s.state.operationId("coinbase-policy", "preset-awaiting"),
+    coinbaseObservationRpc: "publicnode-base" });
+  assert.equal(result.error?.code, "APN_INVALID_INPUT");
+  assert.equal(s.rpc.callLog.length, before); assert.equal(s.providerCalls(), 0);
+});
+
+test("Coinbase optional source remains hash-bound across receipt recovery while legacy evidence excludes it", async () => {
+  const primary = new CoinbaseRpcFixture(), secondary = new SecondaryCoinbaseRpc(), previous = makeOperation(primary);
+  const legacy = await observeCoinbaseGasless(primary, previous);
+  assert.equal(legacy.status, "safe");
+  if (legacy.status !== "safe") return;
+  assert.equal(Object.hasOwn(legacy.settlement, "observationSource"), false);
+  const { evidenceHash: legacyHash, ...legacyBody } = legacy.settlement;
+  assert.equal(legacyHash, hashObject(legacyBody));
+  const observed = await observeCoinbaseGasless(primary, previous, secondary);
+  assert.equal(observed.status, "safe"); if (observed.status !== "safe") return;
+  const { integrityHash: _previous, ...previousBody } = previous;
+  const completed = sealOperation({ ...previousBody, transactionHash: TX, coinbaseGaslessSettlement: observed.settlement,
+    coinbaseGaslessCursor: observed.cursor, state: "completed", terminal: true, reason: "confirmed_coinbase_gasless_transfer",
+    proofClass: "canonical_safe_coinbase_gasless_settlement", transitions: appendTransition(previous.transitions, {
+      at: "2026-09-12T00:00:01.000Z", state: "completed", terminal: true, reason: "confirmed_coinbase_gasless_transfer",
+      proofClass: "canonical_safe_coinbase_gasless_settlement" }) });
+  validateOperation(completed);
+  assert.deepEqual(recoverProviderTerminalOperation(previous, providerDirectReceipt(completed)), completed);
+  for (const source of [{ ...observed.settlement.observationSource!, callRpcOrigin: "https://wrong.example" },
+    { ...observed.settlement.observationSource!, extra: true }]) {
+    const { evidenceHash: _hash, ...body } = observed.settlement;
+    const changed = { ...body, observationSource: source };
+    const { integrityHash: _completed, ...completedBody } = completed;
+    const bad = sealOperation({ ...completedBody, coinbaseGaslessSettlement: { ...changed, evidenceHash: hashObject(changed) } });
+    assert.throws(() => validateOperation(bad), { code: "APN_STATE_CORRUPT" });
+    assert.throws(() => recoverProviderTerminalOperation(previous, providerDirectReceipt(bad)), { code: "APN_STATE_CORRUPT" });
+  }
+});

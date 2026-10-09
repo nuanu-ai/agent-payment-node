@@ -1,3 +1,4 @@
+import { validCoinbaseObservationSource, validCoinbaseSettlementKeys } from "./coinbase-gasless-observation-source.js";
 import { ApnError } from "./errors.js";
 import { hashObject } from "./canonical.js";
 import type { OperationRecord, ReceiptRecord } from "./model.js";
@@ -128,6 +129,8 @@ function assertTerminalReceipt(receipt: ReceiptRecord, operation: OperationRecor
         coinbaseSettlement === undefined ||
         (operation.coinbaseGaslessSettlement !== undefined &&
           JSON.stringify(coinbaseSettlement) !== JSON.stringify(operation.coinbaseGaslessSettlement)) ||
+        !validCoinbaseSettlementKeys(coinbaseSettlement) ||
+        !validCoinbaseObservationSource(coinbaseSettlement.observationSource, operation.providerDirect.coinbaseGasless.rpcOrigin) ||
         evidenceHash !== hashObject(evidenceBody) || coinbaseSettlement.grossAtomic !== operation.amountAtomic ||
         coinbaseSettlement.netAtomic !== operation.amountAtomic || coinbaseSettlement.feeAtomic !== "0" ||
         coinbaseSettlement.senderNativeDebitWei !== "0" ||

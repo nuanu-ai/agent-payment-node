@@ -201,8 +201,8 @@ export class TransferService {
             return publicOperation(operation);
         });
     }
-    async resume(operationId, waitSeconds, observeOnly) {
-        return await this.observation.resume(operationId, waitSeconds, observeOnly);
+    async resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc) {
+        return await this.observation.resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc);
     }
     async recoverProviderRequest(operationId, providerRequestId) {
         return await this.observation.recoverProviderRequest(operationId, providerRequestId);

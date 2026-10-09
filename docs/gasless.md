@@ -704,3 +704,6 @@ or signed material.
 Synthetic source and temporary-installed tests establish software behavior.
 They do not establish real-wallet, mainnet, receiving-human or public-release
 acceptance. Those checks require their own explicit approval and evidence.
+
+
+For a saved Coinbase AWAL gasless operation already in `started` or `ambiguous_effect`, `apn operation resume --operation <operation-id> --rpc-url <frozen-primary-rpc-url> --coinbase-observation-rpc publicnode-base` selects `https://base-rpc.publicnode.com` for bounded log scans only. The frozen primary still supplies deployment, state, transaction and receipt evidence. APN cross-checks the secondary chain and frozen anchor, safe head and scan boundary hashes, scans the full window for duplicate candidates, and binds the selected observation source into settlement evidence. This option cannot approve or resend, accepts only the fixed preset, and cannot be combined with wait or other observation options.

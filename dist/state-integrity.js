@@ -1,3 +1,4 @@
+import { validCoinbaseObservationSource, validCoinbaseSettlementKeys } from "./coinbase-gasless-observation-source.js";
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -111,6 +112,11 @@ export function validateReceipt(value) {
     }
     else if (receipt.amountAtomic !== undefined || receipt.evmEvidence !== undefined)
         stateCorrupt("Receipt asset fields have no binding.");
+    if (receipt.coinbaseGaslessSettlement !== undefined) {
+        const settlement = receipt.coinbaseGaslessSettlement;
+        if (!validCoinbaseSettlementKeys(settlement) || !validCoinbaseObservationSource(settlement.observationSource, settlement.observationSource?.callRpcOrigin ?? ""))
+            stateCorrupt("Coinbase receipt observation source is invalid.");
+    }
     return receipt;
 }
 function validateTransitions(values) {
@@ -292,7 +298,8 @@ function validateCoinbaseGasless(operation, value) {
         const settlement = operation.coinbaseGaslessSettlement;
         if (!isPlainRecord(settlement) || !exactKeys(settlement, ["schemaVersion", "userOperationHash", "transactionHash", "nonceAtomic",
             "paymaster", "paymasterCodeHash", "block", "safeBlock", "evidenceHash", "grossAtomic", "netAtomic", "feeAtomic",
-            "senderNativeDebitWei"]) || settlement.schemaVersion !== "apn.coinbase-gasless-settlement.v1" ||
+            "senderNativeDebitWei", ...(settlement.observationSource === undefined ? [] : ["observationSource"])]) ||
+            !validCoinbaseObservationSource(settlement.observationSource, value.rpcOrigin) || settlement.schemaVersion !== "apn.coinbase-gasless-settlement.v1" ||
             !/^0x[0-9a-f]{64}$/u.test(settlement.userOperationHash) || !/^0x[0-9a-f]{64}$/u.test(settlement.transactionHash) ||
             !/^0x[0-9a-fA-F]{40}$/u.test(settlement.paymaster) || settlement.paymaster.toLowerCase() === "0x0000000000000000000000000000000000000000" ||
             !/^0x[0-9a-f]{64}$/u.test(settlement.paymasterCodeHash) || !/^[a-f0-9]{64}$/u.test(settlement.evidenceHash) ||
