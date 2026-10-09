@@ -116,7 +116,7 @@ function submissionHint(result: MetaMaskProcessResult): MetaMaskNativeSubmission
   const notice = classifyMetaMaskPendingNotices(parsed.notices);
   const data = parsed.envelope?.data;
   const transactionHash = isPlainRecord(data) && typeof data.hash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(data.hash)
-    ? data.hash as Hex : undefined;
+    ? data.hash.toLowerCase() as Hex : undefined;
   const requestId = isPlainRecord(data) && typeof data.pollingId === "string" && /^[A-Za-z0-9._:-]{1,256}$/u.test(data.pollingId)
     ? data.pollingId : notice.disposition === "pending" ? notice.recoveryToken : undefined;
   const unknown = (reason: string): MetaMaskNativeSubmission => ({disposition: "unknown", reason,
