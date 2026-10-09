@@ -42,16 +42,7 @@ export function circleNativeSourceIdentity(op: CircleOperationV1): string {
   return hashObject({ sourceCustody: op.sourceCustody, source: op.source, attestation: op.attestation,
     effects: op.effects.filter(e => e.role !== "mint"), residualAllowanceAtomic: op.residualAllowanceAtomic });
 }
-/** Exactly fourteen scalar read POSTs for one saved source. No journal mutation or custody entry. */
-class PublicCircleReads extends CircleRpc {
-  private count = 0;
-  constructor(private readonly port: RpcPort) { super("https://public.invalid", 42161); }
-  override async call(method: string, params: readonly unknown[]): Promise<unknown> {
-    if (++this.count > 14 || !["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_call"].includes(method) ||
-        this.port.coinbaseGaslessCall === undefined) blocked();
-    return await this.port.coinbaseGaslessCall(method as Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params);
-  }
-}
+
 function envelope(effect: CircleEffect, input: unknown): void {
   const t = circleRecord(input), e = effect.envelope;
   if (circleHex(t.hash, 32) !== effect.transactionHash || circleUint(t.nonce).toString() !== e.nonceAtomic ||
@@ -79,6 +70,16 @@ export async function verifyCircleNativeAdmission(state: StateStore, port: RpcPo
       expected !== undefined && expected.sources[0]!.sourceIdentityHash !== circleNativeSourceIdentity(op)) blocked();
   port.armEvmDirectRpcGuard?.();
   assertCircleAttestation(op.source!, op.attestation!);
+  /** Exactly fourteen scalar read POSTs for one saved source. No journal mutation or custody entry. */
+  class PublicCircleReads extends CircleRpc {
+    private count = 0;
+    constructor(private readonly port: RpcPort) { super("https://public.invalid", 42161); }
+    override async call(method: string, params: readonly unknown[]): Promise<unknown> {
+      if (++this.count > 14 || !["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_call"].includes(method) ||
+          this.port.coinbaseGaslessCall === undefined) blocked();
+      return await this.port.coinbaseGaslessCall(method as Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params);
+    }
+  }
   const rpc = new PublicCircleReads(port), approval = op.effects.find(e => e.role === "approval")!, burn = op.effects.find(e => e.role === "burn")!;
   const a = await rpc.observation(approval.transactionHash!, "finalized"), b = await rpc.observation(burn.transactionHash!, "finalized");
   if (a === null || b === null) blocked(); envelope(approval, a.transaction); envelope(burn, b.transaction);
