@@ -1,4 +1,4 @@
-import { bindMerchantMaterial, issueMerchantAuthority, assertMerchantAuthority, disposeMerchantAuthority } from "./authority.js";
+import { bindMerchantMaterial, bindMerchantFeeAdmission, issueMerchantAuthority, type MerchantAuthority, assertMerchantAuthority, disposeMerchantAuthority } from "./authority.js";
 import { MerchantClaims } from "./claims.js";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { evmNativeCustody } from "../evm-native-custody.js";
@@ -50,16 +50,16 @@ export class MerchantService {
                 refuse("merchant_finite_owner");
             await assertExclusiveEvmRawSigner(this.state, MERCHANT_OWNER, profileHash);
             await this.operations.assertEvmAccountAvailable(profileHash, 4326, MERCHANT_OWNER);
-            const policy = await this.owner.admit(profile), observation = await this.ports.http.get({ url: MERCHANT_URL }), frozen = merchantChallenge(observation), current = await merchantCurrent(this.ports.rpc);
+            const policy = await this.owner.admit(profile), observation = await this.ports.http.get({ url: MERCHANT_URL }), frozen = merchantChallenge(observation), current = await merchantCurrent(this.ports.rpc,undefined,maximumNativeFee);
             const createdAt = this.ports.now().toISOString();
             if (Date.parse(createdAt) - Date.parse(observation.observedAt) > 30000 || Date.parse(createdAt) < Date.parse(observation.observedAt))
                 refuse("merchant_challenge_read_age");
             const envelope = { nonce: current.nonce, gas: current.gas, maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas, maximumNativeFee };
-            checkMerchantEnvelope(current, envelope);
+            checkMerchantEnvelope(current, envelope,current.feeContext);
             if (BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
                 refuse("merchant_usdm_balance");
-            const effectBinding = await this.owner.effectBinding(profile,(BigInt(envelope.gas)*BigInt(envelope.maxFeePerGas)).toString(),new Date(Date.parse(createdAt)+300000).toISOString());
-            const body = { effectBinding, schemaVersion: "apn.x402-merchant.v1" as const, kind: "merchant_x402" as const, operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared" as const, terminal: false, signingAttempts: 0 as const, submissionAttempts: 0 as const, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared" as const, previousHash: null, snapshotHash: merchantSnapshot({ state:"prepared", signingAttempts:0, submissionAttempts:0, txHash:null, receipt:null, deliveryAttempts:[] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state:"prepared", signingAttempts:0, submissionAttempts:0, txHash:null, receipt:null, deliveryAttempts:[] }) }) }] };
+            const effectBinding = await this.owner.effectBinding(profile,current.feeContext.admissionEstimatedUpper,new Date(Date.parse(createdAt)+300000).toISOString());
+            const body = { feeContext:current.feeContext,effectBinding, schemaVersion: "apn.x402-merchant.v1" as const, kind: "merchant_x402" as const, operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared" as const, terminal: false, signingAttempts: 0 as const, submissionAttempts: 0 as const, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared" as const, previousHash: null, snapshotHash: merchantSnapshot({ state:"prepared", signingAttempts:0, submissionAttempts:0, txHash:null, receipt:null, deliveryAttempts:[] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state:"prepared", signingAttempts:0, submissionAttempts:0, txHash:null, receipt:null, deliveryAttempts:[] }) }) }] };
             const o = sealMerchant({ ...body, fingerprint: merchantFingerprint(body) });
             await this.records.persist(o);
             return o;
@@ -73,6 +73,7 @@ export class MerchantService {
                 refuse("merchant_once_only_approval");
             if (this.ports.approve === undefined || this.ports.custody === undefined)
                 throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "The pinned USDm payment requires foreground CLI confirmation.");
+            if(o.feeContext===undefined)refuse("merchant_new_full_fee_context_required");
             if(o.effectBinding===undefined)refuse("merchant_new_effect_binding_required");
             const claims=new MerchantClaims(this.state.root);
             await claims.assertUnused(o);
@@ -91,15 +92,16 @@ export class MerchantService {
             const holds=await owner.held(o), grant=issueMerchantAuthority(this,o,holds.token,holds.native,approvalEndsAt);
             // No path after this durable fence may invoke custody again, including a crash before the signature returns.
             try {
+                await this.refreshFee(o,grant);
                 assertMerchantAuthority(grant,this,o,this.ports.now());
-                const raw = await this.ports.custody.sign(o,grant,this), txHash = await this.ports.custody.verify(o, raw);
+                const raw = await this.ports.custody.sign(o,grant,this,()=>this.refreshFee(o,grant)), txHash = await this.ports.custody.verify(o, raw);
                 bindMerchantMaterial(grant,this,o,this.ports.now(),hashObject({raw,txHash,fingerprint:o.fingerprint}));
                 await this.ports.custody.seal(o, raw);
                 this.fresh(o);
                 assertMerchantAuthority(grant,this,o,this.ports.now());
                 await owner.confirm(o);
                 await owner.held(o);
-                checkMerchantEnvelope(await merchantCurrent(this.ports.rpc), o.envelope);
+                await this.refreshFee(o,grant);
                 if (canonicalJson(merchantChallenge(await this.ports.http.get({url:MERCHANT_URL}))) !== canonicalJson(o.frozen)) refuse("merchant_challenge_changed_after_sealing");
                 this.fresh(o);
                 assertMerchantAuthority(grant,this,o,this.ports.now());
@@ -203,12 +205,17 @@ export class MerchantService {
         this.fresh(o);
         await owner.confirm(o);
         await this.operations.assertMerchantAccountAvailable(o);
-        const current = await merchantCurrent(this.ports.rpc);
-        checkMerchantEnvelope(current, o.envelope);
+        const current = await merchantCurrent(this.ports.rpc,o.envelope);
+        checkMerchantEnvelope(current, o.envelope,o.feeContext);
         const fresh = merchantChallenge(await this.ports.http.get({ url: MERCHANT_URL }));
         if (canonicalJson(fresh) !== canonicalJson(o.frozen))
             refuse("merchant_challenge_changed");
         this.fresh(o);
+    }
+    private async refreshFee(o:MerchantOperation,grant:MerchantAuthority):Promise<void>{
+        const started=this.ports.now();this.fresh(o);
+        const current=await merchantCurrent(this.ports.rpc,o.envelope);checkMerchantEnvelope(current,o.envelope,o.feeContext);
+        bindMerchantFeeAdmission(grant,this,o,current.feeContext,started,this.ports.now());
     }
     private consentFresh(o:MerchantOperation,approvalEndsAt:string) { this.fresh(o); if(o.effectBinding===undefined || this.at() >= approvalEndsAt || this.at() >= o.effectBinding.policyEndsAt) refuse("merchant_foreground_authority_required_or_expired"); }
     private fresh(o: MerchantOperation) { if (this.at() >= o.expiresAt || this.at().slice(0, 10) !== o.createdAt.slice(0, 10))
@@ -221,5 +228,6 @@ export class MerchantService {
 
 export function sameReceiptEffect(saved: MerchantReceipt, fresh: MerchantReceipt): boolean {
     for (const key of ["transactionHash", "blockNumber", "blockHash", "status", "networkFeeWei"] as const) if (saved[key] !== fresh[key]) return false;
+    if(saved.fullFee!==undefined&&canonicalJson(saved.fullFee)!==canonicalJson(fresh.fullFee))return false;
     return saved.canonical === undefined || saved.canonical.transactionIndex === fresh.canonical?.transactionIndex && saved.canonical.blockHeaderHash === fresh.canonical?.blockHeaderHash;
 }

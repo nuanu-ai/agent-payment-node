@@ -1,3 +1,4 @@
+import { merchantFeeQuote, checkMerchantFullFee, merchantActualFee, merchantOracleAt, merchantPayerDebit, type MerchantFeeContext } from "./mega-fee.js";
 import { decodeEventLog, decodeFunctionResult, encodeFunctionData, erc20Abi, getAddress, hashDomain, keccak256, type Hex } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
@@ -18,7 +19,7 @@ const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance"
 export class MerchantRpc implements MerchantRpcPort {
     private sequence = 0;
     private readonly guard: EvmDirectRpcGuard;
-    constructor(state: StateStore, private readonly transport = new BridgeHttps()) { this.guard = new EvmDirectRpcGuard(state); }
+    constructor(state: StateStore, private readonly transport = new BridgeHttps()) { this.guard = new EvmDirectRpcGuard(state,64); }
     async batch(calls: readonly {
         method: string;
         params: readonly unknown[];
@@ -54,13 +55,14 @@ export function hexHash(v: unknown): Hex { const h = bytes(v); if (h.length !== 
     refuse("merchant_rpc_hash"); return h; }
 export function rpcTransaction() { return { from: MERCHANT_OWNER, to: MERCHANT_TOKEN, data: MERCHANT_DATA, value: "0x0" }; }
 /** Fresh runtime, proxy implementation, real domain, balances and pending nonce at one rechecked anchor. */
-export async function merchantCurrent(rpc: MerchantRpcPort): Promise<{
+export async function merchantCurrent(rpc: MerchantRpcPort,frozenEnvelope?:MerchantEnvelope,maximumNativeFee="1000000000000000000"): Promise<{
     nonce: string;
     gas: string;
     maxFeePerGas: string;
     maxPriorityFeePerGas: string;
     native: string;
     token: string;
+    feeContext: MerchantFeeContext;
 }> {
     const head = object(await rpc.call("eth_getBlockByNumber", ["latest", false])), tag = head.number, blockHash = hexHash(head.hash);
     const call = (functionName: "name" | "symbol" | "decimals" | "balanceOf", args?: readonly [
@@ -80,9 +82,12 @@ export async function merchantCurrent(rpc: MerchantRpcPort): Promise<{
         bytes(v[7]) !== hashDomain({ types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"},{name:"chainId",type:"uint256"},{name:"verifyingContract",type:"address"}] }, domain: { name: "MegaUSD", version: "1", chainId: 4326n, verifyingContract: MERCHANT_TOKEN } }))
         refuse("merchant_token_domain");
     const gas = quantity(v[12]) * 12n / 10n + 1n, priority = quantity(v[13]), fee = quantity(head.baseFeePerGas) * 2n + priority;
-    return { nonce: quantity(v[10]).toString(), gas: gas.toString(), maxFeePerGas: fee.toString(), maxPriorityFeePerGas: priority.toString(), native: quantity(v[9]).toString(), token: String(decode("balanceOf", v[8])) };
+    const e=frozenEnvelope??{nonce:quantity(v[10]).toString(),gas:gas.toString(),maxFeePerGas:fee.toString(),maxPriorityFeePerGas:priority.toString(),maximumNativeFee};
+    const feeContext=await merchantFeeQuote(rpc,head,e);
+    return {feeContext, nonce: quantity(v[10]).toString(), gas: gas.toString(), maxFeePerGas: fee.toString(), maxPriorityFeePerGas: priority.toString(), native: quantity(v[9]).toString(), token: String(decode("balanceOf", v[8])) };
 }
-export function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope): void {
+export function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope,feeContext?:MerchantFeeContext): void {
+    checkMerchantFullFee(current.feeContext,feeContext??current.feeContext,envelope,current.native);
     if (current.nonce !== envelope.nonce || BigInt(current.gas) > BigInt(envelope.gas) || BigInt(current.maxFeePerGas) > BigInt(envelope.maxFeePerGas) || BigInt(current.maxPriorityFeePerGas) > BigInt(envelope.maxPriorityFeePerGas) ||
         BigInt(current.native) < BigInt(envelope.gas) * BigInt(envelope.maxFeePerGas) || BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
         refuse("merchant_nonce_fee_balance_changed");
@@ -133,8 +138,16 @@ export async function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation
     const signedPrice = BigInt(o.envelope.maxFeePerGas), offeredPrice = baseFee + BigInt(o.envelope.maxPriorityFeePerGas);
     if (effectiveGasPrice !== (signedPrice < offeredPrice ? signedPrice : offeredPrice)) refuse("merchant_receipt_effective_fee");
     if (gasUsed === 0n || quantity(r.type) !== 2n || effectiveGasPrice < baseFee || effectiveGasPrice > baseFee + BigInt(o.envelope.maxPriorityFeePerGas) ||
-        r.l1Fee !== undefined && quantity(r.l1Fee) !== 0n || r.blobGasUsed !== undefined && quantity(r.blobGasUsed) !== 0n) refuse("merchant_receipt_fee_type");
+        (o.feeContext===undefined && r.l1Fee !== undefined && quantity(r.l1Fee) !== 0n) || r.blobGasUsed !== undefined && quantity(r.blobGasUsed) !== 0n) refuse("merchant_receipt_fee_type");
     if (gasUsed > BigInt(o.envelope.gas) || effectiveGasPrice > BigInt(o.envelope.maxFeePerGas) || gasUsed * effectiveGasPrice > BigInt(o.envelope.maximumNativeFee)) refuse("merchant_receipt_fee_ceiling");
+    const actual=o.feeContext===undefined?null:merchantActualFee(r);
+    let fullFee:MerchantReceipt["fullFee"]|undefined;
+    if(actual!==null){
+      if(o.effectBinding===undefined || BigInt(actual.total)>BigInt(o.envelope.maximumNativeFee) || BigInt(actual.total)>BigInt(o.effectBinding.nativeAmountAtomic))refuse("merchant_receipt_full_fee_budget");
+      await merchantOracleAt(rpc,quantity(r.blockNumber).toString(),hexHash(r.blockHash),gasUsed);
+      const payerDebit=await merchantPayerDebit(rpc,MERCHANT_OWNER,fullBlock,r,o.effectBinding.nativeAmountAtomic);
+      fullFee={executionWei:actual.execution,l1Wei:actual.l1,operatorWei:actual.operator,signedExecutionCapWei:o.feeContext!.executionUpper,admissionEstimatedUpperWei:o.feeContext!.admissionEstimatedUpper,payerDebit};
+    }
     const status = quantity(r.status);
     if (status !== 0n && status !== 1n)
         refuse("merchant_receipt_status");
@@ -179,7 +192,7 @@ export async function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation
         const currentAnchor = await rpc.call("eth_getBlockByNumber", [currentHead.number, false]);
         if (canonicalJson(merchantHeader(currentAnchor)) !== canonicalJson(currentIdentity)) refuse("merchant_receipt_finalized_changed");
     }
-    return { transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: (gasUsed * effectiveGasPrice).toString(),
+    return { transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: actual?.total??(gasUsed * effectiveGasPrice).toString(),...(fullFee===undefined?{}:{fullFee}),
         canonical: { transactionIndex: index.toString(), blockHeaderHash: hashObject(blockIdentity), finalizedNumber: quantity(currentHead.number).toString(), finalizedHash: hexHash(currentHead.hash), finalizedHeaderHash: hashObject(currentIdentity) },
-        evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, currentFinalizedHead: currentHead, code, impl, storage }) };
+        evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, currentFinalizedHead: currentHead, code, impl, storage,...(fullFee===undefined?{}:{fullFee}) }) };
 }
