@@ -57,7 +57,10 @@ export class Cleanup86Store extends SecureStateStore {
   async startCurrent(state: StateStore, op: CircleOperationV1, recovery: Cleanup85RecoveryIntent, envelope: CircleEnvelope, certificate: VerifiedCleanup86CurrentPurpose): Promise<Cleanup86Intent> {
     if (state.root !== this.root) circleBlocked("cleanup86_current_root_changed");
     const purpose = verifiedCleanup86CurrentPurpose(certificate, state, op, recovery, envelope);
-    for (const kind of ["intent", "effect", "sign", "send", "material", "history-0", "first-failure"]) if (await this.readJson(this.path(op, kind)) !== null) circleBlocked("cleanup86_existing_observe_only");
+    for (const kind of ["intent", "effect", "sign", "send", "material", "first-failure"]) if (await this.readJson(this.path(op, kind)) !== null) circleBlocked("cleanup86_existing_observe_only");
+    // A journal can survive without its effect head or earlier sequence entries.
+    // Any exact-parent history name, including an unsafe/corrupt entry, fences retry.
+    for (const entry of await this.readDirectory("circle-cleanup85-recovery")) if (entry.name.startsWith(`${op.operationId}-cleanup86-history-`)) circleBlocked("cleanup86_existing_observe_only");
     const body = { version: "apn.circle-cleanup86-intent.v3" as const, recoveryBinding: recovery.recoveryBinding, cancellationProofHash: purpose.cancellationProofHash, envelope, policies: purpose.policies, capturedAt: purpose.capturedAt, windowEndsAt: purpose.windowEndsAt, currentPurpose: purpose };
     const intent = validateCleanup86Intent({ ...body, intentHash: hashObject(body) }, recovery, undefined, { root: this.root, op });
     verifiedCleanup86CurrentPurpose(certificate, state, op, recovery, envelope);

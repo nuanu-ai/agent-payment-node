@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, symlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Cleanup85CancellationProof } from "../../src/circle-cleanup85-cancellation-contract.js";
 import type { VerifiedCleanup86CurrentPurpose } from "../../src/circle-v2-evm/cleanup86-current-purpose.js";
@@ -31,7 +31,7 @@ test("current86 actual permission issuer with explicit future F85 TEST public-st
   const { executeAllowlistPolicyCommand } = await import("../../src/allowlist-policy-command.js"), { AllowlistPolicyStore } = await import("../../src/allowlist-policy-store.js");
   const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js"), { StateStore } = await import("../../src/state.js");
   const { executeCleanup86 } = await import("../../src/circle-v2-evm/cleanup86-controller.js");
-  const variants = ["positive", "expired_legacy", "proof", "proof_hash", "root", "copied_token", "nonce", "fee", "day", "expired", "policy", "daily", "perop", "carry", "no_reset", "material", "sign", "send", "history", "no_private_dto", "no_repeat", "legacy_strict", "historical_reload", "rpc_budget", "f85_accounting_refusal", "claimed_unknown", "normal_cli"] as const;
+  const variants = ["positive", "expired_legacy", "proof", "proof_hash", "root", "copied_token", "nonce", "fee", "day", "expired", "policy", "daily", "perop", "carry", "no_reset", "material", "sign", "send", "history", "history_one", "history_gap", "history_high", "history_corrupt", "history_symlink", "history_directory", "no_private_dto", "no_repeat", "legacy_strict", "historical_reload", "rpc_budget", "f85_accounting_refusal", "claimed_unknown", "normal_cli"] as const;
   for (const variant of variants) await t.test(variant, async t => {
     const temp = await temporaryState(); t.after(temp.cleanup); const f = await cleanup85PublicState(temp.root), transport = await cleanup85PublicTransport(); let clock = Date.parse("2026-10-09T20:00:00.000Z");
     const store = new Cleanup86Store(temp.root), { CircleNonceRetirementStore } = await import("../../src/circle-v2-evm/nonce-retirement-store.js"), parentIntent = (await new CircleNonceRetirementStore(temp.root).intent(f.parent))!;
@@ -88,6 +88,15 @@ test("current86 actual permission issuer with explicit future F85 TEST public-st
       if (variant === "day" || variant === "expired") { await assert.rejects(store.startCurrent(f.state, f.parent, recovery, envelope, token)); return; }
       if (variant === "policy") { const originalRead = AllowlistPolicyStore.prototype.readUnderProfileLock; t.mock.method(AllowlistPolicyStore.prototype, "readUnderProfileLock", async function(this: InstanceType<typeof AllowlistPolicyStore>, profile: string) { const value = await originalRead.call(this, profile); return profile === f.parent.profile ? { ...value, entries: [] } : value; }); await assert.rejects(assertCleanup86CurrentPermission(token, f.state, f.parent, recovery, envelope), /active_owner_asset_policy_required/); return; }
       if (["material", "sign", "send", "history"].includes(variant)) { await writeFile(join(temp.root, "circle-cleanup85-recovery", `${f.parent.operationId}-cleanup86-${variant === "history" ? "history-0" : variant}.json`), "{}", { mode: 0o600 }); await assert.rejects(store.startCurrent(f.state, f.parent, recovery, envelope, token), /existing_observe_only/); return; }
+      if (variant.startsWith("history_")) {
+        const suffix = variant === "history_one" ? "1.json" : variant === "history_gap" ? "7.json" : variant === "history_high" ? "999999999999999999999999.json" : variant === "history_corrupt" ? "broken.json" : "2.json";
+        const marker = join(temp.root, "circle-cleanup85-recovery", `${f.parent.operationId}-cleanup86-history-${suffix}`);
+        if (variant === "history_symlink") await symlink(parentPath, marker);
+        else if (variant === "history_directory") await mkdir(marker, { mode: 0o700 });
+        else await writeFile(marker, variant === "history_corrupt" ? "not JSON" : "{}", { mode: 0o600 });
+        await assert.rejects(store.startCurrent(f.state, f.parent, recovery, envelope, token), /existing_observe_only/);
+        assert.equal(await store.intent(f.parent, recovery), null); return;
+      }
       const intent = await store.startCurrent(f.state, f.parent, recovery, envelope, token); assert.equal(intent.version, "apn.circle-cleanup86-intent.v3"); assert.equal((await store.intent(f.parent, recovery))!.intentHash, intent.intentHash);
       if (variant === "legacy_strict") { const { currentPurpose: _purpose, intentHash: _hash, ...body } = intent; assert.throws(() => validateCleanup86Intent({ ...body, version: "apn.circle-cleanup86-intent.v1", intentHash: hashObject({ ...body, version: "apn.circle-cleanup86-intent.v1" }) }, recovery), /intent_binding/); return; }
       if (variant === "historical_reload") { historicalIntentHash = intent.intentHash; return; }
