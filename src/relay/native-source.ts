@@ -24,6 +24,7 @@ import type { StateStore } from "../state.js";
 import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
 import { ETHEREUM_DEPOSITORY } from "./quote.js";
 import { BASE_RELAY_SIGNED_BYTES, verifyRelayBaseFunding } from "./base-source-guard.js";
+import { decodeRelayBaseReceiptFee, verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 
 const HASH = /^[a-f0-9]{64}$/u, TX_HASH = /^0x[a-f0-9]{64}$/u;
@@ -324,6 +325,13 @@ export class RelayNativeSourceRuntime {
       evmRpcHex(evmRpcRecord(recheck[1]).hash, 32) !== evmRpcHex(latest.hash, 32)) blocked("source_block_changed");
     const status = evmRpcQuantity(receipt.status);
     if (status !== 0n && status !== 1n) corrupt("receipt status");
+    if (op.sourceChainId === 8453) {
+      // A source receipt cannot settle the native hold on L2-only gas evidence.
+      // Unsupported, malformed or over-cap fee evidence keeps the send charged
+      // and nonterminal; it must never trigger a send retry or hold release.
+      try { verifyRelayBaseReceiptFee(decodeRelayBaseReceiptFee(receipt), op.depositNetworkFeeCeilingWei!); }
+      catch { return null; }
+    }
     return status === 1n ? "confirmed" : "failed";
   }
   private async run(op: RelayUnsignedOperation, rpc: Rpc, signal: AbortSignal): Promise<RelayNativeSourceJournal> {
