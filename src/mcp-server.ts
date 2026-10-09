@@ -57,6 +57,10 @@ async function callTool(
       const handoff = createCliHandoff(["apn", "circle", "evm", action, "--operation", bound.request.operationId]);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Confirm the exact Circle financial effect and both owners in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
     }
+    if (bound.request.command === "x402.merchant.approve") {
+      const handoff = createCliHandoff(["apn", "x402", "merchant", "approve", "--operation", bound.request.operationId]);
+      return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve the frozen USDm transfer in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+    }
     if (bound.request.command === "operation.abandon") {
       const handoff = createCliHandoff(["apn", "operation", "abandon", "--operation", bound.request.operationId]);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError(

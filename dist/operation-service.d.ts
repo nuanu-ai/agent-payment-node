@@ -1,6 +1,7 @@
 import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { type CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
 import { MegaFundingJournal, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
+import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import type { CommandOutcome } from "./commands.js";
@@ -31,6 +32,9 @@ export type StoredMoneyOperation = {
 } | {
     readonly kind: "mega_gaszip";
     readonly record: MegaFundingRecord;
+} | {
+    readonly kind: "merchant_x402";
+    readonly record: MerchantOperation;
 } | {
     readonly kind: "permit2_production";
     readonly record: Permit2ProductionRecord;
@@ -110,6 +114,8 @@ export declare class OperationService {
     /** Both Circle signing accounts are held under their existing profile locks. */
     assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved?: boolean): Promise<void>;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
+    private merchantOperations;
+    assertMerchantAccountAvailable(record: MerchantOperation): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;
     relayStatus(operation: RelayUnsignedOperation): Promise<import("./relay-unsigned-operation.js").PublicRelayUnsignedOperation>;

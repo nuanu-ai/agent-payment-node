@@ -37,6 +37,18 @@ export type CommandRequest = {
     readonly command: "mega.funding.approve" | "mega.funding.status";
     readonly operationId: string;
 } | {
+    readonly command: "x402.merchant.prepare";
+    readonly profile: string;
+    readonly maximumNativeFee: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "x402.merchant.approve" | "x402.merchant.status";
+    readonly operationId: string;
+} | {
+    readonly command: "x402.merchant.observe";
+    readonly operationId: string;
+    readonly deliver: boolean;
+} | {
     readonly command: "x402.permit2.approve";
     readonly profile: string;
     readonly url: string;

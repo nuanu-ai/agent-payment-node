@@ -1,3 +1,4 @@
+import { merchantPolicyAsset } from "./x402-merchant/pins.js";
 import { reviewedWbtcPolicyAsset } from "./canonical-wbtc-policy-assets.js";
 import { getAddress } from "viem";
 import { resolveAllowlistAsset } from "./allowlist-inventory.js";
@@ -21,6 +22,9 @@ export function directEvmSupplementalAsset(chain, identifier) {
 }
 /** Only a direct policy admission can resolve a supplemental identity. */
 export function resolveDirectPolicyAsset(input, inventory) {
+    const merchant = merchantPolicyAsset(input);
+    if (merchant !== undefined)
+        return merchant;
     const wbtc = reviewedWbtcPolicyAsset(input);
     if (wbtc !== undefined)
         return wbtc;

@@ -53,6 +53,7 @@ import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
 export interface RuntimeFactoryOptions {
+  readonly merchantTtyOptions?: TtyTransferApprovalOptions;
   /** Synthetic read-only preflight seam; production uses the bounded HTTPS source. */
   readonly permit2PreflightPorts?: Permit2PreflightPorts;
   /** Synthetic CLI test seam; source runtime still owns confirmation, pacing, and source effect guards. */

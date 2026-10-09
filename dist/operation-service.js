@@ -2,6 +2,8 @@ import { SeiFundingJournal, publicSeiFunding } from "./lifi/sei-gaszip-journal.j
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { publicCircle } from "./circle-v2-evm/operation-model.js";
 import { MegaFundingJournal, publicMegaFunding } from "./lifi/mega-gaszip-journal.js";
+import { MerchantRepository } from "./x402-merchant/repository.js";
+import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { Permit2LegacyConflictRepository } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
@@ -98,6 +100,7 @@ export class OperationService {
             ...(await this.seiFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "sei_gaszip", record })),
             ...(await this.circleOperations()).filter(operation => operation.idempotencyHash === idempotencyHash).map(record => ({ kind: "circle_route", record })),
             ...(await this.megaFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "mega_gaszip", record })),
+            ...(await this.merchantOperations()).filter(o => o.idempotencyHash === idempotencyHash).map(record => ({ kind: "merchant_x402", record })),
             ...(await this.relayUnsigned.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "relay_unsigned", record })),
             ...(await this.facilitatorGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "facilitator_gasless_transfer", record })),
             ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
@@ -190,6 +193,7 @@ export class OperationService {
             ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip", record })),
             ...(await this.circleOperations(profileHash)).map(record => ({ kind: "circle_route", record })),
             ...(await this.megaFunding.listOperations(profileHash)).map(record => ({ kind: "mega_gaszip", record })),
+            ...(await this.merchantOperations(profileHash)).map(record => ({ kind: "merchant_x402", record })),
             ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production", record })),
             ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict", record })),
             ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned", record })),
@@ -238,11 +242,25 @@ export class OperationService {
             });
         }
     }
+    async merchantOperations(profileHash) {
+        if (this.state.root === undefined)
+            return [];
+        const records = new MerchantRepository(this.state.root);
+        return profileHash === undefined ? records.listAllOperations() : records.listOperations(profileHash);
+    }
+    async assertMerchantAccountAvailable(record) {
+        validateMerchant(record);
+        const saved = await new MerchantRepository(this.state.root).findOperation(record.operationId);
+        if (saved === null || saved.integrityHash !== record.integrityHash)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Merchant conflict exclusion requires the exact saved operation.");
+        await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(4326, record.custody.walletAddress)], record.operationId);
+    }
     async required(operationId) {
         const canonicalId = canonicalOperationId(operationId);
         const mega = await this.megaFunding.findOperation(canonicalId);
         const sei = await this.seiFunding.findOperation(canonicalId);
         const circle = (await this.circleOperations()).find(record => record.operationId === canonicalId) ?? null;
+        const merchant = await new MerchantRepository(this.state.root).findOperation(canonicalId);
         const permit2 = await new Permit2ProductionRepository(this.state.root).findOperation(canonicalId);
         const direct = await this.state.findOperation(canonicalId);
         const x402 = await this.state.findX402Operation(canonicalId);
@@ -254,7 +272,7 @@ export class OperationService {
         const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
         const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
         const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
-        if ([mega, sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
+        if ([merchant, mega, sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
             .filter((value) => value !== null).length > 1) {
             throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
         }
@@ -264,6 +282,8 @@ export class OperationService {
             return { kind: "sei_gaszip", record: sei };
         if (circle !== null)
             return { kind: "circle_route", record: circle };
+        if (merchant !== null)
+            return { kind: "merchant_x402", record: merchant };
         if (permit2 !== null)
             return { kind: "permit2_production", record: permit2 };
         if (direct !== null)
@@ -296,6 +316,8 @@ export class OperationService {
             return publicCircle(operation.record);
         if (operation.kind === "mega_gaszip")
             return publicMegaFunding(operation.record);
+        if (operation.kind === "merchant_x402")
+            return publicMerchant(operation.record);
         if (operation.kind === "permit2_production")
             return publicPermit2Production(operation.record);
         if (operation.kind === "permit2_legacy_conflict")

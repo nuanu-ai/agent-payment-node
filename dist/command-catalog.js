@@ -1,6 +1,7 @@
 import { MEGA_FUNDING_COMMANDS } from "./lifi/mega-gaszip-command-catalog.js";
 import { SEI_FUNDING_COMMANDS } from "./lifi/sei-gaszip-command-catalog.js";
 import { CIRCLE_EVM_COMMANDS, CIRCLE_EVM_GROUPS } from "./circle-v2-evm/command-catalog.js";
+import { MERCHANT_COMMANDS } from "./x402-merchant/command-catalog.js";
 import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
 import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
@@ -97,6 +98,7 @@ export const COMMAND_GROUPS = [
     { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
     { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
     { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
+    { path: ["x402", "merchant"], summary: "Finite external USDm merchant transfer-proof payment and delivery.", kind: "group" },
     { path: ["x402", "permit2"], summary: "Read owner admission and intents, approve one foreground Permit2 GET and observe chain evidence.", kind: "group" },
     { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
     { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
@@ -106,6 +108,7 @@ export const COMMAND_GROUPS = [
 ];
 const BASE_COMMANDS = [
     ...PERMIT2_COMMANDS,
+    ...MERCHANT_COMMANDS,
     command(["relay", "arbitrum", "prepare"], "apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>", "Save one unsigned Arbitrum USDC to the exact Ethereum USDC recipient Relay quote.", [profileRequired, option("--owner", "address", true, noDefault, ["canonical_evm_address"], "public"),
         option("--amount-atomic", "atomic_usdc", true, noDefault, ["positive_integer"], "operator_input"),
         option("--min-output-atomic", "atomic_usdc", true, noDefault, ["positive_integer"], "operator_input"),

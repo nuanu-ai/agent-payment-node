@@ -13,6 +13,9 @@ export type CommandRequest =
   | { readonly command: "circle.evm.prepare"; readonly profile: string; readonly destinationProfile: string; readonly destinationChain: 1329 | 59144 | 143; readonly idempotencyKey: string }
   | { readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.status"; readonly operationId: string }
   | { readonly command: "mega.funding.approve" | "mega.funding.status"; readonly operationId: string }
+  | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly maximumNativeFee: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.merchant.approve" | "x402.merchant.status"; readonly operationId: string }
+  | { readonly command: "x402.merchant.observe"; readonly operationId: string; readonly deliver: boolean }
   | { readonly command: "x402.permit2.approve"; readonly profile: string; readonly url: string; readonly idempotencyKey: string }
   | { readonly command: "x402.permit2.observe"; readonly operationId: string; readonly profile?: string; readonly transaction?: string; readonly expiredUnused: boolean }
   | { readonly command: "x402.permit2.preflight"; readonly profile: string; readonly paymentRequired: string;

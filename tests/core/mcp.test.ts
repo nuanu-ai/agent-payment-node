@@ -93,6 +93,7 @@ const TOOL_NAMES = [
   "apn_wallet_policy_show",
   "apn_wallet_policy_set",
   "apn_x402_permit2_status",
+  "apn_x402_merchant_prepare", "apn_x402_merchant_approve", "apn_x402_merchant_observe", "apn_x402_merchant_status",
   "apn_x402_inspect",
   "apn_x402_fetch_prepare",
   "apn_x402_fetch_approve",
@@ -252,6 +253,10 @@ test("official MCP client proves production stdio descriptor, the exact tool set
         defaults: {},
       },
       { name: "apn_x402_permit2_status", properties: ["profile", "operation"], required: ["profile", "operation"], defaults: {} },
+      { name: "apn_x402_merchant_prepare", properties: ["profile", "max_native_fee_wei", "idempotency_key"], required: ["profile", "max_native_fee_wei", "idempotency_key"], defaults: {} },
+      { name: "apn_x402_merchant_approve", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_x402_merchant_observe", properties: ["operation", "deliver"], required: ["operation"], defaults: {} },
+      { name: "apn_x402_merchant_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_x402_inspect", properties: ["method", "headers_json", "body_base64", "payer", "url"], required: ["url"], defaults: {} },
       { name: "apn_x402_fetch_prepare", properties: ["profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
@@ -343,7 +348,7 @@ test("manifest projection is exact, strict and rejects missing, colliding or uns
   assert.equal(projected.every((tool) => tool.inputSchema.additionalProperties === false), true);
   assert.equal(projected.every((tool) => Object.entries(tool.inputSchema.properties).every(([field, schema]) => (
     typeof schema === "object" && schema !== null && !Array.isArray(schema) &&
-    schema.type === (tool.name === "apn_wallet_portfolio" && field === "refresh" ? "boolean" : "string")
+    schema.type === ((tool.name === "apn_wallet_portfolio" && field === "refresh") || (tool.name === "apn_x402_merchant_observe" && field === "deliver") ? "boolean" : "string")
   ))), true);
   assert.equal(projected.some((tool) => tool.name.includes("mcp")), false);
   assert.equal(projected.some((tool) => tool.name.includes("mcp") || tool.name.includes("control")), false);
