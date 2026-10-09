@@ -44,7 +44,8 @@ export async function merchantFeeQuote(rpc:MerchantRpcPort,head:Record<string,un
 }
 export function checkMerchantFullFee(fresh:MerchantFeeContext,frozen:MerchantFeeContext,e:MerchantEnvelope,native:string):void {
   validateMerchantFeeContext(frozen,e);validateMerchantFeeContext(fresh,e);
-  if(fresh.unsignedHash!==frozen.unsignedHash||BigInt(fresh.admissionEstimatedUpper)>BigInt(frozen.admissionEstimatedUpper)||BigInt(fresh.admissionEstimatedUpper)>BigInt(e.maximumNativeFee)||BigInt(native)<BigInt(frozen.admissionEstimatedUpper))refuse("merchant_full_fee_admission_changed");
+  if(e.nativeFeeReserveWei!==undefined&&(!/^[1-9][0-9]*$/u.test(e.nativeFeeReserveWei)||BigInt(e.nativeFeeReserveWei)<BigInt(frozen.admissionEstimatedUpper)||BigInt(e.nativeFeeReserveWei)>BigInt(e.maximumNativeFee)))refuse("merchant_native_reserve_binding");
+  if(fresh.unsignedHash!==frozen.unsignedHash||BigInt(fresh.admissionEstimatedUpper)>BigInt(e.nativeFeeReserveWei??frozen.admissionEstimatedUpper)||BigInt(fresh.admissionEstimatedUpper)>BigInt(e.maximumNativeFee)||BigInt(native)<BigInt(e.nativeFeeReserveWei??frozen.admissionEstimatedUpper))refuse("merchant_full_fee_admission_changed");
 }
 /** L1 is additional to receipt execution cost. Missing quantities/unsupported nonzero operator fields refuse. */
 export function merchantActualFee(r:Record<string,unknown>):{execution:string;l1:string;operator:"0";total:string} {

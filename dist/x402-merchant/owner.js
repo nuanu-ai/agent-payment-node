@@ -92,9 +92,15 @@ export class MerchantOwner {
         }
         return { token: digests[0], native: digests[1] };
     }
-    async follow(o, target) {
+    async follow(o, target, freshReceipt) {
         const entries = o.effectBinding === undefined ? [[merchantUsageIdentity, MERCHANT_AMOUNT, merchantUsageKey(o.operationId)]] : [[merchantUsageIdentity, MERCHANT_AMOUNT, merchantUsageKey(o.operationId)], [merchantNativeUsageIdentity, o.effectBinding.nativeAmountAtomic, merchantNativeUsageKey(o.operationId)]];
         for (const [identity, amount, key] of entries) {
+            if (target === "finalized" && identity.asset.kind === "native" && o.envelope.nativeFeeReserveWei !== undefined) {
+                if (freshReceipt === undefined)
+                    refuse("merchant_native_actual_fee_authority_required");
+                await this.ledger.settleMerchantNativeActualFee(o, freshReceipt, this.now());
+                continue;
+            }
             const reservationId = assetUsageReservationId(identity, key), r = await this.ledger.load(identity, reservationId);
             if (r === null || r.policyDigest !== o.policy.digest || r.amountAtomic !== amount || r.rail !== "x402")
                 refuse("merchant_usage_binding");

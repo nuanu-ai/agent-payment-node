@@ -1,3 +1,4 @@
+import { type MerchantFailure } from "./failure.js";
 import { type MerchantFeeContext } from "./mega-fee.js";
 import type { Hex } from "viem";
 import type { EvmNativeCustody } from "../evm-native-custody.js";
@@ -8,8 +9,9 @@ export interface MerchantEnvelope {
     readonly maxFeePerGas: string;
     readonly maxPriorityFeePerGas: string;
     readonly maximumNativeFee: string;
+    readonly nativeFeeReserveWei?: string;
 }
-export type MerchantPhase = "prepared" | "signing_started" | "submission_started" | "unknown_finality" | "payment_finalized" | "delivery_unknown" | "delivered" | "reverted";
+export type MerchantPhase = "prepared" | "signing_started" | "submission_started" | "unknown_finality" | "payment_finalized" | "delivery_unknown" | "delivered" | "reverted" | "retired_unsent";
 export interface MerchantReceipt {
     readonly transactionHash: Hex;
     readonly blockNumber: string;
@@ -78,6 +80,8 @@ export interface MerchantOperation {
         readonly revision: number;
         readonly activationDigest: string;
     };
+    readonly failures?: readonly MerchantFailure[];
+    readonly retirementDigest?: string;
     readonly feeContext?: MerchantFeeContext;
     readonly effectBinding?: {
         readonly policyEndsAt: string;
@@ -110,12 +114,22 @@ export interface MerchantOperation {
 export declare function merchantFingerprint(o: Omit<MerchantOperation, "fingerprint" | "integrityHash">): string;
 export declare function sealMerchant(o: Omit<MerchantOperation, "integrityHash">): MerchantOperation;
 export declare function merchantSnapshot(o: Pick<MerchantOperation, "state" | "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts">): string;
-export declare function merchantMove(o: MerchantOperation, state: MerchantPhase, at: string, changes?: Partial<Pick<MerchantOperation, "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts">>): MerchantOperation;
+export declare function merchantMove(o: MerchantOperation, state: MerchantPhase, at: string, changes?: Partial<Pick<MerchantOperation, "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts" | "retirementDigest">>): MerchantOperation;
 export declare function validateMerchant(v: unknown): MerchantOperation;
 export declare function publicMerchant(o: MerchantOperation): {
     currentCanonicalProof: MerchantCanonicalObservation | null;
     result: Record<string, unknown> | null | undefined;
     receipt: MerchantReceipt | null;
+    nativeFeeReserveWei?: string;
+    failures: readonly MerchantFailure[];
+    retirementDigest: string | null;
+    retirementReceipt: {
+        kind: string;
+        tombstoneDigest: string | undefined;
+        consumedAtomic: string;
+        payment: boolean;
+        delivery: boolean;
+    } | null;
     feeBudgetSemantics?: string;
     signedExecutionCapWei?: string;
     admissionEstimatedUpperWei?: string;

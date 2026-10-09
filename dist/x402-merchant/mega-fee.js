@@ -54,7 +54,9 @@ export async function merchantFeeQuote(rpc, head, e) {
 export function checkMerchantFullFee(fresh, frozen, e, native) {
     validateMerchantFeeContext(frozen, e);
     validateMerchantFeeContext(fresh, e);
-    if (fresh.unsignedHash !== frozen.unsignedHash || BigInt(fresh.admissionEstimatedUpper) > BigInt(frozen.admissionEstimatedUpper) || BigInt(fresh.admissionEstimatedUpper) > BigInt(e.maximumNativeFee) || BigInt(native) < BigInt(frozen.admissionEstimatedUpper))
+    if (e.nativeFeeReserveWei !== undefined && (!/^[1-9][0-9]*$/u.test(e.nativeFeeReserveWei) || BigInt(e.nativeFeeReserveWei) < BigInt(frozen.admissionEstimatedUpper) || BigInt(e.nativeFeeReserveWei) > BigInt(e.maximumNativeFee)))
+        refuse("merchant_native_reserve_binding");
+    if (fresh.unsignedHash !== frozen.unsignedHash || BigInt(fresh.admissionEstimatedUpper) > BigInt(e.nativeFeeReserveWei ?? frozen.admissionEstimatedUpper) || BigInt(fresh.admissionEstimatedUpper) > BigInt(e.maximumNativeFee) || BigInt(native) < BigInt(e.nativeFeeReserveWei ?? frozen.admissionEstimatedUpper))
         refuse("merchant_full_fee_admission_changed");
 }
 /** L1 is additional to receipt execution cost. Missing quantities/unsupported nonzero operator fields refuse. */

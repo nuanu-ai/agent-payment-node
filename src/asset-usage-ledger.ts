@@ -1,3 +1,7 @@
+import { MerchantRepository } from "./x402-merchant/repository.js";
+import { hashObject } from "./canonical.js";
+import { merchantNativeActualFee, type MerchantNativeActualFee } from "./x402-merchant/fee-settlement.js";
+import type { MerchantOperation, MerchantReceipt } from "./x402-merchant/model.js";
 import { getAddress } from "viem";
 import { canonicalJson, domainHash } from "./canonical.js";
 import {
@@ -8,7 +12,7 @@ import {
 import { SecureStateStore } from "./secure-state-store.js";
 
 import { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, validateAssetUsageReservation,
-  expectedStates, reservationIdFor, seal, sumUsage, assertReplay, assertBucketWindow, assertTransition,
+  expectedStates, assetUsageReservationId, reservationIdFor, seal, sumUsage, assertReplay, assertBucketWindow, assertTransition,
   validateIdentity, exactIdentity, exactAsset, withoutDigest, canonicalAccount, idempotency, atomic, instant, digest, invalid, blocked, corrupt,
 } from "./asset-usage-ledger-record.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, assetUsageReservationId, validateAssetUsageReservation } from "./asset-usage-ledger-record.js";
@@ -41,6 +45,7 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
   readonly amountAtomic: string;
   /** Proven asset consumption on a confirmed revert; absent on historical zero-consumption records. */
   readonly consumedAtomic?: string;
+  readonly merchantNativeActualFee?: MerchantNativeActualFee;
   readonly state: AssetUsageState;
   readonly reservedAt: string;
   readonly updatedAt: string;
@@ -253,6 +258,23 @@ export class AssetUsageLedger extends SecureStateStore {
       const next = seal(body);
       await this.writeJson(this.recordPath(identity, reservationId), next);
       return next;
+    });
+  }
+
+  /** Finite Mega merchant headroom only: metadata cannot mint this canonical receipt authority. */
+  async settleMerchantNativeActualFee(o:MerchantOperation,receipt:MerchantReceipt,now:Date):Promise<AssetUsageReservation> {
+    const proof=merchantNativeActualFee(o,receipt),durable=await new MerchantRepository(this.root).findOperation(o.operationId);
+    if(durable===null||canonicalJson(durable)!==canonicalJson(o)||durable.submissionAttempts!==1||durable.signingAttempts!==1||durable.txHash!==receipt.transactionHash||durable.receipt===null||canonicalJson(durable.receipt)!==canonicalJson(o.receipt)||!["payment_finalized","delivery_unknown","delivered"].includes(durable.state))throw blocked("Merchant actual fee is not bound to this ledger root durable paid operation.");
+    const identity:AssetUsageIdentity={account:o.custody.walletAddress,chain:"eip155:4326",asset:{kind:"native",identifier:null}},key=`apn.merchant-native:${o.operationId}`;
+    if(identity.account!=="0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"||o.profile!=="default")throw blocked("Finite merchant native owner mismatch.");
+    const reservationId=assetUsageReservationId(identity,key),at=instant(now);await this.ready();
+    return this.withLocks([this.bucketLock(identity)],async()=>{
+      const value=await this.readJson(this.recordPath(identity,reservationId));if(value===null)throw blocked("Merchant native hold missing.");
+      const current=validateAssetUsageReservation(value),outcomeDigest=hashObject(proof);
+      if(current.reservationId!==reservationId||current.idempotencyHash!==idempotency(key)||current.rail!=="x402"||current.policyDigest!==o.policy.digest||current.amountAtomic!==proof.reservedFee||at<current.updatedAt||BigInt(proof.actualFee)>BigInt(current.amountAtomic))throw blocked("Merchant actual fee hold mismatch.");
+      if(current.state==="finalized"){if(current.outcomeDigest!==outcomeDigest||canonicalJson(current.merchantNativeActualFee)!==canonicalJson(proof))throw blocked("Merchant fee outcome changed.");return current;}
+      if(!["submitted","unknown_finality"].includes(current.state))throw blocked("Merchant fee hold not exposed.");
+      const next=seal({...withoutDigest(current),state:"finalized",updatedAt:at,effectAt:at,outcomeDigest,consumedAtomic:proof.actualFee,merchantNativeActualFee:proof});await this.writeJson(this.recordPath(identity,reservationId),next);return next;
     });
   }
 

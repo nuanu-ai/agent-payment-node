@@ -1,3 +1,4 @@
+import { validateMerchantFailures } from "./failure.js";
 import { validateMerchantFeeContext } from "./mega-fee.js";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { validateEvmNativeCustody } from "../evm-native-custody.js";
@@ -13,27 +14,33 @@ export function merchantMove(o, state, at, changes = {}) {
     const base = { at, state, snapshotHash: merchantSnapshot({ ...o, ...changes, state }), previousHash: o.events.at(-1)?.eventHash ?? null };
     const event = { ...base, eventHash: hashObject(base) };
     const { integrityHash: _, ...body } = o;
-    return sealMerchant({ ...body, ...changes, state, terminal: state === "delivered" || state === "reverted", events: [...o.events, event] });
+    return sealMerchant({ ...body, ...changes, state, terminal: state === "delivered" || state === "reverted" || state === "retired_unsent", events: [...o.events, event] });
 }
 export function validateMerchant(v) {
-    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", "envelope", "policy", ...(v.feeContext === undefined ? [] : ["feeContext"]), ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
+    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", "envelope", "policy", ...(v.failures === undefined ? [] : ["failures"]), ...(v.retirementDigest === undefined ? [] : ["retirementDigest"]), ...(v.feeContext === undefined ? [] : ["feeContext"]), ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
         refuse("merchant_state_schema");
     const o = v, { integrityHash, ...body } = o;
-    if (!["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted"].includes(o.state) || !exactKeys(o.policy, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
+    if (!["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent"].includes(o.state) || !exactKeys(o.policy, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
         ![o.operationId, o.profileHash, o.idempotencyHash, o.requestHash, o.fingerprint, o.policy?.digest, o.policy?.activationDigest].every(h => /^[a-f0-9]{64}$/u.test(h)) ||
         !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(o.profile) || !Number.isSafeInteger(o.policy.revision) || o.policy.revision < 1 ||
-        o.terminal !== ["delivered", "reverted"].includes(o.state) || ![0, 1].includes(o.signingAttempts) || ![0, 1].includes(o.submissionAttempts) || o.submissionAttempts > o.signingAttempts)
+        o.terminal !== ["delivered", "reverted", "retired_unsent"].includes(o.state) || ![0, 1].includes(o.signingAttempts) || ![0, 1].includes(o.submissionAttempts) || o.submissionAttempts > o.signingAttempts)
         refuse("merchant_state_integrity");
     validateEvmNativeCustody(o.custody);
     if (o.custody.walletAddress !== MERCHANT_OWNER || o.custody.profileHash !== o.profileHash || canonicalJson(checkMerchantChallenge(o.frozen.challenge)) !== canonicalJson(o.frozen))
         refuse("merchant_state_binding");
-    if (!exactKeys(o.envelope, ["nonce", "gas", "maxFeePerGas", "maxPriorityFeePerGas", "maximumNativeFee"]) || !Object.values(o.envelope).every(a => /^(0|[1-9][0-9]*)$/u.test(a)) ||
+    if (!exactKeys(o.envelope, ["nonce", "gas", "maxFeePerGas", "maxPriorityFeePerGas", "maximumNativeFee", ...(o.envelope.nativeFeeReserveWei === undefined ? [] : ["nativeFeeReserveWei"])]) || !Object.values(o.envelope).every(a => /^(0|[1-9][0-9]*)$/u.test(a)) ||
         BigInt(o.envelope.nonce) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(o.envelope.gas) < 21000n || BigInt(o.envelope.maxPriorityFeePerGas) > BigInt(o.envelope.maxFeePerGas) ||
         BigInt(o.envelope.maximumNativeFee) < BigInt(o.envelope.gas) * BigInt(o.envelope.maxFeePerGas))
         refuse("merchant_state_envelope");
     if (o.feeContext !== undefined)
         validateMerchantFeeContext(o.feeContext, o.envelope);
-    if (o.effectBinding !== undefined && (!isPlainRecord(o.effectBinding) || !exactKeys(o.effectBinding, ["policyEndsAt", "nativeAmountAtomic"]) || !Number.isFinite(Date.parse(o.effectBinding.policyEndsAt)) || new Date(o.effectBinding.policyEndsAt).toISOString() !== o.effectBinding.policyEndsAt || o.effectBinding.nativeAmountAtomic !== (o.feeContext?.admissionEstimatedUpper ?? (BigInt(o.envelope.gas) * BigInt(o.envelope.maxFeePerGas)).toString())))
+    if (o.envelope.nativeFeeReserveWei !== undefined && (o.feeContext === undefined || BigInt(o.envelope.nativeFeeReserveWei) < BigInt(o.feeContext.admissionEstimatedUpper) || BigInt(o.envelope.nativeFeeReserveWei) > BigInt(o.envelope.maximumNativeFee)))
+        refuse("merchant_native_reserve_binding");
+    if (o.failures !== undefined)
+        validateMerchantFailures(o.failures);
+    if (o.retirementDigest !== undefined && (!/^[a-f0-9]{64}$/u.test(o.retirementDigest) || o.state !== "retired_unsent") || o.state === "retired_unsent" && (o.retirementDigest === undefined || o.signingAttempts !== 1 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null || o.deliveryAttempts.length !== 0))
+        refuse("merchant_retirement_binding");
+    if (o.effectBinding !== undefined && (!isPlainRecord(o.effectBinding) || !exactKeys(o.effectBinding, ["policyEndsAt", "nativeAmountAtomic"]) || !Number.isFinite(Date.parse(o.effectBinding.policyEndsAt)) || new Date(o.effectBinding.policyEndsAt).toISOString() !== o.effectBinding.policyEndsAt || o.effectBinding.nativeAmountAtomic !== (o.envelope.nativeFeeReserveWei ?? o.feeContext?.admissionEstimatedUpper ?? (BigInt(o.envelope.gas) * BigInt(o.envelope.maxFeePerGas)).toString())))
         refuse("merchant_effect_binding");
     for (const t of [o.createdAt, o.expiresAt])
         if (!Number.isFinite(Date.parse(t)) || new Date(t).toISOString() !== t)
@@ -58,7 +65,7 @@ export function validateMerchant(v) {
         const f = o.receipt.fullFee, d = f.payerDebit;
         if (o.feeContext === undefined || !isPlainRecord(f) || !exactKeys(f, ["executionWei", "l1Wei", "operatorWei", "signedExecutionCapWei", "admissionEstimatedUpperWei", "payerDebit"]) || !isPlainRecord(d) || !exactKeys(d, ["before", "after", "aggregateDebit", "transactionHashes", "evidenceHash"]) ||
             ![f.executionWei, f.l1Wei, f.operatorWei, f.signedExecutionCapWei, f.admissionEstimatedUpperWei, d.before, d.after, d.aggregateDebit].every(x => /^(0|[1-9][0-9]{0,77})$/u.test(x)) || f.operatorWei !== "0" || f.signedExecutionCapWei !== o.feeContext.executionUpper || f.admissionEstimatedUpperWei !== o.feeContext.admissionEstimatedUpper ||
-            BigInt(f.executionWei) + BigInt(f.l1Wei) !== BigInt(o.receipt.networkFeeWei) || BigInt(o.receipt.networkFeeWei) > BigInt(f.admissionEstimatedUpperWei) || BigInt(d.before) - BigInt(d.after) !== BigInt(d.aggregateDebit) || BigInt(d.aggregateDebit) < BigInt(o.receipt.networkFeeWei) ||
+            BigInt(f.executionWei) + BigInt(f.l1Wei) !== BigInt(o.receipt.networkFeeWei) || BigInt(o.receipt.networkFeeWei) > BigInt(o.envelope.nativeFeeReserveWei ?? f.admissionEstimatedUpperWei) || BigInt(d.before) - BigInt(d.after) !== BigInt(d.aggregateDebit) || BigInt(d.aggregateDebit) < BigInt(o.receipt.networkFeeWei) ||
             !/^[a-f0-9]{64}$/u.test(d.evidenceHash) || !Array.isArray(d.transactionHashes) || d.transactionHashes.length < 1 || d.transactionHashes.length > 8 || new Set(d.transactionHashes).size !== d.transactionHashes.length || d.transactionHashes.filter(h => h === o.txHash).length !== 1 || d.transactionHashes.some(h => !/^0x[a-f0-9]{64}$/u.test(h)))
             refuse("merchant_full_fee_receipt_binding");
     }
@@ -116,6 +123,7 @@ export function publicMerchant(o) {
     return { kind: o.kind, operationId: o.operationId, state: o.state, terminal: o.terminal,
         mechanism: "x402engine-erc20-transfer-proof", provider: { id: "x402engine-erc20-transfer-proof", reference: "megaeth-usdm-crypto-price-v1", protocolSnapshot: "vendor/x402engine-transfer-proof/protocol-v1.json", assetTransferMethod: "erc20-transfer-proof", eip3009: false, gasless: false }, paymentFinalized: o.receipt?.status === "success", merchantDelivered: o.state === "delivered", transactionHash: o.txHash,
         challengeHash: o.frozen.challengeHash, expiresAt: o.expiresAt, amountAtomic: o.frozen.accepted.amount, feeCeilingWei: o.envelope.maximumNativeFee, ...(o.feeContext === undefined ? {} : { feeBudgetSemantics: "pre_submission_full_fee_estimate_not_onchain_l1_cap", signedExecutionCapWei: o.feeContext.executionUpper, admissionEstimatedUpperWei: o.feeContext.admissionEstimatedUpper, l1EstimatedUpperWei: o.feeContext.l1EstimatedUpper }),
+        failures: o.failures ?? [], retirementDigest: o.retirementDigest ?? null, retirementReceipt: o.state === "retired_unsent" ? { kind: "merchant_unsent_retirement", tombstoneDigest: o.retirementDigest, consumedAtomic: "0", payment: false, delivery: false } : null, ...(o.envelope.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: o.envelope.nativeFeeReserveWei }),
         currentCanonicalProof: o.canonicalObservations?.at(-1) ?? null, result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
 }
 //# sourceMappingURL=model.js.map

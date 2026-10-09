@@ -40,9 +40,10 @@ export type CommandRequest = {
     readonly command: "x402.merchant.prepare";
     readonly profile: string;
     readonly maximumNativeFee: string;
+    readonly nativeFeeReserveWei?: string;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "x402.merchant.approve" | "x402.merchant.status";
+    readonly command: "x402.merchant.approve" | "x402.merchant.status" | "x402.merchant.retire-unsent";
     readonly operationId: string;
 } | {
     readonly command: "x402.merchant.observe";

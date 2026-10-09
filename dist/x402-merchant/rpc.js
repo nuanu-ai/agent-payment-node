@@ -6,6 +6,9 @@ import { BridgeHttps } from "../lifi/https.js";
 import { parseRpcBatchResultEnvelope } from "../rpc.js";
 import { MERCHANT_AMOUNT, MERCHANT_IMPLEMENTATION, MERCHANT_IMPLEMENTATION_HASH, MERCHANT_OWNER, MERCHANT_PAYEE, MERCHANT_PROXY_HASH, MERCHANT_RPC, MERCHANT_TOKEN } from "./pins.js";
 import { refuse } from "./protocol.js";
+const canonicalReceipts = new WeakMap();
+export function requireMerchantCanonicalReceipt(o, r) { const b = canonicalReceipts.get(r); if (b === undefined || b.fingerprint !== o.fingerprint || b.hash !== hashObject(r))
+    refuse("merchant_native_actual_fee_authority_required"); return b.hash; }
 const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_sendRawTransaction"]);
 export class MerchantRpc {
     transport;
@@ -209,8 +212,11 @@ export async function merchantReceipt(rpc, o) {
         if (canonicalJson(merchantHeader(currentAnchor)) !== canonicalJson(currentIdentity))
             refuse("merchant_receipt_finalized_changed");
     }
-    return { transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: actual?.total ?? (gasUsed * effectiveGasPrice).toString(), ...(fullFee === undefined ? {} : { fullFee }),
+    const receipt = { transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: actual?.total ?? (gasUsed * effectiveGasPrice).toString(), ...(fullFee === undefined ? {} : { fullFee }),
         canonical: { transactionIndex: index.toString(), blockHeaderHash: hashObject(blockIdentity), finalizedNumber: quantity(currentHead.number).toString(), finalizedHash: hexHash(currentHead.hash), finalizedHeaderHash: hashObject(currentIdentity) },
         evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, currentFinalizedHead: currentHead, code, impl, storage, ...(fullFee === undefined ? {} : { fullFee }) }) };
+    if (receipt.fullFee !== undefined)
+        canonicalReceipts.set(receipt, { fingerprint: o.fingerprint, hash: hashObject(receipt) });
+    return receipt;
 }
 //# sourceMappingURL=rpc.js.map
