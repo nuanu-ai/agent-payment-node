@@ -50,6 +50,8 @@ export interface RelayBnbProofPorts {
     polygonFinalizedCheckpoint?(): Promise<RelayBnbBlock | null>;
     /** null when trace support or exhaustive success semantics are unavailable. */
     nativeTrace(hash: string): Promise<RelayBnbNativeTrace | null>;
+    /** Exhaustive canonical callTracer plus adjacent balance proof for the finite Base→Polygon lane. */
+    polygonNativeTrace?(hash: string): Promise<RelayBnbNativeTrace | null>;
     /** Base only: bytecode identity and two balances from one pinned inclusion window. */
     routerCodeHash?(address: string, block: bigint): Promise<string>;
     tokenIdentityAndBalances?(token: string, recipient: string, block: bigint, blockHash: string): Promise<Readonly<{

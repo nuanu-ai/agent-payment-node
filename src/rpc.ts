@@ -1,5 +1,5 @@
 import { rpcObservationCounters, rpcObservationSnapshot } from "./rpc-observation-metrics.js";
-import { MAX_RPC_BATCH_CALLS, BATCH_READ_METHODS, parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, postJson, rpcAbortableWait } from "./rpc-envelope.js";
+import { MAX_RPC_BATCH_CALLS, BATCH_READ_METHODS, readOnlyBatchMethod, parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, postJson, rpcAbortableWait } from "./rpc-envelope.js";
 export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, classifyX402LogAvailabilityMessage, acceptRpcHttpBody } from "./rpc-envelope.js";
 export { isPublicIp } from "./network-policy.js";
 import { performance } from "node:perf_hooks";
@@ -442,7 +442,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   async batchCall(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
     if (!Array.isArray(calls) || calls.length < 1 || calls.length > MAX_RPC_BATCH_CALLS ||
       calls.some((call) => call === null || typeof call !== "object" ||
-        !BATCH_READ_METHODS.has(call.method) || !Array.isArray(call.params))) {
+        !Array.isArray(call.params) || !readOnlyBatchMethod(call.method, call.params))) {
       throw new ApnError("APN_INVALID_INPUT", "RPC batch contains an invalid read request.");
     }
     const ids = calls.map(() => {

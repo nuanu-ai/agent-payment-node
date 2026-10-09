@@ -91,7 +91,7 @@ export function createSpecialApnCore(bound: BoundCommand, options: RuntimeFactor
     const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc);
     const nativeSource = (chainId: 56 | 8453) => new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc, undefined, chainId);
     const native = new RelayNativeObserveService(state, nativeSource,
-      chainId => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, chainId === 4326 ? new EvmDirectRpcGuard(state, 10) : undefined, chainId),
+      (chainId, sourceChainId) => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, sourceChainId === 8453 ? new EvmDirectRpcGuard(state, 10) : undefined, chainId),
       new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
     return new ApnCore({ state, relayObserve: options.relayObserve ??
       new RelayObserveService(state, source, bnbInvocation,

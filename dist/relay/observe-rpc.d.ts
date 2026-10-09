@@ -20,6 +20,7 @@ export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     private readonly expectedChainId;
     private readonly rpc;
     private readonly guard;
+    private readonly transactions;
     constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard, expectedChainId?: 56 | 137 | 143 | 8453 | 4326);
     get physicalPosts(): number;
     private read;
@@ -31,6 +32,7 @@ export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
     polygonFinalizedCheckpoint(): Promise<RelayBnbBlock | null>;
     nativeTrace(): Promise<null>;
+    polygonNativeTrace(hash: string): Promise<import("./destination-proof.js").RelayBnbNativeTrace>;
     routerCodeHash(address: string, blockNumber: bigint): Promise<string>;
     tokenIdentityAndBalances(token: string, recipient: string, number: bigint, expectedHash: string): Promise<{
         proxyHash: `0x${string}`;

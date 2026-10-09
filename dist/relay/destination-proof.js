@@ -210,7 +210,7 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
     else {
         let trace;
         try {
-            trace = await ports.nativeTrace(hash);
+            trace = await (op.sourceChainId === 8453 && expectedChainId === 137 ? ports.polygonNativeTrace?.(hash) ?? Promise.resolve(null) : ports.nativeTrace(hash));
         }
         catch {
             return unproven("destination_trace_unavailable");

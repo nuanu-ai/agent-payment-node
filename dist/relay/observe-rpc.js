@@ -4,6 +4,8 @@ import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcWord
 import { ApnError } from "../errors.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc } from "../rpc.js";
+import { decodePolygonPayoutTrace } from "./polygon-trace.js";
+import { RELAY_BNB_SOURCE } from "./native-quote.js";
 import { decodeRelayBaseReceiptFee } from "./source-fee-proof.js";
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 /** The shared provider lock stays held until 750 ms after a POST settles.
@@ -95,6 +97,7 @@ export class RelayBnbReadOnlyRpc {
     expectedChainId;
     rpc;
     guard;
+    transactions = new Map();
     constructor(url, state, rpc, guard = new EvmDirectRpcGuard(state, 8), expectedChainId = 56) {
         this.url = url;
         this.expectedChainId = expectedChainId;
@@ -115,6 +118,7 @@ export class RelayBnbReadOnlyRpc {
         if (value === null)
             return null;
         const tx = evmRpcRecord(value);
+        this.transactions.set(hash.toLowerCase(), tx);
         return { hash: evmRpcHex(tx.hash, 32), chainId: Number(evmRpcQuantity(tx.chainId)),
             to: optionalAddress(tx.to), valueWei: evmRpcQuantity(tx.value),
             blockNumber: tx.blockNumber === null ? null : evmRpcQuantity(tx.blockNumber),
@@ -160,6 +164,34 @@ export class RelayBnbReadOnlyRpc {
         return block(await this.read("eth_getBlockByNumber", ["finalized", false]), "finalized");
     }
     async nativeTrace() { return null; }
+    async polygonNativeTrace(hash) {
+        if (this.expectedChainId !== 137)
+            throw new ApnError("APN_CHAIN_MISMATCH", "Polygon trace requires Polygon RPC.");
+        const tx = this.transactions.get(hash.toLowerCase());
+        if (!tx || tx.blockNumber === null)
+            throw new ApnError("APN_RPC_PROTOCOL", "Polygon trace requires the original included transaction.");
+        const number = evmRpcQuantity(tx.blockNumber), tag = `0x${number.toString(16)}`;
+        if (number === 0n)
+            throw new ApnError("APN_RPC_PROTOCOL", "Polygon trace requires an adjacent parent.");
+        const previousTag = `0x${(number - 1n).toString(16)}`;
+        const [trace, rawBlock, rawParent] = await this.readBatch([
+            { method: "debug_traceTransaction", params: [hash, { tracer: "callTracer", timeout: "10s" }] },
+            { method: "eth_getBlockByNumber", params: [tag, true] },
+            { method: "eth_getBlockByNumber", params: [previousTag, false] },
+        ]);
+        const included = evmRpcBlockResult(rawBlock, tag), parent = evmRpcBlockResult(rawParent, previousTag);
+        if (!same(included.hash, evmRpcHex(tx.blockHash, 32)) || !same(evmRpcHex(included.raw.parentHash, 32), parent.hash) ||
+            !Array.isArray(included.raw.transactions) || included.raw.transactions.filter(row => same(evmRpcHex(evmRpcRecord(row).hash, 32), hash)).length !== 1)
+            throw new ApnError("APN_RPC_PROTOCOL", "Polygon trace block membership changed.");
+        const [before, after, again] = await this.readBatch([
+            { method: "eth_getBalance", params: [RELAY_BNB_SOURCE, { blockHash: parent.hash, requireCanonical: true }] },
+            { method: "eth_getBalance", params: [RELAY_BNB_SOURCE, { blockHash: included.hash, requireCanonical: true }] },
+            { method: "eth_getBlockByNumber", params: [tag, false] },
+        ]);
+        if (!same(evmRpcBlockResult(again, tag).hash, included.hash))
+            throw new ApnError("APN_RPC_PROTOCOL", "Polygon trace inclusion changed.");
+        return decodePolygonPayoutTrace(trace, tx, hash, included.hash, evmRpcQuantity(before), evmRpcQuantity(after));
+    }
     async routerCodeHash(address, blockNumber) {
         const code = evmRpcHex(await this.read("eth_getCode", [address, `0x${blockNumber.toString(16)}`]));
         return keccak256(code);
@@ -169,21 +201,24 @@ export class RelayBnbReadOnlyRpc {
             throw new ApnError("APN_RPC_PROTOCOL", "Mega token observation lane is invalid.");
         const tag = `0x${number.toString(16)}`, beforeTag = `0x${(number - 1n).toString(16)}`;
         const data = encodeFunctionData({ abi: parseAbi(["function balanceOf(address) view returns(uint256)"]), functionName: "balanceOf", args: [recipient] });
-        const [code, slot, before, after, rawBefore, rawBlock] = await this.readBatch([
-            { method: "eth_getCode", params: [token, tag] },
-            { method: "eth_getStorageAt", params: [token, "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc", tag] },
-            { method: "eth_call", params: [{ to: token, data }, beforeTag] },
-            { method: "eth_call", params: [{ to: token, data }, tag] },
+        const [rawBefore, rawBlock] = await this.readBatch([
             { method: "eth_getBlockByNumber", params: [beforeTag, false] },
             { method: "eth_getBlockByNumber", params: [tag, false] },
         ]);
         const block = evmRpcBlockResult(rawBlock, tag), previous = evmRpcBlockResult(rawBefore, beforeTag);
+        const pinned = { blockHash: block.hash, requireCanonical: true }, parent = { blockHash: previous.hash, requireCanonical: true };
+        const [code, slot, before, after] = await this.readBatch([
+            { method: "eth_getCode", params: [token, pinned] },
+            { method: "eth_getStorageAt", params: [token, "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc", pinned] },
+            { method: "eth_call", params: [{ to: token, data }, parent] },
+            { method: "eth_call", params: [{ to: token, data }, pinned] },
+        ]);
         const storage = evmRpcHex(slot, 32);
         if (!same(block.hash, expectedHash) || !same(evmRpcHex(block.raw.parentHash, 32), previous.hash) ||
             storage.slice(2, 26) !== "0".repeat(24))
             throw new ApnError("APN_RPC_PROTOCOL", "Mega token state block binding failed.");
         const implementation = `0x${storage.slice(-40)}`;
-        const [implCode, again] = await this.readBatch([{ method: "eth_getCode", params: [implementation, tag] },
+        const [implCode, again] = await this.readBatch([{ method: "eth_getCode", params: [implementation, pinned] },
             { method: "eth_getBlockByNumber", params: [tag, false] }]);
         if (!same(evmRpcBlockResult(again, tag).hash, expectedHash))
             throw new ApnError("APN_RPC_PROTOCOL", "Mega token block changed.");

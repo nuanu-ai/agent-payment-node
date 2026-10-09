@@ -137,7 +137,7 @@ export class RelayNativeObserveService {
             same(provider.inTxHashes[0], hash);
         if (provider.txHashes.length !== 1)
             return this.result(op.operationId, provider.txHashes.length === 0 ? "source_finalized" : "provider_candidate_unproven", provider.txHashes.length === 0 ? "provider_candidate_missing" : "multiple_provider_candidates", true, provider.status, sourceBound);
-        const destination = this.destinationInvocation(op.destinationChainId);
+        const destination = this.destinationInvocation(op.destinationChainId, op.sourceChainId);
         if (this.usedInvocations.has(destination))
             throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Relay native observe requires a fresh destination RPC budget.");
         this.usedInvocations.add(destination);
