@@ -100,7 +100,7 @@ export class SeiFundingService {
           const active=await this.policy(saved,saved,true);authority.assert(gaszipEffectBinding(saved,"sei"),active.registry.expiresAt);return active;
         };
         let active=await check();
-        const fresh=await readSeiFundingPlan(this.rpc("source"),saved.owner.address,saved.amountAtomic,saved.maximumFeeAtomic,saved.plan.feeUpper);assertSeiFundingFresh(saved.plan,fresh);
+        const fresh=await readSeiFundingPlan(this.rpc("source"),saved.owner.address,saved.amountAtomic,saved.maximumFeeAtomic,saved.plan);assertSeiFundingFresh(saved.plan,fresh,saved.maximumFeeAtomic);
         active=await check();
         const reservation=await this.ledger.reserve({...this.identity(saved),registry:active.registry,rail:"bridge",mechanism:SEI_FUNDING.mechanism,
           amountAtomic:saved.amountAtomic,idempotencyKey:`sei-gaszip:${id}`,now:new Date(this.now())});

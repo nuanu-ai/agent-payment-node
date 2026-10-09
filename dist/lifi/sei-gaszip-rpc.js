@@ -46,7 +46,7 @@ export class SeiFundingRpc {
         return v.result;
     }
 }
-export async function readSeiFundingPlan(rpc, owner, amount, maxFee, frozenFeeUpper) {
+export async function readSeiFundingPlan(rpc, owner, amount, maxFee, frozenPlan) {
     if (seiQuantity(await rpc.call("eth_chainId", [])) !== 8453n)
         seiFail("source_chain");
     const block = seiObject(await rpc.call("eth_getBlockByNumber", ["latest", false]));
@@ -58,25 +58,29 @@ export async function readSeiFundingPlan(rpc, owner, amount, maxFee, frozenFeeUp
     if (code !== "0x" || seiQuantity(n) !== seiQuantity(p) || seiQuantity(n) > BigInt(Number.MAX_SAFE_INTEGER))
         seiFail("source_code_or_nonce");
     // Base requires a quoted total fee including L1 data and operator components. It is not an on-chain total-fee cap.
-    const gas = (seiQuantity(g) * 110n + 99n) / 100n, tip = 1000000n, fee = 2n * seiQuantity(block.baseFeePerGas) + tip;
+    const gas = frozenPlan === undefined ? (seiQuantity(g) * 110n + 99n) / 100n : seiQuantity(g), tip = 1000000n, fee = 2n * seiQuantity(block.baseFeePerGas) + tip;
     if (gas > 30000n || fee > 100000000n)
         seiFail("source_fee_pair");
     const [l1, op] = await Promise.all([rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: ABI, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] }) }, tag]),
-        rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: ABI, functionName: "getOperatorFee", args: [gas] }) }, tag])]);
+        rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: ABI, functionName: "getOperatorFee", args: [frozenPlan === undefined ? gas : BigInt(frozenPlan.gas)] }) }, tag])]);
     const l1Fee = gaszipOracleUint256(l1, seiFail), operator = gaszipOracleUint256(op, seiFail), total = gas * fee + l1Fee + operator;
     if (operator !== 0n)
         seiFail("base_operator_fee_unreviewed");
-    if (total > BigInt(maxFee) || total > SEI_FUNDING.maximumFee || seiQuantity(balance) < BigInt(amount) + (frozenFeeUpper === undefined || total > BigInt(frozenFeeUpper) ? total : BigInt(frozenFeeUpper)))
+    // The exclusive owner conflict keeps the full caller-authorized fee reserve unavailable to other local rails.
+    const signedUpper = (frozenPlan === undefined ? gas * fee : BigInt(frozenPlan.gas) * BigInt(frozenPlan.maxFee)) + l1Fee + operator;
+    if (signedUpper > BigInt(maxFee) || signedUpper > SEI_FUNDING.maximumFee || seiQuantity(balance) < BigInt(amount) + BigInt(maxFee))
         seiFail("source_balance_or_fee_cap");
     const check = seiObject(await rpc.call("eth_getBlockByNumber", [hex(number), false]));
     if (seiHash(check.hash) !== blockHash)
         seiFail("source_reorg");
     return { blockHash, nonce: seiQuantity(n).toString(), gas: gas.toString(), maxFee: fee.toString(), tip: tip.toString(), l1FeeUpper: l1Fee.toString(), operatorFeeUpper: operator.toString(), feeUpper: total.toString() };
 }
-export function assertSeiFundingFresh(initial, fresh) {
-    if (initial.nonce !== fresh.nonce || BigInt(fresh.gas) > BigInt(initial.gas) || BigInt(fresh.maxFee) > BigInt(initial.maxFee) ||
-        BigInt(fresh.l1FeeUpper) > BigInt(initial.l1FeeUpper) || BigInt(fresh.operatorFeeUpper) > BigInt(initial.operatorFeeUpper) ||
-        BigInt(fresh.feeUpper) > BigInt(initial.feeUpper))
+export function assertSeiFundingFresh(initial, fresh, maximumFee) {
+    // Reprice only unsigned L1/operator estimates. Every signed field stays frozen in the saved plan.
+    const minimumPrice = (BigInt(fresh.maxFee) - BigInt(fresh.tip)) / 2n + BigInt(initial.tip);
+    const fullUpper = BigInt(initial.gas) * BigInt(initial.maxFee) + BigInt(fresh.l1FeeUpper) + BigInt(fresh.operatorFeeUpper);
+    if (initial.nonce !== fresh.nonce || BigInt(fresh.gas) > BigInt(initial.gas) || initial.tip !== fresh.tip ||
+        minimumPrice > BigInt(initial.maxFee) || fullUpper > BigInt(maximumFee) || fullUpper > SEI_FUNDING.maximumFee)
         seiFail("source_plan_drift");
 }
 /** The exact transaction and receipt must agree, have canonical block identity, and lie at or below a fresh safe head. */
@@ -110,8 +114,11 @@ export async function proveSeiSafeTransaction(rpc, chain, hash, expected) {
         if (r.operatorFeeScalar !== undefined || r.operatorFeeConstant !== undefined) {
             if (r.operatorFeeScalar === undefined || r.operatorFeeConstant === undefined)
                 seiFail("operator_receipt_shape");
-            fee += seiQuantity(r.operatorFeeConstant) + seiQuantity(r.gasUsed) * seiQuantity(r.operatorFeeScalar) / 1000000n;
+            if (seiQuantity(r.operatorFeeConstant) !== 0n || seiQuantity(r.operatorFeeScalar) !== 0n)
+                seiFail("base_operator_fee_unreviewed");
         }
+        if (r.operatorFee !== undefined && seiQuantity(r.operatorFee) !== 0n)
+            seiFail("base_operator_fee_unreviewed");
         actualFee = fee.toString();
     }
     return { hash, blockHash, blockNumber: number.toString(), status: seiQuantity(r.status) === 1n ? "success" : "reverted",

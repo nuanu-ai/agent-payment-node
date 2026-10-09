@@ -14,8 +14,8 @@ export declare class MegaFundingRpc implements MegaRpcPort {
     constructor(url: string, https?: Pick<BridgeHttps, "request">);
     call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
 }
-export declare function readMegaFundingPlan(rpc: MegaRpcPort, owner: string, amount: string, maxFee: string, frozenFeeUpper?: string): Promise<MegaFundingPlan>;
-export declare function assertMegaFundingFresh(initial: MegaFundingPlan, fresh: MegaFundingPlan): void;
+export declare function readMegaFundingPlan(rpc: MegaRpcPort, owner: string, amount: string, maxFee: string, frozenPlan?: MegaFundingPlan): Promise<MegaFundingPlan>;
+export declare function assertMegaFundingFresh(initial: MegaFundingPlan, fresh: MegaFundingPlan, maximumFee: string): void;
 export interface MegaSafeProof {
     readonly hash: Hex;
     readonly blockHash: Hex;
