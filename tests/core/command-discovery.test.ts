@@ -38,7 +38,7 @@ const EXPECTED_COMMANDS = [
   "x402 permit2 approve", "x402 permit2 observe",
   "x402 permit2 preflight",
   "x402 permit2 status",
-  "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant status",
+  "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant status", "x402 merchant retire-unsent",
   "relay arbitrum prepare", "relay arbitrum observe", "relay arbitrum approval-check", "relay arbitrum approval-execute", "relay arbitrum deposit-dispatch", "relay base prepare", "relay base observe", "relay prepare", "relay native prepare", "relay preflight", "relay execute", "relay native execute", "relay retire", "relay status", "relay observe",
   "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
   "stargate token prepare", "stargate token execute", "stargate token cleanup", "stargate token observe", "stargate token status", "stargate token receipt",
