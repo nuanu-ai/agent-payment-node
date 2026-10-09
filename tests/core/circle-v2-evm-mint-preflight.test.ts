@@ -1,0 +1,30 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { StateStore } from "../../src/state.js";
+import { CircleEvmService } from "../../src/circle-v2-evm/runtime.js";
+import { CircleRpc, readCircleAttesters } from "../../src/circle-v2-evm/rpc.js";
+import { circleEnvelope, type CircleOperationV1, type CircleEffect } from "../../src/circle-v2-evm/operation-model.js";
+import { CIRCLE_MESSENGER, CIRCLE_SOURCE_OWNER, CIRCLE_TRANSMITTER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { decodeCircleSource, bindCircleAttestation, encodeCircleBurn, encodeCircleMint } from "../../src/circle-v2-evm/protocol.js";
+import type { CircleLifecyclePorts } from "../../src/circle-v2-evm/lifecycle.js";
+import { source, iris, snapshot } from "./circle-v2-evm-runtime-fixtures.js";
+
+test("each mint preflight verifies both chains once and passes its fresh digest to current attesters", async t => {
+  const route = circleRoute(143), raw = source(143); Object.assign(raw.transaction as Record<string, unknown>, { nonce: "0x2", maxPriorityFeePerGas: "0x0" });
+  const proof = decodeCircleSource(raw, 143), attestation = await bindCircleAttestation(proof, await iris(proof), snapshot(143));
+  const burn = { role: "burn", phase: "confirmed", transactionHash: proof.transactionHash, envelope: circleEnvelope({ chainId: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_MESSENGER, data: encodeCircleBurn(143), valueAtomic: "0", nonceAtomic: "2", gasLimitAtomic: "500000", maxFeePerGasAtomic: "20000000", maxPriorityFeePerGasAtomic: "0" }) } as CircleEffect;
+  const mint = { role: "mint", phase: "prepared", envelope: circleEnvelope({ chainId: 143, from: route.gasPayer, to: CIRCLE_TRANSMITTER, data: encodeCircleMint(attestation), valueAtomic: "0", nonceAtomic: "10", gasLimitAtomic: "400000", maxFeePerGasAtomic: "100000000000", maxPriorityFeePerGasAtomic: "0" }) } as CircleEffect;
+  const op = { destinationChain: 143, destinationProfile: "default", source: proof, attestation, effects: [burn, mint] } as unknown as CircleOperationV1;
+  const service = new CircleEvmService(new StateStore("/tmp/circle-preflight-no-effects"), { load: async () => { throw new Error("private_material_forbidden"); } } as never, {});
+  const internal = service as unknown as { preflightDeployments(source: CircleRpc, destination: CircleRpc, chain: number): Promise<{ digest: string }>; preflightAttesters(destination: CircleRpc, digest: string): ReturnType<typeof readCircleAttesters>; ports(op: CircleOperationV1): CircleLifecyclePorts };
+  let verifications = 0, wrongAttesters = false; const usedDigests: string[] = [];
+  t.mock.method(internal, "preflightDeployments", async (source: CircleRpc, destination: CircleRpc, chain: number) => { assert.equal(source.chainId, 42161); assert.equal(destination.chainId, 143); assert.equal(chain, 143); return { digest: String(++verifications).repeat(64) }; });
+  t.mock.method(internal, "preflightAttesters", async (destination: CircleRpc, digest: string) => { usedDigests.push(digest); return readCircleAttesters(destination, digest); });
+  t.mock.method(CircleRpc.prototype, "identity", async () => {});
+  t.mock.method(CircleRpc.prototype, "call", async function(this: CircleRpc, method: string) { if (method === "eth_getTransactionCount") return "0xa"; if (method === "eth_getBalance") return "0xffffffffffffffff"; if (method === "eth_estimateGas") return "0x186a0"; if (method === "eth_call") return `0x${"0".repeat(63)}1`; throw new Error(`unexpected_read:${method}`); });
+  t.mock.method(CircleRpc.prototype, "observation", async function(this: CircleRpc) { assert.equal(this.chainId, 42161); return raw; });
+  t.mock.method(CircleRpc.prototype, "block", async () => ({ number: "0xa", hash: snapshot(143).blockHash }));
+  t.mock.method(CircleRpc.prototype, "read", async (_to: unknown, name: string, args: readonly unknown[] = []) => { if (name === "signatureThreshold" || name === "getNumEnabledAttesters") return 2n; if (name === "getEnabledAttester") return wrongAttesters ? [CIRCLE_SOURCE_OWNER, route.gasPayer][Number(args[0])] : snapshot(143).enabledAttesters[Number(args[0])]; if (name === "usedNonces") return 0n; throw new Error(`unexpected_contract_read:${name}`); });
+  const ports = internal.ports(op); await ports.preflight(op, mint); await ports.preflight(op, mint); assert.equal(verifications, 2); assert.deepEqual(usedDigests, ["1".repeat(64), "2".repeat(64)]);
+  wrongAttesters = true; await assert.rejects(ports.preflight(op, mint), /signer/); assert.equal(verifications, 3); assert.deepEqual(usedDigests, ["1".repeat(64), "2".repeat(64), "3".repeat(64)]);
+});

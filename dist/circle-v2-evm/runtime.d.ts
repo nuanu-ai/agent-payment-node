@@ -55,6 +55,8 @@ export declare class CircleEvmService {
     private required;
     private run;
     private assertPriorSourcesCanonical;
+    private preflightDeployments;
+    private preflightAttesters;
     private remotes;
     private api;
     private fee;

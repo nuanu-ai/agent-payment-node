@@ -171,9 +171,11 @@ export async function bindCircleAttestation(source, response, snapshot) {
     if (circleHex(r.sourceTxHash, 32) !== source.transactionHash || !Array.isArray(r.messages) || r.messages.length !== 1)
         circleFail("iris_source_binding");
     const entry = circleRecord(r.messages[0]);
-    if (entry.cctpVersion !== 2 || entry.status !== "complete" || typeof entry.eventNonce !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(entry.eventNonce))
+    if (entry.cctpVersion !== 2 || entry.status !== "complete")
         circleFail("iris_status");
     const m = decodeCircleMessage(entry.message, source.destinationChain, true), attestation = circleHex(entry.attestation);
+    if (circleHex(entry.eventNonce, 32) !== m.nonce)
+        circleFail("iris_event_nonce_binding");
     // Only nonce, executed finality, bounded feeExecuted and expiration may differ from the source MessageSent bytes.
     for (let i = 0; i < 376; i++)
         if (!(i >= 12 && i < 44 || i >= 144 && i < 148 || i >= 312 && i < 376) &&
@@ -182,7 +184,7 @@ export async function bindCircleAttestation(source, response, snapshot) {
     const decoded = circleRecord(entry.decodedMessage), b = circleRecord(decoded.decodedMessageBody);
     const sameWord = (v, w) => typeof v === "string" && (v.length === 42 ? circleWord(v) : circleHex(v, 32)) === w;
     if (circleUint(decoded.sourceDomain) !== 3n || circleUint(decoded.destinationDomain) !== BigInt(circleRoute(source.destinationChain).domain) ||
-        (typeof decoded.nonce !== "string" || (/^0x/u.test(decoded.nonce) ? circleHex(decoded.nonce, 32) !== m.nonce : circleUint(decoded.nonce) !== BigInt(m.nonce))) ||
+        circleHex(decoded.nonce, 32) !== m.nonce ||
         !sameWord(decoded.sender, circleWord(CIRCLE_MESSENGER)) || !sameWord(decoded.recipient, circleWord(CIRCLE_MESSENGER)) ||
         !sameWord(decoded.destinationCaller, CIRCLE_ZERO) || circleHex(decoded.messageBody) !== m.body ||
         !sameWord(b.burnToken, circleWord(CIRCLE_SOURCE_TOKEN)) || !sameWord(b.mintRecipient, circleWord(CIRCLE_RECIPIENT)) ||
