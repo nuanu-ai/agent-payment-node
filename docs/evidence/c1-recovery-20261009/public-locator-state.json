@@ -1,0 +1,24 @@
+{
+  "observedAt": "2026-10-09T03:26:42.631Z",
+  "endpoint": "https://public.pimlico.io/v2/1/rpc",
+  "bundler": [
+    {
+      "method": "eth_getUserOperationReceipt",
+      "status": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": null
+      }
+    },
+    {
+      "method": "eth_getUserOperationByHash",
+      "status": 200,
+      "response": {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": null
+      }
+    }
+  ]
+}
