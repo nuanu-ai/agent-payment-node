@@ -1,3 +1,5 @@
+import { hashObject } from "../canonical.js";
+import { externalClaimKey } from "./external-proof.js";
 import { HistoricalPaidRpc } from "./historical-paid-rpc.js";
 import type { StateStore } from "../state.js";
 import type { BridgeHttps } from "../lifi/https.js";
@@ -13,8 +15,9 @@ import { HISTORICAL_LINEA_OPERATION, HISTORICAL_MONAD_OPERATION } from "./histor
 import { HISTORICAL_MONAD_MINT } from "./historical-paid-destination.js";
 /** Existing observe/adopt entry points only. This path cannot consent, load a key or dispatch. */
 export async function observeHistoricalPaidCircle(state: StateStore, repo: CircleRepository, usage: CircleUsage, env: Readonly<Record<string, string | undefined>>, now: () => number, https: Pick<BridgeHttps, "request">, id: string, transactionHash?: string): Promise<CircleOperationV1> {
-  const initial = await repo.load(id); if (initial === null || ![HISTORICAL_LINEA_OPERATION, HISTORICAL_MONAD_OPERATION].includes(id) || id === HISTORICAL_MONAD_OPERATION && transactionHash !== undefined && transactionHash !== HISTORICAL_MONAD_MINT) circleBlocked("historical_paid_exact_observation");
-  await state.initialize(); return state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `custody:${initial.profileHash}`, `custody:${initial.destinationProfileHash}`, `operation:${id}`, `operation:idempotency:${initial.idempotencyHash}`, evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => {
+  const initial = await repo.load(id); if (initial === null || initial.source === null || ![HISTORICAL_LINEA_OPERATION, HISTORICAL_MONAD_OPERATION].includes(id) || id === HISTORICAL_MONAD_OPERATION && transactionHash !== undefined && transactionHash !== HISTORICAL_MONAD_MINT) circleBlocked("historical_paid_exact_observation");
+  const externalLocks = id === HISTORICAL_MONAD_OPERATION ? [`circle-external-nonce:${externalClaimKey(initial)}`, `circle-external-message:${hashObject({ sourceTransactionHash: initial.source!.transactionHash, sourceMessageHash: initial.source!.sourceMessageHash })}`] : [];
+  await state.initialize(); return state.withLocks([...externalLocks, `profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `custody:${initial.profileHash}`, `custody:${initial.destinationProfileHash}`, `operation:${id}`, `operation:idempotency:${initial.idempotencyHash}`, evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => {
     let op = (await repo.load(id))!; const route = circleRoute(op.destinationChain, op.destinationProfile), budget = new CircleExternalRpcBudget(now, now() + 120000, https), source = new HistoricalPaidRpc(env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", 42161, budget, op.operationId), destination = new HistoricalPaidRpc(env[route.rpcEnvironment] ?? route.rpcDefault, op.destinationChain, budget, op.operationId);
     const authority = await verifyHistoricalPaidClosure(state, op, source, destination), closure = (await new HistoricalPaidClosureStore(state.root).load(op))!;
     if (closure.externalFulfillment !== null) { const store = new CircleExternalStore(state.root), proof = closure.externalFulfillment, prior = await store.readClaim(op); await store.claim({ ...op, source: closure.source.sourceProof }, proof, prior === null ? { source: closure.source, destination: closure.destination } : await store.evidence(prior)); }

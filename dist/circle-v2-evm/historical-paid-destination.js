@@ -58,12 +58,22 @@ export async function verifyHistoricalPaidDestination(state, op, sourceEvidence,
         if (op.effects.some(e => ["mint", "cleanup"].includes(e.role) && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)) || op.transitions.some(x => /^(mint|cleanup)_(signing|submission|material|submitted|fenced)/u.test(x.reason)))
             circleBlocked("historical_paid_external_private_entry");
         await new CircleEffectStore(state.root, { load: async () => { circleBlocked("historical_paid_private_forbidden"); }, create: async () => { circleBlocked("historical_paid_private_forbidden"); } }).assertExternalAbsent(op);
+        for (const entry of await state.walletImportEntries())
+            if (entry.isFile() && !entry.isSymbolicLink() && /^[a-z0-9][a-z0-9._-]{0,63}\.json$/u.test(entry.name)) {
+                const wallet = await state.loadWallet(state.profileHash(entry.name.slice(0, -5)));
+                if (wallet === null)
+                    circleBlocked("external_public_wallet_identity_incomplete");
+            }
         for (const wallet of await listLocalWallets(state))
             if (wallet.address.toLowerCase() === signed.caller.toLowerCase())
                 circleBlocked("historical_paid_external_controlled");
         for (const entry of await state.profileImportEntries()) {
+            if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name))
+                circleBlocked("external_profile_directory");
             const profile = await state.loadProviderProfile(entry.name);
-            if (profile === null || profile.public_address.toLowerCase() === signed.caller.toLowerCase())
+            if (profile === null)
+                circleBlocked("external_profile_disappeared");
+            if (profile.public_address.toLowerCase() === signed.caller.toLowerCase())
                 circleBlocked("historical_paid_external_controlled");
         }
     }

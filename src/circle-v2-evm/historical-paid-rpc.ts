@@ -7,6 +7,7 @@ export class HistoricalPaidRpc extends CircleExternalRpc {
   private readonly cache = new Map<string, string>();
   private logical = 0; private hits = 0; private physical = 0;
   constructor(private readonly exactEndpoint: string, chain: number, private readonly historicalBudget: CircleExternalRpcBudget, operationId: string) { super(exactEndpoint, chain, historicalBudget); if (operationId !== HISTORICAL_LINEA_OPERATION && operationId !== HISTORICAL_MONAD_OPERATION || chain !== 42161 && chain !== (operationId === HISTORICAL_LINEA_OPERATION ? 59144 : 143)) circleBlocked("historical_paid_rpc_exact_scope"); }
+  readEndpoint(): string { return this.exactEndpoint; }
   assertReadDeadline(): void { this.historicalBudget.assert(); }
   counts() { return Object.freeze({ logical: this.logical, hits: this.hits, physical: this.physical, entries: this.cache.size }); }
   override async call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown> {
