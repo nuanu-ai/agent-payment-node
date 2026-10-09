@@ -37,7 +37,7 @@ export class CircleRpc {
     return value.result;
   }
   async identity() { if (circleUint(await this.call("eth_chainId", [])) !== BigInt(this.chainId)) circleBlocked("rpc_chain_changed"); }
-  async read(to: Address, name: string, args: readonly unknown[] = [], tag = "latest"): Promise<unknown> {
+  async read(to: Address, name: string, args: readonly unknown[] = [], tag: string | { readonly blockHash: Hex; readonly requireCanonical: true } = "latest"): Promise<unknown> {
     const data = encodeFunctionData({ abi: CIRCLE_RPC_ABI, functionName: name as never, args: args as never });
     const result = circleHex(await this.call("eth_call", [{ to, data }, tag]));
     return decodeFunctionResult({ abi: CIRCLE_RPC_ABI, functionName: name as never, data: result });
@@ -64,9 +64,9 @@ export class CircleRpc {
   }
 }
 function hexQuantity(input: unknown): string { return `0x${circleUint(input).toString(16)}`; }
-export async function readCircleDeployment(rpc: CircleRpc, destinationChain: CircleDestinationChain): Promise<CircleDeploymentSnapshot> {
+export async function readCircleDeployment(rpc: CircleRpc, destinationChain: CircleDestinationChain, historicalBlock?: Record<string, unknown>): Promise<CircleDeploymentSnapshot> {
   await rpc.identity(); const route = circleRoute(destinationChain), source = rpc.chainId === 42161, token = source ? CIRCLE_SOURCE_TOKEN : route.token, remoteDomain = source ? route.domain : 3,
-    remoteToken = source ? route.token : CIRCLE_SOURCE_TOKEN, block = await rpc.block("safe"), tag = String(block.number), expected = CIRCLE_DEPLOYMENT_PINS[rpc.chainId as 42161 | CircleDestinationChain];
+    remoteToken = source ? route.token : CIRCLE_SOURCE_TOKEN, block = historicalBlock ?? await rpc.block("safe"), tag = historicalBlock === undefined ? String(block.number) : { blockHash: circleHex(block.hash, 32), requireCanonical: true as const }, expected = CIRCLE_DEPLOYMENT_PINS[rpc.chainId as 42161 | CircleDestinationChain];
   const contracts = {} as Record<"messenger" | "transmitter" | "minter" | "token", CircleDeploymentSnapshot["contracts"]["token"]>;
   for (const key of ["messenger", "transmitter", "minter", "token"] as const) {
     const address = getAddress(expected[key].address), proxyCodeHash = keccak256(circleRuntimeBytecode(await rpc.call("eth_getCode", [address, tag])));
@@ -79,7 +79,7 @@ export async function readCircleDeployment(rpc: CircleRpc, destinationChain: Cir
     rpc.read(CIRCLE_MINTER, "remoteTokensToLocalTokens", [circleTokenPairKey(remoteDomain, remoteToken)], tag), rpc.read(CIRCLE_MESSENGER, "localMinter", [], tag),
     rpc.read(CIRCLE_MESSENGER, "localMessageTransmitter", [], tag), rpc.read(CIRCLE_MINTER, "localTokenMessenger", [], tag), rpc.read(CIRCLE_TRANSMITTER, "version", [], tag),
     rpc.read(CIRCLE_MESSENGER, "messageBodyVersion", [], tag), rpc.read(token, "decimals", [], tag), rpc.read(CIRCLE_TRANSMITTER, "paused", [], tag), rpc.read(CIRCLE_MINTER, "paused", [], tag), rpc.read(token, "paused", [], tag)]);
-  const rechecked = await rpc.block(tag); if (circleHex(rechecked.hash, 32) !== circleHex(block.hash, 32)) circleBlocked("deployment_snapshot_reorg");
+  const rechecked = await rpc.block(String(block.number)); if (circleHex(rechecked.hash, 32) !== circleHex(block.hash, 32)) circleBlocked("deployment_snapshot_reorg");
   return { chainId: rpc.chainId as 42161 | CircleDestinationChain, domain: Number(values[0]), blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(), contracts,
     remoteDomain, remoteMessenger: circleHex(values[1], 32), pairedToken: getAddress(String(values[2])), localMinter: getAddress(String(values[3])), localMessageTransmitter: getAddress(String(values[4])),
     localTokenMessenger: getAddress(String(values[5])), messageVersion: Number(values[6]), messageBodyVersion: Number(values[7]), tokenDecimals: Number(values[8]), transmitterPaused: values[9] === true, minterPaused: values[10] === true, tokenPaused: values[11] === true };
@@ -88,12 +88,12 @@ export async function currentCircleDeployments(source: CircleRpc, destination: C
   const [a, b] = await Promise.all([readCircleDeployment(source, chain), readCircleDeployment(destination, chain)]);
   return { source: a, destination: b, digest: verifyCircleDeployments(a, b) };
 }
-export async function readCircleAttesters(rpc: CircleRpc, deploymentDigest: string): Promise<CircleAttesterSnapshot> {
-  await rpc.identity(); const block = await rpc.block("safe"), tag = String(block.number), threshold = Number(await rpc.read(CIRCLE_TRANSMITTER, "signatureThreshold", [], tag)), count = Number(await rpc.read(CIRCLE_TRANSMITTER, "getNumEnabledAttesters", [], tag));
+export async function readCircleAttesters(rpc: CircleRpc, deploymentDigest: string, historicalBlock?: Record<string, unknown>): Promise<CircleAttesterSnapshot> {
+  await rpc.identity(); const block = historicalBlock ?? await rpc.block("safe"), tag = historicalBlock === undefined ? String(block.number) : { blockHash: circleHex(block.hash, 32), requireCanonical: true as const }, threshold = Number(await rpc.read(CIRCLE_TRANSMITTER, "signatureThreshold", [], tag)), count = Number(await rpc.read(CIRCLE_TRANSMITTER, "getNumEnabledAttesters", [], tag));
   if (!Number.isSafeInteger(count) || count < 1 || count > 20 || !Number.isSafeInteger(threshold) || threshold < 1 || threshold > count) circleBlocked("attester_count");
   const enabledAttesters: Address[] = [];
   for (let i = 0; i < count; i++) enabledAttesters.push(getAddress(String(await rpc.read(CIRCLE_TRANSMITTER, "getEnabledAttester", [BigInt(i)], tag))));
-  if (circleHex((await rpc.block(tag)).hash, 32) !== circleHex(block.hash, 32)) circleBlocked("attester_snapshot_reorg");
+  if (circleHex((await rpc.block(String(block.number))).hash, 32) !== circleHex(block.hash, 32)) circleBlocked("attester_snapshot_reorg");
   return { threshold, enabledAttesters, chainId: rpc.chainId as CircleDestinationChain, transmitter: CIRCLE_TRANSMITTER, blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(), deploymentDigest };
 }
 export const circleRpcTransaction = (e: CircleEnvelope) => ({ from: e.from, to: e.to, data: e.data, value: "0x0", nonce: hexQuantity(e.nonceAtomic), gas: hexQuantity(e.gasLimitAtomic), maxFeePerGas: hexQuantity(e.maxFeePerGasAtomic), maxPriorityFeePerGas: hexQuantity(e.maxPriorityFeePerGasAtomic) });

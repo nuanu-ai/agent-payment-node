@@ -1,3 +1,4 @@
+import { validateExternalFulfillment, type CircleExternalFulfillment } from "./external-proof.js";
 import { validateCircleNonceRetirementProof, type CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { getAddress, type Address, type Hex } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "../canonical.js";
@@ -20,12 +21,12 @@ export interface CircleOperationV1 { readonly schemaVersion: "apn.circle-v2-evm-
   readonly idempotencyHash: string; readonly requestHash: string; readonly fingerprint: string; readonly destinationChain: CircleDestinationChain;
   readonly sourceCustody: EvmNativeCustody; readonly destinationCustody: EvmNativeCustody; readonly policies: readonly CirclePolicy[];
   readonly preparedAt: string; readonly expiresAt: string; readonly deploymentDigest: string; readonly feeQuoteAtomic: string;
-  readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired";
+  readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
   readonly terminal: boolean; readonly effects: readonly CircleEffect[]; readonly source: CircleSourceProof | null;
   readonly attestation: CircleAttestation | null; readonly destination: ReturnType<typeof decodeCircleDestination> | null;
   readonly residualAllowanceAtomic: string; readonly usage: readonly AssetUsageReservation[]; readonly usageFinalized: boolean;
   readonly transitions: readonly { readonly sequence: number; readonly at: string; readonly reason: string; readonly previousHash: string | null; readonly snapshotHash: string }[];
-  readonly integrityHash: string; readonly nonceRetirement?: CircleNonceRetirementProof; }
+  readonly integrityHash: string; readonly externalFulfillment?: CircleExternalFulfillment; readonly nonceRetirement?: CircleNonceRetirementProof; }
 export function circleBlocked(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", `Circle EVM operation blocked: ${reason}.`, { reason }); }
 export function circleCorrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT", `Circle EVM journal is invalid: ${reason}.`, { reason }); }
 export function sealCircle(input: Omit<CircleOperationV1, "integrityHash"> | CircleOperationV1): CircleOperationV1 {
@@ -49,14 +50,14 @@ export function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chai
     BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic) > BigInt(destination ? route.destinationNativeCap : role === "cleanup" ? "15000000000000" : "30000000000000")) circleCorrupt("envelope_fee_cap");
 }
 export function validateCircle(value: unknown): CircleOperationV1 {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "profile", "profileHash", "destinationProfile", "destinationProfileHash", "idempotencyHash", "requestHash", "fingerprint", "destinationChain", "sourceCustody", "destinationCustody", "policies", "preparedAt", "expiresAt", "deploymentDigest", "feeQuoteAtomic", "state", "terminal", "effects", "source", "attestation", "destination", "residualAllowanceAtomic", "usage", "usageFinalized", "transitions", "integrityHash", ...(value.nonceRetirement === undefined ? [] : ["nonceRetirement"])])) circleCorrupt("shape");
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "profile", "profileHash", "destinationProfile", "destinationProfileHash", "idempotencyHash", "requestHash", "fingerprint", "destinationChain", "sourceCustody", "destinationCustody", "policies", "preparedAt", "expiresAt", "deploymentDigest", "feeQuoteAtomic", "state", "terminal", "effects", "source", "attestation", "destination", "residualAllowanceAtomic", "usage", "usageFinalized", "transitions", "integrityHash", ...(value.nonceRetirement === undefined ? [] : ["nonceRetirement"]), ...(value.externalFulfillment === undefined ? [] : ["externalFulfillment"])])) circleCorrupt("shape");
   const op = value as unknown as CircleOperationV1, { integrityHash, ...body } = op;
   if (op.schemaVersion !== "apn.circle-v2-evm-operation.v1" || hashObject(body) !== integrityHash || ![op.operationId, op.profileHash, op.destinationProfileHash, op.idempotencyHash, op.requestHash, op.fingerprint, op.deploymentDigest].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x))) circleCorrupt("integrity");
   const route = circleRoute(op.destinationChain, op.destinationProfile);
   validateEvmNativeCustody(op.sourceCustody); validateEvmNativeCustody(op.destinationCustody);
   if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||
     op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > 100n ||
-    !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired"].includes(op.state) ||
+    !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"].includes(op.state) ||
     !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
     !/^(?:0|40100)$/u.test(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies)) circleCorrupt("intent");
   if (op.policies.length !== new Set([op.profileHash, op.destinationProfileHash]).size || new Set(op.policies.map(p => p.profileHash)).size !== op.policies.length) circleCorrupt("policy_count");
@@ -73,7 +74,7 @@ export function validateCircle(value: unknown): CircleOperationV1 {
     const expected = expectedUsage[i]!;
     if (u.account !== expected.account || u.chain !== expected.chain || u.asset.kind !== expected.kind || u.asset.identifier !== expected.identifier || u.amountAtomic !== expected.amount || u.rail !== "bridge" || !op.policies.some(p => p.policyDigest === u.policyDigest)) circleCorrupt("usage_binding");
   }
-  if (op.usageFinalized && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => u.state !== "failed_before_effect") : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state)))) circleCorrupt("usage_finality");
+  if (op.usageFinalized && op.state !== "external_fulfilled" && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => u.state !== "failed_before_effect") : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state)))) circleCorrupt("usage_finality");
   if (new Set(op.usage.map(u => u.reservationId)).size !== op.usage.length) circleCorrupt("duplicate_usage");
   if (!Array.isArray(op.effects) || op.effects.length < 2 || op.effects.length > 4 || op.effects[0]?.role !== "approval" || op.effects[1]?.role !== "burn" || new Set(op.effects.map(x => x.role)).size !== op.effects.length) circleCorrupt("effects");
   for (const inputEffect of op.effects) {
@@ -91,6 +92,11 @@ export function validateCircle(value: unknown): CircleOperationV1 {
   if (op.destination !== null && (op.attestation === null || op.destination.nonce !== op.attestation.nonce || op.destination.attestedMessageHash !== op.attestation.hash || op.destination.transactionHash !== op.effects.find(e => e.role === "mint")?.transactionHash)) circleCorrupt("destination_binding");
   if (op.state === "completed" && (op.source?.finalityTag !== "finalized" || op.destination?.finalityTag !== "safe" || op.residualAllowanceAtomic !== "0" || !op.usageFinalized)) circleCorrupt("completion_finality");
   if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null))) circleCorrupt("cancel_private_entry");
+  if (op.externalFulfillment !== undefined) {
+    validateExternalFulfillment(op.externalFulfillment, op);
+    if (op.effects.some(e => ["mint", "cleanup"].includes(e.role) && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)) || op.destination !== null || op.source?.finalityTag !== "finalized" || op.residualAllowanceAtomic !== "0" || op.nonceRetirement !== undefined) circleCorrupt("external_private_or_source_binding");
+  }
+  if (op.state === "external_fulfilled" && (op.externalFulfillment === undefined || !op.usageFinalized || op.usage.length !== 5 || op.usage.some((u,i) => u.state !== (i < 3 ? "finalized" : "released_unsubmitted")))) circleCorrupt("external_terminal_binding");
   if (op.nonceRetirement !== undefined) validateCircleNonceRetirementProof(op.nonceRetirement, op);
   if (op.state === "nonce_retired" && (op.nonceRetirement === undefined || op.source !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized)) circleCorrupt("nonce_retirement_terminal");
   if (op.state !== "nonce_retired" && op.nonceRetirement !== undefined) circleCorrupt("nonce_retirement_metadata_state");
@@ -104,9 +110,10 @@ export function validateCircle(value: unknown): CircleOperationV1 {
 export function publicCircle(op: CircleOperationV1) { return { operation_id: op.operationId, kind: "circle_route", state: op.state, terminal: op.terminal,
   source_profile: op.profile, destination_profile: op.destinationProfile, destination_chain: op.destinationChain, amount_atomic: "40100", minimum_output_atomic: "40000",
   effects: op.effects.map(e => ({ role: e.role, phase: e.phase, transaction_hash: e.transactionHash, actual_fee_atomic: e.proof?.actualFeeAtomic ?? null })),
-  source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? null, nonce: op.attestation?.nonce ?? null,
+  source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? op.externalFulfillment?.destinationReceipt.finalityTag ?? null, nonce: op.attestation?.nonce ?? null,
   residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash, ...(op.nonceRetirement === undefined ? {} : { cleanup_retirement_receipt: op.nonceRetirement }),
-  next_actions: op.terminal ? [] : [`apn circle evm observe --operation ${op.operationId}`] }; }
+  ...(op.externalFulfillment === undefined ? {} : { external_fulfillment: op.externalFulfillment, proof_class: "circle_external_mint_fulfillment", destination_finality_external: "safe", controlled_destination_native_atomic: "0", source_budget_native_atomic: "60000000000000", source_actual_native_atomic: (BigInt(op.externalFulfillment.sourceApprovalActualFeeAtomic) + BigInt(op.externalFulfillment.sourceBurnActualFeeAtomic)).toString(), destination_fee_payer: op.externalFulfillment.caller }),
+    next_actions: op.terminal ? [] : [`apn circle evm observe --operation ${op.operationId}`] }; }
 export function circleSame(a: unknown, b: unknown): boolean { return canonicalJson(a) === canonicalJson(b); }
 
 function shape(value: unknown, keys: readonly string[]): boolean { return isPlainRecord(value) && exactKeys(value, keys); }

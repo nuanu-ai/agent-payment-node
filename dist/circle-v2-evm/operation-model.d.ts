@@ -1,3 +1,4 @@
+import { type CircleExternalFulfillment } from "./external-proof.js";
 import { type CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { type Address, type Hex } from "viem";
 import { type EvmNativeCustody } from "../evm-native-custody.js";
@@ -51,7 +52,7 @@ export interface CircleOperationV1 {
     readonly expiresAt: string;
     readonly deploymentDigest: string;
     readonly feeQuoteAtomic: string;
-    readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired";
+    readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
     readonly terminal: boolean;
     readonly effects: readonly CircleEffect[];
     readonly source: CircleSourceProof | null;
@@ -68,6 +69,7 @@ export interface CircleOperationV1 {
         readonly snapshotHash: string;
     }[];
     readonly integrityHash: string;
+    readonly externalFulfillment?: CircleExternalFulfillment;
     readonly nonceRetirement?: CircleNonceRetirementProof;
 }
 export declare function circleBlocked(reason: string): never;
@@ -79,10 +81,17 @@ export declare function validateCircleEnvelope(e: CircleEnvelope, role: CircleRo
 export declare function validateCircle(value: unknown): CircleOperationV1;
 export declare function publicCircle(op: CircleOperationV1): {
     next_actions: string[];
+    external_fulfillment?: CircleExternalFulfillment;
+    proof_class?: string;
+    destination_finality_external?: string;
+    controlled_destination_native_atomic?: string;
+    source_budget_native_atomic?: string;
+    source_actual_native_atomic?: string;
+    destination_fee_payer?: `0x${string}`;
     cleanup_retirement_receipt?: CircleNonceRetirementProof;
     operation_id: string;
     kind: string;
-    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired";
+    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;

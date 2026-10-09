@@ -1,3 +1,4 @@
+import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { BridgeHttps } from "../lifi/https.js";
 import type { StateStore } from "../state.js";
@@ -26,10 +27,17 @@ export declare class CircleEvmService {
     prepare(input: CirclePrepareInput): Promise<CircleOperationV1>;
     status(id: string): Promise<{
         next_actions: string[];
+        external_fulfillment?: import("./external-proof.js").CircleExternalFulfillment;
+        proof_class?: string;
+        destination_finality_external?: string;
+        controlled_destination_native_atomic?: string;
+        source_budget_native_atomic?: string;
+        source_actual_native_atomic?: string;
+        destination_fee_payer?: `0x${string}`;
         cleanup_retirement_receipt?: import("./nonce-retirement-proof.js").CircleNonceRetirementProof;
         operation_id: string;
         kind: string;
-        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired";
+        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
         terminal: boolean;
         source_profile: string;
         destination_profile: string;
@@ -50,6 +58,7 @@ export declare class CircleEvmService {
         integrity_hash: string;
     }>;
     approveSource(id: string): Promise<CircleOperationV1>;
+    adoptExternalMint(id: string, transactionHash: Hex): Promise<CircleOperationV1>;
     approveMint(id: string): Promise<CircleOperationV1>;
     observe(id: string): Promise<CircleOperationV1>;
     refreshAttestation(id: string): Promise<CircleOperationV1>;

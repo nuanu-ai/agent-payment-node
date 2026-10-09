@@ -23,5 +23,6 @@ export declare class CircleUsage {
     authorizationDeadline(op: CircleOperationV1, policies?: readonly CirclePolicy[]): Promise<string | null>;
     confirm(op: CircleOperationV1, policies?: readonly CirclePolicy[]): Promise<void>;
     reserve(op: CircleOperationV1): Promise<readonly AssetUsageReservation[]>;
+    followExternalFulfillment(op: CircleOperationV1): Promise<readonly AssetUsageReservation[]>;
     follow(op: CircleOperationV1, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<readonly AssetUsageReservation[]>;
 }

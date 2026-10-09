@@ -91,7 +91,7 @@ export function verifyCircleObservation(input: CircleObservation, expected: { ch
     finalityBlockNumberAtomic: circleUint(head.number).toString(), transactionHashBinding: hashObject(t), finalityTag: input.finalityTag, receiptHash: hashObject(r),
     logsHash: hashObject(r.logs), actualFeeAtomic: fee.toString() };
 }
-function oneEvent(observation: CircleObservation, name: "DepositForBurn" | "MessageSent" | "MessageReceived" | "MintAndWithdraw" | "Transfer" | "Approval", emitter: Address) {
+export function oneEvent(observation: CircleObservation, name: "DepositForBurn" | "MessageSent" | "MessageReceived" | "MintAndWithdraw" | "Transfer" | "Approval", emitter: Address) {
   const logs = circleRecord(observation.receipt).logs as unknown[], event = CIRCLE_ABI.find(x => x.type === "event" && x.name === name)!;
   const matching = logs.map(circleRecord).filter(l => addressEquals(l.address, emitter) && Array.isArray(l.topics) && circleHex(l.topics[0], 32) === toEventSelector(event));
   if (matching.length !== 1) circleFail("event_count"); const log = matching[0]!;

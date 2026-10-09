@@ -226,6 +226,10 @@ export declare function verifyCircleObservation(input: CircleObservation, expect
     maxNativeDebitAtomic: bigint;
     maxGasAtomic: bigint;
 }): CircleReceiptProof;
+export declare function oneEvent(observation: CircleObservation, name: "DepositForBurn" | "MessageSent" | "MessageReceived" | "MintAndWithdraw" | "Transfer" | "Approval", emitter: Address): {
+    args: Record<string, unknown>;
+    logIndex: bigint;
+};
 export interface CircleSourceProof extends CircleReceiptProof {
     readonly kind: "circle_v2_evm_source";
     readonly destinationChain: CircleDestinationChain;

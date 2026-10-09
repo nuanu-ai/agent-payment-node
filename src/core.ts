@@ -177,7 +177,7 @@ export class ApnCore {
         return operationOutcome(await service.prepare(request));
       }
       case "circle.evm.prepare": case "circle.evm.approve-source": case "circle.evm.approve-mint": case "circle.evm.observe":
-      case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.cleanup-nonce": case "circle.evm.status": case "circle.approval.prepare":
+      case "circle.evm.adopt-external-mint": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.cleanup-nonce": case "circle.evm.status": case "circle.approval.prepare":
       case "circle.approval.execute": case "circle.approval.status": case "circle.source.submit": return await executeCircleCommand(request, this.context);
       case "stargate.native.execute": case "stargate.native.observe": case "stargate.native.status": case "stargate.native.receipt": {
         const service = this.context.stargateNative;

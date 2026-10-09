@@ -158,19 +158,22 @@ export declare class CircleRpc {
     constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number);
     call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
     identity(): Promise<void>;
-    read(to: Address, name: string, args?: readonly unknown[], tag?: string): Promise<unknown>;
+    read(to: Address, name: string, args?: readonly unknown[], tag?: string | {
+        readonly blockHash: Hex;
+        readonly requireCanonical: true;
+    }): Promise<unknown>;
     block(tag: string): Promise<Record<string, unknown>>;
     observation(transactionHash: Hex, finalityTag: "included" | "safe" | "finalized"): Promise<CircleObservation | null>;
     account(address: Address, token: Address, spender: Address): Promise<CircleAccountPreflight>;
     envelope(from: Address, to: Address, data: Hex, nonceAtomic: string, gasLimit?: string): Promise<CircleEnvelope>;
 }
-export declare function readCircleDeployment(rpc: CircleRpc, destinationChain: CircleDestinationChain): Promise<CircleDeploymentSnapshot>;
+export declare function readCircleDeployment(rpc: CircleRpc, destinationChain: CircleDestinationChain, historicalBlock?: Record<string, unknown>): Promise<CircleDeploymentSnapshot>;
 export declare function currentCircleDeployments(source: CircleRpc, destination: CircleRpc, chain: CircleDestinationChain): Promise<{
     source: CircleDeploymentSnapshot;
     destination: CircleDeploymentSnapshot;
     digest: string;
 }>;
-export declare function readCircleAttesters(rpc: CircleRpc, deploymentDigest: string): Promise<CircleAttesterSnapshot>;
+export declare function readCircleAttesters(rpc: CircleRpc, deploymentDigest: string, historicalBlock?: Record<string, unknown>): Promise<CircleAttesterSnapshot>;
 export declare const circleRpcTransaction: (e: CircleEnvelope) => {
     from: `0x${string}`;
     to: `0x${string}`;

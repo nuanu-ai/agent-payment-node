@@ -1,6 +1,8 @@
 import { isSealedBurnRetirement, sealedBurnReplacement, assertSealedBurnReplacement, SEALED_BURN_HASH, SEALED_BURN_MATERIAL } from "./burn-retirement.js";
 import { sealedBurnEvidence, assertBurnReplacementAccount } from "./burn-retirement-rpc.js";
+import { CircleExternalStore } from "./external-store.js";
 import { readCircleMintFeeRecipient } from "./mint-fee-recipient.js";
+import { adoptCircleExternalMint } from "./external-adoption.js";
 import { CircleRetirementAuthorityStore, assertCircleRetirementWindow, type CircleRetirementAuthority } from "./nonce-retirement-authority.js";
 import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { assertCircleNonceRetirementCase, retireCircleNonce, type CircleNonceRetirementPorts } from "./nonce-retirement.js";
@@ -73,6 +75,7 @@ export class CircleEvmService {
   }
   async status(id: string) { return publicCircle(await this.required(id)); }
   async approveSource(id: string) { return this.run(id, approveCircleSource); }
+  async adoptExternalMint(id: string, transactionHash: Hex) { return adoptCircleExternalMint(this.state,this.repo,this.usage,this.env,this.now,this.https,id,transactionHash); }
   async approveMint(id: string) { return this.run(id, approveCircleMint); }
   async observe(id: string) { return this.run(id, async (op, ports) => await this.retirements.intent(op) === null ? observeCircle(op, ports) : retireCircleNonce(op, ports as CircleNonceRetirementPorts, false)); }
   async refreshAttestation(id: string) { return this.run(id, refreshCircleAttestation); }
@@ -98,6 +101,7 @@ export class CircleEvmService {
     return this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
       evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
       let op = await this.required(id);
+      if(action === approveCircleMint && op.destinationChain === 143)await new CircleExternalStore(this.state.root).assertOwnedMintAvailable(op);
       if (action !== cleanupCircle && op.usage.length === 0 && op.effects.every(e => e.phase === "prepared")) { op = advanceCircle(op, { usage: await this.usage.reserve(op) }, "interrupted_prepare_reserves_repaired", this.now()); await this.repo.save(op); }
       return action(op, this.ports(op, retirementOnly));
     }));

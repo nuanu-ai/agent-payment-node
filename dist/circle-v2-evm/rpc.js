@@ -85,9 +85,9 @@ export class CircleRpc {
     }
 }
 function hexQuantity(input) { return `0x${circleUint(input).toString(16)}`; }
-export async function readCircleDeployment(rpc, destinationChain) {
+export async function readCircleDeployment(rpc, destinationChain, historicalBlock) {
     await rpc.identity();
-    const route = circleRoute(destinationChain), source = rpc.chainId === 42161, token = source ? CIRCLE_SOURCE_TOKEN : route.token, remoteDomain = source ? route.domain : 3, remoteToken = source ? route.token : CIRCLE_SOURCE_TOKEN, block = await rpc.block("safe"), tag = String(block.number), expected = CIRCLE_DEPLOYMENT_PINS[rpc.chainId];
+    const route = circleRoute(destinationChain), source = rpc.chainId === 42161, token = source ? CIRCLE_SOURCE_TOKEN : route.token, remoteDomain = source ? route.domain : 3, remoteToken = source ? route.token : CIRCLE_SOURCE_TOKEN, block = historicalBlock ?? await rpc.block("safe"), tag = historicalBlock === undefined ? String(block.number) : { blockHash: circleHex(block.hash, 32), requireCanonical: true }, expected = CIRCLE_DEPLOYMENT_PINS[rpc.chainId];
     const contracts = {};
     for (const key of ["messenger", "transmitter", "minter", "token"]) {
         const address = getAddress(expected[key].address), proxyCodeHash = keccak256(circleRuntimeBytecode(await rpc.call("eth_getCode", [address, tag])));
@@ -100,7 +100,7 @@ export async function readCircleDeployment(rpc, destinationChain) {
         rpc.read(CIRCLE_MINTER, "remoteTokensToLocalTokens", [circleTokenPairKey(remoteDomain, remoteToken)], tag), rpc.read(CIRCLE_MESSENGER, "localMinter", [], tag),
         rpc.read(CIRCLE_MESSENGER, "localMessageTransmitter", [], tag), rpc.read(CIRCLE_MINTER, "localTokenMessenger", [], tag), rpc.read(CIRCLE_TRANSMITTER, "version", [], tag),
         rpc.read(CIRCLE_MESSENGER, "messageBodyVersion", [], tag), rpc.read(token, "decimals", [], tag), rpc.read(CIRCLE_TRANSMITTER, "paused", [], tag), rpc.read(CIRCLE_MINTER, "paused", [], tag), rpc.read(token, "paused", [], tag)]);
-    const rechecked = await rpc.block(tag);
+    const rechecked = await rpc.block(String(block.number));
     if (circleHex(rechecked.hash, 32) !== circleHex(block.hash, 32))
         circleBlocked("deployment_snapshot_reorg");
     return { chainId: rpc.chainId, domain: Number(values[0]), blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(), contracts,
@@ -111,15 +111,15 @@ export async function currentCircleDeployments(source, destination, chain) {
     const [a, b] = await Promise.all([readCircleDeployment(source, chain), readCircleDeployment(destination, chain)]);
     return { source: a, destination: b, digest: verifyCircleDeployments(a, b) };
 }
-export async function readCircleAttesters(rpc, deploymentDigest) {
+export async function readCircleAttesters(rpc, deploymentDigest, historicalBlock) {
     await rpc.identity();
-    const block = await rpc.block("safe"), tag = String(block.number), threshold = Number(await rpc.read(CIRCLE_TRANSMITTER, "signatureThreshold", [], tag)), count = Number(await rpc.read(CIRCLE_TRANSMITTER, "getNumEnabledAttesters", [], tag));
+    const block = historicalBlock ?? await rpc.block("safe"), tag = historicalBlock === undefined ? String(block.number) : { blockHash: circleHex(block.hash, 32), requireCanonical: true }, threshold = Number(await rpc.read(CIRCLE_TRANSMITTER, "signatureThreshold", [], tag)), count = Number(await rpc.read(CIRCLE_TRANSMITTER, "getNumEnabledAttesters", [], tag));
     if (!Number.isSafeInteger(count) || count < 1 || count > 20 || !Number.isSafeInteger(threshold) || threshold < 1 || threshold > count)
         circleBlocked("attester_count");
     const enabledAttesters = [];
     for (let i = 0; i < count; i++)
         enabledAttesters.push(getAddress(String(await rpc.read(CIRCLE_TRANSMITTER, "getEnabledAttester", [BigInt(i)], tag))));
-    if (circleHex((await rpc.block(tag)).hash, 32) !== circleHex(block.hash, 32))
+    if (circleHex((await rpc.block(String(block.number))).hash, 32) !== circleHex(block.hash, 32))
         circleBlocked("attester_snapshot_reorg");
     return { threshold, enabledAttesters, chainId: rpc.chainId, transmitter: CIRCLE_TRANSMITTER, blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(), deploymentDigest };
 }

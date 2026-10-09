@@ -76,6 +76,8 @@ export function validateCircleAdvance(previous, next) {
         circleCorrupt("destination_replacement");
     if (previous.usage.length > 0 && !circleSame(previous.usage.map(x => ({ id: x.reservationId, account: x.account, amount: x.amountAtomic })), next.usage.map(x => ({ id: x.reservationId, account: x.account, amount: x.amountAtomic }))))
         circleCorrupt("usage_replacement");
+    if (previous.externalFulfillment !== undefined && !circleSame(previous.externalFulfillment, next.externalFulfillment))
+        circleCorrupt("external_fulfillment_replacement");
     if (previous.nonceRetirement !== undefined && !circleSame(previous.nonceRetirement, next.nonceRetirement))
         circleCorrupt("retirement_replacement");
     if (previous.usageFinalized && !next.usageFinalized)

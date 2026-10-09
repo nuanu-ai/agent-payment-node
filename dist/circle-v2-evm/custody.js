@@ -17,6 +17,9 @@ export class CircleEffectStore extends SecureStateStore {
         this.wrapping = wrapping;
     }
     path(op, role) { validateCircle(op); return `circle-v2-evm-effects/${op.operationId}-${role}.json`; }
+    async assertExternalAbsent(op) { validateCircle(op); const entries = await this.readDirectory("circle-v2-evm-effects"); for (const role of ["mint", "cleanup"])
+        if (entries.some(entry => entry.name === `${op.operationId}-${role}.json`))
+            circleBlocked("external_owned_material_present"); }
     async assertCleanupAbsent(op) { if (await this.readJson(this.path(op, "cleanup")) !== null)
         circleBlocked("retirement_unclaimed_cleanup_material_present"); }
     async assertRetirementHeaders(op) {
