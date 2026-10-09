@@ -40,9 +40,9 @@ export async function executeHistoricalJupiterCli(argv, stateRoot) {
         }
         const evidence = projection.retainedClaimEvidence;
         publicProjection.retainedClaimEvidence = evidence.kind === "retained_send_claim_present"
-            ? { kind: evidence.kind, claimHash: evidence.claimHash }
+            ? { kind: evidence.kind, claimHash: evidence.claimHash, signedMarkerSnapshotHash: evidence.signedMarkerSnapshotHash }
             : { kind: evidence.kind, observation: evidence.observation, submissionHistory: evidence.submissionHistory,
-                transactionMayHaveBeenSubmitted: evidence.transactionMayHaveBeenSubmitted, absenceSnapshotHash: evidence.absenceSnapshotHash };
+                transactionMayHaveBeenSubmitted: evidence.transactionMayHaveBeenSubmitted, absenceSnapshotHash: evidence.absenceSnapshotHash, signedMarkerSnapshotHash: evidence.signedMarkerSnapshotHash };
         return { ...base, ok: true, proof_class: "historical_material_authentication_only", error: null,
             data: { scope: "Retained material authentication only; no expiry or historical execution verdict, ledger change, or financial permission.",
                 projection: publicProjection } };

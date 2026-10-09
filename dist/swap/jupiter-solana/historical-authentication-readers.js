@@ -30,6 +30,7 @@ const CUSTODY_DIRECTORIES = Object.freeze([...BASE_DIRECTORIES, "chain-accounts"
 export class HistoricalDirectoryGuard {
     root;
     #identities = new Map();
+    #signedMarkers = new Map();
     constructor(root) {
         this.root = root;
     }
@@ -46,6 +47,40 @@ export class HistoricalDirectoryGuard {
         if (original !== undefined && (original.dev !== after.dev || original.ino !== after.ino))
             historicalAuthenticationRefused();
         this.#identities.set(path, { dev: after.dev, ino: after.ino });
+    }
+    /** Read and retain the finite public marker leaf identity across the entire authentication session. */
+    async signedMarkerSnapshot(op, marker) {
+        if (!HISTORICAL_JUPITER_IDS.some(id => id === op.operationId))
+            historicalAuthenticationRefused();
+        stateIdentifier(op.ownerProfileHash, "Jupiter profile");
+        const directory = `jupiter-v1-signatures/${op.ownerProfileHash}`, path = resolve(this.root, directory, `${op.operationId}.json`);
+        await this.check([directory]);
+        const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        let snapshotHash;
+        try {
+            const opened = await handle.stat({ bigint: true }), before = await lstat(path, { bigint: true });
+            const valid = (v) => v.isFile() && !v.isSymbolicLink() && v.uid === BigInt(process.geteuid?.() ?? -1)
+                && (v.mode & 511n) === 384n && v.nlink === 1n && v.size > 0n && v.size <= 1024n;
+            const facts = (v) => ({ dev: String(v.dev), ino: String(v.ino), uid: String(v.uid), mode: String(v.mode), nlink: String(v.nlink),
+                size: String(v.size), mtimeNs: String(v.mtimeNs), ctimeNs: String(v.ctimeNs) });
+            if (!valid(opened) || !valid(before) || canonicalJson(facts(opened)) !== canonicalJson(facts(before)))
+                historicalAuthenticationRefused();
+            const bytes = await handle.readFile();
+            await this.check([directory]);
+            const after = await lstat(path, { bigint: true }), canonical = canonicalJson(marker), text = bytes.toString("utf8");
+            if (!valid(after) || canonicalJson(facts(opened)) !== canonicalJson(facts(after)) || (text !== canonical && text !== `${canonical}\n`))
+                historicalAuthenticationRefused();
+            snapshotHash = hashObject({ root: this.root, path, leaf: facts(after) });
+            const original = this.#signedMarkers.get(path);
+            if (original !== undefined && original !== snapshotHash)
+                historicalAuthenticationRefused();
+            this.#signedMarkers.set(path, snapshotHash);
+        }
+        finally {
+            await handle.close();
+        }
+        await this.check([directory]);
+        return snapshotHash;
     }
     async check(directories = []) {
         try {
@@ -128,13 +163,15 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
         historicalAuthenticationRefused(); this.#guard = guard; }
     /** Only exact ea25 may authenticate retained signed material while observing an absent claim. */
     async retainedEvidence(op, binding) {
-        const signedMarker = await this.loadSignedMarker(op, binding), claim = await this.loadClaim(op);
+        const signedMarker = await this.loadSignedMarker(op, binding);
         if (signedMarker === null)
             historicalAuthenticationRefused();
+        const signedMarkerSnapshotHash = await this.#guard.signedMarkerSnapshot(op, signedMarker);
+        const claim = await this.loadClaim(op);
         if (claim !== null) {
             if (claim.signature !== signedMarker.signature || claim.bindingHash !== binding.bindingHash || claim.rawPayloadHash !== signedMarker.rawPayloadHash)
                 historicalAuthenticationRefused();
-            return { signedMarker, claim, evidence: { kind: "retained_send_claim_present", claimHash: claim.claimHash } };
+            return { signedMarker, claim, evidence: { kind: "retained_send_claim_present", claimHash: claim.claimHash, signedMarkerSnapshotHash } };
         }
         if (op.operationId !== HISTORICAL_JUPITER_IDS[1])
             historicalAuthenticationRefused();
@@ -157,7 +194,7 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
         if (canonicalJson(facts(before)) !== canonicalJson(facts(after)))
             historicalAuthenticationRefused();
         // A replacement or even a create/remove changes this current absence observation.
-        return { signedMarker, claim: null, evidence: { kind: "retained_send_claim_absent", observation: "current_observation", submissionHistory: "unknown", transactionMayHaveBeenSubmitted: true,
+        return { signedMarker, claim: null, evidence: { kind: "retained_send_claim_absent", observation: "current_observation", submissionHistory: "unknown", transactionMayHaveBeenSubmitted: true, signedMarkerSnapshotHash,
                 absenceSnapshotHash: hashObject({ root: this.root, target, directory: facts(after), observation: "ENOENT" }) } };
     }
     /** Production issuer only: generated wallets cannot replace this original public file anchor. */
@@ -165,6 +202,8 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
         if (retained.evidence.kind !== "retained_send_claim_absent")
             return;
         if (op.operationId !== HISTORICAL_JUPITER_IDS[1])
+            historicalAuthenticationRefused();
+        if (await this.#guard.signedMarkerSnapshot(op, retained.signedMarker) !== retained.evidence.signedMarkerSnapshotHash)
             historicalAuthenticationRefused();
         stateIdentifier(op.ownerProfileHash, "Jupiter profile");
         const directory = `jupiter-v1-signatures/${op.ownerProfileHash}`, path = resolve(this.root, directory, `${op.operationId}.json`);
@@ -185,6 +224,8 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
         finally {
             await handle.close();
         }
+        if (await this.#guard.signedMarkerSnapshot(op, retained.signedMarker) !== retained.evidence.signedMarkerSnapshotHash)
+            historicalAuthenticationRefused();
         await this.#guard.check([directory]);
     }
     async initialize() { await this.#guard.check(BINDING_DIRECTORIES); }

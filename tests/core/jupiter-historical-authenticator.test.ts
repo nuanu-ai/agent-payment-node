@@ -2,13 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { readFile, writeFile, readdir, rm, rename, mkdir, symlink } from "node:fs/promises";
+import { readFile, writeFile, readdir, rm, rename, mkdir, symlink, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { JupiterHistoricalAuthenticator as FixedHistoricalAuthenticator, HISTORICAL_JUPITER_IDS } from "../../src/swap/jupiter-solana/historical-authenticator.js";
 import { JupiterHistoricalProjectionReader } from "../../src/swap/jupiter-solana/historical-projection-reader.js";
-import { HistoricalBindingReader } from "../../src/swap/jupiter-solana/historical-authentication-readers.js";
+import { HistoricalBindingReader, HistoricalDirectoryGuard, type HistoricalRetainedEvidence } from "../../src/swap/jupiter-solana/historical-authentication-readers.js";
 import { historicalFixture } from "./jupiter-historical-authentication-fixture.js";
+import { HISTORICAL_JUPITER_EA25_SIGNED_MARKER_SHA256, HISTORICAL_JUPITER_OWNER_PROFILE } from "../../src/swap/jupiter-solana/historical-pins.js";
+import type { SwapOperationRecord } from "../../src/swap/model.js";
 import { temporaryState } from "./helpers.js";
 async function snapshot(root: string, prefix=""): Promise<Record<string,string>> {
  const result:Record<string,string>={};for(const entry of await readdir(join(root,prefix),{withFileTypes:true})){if(prefix===""&&entry.name==="locks")continue;const path=join(prefix,entry.name);if(entry.isDirectory())Object.assign(result,await snapshot(root,path));else result[path]=sha256(await readFile(join(root,path)));}return result;
@@ -128,3 +130,37 @@ test("production original marker anchor leaves present-claim legacy route unpinn
  const f=await historicalFixture({operationId:ea25});t.after(f.temp.cleanup);const reader=new HistoricalBindingReader(f.temp.root),retained=await reader.retainedEvidence(f.op,f.binding);
  assert.equal(retained.evidence.kind,"retained_send_claim_present");await reader.assertOriginalAbsentSignedMarker(f.op,retained);
 });
+
+// Public original-marker bytes only: this witness issues no fixed-owner private token.
+const originalEa25Marker = Object.freeze({
+ schemaVersion:"apn.jupiter-v1-signed-marker.v1" as const,
+ operationId:ea25, markerHash:"2152a993873aed45917c70e6631cad60b8041f5b1285b8aea0bf3b4cb1196c62",
+ bindingHash:"ed039fe9b397d8a6bff808c61af401e1eab4e645f3d950b16d54bbd0d97c34ef",
+ signature:"5sdGa18Jtau66J1H64YLD7mXqsjvMw3pztuMJuFcxnZjM2jP99pDFo3VXixH98zdfz77ppvX1no3M8iqMBFptih7",
+ rawPayloadHash:"4ffd2656d1f2d4c26dd4d99e67ad1a85bd1394a0ef1ecc038a041548634e06c2",
+ recordHash:"e0dc8f9007e8998cdff524ebcfc1988a47b0bb547a74c0c6907008583e746a96",
+});
+test("production original raw marker anchor retains stable leaf and refuses identical-byte replacement",async t=>{
+ const temp=await temporaryState();t.after(temp.cleanup);await mkdir(temp.root,{mode:0o700});
+ const dir=join(temp.root,"jupiter-v1-signatures",HISTORICAL_JUPITER_OWNER_PROFILE);await mkdir(dir,{recursive:true,mode:0o700});
+ const path=join(dir,`${ea25}.json`),bytes=Buffer.from(`${canonicalJson(originalEa25Marker)}\n`),retainedPath=join(temp.base,"retained-original-marker");
+ assert.equal(bytes.length,561);assert.equal(sha256(bytes),HISTORICAL_JUPITER_EA25_SIGNED_MARKER_SHA256);await writeFile(path,bytes,{mode:0o600});
+ const op={operationId:ea25,ownerProfileHash:HISTORICAL_JUPITER_OWNER_PROFILE} as SwapOperationRecord,guard=new HistoricalDirectoryGuard(temp.root),reader=new HistoricalBindingReader(temp.root,guard);
+ const signedMarkerSnapshotHash=await guard.signedMarkerSnapshot(op,originalEa25Marker);
+ const retained:HistoricalRetainedEvidence={signedMarker:originalEa25Marker,claim:null,evidence:{kind:"retained_send_claim_absent",observation:"current_observation",submissionHistory:"unknown",transactionMayHaveBeenSubmitted:true,absenceSnapshotHash:"a".repeat(64),signedMarkerSnapshotHash}};
+ await reader.assertOriginalAbsentSignedMarker(op,retained);await reader.assertOriginalAbsentSignedMarker(op,retained);
+ assert.equal(await guard.signedMarkerSnapshot(op,originalEa25Marker),signedMarkerSnapshotHash);
+ const before=await lstat(path);await rename(path,retainedPath);await writeFile(path,bytes,{mode:0o600});const after=await lstat(path);assert.notEqual(after.ino,before.ino);
+ await assert.rejects(reader.assertOriginalAbsentSignedMarker(op,retained));
+ assert.deepEqual(await readFile(retainedPath),bytes);assert.deepEqual(await readFile(path),bytes);
+});
+const identicalMarkerReplacement="plain projection reader refuses identical-byte marker replacement after genuine TEST consent";
+test(identicalMarkerReplacement,async()=>inPty(identicalMarkerReplacement,async()=>{
+ const f=await historicalFixture({operationId:ea25,omitClaim:true});
+ try{
+  const markerPath=join(f.temp.root,"jupiter-v1-signatures",f.op.ownerProfileHash,`${ea25}.json`),retainedPath=join(f.temp.base,"retained-original-marker"),bytes=await readFile(markerPath),before=await snapshot(f.temp.root);let keys=0;
+  const reader=new JupiterHistoricalProjectionReader(f.temp.root,{load:async()=>{keys++;const old=await lstat(markerPath);await rename(markerPath,retainedPath);await writeFile(markerPath,bytes,{mode:0o600});assert.notEqual((await lstat(markerPath)).ino,old.ino);return Buffer.alloc(32,77);},create:async()=>{throw Error();}});
+  await assert.rejects(reader.read(ea25));assert.equal(keys,1);
+  assert.deepEqual(await readFile(retainedPath),bytes);assert.deepEqual(await readFile(markerPath),bytes);assert.deepEqual(await snapshot(f.temp.root),before);
+ }finally{await f.temp.cleanup();}
+}));

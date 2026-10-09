@@ -11,6 +11,8 @@ export declare class HistoricalDirectoryGuard {
     #private;
     readonly root: string;
     constructor(root: string);
+    /** Read and retain the finite public marker leaf identity across the entire authentication session. */
+    signedMarkerSnapshot(op: Pick<SwapOperationRecord, "operationId" | "ownerProfileHash">, marker: JupiterV1SignedMarker): Promise<string>;
     check(directories?: readonly string[]): Promise<void>;
 }
 export declare class HistoricalReadState extends StateStore {
@@ -41,12 +43,14 @@ export declare class HistoricalMaterialReader extends SavedJupiterV1MaterialStor
 export type HistoricalRetainedClaimEvidence = {
     readonly kind: "retained_send_claim_present";
     readonly claimHash: string;
+    readonly signedMarkerSnapshotHash: string;
 } | {
     readonly kind: "retained_send_claim_absent";
     readonly observation: "current_observation";
     readonly submissionHistory: "unknown";
     readonly transactionMayHaveBeenSubmitted: true;
     readonly absenceSnapshotHash: string;
+    readonly signedMarkerSnapshotHash: string;
 };
 export interface HistoricalRetainedEvidence {
     readonly signedMarker: JupiterV1SignedMarker;
