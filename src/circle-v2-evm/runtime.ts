@@ -110,10 +110,10 @@ export class CircleEvmService {
     const deployments = () => this.preflightDeployments(source, destination, initial.destinationChain);
     return {
       now: this.now, save: op => this.repo.save(op), authorizationDeadline: op => this.usage.authorizationDeadline(op),
-      assertOwnerPolicyAndConflicts: async op => {
+      assertOwnerPolicyAndConflicts: async (op, effectRole) => {
         await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody); await assertEvmNativeCustody(this.state, op.destinationProfile, op.destinationCustody);
         await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash);
-        await this.operations.assertCircleAccountsAvailable(op, true); await this.usage.confirm(op);
+        await this.operations.assertCircleAccountsAvailable(op, true, effectRole); await this.usage.confirm(op);
       },
       approve: async (op, role, deadline) => role === "cancel" ? exactChainConsent([
         "Agent Payment Node Circle unsubmitted cancellation", `Operation: ${op.operationId}`,

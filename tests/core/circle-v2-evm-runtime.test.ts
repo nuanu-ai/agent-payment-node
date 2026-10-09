@@ -30,9 +30,10 @@ function initial(root = join(tmpdir(), "circle-fixture"), chain: 143 | 1329 | 59
   return advanceCircle(body, {}, "prepared", at);
 }
 function usage(op: CircleOperationV1, target: "reserved" | "unknown_finality" | "finalized" = "reserved") {
+  const route = circleRoute(op.destinationChain);
   return ["usdc", "approval-native", "burn-native", "cleanup-native", "mint-native"].map((key, i) => {
-    const identity = { account: i === 4 ? route.gasPayer : CIRCLE_SOURCE_OWNER, chain: i === 4 ? "eip155:143" : "eip155:42161", asset: i === 0 ? { kind: "token" as const, identifier: CIRCLE_SOURCE_TOKEN } : { kind: "native" as const, identifier: null } }, idempotencyHash = idempotency(`${op.operationId}:${key}`);
-    return sealUsage({ schemaVersion: "apn.asset-usage-reservation.v1", reservationId: reservationIdFor(identity, idempotencyHash), idempotencyHash, policyDigest: op.policies[i === 4 ? 1 : 0]!.policyDigest, registryVersion: "circle-fixture", ...identity, rail: "bridge", amountAtomic: i === 0 ? "40100" : i === 4 ? route.destinationNativeCap : i === 3 ? "15000000000000" : "30000000000000", state: target,
+    const identity = { account: i === 4 ? route.gasPayer : CIRCLE_SOURCE_OWNER, chain: i === 4 ? `eip155:${op.destinationChain}` : "eip155:42161", asset: i === 0 ? { kind: "token" as const, identifier: CIRCLE_SOURCE_TOKEN } : { kind: "native" as const, identifier: null } }, idempotencyHash = idempotency(`${op.operationId}:${key}`);
+    return sealUsage({ schemaVersion: "apn.asset-usage-reservation.v1", reservationId: reservationIdFor(identity, idempotencyHash), idempotencyHash, policyDigest: op.policies.find(p => p.profileHash === (i === 4 ? op.destinationProfileHash : op.profileHash))!.policyDigest, registryVersion: "circle-fixture", ...identity, rail: "bridge", amountAtomic: i === 0 ? "40100" : i === 4 ? route.destinationNativeCap : i === 3 ? "15000000000000" : "30000000000000", state: target,
       reservedAt: new Date(at).toISOString(), updatedAt: new Date(at).toISOString(), effectAt: target === "finalized" ? new Date(at).toISOString() : null, outcomeDigest: target === "finalized" ? "8".repeat(64) : null });
   });
 }
@@ -61,9 +62,9 @@ test("unknown signing can recover encrypted material only for observation", asyn
   let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); op = advanceCircle(op, { effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "signing_started" } : e), state: "source_unknown" }, "signing_fence", at);
   const p = ports(op); const recovered = await observeCircle(op, p.p); assert.equal(recovered.effects[0]!.phase, "unknown"); assert.equal(recovered.effects[0]!.transactionHash, tx); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
 });
-async function sourceReady(finalized = false) {
-  let op = initial(); op = advanceCircle(op, { usage: usage(op, "unknown_finality") }, "reserved", at);
-  const raw = source(143), proof = decodeCircleSource(finalized ? { ...raw, finalityTag: "finalized" } : raw, 143), attestation = await bindCircleAttestation(proof, await iris(proof), snapshot(143));
+async function sourceReady(finalized = false, chain: 143 | 1329 | 59144 = 143) {
+  let op = initial(undefined, chain); op = advanceCircle(op, { usage: usage(op, "unknown_finality") }, "reserved", at);
+  const raw = source(chain), proof = decodeCircleSource(finalized ? { ...raw, finalityTag: "finalized" } : raw, chain), attestation = await bindCircleAttestation(proof, await iris(proof), snapshot(chain));
   op = advanceCircle(op, { source: proof, attestation, effects: op.effects.map(e => ({ ...e, phase: "confirmed", transactionHash: tx, materialHash: "9".repeat(64), proof })), state: "awaiting_mint" }, "source_confirmed", at);
   return op;
 }
@@ -242,4 +243,35 @@ test("pending-finality fallback requires exact fresh canonical source and never 
 test("saved finalized source cannot use included fallback to mask absent finalized canonical proof", async () => {
   const op = await sourceReady(true), requested: boolean[] = []; const p = ports(op, { observeSource: async (_op, finalized) => { requested.push(finalized); return null; } });
   const observed = await observeCircle(op, p.p); assert.deepEqual(requested, [true]); assert.equal(observed.terminal, false); assert.equal(observed.usageFinalized, false);
+});
+
+
+test("finalized Linea mint scopes conflicts to its destination payer without freeing any source unknown holds", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "circle-mint-payer-conflict-")));
+  try {
+    const state = new StateStore(root); await state.initialize(); const repo = new CircleRepository(root), service = new OperationService(state);
+    const fixture = async (op: CircleOperationV1) => { validateCircle(op); await mkdir(join(root, "circle-v2-evm"), { recursive: true, mode: 0o700 }); await writeFile(join(root, "circle-v2-evm", `${op.operationId}.json`), `${canonicalJson(op)}\n`, { mode: 0o600 }); };
+    const current = await sourceReady(true, 59144); await fixture(current);
+    const otherBase = initial(root), other = advanceCircle(sealCircle({ ...otherBase, operationId: "8".repeat(64), idempotencyHash: "8".repeat(64) }), { state: "source_unknown", effects: otherBase.effects.map(e => e.role === "approval" ? { ...e, phase: "unknown" } : e) }, "other_unknown", at);
+    await fixture(other); const oldBytes = await readFile(join(root, "circle-v2-evm", `${other.operationId}.json`), "utf8");
+    await service.assertCircleAccountsAvailable(current, true, "mint");
+    for (const role of [undefined, "approval", "burn", "cleanup"] as const) await assert.rejects(service.assertCircleAccountsAvailable(current, true, role), { code: "APN_OPERATION_BLOCKED" });
+    const mintEnvelope = async (op: CircleOperationV1) => circleEnvelope({ chainId: 59144, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_TRANSMITTER, data: encodeCircleMint(op.attestation!), valueAtomic: "0", nonceAtomic: "10", gasLimitAtomic: "500000", maxFeePerGasAtomic: "100000000", maxPriorityFeePerGasAtomic: "0" });
+    const normal = ports(current, { save: op => repo.save(op), mintEnvelope, assertOwnerPolicyAndConflicts: (op, role) => service.assertCircleAccountsAvailable(op, true, role) });
+    const submitted = await approveCircleMint(current, normal.p); assert.equal(submitted.effects.find(e => e.role === "mint")!.phase, "submitted"); assert.equal(normal.signs(), 1); assert.equal(normal.sends(), 1);
+    await fixture(current);
+    const expired = ports(current, { save: op => repo.save(op), mintEnvelope, assertOwnerPolicyAndConflicts: (op, role) => service.assertCircleAccountsAvailable(op, true, role), authorizationDeadline: async () => new Date(at + 1).toISOString() });
+    await assert.rejects(approveCircleMint(current, expired.p), /consent_expired/); assert.equal(expired.signs(), 0); assert.equal(expired.sends(), 0);
+    await fixture(current);
+    const included = await sourceReady(false, 59144); await writeFile(join(root, "circle-v2-evm", `${current.operationId}.json`), `${canonicalJson(included)}\n`, { mode: 0o600 });
+    await assert.rejects(service.assertCircleAccountsAvailable(included, true, "mint"), { code: "APN_OPERATION_BLOCKED" });
+    await writeFile(join(root, "circle-v2-evm", `${current.operationId}.json`), `${canonicalJson(current)}\n`, { mode: 0o600 });
+    const ownUnknown = sealCircle({ ...current, effects: current.effects.map(e => e.role === "approval" ? { ...e, phase: "unknown" as const } : e) });
+    await writeFile(join(root, "circle-v2-evm", `${current.operationId}.json`), `${canonicalJson(ownUnknown)}\n`, { mode: 0o600 });
+    await assert.rejects(service.assertCircleAccountsAvailable(ownUnknown, true, "mint"));
+    await writeFile(join(root, "circle-v2-evm", `${current.operationId}.json`), `${canonicalJson(current)}\n`, { mode: 0o600 });
+    const destinationBase = initial(root, 59144), destinationUnknown = advanceCircle(sealCircle({ ...destinationBase, operationId: "9".repeat(64), idempotencyHash: "9".repeat(64) }), { state: "source_unknown", effects: destinationBase.effects.map(e => e.role === "approval" ? { ...e, phase: "unknown" } : e) }, "destination_unknown", at);
+    await fixture(destinationUnknown); await assert.rejects(service.assertCircleAccountsAvailable(current, true, "mint"), (e: unknown) => { const error = e as { details: Record<string, string> }; assert.equal(error.details.blockingNetwork, "evm:59144"); return true; });
+    assert.equal(await readFile(join(root, "circle-v2-evm", `${other.operationId}.json`), "utf8"), oldBytes); assert.equal(current.terminal, false); assert.ok(current.usage.every(u => u.state === "unknown_finality"));
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
