@@ -211,6 +211,10 @@ test("Base execution retains exact allowlist lock through the asynchronous criti
   const running = runtime.execute(saved.operationId); await started;
   const policies = new AllowlistPolicyStore(tmp.root); Object.assign(policies, { lockWaitMs: 0 });
   try {
+    const { LocalWalletNative } = await import("../../src/local-wallet-native.js");
+    const other = new StateStore(tmp.root); Object.assign(other, { lockWaitMs: 0 });
+    await assert.rejects(new LocalWalletNative(other, { load: async () => { throw new Error("no key read"); }, create: async () => { throw new Error("no key create"); } })
+      .request({ version: "apn.native.v1", requestId: "custody-witness", operation: "wallet.describe", payload: { profile: "evm-live-seller" } }), { code: "APN_STATE_BUSY" });
     await assert.rejects(policies.read("evm-live-seller"), { code: "APN_STATE_BUSY" });
     await assert.rejects(policies.appendDecision("evm-live-seller", null, { status: "revoked", revision: 1, stagedRecordDigest: "a".repeat(64), policyDigest: "b".repeat(64), approvalFingerprint: "c".repeat(64), decidedAt: new Date(clock * 1000).toISOString() }), { code: "APN_STATE_BUSY" });
   }
@@ -229,4 +233,23 @@ test("permanent signing claim rejects restored pending attempts and no-effect re
   Object.assign(runtime, { owner: async () => {} });
   await assert.rejects((runtime as any).run(saved, (runtime as any).ports.rpc, new AbortController().signal), (error: any) => error.details?.reason === "permanent_effect_claim_requires_observation");
   await assert.rejects(new RelayRetireService(state, { now: () => new Date(clock * 1000) }, wrapping).retire({ profile: "evm-live-seller", operationId: saved.operationId }), /permanent native effect claim/u);
+});
+
+for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} custody is outermost and nested sealed-slot reads reuse exact private scope`, async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root), saved = await op(state, mega);
+  await new RelayUnsignedOperationRepository(tmp.root).persistLocked(saved);
+  const { walletCustodyLock } = await import("../../src/encrypted-wallet-store.js");
+  const { RelayNativeSourceRuntime } = await import("../../src/relay/native-source.js");
+  const wrapping = { load: async () => { throw new Error("no key read"); }, create: async () => { throw new Error("no key create"); } };
+  const other = new StateStore(tmp.root); Object.assign(other, { lockWaitMs: 0 });
+  const runtime = new RelayNativeSourceRuntime(other, wrapping, { confirm: async () => { throw new Error("no foreground"); }, rpc: {
+    batchCall: async () => { throw new Error("no RPC"); }, submitRawTransaction: async () => { throw new Error("no send"); } } }, { now: () => new Date(clock * 1000) });
+  let entered = 0;
+  Object.assign(runtime, { run: async (current: typeof saved) => { entered++; return (runtime as any).custody(current); },
+    wallets: { describe: async () => ({ identity: { address: saved.sourceAccount }, secret: { directEffects: {} } }), clear: () => {} } });
+  await state.withLocks([walletCustodyLock(state, "evm-live-seller")], async () => {
+    await assert.rejects(runtime.execute(saved.operationId), { code: "APN_STATE_BUSY" });
+    assert.equal(entered, 0);
+  });
+  assert.equal(await runtime.execute(saved.operationId), null); assert.equal(entered, 1);
 });

@@ -76,10 +76,12 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
     const value = await this.readJson(this.path(op)); return value === null ? null : validateJournal(value, op);
   }
   async hasEffectClaim(op: RelayUnsignedOperation): Promise<boolean> {
+    if (op.sourceChainId !== 8453) return false;
     return await this.readJson(`relay-native-signing-claims/${op.operationId}.json`) !== null ||
       await this.readJson(`relay-native-broadcast-claims/${op.operationId}.json`) !== null;
   }
   async claimSigning(op: RelayUnsignedOperation, nonce: bigint): Promise<void> {
+    if (op.sourceChainId !== 8453) return;
     await this.ensureDirectory("relay-native-signing-claims");
     await this.writeJson(`relay-native-signing-claims/${op.operationId}.json`, {
       schemaVersion: "apn.relay-native-signing-claim.v1", operationId: op.operationId,
@@ -90,6 +92,7 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
   }
   /** Independent create-only fence survives restoration of an older mutable journal. */
   async claimBroadcast(op: RelayUnsignedOperation, raw: Hex): Promise<void> {
+    if (op.sourceChainId !== 8453) return;
     const transactionHash = keccak256(raw);
     await this.ensureDirectory("relay-native-broadcast-claims");
     await this.writeJson(`relay-native-broadcast-claims/${op.operationId}.json`, {
@@ -168,6 +171,7 @@ export interface RelayNativeSourcePorts {
   readonly rpc: Rpc;
 }
 export class RelayNativeSourceRuntime {
+  readonly #heldCustody = new WeakSet<RelayUnsignedOperation>();
   private readonly wallets: EncryptedWalletStore;
   private readonly permissions: EncryptedSmartAccountPermissionStore;
   private readonly journals: RelayNativeSourceJournalRepository;
@@ -191,8 +195,13 @@ export class RelayNativeSourceRuntime {
       const invocation = this.origin === undefined ? null : new RelayRpcInvocation(this.state, this.origin, transport, abort.signal,
         transport instanceof HttpsBaseRpc ? () => transport.primePublicAddresses() : undefined);
       const rpc = invocation?.rpc ?? transport;
-      const result = await this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(relayNativeRoute(op.sourceAccount, op.recipient).profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)],
+      const work = () => this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(relayNativeRoute(op.sourceAccount, op.recipient).profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)],
         async () => this.run(op, rpc, abort.signal));
+      const result = op.sourceChainId !== 8453 ? await work() : await this.state.withLocks([
+        walletCustodyLock(this.state, relayNativeRoute(op.sourceAccount, op.recipient).profile)], async () => {
+        this.#heldCustody.add(op);
+        try { return await work(); } finally { this.#heldCustody.delete(op); }
+      });
       invocation?.assertAllowed(); return result;
     } finally { abort.abort(); clearTimeout(timeout); }
   }
@@ -276,7 +285,7 @@ export class RelayNativeSourceRuntime {
   }
   private async custody(op: RelayUnsignedOperation, signed?: { raw: Hex; hash: Hex }): Promise<{ raw: Hex; hash: Hex } | null> {
     const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
-    return this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
+    const work = async () => {
       const wallet = await this.wallets.describe(profile);
       if (wallet === null) blocked("encrypted_wallet_missing");
       try {
@@ -296,7 +305,8 @@ export class RelayNativeSourceRuntime {
         await verifySigned(op, old.rawTransaction);
         return { raw: old.rawTransaction, hash: old.transactionHash };
       } finally { this.wallets.clear(wallet.secret); }
-    });
+    };
+    return this.#heldCustody.has(op) ? await work() : await this.state.withLocks([walletCustodyLock(this.state, profile)], work);
   }
   private async observe(op: RelayUnsignedOperation, rpc: Rpc, hash: Hex): Promise<"confirmed" | "failed" | null> {
     const rows = await rpc.batchCall([{ method: "eth_getTransactionByHash", params: [hash] },

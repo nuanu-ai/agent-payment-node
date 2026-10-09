@@ -72,10 +72,14 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
         return value === null ? null : validateJournal(value, op);
     }
     async hasEffectClaim(op) {
+        if (op.sourceChainId !== 8453)
+            return false;
         return await this.readJson(`relay-native-signing-claims/${op.operationId}.json`) !== null ||
             await this.readJson(`relay-native-broadcast-claims/${op.operationId}.json`) !== null;
     }
     async claimSigning(op, nonce) {
+        if (op.sourceChainId !== 8453)
+            return;
         await this.ensureDirectory("relay-native-signing-claims");
         await this.writeJson(`relay-native-signing-claims/${op.operationId}.json`, {
             schemaVersion: "apn.relay-native-signing-claim.v1", operationId: op.operationId,
@@ -86,6 +90,8 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
     }
     /** Independent create-only fence survives restoration of an older mutable journal. */
     async claimBroadcast(op, raw) {
+        if (op.sourceChainId !== 8453)
+            return;
         const transactionHash = keccak256(raw);
         await this.ensureDirectory("relay-native-broadcast-claims");
         await this.writeJson(`relay-native-broadcast-claims/${op.operationId}.json`, {
@@ -170,6 +176,7 @@ export class RelayNativeSourceRuntime {
     ports;
     clock;
     origin;
+    #heldCustody = new WeakSet();
     wallets;
     permissions;
     journals;
@@ -202,7 +209,18 @@ export class RelayNativeSourceRuntime {
             const transport = this.ports.rpc instanceof HttpsBaseRpc ? this.ports.rpc.withAbortSignal(abort.signal) : this.ports.rpc;
             const invocation = this.origin === undefined ? null : new RelayRpcInvocation(this.state, this.origin, transport, abort.signal, transport instanceof HttpsBaseRpc ? () => transport.primePublicAddresses() : undefined);
             const rpc = invocation?.rpc ?? transport;
-            const result = await this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(relayNativeRoute(op.sourceAccount, op.recipient).profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)], async () => this.run(op, rpc, abort.signal));
+            const work = () => this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(relayNativeRoute(op.sourceAccount, op.recipient).profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)], async () => this.run(op, rpc, abort.signal));
+            const result = op.sourceChainId !== 8453 ? await work() : await this.state.withLocks([
+                walletCustodyLock(this.state, relayNativeRoute(op.sourceAccount, op.recipient).profile)
+            ], async () => {
+                this.#heldCustody.add(op);
+                try {
+                    return await work();
+                }
+                finally {
+                    this.#heldCustody.delete(op);
+                }
+            });
             invocation?.assertAllowed();
             return result;
         }
@@ -311,7 +329,7 @@ export class RelayNativeSourceRuntime {
     }
     async custody(op, signed) {
         const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
-        return this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
+        const work = async () => {
             const wallet = await this.wallets.describe(profile);
             if (wallet === null)
                 blocked("encrypted_wallet_missing");
@@ -341,7 +359,8 @@ export class RelayNativeSourceRuntime {
             finally {
                 this.wallets.clear(wallet.secret);
             }
-        });
+        };
+        return this.#heldCustody.has(op) ? await work() : await this.state.withLocks([walletCustodyLock(this.state, profile)], work);
     }
     async observe(op, rpc, hash) {
         const rows = await rpc.batchCall([{ method: "eth_getTransactionByHash", params: [hash] },

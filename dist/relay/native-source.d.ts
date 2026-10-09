@@ -67,6 +67,7 @@ export interface RelayNativeSourcePorts {
     readonly rpc: Rpc;
 }
 export declare class RelayNativeSourceRuntime {
+    #private;
     private readonly state;
     private readonly ports;
     private readonly clock;
