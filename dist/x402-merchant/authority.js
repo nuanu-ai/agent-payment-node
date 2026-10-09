@@ -2,11 +2,11 @@ import { hashObject } from "../canonical.js";
 import { refuse } from "./protocol.js";
 const grants = new WeakMap();
 /** This in-memory authority exists only during the foreground approval under its policy lock. */
-export function issueMerchantAuthority(controller, o, tokenHold, nativeHold, now = new Date(o.createdAt)) {
+export function issueMerchantAuthority(controller, o, tokenHold, nativeHold, approvalEndsAt) {
     if (o.effectBinding === undefined)
         refuse("merchant_new_effect_binding_required");
     const opaque = Object.freeze({});
-    grants.set(opaque, { controller, frame: o.fingerprint, endsAt: [o.expiresAt, o.effectBinding.policyEndsAt, new Date(now.getTime() + 120000).toISOString()].sort()[0], live: true, sign: false, send: false, tokenHold, nativeHold, material: null });
+    grants.set(opaque, { controller, frame: o.fingerprint, endsAt: [o.expiresAt, o.effectBinding.policyEndsAt, approvalEndsAt].sort()[0], live: true, sign: false, send: false, tokenHold, nativeHold, material: null });
     return Object.freeze({ opaque });
 }
 export function assertMerchantAuthority(grant, controller, o, now, effect) {

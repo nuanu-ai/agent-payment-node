@@ -6,10 +6,10 @@ export interface MerchantAuthority { readonly opaque: object; }
 interface Binding { controller: object; frame: string; endsAt: string; live: boolean; sign: boolean; send: boolean; tokenHold: string; nativeHold: string; material: string|null; }
 const grants = new WeakMap<object, Binding>();
 /** This in-memory authority exists only during the foreground approval under its policy lock. */
-export function issueMerchantAuthority(controller: object, o: MerchantOperation, tokenHold: string, nativeHold: string, now:Date=new Date(o.createdAt)): MerchantAuthority {
+export function issueMerchantAuthority(controller: object, o: MerchantOperation, tokenHold: string, nativeHold: string, approvalEndsAt:string): MerchantAuthority {
     if (o.effectBinding === undefined) refuse("merchant_new_effect_binding_required");
     const opaque = Object.freeze({});
-    grants.set(opaque, { controller, frame:o.fingerprint, endsAt:[o.expiresAt,o.effectBinding.policyEndsAt,new Date(now.getTime()+120000).toISOString()].sort()[0]!, live:true, sign:false, send:false, tokenHold, nativeHold, material:null });
+    grants.set(opaque, { controller, frame:o.fingerprint, endsAt:[o.expiresAt,o.effectBinding.policyEndsAt,approvalEndsAt].sort()[0]!, live:true, sign:false, send:false, tokenHold, nativeHold, material:null });
     return Object.freeze({opaque});
 }
 export function assertMerchantAuthority(grant: MerchantAuthority | undefined, controller: object, o: MerchantOperation, now: Date, effect?: MerchantEffect): void {

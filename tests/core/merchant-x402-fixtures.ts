@@ -43,5 +43,5 @@ export async function merchantFixture(root:string){
  const http:HttpPort={get:async input=>{if(input.paymentSignature!==undefined){headers.push(input.paymentSignature);if(deliveryFails)throw new Error("merchant response lost");return observation(now,200);}return observation(now);}};
  let approve:()=>Promise<void>=async()=>{};
  const service=new MerchantService(state,{rpc,http,now:()=>new Date(now),approve:async o=>{rpc.operation=o;await approve();},custody:{verify:async()=>TX_HASH,sign:async()=>{signs++;return "0x02";},seal:async()=>{seals++;}}});
- return {state,service,rpc,http,activate,headers,signs:()=>signs,seals:()=>seals,advance:(ms:number)=>{now=new Date(now.getTime()+ms);},onApprove:(fn:()=>Promise<void>)=>{approve=fn;},failDelivery:()=>{deliveryFails=true;},repairDelivery:()=>{deliveryFails=false;},prepare:()=>service.prepare({profile:"default",maximumNativeFee:"1000000000000",idempotencyKey:"merchant-test-0001"})};
+ return {state,service,rpc,http,activate,headers,now:()=>new Date(now),signs:()=>signs,seals:()=>seals,advance:(ms:number)=>{now=new Date(now.getTime()+ms);},onApprove:(fn:()=>Promise<void>)=>{approve=fn;},failDelivery:()=>{deliveryFails=true;},repairDelivery:()=>{deliveryFails=false;},prepare:()=>service.prepare({profile:"default",maximumNativeFee:"1000000000000",idempotencyKey:"merchant-test-0001"})};
 }
