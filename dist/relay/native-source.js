@@ -1,10 +1,10 @@
-/** One guarded BNB native deposit for the fixed Relay BNB -> Polygon or Monad quote. */
+/** One durable native deposit for an exact fixed Relay BNB or Base funding quote. */
 import { randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject, canonicalJson, domainHash } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
 import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
@@ -17,11 +17,12 @@ import { HttpsBaseRpc } from "../rpc.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
 import { ETHEREUM_DEPOSITORY } from "./quote.js";
+import { BASE_RELAY_SIGNED_BYTES, verifyRelayBaseFunding } from "./base-source-guard.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 const HASH = /^[a-f0-9]{64}$/u, TX_HASH = /^0x[a-f0-9]{64}$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
-function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay BNB source execution is blocked.", { reason }); }
-function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay BNB source state is invalid: ${reason}.`); }
+function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay native source execution is blocked.", { reason }); }
+function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay native source state is invalid: ${reason}.`); }
 /** Provider locator stays in the durable owner journal, never in CLI or MCP output. */
 export function publicRelayNativeSourceJournal(journal) {
     const { requestId: _requestId, ...publicFields } = journal;
@@ -115,7 +116,7 @@ function custodyBinding(op) {
         integrityHash: op.integrityHash, quoteDigest: op.quoteDigest, deposit: op.nativeQuote.deposit }));
 }
 async function verifySigned(op, raw, expectedNonce) {
-    if (!/^0x(?:[a-fA-F0-9]{2})+$/u.test(raw))
+    if ((op.sourceChainId === 8453 && (raw.length - 2) / 2 > BASE_RELAY_SIGNED_BYTES) || !/^0x(?:[a-fA-F0-9]{2})+$/u.test(raw))
         corrupt("signed encoding");
     let tx, signer;
     try {
@@ -126,7 +127,7 @@ async function verifySigned(op, raw, expectedNonce) {
         corrupt("signed decode");
     }
     const d = op.nativeQuote.deposit;
-    if (tx.type !== "eip1559" || tx.chainId !== 56 || !same(signer, op.sourceAccount) ||
+    if (tx.type !== "eip1559" || tx.chainId !== op.sourceChainId || !same(signer, op.sourceAccount) ||
         !same(tx.to ?? "", d.to) || !same(tx.data ?? "0x", d.data) || (tx.value ?? 0n) !== BigInt(d.value) ||
         tx.gas !== BigInt(d.gas) || tx.maxFeePerGas !== BigInt(d.maxFeePerGas) ||
         tx.maxPriorityFeePerGas !== BigInt(d.maxPriorityFeePerGas) || tx.nonce === undefined ||
@@ -190,13 +191,13 @@ export class RelayNativeSourceRuntime {
         catch {
             blocked("saved_native_quote_or_route");
         }
-        if (op.quote !== undefined || op.sourceChainId !== 56 || op.destinationChainId !== route.chainId ||
+        if (op.quote !== undefined || op.sourceChainId !== route.sourceChainId || op.destinationChainId !== route.chainId ||
             op.profileHash !== this.state.profileHash(route.profile) ||
             !same(op.sourceAccount, route.payer) || !same(op.recipient, route.recipient) ||
             q?.routeReference !== route.reference || d === undefined ||
             op.statusLocator === undefined || op.policyDigest === undefined || op.policyRevision === undefined ||
             op.depositNetworkFeeCeilingWei === undefined || q.statusLocator?.requestId !== op.statusLocator.requestId ||
-            !same(d.to, ETHEREUM_DEPOSITORY) || !same(d.from, op.sourceAccount) || d.chainId !== 56 ||
+            !same(d.to, ETHEREUM_DEPOSITORY) || !same(d.from, op.sourceAccount) || d.chainId !== route.sourceChainId ||
             d.value !== op.amountAtomic || d.maximumNetworkFeeWei !== op.depositNetworkFeeCeilingWei ||
             !same(q.paymentDetails.depository, d.to))
             blocked("saved_native_quote_or_route");
@@ -216,7 +217,7 @@ export class RelayNativeSourceRuntime {
         }
     }
     usageIdentity(op) {
-        return { account: getAddress(op.sourceAccount), chain: "eip155:56", asset: { kind: "native", identifier: null } };
+        return { account: getAddress(op.sourceAccount), chain: `eip155:${op.sourceChainId}`, asset: { kind: "native", identifier: null } };
     }
     async active(op) {
         const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
@@ -241,17 +242,16 @@ export class RelayNativeSourceRuntime {
             current.reservation.reservedAt.slice(0, 10) === now.toISOString().slice(0, 10) ? BigInt(op.amountAtomic) : 0n;
         if (BigInt(current.snapshot.amountAtomic) < own)
             corrupt("usage total");
-        const decision = evaluateAssetPolicy(active.registry, { chain: "eip155:56", asset: { kind: "native", identifier: null },
-            rail: "bridge", amountAtomic: op.amountAtomic, dailyUsageAtomic: (BigInt(current.snapshot.amountAtomic) - own).toString(),
+        const decision = evaluateAssetPolicy(active.registry, { chain: `eip155:${op.sourceChainId}`, asset: { kind: "native", identifier: null },
+            rail: "bridge", mechanism: { provider: "relay", reference: op.nativeQuote.routeReference }, amountAtomic: op.amountAtomic, dailyUsageAtomic: (BigInt(current.snapshot.amountAtomic) - own).toString(),
             asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        const pin = decision.asset.mechanismPins?.bridge;
-        if (pin?.provider !== "relay" || pin.reference !== op.nativeQuote.routeReference)
+        if (!bridgeMechanismAdmitted(decision, { provider: "relay", reference: op.nativeQuote.routeReference }))
             blocked("route_pin");
         return active;
     }
     async funding(op, rpc) {
         const head = await rpc.batchCall([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
-        if (head.length !== 2 || evmRpcQuantity(head[0]) !== 56n)
+        if (head.length !== 2 || evmRpcQuantity(head[0]) !== BigInt(op.sourceChainId))
             blocked("bnb_rpc_chain");
         const block = evmRpcRecord(head[1]), number = evmRpcQuantity(block.number), hash = evmRpcHex(block.hash, 32);
         const reference = { blockHash: hash, requireCanonical: true };
@@ -261,13 +261,19 @@ export class RelayNativeSourceRuntime {
             { method: "eth_getTransactionCount", params: [op.sourceAccount, "pending"] },
             { method: "eth_gasPrice", params: [] }, { method: "eth_chainId", params: [] },
         ]);
-        if (rows.length !== 5 || evmRpcQuantity(rows[4]) !== 56n || evmRpcQuantity(evmRpcRecord(rows[0]).number) !== number ||
+        if (rows.length !== 5 || evmRpcQuantity(rows[4]) !== BigInt(op.sourceChainId) || evmRpcQuantity(evmRpcRecord(rows[0]).number) !== number ||
             evmRpcHex(evmRpcRecord(rows[0]).hash, 32) !== hash)
             blocked("bnb_source_block_changed");
         const d = op.nativeQuote.deposit;
         if (evmRpcQuantity(rows[1]) < BigInt(d.value) + BigInt(op.depositNetworkFeeCeilingWei) ||
             evmRpcQuantity(rows[3]) > BigInt(d.maxFeePerGas) || evmRpcQuantity(rows[3]) <= 0n)
             blocked("native_funding_or_fee");
+        if (op.sourceChainId === 8453) {
+            await verifyRelayBaseFunding(op, rpc, `0x${number.toString(16)}`);
+            const [again] = await rpc.batchCall([{ method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] }]);
+            if (evmRpcHex(evmRpcRecord(again).hash, 32) !== hash)
+                blocked("base_preflight_block_changed");
+        }
         const nonce = evmRpcQuantity(rows[2]);
         if (nonce > BigInt(Number.MAX_SAFE_INTEGER))
             blocked("nonce_unbounded");
@@ -314,7 +320,7 @@ export class RelayNativeSourceRuntime {
             return null;
         const tx = evmRpcRecord(rows[0]), receipt = evmRpcRecord(rows[1]);
         if (evmRpcHex(tx.hash, 32) !== hash || evmRpcHex(receipt.transactionHash, 32) !== hash ||
-            evmRpcQuantity(tx.chainId) !== 56n || evmRpcQuantity(tx.type) !== 2n ||
+            evmRpcQuantity(tx.chainId) !== BigInt(op.sourceChainId) || evmRpcQuantity(tx.type) !== 2n ||
             !same(evmRpcAddress(tx.from), op.sourceAccount) || !same(evmRpcAddress(tx.to), op.nativeQuote.deposit.to) ||
             !same(evmRpcHex(tx.input), op.nativeQuote.deposit.data) || evmRpcQuantity(tx.value) !== BigInt(op.amountAtomic) ||
             evmRpcQuantity(tx.blockNumber) !== evmRpcQuantity(receipt.blockNumber) ||
@@ -322,18 +328,18 @@ export class RelayNativeSourceRuntime {
             corrupt("source transaction identity");
         const number = evmRpcQuantity(receipt.blockNumber), tag = `0x${number.toString(16)}`;
         const blocks = await rpc.batchCall([{ method: "eth_getBlockByNumber", params: [tag, false] },
-            { method: "eth_getBlockByNumber", params: ["latest", false] }, { method: "eth_chainId", params: [] }]);
-        if (blocks.length !== 3 || evmRpcQuantity(blocks[2]) !== 56n)
+            { method: "eth_getBlockByNumber", params: [op.sourceChainId === 8453 ? "safe" : "latest", false] }, { method: "eth_chainId", params: [] }]);
+        if (blocks.length !== 3 || evmRpcQuantity(blocks[2]) !== BigInt(op.sourceChainId))
             blocked("bnb_rpc_chain");
         const inclusion = evmRpcRecord(blocks[0]), latest = evmRpcRecord(blocks[1]);
         if (evmRpcHex(inclusion.hash, 32) !== evmRpcHex(receipt.blockHash, 32) || evmRpcQuantity(inclusion.number) !== number)
             blocked("source_receipt_reorg");
-        if (evmRpcQuantity(latest.number) < number + 15n)
+        if (evmRpcQuantity(latest.number) < number + (op.sourceChainId === 56 ? 15n : 0n))
             return null;
         const recheck = await rpc.batchCall([{ method: "eth_getBlockByNumber", params: [tag, false] },
             { method: "eth_getBlockByNumber", params: [`0x${evmRpcQuantity(latest.number).toString(16)}`, false] },
             { method: "eth_chainId", params: [] }]);
-        if (recheck.length !== 3 || evmRpcQuantity(recheck[2]) !== 56n ||
+        if (recheck.length !== 3 || evmRpcQuantity(recheck[2]) !== BigInt(op.sourceChainId) ||
             evmRpcHex(evmRpcRecord(recheck[0]).hash, 32) !== evmRpcHex(inclusion.hash, 32) ||
             evmRpcHex(evmRpcRecord(recheck[1]).hash, 32) !== evmRpcHex(latest.hash, 32))
             blocked("source_block_changed");
@@ -364,7 +370,7 @@ export class RelayNativeSourceRuntime {
             return j;
         }
         const observationOnly = j?.phase === "submitting";
-        if (!observationOnly && await this.ports.confirm({ operationId: op.operationId, sourceChainId: 56, destinationChainId: op.destinationChainId,
+        if (!observationOnly && await this.ports.confirm({ operationId: op.operationId, sourceChainId: op.sourceChainId, destinationChainId: op.destinationChainId,
             sourceAccount: op.sourceAccount, recipient: op.recipient, amountAtomic: op.amountAtomic,
             minOutputAtomic: op.minOutputAtomic, deadline: op.deadline, quoteDigest: op.quoteDigest,
             requestId: op.statusLocator.requestId, depositNetworkFeeCeilingWei: op.depositNetworkFeeCeilingWei,
@@ -377,7 +383,7 @@ export class RelayNativeSourceRuntime {
         if (j.phase === "pending") {
             const active = await this.admission(op, this.clock.now());
             const prior = await this.usage.load(identity, reservationId);
-            await this.usage.reserve({ ...identity, registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
+            await this.usage.reserve({ ...identity, registry: active.registry, rail: "bridge", mechanism: { provider: "relay", reference: op.nativeQuote.routeReference }, amountAtomic: op.amountAtomic,
                 idempotencyKey: `relay-native-execute:${op.operationId}`, now: this.clock.now(),
                 ...(prior === null ? {} : { retryFailedBeforeEffect: true }) });
             await this.admission(op, this.clock.now());
@@ -394,7 +400,7 @@ export class RelayNativeSourceRuntime {
                 if (!same(signer.address, op.sourceAccount))
                     corrupt("local_signer_owner");
                 const d = op.nativeQuote.deposit;
-                raw = await signer.signTransaction({ type: "eip1559", chainId: 56, to: d.to, data: d.data,
+                raw = await signer.signTransaction({ type: "eip1559", chainId: op.sourceChainId, to: d.to, data: d.data,
                     value: BigInt(d.value), gas: BigInt(d.gas), nonce: Number(nonce), maxFeePerGas: BigInt(d.maxFeePerGas),
                     maxPriorityFeePerGas: BigInt(d.maxPriorityFeePerGas), accessList: [] });
             }
@@ -443,6 +449,9 @@ export class RelayNativeSourceRuntime {
             j.phase === "failed_before_effect" ? "failed_before_effect" : "failed_confirmed_revert";
         if (current.state === target)
             return;
+        if (target === "failed_confirmed_revert" && current.state === "reserved")
+            await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest,
+                state: "submitted", expectedCurrentStates: ["reserved"], now: this.clock.now() });
         await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest,
             state: target, now: this.clock.now(), outcomeDigest: j.integrityHash });
     }
@@ -475,11 +484,11 @@ export function createRelayNativeSourceRuntime(state, wrapping, rpcUrl, confirm,
         url = new URL(rpcUrl);
     }
     catch {
-        throw new ApnError("APN_RPC_CONFIG", "Relay BNB source requires a HTTPS RPC origin.");
+        throw new ApnError("APN_RPC_CONFIG", "Relay native source requires a HTTPS RPC origin.");
     }
     if (url.protocol !== "https:" || url.pathname !== "/" || url.search !== "" || url.hash !== "" ||
         url.username !== "" || url.password !== "")
-        throw new ApnError("APN_RPC_CONFIG", "Relay BNB source requires a keyless HTTPS RPC origin.");
+        throw new ApnError("APN_RPC_CONFIG", "Relay native source requires a keyless HTTPS RPC origin.");
     return new RelayNativeSourceRuntime(state, wrapping, { confirm, rpc: transport ?? new HttpsBaseRpc(rpcUrl) }, clock, url.origin);
 }
 //# sourceMappingURL=native-source.js.map

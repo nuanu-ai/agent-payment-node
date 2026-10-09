@@ -11,7 +11,7 @@ export declare class RelayEthereumFinalityRpc implements RelaySourceFinalityPort
     private readonly guardFactory;
     private readonly expectedChainId;
     private readonly rpc;
-    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guardFactory?: () => EvmDirectRpcGuard, expectedChainId?: 1 | 56);
+    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guardFactory?: () => EvmDirectRpcGuard, expectedChainId?: 1 | 56 | 8453);
     private read;
     finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null>;
 }
@@ -20,7 +20,7 @@ export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     private readonly expectedChainId;
     private readonly rpc;
     private readonly guard;
-    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard, expectedChainId?: 56 | 137 | 143 | 8453);
+    constructor(url: string, state: StateStore, rpc?: HttpsBaseRpc, guard?: EvmDirectRpcGuard, expectedChainId?: 56 | 137 | 143 | 8453 | 4326);
     get physicalPosts(): number;
     private read;
     private readBatch;
@@ -31,5 +31,12 @@ export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
     nativeTrace(): Promise<null>;
     routerCodeHash(address: string, blockNumber: bigint): Promise<string>;
+    tokenIdentityAndBalances(token: string, recipient: string, number: bigint, expectedHash: string): Promise<{
+        proxyHash: `0x${string}`;
+        implementation: string;
+        implementationHash: `0x${string}`;
+        before: bigint;
+        after: bigint;
+    }>;
     adjacentBalances(address: string, blockNumber: bigint, expectedBlockHash: string): Promise<readonly [bigint, bigint]>;
 }

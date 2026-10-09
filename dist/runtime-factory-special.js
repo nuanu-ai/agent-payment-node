@@ -85,8 +85,8 @@ export function createSpecialApnCore(bound, options, state) {
         // Construct only keyless readers. No wallet, signer, custody, or execution runtime is installed.
         const source = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc);
         const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc);
-        const nativeSource = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc, undefined, 56);
-        const native = new RelayNativeObserveService(state, nativeSource, chainId => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, undefined, chainId), new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
+        const nativeSource = (chainId) => new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc, undefined, chainId);
+        const native = new RelayNativeObserveService(state, nativeSource, chainId => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, chainId === 4326 ? new EvmDirectRpcGuard(state, 10) : undefined, chainId), new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
         return new ApnCore({ state, relayObserve: options.relayObserve ??
                 new RelayObserveService(state, source, bnbInvocation, new RelayKeylessStatusService(state, options.relayStatusFetch), native) });
     }

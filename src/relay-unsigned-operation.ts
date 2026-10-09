@@ -22,8 +22,8 @@ const body = z.strictObject({
   operationId: hash,
   idempotencyHash: hash,
   requestHash: hash,
-  sourceChainId: z.union([z.literal(1), z.literal(56), z.literal(42161)]),
-  destinationChainId: z.union([z.literal(1), z.literal(56), z.literal(137), z.literal(143), z.literal(8453)]),
+  sourceChainId: z.union([z.literal(1), z.literal(56), z.literal(8453), z.literal(42161)]),
+  destinationChainId: z.union([z.literal(1), z.literal(56), z.literal(137), z.literal(143), z.literal(4326), z.literal(8453)]),
   sourceAccount: address,
   recipient: address,
   quoteDigest: hash,
@@ -84,7 +84,7 @@ export function validateRelayUnsignedOperation(value: unknown): RelayUnsignedOpe
     const quote = operation.nativeQuote;
     let route: ReturnType<typeof relayNativeRoute>;
     try { route = relayNativeRoute(operation.sourceAccount, operation.recipient); } catch { return corrupt(); }
-    if (operation.quote !== undefined || operation.sourceChainId !== 56 || operation.destinationChainId !== route.chainId ||
+    if (operation.quote !== undefined || operation.sourceChainId !== route.sourceChainId || operation.destinationChainId !== route.chainId ||
       operation.sourceAccount.toLowerCase() !== route.payer.toLowerCase() ||
       quote.routeReference !== route.reference || quote.schemaVersion !== "apn.relay-native-quote.v1" ||
       operation.approvalNetworkFeeCeilingWei !== undefined || operation.policyDigest === undefined ||

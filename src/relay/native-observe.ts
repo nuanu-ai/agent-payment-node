@@ -20,7 +20,7 @@ function blocked(reason: string): never { throw new ApnError("APN_OPERATION_BLOC
 export function verifyRelayNativeSourceObservation(op: RelayUnsignedOperation, hash: string,
   observation: RelayDepositObservation): "confirmed" | "failed" {
   const tx = observation.transaction, receipt = observation.receipt, deposit = op.nativeQuote!.deposit;
-  if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== 56 ||
+  if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== op.sourceChainId ||
     !same(tx.from, op.sourceAccount) || !same(tx.to ?? "", deposit.to) ||
     !same(tx.input, deposit.data) || tx.value !== BigInt(deposit.value) ||
     !same(receipt.blockHash, observation.canonicalBlockHash) || receipt.blockNumber < 0n ||
@@ -30,8 +30,8 @@ export function verifyRelayNativeSourceObservation(op: RelayUnsignedOperation, h
 
 export class RelayNativeObserveService {
   private readonly usedInvocations = new WeakSet<RelayBnbProofPorts>();
-  constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts,
-    private readonly destinationInvocation: (chainId: 137 | 143) => RelayBnbProofPorts,
+  constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts | ((chainId: 56 | 8453) => RelaySourceFinalityPorts),
+    private readonly destinationInvocation: (chainId: 137 | 143 | 4326) => RelayBnbProofPorts,
     private readonly status = new RelayKeylessStatusService(state),
     private readonly clock: ClockPort = { now: () => new Date() }) {}
 
@@ -65,7 +65,7 @@ export class RelayNativeObserveService {
     if (journal.transactionHash === null) blocked("source_hash_missing");
     const hash = journal.transactionHash;
     let source: RelayDepositObservation | null;
-    try { source = await this.source.finalizedDeposit(hash as Hex); }
+    try { source = await (typeof this.source === "function" ? this.source(op.sourceChainId as 56 | 8453) : this.source).finalizedDeposit(hash as Hex); }
     catch { return this.result(op.operationId, "source_unproven", "source_rpc_unavailable"); }
     if (source === null) return this.result(op.operationId, "source_unproven", "source_not_finalized_or_noncanonical");
     let outcome: "confirmed" | "failed";
@@ -73,7 +73,7 @@ export class RelayNativeObserveService {
     catch { return this.result(op.operationId, "source_unproven", "source_transaction_binding_failed"); }
     if (journal.phase !== "submitting" && journal.phase !== outcome) blocked("source_journal_receipt_conflict");
     const usage = new AssetUsageLedger(this.state.root);
-    const identity = { account: getAddress(op.sourceAccount), chain: "eip155:56",
+    const identity = { account: getAddress(op.sourceAccount), chain: `eip155:${op.sourceChainId}`,
       asset: { kind: "native" as const, identifier: null } };
     const reservationId = assetUsageReservationId(identity, `relay-native-execute:${op.operationId}`);
     await this.state.withLocks([`relay-native-source:${op.operationId}`, evmAddressLock(op.sourceAccount)], async () => {
@@ -110,7 +110,7 @@ export class RelayNativeObserveService {
       provider.txHashes.length === 0 ? "source_finalized" : "provider_candidate_unproven",
       provider.txHashes.length === 0 ? "provider_candidate_missing" : "multiple_provider_candidates",
       true, provider.status, sourceBound);
-    const destination = this.destinationInvocation(op.destinationChainId as 137 | 143);
+    const destination = this.destinationInvocation(op.destinationChainId as 137 | 143 | 4326);
     if (this.usedInvocations.has(destination)) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Relay native observe requires a fresh destination RPC budget.");
     this.usedInvocations.add(destination);
     const proof = await proveRelayNativeDestination(op, hash, provider.txHashes, destination);
