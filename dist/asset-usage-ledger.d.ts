@@ -1,3 +1,5 @@
+import { type MerchantNativeActualFee } from "./x402-merchant/fee-settlement.js";
+import type { MerchantOperation, MerchantReceipt } from "./x402-merchant/model.js";
 import { type AssetPolicyRail } from "./asset-policy-registry.js";
 import { SecureStateStore } from "./secure-state-store.js";
 import { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW } from "./asset-usage-ledger-record.js";
@@ -29,6 +31,7 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
     readonly amountAtomic: string;
     /** Proven asset consumption on a confirmed revert; absent on historical zero-consumption records. */
     readonly consumedAtomic?: string;
+    readonly merchantNativeActualFee?: MerchantNativeActualFee;
     readonly state: AssetUsageState;
     readonly reservedAt: string;
     readonly updatedAt: string;
@@ -101,6 +104,8 @@ export declare class AssetUsageLedger extends SecureStateStore {
         outcomeDigest: string;
     }>): Promise<T>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
+    /** Finite Mega merchant headroom only: metadata cannot mint this canonical receipt authority. */
+    settleMerchantNativeActualFee(o: MerchantOperation, receipt: MerchantReceipt, now: Date): Promise<AssetUsageReservation>;
     /** Atomic cancellation in the existing schema; a delayed reserve can only replay the released row. */
     cancelUnsubmittedReservation(input: CancelUnsubmittedReservationInput): Promise<AssetUsageReservation>;
     usage(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;

@@ -3,6 +3,7 @@ import { type Hex } from "viem";
 import { BridgeHttps } from "../lifi/https.js";
 import type { StateStore } from "../state.js";
 import type { MerchantEnvelope, MerchantOperation, MerchantReceipt } from "./model.js";
+export declare function requireMerchantCanonicalReceipt(o: MerchantOperation, r: MerchantReceipt): string;
 export interface MerchantRpcPort {
     call(method: string, params: readonly unknown[], beforeSend?: () => Promise<void> | void, beforeWire?: () => void): Promise<unknown>;
     batch(calls: readonly {

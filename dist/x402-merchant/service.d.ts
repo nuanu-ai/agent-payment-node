@@ -21,10 +21,12 @@ export declare class MerchantService {
     prepare(input: {
         profile: string;
         maximumNativeFee: string;
+        nativeFeeReserveWei?: string;
         idempotencyKey: string;
     }): Promise<MerchantOperation>;
     approve(id: string): Promise<MerchantOperation>;
     observe(id: string, deliver?: boolean): Promise<MerchantOperation>;
+    retireUnsent(id: string): Promise<MerchantOperation>;
     status(id: string): Promise<MerchantOperation>;
     private observeLocked;
     private refreshCanonical;

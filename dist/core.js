@@ -95,6 +95,7 @@ export class ApnCore {
             case "x402.merchant.approve":
             case "x402.merchant.observe":
             case "x402.merchant.status":
+            case "x402.merchant.retire-unsent":
             case "x402.permit2.preflight":
             case "x402.permit2.approve":
             case "x402.permit2.observe":

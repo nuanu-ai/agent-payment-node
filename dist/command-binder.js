@@ -78,11 +78,13 @@ function bindParsedCatalog(parsed) {
             },
             rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "x402 merchant prepare")
-        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), maximumNativeFee: value(options, "--max-native-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"] === undefined ? {} : { nativeFeeReserveWei: value(options, "--native-fee-reserve-wei") }), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "x402 merchant approve")
         return { request: { command: "x402.merchant.approve", operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "x402 merchant observe")
         return { request: { command: "x402.merchant.observe", operationId: value(options, "--operation"), deliver: options["--deliver"] === "true" } };
+    if (parsed.command.path.join(" ") === "x402 merchant retire-unsent")
+        return { request: { command: "x402.merchant.retire-unsent", operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "x402 merchant status")
         return { request: { command: "x402.merchant.status", operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "x402 permit2 status")

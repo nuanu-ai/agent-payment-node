@@ -7,7 +7,7 @@ import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity } fr
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { assertExclusiveEvmRawSigner } from "../evm-address-ownership.js";
 import type { StateStore } from "../state.js";
-import type { MerchantOperation } from "./model.js";
+import type { MerchantOperation, MerchantReceipt } from "./model.js";
 import { MERCHANT_AMOUNT, MERCHANT_CHAIN, MERCHANT_MECHANISM, MERCHANT_OWNER, MERCHANT_TOKEN } from "./pins.js";
 import { merchantHoldBinding } from "./authority.js";
 import { refuse } from "./protocol.js";
@@ -68,9 +68,10 @@ export class MerchantOwner {
             digests.push(merchantHoldBinding(o,r.reservationDigest));
         } return {token:digests[0]!,native:digests[1]!};
     }
-    async follow(o:MerchantOperation,target:"unknown_finality"|"finalized"|"failed_confirmed_revert") {
+    async follow(o:MerchantOperation,target:"unknown_finality"|"finalized"|"failed_confirmed_revert",freshReceipt?:MerchantReceipt) {
         const entries=o.effectBinding===undefined ? [[merchantUsageIdentity,MERCHANT_AMOUNT,merchantUsageKey(o.operationId)]] as const : [[merchantUsageIdentity,MERCHANT_AMOUNT,merchantUsageKey(o.operationId)],[merchantNativeUsageIdentity,o.effectBinding.nativeAmountAtomic,merchantNativeUsageKey(o.operationId)]] as const;
         for(const [identity,amount,key] of entries) {
+            if(target==="finalized"&&identity.asset.kind==="native"&&o.envelope.nativeFeeReserveWei!==undefined){if(freshReceipt===undefined)refuse("merchant_native_actual_fee_authority_required");await this.ledger.settleMerchantNativeActualFee(o,freshReceipt,this.now());continue;}
             const reservationId=assetUsageReservationId(identity,key),r=await this.ledger.load(identity,reservationId);
             if(r===null || r.policyDigest!==o.policy.digest || r.amountAtomic!==amount || r.rail!=="x402")refuse("merchant_usage_binding");
             if(r.state===target)continue;

@@ -8,6 +8,8 @@ import type { StateStore } from "../state.js";
 import { MERCHANT_AMOUNT, MERCHANT_IMPLEMENTATION, MERCHANT_IMPLEMENTATION_HASH, MERCHANT_OWNER, MERCHANT_PAYEE, MERCHANT_PROXY_HASH, MERCHANT_RPC, MERCHANT_TOKEN } from "./pins.js";
 import { refuse } from "./protocol.js";
 import type { MerchantEnvelope, MerchantOperation, MerchantReceipt } from "./model.js";
+const canonicalReceipts=new WeakMap<object,{fingerprint:string;hash:string}>();
+export function requireMerchantCanonicalReceipt(o:MerchantOperation,r:MerchantReceipt):string {const b=canonicalReceipts.get(r);if(b===undefined||b.fingerprint!==o.fingerprint||b.hash!==hashObject(r))refuse("merchant_native_actual_fee_authority_required");return b.hash;}
 export interface MerchantRpcPort {
     call(method: string, params: readonly unknown[], beforeSend?: () => Promise<void> | void, beforeWire?: () => void): Promise<unknown>;
     batch(calls: readonly {
@@ -192,7 +194,8 @@ export async function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation
         const currentAnchor = await rpc.call("eth_getBlockByNumber", [currentHead.number, false]);
         if (canonicalJson(merchantHeader(currentAnchor)) !== canonicalJson(currentIdentity)) refuse("merchant_receipt_finalized_changed");
     }
-    return { transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: actual?.total??(gasUsed * effectiveGasPrice).toString(),...(fullFee===undefined?{}:{fullFee}),
+    const receipt:MerchantReceipt={ transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: actual?.total??(gasUsed * effectiveGasPrice).toString(),...(fullFee===undefined?{}:{fullFee}),
         canonical: { transactionIndex: index.toString(), blockHeaderHash: hashObject(blockIdentity), finalizedNumber: quantity(currentHead.number).toString(), finalizedHash: hexHash(currentHead.hash), finalizedHeaderHash: hashObject(currentIdentity) },
         evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, currentFinalizedHead: currentHead, code, impl, storage,...(fullFee===undefined?{}:{fullFee}) }) };
+    if(receipt.fullFee!==undefined)canonicalReceipts.set(receipt,{fingerprint:o.fingerprint,hash:hashObject(receipt)});return receipt;
 }

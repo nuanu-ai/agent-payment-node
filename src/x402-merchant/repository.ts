@@ -1,3 +1,4 @@
+import { MerchantRetirementClaims } from "./retirement-claims.js";
 import { canonicalJson } from "../canonical.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { validateMerchant, type MerchantOperation } from "./model.js";
@@ -6,7 +7,7 @@ export class MerchantRepository extends SecureStateStore {
     private path(id: string) { stateIdentifier(id, "merchant operation"); return `merchant-x402/${id}.json`; }
     async findOperation(id: string): Promise<MerchantOperation | null> { const v = await this.readJson(this.path(id)); if (v === null)
         return null; const o = validateMerchant(v); if (o.operationId !== id)
-        refuse("merchant_path_binding"); return o; }
+        refuse("merchant_path_binding"); if(o.state==="retired_unsent"){const c=await new MerchantRetirementClaims(this.root).find(o);if(c===null||c.claimDigest!==o.retirementDigest)refuse("merchant_retirement_tombstone_required");} return o; }
     async listAllOperations() { const out: MerchantOperation[] = []; for (const f of await this.readDirectory("merchant-x402")) {
         if (!f.isFile() || !/^[a-f0-9]{64}\.json$/u.test(f.name))
             refuse("merchant_directory_entry");
@@ -22,10 +23,10 @@ export class MerchantRepository extends SecureStateStore {
         await this.initialize();
         await this.ensureDirectory("merchant-x402");
         const prior = await this.findOperation(o.operationId);
-        const edges: Record<MerchantOperation["state"], readonly MerchantOperation["state"][]> = { prepared:["signing_started"], signing_started:["submission_started","unknown_finality"], submission_started:["unknown_finality","payment_finalized","reverted"], unknown_finality:["payment_finalized","reverted"], payment_finalized:["delivery_unknown"], delivery_unknown:["delivered"], delivered:[], reverted:[] };
+        const edges: Record<MerchantOperation["state"], readonly MerchantOperation["state"][]> = { prepared:["signing_started"], signing_started:["submission_started","unknown_finality"], submission_started:["unknown_finality","payment_finalized","reverted"], unknown_finality:["payment_finalized","reverted","retired_unsent"], payment_finalized:["delivery_unknown"], delivery_unknown:["delivered"], delivered:[], reverted:[],retired_unsent:[] };
         const auditAppend = prior !== null && canonicalJson(o.canonicalObservations?.slice(0, prior.canonicalObservations?.length ?? 0) ?? []) === canonicalJson(prior.canonicalObservations ?? []);
         const stripAudit = (value: MerchantOperation) => { const { integrityHash: _, canonicalObservations: __, ...body } = value; return body; };
-        if (prior !== null && (prior.state !== o.state && !edges[prior.state].includes(o.state) ||prior.fingerprint !== o.fingerprint || prior.signingAttempts > o.signingAttempts || prior.submissionAttempts > o.submissionAttempts ||
+        if (prior !== null && (prior.state !== o.state && !edges[prior.state].includes(o.state) ||canonicalJson(o.failures?.slice(0,prior.failures?.length??0)??[])!==canonicalJson(prior.failures??[]) || prior.retirementDigest!==undefined&&prior.retirementDigest!==o.retirementDigest || prior.fingerprint !== o.fingerprint || prior.signingAttempts > o.signingAttempts || prior.submissionAttempts > o.submissionAttempts ||
             prior.txHash !== null && prior.txHash !== o.txHash || prior.receipt !== null && canonicalJson(prior.receipt) !== canonicalJson(o.receipt) ||
             !auditAppend || prior.terminal && canonicalJson(stripAudit(prior)) !== canonicalJson(stripAudit(o)) || canonicalJson(o.events.slice(0, prior.events.length)) !== canonicalJson(prior.events) ||
             canonicalJson(o.deliveryAttempts.slice(0, prior.deliveryAttempts.length)) !== canonicalJson(prior.deliveryAttempts)))

@@ -88,7 +88,7 @@ export class ApnCore {
   }
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
-      case "x402.merchant.prepare": case "x402.merchant.approve": case "x402.merchant.observe": case "x402.merchant.status": case "x402.permit2.preflight": case "x402.permit2.approve": case "x402.permit2.observe":
+      case "x402.merchant.prepare": case "x402.merchant.approve": case "x402.merchant.observe": case "x402.merchant.status": case "x402.merchant.retire-unsent": case "x402.permit2.preflight": case "x402.permit2.approve": case "x402.permit2.observe":
         throw new ApnError("APN_UNSUPPORTED_COMMAND", "This provider command requires its dedicated bounded CLI path.");
       case "x402.permit2.status":
         return dataOutcome(await readPermit2IntentStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_blocked_intent");

@@ -25,7 +25,7 @@ export function assertMerchantAuthority(grant: MerchantAuthority | undefined, co
 export function bindMerchantFeeAdmission(grant:MerchantAuthority,controller:object,o:MerchantOperation,fresh:MerchantFeeContext,started:Date,now:Date):void {
     const b=grants.get(grant.opaque);if(b===undefined||!b.live||b.controller!==controller||b.frame!==o.fingerprint||o.feeContext===undefined||now.toISOString()>=b.endsAt)refuse("merchant_fee_authority_required");
     validateMerchantFeeContext(fresh,o.envelope);
-    if(BigInt(fresh.admissionEstimatedUpper)>BigInt(o.feeContext.admissionEstimatedUpper)||now.getTime()<started.getTime()||now.getTime()-started.getTime()>=10000)refuse("merchant_fee_witness_expired");
+    if(BigInt(fresh.admissionEstimatedUpper)>BigInt(o.envelope.nativeFeeReserveWei??o.feeContext.admissionEstimatedUpper)||now.getTime()<started.getTime()||now.getTime()-started.getTime()>=10000)refuse("merchant_fee_witness_expired");
     b.feeWitness={startedAt:started.toISOString(),endsAt:new Date(Math.min(started.getTime()+10000,Date.parse(b.endsAt))).toISOString(),digest:hashObject(fresh)};
 }
 export function bindMerchantMaterial(grant:MerchantAuthority, controller:object,o:MerchantOperation,now:Date,materialHash:string) { assertMerchantAuthority(grant,controller,o,now); const b=grants.get(grant.opaque)!; if(b.material!==null || !/^[a-f0-9]{64}$/u.test(materialHash))refuse("merchant_material_authority_binding");b.material=materialHash; }

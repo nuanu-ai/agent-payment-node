@@ -32,7 +32,7 @@ export function bindMerchantFeeAdmission(grant, controller, o, fresh, started, n
     if (b === undefined || !b.live || b.controller !== controller || b.frame !== o.fingerprint || o.feeContext === undefined || now.toISOString() >= b.endsAt)
         refuse("merchant_fee_authority_required");
     validateMerchantFeeContext(fresh, o.envelope);
-    if (BigInt(fresh.admissionEstimatedUpper) > BigInt(o.feeContext.admissionEstimatedUpper) || now.getTime() < started.getTime() || now.getTime() - started.getTime() >= 10000)
+    if (BigInt(fresh.admissionEstimatedUpper) > BigInt(o.envelope.nativeFeeReserveWei ?? o.feeContext.admissionEstimatedUpper) || now.getTime() < started.getTime() || now.getTime() - started.getTime() >= 10000)
         refuse("merchant_fee_witness_expired");
     b.feeWitness = { startedAt: started.toISOString(), endsAt: new Date(Math.min(started.getTime() + 10000, Date.parse(b.endsAt))).toISOString(), digest: hashObject(fresh) };
 }
