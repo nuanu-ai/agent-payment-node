@@ -59,11 +59,11 @@ export async function consumedBurnEvidence(source, op, afterCleanup = false) {
     const consumerProof = verifyConsumedNonce(consumer);
     if (getAddress(await recoverTransactionAddress({ serializedTransaction: consumerWire(circleRecord(consumer.transaction)) })) !== CIRCLE_SOURCE_OWNER)
         circleBlocked("consumer_signature_owner_changed");
-    const head = await source.block("finalized"), tag = { blockHash: circleHex(head.hash, 32), requireCanonical: true }, nonce = afterCleanup ? 86n : 85n;
+    const head = await source.block("finalized"), tag = { blockHash: circleHex(head.hash, 32), requireCanonical: true }, nonce = afterCleanup === "cleanup86" ? 87n : afterCleanup ? 86n : 85n;
     if (circleHex(head.hash, 32) === "0x" + "0".repeat(64) || circleUint(head.number) < 513145262n || circleUint(head.timestamp) < CONSUMER_TIME)
         circleBlocked("consumed_current_finalized_head_invalid");
     const [latest, pending, finalized, balance, allowance, oldReceipt] = await Promise.all([source.call("eth_getTransactionCount", [CIRCLE_SOURCE_OWNER, "latest"]), source.call("eth_getTransactionCount", [CIRCLE_SOURCE_OWNER, "pending"]), source.call("eth_getTransactionCount", [CIRCLE_SOURCE_OWNER, tag]), source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], tag), source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag), source.call("eth_getTransactionReceipt", [SEALED_BURN_HASH])]);
-    if ([latest, pending, finalized].some(x => circleUint(x) !== nonce) || circleUint(head.number) < 513145262n || String(balance) !== "97924" || String(allowance) !== (afterCleanup ? "0" : "40100") || oldReceipt !== null)
+    if ([latest, pending, finalized].some(x => circleUint(x) !== nonce) || circleUint(head.number) < 513145262n || String(balance) !== "97924" || String(allowance) !== (afterCleanup && afterCleanup !== "cancel85" ? "0" : "40100") || oldReceipt !== null)
         circleBlocked("consumed_nonce_principal_or_allowance_changed");
     for (const h of [{ number: "0x" + BigInt(approvalProof.finalityBlockNumberAtomic).toString(16), hash: approvalProof.finalityBlockHash }, circleRecord(consumer.finalityHead), head]) {
         const reanchor = await source.block(String(h.number));

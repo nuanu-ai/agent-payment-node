@@ -6,6 +6,7 @@ export interface CircleLifecyclePorts {
     readonly now: () => number;
     consentContext?(): string | null;
     effectAuthorityGuard?(op: CircleOperationV1): void;
+    recordEffectFailure?(op: CircleOperationV1, role: CircleRole, error: unknown): Promise<void>;
     save(op: CircleOperationV1): Promise<void>;
     assertOwnerPolicyAndConflicts(op: CircleOperationV1, effectRole?: CircleRole): Promise<void>;
     authorizationDeadline(op: CircleOperationV1): Promise<string | null>;

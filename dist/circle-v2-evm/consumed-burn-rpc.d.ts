@@ -14,4 +14,4 @@ export interface ConsumedBurnEvidence {
 export declare function verifyConsumedNonce(input: CircleObservation): CircleReceiptProof;
 export declare function assertConsumedBurnEvidence(value: ConsumedBurnEvidence, op: CircleOperationV1): void;
 /** Historical allowance and principal at the exact approval block remain mandatory. An archive transport is required. */
-export declare function consumedBurnEvidence(source: CircleRpc, op: CircleOperationV1, afterCleanup?: boolean): Promise<ConsumedBurnEvidence>;
+export declare function consumedBurnEvidence(source: CircleRpc, op: CircleOperationV1, afterCleanup?: boolean | "cancel85" | "cleanup86"): Promise<ConsumedBurnEvidence>;

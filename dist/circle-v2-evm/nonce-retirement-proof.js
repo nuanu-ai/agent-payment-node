@@ -1,11 +1,16 @@
+import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
 import { validateConsumedBurnProof } from "./consumed-burn-proof.js";
 import { validateSealedBurnProof } from "./burn-retirement-proof.js";
 import { isSealedBurnRetirement, isConsumedBurnRetirement } from "./burn-retirement.js";
 import { exactKeys, isPlainRecord, hashObject } from "../canonical.js";
 import { circleBlocked } from "./operation-model.js";
 export function validateCircleNonceRetirementProof(proof, op) {
-    if (!isPlainRecord(proof) || !exactKeys(proof, ["intentHash", "originalApprovalHash", "originalNonceAtomic", "finalizedNonceAtomic", "finalizedBlockHash", "finalizedBlockNumberAtomic", "cleanupTransactionHash", "actualCleanupFeeAtomic", "proofHash", ...(isConsumedBurnRetirement(op) ? ["consumedBurn"] : isSealedBurnRetirement(op) ? ["sealedBurn"] : [])]))
+    if (!isPlainRecord(proof) || !exactKeys(proof, ["intentHash", "originalApprovalHash", "originalNonceAtomic", "finalizedNonceAtomic", "finalizedBlockHash", "finalizedBlockNumberAtomic", "cleanupTransactionHash", "actualCleanupFeeAtomic", "proofHash", ...(proof.cleanup85Recovery !== undefined ? ["cleanup85Recovery"] : isConsumedBurnRetirement(op) ? ["consumedBurn"] : isSealedBurnRetirement(op) ? ["sealedBurn"] : [])]))
         circleBlocked("nonce_retirement_proof_shape");
+    if (proof.cleanup85Recovery !== undefined) {
+        validateCleanup85RecoveryProof(proof, op);
+        return;
+    }
     if (isConsumedBurnRetirement(op)) {
         validateConsumedBurnProof(proof, op);
         return;

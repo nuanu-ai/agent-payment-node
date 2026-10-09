@@ -7,9 +7,9 @@ import type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
 
 /** Construct finite funding rails while retaining their existing construction boundaries. */
 export function finiteFundingRuntime(command: string, state: StateStore, wrappingSecret: WrappingSecretPort,
-  options: Pick<RuntimeFactoryOptions, "seiFunding" | "megaFunding" | "circleEvm">, environment: NodeJS.ProcessEnv, now: () => number) {
+  options: Pick<RuntimeFactoryOptions, "seiFunding" | "megaFunding" | "circleEvm" | "cleanup85Recovery">, environment: NodeJS.ProcessEnv, now: () => number) {
   return {
-    circleEvm: options.circleEvm ?? new CircleEvmService(state, wrappingSecret, environment, now),
+    circleEvm: options.circleEvm ?? new CircleEvmService(state, wrappingSecret, environment, now, {}, undefined, options.cleanup85Recovery),
     ...(command.startsWith("sei.funding.") || options.seiFunding !== undefined
       ? { seiFunding: options.seiFunding ?? new SeiFundingService(state, wrappingSecret, environment) } : {}),
     ...(command.startsWith("mega.funding.") || options.megaFunding !== undefined

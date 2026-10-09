@@ -1,13 +1,15 @@
+import { validateCleanup85RecoveryProof, type Cleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
 import { validateConsumedBurnProof, type ConsumedBurnRetirementProof } from "./consumed-burn-proof.js";
 import { validateSealedBurnProof, type SealedBurnRetirementProof } from "./burn-retirement-proof.js";
 import { isSealedBurnRetirement, isConsumedBurnRetirement } from "./burn-retirement.js";
 import { exactKeys, isPlainRecord, hashObject } from "../canonical.js";
 import { circleBlocked, type CircleOperationV1 } from "./operation-model.js";
-export interface CircleNonceRetirementProof { readonly consumedBurn?: ConsumedBurnRetirementProof; readonly sealedBurn?: SealedBurnRetirementProof; readonly intentHash: string; readonly originalApprovalHash: string;
+export interface CircleNonceRetirementProof { readonly cleanup85Recovery?: Cleanup85RecoveryProof; readonly consumedBurn?: ConsumedBurnRetirementProof; readonly sealedBurn?: SealedBurnRetirementProof; readonly intentHash: string; readonly originalApprovalHash: string;
   readonly originalNonceAtomic: string; readonly finalizedNonceAtomic: string; readonly finalizedBlockHash: string;
   readonly finalizedBlockNumberAtomic: string; readonly cleanupTransactionHash: string; readonly actualCleanupFeeAtomic: string; readonly proofHash: string; }
 export function validateCircleNonceRetirementProof(proof: CircleNonceRetirementProof, op: CircleOperationV1): void {
-  if (!isPlainRecord(proof) || !exactKeys(proof, ["intentHash", "originalApprovalHash", "originalNonceAtomic", "finalizedNonceAtomic", "finalizedBlockHash", "finalizedBlockNumberAtomic", "cleanupTransactionHash", "actualCleanupFeeAtomic", "proofHash", ...(isConsumedBurnRetirement(op) ? ["consumedBurn"] : isSealedBurnRetirement(op) ? ["sealedBurn"] : [])])) circleBlocked("nonce_retirement_proof_shape");
+  if (!isPlainRecord(proof) || !exactKeys(proof, ["intentHash", "originalApprovalHash", "originalNonceAtomic", "finalizedNonceAtomic", "finalizedBlockHash", "finalizedBlockNumberAtomic", "cleanupTransactionHash", "actualCleanupFeeAtomic", "proofHash", ...(proof.cleanup85Recovery !== undefined ? ["cleanup85Recovery"] : isConsumedBurnRetirement(op) ? ["consumedBurn"] : isSealedBurnRetirement(op) ? ["sealedBurn"] : [])])) circleBlocked("nonce_retirement_proof_shape");
+  if (proof.cleanup85Recovery !== undefined) { validateCleanup85RecoveryProof(proof, op); return; }
   if (isConsumedBurnRetirement(op)) { validateConsumedBurnProof(proof, op); return; }
   if (isSealedBurnRetirement(op)) { validateSealedBurnProof(proof, op); return; }
   const { proofHash, ...body } = proof, cleanup = op.effects.find(x => x.role === "cleanup"), approval = op.effects[0]!, burn = op.effects[1]!;

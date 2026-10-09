@@ -1,3 +1,7 @@
+import { consumeCleanup85Settlement, type VerifiedCleanup85Settlement } from "./cleanup85-settlement-authority.js";
+import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
+import { Cleanup85RecoveryStore } from "./cleanup85-recovery-store.js";
+import type { CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { CircleRepository } from "./repository.js";
 import { CircleExternalStore } from "./external-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -118,6 +122,20 @@ export class CircleUsage {
       const outcomeDigest = hashObject({kind:"circle_external_mint_fulfillment",operationId:op.operationId,fingerprint:op.fingerprint,proofHash:op.externalFulfillment.proofHash,reservationId:row.reservationId,index,state});
       if(current.state === state){if(current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== undefined)circleBlocked("external_usage_outcome_changed");result.push(current);continue;}
       result.push(await this.ledger.transition({account:row.account,chain:row.chain,asset:row.asset,reservationId:row.reservationId,policyDigest:row.policyDigest,state,now:new Date(this.now()),outcomeDigest,expectedCurrentStates:index < 3 ? ["reserved","submitted","unknown_finality"] : ["reserved","unknown_finality"]}));
+    }
+    return result;
+  }
+  /** Only a fully verified versioned recovery chooses the new86 fee; old cleanup85 stays unknown. */
+  async closeCleanup85Recovery(op: CircleOperationV1, proof: CircleNonceRetirementProof, authority: VerifiedCleanup85Settlement): Promise<readonly AssetUsageReservation[]> {
+    consumeCleanup85Settlement(authority, this.state, op, proof); validateCleanup85RecoveryProof(proof, op); if (op.usage.length !== 5) circleBlocked("cleanup85_usage_missing");
+    const durable = await new Cleanup85RecoveryStore(this.state.root).publicRecord(op, proof.cleanup85Recovery!.mode === "observed_original" ? "observed-original-proof" : "cleanup86-finalized-proof");
+    if (durable === null || canonicalJson(durable) !== canonicalJson(proof)) circleBlocked("cleanup85_durable_settlement_proof_required");
+    const result: AssetUsageReservation[] = [];
+    for (const [index, row] of op.usage.entries()) {
+      const saved = await this.ledger.load(row, row.reservationId); if (saved === null || saved.policyDigest !== row.policyDigest || saved.amountAtomic !== row.amountAtomic) circleBlocked("cleanup85_usage_hold_changed");
+      const consumedAtomic = index === 1 ? "1116903336000" : index === 3 ? proof.actualCleanupFeeAtomic : "0", outcomeDigest = hashObject({ version: "apn.circle-cleanup85-retirement-usage.v1", proofHash: proof.proofHash, operationId: op.operationId, reservationId: row.reservationId, index });
+      if (saved.state === "failed_confirmed_revert") { if (saved.consumedAtomic !== consumedAtomic || saved.outcomeDigest !== outcomeDigest) circleBlocked("cleanup85_usage_outcome_changed"); result.push(saved); continue; }
+      result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state: "failed_confirmed_revert", consumedAtomic, outcomeDigest, now: new Date(this.now()), expectedCurrentStates: ["reserved", "submitted", "unknown_finality"] }));
     }
     return result;
   }

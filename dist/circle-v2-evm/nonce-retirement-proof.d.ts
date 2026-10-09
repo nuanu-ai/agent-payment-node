@@ -1,7 +1,9 @@
+import { type Cleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
 import { type ConsumedBurnRetirementProof } from "./consumed-burn-proof.js";
 import { type SealedBurnRetirementProof } from "./burn-retirement-proof.js";
 import { type CircleOperationV1 } from "./operation-model.js";
 export interface CircleNonceRetirementProof {
+    readonly cleanup85Recovery?: Cleanup85RecoveryProof;
     readonly consumedBurn?: ConsumedBurnRetirementProof;
     readonly sealedBurn?: SealedBurnRetirementProof;
     readonly intentHash: string;

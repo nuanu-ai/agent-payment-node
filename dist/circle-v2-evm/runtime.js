@@ -1,7 +1,13 @@
+import { reconcileOriginalCleanup85 } from "./cleanup85-public-reconcile.js";
+import { CLEANUP85_HASH } from "./cleanup85-recovery-store.js";
+import { prepareCleanup85Recovery } from "./cleanup85-recovery-prepare.js";
+import { Cleanup85RecoveryRuntime } from "./cleanup85-recovery-runtime.js";
+import { Cleanup85RecoveryStore } from "./cleanup85-recovery-store.js";
+import { CirclePublicFailureStore } from "./public-failure-store.js";
 import { consumedBurnEvidence, CONSUMER_HASH, CONSUMER_BLOCK_HASH } from "./consumed-burn-rpc.js";
 import { assertConsumedCleanup } from "./consumed-burn-proof.js";
 import { approvalReceiptIdentity } from "./burn-retirement-rpc.js";
-import { isConsumedBurnRetirement, isSealedBurnRetirement, sealedBurnReplacement, assertSealedBurnReplacement, SEALED_BURN_HASH, SEALED_BURN_MATERIAL } from "./burn-retirement.js";
+import { isConsumedBurnRetirement, isSealedBurnRetirement, sealedBurnReplacement, assertSealedBurnReplacement, SEALED_BURN_HASH, SEALED_BURN_MATERIAL, SEALED_BURN_OPERATION } from "./burn-retirement.js";
 import { sealedBurnEvidence, assertBurnReplacementAccount } from "./burn-retirement-rpc.js";
 import { CircleExternalStore } from "./external-store.js";
 import { readCircleMintFeeRecipient } from "./mint-fee-recipient.js";
@@ -41,7 +47,8 @@ export class CircleEvmService {
     custody;
     operations;
     retirements;
-    constructor(state, wrapping, env, now = Date.now, ttyOptions = {}, https = new BridgeHttps()) {
+    cleanup85Recovery;
+    constructor(state, wrapping, env, now = Date.now, ttyOptions = {}, https = new BridgeHttps(), cleanup85Dependencies) {
         this.state = state;
         this.env = env;
         this.now = now;
@@ -52,6 +59,7 @@ export class CircleEvmService {
         this.usage = new CircleUsage(state, now);
         this.custody = new LocalCircleCustody(state, wrapping);
         this.operations = new OperationService(state);
+        this.cleanup85Recovery = new Cleanup85RecoveryRuntime(state, wrapping, env, now, ttyOptions, https, cleanup85Dependencies);
     }
     async prepare(input) {
         const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile), route = circleRoute(input.destinationChain, destinationProfile);
@@ -110,11 +118,27 @@ export class CircleEvmService {
             return reserved;
         }));
     }
-    async status(id) { return publicCircle(await this.required(id)); }
+    async status(id) { const op = await this.required(id), failure = await new CirclePublicFailureStore(this.state.root).read(op), recovery = await this.cleanup85Recovery.publicStatus(id); return { ...publicCircle(op), ...(failure === null ? {} : { first_public_effect_failure: failure }), ...(recovery === null ? {} : { cleanup85_recovery: recovery }) }; }
+    async prepareCleanup85Recovery(id) { const { source, destination } = this.remotes(1329); return prepareCleanup85Recovery(this.state, source, destination, id, this.now); }
+    async cancelCleanup85(id) { return this.cleanup85Recovery.cancel(id); }
+    async approveCleanup86(id) { return this.cleanup85Recovery.approve86(id); }
     async approveSource(id) { return this.run(id, approveCircleSource); }
     async adoptExternalMint(id, transactionHash) { return adoptCircleExternalMint(this.state, this.repo, this.usage, this.env, this.now, this.https, id, transactionHash); }
     async approveMint(id) { return this.run(id, approveCircleMint); }
-    async observe(id) { return this.run(id, async (op, ports) => await this.retirements.intent(op) === null ? observeCircle(op, ports) : retireCircleNonce(op, ports, false)); }
+    async observe(id) {
+        const saved = await this.required(id);
+        if (saved.state === "nonce_retired" && saved.nonceRetirement?.cleanup85Recovery === undefined)
+            return saved;
+        if (saved.operationId === SEALED_BURN_OPERATION && await new Cleanup85RecoveryStore(this.state.root).publicRecord(saved, "cleanup86-intent") !== null)
+            return this.cleanup85Recovery.observe(id);
+        return this.run(id, async (op, ports) => {
+            if (op.effects.find(e => e.role === "cleanup")?.transactionHash === CLEANUP85_HASH) {
+                const { source, destination } = this.remotes(op.destinationChain);
+                return reconcileOriginalCleanup85(this.state, this.repo, this.usage, source, destination, op, this.now);
+            }
+            return await this.retirements.intent(op) === null ? observeCircle(op, ports) : retireCircleNonce(op, ports, false);
+        });
+    }
     async refreshAttestation(id) { return this.run(id, refreshCircleAttestation); }
     async cleanupNonce(id) {
         return this.run(id, async (op, ports) => {
@@ -199,6 +223,7 @@ export class CircleEvmService {
         };
         return {
             now: this.now, save: op => this.repo.save(op),
+            recordEffectFailure: (op, role, error) => new CirclePublicFailureStore(this.state.root).record(op, role, error),
             consentContext: () => currentAuthority?.authorityHash ?? null,
             effectAuthorityGuard: op => { if (currentAuthority !== null) {
                 assertCircleRetirementWindow(currentAuthority, this.now());

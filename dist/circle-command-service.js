@@ -14,6 +14,19 @@ export async function executeCircleCommand(request, context) {
             const op = await service.adoptExternalMint(request.operationId, request.transactionHash);
             return { ...operationOutcome(publicCircle(op)), proofClass: "circle_external_mint_fulfillment", receipt: op.externalFulfillment ?? null };
         }
+        case "circle.evm.cleanup85-prepare":
+        case "circle.evm.cleanup85-cancel":
+        case "circle.evm.cleanup86-approve": {
+            const service = context.circleEvm;
+            if (service === undefined)
+                throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle EVM runtime unavailable.");
+            if (request.command === "circle.evm.cleanup85-prepare")
+                return dataOutcome(await service.prepareCleanup85Recovery(request.operationId), "circle_cleanup85_recovery_prepared_unsigned");
+            if (request.command === "circle.evm.cleanup85-cancel")
+                return dataOutcome(await service.cancelCleanup85(request.operationId), "circle_cleanup85_distinct_native_cancellation");
+            await service.approveCleanup86(request.operationId);
+            return operationOutcome(await service.status(request.operationId));
+        }
         case "circle.evm.prepare": {
             const service = context.circleEvm;
             if (service === undefined)

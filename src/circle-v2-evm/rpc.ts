@@ -1,5 +1,6 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi, type Address, type Hex } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { ApnError } from "../errors.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
@@ -19,22 +20,38 @@ export const CIRCLE_RPC_ABI = parseAbi([
 ]);
 const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_getCode", "eth_getStorageAt", "eth_call",
   "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt", "eth_getTransactionByHash"]);
-/** Public HTTPS, DNS pinning, bounded bodies, no redirect/retry and a finite per-command physical request budget. */
+const READ_METHODS = new Set([...METHODS].filter(method => method !== "eth_sendRawTransaction"));
+const transient = (e: unknown) => e instanceof ApnError && typeof e.details?.status === "number" && [429, 500, 502, 503, 504].includes(e.details.status);
+/** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
+ * retry once; anchored observations restart wholly. Financial RPC is never retried. */
 export class CircleRpc {
   private sequence = 0; private requests = 0; private readonly endpoint: string;
+  private readonly scopes = new AsyncLocalStorage<{ readonly guard: (() => void) | undefined; readonly retryRead: boolean }>();
   constructor(url: string, readonly chainId: number, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps(), private readonly maxRequests = 256) {
     const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Circle RPC", 2048);
     if (parsed.search !== "" || parsed.hash !== "") circleBlocked("rpc_url"); this.endpoint = parsed.toString();
   }
+  guarded<T>(guard: () => void, action: () => Promise<T>): Promise<T> { return this.scopes.run({ guard, retryRead: this.scopes.getStore()?.retryRead ?? true }, action); }
   async call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown> {
-    if (!METHODS.has(method) || ++this.requests > this.maxRequests) circleBlocked("rpc_method_or_budget");
-    if (method === "eth_sendRawTransaction" && beforeSend === undefined) circleBlocked("financial_rpc_consent_required");
-    beforeSend?.();
-    const id = ++this.sequence, response = await this.https.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", beforeSend);
-    if (response.status !== 200) throw new ApnError("APN_RPC_CONFIG", "Circle RPC returned an unsuccessful HTTP response.");
-    const value = circleRecord(JSON.parse(response.body));
-    if (value.jsonrpc !== "2.0" || value.id !== id || !Object.hasOwn(value, "result") || Object.hasOwn(value, "error")) throw new ApnError("APN_RPC_PROTOCOL", "Circle RPC result envelope is invalid.");
-    return value.result;
+    const guard = this.scopes.getStore()?.guard, gate = () => { guard?.(); beforeSend?.(); }, retry = READ_METHODS.has(method) && this.scopes.getStore()?.retryRead !== false;
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.physicalCall(method, params, gate, beforeSend !== undefined); }
+      catch (error) { if (!retry || attempt >= 1 || !transient(error)) throw error; gate(); await new Promise(resolve => setTimeout(resolve, 100)); gate(); }
+    }
+  }
+  private async physicalCall(method: string, params: readonly unknown[], gate: () => void, financialConsent: boolean): Promise<unknown> {
+    gate(); if (!METHODS.has(method) || ++this.requests > this.maxRequests) circleBlocked("rpc_method_or_budget");
+    if (method === "eth_sendRawTransaction" && !financialConsent) circleBlocked("financial_rpc_consent_required");
+    const id = ++this.sequence, origin = new URL(this.endpoint).origin;
+    let response: Awaited<ReturnType<BridgeHttps["request"]>>;
+    try { response = await this.https.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", gate); }
+    catch (error) { if (error instanceof ApnError) throw new ApnError(error.code, "Circle RPC transport failed.", { method, origin, stage: "transport" }); throw error; }
+    gate();
+    if (response.status !== 200) throw new ApnError("APN_RPC_CONFIG", "Circle RPC returned an unsuccessful HTTP response.", { method, origin, status: response.status, stage: "response" });
+    let value: Record<string, unknown>;
+    try { value = circleRecord(JSON.parse(response.body)); } catch (error) { throw new ApnError(error instanceof ApnError ? error.code : "APN_RPC_PROTOCOL", "Circle RPC result cannot be decoded.", { method, origin, stage: "protocol" }); }
+    if (value.jsonrpc !== "2.0" || value.id !== id || !Object.hasOwn(value, "result") || Object.hasOwn(value, "error")) throw new ApnError("APN_RPC_PROTOCOL", "Circle RPC result envelope is invalid.", { method, origin, stage: "protocol" });
+    gate(); return value.result;
   }
   async identity() { if (circleUint(await this.call("eth_chainId", [])) !== BigInt(this.chainId)) circleBlocked("rpc_chain_changed"); }
   async read(to: Address, name: string, args: readonly unknown[] = [], tag: string | { readonly blockHash: Hex; readonly requireCanonical: true } = "latest"): Promise<unknown> {
@@ -44,6 +61,12 @@ export class CircleRpc {
   }
   async block(tag: string) { return circleRecord(await this.call("eth_getBlockByNumber", [tag, false])); }
   async observation(transactionHash: Hex, finalityTag: "included" | "safe" | "finalized"): Promise<CircleObservation | null> {
+    for (let attempt = 0; ; attempt++) {
+      try { return await this.scopes.run({ guard: this.scopes.getStore()?.guard, retryRead: false }, () => this.anchoredObservation(transactionHash, finalityTag)); }
+      catch (error) { if (attempt >= 1 || !transient(error)) throw error; this.scopes.getStore()?.guard?.(); await new Promise(resolve => setTimeout(resolve, 100)); this.scopes.getStore()?.guard?.(); }
+    }
+  }
+  private async anchoredObservation(transactionHash: Hex, finalityTag: "included" | "safe" | "finalized"): Promise<CircleObservation | null> {
     await this.identity(); const [transaction, receipt] = await Promise.all([this.call("eth_getTransactionByHash", [transactionHash]), this.call("eth_getTransactionReceipt", [transactionHash])]);
     if (transaction === null || receipt === null) return null;
     const r = circleRecord(receipt); if (r.blockNumber === null || r.blockHash === null) return null;

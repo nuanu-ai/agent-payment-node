@@ -121,6 +121,7 @@ export async function executeCircleEffect(input, role, ports, token) {
     catch (error) {
         if (op.effects.find(e => e.role === role).phase === "prepared")
             throw error;
+        await ports.recordEffectFailure?.(op, role, error);
         return await persist(op, { effects: updateEffect(op, role, { phase: "unknown" }) }, `${role}_fenced_unknown_observe_only`, ports);
     }
     finally {

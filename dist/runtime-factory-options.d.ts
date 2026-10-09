@@ -1,4 +1,5 @@
 import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
+import type { Cleanup85RecoveryDependencies } from "./circle-v2-evm/cleanup85-recovery-runtime.js";
 import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
 import type { RelayUnsignedPrepareService, RelayPreparePorts } from "./relay/prepare.js";
@@ -79,6 +80,7 @@ export interface RuntimeFactoryOptions {
     readonly relayObserveBnbRpc?: HttpsBaseRpc;
     readonly stargateNative?: StargateNativeService;
     readonly circleEvm?: CircleEvmService;
+    readonly cleanup85Recovery?: Cleanup85RecoveryDependencies;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
