@@ -242,11 +242,21 @@ export class RelayUnsignedPrepareService {
             minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
         const quote = await (this.ports.nativeQuote?.(intent) ?? requestRelayNativeQuote(intent));
         const { quoteDigest, ...projection } = quote;
+        // A Base order's signed deadline bounds settlement/refunds, not local source-effect authority.
+        const authorizationDeadline = Math.min(quote.deadline * 1000 - 60_000, active.registry.expiresAt === undefined ? Infinity : Date.parse(active.registry.expiresAt));
+        if (route.sourceChainId === 8453) {
+            const current = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile));
+            const at = this.clock.now().getTime();
+            if (current === null || current.profile !== active.profile || current.digest !== active.digest || current.revision !== active.revision ||
+                current.activationDigest !== active.activationDigest || current.accounts.evm?.toLowerCase() !== payer ||
+                !Number.isFinite(at) || !Number.isFinite(authorizationDeadline) || at >= authorizationDeadline)
+                refuse("relay_native_authorization_window");
+        }
         if (hashObject(projection) !== quoteDigest || quote.routeReference !== route.reference ||
             quote.payer !== payer || quote.recipient !== intent.recipient || quote.principalAtomic !== input.amountAtomic ||
             BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
             quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
-            (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
+            (route.sourceChainId !== 8453 && active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
             BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
             throw new ApnError("APN_OPERATION_BLOCKED", "Relay native quote identity, deadline, or fee ceiling changed.");
         }
