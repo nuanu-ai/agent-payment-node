@@ -127,6 +127,8 @@ export declare class AssetUsageLedger extends SecureStateStore {
     load(identityValue: AssetUsageIdentity, reservationIdValue: string): Promise<AssetUsageReservation | null>;
     private ready;
     private loadBucket;
+    /** Central existing-record projection shared by reserve admission and every usage reader. */
+    private sumBucketUsage;
     private bucketDirectory;
     private recordPath;
     private bucketLock;

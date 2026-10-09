@@ -1,3 +1,5 @@
+import { JupiterHistoricalRetirementReader } from "./swap/jupiter-solana/historical-retirement-reader.js";
+import { historicalRetirementUsage } from "./swap/jupiter-solana/historical-retirement-record.js";
 import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
 import { assertCleanup85GenericCapacityRelease, cleanup85NativeReservationMarker, sameCleanup85NativeMarker } from "./asset-usage-ledger-cleanup85-native.js";
 import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
@@ -11,7 +13,7 @@ import { getAddress } from "viem";
 import { canonicalJson, domainHash } from "./canonical.js";
 import { evaluateAssetPolicy, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
 import { SecureStateStore } from "./secure-state-store.js";
-import { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, validateAssetUsageReservation, expectedStates, assetUsageReservationId, reservationIdFor, seal, sumUsage, assertReplay, assertBucketWindow, assertTransition, validateIdentity, exactIdentity, exactAsset, withoutDigest, canonicalAccount, idempotency, atomic, instant, digest, invalid, blocked, corrupt, } from "./asset-usage-ledger-record.js";
+import { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, validateAssetUsageReservation, expectedStates, assetUsageReservationId, reservationIdFor, seal, assertReplay, assertBucketWindow, assertTransition, validateIdentity, exactIdentity, exactAsset, withoutDigest, canonicalAccount, idempotency, atomic, instant, digest, invalid, blocked, corrupt, } from "./asset-usage-ledger-record.js";
 import { Cleanup85NativePublicRecords } from "./circle-cleanup85-native-records.js";
 import { DirectPublicEffectJournal } from "./direct-public-effect.js";
 import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
@@ -85,7 +87,7 @@ export class AssetUsageLedger extends SecureStateStore {
                     throw blocked("Cleanup85 reservation marker replay mismatch.");
                 if (input.retryFailedBeforeEffect === true && existing.state === "failed_before_effect") {
                     assertBucketWindow(reservations, at);
-                    const usage = sumUsage(reservations, input.now);
+                    const usage = await this.sumBucketUsage(identity, reservations, input.now);
                     evaluateAssetPolicy(registry, {
                         chain: identity.chain, asset: identity.asset, rail: input.rail, ...(input.mechanism === undefined ? {} : { mechanism: input.mechanism }),
                         amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
@@ -98,7 +100,7 @@ export class AssetUsageLedger extends SecureStateStore {
                 return existing;
             }
             assertBucketWindow(reservations, at);
-            const usage = sumUsage(reservations, input.now);
+            const usage = await this.sumBucketUsage(identity, reservations, input.now);
             evaluateAssetPolicy(registry, {
                 chain: identity.chain, asset: identity.asset, rail: input.rail, ...(input.mechanism === undefined ? {} : { mechanism: input.mechanism }),
                 amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
@@ -312,7 +314,7 @@ export class AssetUsageLedger extends SecureStateStore {
             windowPolicy: ASSET_USAGE_WINDOW,
             windowStart: `${at.slice(0, 10)}T00:00:00.000Z`,
             windowEnd: new Date(Date.parse(`${at.slice(0, 10)}T00:00:00.000Z`) + 86_400_000).toISOString(),
-            amountAtomic: sumUsage(await this.loadBucket(identity), now),
+            amountAtomic: await this.sumBucketUsage(identity, await this.loadBucket(identity), now),
         }));
     }
     /** Existing-ledger snapshot for nonpersistent preflight; never initializes, locks, or creates a bucket. */
@@ -323,7 +325,7 @@ export class AssetUsageLedger extends SecureStateStore {
             windowPolicy: ASSET_USAGE_WINDOW,
             windowStart: `${at.slice(0, 10)}T00:00:00.000Z`,
             windowEnd: new Date(Date.parse(`${at.slice(0, 10)}T00:00:00.000Z`) + 86_400_000).toISOString(),
-            amountAtomic: sumUsage(await this.loadBucket(identity, false), now),
+            amountAtomic: await this.sumBucketUsage(identity, await this.loadBucket(identity, false), now),
         };
     }
     /** Read the daily total and one reservation from the same locked bucket snapshot. */
@@ -339,7 +341,7 @@ export class AssetUsageLedger extends SecureStateStore {
                     windowPolicy: ASSET_USAGE_WINDOW,
                     windowStart: `${at.slice(0, 10)}T00:00:00.000Z`,
                     windowEnd: new Date(Date.parse(`${at.slice(0, 10)}T00:00:00.000Z`) + 86_400_000).toISOString(),
-                    amountAtomic: sumUsage(records, now),
+                    amountAtomic: await this.sumBucketUsage(identity, records, now),
                 },
                 reservation: records.find(record => record.reservationId === reservationId) ?? null,
             };
@@ -383,6 +385,11 @@ export class AssetUsageLedger extends SecureStateStore {
             records.push(record);
         }
         return records;
+    }
+    /** Central existing-record projection shared by reserve admission and every usage reader. */
+    async sumBucketUsage(identity, records, now) {
+        const retired = await new JupiterHistoricalRetirementReader(this.root).forBucket(identity, records);
+        return historicalRetirementUsage(records, retired, now);
     }
     bucketDirectory(identity) {
         return `asset-usage/${domainHash("apn.asset-usage-bucket.v1", canonicalJson(identity))}`;
