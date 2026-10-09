@@ -1,3 +1,4 @@
+import { decodeCircleMintEvents } from "./mint-events.js";
 /** Finite CCTP V2 Fast codecs. Pure caller-supplied chain observations are not RPC authenticity proof.
  * Wire layouts/signatures: circlefin/evm-cctp-contracts commit 6e7513cdb2bee6bb0cddf331fe972600fc5017c9. */
 import { decodeEventLog, encodeAbiParameters, encodeFunctionData, encodeEventTopics, getAddress, keccak256, parseAbi,
@@ -14,7 +15,7 @@ export const CIRCLE_ABI = parseAbi([
   "event DepositForBurn(address indexed burnToken,uint256 amount,address indexed depositor,bytes32 mintRecipient,uint32 destinationDomain,bytes32 destinationTokenMessenger,bytes32 destinationCaller,uint256 maxFee,uint32 indexed minFinalityThreshold,bytes hookData)",
   "event MessageSent(bytes message)",
   "event MessageReceived(address indexed caller,uint32 sourceDomain,bytes32 indexed nonce,bytes32 sender,uint32 indexed finalityThresholdExecuted,bytes messageBody)",
-  "event MintAndWithdraw(address indexed mintRecipient,uint256 amount,address indexed mintToken)",
+  "event MintAndWithdraw(address indexed mintRecipient,uint256 amount,address indexed mintToken,uint256 feeCollected)",
   "event Transfer(address indexed from,address indexed to,uint256 value)",
   "event Approval(address indexed owner,address indexed spender,uint256 value)",
 ]);
@@ -187,17 +188,15 @@ export function assertCircleAttestation(source: CircleSourceProof, attested: Cir
 }
 export function encodeCircleMint(attested: CircleAttestation): Hex { return encodeFunctionData({ abi: CIRCLE_ABI,
   functionName: "receiveMessage", args: [attested.bytes, attested.attestation] }); }
-export function decodeCircleDestination(source: CircleSourceProof, attested: CircleAttestation, input: CircleObservation, usedNonceAtomic: string, destinationProfile?: string) {
+export function decodeCircleDestination(source: CircleSourceProof, attested: CircleAttestation, input: CircleObservation, usedNonceAtomic: string, destinationProfile?: string, feeRecipient?: Address) {
   assertCircleAttestation(source, attested); const route = circleRoute(source.destinationChain, destinationProfile);
   const receipt = verifyCircleObservation(input, { chain: route.chainId, from: route.gasPayer, to: CIRCLE_TRANSMITTER,
     data: encodeCircleMint(attested), maxNativeDebitAtomic: BigInt(route.destinationNativeCap), maxGasAtomic: 600_000n });
-  const received = oneEvent(input, "MessageReceived", CIRCLE_TRANSMITTER).args,
-    mint = oneEvent(input, "MintAndWithdraw", CIRCLE_MESSENGER).args, transfer = oneEvent(input, "Transfer", route.token).args;
+  const received = oneEvent(input, "MessageReceived", CIRCLE_TRANSMITTER).args;
+  decodeCircleMintEvents(attested, input, feeRecipient);
   if (circleUint(usedNonceAtomic) !== 1n || !addressEquals(received.caller, route.gasPayer) || received.sourceDomain !== 3 ||
     circleHex(received.nonce, 32) !== attested.nonce || circleHex(received.sender, 32) !== circleWord(CIRCLE_MESSENGER) ||
     received.finalityThresholdExecuted !== attested.finalityExecuted || circleHex(received.messageBody) !== attested.body ||
-    !addressEquals(mint.mintRecipient, CIRCLE_RECIPIENT) || mint.amount !== BigInt(attested.receivedAtomic) || !addressEquals(mint.mintToken, route.token) ||
-    !addressEquals(transfer.from, getAddress(`0x${"0".repeat(40)}`)) || !addressEquals(transfer.to, CIRCLE_RECIPIENT) || transfer.value !== BigInt(attested.receivedAtomic) ||
     BigInt(attested.expirationBlock) !== 0n && BigInt(attested.expirationBlock) <= BigInt(receipt.blockNumberAtomic)) circleFail("destination_mint_binding");
   return { kind: "circle_v2_evm_destination" as const, ...receipt, sourceTransactionHash: source.transactionHash,
     attestedMessageHash: attested.hash, nonce: attested.nonce, nonceConsumed: true as const, recipient: CIRCLE_RECIPIENT,

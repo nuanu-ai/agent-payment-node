@@ -1,3 +1,4 @@
+const issuerFeeRecipient = getAddress(`0x${"44".repeat(20)}`);
 import assert from "node:assert/strict";
 import test from "node:test";
 import { encodeAbiParameters, encodeEventTopics, getAddress, keccak256, type Address, type Hex } from "viem";
@@ -60,13 +61,14 @@ for (const chain of [1329, 59144, 143] as const) test(`finite ${chain}: exact so
   const proof = decodeCircleSource(source(chain), chain), attested = await bindCircleAttestation(proof, await iris(proof), snapshot(chain));
   assert.equal(attested.receivedAtomic, "40094"); assert.equal(proof.finalityTag, "included");
   const route = circleRoute(chain), logs = [event("Transfer", route.token, { from: getAddress(`0x${"0".repeat(40)}`), to: CIRCLE_RECIPIENT, value: 40094n }, 0),
-    event("MintAndWithdraw", CIRCLE_MESSENGER, { mintRecipient: CIRCLE_RECIPIENT, amount: 40094n, mintToken: route.token }, 1),
+    event("Transfer", route.token, { from: getAddress(`0x${"0".repeat(40)}`), to: issuerFeeRecipient, value: 6n }, 1),
+    event("MintAndWithdraw", CIRCLE_MESSENGER, { mintRecipient: CIRCLE_RECIPIENT, amount: 40094n, mintToken: route.token, feeCollected: 6n }, 2),
     event("MessageReceived", CIRCLE_TRANSMITTER, { caller: route.gasPayer, sourceDomain: 3, nonce: attested.nonce,
-      sender: circleWord(CIRCLE_MESSENGER), finalityThresholdExecuted: 1000, messageBody: attested.body }, 2)];
+      sender: circleWord(CIRCLE_MESSENGER), finalityThresholdExecuted: 1000, messageBody: attested.body }, 3)];
   const dst = observation(chain, route.gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(attested), logs);
-  const minted = decodeCircleDestination(proof, attested, dst, "1"); assert.equal(minted.amountAtomic, "40094");
+  const minted = decodeCircleDestination(proof, attested, dst, "1", undefined, issuerFeeRecipient); assert.equal(minted.amountAtomic, "40094");
   if (chain === 143) assert.equal(minted.actualFeeAtomic, "51000000000000000");
-  assert.throws(() => decodeCircleDestination(proof, attested, dst, "0"), /destination_mint_binding/);
+  assert.throws(() => decodeCircleDestination(proof, attested, dst, "0", undefined, issuerFeeRecipient), /destination_mint_binding/);
   verifyCircleMintPreflight(proof, attested, { destinationBlockAtomic: "10", usedNonceAtomic: "0",
     attesterConfigurationHash: attested.attesterConfigurationHash, transactionSimulationResult: `0x${"0".repeat(63)}1` });
   assert.throws(() => verifyCircleMintPreflight(proof, attested, { destinationBlockAtomic: "1000", usedNonceAtomic: "0",

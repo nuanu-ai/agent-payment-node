@@ -1,3 +1,4 @@
+const issuerFeeRecipient = getAddress(`0x${"44".repeat(20)}`);
 import assert from "node:assert/strict";
 import test from "node:test";
 import { tmpdir } from "node:os";
@@ -49,10 +50,10 @@ test("seller account preflight cannot authorize buyer, arbitrary payer, non-Sei 
 });
 test("same pinned burn and issuer attestation mint canonical USDC only through the frozen seller variant", async () => {
   const proof=decodeCircleSource(source(1329),1329), attested=await bindCircleAttestation(proof,await iris(proof),snapshot(1329)), route=circleRoute(1329,"evm-live-seller");
-  const logs=[event("Transfer",route.token,{from:getAddress(`0x${"0".repeat(40)}`),to:CIRCLE_RECIPIENT,value:40094n},0),event("MintAndWithdraw",CIRCLE_MESSENGER,{mintRecipient:CIRCLE_RECIPIENT,amount:40094n,mintToken:route.token},1),event("MessageReceived",CIRCLE_TRANSMITTER,{caller:CIRCLE_SEI_SELLER,sourceDomain:3,nonce:attested.nonce,sender:circleWord(CIRCLE_MESSENGER),finalityThresholdExecuted:1000,messageBody:attested.body},2)];
+  const logs=[event("Transfer",route.token,{from:getAddress(`0x${"0".repeat(40)}`),to:CIRCLE_RECIPIENT,value:40094n},0),event("Transfer",route.token,{from:getAddress(`0x${"0".repeat(40)}`),to:issuerFeeRecipient,value:6n},1),event("MintAndWithdraw",CIRCLE_MESSENGER,{mintRecipient:CIRCLE_RECIPIENT,amount:40094n,mintToken:route.token,feeCollected:6n},2),event("MessageReceived",CIRCLE_TRANSMITTER,{caller:CIRCLE_SEI_SELLER,sourceDomain:3,nonce:attested.nonce,sender:circleWord(CIRCLE_MESSENGER),finalityThresholdExecuted:1000,messageBody:attested.body},3)];
   const observed=observation(1329,CIRCLE_SEI_SELLER,CIRCLE_TRANSMITTER,encodeCircleMint(attested),logs);
-  const minted=decodeCircleDestination(proof,attested,observed,"1","evm-live-seller"); assert.equal(minted.amountAtomic,"40094"); assert.equal(minted.finalityTag,"safe");
-  assert.throws(()=>decodeCircleDestination(proof,attested,observed,"1")); assert.throws(()=>decodeCircleDestination(proof,attested,observed,"0","evm-live-seller"));
+  const minted=decodeCircleDestination(proof,attested,observed,"1","evm-live-seller",issuerFeeRecipient); assert.equal(minted.amountAtomic,"40094"); assert.equal(minted.finalityTag,"safe");
+  assert.throws(()=>decodeCircleDestination(proof,attested,observed,"1")); assert.throws(()=>decodeCircleDestination(proof,attested,observed,"0","evm-live-seller",issuerFeeRecipient));
   assert.equal(proof.sourceMessage,decodeCircleSource(source(1329),1329).sourceMessage); assert.equal(attested.feeExecutedAtomic,"6");
 });
 test("normal CLI has the explicit finite seller selector", () => {
