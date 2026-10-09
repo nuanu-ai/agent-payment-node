@@ -15,6 +15,8 @@ node scripts/local-release.mjs prepare --version 0.5.36 --commit "$COMMIT" --out
 node scripts/local-release.mjs verify --version 0.5.36 --commit "$COMMIT" --output /tmp/apn-0.5.36-release
 ```
 
+The source test command enables Node24's official module-mock API with `--experimental-test-module-mocks` directly on `node --test`; Node24 rejects that flag in `NODE_OPTIONS`. Compiler settings remain unchanged.
+
 Preparation runs the core/source build and tests, supply-chain/platform tests, all four exact vendor regeneration checks and production low-severity npm audit. It refuses source/dist drift after the build. It performs two script-free npm packs, retains and compares both archives, checks every packed member against reviewed source bytes, checks embedded package/version/macOS arm64 identity, generates the existing production SPDX 2.3 SBOM including emitted vendor packages/licenses, and creates/verifies the existing commit/version/SHA/size release manifest. A failed gate leaves an incomplete directory for inspection and cannot be used as a verified candidate.
 
 The output directory contains the following concrete review material:
