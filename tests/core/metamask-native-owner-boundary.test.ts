@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, readdir, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent,
   runFixedMetaMaskNativeTransfer, readFixedMetaMaskNativeTransfer, readMetaMaskNativeSettlement,
   type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "../../src/metamask-native-transfer-owner.js";
+import { StateStore } from "../../src/state.js";
+import { OperationService } from "../../src/operation-service.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { parseCatalogArgv } from "../../src/command-catalog.js";
 
@@ -34,4 +36,19 @@ test("settlement and reserve do not accept forged operation identities or a quot
 test("fixed CLI rejects caller custody, recipient, token, RPC and raw transaction parameters",()=>{
   const base=["wallet","metamask","native-transfer","--chain-id","1","--idempotency-key","native-0001"];
   for(const flag of ["--profile","--recipient","--token","--raw-tx","--rpc-url","--wallet"]) assert.throws(()=>parseCatalogArgv([...base,flag,"arbitrary"]));
+});
+
+test("normal central EVM guard reads existing native journals only and cannot hide malformed financial state",async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),"apn-native-central-read-")));
+  try {
+    const state=new StateStore(root),operations=new OperationService(state),profileHash=state.profileHash("native-test-alias"),payer="0xf41170df51aab52aaa04fbc3ff325cf051644aca";
+    await operations.assertEvmAccountAvailable(profileHash,1,payer);
+    assert.deepEqual(await readdir(root),[]);
+    await assert.rejects(()=>operations.assertMetaMaskNativeOwnedAccountAvailable(scope,context),/scope/);
+    await mkdir(join(root,"metamask-native-operations"),{mode:0o700});
+    await writeFile(join(root,"metamask-native-operations",`${"a".repeat(64)}.json`),JSON.stringify({schemaVersion:"forged"}),{mode:0o600});
+    await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,1,payer),{code:"APN_STATE_CORRUPT"});
+    await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,59144,payer),{code:"APN_STATE_CORRUPT"});
+    assert.deepEqual(await readdir(root),["metamask-native-operations"]);
+  } finally {await rm(root,{recursive:true,force:true});}
 });

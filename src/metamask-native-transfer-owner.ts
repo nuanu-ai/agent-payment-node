@@ -1,3 +1,7 @@
+import { OperationService } from "./operation-service.js";
+import { evmAddressLock } from "./evm-address-ownership.js";
+import { listLocalWallets, listEncryptedWalletEnvelopes } from "./wallet-import-collision.js";
+import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
 import { SecureStateStore } from "./secure-state-store.js";
 import { performance } from "node:perf_hooks";
 import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
@@ -69,6 +73,7 @@ export async function assertMetaMaskNativeOwnedContextCurrent(scope: MetaMaskNat
   assertMetaMaskNativeOwnedScope(scope, context);
   const e = entry(scope, context), state = new StateStore(context.stateRoot);
   const current = await currentOwner(state); assertMetaMaskNativeOwnedScope(scope, context);
+  await new OperationService(state).assertMetaMaskNativeOwnedAccountAvailable(scope,context); assertMetaMaskNativeOwnedScope(scope,context);
   if (current.profile.account_binding_hash !== context.accountBindingHash || current.profile.capability_hash !== context.capabilityHash ||
     current.profile.revision !== context.profileRevision || current.policy.digest !== context.policyDigest ||
     current.policy.revision !== context.policyRevision || current.policy.activationDigest !== context.activationDigest) blocked("Native transfer current owner policy or custody changed.");
@@ -143,6 +148,21 @@ class NativeJournal extends SecureStateStore {
     if (op.operationId !== id || op.context.stateRoot !== this.root) corrupt("Native transfer journal root changed.");
     return op;
   }
+  async assertAccountAvailable(chainId:MetaMaskNativeFeeChainId,exceptId:string):Promise<void> {
+    for(const item of await this.readDirectory("metamask-native-operations")) {
+      if(!item.isFile()||item.isSymbolicLink()||!/^[a-f0-9]{64}\.json$/.test(item.name))corrupt("Native transfer journal directory is invalid.");
+      const op=await this.read(item.name.slice(0,-5));if(op===null)corrupt("Native transfer journal disappeared.");
+      if(op.operationId!==exceptId&&op.context.quote.chainId===chainId&&op.context.quote.sender.toLowerCase()===METAMASK_NATIVE_OWNER_ADDRESS&&
+        op.state!=="confirmed"&&op.state!=="failed_before_effect")blocked("Another native transfer for this account and chain is unresolved.");
+    }
+  }
+  async assertSignedDomainAvailable(chainId:number|string,account:string,exceptId?:string):Promise<void> {
+    for(const item of await this.readDirectory("metamask-native-operations")) {
+      if(!item.isFile()||item.isSymbolicLink()||!/^[a-f0-9]{64}\.json$/.test(item.name))corrupt("Native transfer journal directory is invalid.");
+      const op=await this.read(item.name.slice(0,-5));if(op===null)corrupt("Native transfer journal disappeared.");
+      if(op.operationId!==exceptId&&String(op.context.quote.chainId)===String(chainId)&&op.context.quote.sender.toLowerCase()===account.toLowerCase()&&(op.effectAttempts===1||op.providerRequestId!==null||op.transactionHash!==null)&&op.state!=="confirmed")blocked("An unresolved native transfer holds this EVM account and chain.");
+    }
+  }
   async matchingHold(reservation:AssetUsageReservation):Promise<NativeOperation|null> {
     const entries=await this.readDirectory("metamask-native-operations");
     for(const item of entries){
@@ -166,6 +186,16 @@ class NativeJournal extends SecureStateStore {
     return next;
   }
 }
+/** Read-only central conflict guard. No namespace creation, caller skip ID or financial proof DTO. */
+export async function assertMetaMaskNativeConflictDomainAvailable(stateRoot:string,chainId:number|string,account:string):Promise<void> {
+  await new NativeJournal(stateRoot).assertSignedDomainAvailable(chainId,account);
+}
+/** Exact own-journal exclusion is available only to a currently claimed foreground owner scope. */
+export async function assertMetaMaskNativeOwnedConflictDomainAvailable(scope:MetaMaskNativeOwnedScope,context:MetaMaskNativeOwnedContext):Promise<void> {
+  assertMetaMaskNativeOwnedScope(scope,context);
+  await entry(scope,context).journal.assertSignedDomainAvailable(context.quote.chainId,context.quote.sender,context.operationId);
+  assertMetaMaskNativeOwnedScope(scope,context);
+}
 function transitionIdentity(r:AssetUsageReservation) { return {account:r.account,chain:r.chain,asset:r.asset,reservationId:r.reservationId,policyDigest:r.policyDigest}; }
 function patch(op: NativeOperation, fields: Partial<NativeOperation>): Omit<NativeOperation,"recordHash"> {
   const { recordHash: _, ...body } = op; return { ...body, ...fields, updatedAt: new Date().toISOString() };
@@ -178,6 +208,25 @@ async function currentOwner(state: StateStore): Promise<{ profile: ReturnType<ty
     profile.provider_id !== "metamask-agent-wallet" || profile.drift.state !== "bound" || profile.drift.reason !== "none" ||
     profile.public_address.toLowerCase() !== METAMASK_NATIVE_OWNER_ADDRESS || policy === null || policy.accounts.evm?.toLowerCase() !== METAMASK_NATIVE_OWNER_ADDRESS) blocked("Fixed MetaMask custody or owner policy is unavailable.");
   return { profile, policy };
+}
+/** Caller holds the common physical EVM account lock. Aliases share conflict checks, not an exclusivity ban. */
+async function assertAccountAvailable(state:StateStore,journal:NativeJournal,chainId:MetaMaskNativeFeeChainId,exceptId:string):Promise<void> {
+  const hashes=new Set([state.profileHash(METAMASK_NATIVE_OWNER_PROFILE)]);
+  for(const item of await state.profileImportEntries()) {
+    if(!item.isDirectory()||item.isSymbolicLink()||!/^[a-f0-9]{64}$/.test(item.name))corrupt("Profiles directory is invalid during native account conflict check.");
+    const profile=await state.loadProviderProfile(item.name);if(profile===null)corrupt("Provider profile disappeared during native account conflict check.");
+    if(profile.public_address.toLowerCase()===METAMASK_NATIVE_OWNER_ADDRESS)hashes.add(item.name);
+  }
+  for(const wallet of await listLocalWallets(state))if(wallet.address.toLowerCase()===METAMASK_NATIVE_OWNER_ADDRESS)hashes.add(wallet.profileHash);
+  for(const envelope of await listEncryptedWalletEnvelopes(state)) {
+    const identity=walletEnvelopeIdentity(envelope.value,envelope.profile);
+    if(identity.address.toLowerCase()===METAMASK_NATIVE_OWNER_ADDRESS)hashes.add(state.profileHash(identity.profile));
+  }
+  // Historical direct aliases remain conflict owners even if their current profile binding was removed.
+  for(const operation of await state.listAllOperations())if(operation.walletAddress.toLowerCase()===METAMASK_NATIVE_OWNER_ADDRESS)hashes.add(operation.profileHash);
+  const operations=new OperationService(state);
+  for(const hash of hashes)await operations.assertEvmAccountAvailable(hash,chainId,METAMASK_NATIVE_OWNER_ADDRESS);
+  await journal.assertAccountAvailable(chainId,exceptId);
 }
 function freeze<T>(value: T): T { if (value !== null && typeof value === "object") { Object.freeze(value); for (const child of Object.values(value)) freeze(child); } return value; }
 function publicOperation(o: NativeOperation) {
@@ -198,9 +247,10 @@ export async function runFixedMetaMaskNativeTransfer(stateRoot: string, chainInp
   const chainId = chain(chainInput), key = canonicalIdempotencyKey(keyInput), state = new StateStore(stateRoot), journal = new NativeJournal(stateRoot);
   const id = state.operationId(METAMASK_NATIVE_OWNER_PROFILE, `metamask-native:${chainId}:${key}`), requestHash = hashObject({chainId,key,profile:METAMASK_NATIVE_OWNER_PROFILE});
   await journal.initialize();
-  return state.withLocks([`profile:${allowlistProfileHash(METAMASK_NATIVE_OWNER_PROFILE)}`,`profile:${state.profileHash(METAMASK_NATIVE_OWNER_PROFILE)}`,`operation:${id}`,"provider-session:metamask-agent-wallet",`account-chain-nonce:${METAMASK_NATIVE_OWNER_ADDRESS}:${chainId}`], async () => {
+  return state.withLocks([`profile:${allowlistProfileHash(METAMASK_NATIVE_OWNER_PROFILE)}`,`profile:${state.profileHash(METAMASK_NATIVE_OWNER_PROFILE)}`,`operation:${id}`,"provider-session:metamask-agent-wallet",evmAddressLock(METAMASK_NATIVE_OWNER_ADDRESS),`account-chain-nonce:${METAMASK_NATIVE_OWNER_ADDRESS}:${chainId}`], async () => {
     const existing = await journal.read(id);
     if (existing !== null) { if (existing.requestHash !== requestHash) blocked("Native transfer idempotency collision."); return publicOperation(existing); }
+    await assertAccountAvailable(state,journal,chainId,id);
     const owner = await currentOwner(state), ledger = new AssetUsageLedger(stateRoot), now = new Date(), day = now.toISOString().slice(0,10);
     const identity = {account:getAddress(METAMASK_NATIVE_OWNER_ADDRESS),chain:`eip155:${chainId}`,asset:{kind:"native" as const,identifier:null}};
     const usage = await ledger.usage(identity, now);
@@ -233,6 +283,8 @@ export async function runFixedMetaMaskNativeTransfer(stateRoot: string, chainInp
       if (fresh.policy.activationDigest!==owner.policy.activationDigest || fresh.profile.revision!==owner.profile.revision || fresh.profile.account_binding_hash!==owner.profile.account_binding_hash) blocked("Native transfer owner changed during consent.");
       const vendorFresh=await readFixedMetaMaskNativePolicy(chainId);
       if(vendorFresh.vendorProjectHash!==context.vendorProjectHash||vendorFresh.vendorPolicyHash!==context.vendorPolicyHash||vendorFresh.tradingMode!=="guard"||Date.now()>=Date.parse(expires)||new Date().toISOString().slice(0,10)!==day)blocked("Native transfer vendor project/policy changed or consent expired before private handoff.");
+      await assertAccountAvailable(state,journal,chainId,id);
+      if(Date.now()>=Date.parse(expires)||new Date().toISOString().slice(0,10)!==day)blocked("Native transfer consent expired during account conflict recheck.");
       op = await journal.persist(patch(op,{state:"effect_started",effectAttempts:1}));
       scope = Object.freeze({}) as MetaMaskNativeOwnedScope;
       scopes.set(scope,{context,journal,reservations,state:"issued",lockActive:true,monotonicDeadline:performance.now()+Math.min(60000,Date.parse(expires)-Date.now()),lastNow:Date.now()});
