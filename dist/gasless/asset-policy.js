@@ -94,7 +94,16 @@ export class GaslessAssetPolicy {
             active.activationDigest !== bound.activationDigest)
             refused("gasless_allowlist_changed");
         const { snapshot, reservation } = await this.usage.usageWithReservation(identity(op.intent), bound.reservationId, at(this.now()));
-        if (requireReservation && (reservation === null || reservation.state !== "reserved")) {
+        // A disclosed bootstrap keeps its gross charged after a final guard failure. The
+        // same sealed, never-submitted UserOperation may still pass its first-send gate;
+        // this is neither a new reservation nor permission to replay an attempted send.
+        const continuingSealed = reservation?.state === "unknown_finality" && op.state === "unknown_finality" &&
+            op.bootstrap.phase === "checked" && op.bootstrap.disclosureAttempts === 1 && op.bootstrap.estimate !== null &&
+            op.bootstrap.signingAttempts === 1 && op.userOperation.phase === "sealed" &&
+            op.userOperation.signingAttempts === 1 && op.userOperation.materialHash !== null &&
+            op.userOperation.userOperationHash !== null && op.userOperation.sealedAt !== null &&
+            op.userOperation.disclosureAttempts === 0 && op.userOperation.submissionAttempts === 0 && op.settlement === null;
+        if (requireReservation && (reservation === null || (reservation.state !== "reserved" && !continuingSealed))) {
             refused("gasless_usage_reservation_missing");
         }
         const own = reservation === null ? 0n : this.checkedReservation(op, reservation);
