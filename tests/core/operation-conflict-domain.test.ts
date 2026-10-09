@@ -149,7 +149,8 @@ test("pending Sei funding and Circle Sei mint block each other through destinati
   const sourceProfile = "9".repeat(64);
   const sei = { kind: "sei_gaszip", record: { ...open("sei-funding", { owner: { address: A } }), profileHash: PROFILE } } as never;
   const circle = { kind: "circle_route", record: { ...open("circle-mint", {}), profileHash: sourceProfile, destinationProfileHash: PROFILE,
-    sourceCustody: { walletAddress: B }, destinationCustody: { walletAddress: A }, destinationChain: 1329, source: null } } as never;
+    sourceCustody: { walletAddress: B }, destinationCustody: { walletAddress: A }, destinationChain: 1329,
+    source: null, attestation: null, effects: [], residualAllowanceAtomic: "0" } } as never;
   const beforeMint = service({});
   Object.defineProperty(beforeMint, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [sei] : [] });
   await assert.rejects(beforeMint.assertCircleAccountsAvailable((circle as any).record), blockedOn("sei-funding", "evm:1329", A.toLowerCase()));
