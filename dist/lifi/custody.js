@@ -1,3 +1,4 @@
+import { assertBridgeSignGrant, assertBridgeSignImmediate, guardedWbtc } from "./effect-authority.js";
 import { hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { keccak256 } from "viem";
@@ -20,20 +21,25 @@ export class LocalBridgeCustody {
     }
     async load(op, role) {
         validateBridgeOperation(op);
-        return await this.state.withLocks([`custody:${op.profileHash}`], async () => await this.effects.load(op, role));
+        return await this.effects.load(op, role);
     }
-    async seal(op, role, owner) {
+    async seal(op, role, owner, beforeSign) {
         validateBridgeOperation(op);
         const effect = op.effects.find((e) => e.role === role);
         if (op.terminal || op.approval === null || effect?.phase !== "signing_started" || !bridgeSame(owner, op.intent.owner) ||
             Date.parse(op.intent.expiresAt) - this.now() < BRIDGE_MIN_REMAINING_MS)
             bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_signing_gate");
-        return await this.state.withLocks([`custody:${op.profileHash}`], async () => {
+        return await (async () => {
+            if (guardedWbtc(op)) {
+                assertBridgeSignGrant(beforeSign, op, role);
+                await beforeSign();
+            }
             await assertBridgeOwner(this.state, op.intent);
             const existing = await this.effects.load(op, role);
             if (existing !== null)
                 return existing;
-            const wallet = await this.wallets.describe(owner.profile);
+            const wallet = await this.wallets.describe(owner.profile, beforeSign === undefined ? undefined : () => assertBridgeSignImmediate(beforeSign), async () => { if (beforeSign !== undefined)
+                await beforeSign(); });
             if (wallet === null)
                 bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_encrypted_wallet_missing");
             try {
@@ -45,6 +51,8 @@ export class LocalBridgeCustody {
                 const e = effect.envelope, c = e.economics, nonce = BigInt(c.nonceAtomic);
                 if (nonce > BigInt(Number.MAX_SAFE_INTEGER))
                     bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_nonce_bound");
+                if (beforeSign !== undefined)
+                    await beforeSign();
                 const account = privateKeyToAccount(wallet.secret.privateKey);
                 const rawTransaction = await account.signTransaction({ type: "eip1559", chainId: e.chainId, to: e.to,
                     data: e.data, value: BigInt(e.valueAtomic), nonce: Number(nonce), gas: BigInt(c.gasLimitAtomic),
@@ -58,7 +66,7 @@ export class LocalBridgeCustody {
             finally {
                 this.wallets.clear(wallet.secret);
             }
-        });
+        })();
     }
 }
 //# sourceMappingURL=custody.js.map

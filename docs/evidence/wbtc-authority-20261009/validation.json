@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "apn.wbtc-authority-verification.v1",
+  "baseCommit": "2fedbc8782dd5e6dd0325ac58f9605ef243b24ef",
+  "node": "v24.15.0",
+  "sourceBuild": "passed",
+  "targetedTestBuild": "passed",
+  "witnessTests": {
+    "passed": 20,
+    "failed": 0
+  },
+  "regressionTests": {
+    "passed": 46,
+    "failed": 0
+  },
+  "totalPassed": 66,
+  "forbiddenSurfaceAnd500LineLimit": "passed (798 files)",
+  "typedPhysicalPosts": {
+    "ethereumToArbitrum": 31,
+    "arbitrumToEthereum": 33
+  },
+  "rpcExecutionBudgetSourceUnchanged": true,
+  "liveActions": "none",
+  "files": [
+    {
+      "source": "src/evm-ports.ts",
+      "sourceSha256": "23d7c7c32d1d82d1b24bc40946843703f8d8934500b39219a785030cd546a906",
+      "dist": "dist/evm-ports.js",
+      "distSha256": "950d67d2c50cdc20ebf6e81b7e8ba1f9f42fe48ceabe6a144d80bad99266fad3",
+      "testedJsParity": true,
+      "lines": 81
+    },
+    {
+      "source": "src/lifi/allowlist.ts",
+      "sourceSha256": "5574448a90a6d8cbe5a08b49faa86b0110589a6222e123fba66d51669854cbc1",
+      "dist": "dist/lifi/allowlist.js",
+      "distSha256": "3e30d02f8d0179b5fd6333b9d36cf2495d18d5577b9b040fc5e52cb7e69cc201",
+      "testedJsParity": true,
+      "lines": 204
+    },
+    {
+      "source": "src/lifi/custody.ts",
+      "sourceSha256": "bca4cf840ef74c145fad6bd597d30310af6e1bc5b7411ceb7aa21271bb5a5547",
+      "dist": "dist/lifi/custody.js",
+      "distSha256": "a7c39f1e60228a5e2e59bd12cad603528ad0038e71c1e22a051d653736374deb",
+      "testedJsParity": true,
+      "lines": 58
+    },
+    {
+      "source": "src/lifi/effect-authority.ts",
+      "sourceSha256": "75b9ea1dfdebf3b567fedac4f6ab15af073f2fe1505d2225098ac2e637f369fe",
+      "dist": "dist/lifi/effect-authority.js",
+      "distSha256": "839eccfee8549212cdb0742dfd3d1843763ad5873b218c438a79f5072504c5de",
+      "testedJsParity": true,
+      "lines": 89
+    },
+    {
+      "source": "src/lifi/execution.ts",
+      "sourceSha256": "1a1a2ef03f403541d3d224abd817ea699af0204a0b13be0fbb2b061a89fa352f",
+      "dist": "dist/lifi/execution.js",
+      "distSha256": "1759b65579aac63d2af4c9e220126e1208cbe49f490815970c6ff2ab433cc709",
+      "testedJsParity": true,
+      "lines": 214
+    },
+    {
+      "source": "src/lifi/https.ts",
+      "sourceSha256": "c668f5333534b8c0b0f0d2e0a9fccf1c5d09c76999b80c1b2cb69e06903eea85",
+      "dist": "dist/lifi/https.js",
+      "distSha256": "70d5b795a8cf8d4e58b7c63f8e09be18a5ed214662f1f788b4779fdba438b8cb",
+      "testedJsParity": true,
+      "lines": 115
+    },
+    {
+      "source": "src/lifi/ports.ts",
+      "sourceSha256": "35cf9f29fc4423edb8d3235f3a14dcc6b2bdef15bd5c9abbd3d6bb7460fbb16d",
+      "dist": "dist/lifi/ports.js",
+      "distSha256": "f70648a9229f2df4d46f3cc0daafce2139e3f4408c5c4bbdaaf1169fd771aa7d",
+      "testedJsParity": true,
+      "lines": 78
+    },
+    {
+      "source": "src/lifi/prepare.ts",
+      "sourceSha256": "5a03c68efd84e75eb1619ecf3f4516df962342640e228194ebb2a8674b95ef34",
+      "dist": "dist/lifi/prepare.js",
+      "distSha256": "5f54941cbfcc98fad60fa3aee8dec393cd4f89d1965d43f34bfcb285f0347890",
+      "testedJsParity": true,
+      "lines": 108
+    },
+    {
+      "source": "src/lifi/rpc-adapter.ts",
+      "sourceSha256": "7f16cce56092ed5e7ae0d07359f774d854462d21f6083ec96dd5abbb007d4829",
+      "dist": "dist/lifi/rpc-adapter.js",
+      "distSha256": "5c4015f7016a87b1fcaad2c98c12730833dc86dd567616d121569583279353b0",
+      "testedJsParity": true,
+      "lines": 485
+    },
+    {
+      "source": "src/lifi/rpc-transport.ts",
+      "sourceSha256": "7c3956965604b1e83d57e3e7ace419b4184f4bd4ef8f6efbdba28f6391eea0fc",
+      "dist": "dist/lifi/rpc-transport.js",
+      "distSha256": "9319fa6d71ef0d729ec71843939a1400866c62548df90f5a06e07e4db4375cae",
+      "testedJsParity": true,
+      "lines": 220
+    },
+    {
+      "source": "src/lifi/service.ts",
+      "sourceSha256": "ed236e329d322db8db7173bba81cb34a96b3aced14e81384fc583bb0b9a64fd2",
+      "dist": "dist/lifi/service.js",
+      "distSha256": "e2d2cb0d0f25bf96f0901adaafbd4aced0b4eabc69f0b8aa59397f2e28cbab6b",
+      "testedJsParity": true,
+      "lines": 251
+    }
+  ]
+}
