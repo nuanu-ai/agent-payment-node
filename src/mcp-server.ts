@@ -65,8 +65,8 @@ async function callTool(
         { ...cliHandoffDetails(handoff), foreground_auth: true },
       ));
     }
-    if (bound.request.command === "gasless.transfer.approve") {
-      const handoff = createCliHandoff(["apn", "gasless", "transfer", "approve", "--operation", bound.request.operationId]);
+    if (bound.request.command === "gasless.transfer.approve" || bound.request.command === "gasless.transfer.approve-sealed") {
+      const handoff = createCliHandoff(["apn", "gasless", "transfer", bound.request.command === "gasless.transfer.approve-sealed" ? "approve-sealed" : "approve", "--operation", bound.request.operationId]);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED",
         "Review the USDC fee budget and provider-specific permission, including Smart Account child expiry, in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
     }

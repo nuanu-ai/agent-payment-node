@@ -106,6 +106,7 @@ export class SeiFundingService {
                 return publicSeiFunding(found.record);
             }
             await ops.assertEvmAccountAvailable(record.profileHash, 8453, record.owner.address);
+            await ops.assertEvmAccountAvailable(record.profileHash, 1329, record.owner.address);
             await assertExclusiveEvmOwner(this.state, record.owner.address, record.profileHash);
             await assertBridgeOwner(this.state, record);
             await this.journal.saveLocked(record, true);

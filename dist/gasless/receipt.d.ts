@@ -2,6 +2,11 @@ import type { GaslessOperationRecord } from "./operation-model.js";
 export declare function gaslessNextActions(op: GaslessOperationRecord): readonly string[];
 export declare function gaslessProofClass(op: GaslessOperationRecord): string;
 export declare function publicGaslessOperation(op: GaslessOperationRecord): {
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    next_actions: readonly string[];
+    first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
     rpc_origin: string;
     bundler_origin: string;
     policy: {
@@ -24,10 +29,6 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
         onchain_user_operation_expiry: boolean;
         onchain_permit_expiry: boolean;
     };
-    created_at: string;
-    updated_at: string;
-    expires_at: string;
-    next_actions: readonly string[];
     observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     schema_version: "apn.gasless-operation.v1";
@@ -108,6 +109,11 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     settlement: import("./model.js").GaslessSettlement | null;
     scan_cursor: import("./model.js").GaslessCursor;
 } | {
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    next_actions: readonly string[];
+    first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
     rpc_origin: string;
     bundler_origin: string;
     policy: {
@@ -130,10 +136,6 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
         onchain_user_operation_expiry: boolean;
         onchain_permit_expiry: boolean;
     };
-    created_at: string;
-    updated_at: string;
-    expires_at: string;
-    next_actions: readonly string[];
     payment_submitted: boolean;
     permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
     observation_source?: import("./model.js").GaslessObservationSource;
@@ -216,6 +218,11 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
     settlement: import("./model.js").GaslessSettlement | null;
     scan_cursor: import("./model.js").GaslessCursor;
 } | {
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    next_actions: readonly string[];
+    first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
     rpc_origin: string;
     bundler_origin: string;
     policy: {
@@ -238,10 +245,6 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
         onchain_user_operation_expiry: boolean;
         onchain_permit_expiry: boolean;
     };
-    created_at: string;
-    updated_at: string;
-    expires_at: string;
-    next_actions: readonly string[];
     payment_submitted: null;
     payment_submission_attempted: boolean;
     prior_payment_effects: "unknown";
@@ -331,6 +334,11 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     receipt_hash: string;
     schema_version: "apn.gasless-receipt.v1";
     operation_binding_hash: string;
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    next_actions: readonly string[];
+    first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
     rpc_origin: string;
     bundler_origin: string;
     policy: {
@@ -353,10 +361,6 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
         onchain_user_operation_expiry: boolean;
         onchain_permit_expiry: boolean;
     };
-    created_at: string;
-    updated_at: string;
-    expires_at: string;
-    next_actions: readonly string[];
     observation_source?: import("./model.js").GaslessObservationSource;
     kind: "gasless_transfer";
     operation_id: string;
@@ -439,6 +443,11 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     receipt_hash: string;
     schema_version: "apn.gasless-receipt.v1";
     operation_binding_hash: string;
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    next_actions: readonly string[];
+    first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
     rpc_origin: string;
     bundler_origin: string;
     policy: {
@@ -461,10 +470,6 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
         onchain_user_operation_expiry: boolean;
         onchain_permit_expiry: boolean;
     };
-    created_at: string;
-    updated_at: string;
-    expires_at: string;
-    next_actions: readonly string[];
     payment_submitted: boolean;
     permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
     observation_source?: import("./model.js").GaslessObservationSource;
@@ -549,6 +554,11 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
     receipt_hash: string;
     schema_version: "apn.gasless-receipt.v1";
     operation_binding_hash: string;
+    created_at: string;
+    updated_at: string;
+    expires_at: string;
+    next_actions: readonly string[];
+    first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
     rpc_origin: string;
     bundler_origin: string;
     policy: {
@@ -571,10 +581,6 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
         onchain_user_operation_expiry: boolean;
         onchain_permit_expiry: boolean;
     };
-    created_at: string;
-    updated_at: string;
-    expires_at: string;
-    next_actions: readonly string[];
     payment_submitted: null;
     payment_submission_attempted: boolean;
     prior_payment_effects: "unknown";

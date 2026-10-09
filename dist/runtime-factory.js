@@ -331,7 +331,7 @@ export function createApnCore(bound, options = {}) {
         gasless: options.gasless ?? { rpcFor: gaslessRpcFactory(process.env),
             observationRpcFor: gaslessObservationRpcFactory(process.env),
             custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
-            ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyGaslessApproval() } : {}) },
+            ...(["gasless.transfer.approve", "gasless.transfer.approve-sealed"].includes(bound.request.command) ? { approval: new TtyGaslessApproval() } : {}) },
         ...(bound.request.command.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
             gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)),
         } : {}),

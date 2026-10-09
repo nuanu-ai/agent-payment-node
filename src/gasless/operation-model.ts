@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import type { GaslessFirstSendApproval } from "./first-send-model.js";
 import type { Hex } from "../model.js";
 import type { GaslessCursor, GaslessEstimate, GaslessIntent, GaslessObservation, GaslessSettlement } from "./model.js";
 
@@ -31,6 +32,7 @@ export interface GaslessEffect {
   readonly submittedAt: string | null;
 }
 export interface GaslessMutable {
+  readonly firstSendApprovals?: readonly GaslessFirstSendApproval[];
   readonly state: GaslessState;
   readonly approval: GaslessConsent | null;
   readonly bootstrap: GaslessEffect;
@@ -73,7 +75,8 @@ export function newGaslessEffect(role: GaslessRole): GaslessEffect {
 }
 export function gaslessSnapshot(op: GaslessMutable): GaslessMutable {
   return { state: op.state, approval: op.approval, bootstrap: op.bootstrap, userOperation: op.userOperation,
-    cursor: op.cursor, observation: op.observation, settlement: op.settlement, failure: op.failure };
+    cursor: op.cursor, observation: op.observation, settlement: op.settlement, failure: op.failure,
+    ...(op.firstSendApprovals === undefined ? {} : { firstSendApprovals: op.firstSendApprovals }) };
 }
 export function sealGaslessOperation(op: Omit<GaslessOperationRecord, "integrityHash">): GaslessOperationRecord {
   return { ...op, integrityHash: hashObject(op) };

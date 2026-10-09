@@ -707,3 +707,26 @@ acceptance. Those checks require their own explicit approval and evidence.
 
 
 For a saved Coinbase AWAL gasless operation already in `started` or `ambiguous_effect`, `apn operation resume --operation <operation-id> --rpc-url <frozen-primary-rpc-url> --coinbase-observation-rpc publicnode-base` selects `https://base-rpc.publicnode.com` for bounded log scans only. The frozen primary still supplies deployment, state, transaction and receipt evidence. APN cross-checks the secondary chain and frozen anchor, safe head and scan boundary hashes, scans the full window for duplicate candidates, and binds the selected observation source into settlement evidence. This option cannot approve or resend, accepts only the fixed preset, and cannot be combined with wait or other observation options.
+
+### Fresh consent for the first submission of an existing sealed operation
+
+`apn gasless transfer approve-sealed --operation <operation-id>` is restricted to
+an expired local Circle USDC operation whose original bootstrap estimate was
+checked and whose original UserOperation was signed and sealed once, with no
+final disclosure or submission attempt. It loads those same sealed bytes and
+requires fresh foreground confirmation of their exact hash, recipient, amounts,
+owner policy activation and charged usage reservation. It creates no signature
+and repeats no estimate.
+
+The original intent, approval deadline and signatures remain unchanged. A
+separate hash-bound local approval lasts at most 120 seconds and requires an
+eight-character hexadecimal confirmation. Current owner, deployment, nonce,
+allowance, balance, fee and policy checks run before and after confirmation. Any
+drift refuses dispatch. The permanent first-send marker is written before the
+network request; expiry while waiting for the paced request, a lost response or
+an ambiguous result retains that marker and requires observation without retry.
+
+Saved approval metadata cannot authorize execution after a process restart.
+Ordinary `operation resume` for the expired operation remains observation-only.
+After the first-send marker, `approve-sealed` refuses another attempt; use normal
+observation to obtain canonical receipt and accounting evidence.

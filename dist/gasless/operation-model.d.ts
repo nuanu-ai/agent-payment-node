@@ -1,3 +1,4 @@
+import type { GaslessFirstSendApproval } from "./first-send-model.js";
 import type { Hex } from "../model.js";
 import type { GaslessCursor, GaslessEstimate, GaslessIntent, GaslessObservation, GaslessSettlement } from "./model.js";
 export type GaslessState = "awaiting_approval" | "execution_pending" | "bootstrap_pending" | "user_operation_pending" | "submitted_pending" | "included_success" | "included_revert" | "unknown_finality" | "failed_effects_pending" | "completed" | "failed_before_effect" | "failed_confirmed_revert" | "failed_permissions_invalidated" | "abandoned_unknown";
@@ -24,6 +25,7 @@ export interface GaslessEffect {
     readonly submittedAt: string | null;
 }
 export interface GaslessMutable {
+    readonly firstSendApprovals?: readonly GaslessFirstSendApproval[];
     readonly state: GaslessState;
     readonly approval: GaslessConsent | null;
     readonly bootstrap: GaslessEffect;

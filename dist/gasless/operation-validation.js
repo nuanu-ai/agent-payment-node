@@ -1,3 +1,4 @@
+import { assertSealedFirstSend } from "./first-send-authority.js";
 import { hashObject } from "../canonical.js";
 import { assetUsageReservationId } from "../asset-usage-ledger.js";
 import { gaslessPolicyChain } from "./asset-policy.js";
@@ -58,11 +59,14 @@ export function validateGaslessOperation(value) {
         if (previous === undefined) {
             if (entry.state !== "awaiting_approval" || entry.at !== op.createdAt || entry.approval !== null ||
                 !gaslessSame(entry.bootstrap, newGaslessEffect("bootstrap")) || !gaslessSame(entry.userOperation, newGaslessEffect("user_operation")) ||
-                entry.observation !== null || entry.settlement !== null || entry.failure !== null || !gaslessSame(entry.cursor, { startBlock: op.intent.initialSnapshot.block, nextBlockAtomic: op.intent.initialSnapshot.block.numberAtomic, previousEndBlock: null }))
+                entry.firstSendApprovals !== undefined || entry.observation !== null || entry.settlement !== null || entry.failure !== null || !gaslessSame(entry.cursor, { startBlock: op.intent.initialSnapshot.block, nextBlockAtomic: op.intent.initialSnapshot.block.numberAtomic, previousEndBlock: null }))
                 gaslessCorrupt();
         }
-        else
+        else {
+            if ((entry.firstSendApprovals?.length ?? 0) > (previous.firstSendApprovals?.length ?? 0))
+                assertSealedFirstSend({ ...op, ...previous });
             validateTransition(previous, entry);
+        }
         try {
             validateGaslessMutable(op, entry, entry.at);
         }
@@ -83,6 +87,17 @@ function validateTransition(p, n) {
         gaslessCorrupt();
     if (p.approval !== null && !gaslessSame(p.approval, n.approval))
         gaslessCorrupt();
+    const previousApprovals = p.firstSendApprovals ?? [], nextApprovals = n.firstSendApprovals ?? [];
+    if (nextApprovals.length < previousApprovals.length || nextApprovals.length > previousApprovals.length + 1 ||
+        !gaslessSame(previousApprovals, nextApprovals.slice(0, previousApprovals.length)) ||
+        (p.firstSendApprovals !== undefined && n.firstSendApprovals === undefined))
+        gaslessCorrupt();
+    if (nextApprovals.length > previousApprovals.length) {
+        // Consent is appended before the send fence, with every original effect untouched.
+        if (!gaslessSame(p.bootstrap, n.bootstrap) || !gaslessSame(p.userOperation, n.userOperation) ||
+            n.state !== p.state || nextApprovals.at(-1).approvedAt > n.at || n.at >= nextApprovals.at(-1).expiresAt)
+            gaslessCorrupt();
+    }
     validateEffectStep(p.bootstrap, n.bootstrap);
     validateEffectStep(p.userOperation, n.userOperation);
     if (p.settlement !== null && !gaslessSame(p.settlement, n.settlement))

@@ -295,6 +295,7 @@ case "sei.funding.prepare": case "sei.funding.approve": case "sei.funding.status
           }
         }
         return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash)[request.command.endsWith("status") ? "status" : "resume"](request.operationId));
+      case "gasless.transfer.approve-sealed": return operationOutcome(await this.gasless.approveSealed(request.operationId));
       case "gasless.transfer.approve": {
         const stored = await this.operations.required(request.operationId), { kind } = stored;
         if (kind === "direct_transfer" && stored.record.providerDirect?.coinbaseGasless !== undefined) {
