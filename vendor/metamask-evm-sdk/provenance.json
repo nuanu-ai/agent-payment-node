@@ -27929,11 +27929,6 @@
   ],
   "outputContributions": [
     {
-      "bytesInOutput": 7640,
-      "file": "punycode.js",
-      "identity": "punycode@2.3.1"
-    },
-    {
       "bytesInOutput": 48081,
       "file": "dist/index.mjs",
       "identity": "@adraffy/ens-normalize@1.11.1"
@@ -32357,6 +32352,11 @@
       "bytesInOutput": 2451,
       "file": "lib/helpers.js",
       "identity": "pony-cause@2.1.11"
+    },
+    {
+      "bytesInOutput": 7525,
+      "file": "punycode.js",
+      "identity": "punycode@2.3.1"
     },
     {
       "bytesInOutput": 39835,

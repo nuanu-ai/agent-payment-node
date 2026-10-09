@@ -124,7 +124,7 @@ try {
       builder.onLoad({ filter: /.*/, namespace: "apn-sdk" }, args => {
         assert(args.path in entries); return { contents: entrySource(args.path), loader: "js", resolveDir: root };
       });
-      builder.onResolve({ filter: /^punycode$/ }, () => ({ path: require.resolve("punycode/") }));
+      builder.onResolve({ filter: /^punycode$/ }, () => ({ path: join(root, "node_modules", "punycode", "punycode.js") }));
       builder.onResolve({ filter: forbiddenPackage }, args => { throw Error(`forbidden SDK dependency: ${args.path}`); });
       builder.onLoad({ filter: /.*/, namespace: "file" }, args => {
         assert(!forbiddenFile.test(args.path), `forbidden decoder input: ${args.path}`);
