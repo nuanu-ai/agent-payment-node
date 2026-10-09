@@ -1,0 +1,8 @@
+
+> @nuanu-ai/apn@0.5.35 build
+> npm run build:ts
+
+
+> @nuanu-ai/apn@0.5.35 build:ts
+> tsc -p tsconfig.json
+

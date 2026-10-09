@@ -1,0 +1,4 @@
+
+> @nuanu-ai/apn@0.5.35 typecheck
+> tsc -p tsconfig.json --noEmit
+

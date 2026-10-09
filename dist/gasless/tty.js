@@ -11,6 +11,8 @@ export class TtyGaslessApproval {
         if (generic.gasless_provider === "coinbase-agentic-wallet")
             return await this.confirmCoinbase(input);
         const s = input.summary, t = s.transfer;
+        const fresh = generic.sealed_first_send_approval;
+        const consentDeadline = fresh?.expiresAt ?? s.expires_at;
         // Unit and scale come from the registry row the receipt resolved, never from a symbol baked into this screen.
         const amount = (atomic) => `${formatUnits(BigInt(atomic), t.decimals)} ${t.symbol}`;
         const lines = [`Agent Payment Node — transfer with gas paid in ${t.symbol}`, `Profile: ${s.profile}; local software custody`,
@@ -26,9 +28,15 @@ export class TtyGaslessApproval {
             "The signed permit and operation have no on-chain expiry. Delegation persists after this payment.",
             "Success clears the paymaster allowance. An unresolved failure blocks new transfers from this wallet on this chain until it is reconciled.",
             `RPC: ${s.rpc_origin}`, `Bundler: ${s.bundler_origin}`, `Operation: ${s.operation_id}`,
-            `Fingerprint: ${input.fingerprint}`, `Approve before: ${s.expires_at}`];
+            `Fingerprint: ${input.fingerprint}`,
+            ...(fresh === undefined ? [] : ["Authorize the first submission of this already-signed operation; no new signature is created.",
+                `Original action deadline: ${s.expires_at}`, `Current state: ${s.state}`,
+                `Atomic amounts: gross ${t.gross_atomic}; maximum fee ${t.user_max_fee_atomic}; minimum receipt ${t.minimum_received_atomic}`,
+                `Original UserOperation hash: ${fresh.userOperationHash}`, `Sealed material digest: ${fresh.userOperationMaterialHash}`,
+                `Unchanged owner policy revision: ${fresh.policyRevision}; activation: ${fresh.activationDigest}`]),
+            `Approve before: ${consentDeadline}`];
         try {
-            await exactChainConsent(lines, input.exactPhrase, s.expires_at, this.options);
+            await exactChainConsent(lines, input.exactPhrase, consentDeadline, this.options);
             return true;
         }
         catch (error) {

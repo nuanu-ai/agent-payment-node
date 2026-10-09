@@ -1,3 +1,4 @@
+import { GaslessSealedFirstSendExecution } from "./first-send-execution.js";
 import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { OperationService } from "../operation-service.js";
@@ -114,6 +115,17 @@ export class GaslessService {
         nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
       });
       return publicGaslessOperation(await this.execution(op).approve(op, approval));
+    }));
+  }
+  async approveSealed(operationId: string) {
+    return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
+      const d = this.dependencies();
+      if (d.approval === undefined) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED",
+        "Approve the first submission of this exact sealed operation in a foreground terminal.", {
+          nextActions: [`apn gasless transfer approve-sealed --operation ${op.operationId}`] });
+      return publicGaslessOperation(await new GaslessSealedFirstSendExecution(this.context.state,
+        d.rpcFor(op.intent.request.chainId), d.custody, this.policy, () => this.context.clock.now().getTime(),
+        async (previous, patch) => await this.save(previous, patch)).approve(op, d.approval));
     }));
   }
   async resume(operationId: string, observationRpcEnv?: string) {

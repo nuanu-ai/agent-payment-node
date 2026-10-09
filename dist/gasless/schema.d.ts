@@ -578,6 +578,27 @@ export declare const transitionSchema: z.ZodObject<{
     at: z.ZodString;
     previousHash: z.ZodString;
     transitionHash: z.ZodString;
+    firstSendApprovals: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        policy: z.ZodLiteral<"apn.gasless.sealed-first-send-approval.v1">;
+        operationId: z.ZodString;
+        operationFingerprint: z.ZodString;
+        profileHash: z.ZodString;
+        envelopeHash: z.ZodString;
+        bootstrapMaterialHash: z.ZodString;
+        bootstrapEstimateHash: z.ZodString;
+        userOperationMaterialHash: z.ZodString;
+        userOperationHash: z.ZodString;
+        owner: z.ZodString;
+        reservationId: z.ZodString;
+        policyDigest: z.ZodString;
+        policyRevision: z.ZodNumber;
+        activationDigest: z.ZodString;
+        issuedAt: z.ZodISODateTime;
+        expiresAt: z.ZodISODateTime;
+        approvedAt: z.ZodISODateTime;
+        approvalFingerprint: z.ZodString;
+        approvalDigest: z.ZodString;
+    }, z.core.$strict>>>;
     state: z.ZodEnum<{
         failed_confirmed_revert: "failed_confirmed_revert";
         unknown_finality: "unknown_finality";
@@ -1011,6 +1032,27 @@ export declare const operationSchema: z.ZodObject<{
         at: z.ZodString;
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
+        firstSendApprovals: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            policy: z.ZodLiteral<"apn.gasless.sealed-first-send-approval.v1">;
+            operationId: z.ZodString;
+            operationFingerprint: z.ZodString;
+            profileHash: z.ZodString;
+            envelopeHash: z.ZodString;
+            bootstrapMaterialHash: z.ZodString;
+            bootstrapEstimateHash: z.ZodString;
+            userOperationMaterialHash: z.ZodString;
+            userOperationHash: z.ZodString;
+            owner: z.ZodString;
+            reservationId: z.ZodString;
+            policyDigest: z.ZodString;
+            policyRevision: z.ZodNumber;
+            activationDigest: z.ZodString;
+            issuedAt: z.ZodISODateTime;
+            expiresAt: z.ZodISODateTime;
+            approvedAt: z.ZodISODateTime;
+            approvalFingerprint: z.ZodString;
+            approvalDigest: z.ZodString;
+        }, z.core.$strict>>>;
         state: z.ZodEnum<{
             failed_confirmed_revert: "failed_confirmed_revert";
             unknown_finality: "unknown_finality";
@@ -1326,6 +1368,27 @@ export declare const operationSchema: z.ZodObject<{
         failure: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
+    firstSendApprovals: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        policy: z.ZodLiteral<"apn.gasless.sealed-first-send-approval.v1">;
+        operationId: z.ZodString;
+        operationFingerprint: z.ZodString;
+        profileHash: z.ZodString;
+        envelopeHash: z.ZodString;
+        bootstrapMaterialHash: z.ZodString;
+        bootstrapEstimateHash: z.ZodString;
+        userOperationMaterialHash: z.ZodString;
+        userOperationHash: z.ZodString;
+        owner: z.ZodString;
+        reservationId: z.ZodString;
+        policyDigest: z.ZodString;
+        policyRevision: z.ZodNumber;
+        activationDigest: z.ZodString;
+        issuedAt: z.ZodISODateTime;
+        expiresAt: z.ZodISODateTime;
+        approvedAt: z.ZodISODateTime;
+        approvalFingerprint: z.ZodString;
+        approvalDigest: z.ZodString;
+    }, z.core.$strict>>>;
     state: z.ZodEnum<{
         failed_confirmed_revert: "failed_confirmed_revert";
         unknown_finality: "unknown_finality";

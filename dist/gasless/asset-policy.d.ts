@@ -26,6 +26,8 @@ export declare class GaslessAssetPolicy {
     prepare(intent: Pick<GaslessIntent, "profile" | "owner" | "request" | "token">, operationId: string): Promise<GaslessAllowlistBinding>;
     /** Recheck the owner activation and caps before every first signature, disclosure and dispatch. */
     assert(op: GaslessOperationRecord, requireReservation: boolean): Promise<void>;
+    /** Fresh consent can use only the already charged unknown lease; never a replacement reservation. */
+    assertSealedFirstSend(op: GaslessOperationRecord): Promise<void>;
     reserve(op: GaslessOperationRecord): Promise<void>;
     /** A saved operation is authoritative; a crash between journal and ledger writes is repaired on the next read. */
     reconcile(op: GaslessOperationRecord): Promise<void>;

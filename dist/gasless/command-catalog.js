@@ -96,6 +96,12 @@ export const GASLESS_COMMANDS = [
         recovery: [{ command_path: ["operation", "resume"], when: "Continue an approved unattempted phase or observe the original operation; omit --wait-seconds." },
             { command_path: ["receipt", "get"], when: "Read saved delivery, fees and remaining permissions." }],
         examples: ["apn gasless transfer approve --operation <operation-id>"] },
+    { path: ["gasless", "transfer", "approve-sealed"], synopsis: "apn gasless transfer approve-sealed --operation <operation-id>",
+        summary: "Approve the first submission of an expired, already sealed local Circle USDC operation.",
+        options: [operation], effect: { class: "payment_submit", summary: "Rechecks the unchanged owner policy, charged lease, original signed bytes and current chain state. Fresh foreground consent permits one first send within 120 seconds; never signs or repeats an estimate or attempted send." },
+        approval: { class: "foreground_tty", when: "Every sealed first-send attempt; MCP returns the exact foreground CLI handoff." }, output, states,
+        recovery: [{ command_path: ["operation", "resume"], when: "Observe the original hash after its permanent first-send fence; never resubmit." }],
+        examples: ["apn gasless transfer approve-sealed --operation <operation-id>"] },
 ];
 export function includeGaslessRecovery(commands) {
     return commands.map((c) => !["operation resume", "operation status", "receipt get"].includes(c.path.join(" ")) ? c : {
@@ -132,6 +138,8 @@ export function bindGaslessCommand(path, o) {
         return { command: `gasless.usdt.${path.split(" ").at(-1)}`, profileHash,
             operationId: o["--operation"] };
     }
+    if (path === "gasless transfer approve-sealed")
+        return { command: "gasless.transfer.approve-sealed", operationId: o["--operation"] };
     if (path === "gasless transfer approve")
         return { command: "gasless.transfer.approve", operationId: o["--operation"] };
     if (!/^[1-9][0-9]{0,5}$/u.test(o["--chain"] ?? ""))

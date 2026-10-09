@@ -105,7 +105,7 @@ export type CommandRequest =
   | { readonly command: "gasless.balance"; readonly profile: string; readonly chainId: GaslessCommandChainId }
   | { readonly command: "gasless.transfer.quote"; readonly profile: string; readonly owner: Address; readonly request: GaslessCommandRequest; readonly rpcMaxBatchItems?: number }
   | { readonly command: "gasless.transfer.prepare"; readonly profile: string; readonly request: GaslessCommandRequest; readonly idempotencyKey: string }
-  | { readonly command: "gasless.transfer.approve"; readonly operationId: string }
+  | { readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed"; readonly operationId: string }
   | { readonly command: "gasless.usdt.status" | "gasless.usdt.resume"; readonly profileHash: string; readonly operationId: string }
   | { readonly command: "gasless.usdt.execute" | "gasless.usdt.execution-status" | "gasless.usdt.observe"; readonly profileHash: string; readonly operationId: string }
   | { readonly command: "gasless.usdt.prepare"; readonly profile: string; readonly recipient: Address;

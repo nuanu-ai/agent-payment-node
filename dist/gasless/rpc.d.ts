@@ -46,7 +46,7 @@ export declare class GaslessRpc implements GaslessRpcPort {
     private bundlerState;
     mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
     estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
-    send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
+    send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial, beforeSend?: () => void): Promise<Hex>;
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
     private assertChainUnlessVerified;
     /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */

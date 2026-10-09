@@ -143,3 +143,19 @@ test("every stored money family maps to its network and sending account", () => 
   assert.deepEqual(domains({ kind: "smart_account_gasless_transfer", record: open("s", { intent: { request: { chainId: 8453 }, binding: { ownerAddress: A } } }) }), evm("8453", A));
   assert.equal(domains({ kind: "gasless_transfer", record: open("g", { intent: { request: {}, owner: { address: A } } }) }), null);
 });
+
+// Persisted cross-rail claims must survive releasing the transient address lock.
+test("pending Sei funding and Circle Sei mint block each other through destination domains", async () => {
+  const sourceProfile = "9".repeat(64);
+  const sei = { kind: "sei_gaszip", record: { ...open("sei-funding", { owner: { address: A } }), profileHash: PROFILE } } as never;
+  const circle = { kind: "circle_route", record: { ...open("circle-mint", {}), profileHash: sourceProfile, destinationProfileHash: PROFILE,
+    sourceCustody: { walletAddress: B }, destinationCustody: { walletAddress: A }, destinationChain: 1329, source: null } } as never;
+  const beforeMint = service();
+  Object.defineProperty(beforeMint, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [sei] : [] });
+  await assert.rejects(beforeMint.assertCircleAccountsAvailable((circle as any).record), blockedOn("sei-funding", "evm:1329", A.toLowerCase()));
+  const beforeFunding = service();
+  Object.defineProperty(beforeFunding, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [circle] : [] });
+  await beforeFunding.assertEvmAccountAvailable(PROFILE, 8453, A);
+  await assert.rejects(beforeFunding.assertEvmAccountAvailable(PROFILE, 1329, A), blockedOn("circle-mint", "evm:1329", A.toLowerCase()));
+  await beforeFunding.assertEvmAccountAvailable(PROFILE, 1329, B);
+});

@@ -34,7 +34,7 @@ export function gaslessAtTransition(op: GaslessOperationRecord, index: number): 
   const s = op.transitions[index];
   if (s === undefined) gaslessFailure("APN_STATE_CORRUPT", "gasless_history_index");
   const { at, previousHash: _previous, transitionHash: _transition, ...mutable } = s;
-  const { integrityHash: _old, ...body } = op;
+  const { integrityHash: _old, firstSendApprovals: _latestApprovals, ...body } = op;
   return sealGaslessOperation({ ...body, ...mutable, updatedAt: at, terminal: GASLESS_TERMINAL.includes(mutable.state),
     transitions: op.transitions.slice(0, index + 1) });
 }

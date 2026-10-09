@@ -115,6 +115,17 @@ export class GaslessAssetPolicy {
             corrupt();
         this.admit(active, op.intent, other.toString());
     }
+    /** Fresh consent can use only the already charged unknown lease; never a replacement reservation. */
+    async assertSealedFirstSend(op) {
+        await this.assert(op, true);
+        const bound = op.intent.allowlist;
+        if (bound === undefined)
+            return corrupt();
+        const lease = await this.usage.load(identity(op.intent), bound.reservationId);
+        if (lease === null || lease.state !== "unknown_finality")
+            return refused("gasless_usage_reservation_missing");
+        this.checkedReservation(op, lease);
+    }
     async reserve(op) {
         if (gaslessPolicyChain(op.intent.request.chainId) === null)
             return;

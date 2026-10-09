@@ -251,7 +251,7 @@ export class GaslessRpc implements GaslessRpcPort {
     return estimate;
   }
 
-  async send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex> {
+  async send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial, beforeSend?: () => void): Promise<Hex> {
     assertGaslessExecutionChain(this.chainId);
     this.assertIntent(intent);
     const wire = validateGaslessWire(intent, sealed.userOperation);
@@ -261,7 +261,7 @@ export class GaslessRpc implements GaslessRpcPort {
     }
     await this.assertChainUnlessVerified();
     try {
-      const returned = rpcHex(await this.bundlerCall("eth_sendUserOperation", [wire, intent.entryPoint]), 32, 32);
+      const returned = rpcHex(await this.call("bundler", "eth_sendUserOperation", [wire, intent.entryPoint], this.transport, beforeSend), 32, 32);
       if (returned !== localHash) throw new Error("hash");
       return returned;
     } catch { throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless submission state is unknown."); }
@@ -319,7 +319,7 @@ export class GaslessRpc implements GaslessRpcPort {
   }
 
   private async call(which: "rpc" | "bundler", method: GaslessRpcMethod, params: readonly unknown[],
-    transport: GaslessTransport): Promise<unknown> {
+    transport: GaslessTransport, beforeSend?: () => void): Promise<unknown> {
     const methods = which === "rpc" ? RPC_METHODS : BUNDLER_METHODS;
     if (!methods.has(method)) gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_method");
     const id = (++this.sequence).toString();
@@ -330,7 +330,7 @@ export class GaslessRpc implements GaslessRpcPort {
     let response: { readonly status: number; readonly body: string };
     try {
       response = await transport.request(this.bundlerEndpoint,
-        "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG", () => session.assertActive());
+        "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG", () => { session.assertActive(); beforeSend?.(); });
     } catch { throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable."); }
     assertHttpStatus(response.status, session);
     const record = rpcRecord(rpcJson(response.body, MAX_RESPONSE));

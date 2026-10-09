@@ -71,6 +71,11 @@ export declare class GaslessService {
         quote_scope: string;
     }>;
     prepare(input: Parameters<GaslessPreparation["prepare"]>[0]): Promise<{
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -93,10 +98,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
@@ -177,6 +178,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -199,10 +205,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
         observation_source?: import("./model.js").GaslessObservationSource;
@@ -285,6 +287,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -307,10 +314,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: null;
         payment_submission_attempted: boolean;
         prior_payment_effects: "unknown";
@@ -397,6 +400,11 @@ export declare class GaslessService {
         scan_cursor: import("./model.js").GaslessCursor;
     }>;
     approve(operationId: string): Promise<{
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -419,10 +427,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
@@ -503,6 +507,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -525,10 +534,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
         observation_source?: import("./model.js").GaslessObservationSource;
@@ -611,6 +616,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -633,10 +643,335 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
+        payment_submitted: null;
+        payment_submission_attempted: boolean;
+        prior_payment_effects: "unknown";
+        final_permissions_invalidated: boolean;
+        permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
+        kind: "gasless_transfer";
+        schema_version: "apn.gasless-operation.v1";
+        operation_id: string;
+        profile: string;
+        provider: "local";
+        custody: "local_software";
+        fingerprint: string;
+        state: import("./operation-model.js").GaslessState;
+        terminal: boolean;
+        proof_class: string;
+        reason: string;
+        execution_owner: string;
+        retry_owner: string;
+        evidence_owner: string;
+        transfer: {
+            chain_id: GaslessChainId;
+            token: `0x${string}`;
+            symbol: string;
+            decimals: number;
+            sender: `0x${string}`;
+            recipient: `0x${string}`;
+            gross_atomic: string;
+            user_max_fee_atomic: string;
+            minimum_received_atomic: string;
+            quoted_fee_budget_atomic: string;
+            recipient_atomic: string;
+            actual_delivered_atomic: string | null;
+            actual_sender_debit_atomic: string | null;
+            unused_gross_atomic: string | null;
+        };
+        fees: {
+            asset: `0x${string}`;
+            prefund_atomic: string | null;
+            refund_atomic: string | null;
+            actual_fee_atomic: string | null;
+            unused_fee_budget_atomic: string | null;
+            unused_budget_remains_with_sender: boolean;
+            fee_possible_on_failed_transfer: boolean;
+            approved_sender_native_debit_wei: string;
+            proven_sender_native_debit_wei: string | null;
+            native_gas_payer: `0x${string}` | null;
+            native_paymaster: `0x${string}`;
+            native_paymaster_bill_capped_by_this_quote: boolean;
+        };
+        permission: {
+            entry_point: `0x${string}`;
+            paymaster: `0x${string}`;
+            delegate: `0x${string}`;
+            initial_designation: "expected" | "empty";
+            observed_designation: "expected" | "empty" | null;
+            delegation_persists: boolean;
+            permit_deadline: string;
+            permit_amount_atomic: string;
+            initial_allowance_atomic: string;
+            residual_allowance_atomic: string | null;
+            guard_held: boolean;
+            automatic_revocation: boolean;
+        };
+        gas: import("./model.js").GaslessGas;
+        effects: {
+            role: import("./operation-model.js").GaslessRole;
+            phase: import("./operation-model.js").GaslessEffectPhase;
+            signing_attempts: 0 | 1;
+            disclosure_attempts: 0 | 1;
+            submission_attempts: 0 | 1;
+            material_hash: string | null;
+            user_operation_hash: `0x${string}` | null;
+            estimate_hash: string | null;
+            signing_started_at: string | null;
+            sealed_at: string | null;
+            disclosed_at: string | null;
+            submitted_at: string | null;
+        }[];
+        unsigned_envelope_hash: string;
+        user_operation_hash: `0x${string}` | null;
+        transaction_hash: `0x${string}` | null;
+        settlement: import("./model.js").GaslessSettlement | null;
+        scan_cursor: import("./model.js").GaslessCursor;
+    }>;
+    approveSealed(operationId: string): Promise<{
         created_at: string;
         updated_at: string;
         expires_at: string;
         next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:1" | "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
+        observation_source?: import("./model.js").GaslessObservationSource;
+        kind: "gasless_transfer";
+        schema_version: "apn.gasless-operation.v1";
+        operation_id: string;
+        profile: string;
+        provider: "local";
+        custody: "local_software";
+        fingerprint: string;
+        state: import("./operation-model.js").GaslessState;
+        terminal: boolean;
+        proof_class: string;
+        reason: string;
+        execution_owner: string;
+        retry_owner: string;
+        evidence_owner: string;
+        transfer: {
+            chain_id: GaslessChainId;
+            token: `0x${string}`;
+            symbol: string;
+            decimals: number;
+            sender: `0x${string}`;
+            recipient: `0x${string}`;
+            gross_atomic: string;
+            user_max_fee_atomic: string;
+            minimum_received_atomic: string;
+            quoted_fee_budget_atomic: string;
+            recipient_atomic: string;
+            actual_delivered_atomic: string | null;
+            actual_sender_debit_atomic: string | null;
+            unused_gross_atomic: string | null;
+        };
+        fees: {
+            asset: `0x${string}`;
+            prefund_atomic: string | null;
+            refund_atomic: string | null;
+            actual_fee_atomic: string | null;
+            unused_fee_budget_atomic: string | null;
+            unused_budget_remains_with_sender: boolean;
+            fee_possible_on_failed_transfer: boolean;
+            approved_sender_native_debit_wei: string;
+            proven_sender_native_debit_wei: string | null;
+            native_gas_payer: `0x${string}` | null;
+            native_paymaster: `0x${string}`;
+            native_paymaster_bill_capped_by_this_quote: boolean;
+        };
+        permission: {
+            entry_point: `0x${string}`;
+            paymaster: `0x${string}`;
+            delegate: `0x${string}`;
+            initial_designation: "expected" | "empty";
+            observed_designation: "expected" | "empty" | null;
+            delegation_persists: boolean;
+            permit_deadline: string;
+            permit_amount_atomic: string;
+            initial_allowance_atomic: string;
+            residual_allowance_atomic: string | null;
+            guard_held: boolean;
+            automatic_revocation: boolean;
+        };
+        gas: import("./model.js").GaslessGas;
+        effects: {
+            role: import("./operation-model.js").GaslessRole;
+            phase: import("./operation-model.js").GaslessEffectPhase;
+            signing_attempts: 0 | 1;
+            disclosure_attempts: 0 | 1;
+            submission_attempts: 0 | 1;
+            material_hash: string | null;
+            user_operation_hash: `0x${string}` | null;
+            estimate_hash: string | null;
+            signing_started_at: string | null;
+            sealed_at: string | null;
+            disclosed_at: string | null;
+            submitted_at: string | null;
+        }[];
+        unsigned_envelope_hash: string;
+        user_operation_hash: `0x${string}` | null;
+        transaction_hash: `0x${string}` | null;
+        settlement: import("./model.js").GaslessSettlement | null;
+        scan_cursor: import("./model.js").GaslessCursor;
+    } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:1" | "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
+        payment_submitted: boolean;
+        permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
+        observation_source?: import("./model.js").GaslessObservationSource;
+        kind: "gasless_transfer";
+        schema_version: "apn.gasless-operation.v1";
+        operation_id: string;
+        profile: string;
+        provider: "local";
+        custody: "local_software";
+        fingerprint: string;
+        state: import("./operation-model.js").GaslessState;
+        terminal: boolean;
+        proof_class: string;
+        reason: string;
+        execution_owner: string;
+        retry_owner: string;
+        evidence_owner: string;
+        transfer: {
+            chain_id: GaslessChainId;
+            token: `0x${string}`;
+            symbol: string;
+            decimals: number;
+            sender: `0x${string}`;
+            recipient: `0x${string}`;
+            gross_atomic: string;
+            user_max_fee_atomic: string;
+            minimum_received_atomic: string;
+            quoted_fee_budget_atomic: string;
+            recipient_atomic: string;
+            actual_delivered_atomic: string | null;
+            actual_sender_debit_atomic: string | null;
+            unused_gross_atomic: string | null;
+        };
+        fees: {
+            asset: `0x${string}`;
+            prefund_atomic: string | null;
+            refund_atomic: string | null;
+            actual_fee_atomic: string | null;
+            unused_fee_budget_atomic: string | null;
+            unused_budget_remains_with_sender: boolean;
+            fee_possible_on_failed_transfer: boolean;
+            approved_sender_native_debit_wei: string;
+            proven_sender_native_debit_wei: string | null;
+            native_gas_payer: `0x${string}` | null;
+            native_paymaster: `0x${string}`;
+            native_paymaster_bill_capped_by_this_quote: boolean;
+        };
+        permission: {
+            entry_point: `0x${string}`;
+            paymaster: `0x${string}`;
+            delegate: `0x${string}`;
+            initial_designation: "expected" | "empty";
+            observed_designation: "expected" | "empty" | null;
+            delegation_persists: boolean;
+            permit_deadline: string;
+            permit_amount_atomic: string;
+            initial_allowance_atomic: string;
+            residual_allowance_atomic: string | null;
+            guard_held: boolean;
+            automatic_revocation: boolean;
+        };
+        gas: import("./model.js").GaslessGas;
+        effects: {
+            role: import("./operation-model.js").GaslessRole;
+            phase: import("./operation-model.js").GaslessEffectPhase;
+            signing_attempts: 0 | 1;
+            disclosure_attempts: 0 | 1;
+            submission_attempts: 0 | 1;
+            material_hash: string | null;
+            user_operation_hash: `0x${string}` | null;
+            estimate_hash: string | null;
+            signing_started_at: string | null;
+            sealed_at: string | null;
+            disclosed_at: string | null;
+            submitted_at: string | null;
+        }[];
+        unsigned_envelope_hash: string;
+        user_operation_hash: `0x${string}` | null;
+        transaction_hash: `0x${string}` | null;
+        settlement: import("./model.js").GaslessSettlement | null;
+        scan_cursor: import("./model.js").GaslessCursor;
+    } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
+        rpc_origin: string;
+        bundler_origin: string;
+        policy: {
+            asset_allowlist?: {
+                policy_digest: string;
+                policy_revision: number;
+                activation_digest: string;
+                chain: "eip155:1" | "eip155:8453";
+                token: `0x${string}`;
+                mechanism: Readonly<{
+                    provider: "local";
+                    reference: string;
+                }>;
+                reservation_id: string;
+            };
+            identity: string;
+            policy_hash: string;
+            approved_at: string | null;
+            action_deadline: string;
+            onchain_user_operation_expiry: boolean;
+            onchain_permit_expiry: boolean;
+        };
         payment_submitted: null;
         payment_submission_attempted: boolean;
         prior_payment_effects: "unknown";
@@ -723,6 +1058,11 @@ export declare class GaslessService {
         scan_cursor: import("./model.js").GaslessCursor;
     }>;
     resume(operationId: string, observationRpcEnv?: string): Promise<{
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -745,10 +1085,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
@@ -829,6 +1165,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -851,10 +1192,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
         observation_source?: import("./model.js").GaslessObservationSource;
@@ -937,6 +1274,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -959,10 +1301,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: null;
         payment_submission_attempted: boolean;
         prior_payment_effects: "unknown";
@@ -1049,6 +1387,11 @@ export declare class GaslessService {
         scan_cursor: import("./model.js").GaslessCursor;
     }>;
     status(operationId: string): Promise<{
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -1071,10 +1414,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         schema_version: "apn.gasless-operation.v1";
@@ -1155,6 +1494,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -1177,10 +1521,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
         observation_source?: import("./model.js").GaslessObservationSource;
@@ -1263,6 +1603,11 @@ export declare class GaslessService {
         settlement: import("./model.js").GaslessSettlement | null;
         scan_cursor: import("./model.js").GaslessCursor;
     } | {
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -1285,10 +1630,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: null;
         payment_submission_attempted: boolean;
         prior_payment_effects: "unknown";
@@ -1378,6 +1719,11 @@ export declare class GaslessService {
         receipt_hash: string;
         schema_version: "apn.gasless-receipt.v1";
         operation_binding_hash: string;
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -1400,10 +1746,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         observation_source?: import("./model.js").GaslessObservationSource;
         kind: "gasless_transfer";
         operation_id: string;
@@ -1486,6 +1828,11 @@ export declare class GaslessService {
         receipt_hash: string;
         schema_version: "apn.gasless-receipt.v1";
         operation_binding_hash: string;
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -1508,10 +1855,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: boolean;
         permission_invalidation: import("./model.js").GaslessPermissionInvalidation;
         observation_source?: import("./model.js").GaslessObservationSource;
@@ -1596,6 +1939,11 @@ export declare class GaslessService {
         receipt_hash: string;
         schema_version: "apn.gasless-receipt.v1";
         operation_binding_hash: string;
+        created_at: string;
+        updated_at: string;
+        expires_at: string;
+        next_actions: readonly string[];
+        first_send_approvals?: readonly import("./first-send-model.js").GaslessFirstSendApproval[];
         rpc_origin: string;
         bundler_origin: string;
         policy: {
@@ -1618,10 +1966,6 @@ export declare class GaslessService {
             onchain_user_operation_expiry: boolean;
             onchain_permit_expiry: boolean;
         };
-        created_at: string;
-        updated_at: string;
-        expires_at: string;
-        next_actions: readonly string[];
         payment_submitted: null;
         payment_submission_attempted: boolean;
         prior_payment_effects: "unknown";

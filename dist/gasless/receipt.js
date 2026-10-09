@@ -81,6 +81,7 @@ export function publicGaslessOperation(op) {
                     policy_revision: i.allowlist.policyRevision, activation_digest: i.allowlist.activationDigest,
                     chain: i.allowlist.chain, token: i.allowlist.token, mechanism: i.allowlist.mechanism,
                     reservation_id: i.allowlist.reservationId } }) },
+        ...(op.firstSendApprovals === undefined ? {} : { first_send_approvals: op.firstSendApprovals }),
         created_at: op.createdAt, updated_at: op.updatedAt, expires_at: i.expiresAt,
         next_actions: gaslessNextActions(op),
     };

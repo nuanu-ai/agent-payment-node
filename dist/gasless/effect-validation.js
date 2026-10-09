@@ -1,3 +1,4 @@
+import { assertLateFirstSend, validateFirstSendApprovals } from "./first-send-authority.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { assertGaslessPermissionClosure } from "./permission-invalidation.js";
 import { assertGaslessObservationSource } from "./observation-source.js";
@@ -9,6 +10,7 @@ export function validateGaslessMutable(op, s, at) {
         corrupt();
     for (const effect of [s.bootstrap, s.userOperation])
         validateEffect(effect, at);
+    validateFirstSendApprovals(op, s, at);
     const consent = s.approval;
     if (consent !== null && (consent.fingerprint !== op.fingerprint || consent.expiresAt !== op.intent.expiresAt ||
         consent.approvedAt < op.createdAt || consent.approvedAt > at || consent.approvedAt >= consent.expiresAt))
@@ -18,8 +20,11 @@ export function validateGaslessMutable(op, s, at) {
             corrupt();
         if (e.disclosedAt !== null && e.disclosedAt >= op.intent.expiresAt)
             corrupt();
-        if (e.submittedAt !== null && e.submittedAt >= op.intent.expiresAt)
-            corrupt();
+        if (e.submittedAt !== null && e.submittedAt >= op.intent.expiresAt) {
+            if (e.role !== "user_operation")
+                corrupt();
+            assertLateFirstSend(op, s, e.submittedAt);
+        }
     }
     if (s.state === "awaiting_approval" && (consent !== null || s.bootstrap.signingAttempts !== 0))
         corrupt();

@@ -33,7 +33,8 @@ export function conflictDomainKey(domain) {
 export function storedOperationDomains(operation) {
     try {
         if (operation.kind === "sei_gaszip")
-            return [evmConflictDomain(8453, operation.record.owner.address)];
+            return [evmConflictDomain(8453, operation.record.owner.address),
+                evmConflictDomain(1329, operation.record.owner.address)];
         if (operation.kind === "circle_route")
             return [evmConflictDomain(42161, operation.record.sourceCustody.walletAddress),
                 evmConflictDomain(operation.record.destinationChain, operation.record.destinationCustody.walletAddress)];
