@@ -7,6 +7,9 @@ import type { CircleObservation } from "./circle-v2-evm/protocol.js";
 
 export const CLEANUP85_OWNER = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
 export const CLEANUP85_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
+export const CLEANUP85_RECIPIENT_DELEGATE = "0xe6cae83bde06e4c305530e199d7217f42808555b";
+export const CLEANUP85_RECIPIENT_CODE = "0xef0100e6cae83bde06e4c305530e199d7217f42808555b";
+export const CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH = "0xcc7b633aef4b2543cb8f37522adf1a401f910f0f6b2430c1eecc11f401ccfcf3";
 export const CLEANUP85_FEE_CAP = 2_000_000_000_000n;
 export const CLEANUP85_REQUEST = Object.freeze({
   parentOperationId: "4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33",
@@ -48,13 +51,19 @@ export function validateCleanup85Envelope(value: unknown): Cleanup85Cancellation
 /** Strict actual native wire codec. A Circle value-zero codec cannot prove this value-one transfer. */
 export async function verifyCleanup85Raw(e: Cleanup85CancellationEnvelope, raw: Hex): Promise<Hex> {
   validateCleanup85Envelope(e);
+  return verifyNativeCancellationRawFields(e, raw);
+}
+/** Pure cryptographic comparator; it grants no policy, custody, nonce or dispatch authority.
+ * The finite production wrapper above always validates the immutable actual-owner pins first. */
+export async function verifyNativeCancellationRawFields(e: { readonly chainId: number; readonly from: string; readonly to: string; readonly nonceAtomic: string; readonly valueAtomic: string; readonly data: string; readonly gasLimitAtomic: string; readonly maxFeePerGasAtomic: string; readonly maxPriorityFeePerGasAtomic: string }, raw: Hex): Promise<Hex> {
   if (!/^0x02[0-9a-f]+$/u.test(raw) || raw.length > 2050 || raw.length % 2 !== 0) cleanup85Blocked("wire_shape");
   const t = parseTransaction(raw), priority = t.maxPriorityFeePerGas === undefined ? 0n : t.maxPriorityFeePerGas;
   const access = t.accessList === undefined ? [] : t.accessList;
-  if (t.type !== "eip1559" || t.chainId !== 42161 || t.to !== CLEANUP85_RECIPIENT || t.nonce !== 85 || t.value !== 1n ||
-    (t.data === undefined ? "0x" : t.data) !== "0x" || t.gas !== atomic(e.gasLimitAtomic) || t.maxFeePerGas !== atomic(e.maxFeePerGasAtomic) ||
+  if (t.type !== "eip1559" || t.chainId !== e.chainId || (t.to === undefined || t.to === null || getAddress(t.to) !== getAddress(e.to)) || t.nonce !== Number(atomic(e.nonceAtomic)) || t.value !== atomic(e.valueAtomic) ||
+    (t.data === undefined ? "0x" : t.data) !== e.data || t.gas !== atomic(e.gasLimitAtomic) || t.maxFeePerGas !== atomic(e.maxFeePerGasAtomic) ||
     priority !== atomic(e.maxPriorityFeePerGasAtomic) || !Array.isArray(access) || access.length !== 0 ||
-    getAddress(await recoverTransactionAddress({ serializedTransaction: raw as TransactionSerializedEIP1559 })) !== CLEANUP85_OWNER) cleanup85Blocked("signed_wire_binding");
+    getAddress(await recoverTransactionAddress({ serializedTransaction: raw as TransactionSerializedEIP1559 })) !== getAddress(e.from)) cleanup85Blocked("signed_wire_binding");
+  if(t.r===undefined||t.s===undefined||BigInt(t.s)<1n||BigInt(t.s)>0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n||(t.yParity!==0&&t.yParity!==1)||serializeTransaction(t,{r:t.r,s:t.s,yParity:t.yParity})!==raw)cleanup85Blocked("canonical_signature_wire");
   return keccak256(raw);
 }
 function transactionWire(t: Record<string, unknown>): TransactionSerializedEIP1559 {
@@ -79,7 +88,7 @@ export async function verifyCleanup85Observation(e: Cleanup85CancellationEnvelop
   if (input.chainId !== 42161 || input.finalityTag !== "finalized" || hash !== expectedHash || hash === CLEANUP85_REQUEST.oldCleanupTransactionHash ||
     blockHash === `0x${"0".repeat(64)}` || number <= 513145262n || quantity(b.timestamp) < 1791535099n ||
     hex(t.blockHash, 32) !== blockHash || quantity(t.blockNumber) !== number || address(t.from) !== CLEANUP85_OWNER ||
-    hex(r.transactionHash, 32) !== hash || quantity(r.status) !== 1n || hex(r.blockHash, 32) !== blockHash || quantity(r.blockNumber) !== number ||
+    hex(r.transactionHash, 32) !== hash || quantity(r.type) !== 2n || quantity(r.status) !== 1n || hex(r.blockHash, 32) !== blockHash || quantity(r.blockNumber) !== number ||
     address(r.from) !== CLEANUP85_OWNER || address(r.to) !== CLEANUP85_RECIPIENT || quantity(r.transactionIndex) !== index ||
     !Array.isArray(r.logs) || r.logs.length !== 0 || gasUsed === 0n || gasUsed > atomic(e.gasLimitAtomic) || price > atomic(e.maxFeePerGasAtomic) || fee + 1n > CLEANUP85_FEE_CAP ||
     !Array.isArray(b.transactions) || index > BigInt(Number.MAX_SAFE_INTEGER) || b.transactions[Number(index)] !== hash || b.transactions.filter(x => x === hash).length !== 1 ||

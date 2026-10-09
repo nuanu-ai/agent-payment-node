@@ -1,11 +1,12 @@
+import { keccak256 } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcWord } from "./evm-rpc-codec.js";
 import { parsePublicHttpsUrl } from "./network-policy.js";
 import { BridgeHttps } from "./lifi/https.js";
 import { assertCleanup85PhysicalGuard } from "./circle-cleanup85-native-authority.js";
-import { CLEANUP85_FEE_CAP, CLEANUP85_OWNER, CLEANUP85_RECIPIENT, CLEANUP85_REQUEST, cleanup85Blocked, cleanup85Envelope, validateCleanup85Envelope } from "./circle-cleanup85-native-codec.js";
-import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER } from "./circle-v2-evm/catalog.js";
+import { CLEANUP85_FEE_CAP, CLEANUP85_OWNER, CLEANUP85_RECIPIENT, CLEANUP85_REQUEST, CLEANUP85_RECIPIENT_CODE, CLEANUP85_RECIPIENT_DELEGATE, CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH, cleanup85Blocked, cleanup85Envelope, validateCleanup85Envelope } from "./circle-cleanup85-native-codec.js";
+import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_DEPLOYMENT_PINS, CIRCLE_TOKEN_IMPLEMENTATION_SLOT } from "./circle-v2-evm/catalog.js";
 const READ = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash"]);
 const q = (n) => `0x${n.toString(16)}`;
 const balanceData = `0x70a08231${CLEANUP85_OWNER.slice(2).toLowerCase().padStart(64, "0")}`;
@@ -19,15 +20,17 @@ export class Cleanup85NativeRpc {
     calls = 0;
     sequence = 0;
     url;
-    constructor(url, https = new BridgeHttps(), maximumRequests = 192, now = Date.now) {
+    constructor(url, https = new BridgeHttps(), maximumRequests = 224, now = Date.now) {
         this.https = https;
         this.maximumRequests = maximumRequests;
         this.now = now;
         const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Cleanup85 native RPC", 2048);
-        if (parsed.search !== "" || parsed.hash !== "" || !Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 192)
+        if (parsed.search !== "" || parsed.hash !== "" || !Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 224)
             cleanup85Blocked("rpc_configuration");
         this.url = parsed.toString();
     }
+    get physicalRequestCount() { return this.calls; }
+    get remainingRequests() { return this.maximumRequests - this.calls; }
     async call(method, params, beforeSend) {
         if ((!READ.has(method) && method !== "eth_sendRawTransaction") || ++this.calls > this.maximumRequests)
             cleanup85Blocked("rpc_method_or_physical_budget");
@@ -65,12 +68,20 @@ export class Cleanup85NativeRpc {
     async snapshotOnce(frozen) {
         await this.identity();
         const head = await this.block("latest"), tag = { blockHash: head.hash, requireCanonical: true };
-        const [latest, pending, anchored, native, balance, allowance, oldReceipt, basePriority] = await Promise.all([
+        const [latest, pending, anchored, native, balance, allowance, oldReceipt, basePriority, code, impl, implCode, senderCode, recipientCode, delegateCode] = await Promise.all([
             this.call("eth_getTransactionCount", [CLEANUP85_OWNER, "latest"]), this.call("eth_getTransactionCount", [CLEANUP85_OWNER, "pending"]),
             this.call("eth_getTransactionCount", [CLEANUP85_OWNER, tag]), this.call("eth_getBalance", [CLEANUP85_OWNER, tag]),
             this.call("eth_call", [{ to: CIRCLE_SOURCE_TOKEN, data: balanceData }, tag]), this.call("eth_call", [{ to: CIRCLE_SOURCE_TOKEN, data: allowanceData }, tag]),
             this.call("eth_getTransactionReceipt", [CLEANUP85_REQUEST.oldCleanupTransactionHash]), this.call("eth_maxPriorityFeePerGas", []),
+            this.call("eth_getCode", [CIRCLE_SOURCE_TOKEN, tag]), this.call("eth_getStorageAt", [CIRCLE_SOURCE_TOKEN, CIRCLE_TOKEN_IMPLEMENTATION_SLOT, tag]), this.call("eth_getCode", [CIRCLE_DEPLOYMENT_PINS[42161].token.implementation, tag]),
+            this.call("eth_getCode", [CLEANUP85_OWNER, tag]), this.call("eth_getCode", [CLEANUP85_RECIPIENT, tag]),
+            this.call("eth_getCode", [CLEANUP85_RECIPIENT_DELEGATE, tag]),
         ]);
+        const pin = CIRCLE_DEPLOYMENT_PINS[42161].token;
+        if (keccak256(evmRpcHex(code)) !== pin.proxyCodeHash || evmRpcHex(impl, 32) !== `0x${pin.implementation.slice(2).toLowerCase().padStart(64, "0")}` || keccak256(evmRpcHex(implCode)) !== pin.implementationCodeHash)
+            cleanup85Blocked("current_token_pin");
+        if (senderCode !== "0x" || recipientCode !== CLEANUP85_RECIPIENT_CODE || keccak256(evmRpcHex(delegateCode)) !== CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH)
+            cleanup85Blocked("native_account_code_pins");
         if ([latest, pending, anchored].some(x => evmRpcQuantity(x) !== 85n) || evmRpcWord(balance) !== 97924n || evmRpcWord(allowance) !== 40100n || oldReceipt !== null ||
             evmRpcQuantity(native) < CLEANUP85_FEE_CAP || BigInt(head.number) <= 513145262n)
             cleanup85Blocked("current_nonce_balance_allowance_or_old_receipt");
@@ -84,7 +95,7 @@ export class Cleanup85NativeRpc {
         if ((await this.block(head.tag)).hash !== head.hash)
             cleanup85Blocked("snapshot_reanchor");
         await this.identity();
-        return { envelope, nativeBalanceAtomic: evmRpcQuantity(native).toString(), blockNumberAtomic: head.number, blockHash: head.hash, observedAt: this.now() };
+        return { envelope, nativeBalanceAtomic: evmRpcQuantity(native).toString(), senderCode: "0x", recipientCode: CLEANUP85_RECIPIENT_CODE, recipientDelegateCodeHash: CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH, blockNumberAtomic: head.number, blockHash: head.hash, observedAt: this.now() };
     }
     async observation(hash) {
         await this.identity();
@@ -105,6 +116,12 @@ export class Cleanup85NativeRpc {
         await this.identity();
         return { transaction, receipt, canonicalBlock: canonicalBlock.raw, recheckedBlock: recheckedBlock.raw, finalityHead: head.raw, chainId: 42161, finalityTag: "finalized" };
     }
+    async finalizedConsumedAccount(observation) {
+        const head = evmRpcBlockResult(observation.finalityHead, "finalized"), tag = { blockHash: head.hash, requireCanonical: true };
+        if (evmRpcQuantity(await this.call("eth_getTransactionCount", [CLEANUP85_OWNER, tag])) < 86n || (await this.block(head.tag)).hash !== head.hash)
+            cleanup85Blocked("finalized_consumed_nonce");
+        await this.identity();
+    }
     async finalizedAccount(observation) {
         const head = evmRpcBlockResult(observation.finalityHead, "finalized"), tag = { blockHash: head.hash, requireCanonical: true };
         const [nonce, balance, allowance] = await Promise.all([this.call("eth_getTransactionCount", [CLEANUP85_OWNER, tag]), this.call("eth_call", [{ to: CIRCLE_SOURCE_TOKEN, data: balanceData }, tag]), this.call("eth_call", [{ to: CIRCLE_SOURCE_TOKEN, data: allowanceData }, tag])]);
@@ -118,6 +135,6 @@ function transient(error) {
         return false;
     const status = error.details?.httpStatus;
     return status === 429 || typeof status === "number" && status >= 500 && status <= 599 ||
-        error.code === "APN_RPC_AMBIGUOUS" && ["request_interrupted", "response_interrupted", "response_aborted", "request_deadline", "DNS_deadline"].includes(String(error.details?.transportReason));
+        ["APN_RPC_CONFIG", "APN_RPC_AMBIGUOUS"].includes(error.code) && ["request_interrupted", "response_interrupted", "response_aborted", "request_deadline", "DNS_deadline"].includes(String(error.details?.transportReason));
 }
 //# sourceMappingURL=circle-cleanup85-native-rpc.js.map

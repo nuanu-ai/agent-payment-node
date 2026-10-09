@@ -23,7 +23,9 @@ export async function withCleanup85NativeAuthority(binding, expiresAt, now, conf
     };
     const authority = Object.freeze({
         assert,
-        beforeSend: (candidate, raw, hash) => {
+        assertRemaining: (candidate, minimumMs) => { assert(candidate, expiresAt); if (!Number.isSafeInteger(minimumMs) || minimumMs < 0 || deadline - now() < minimumMs)
+            cleanup85Blocked("foreground_remaining_time"); },
+        beforeSend: (candidate, raw, hash, assertFresh) => {
             assert(candidate, expiresAt);
             if (armed || keccak256(raw) !== hash)
                 cleanup85Blocked("one_send_only");
@@ -31,6 +33,7 @@ export async function withCleanup85NativeAuthority(binding, expiresAt, now, conf
             let checks = 0;
             const guard = () => {
                 assert(candidate, expiresAt);
+                assertFresh?.();
                 if (++checks > 2 || physical.get(guard)?.binding !== binding || keccak256(raw) !== hash)
                     cleanup85Blocked("physical_material_or_replay");
             };

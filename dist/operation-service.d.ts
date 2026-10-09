@@ -1,3 +1,4 @@
+import { type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
@@ -104,6 +105,7 @@ export declare class OperationService {
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
     assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void>;
+    assertCleanup85NativeAccountAvailable(proof: VerifiedCleanup85RecoveryAdmission, request: Cleanup85CancellationRequest, exceptOperation?: OperationRecord): Promise<void>;
     /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
     assertPermit2AccountAvailable(record: Permit2ProductionRecord): Promise<void>;
     /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */

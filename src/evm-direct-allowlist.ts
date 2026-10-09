@@ -49,6 +49,11 @@ export function validateEvmAllowlist(operation: OperationRecord): void {
     return;
   }
   const binding = validateDirectAllowlistBinding(operation.allowlist);
+  if (operation.evm?.cleanup85Cancellation !== undefined) {
+    // The finite controller owns a full native hold, not the ordinary principal-only direct lease.
+    if (operation.allowlistLease !== undefined) corrupt();
+    return;
+  }
   if (operation.allowlistLease !== undefined) validateDirectAllowlistLease(operation.allowlistLease, binding, evmAllowlistSubject(operation));
   else if (operation.transitions.some((transition) => transition.state === "started")) corrupt();
 }

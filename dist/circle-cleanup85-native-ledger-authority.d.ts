@@ -46,3 +46,4 @@ export declare function verifyCleanup85NativeReservation(state: StateStore, id: 
 export declare function verifyCleanup85NativeSettlement(state: StateStore, id: string, native: Cleanup85NativeRpc): Promise<VerifiedCleanup85NativeSettlement>;
 /** C must reread the durable owning operation while holding the bucket lock, before any mutation. */
 export declare function sameCleanup85LedgerOperation(expected: OperationRecord, actual: OperationRecord | null): boolean;
+export declare function assertCleanup85NativeSlot(state: StateStore, o: OperationRecord): Promise<void>;

@@ -1,3 +1,4 @@
+import { cleanup85ConflictExclusion } from "./circle-cleanup85-native-conflict.js";
 import { circleNativeSourceIdentity, verifiedCircleNativeSources } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import { SeiFundingJournal, publicSeiFunding } from "./lifi/sei-gaszip-journal.js";
@@ -145,6 +146,10 @@ export class OperationService {
             throw new ApnError("APN_OPERATION_BLOCKED", "Native exclusion requires its exact saved operation.");
         await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], exceptOperation?.operationId, false, sources);
     }
+    async assertCleanup85NativeAccountAvailable(proof, request, exceptOperation) {
+        const v = await cleanup85ConflictExclusion(this.state, proof, request, exceptOperation);
+        await this.assertConflictDomainsAvailable(v.profileHash, () => [evmConflictDomain(42161, v.account)], exceptOperation?.operationId, false, undefined, v.parent);
+    }
     /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
     async assertPermit2AccountAvailable(record) {
         validatePermit2ProductionRecord(record);
@@ -157,7 +162,7 @@ export class OperationService {
     async assertRailAccountAvailable(profileHash, rail, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
     }
-    async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources) {
+    async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources, cleanup85Parent) {
         let wanted;
         try {
             wanted = new Set(domains().map(conflictDomainKey));
@@ -177,6 +182,8 @@ export class OperationService {
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             }
             if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
+                held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
+            if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash)
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
             // An unreadable network or account on either side blocks the whole profile.

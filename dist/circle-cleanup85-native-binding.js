@@ -1,9 +1,10 @@
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
-import { CLEANUP85_FEE_CAP, CLEANUP85_OWNER, CLEANUP85_RECIPIENT, cleanup85Blocked, validateCleanup85Request, validateCleanup85Envelope } from "./circle-cleanup85-native-codec.js";
+import { CLEANUP85_FEE_CAP, CLEANUP85_OWNER, CLEANUP85_RECIPIENT, CLEANUP85_RECIPIENT_CODE, CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH, cleanup85Blocked, validateCleanup85Request, validateCleanup85Envelope } from "./circle-cleanup85-native-codec.js";
 import { validateEvmNativeCustody } from "./evm-native-custody.js";
 export function validateCleanup85NativeBinding(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["version", "request", "recipientCustody", "activationDigest", "nativeReservationId", "nativeReserveAtomic"]) ||
+    if (!isPlainRecord(value) || !exactKeys(value, ["version", "request", "recipientCustody", "activationDigest", "nativeReservationId", "nativeReserveAtomic", "senderCode", "recipientCode", "recipientDelegateCodeHash"]) ||
         value.version !== "apn.circle-cleanup85-native-binding.v1" || value.nativeReserveAtomic !== "2000000000000" ||
+        value.senderCode !== "0x" || value.recipientCode !== CLEANUP85_RECIPIENT_CODE || value.recipientDelegateCodeHash !== CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH ||
         ![value.activationDigest, value.nativeReservationId].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)))
         cleanup85Blocked("native_binding_shape");
     validateCleanup85Request(value.request);
