@@ -47,7 +47,10 @@
     "vendor/relay-order-id/**",
     "docs/runtime-sdk-vendor.md",
     "vendor/metamask-smart-account/**",
-    "docs/relay-base-native.md"
+    "docs/relay-base-native.md",
+    "docs/wbtc-continuation-budget.md",
+    "docs/circle-v2-evm-fast.md",
+    "docs/local-release.md"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",
