@@ -1,0 +1,1 @@
+{"version":3,"file":"gaszip-oracle-data.js","sourceRoot":"","sources":["../../src/lifi/gaszip-oracle-data.ts"],"names":[],"mappings":"AAAA,6EAA6E;AAC7E,MAAM,UAAU,mBAAmB,CAAC,KAAc,EAAE,MAAiC;IACnF,IAAI,OAAO,KAAK,KAAK,QAAQ,IAAI,CAAC,sBAAsB,CAAC,IAAI,CAAC,KAAK,CAAC;QAAE,OAAO,MAAM,CAAC,qBAAqB,CAAC,CAAC;IAC3G,OAAO,MAAM,CAAC,KAAK,CAAC,CAAC;AACvB,CAAC"}

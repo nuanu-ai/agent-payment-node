@@ -36,7 +36,7 @@ class SyntheticSource implements SeiRpcPort {
  async call(m:string,p:readonly unknown[]):Promise<unknown>{
   if(m==="eth_chainId")return h(8453n);if(m==="eth_getBlockByNumber")return {hash:SOURCE_BLOCK,number:h(100n),baseFeePerGas:h(this.baseFee)};
   if(m==="eth_getCode")return "0x";if(m==="eth_getBalance")return h(this.balance);if(m==="eth_getTransactionCount")return "0x0";
-  if(m==="eth_estimateGas")return h(21256n);if(m==="eth_call")return "0x0";
+  if(m==="eth_estimateGas")return h(21256n);if(m==="eth_call")return `0x${"0".repeat(64)}`;
   if(m==="eth_sendRawTransaction"){this.sends++;this.raw=p[0] as Hex;return keccak256(this.raw);}
   if(m==="eth_getTransactionByHash" || m==="eth_getTransactionReceipt"){
    if(this.raw===null || this.hidden)return null;const tx=parseTransaction(this.raw),hash=keccak256(this.raw);
