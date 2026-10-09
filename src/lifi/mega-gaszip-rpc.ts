@@ -25,7 +25,7 @@ export class MegaFundingRpc implements MegaRpcPort {
     if(v.jsonrpc!=="2.0" || v.id!==id || !Object.hasOwn(v,"result") || Object.hasOwn(v,"error"))megaFail("rpc_result");return v.result;
   }
 }
-export async function readMegaFundingPlan(rpc:MegaRpcPort,owner:string,amount:string,maxFee:string,frozenFeeUpper?:string):Promise<MegaFundingPlan>{
+export async function readMegaFundingPlan(rpc:MegaRpcPort,owner:string,amount:string,maxFee:string,frozenPlan?:MegaFundingPlan):Promise<MegaFundingPlan>{
   if(megaQuantity(await rpc.call("eth_chainId",[]))!==8453n)megaFail("source_chain");
   const block=megaObject(await rpc.call("eth_getBlockByNumber",["latest",false]));const blockHash=megaHash(block.hash),number=megaQuantity(block.number);
   const tag={blockHash,requireCanonical:true};const tx={from:owner,to:MEGA_FUNDING.target,data:MEGA_FUNDING.data,value:hex(BigInt(amount))};
@@ -33,20 +33,24 @@ export async function readMegaFundingPlan(rpc:MegaRpcPort,owner:string,amount:st
     rpc.call("eth_getTransactionCount",[owner,"latest"]),rpc.call("eth_getTransactionCount",[owner,"pending"]),rpc.call("eth_estimateGas",[tx,tag])]);
   if(code!=="0x" || megaQuantity(n)!==megaQuantity(p) || megaQuantity(n)>BigInt(Number.MAX_SAFE_INTEGER))megaFail("source_code_or_nonce");
   // Base requires a quoted total fee including L1 data and operator components. It is not an on-chain total-fee cap.
-  const gas=(megaQuantity(g)*110n+99n)/100n,tip=1_000_000n,fee=2n*megaQuantity(block.baseFeePerGas)+tip;
+  const gas=frozenPlan===undefined?(megaQuantity(g)*110n+99n)/100n:megaQuantity(g),tip=1_000_000n,fee=2n*megaQuantity(block.baseFeePerGas)+tip;
   if(gas>30_000n || fee>100_000_000n)megaFail("source_fee_pair");
   const [l1,op]=await Promise.all([rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getL1FeeUpperBound",args:[BigInt(MAX_DIRECT_TRANSACTION_BYTES)]})},tag]),
-    rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getOperatorFee",args:[gas]})},tag])]);
+    rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getOperatorFee",args:[frozenPlan===undefined?gas:BigInt(frozenPlan.gas)]})},tag])]);
   const l1Fee=gaszipOracleUint256(l1,megaFail),operator=gaszipOracleUint256(op,megaFail),total=gas*fee+l1Fee+operator;
   if(operator!==0n)megaFail("base_operator_fee_unreviewed");
-  if(total>BigInt(maxFee) || total>MEGA_FUNDING.maximumFee || megaQuantity(balance)<BigInt(amount)+(frozenFeeUpper===undefined || total>BigInt(frozenFeeUpper)?total:BigInt(frozenFeeUpper)))megaFail("source_balance_or_fee_cap");
+  // The exclusive owner conflict keeps the full caller-authorized fee reserve unavailable to other local rails.
+  const signedUpper=(frozenPlan===undefined?gas*fee:BigInt(frozenPlan.gas)*BigInt(frozenPlan.maxFee))+l1Fee+operator;
+  if(signedUpper>BigInt(maxFee) || signedUpper>MEGA_FUNDING.maximumFee || megaQuantity(balance)<BigInt(amount)+BigInt(maxFee))megaFail("source_balance_or_fee_cap");
   const check=megaObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));if(megaHash(check.hash)!==blockHash)megaFail("source_reorg");
   return {blockHash,nonce:megaQuantity(n).toString(),gas:gas.toString(),maxFee:fee.toString(),tip:tip.toString(),l1FeeUpper:l1Fee.toString(),operatorFeeUpper:operator.toString(),feeUpper:total.toString()};
 }
-export function assertMegaFundingFresh(initial:MegaFundingPlan,fresh:MegaFundingPlan):void{
-  if(initial.nonce!==fresh.nonce || BigInt(fresh.gas)>BigInt(initial.gas) || BigInt(fresh.maxFee)>BigInt(initial.maxFee) ||
-    BigInt(fresh.l1FeeUpper)>BigInt(initial.l1FeeUpper) || BigInt(fresh.operatorFeeUpper)>BigInt(initial.operatorFeeUpper) ||
-    BigInt(fresh.feeUpper)>BigInt(initial.feeUpper))megaFail("source_plan_drift");
+export function assertMegaFundingFresh(initial:MegaFundingPlan,fresh:MegaFundingPlan,maximumFee:string):void{
+  // Reprice only unsigned L1/operator estimates. Every signed field stays frozen in the saved plan.
+  const minimumPrice=(BigInt(fresh.maxFee)-BigInt(fresh.tip))/2n+BigInt(initial.tip);
+  const fullUpper=BigInt(initial.gas)*BigInt(initial.maxFee)+BigInt(fresh.l1FeeUpper)+BigInt(fresh.operatorFeeUpper);
+  if(initial.nonce!==fresh.nonce || BigInt(fresh.gas)>BigInt(initial.gas) || initial.tip!==fresh.tip ||
+    minimumPrice>BigInt(initial.maxFee) || fullUpper>BigInt(maximumFee) || fullUpper>MEGA_FUNDING.maximumFee)megaFail("source_plan_drift");
 }
 export interface MegaSafeProof { readonly hash: Hex; readonly blockHash: Hex; readonly blockNumber:string; readonly status:"success"|"reverted";
   readonly transactionDigest:string; readonly receiptDigest:string; readonly amount:string; readonly actualFee:string|null }
@@ -73,8 +77,9 @@ export async function proveMegaSafeTransaction(rpc:MegaRpcPort,chain:8453|4326,h
     // Current Base operator fee is zero; a nonzero/configured future operator component is required explicitly.
     if(r.operatorFeeScalar!==undefined || r.operatorFeeConstant!==undefined){
       if(r.operatorFeeScalar===undefined || r.operatorFeeConstant===undefined)megaFail("operator_receipt_shape");
-      fee+=megaQuantity(r.operatorFeeConstant)+megaQuantity(r.gasUsed)*megaQuantity(r.operatorFeeScalar)/1_000_000n;
+      if(megaQuantity(r.operatorFeeConstant)!==0n || megaQuantity(r.operatorFeeScalar)!==0n)megaFail("base_operator_fee_unreviewed");
     }
+    if(r.operatorFee!==undefined && megaQuantity(r.operatorFee)!==0n)megaFail("base_operator_fee_unreviewed");
     actualFee=fee.toString();
   }
   return {hash,blockHash,blockNumber:number.toString(),status:megaQuantity(r.status)===1n?"success":"reverted",

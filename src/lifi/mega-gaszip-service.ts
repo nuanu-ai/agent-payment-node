@@ -99,7 +99,7 @@ export class MegaFundingService {
           const active=await this.policy(saved,saved,true);authority.assert(gaszipEffectBinding(saved,"mega"),active.registry.expiresAt);return active;
         };
         let active=await check();
-        const fresh=await readMegaFundingPlan(this.rpc("source"),saved.owner.address,saved.amountAtomic,saved.maximumFeeAtomic,saved.plan.feeUpper);assertMegaFundingFresh(saved.plan,fresh);
+        const fresh=await readMegaFundingPlan(this.rpc("source"),saved.owner.address,saved.amountAtomic,saved.maximumFeeAtomic,saved.plan);assertMegaFundingFresh(saved.plan,fresh,saved.maximumFeeAtomic);
         active=await check();
         const reservation=await this.ledger.reserve({...this.identity(saved),registry:active.registry,rail:"bridge",mechanism:MEGA_FUNDING.mechanism,
           amountAtomic:saved.amountAtomic,idempotencyKey:`mega-gaszip:${id}`,now:new Date(this.now())});

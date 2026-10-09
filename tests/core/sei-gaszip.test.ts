@@ -9,6 +9,7 @@ import { StateStore } from "../../src/state.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { TtyAllowlistPolicyApproval } from "../../src/allowlist-policy-activation.js";
 import { runCli } from "../../src/cli.js";
+import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import { OperationService } from "../../src/operation-service.js";
 import { SEI_FUNDING, inspectSeiFundingQuote, inspectSeiDelivery, seiJson } from "../../src/lifi/sei-gaszip-contract.js";
 import { SeiFundingJournal, sealSeiFunding, validateSeiFunding, type SeiFundingRecord } from "../../src/lifi/sei-gaszip-journal.js";
@@ -32,16 +33,16 @@ test("provider mapping refuses alternate source, destination, refunds, missing o
  assert.equal(inspectSeiDelivery(provider(owner,source,{status:"PENDING"}),source,owner,"10000000000000"),null);
 });
 class SyntheticSource implements SeiRpcPort {
- queueHook:()=>Promise<void>=async()=>{};tlsHook:()=>Promise<void>=async()=>{};guard:(()=>void)|undefined;raw:Hex|null=null;sends=0;hidden=false;wrongData=false;reverted=false;feeOver=false;balance=100_000_000_000_000n;baseFee=5_000_000n;
+ queueHook:()=>Promise<void>=async()=>{};tlsHook:()=>Promise<void>=async()=>{};guard:(()=>void)|undefined;l1=0n;estimate=21256n;nonce=0n;raw:Hex|null=null;sends=0;hidden=false;wrongData=false;operatorNonzero=false;reverted=false;feeOver=false;balance=100_000_000_000_000n;baseFee=5_000_000n;
  async call(m:string,p:readonly unknown[],guard?:()=>void):Promise<unknown>{
   if(m==="eth_chainId")return h(8453n);if(m==="eth_getBlockByNumber")return {hash:SOURCE_BLOCK,number:h(100n),baseFeePerGas:h(this.baseFee)};
-  if(m==="eth_getCode")return "0x";if(m==="eth_getBalance")return h(this.balance);if(m==="eth_getTransactionCount")return "0x0";
-  if(m==="eth_estimateGas")return h(21256n);if(m==="eth_call")return `0x${"0".repeat(64)}`;
+  if(m==="eth_getCode")return "0x";if(m==="eth_getBalance")return h(this.balance);if(m==="eth_getTransactionCount")return h(this.nonce);
+  if(m==="eth_estimateGas"){assert.equal((p[0] as {data:string}).data,SEI_FUNDING.data);assert.equal((p[0] as {to:string}).to,SEI_FUNDING.target);return h(this.estimate);}if(m==="eth_call")return `0x${(((p[0] as {data:string}).data.startsWith("0xf1c7a58b"))?this.l1:0n).toString(16).padStart(64,"0")}`;
   if(m==="eth_sendRawTransaction"){this.guard=guard;await this.queueHook();guard!();await this.tlsHook();guard!();this.sends++;this.raw=p[0] as Hex;return keccak256(this.raw);}
   if(m==="eth_getTransactionByHash" || m==="eth_getTransactionReceipt"){
    if(this.raw===null || this.hidden)return null;const tx=parseTransaction(this.raw),hash=keccak256(this.raw);
    const common={hash,transactionHash:hash,from:this.owner,to:SEI_FUNDING.target,blockHash:SOURCE_BLOCK,blockNumber:h(100n)};
-   return m==="eth_getTransactionByHash"?{...common,chainId:h(8453n),input:this.wrongData?"0x":SEI_FUNDING.data,value:h(tx.value!),nonce:h(BigInt(tx.nonce!)),gas:h(tx.gas!),maxFeePerGas:h(tx.maxFeePerGas!),maxPriorityFeePerGas:h(tx.maxPriorityFeePerGas!)}:{...common,status:this.reverted?"0x0":"0x1",gasUsed:h(21256n),effectiveGasPrice:h(this.feeOver?1_000_000_000n:6_000_000n),l1Fee:"0x0"};
+   return m==="eth_getTransactionByHash"?{...common,chainId:h(8453n),input:this.wrongData?"0x":SEI_FUNDING.data,value:h(tx.value!),nonce:h(BigInt(tx.nonce!)),gas:h(tx.gas!),maxFeePerGas:h(tx.maxFeePerGas!),maxPriorityFeePerGas:h(tx.maxPriorityFeePerGas!)}:{...common,status:this.reverted?"0x0":"0x1",gasUsed:h(21256n),effectiveGasPrice:h(this.feeOver?1_000_000_000n:6_000_000n),l1Fee:"0x0",...(this.operatorNonzero?{operatorFeeScalar:"0x1",operatorFeeConstant:"0x0"}:{})};
   }throw new Error(m);
  }
  owner="";
@@ -74,7 +75,7 @@ async function setup(t:test.TestContext){
  const https={request:async(url:string)=>({status:200,body:url.includes("/quotes/")?quote(now):JSON.stringify(provider(owner,keccak256(source.raw!),providerPending?{status:"PENDING"}:{}))})};
  const service=new SeiFundingService(state,wrapping,{}, {https,source:()=>source,destination:()=>destination,approve:async()=>{approvals++;},now:()=>now});
  const input={profile:"gaszip-test",expectedPayer:owner,amountAtomic:"10000000000000",minimumOutputAtomic:"250000000000000000",maximumFeeAtomic:"1000000000000",idempotencyKey:"synthetic-gaszip-first"};
- return {temp,state,source,destination,service,input,owner,file,approval,policyExpiry:now+3600000,setNow:(n:number)=>{now=n;},advance:()=>{now+=120000;},pending:()=>{providerPending=true;},approvals:()=>approvals};
+ return {temp,state,source,destination,service,input,owner,file,approval,wrapping,policyExpiry:now+3600000,setNow:(n:number)=>{now=n;},advance:()=>{now+=120000;},pending:()=>{providerPending=true;},approvals:()=>approvals};
 }
 test("shared preparation conflict, exact foreground-sign-once/send-once and terminal correlated delivery",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;assert.equal(r.state,"prepared");assert.equal(f.source.sends,0);
@@ -101,6 +102,7 @@ test("source calldata/actual-fee drift and destination amount/delta drift cannot
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
  f.source.wrongData=true;await assert.rejects(f.service.status(r.operationId));f.source.wrongData=false;
  f.source.feeOver=true;await assert.rejects(f.service.status(r.operationId));f.source.feeOver=false;
+ f.source.operatorNonzero=true;await assert.rejects(f.service.status(r.operationId),/base_operator_fee_unreviewed/);f.source.operatorNonzero=false;
  f.destination.wrongAmount=true;await assert.rejects(f.service.status(r.operationId));f.destination.wrongAmount=false;
  f.destination.balanceDrift=true;await assert.rejects(f.service.status(r.operationId));assert.equal((await new SeiFundingJournal(f.state.root).findOperation(r.operationId))?.terminal,false);assert.equal(f.source.sends,1);
 });
@@ -111,7 +113,7 @@ test("safe confirmed source revert releases only principal after independent rec
 test("tampered immutable envelope and excessive post-approval fees refuse",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;
  assert.throws(()=>validateSeiFunding({...r,amountAtomic:"1"}));assert.throws(()=>sealSeiFunding({...r,amountAtomic:"10000000000001"}));
- assert.throws(()=>assertSeiFundingFresh(r.plan,{...r.plan,nonce:"1"}));assert.throws(()=>assertSeiFundingFresh(r.plan,{...r.plan,feeUpper:"1000000000001"}));
+ assert.throws(()=>assertSeiFundingFresh(r.plan,{...r.plan,nonce:"1"},r.maximumFeeAtomic));assert.throws(()=>assertSeiFundingFresh(r.plan,{...r.plan,l1FeeUpper:"1000000000001"},r.maximumFeeAtomic));
 });
 
 test("fresh lower fees cannot weaken the frozen signed envelope affordability check",async(t)=>{
@@ -152,3 +154,23 @@ test("fresh lower fees cannot weaken the frozen signed envelope affordability ch
  for(const action of ["revoke","activate"])assert.equal((await runCli(["allowlist","policy",action,"--profile","gaszip-test","--revision","1"],{},{stateRoot:f.temp.root,allowlistPolicyApproval:f.approval})).ok,true);
  await assert.rejects(f.service.approve(r.operationId),/policy_drift/);assert.equal(f.source.sends,0);assert.equal(f.approvals(),0);
  });
+
+for(const change of ["decrease","increase"] as const)test(`unsigned dynamic L1 fee ${change} under caller cap preserves the signed envelope`,async t=>{
+ const f=await setup(t);f.source.l1=5196823140n;const r=await f.service.prepare(f.input) as SeiFundingRecord;
+ f.source.l1=change==="decrease"?5078223958n:205196823140n;f.source.baseFee=8_000_000n;f.source.estimate=22000n;
+ await f.service.approve(r.operationId);assert.equal(f.source.sends,1);const tx=parseTransaction(f.source.raw!);
+ assert.equal(tx.gas,BigInt(r.plan.gas));assert.equal(tx.maxFeePerGas,BigInt(r.plan.maxFee));assert.equal(tx.maxPriorityFeePerGas,BigInt(r.plan.tip));assert.equal(tx.nonce,Number(r.plan.nonce));assert.equal(tx.data,SEI_FUNDING.data);assert.equal(tx.value,BigInt(r.amountAtomic));
+});
+for(const drift of ["nonce","gas","minimum-price","L1-over-cap","full-reserve"] as const)test(`fresh ${drift} refuses before any signing or send claim`,async t=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;
+ if(drift==="nonce")f.source.nonce=1n;if(drift==="gas")f.source.estimate=BigInt(r.plan.gas)+1n;if(drift==="minimum-price")f.source.baseFee=BigInt(r.plan.maxFee);if(drift==="L1-over-cap")f.source.l1=BigInt(r.maximumFeeAtomic);if(drift==="full-reserve")f.source.balance=BigInt(r.amountAtomic)+BigInt(r.maximumFeeAtomic)-1n;
+ await assert.rejects(f.service.approve(r.operationId));assert.equal(f.source.sends,0);const repo=new SeiFundingJournal(f.state.root);const saved=(await repo.findOperation(r.operationId))!;assert.equal(saved.state,"prepared");assert.equal(saved.rawTransaction,null);await repo.assertNoEffectClaimsLocked(saved);
+});
+
+test("normal direct Base prepare cannot interleave the held caller fee reserve",async t=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;
+ const other=await runCli(["pay","transfer","prepare","--profile","gaszip-test","--idempotency-key","other-normal-base-money","--to",f.owner,"--amount-usdc","0.01","--rpc-url","https://mainnet.base.org"],{},{stateRoot:f.temp.root,wrappingSecret:f.wrapping});
+ assert.equal(other.ok,false);assert.equal(other.error?.code,"APN_OPERATION_BLOCKED");assert.equal(other.error?.details?.blockingOperationId,r.operationId);assert.equal(f.source.sends,0);
+ f.source.queueHook=async()=>{const state=new StateStore(f.temp.root);Object.assign(state,{lockWaitMs:0});const native=new LocalWalletNative(state,f.wrapping);await assert.rejects(native.request({version:"apn.native.v1",requestId:"synthetic-gaszip-custody",operation:"wallet.describe",payload:{profile:"gaszip-test"}}),{code:"APN_STATE_BUSY"});};
+ await f.service.approve(r.operationId);assert.equal(f.source.sends,1);
+});
