@@ -32,10 +32,10 @@ test("provider mapping refuses alternate source, destination, refunds, missing o
  assert.equal(inspectSeiDelivery(provider(owner,source,{status:"PENDING"}),source,owner,"10000000000000"),null);
 });
 class SyntheticSource implements SeiRpcPort {
- raw:Hex|null=null;sends=0;hidden=false;wrongData=false;reverted=false;feeOver=false;
+ raw:Hex|null=null;sends=0;hidden=false;wrongData=false;reverted=false;feeOver=false;balance=100_000_000_000_000n;baseFee=5_000_000n;
  async call(m:string,p:readonly unknown[]):Promise<unknown>{
-  if(m==="eth_chainId")return h(8453n);if(m==="eth_getBlockByNumber")return {hash:SOURCE_BLOCK,number:h(100n),baseFeePerGas:h(5_000_000n)};
-  if(m==="eth_getCode")return "0x";if(m==="eth_getBalance")return h(100_000_000_000_000n);if(m==="eth_getTransactionCount")return "0x0";
+  if(m==="eth_chainId")return h(8453n);if(m==="eth_getBlockByNumber")return {hash:SOURCE_BLOCK,number:h(100n),baseFeePerGas:h(this.baseFee)};
+  if(m==="eth_getCode")return "0x";if(m==="eth_getBalance")return h(this.balance);if(m==="eth_getTransactionCount")return "0x0";
   if(m==="eth_estimateGas")return h(21256n);if(m==="eth_call")return "0x0";
   if(m==="eth_sendRawTransaction"){this.sends++;this.raw=p[0] as Hex;return keccak256(this.raw);}
   if(m==="eth_getTransactionByHash" || m==="eth_getTransactionReceipt"){
@@ -112,4 +112,12 @@ test("tampered immutable envelope and excessive post-approval fees refuse",async
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;
  assert.throws(()=>validateSeiFunding({...r,amountAtomic:"1"}));assert.throws(()=>sealSeiFunding({...r,amountAtomic:"10000000000001"}));
  assert.throws(()=>assertSeiFundingFresh(r.plan,{...r.plan,nonce:"1"}));assert.throws(()=>assertSeiFundingFresh(r.plan,{...r.plan,feeUpper:"1000000000001"}));
+});
+
+test("fresh lower fees cannot weaken the frozen signed envelope affordability check",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;
+ f.source.baseFee=1_000_000n;f.source.balance=BigInt(r.amountAtomic)+BigInt(r.plan.feeUpper)-1n;
+ await assert.rejects(f.service.approve(r.operationId),/source_balance_or_fee_cap/u);
+ assert.equal(f.source.sends,0);assert.equal(f.source.raw,null);
+ assert.equal((await f.service.status(r.operationId) as SeiFundingRecord).state,"prepared");
 });

@@ -39,7 +39,7 @@ export class SeiFundingRpc {
         return v.result;
     }
 }
-export async function readSeiFundingPlan(rpc, owner, amount, maxFee) {
+export async function readSeiFundingPlan(rpc, owner, amount, maxFee, frozenFeeUpper) {
     if (seiQuantity(await rpc.call("eth_chainId", [])) !== 8453n)
         seiFail("source_chain");
     const block = seiObject(await rpc.call("eth_getBlockByNumber", ["latest", false]));
@@ -59,7 +59,7 @@ export async function readSeiFundingPlan(rpc, owner, amount, maxFee) {
     const l1Fee = seiQuantity(l1), operator = seiQuantity(op), total = gas * fee + l1Fee + operator;
     if (operator !== 0n)
         seiFail("base_operator_fee_unreviewed");
-    if (total > BigInt(maxFee) || total > SEI_FUNDING.maximumFee || seiQuantity(balance) < BigInt(amount) + total)
+    if (total > BigInt(maxFee) || total > SEI_FUNDING.maximumFee || seiQuantity(balance) < BigInt(amount) + (frozenFeeUpper === undefined || total > BigInt(frozenFeeUpper) ? total : BigInt(frozenFeeUpper)))
         seiFail("source_balance_or_fee_cap");
     const check = seiObject(await rpc.call("eth_getBlockByNumber", [hex(number), false]));
     if (seiHash(check.hash) !== blockHash)

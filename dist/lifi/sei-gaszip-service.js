@@ -131,7 +131,7 @@ export class SeiFundingService {
                 `No approval transactions. One signature and one send. Unknown outcomes retain their hold.`,
                 `Operation ${r.operationId}; policy ${r.policyDigest}; quote ${r.quoteDigest}; expires ${r.expiresAt}`,
             ], approvalCode("bridge", r.operationId, r.integrityHash), r.expiresAt, {});
-        const fresh = await readSeiFundingPlan(this.rpc("source"), r.owner.address, r.amountAtomic, r.maximumFeeAtomic);
+        const fresh = await readSeiFundingPlan(this.rpc("source"), r.owner.address, r.amountAtomic, r.maximumFeeAtomic, r.plan.feeUpper);
         assertSeiFundingFresh(r.plan, fresh);
         if (Date.parse(r.expiresAt) - this.now() < 10_000)
             seiFail("post_approval_expiry");
