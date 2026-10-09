@@ -67,7 +67,8 @@ export class SeiFundingService {
     await this.state.initialize();return this.state.withLocks([...this.locks(record),`operation:idempotency:${idempotencyHash}`],async()=>{
       const found=await ops.resolvePrepare({kind:"sei_gaszip",profileHash:record.profileHash,operationId,idempotencyHash,requestHash});
       if(found!==null){if(found.kind!=="sei_gaszip")seiFail("idempotency_kind");return publicSeiFunding(found.record);}
-      await ops.assertEvmAccountAvailable(record.profileHash,8453,record.owner.address);await assertExclusiveEvmOwner(this.state,record.owner.address,record.profileHash);
+      await ops.assertEvmAccountAvailable(record.profileHash,8453,record.owner.address);
+      await ops.assertEvmAccountAvailable(record.profileHash,1329,record.owner.address);await assertExclusiveEvmOwner(this.state,record.owner.address,record.profileHash);
       await assertBridgeOwner(this.state,record);await this.journal.saveLocked(record,true);return publicSeiFunding(record);
     });
   }

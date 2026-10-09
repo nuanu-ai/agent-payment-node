@@ -1,0 +1,33 @@
+✔ one account-network-asset daily cap aggregates reservations across every rail label (195.840792ms)
+✔ UTC boundary resets finalized usage but unresolved and unknown-finality reservations carry forward (138.569458ms)
+✔ pre-effect terminal failure releases its reservation and terminal retries are exact (95.116916ms)
+✔ an exposed reservation cannot claim pre-effect failure and remains charged (68.501292ms)
+✔ proven unsubmitted payment releases gross usage with a distinct terminal lease (93.16875ms)
+✔ confirmed revert charges exact proven asset consumption and binds idempotent replay (140.871708ms)
+✔ concurrent duplicate reservation is idempotent and concurrent distinct reservations cannot race past the cap (75.885417ms)
+✔ concurrent usage snapshots include their own reservation exactly when it is charged (340.884875ms)
+✔ reservations and unresolved usage survive a new store instance (81.900167ms)
+✔ transition time is monotonic so a late finality update cannot backdate usage out of the current window (61.144208ms)
+✔ a future-dated terminal update cannot open an earlier daily window for a new reservation (72.838708ms)
+✔ public usage identity rejects token aliases instead of reading a second bucket (24.974084ms)
+✔ policy rebinding, asset confusion, altered state and invalid terminal claims fail closed (39.616833ms)
+✔ direct no-private retirement holds its exact bucket through durable outcome and release (157.734125ms)
+✔ direct no-private retirement refuses a changed reserve before any outcome write (42.235791ms)
+✔ state root rejects wrong mode and symlinked ancestors (12.292417ms)
+✔ state reads reject mode changes, symlink targets, and hard links (191.17675ms)
+✔ operation and receipt tampering fail closed after restart (435.784333ms)
+✔ operation filenames hash idempotency keys instead of exposing them (98.374417ms)
+✔ stable kernel lock files remain in place after release (10.988625ms)
+✔ RPC provider pacing survives restart and malformed records fail closed (51.559ms)
+✔ a held kernel lock refuses a contender until the file handle closes (58.492ms)
+✔ process exit releases the kernel lock without deleting its stable file (88.764916ms)
+✔ lock files reject symlinks, hard links, wrong modes, and path replacement (27.256375ms)
+✔ concurrent contenders serialize the protected action (79.103958ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2798.8625

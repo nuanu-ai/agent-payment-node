@@ -52,6 +52,11 @@ async function callTool(
 ): Promise<OutputEnvelope> {
   try {
     const bound = bindMcpInput(tool.command, input);
+    if (bound.request.command === "circle.evm.approve-source" || bound.request.command === "circle.evm.approve-mint" || bound.request.command === "circle.evm.cleanup") {
+      const action = bound.request.command.slice("circle.evm.".length);
+      const handoff = createCliHandoff(["apn", "circle", "evm", action, "--operation", bound.request.operationId]);
+      return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Confirm the exact Circle financial effect and both owners in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+    }
     if (bound.request.command === "operation.abandon") {
       const handoff = createCliHandoff(["apn", "operation", "abandon", "--operation", bound.request.operationId]);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError(

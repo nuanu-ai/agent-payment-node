@@ -8,6 +8,7 @@ import { mcpFieldName } from "./command-binder.js";
 import { ApnError } from "./errors.js";
 
 const SELECTED_PATHS = [
+  "circle evm prepare", "circle evm approve-source", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare",
   "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
   "swap ethereum uniswap-token inventory", "swap ethereum uniswap-token quote", "swap ethereum uniswap-token prepare",

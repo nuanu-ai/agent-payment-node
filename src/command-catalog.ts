@@ -1,4 +1,5 @@
 import { SEI_FUNDING_COMMANDS } from "./lifi/sei-gaszip-command-catalog.js";
+import { CIRCLE_EVM_COMMANDS, CIRCLE_EVM_GROUPS } from "./circle-v2-evm/command-catalog.js";
 import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
 import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_COMMANDS } from "./evm-command-catalog.js";import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";import { UNISWAP_COMMANDS, UNISWAP_COMMAND_GROUPS } from "./swap/uniswap-command-catalog.js";import { SUNSWAP_COMMANDS, SUNSWAP_COMMAND_GROUPS } from "./swap/sunswap-tron/command-catalog.js";import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/command-catalog.js";import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
@@ -65,7 +66,8 @@ const httpOptions = [
   option("--body-base64", "base64", false, noDefault, ["maximum_65536_decoded_bytes", "empty_is_present_zero_bytes", "omission_is_absent"], "operator_input"),
 ];
 const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
-export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS, ...UNISWAP_TOKEN_COMMAND_GROUPS,
+export const COMMAND_GROUPS: readonly CommandGroup[] = [
+  ...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS, ...UNISWAP_TOKEN_COMMAND_GROUPS,
   ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
   { path: ["relay"], summary: "Prepare finite Relay quotes; execute only admitted Ethereum USDC source routes.", kind: "group" },
   { path: ["sei"], summary: "Finite Sei native funding.", kind: "group" },
@@ -80,6 +82,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["circle"], summary: "Bounded Circle V2 Base to Solana USDC operations.", kind: "group" },
   { path: ["circle", "approval"], summary: "Prepare and execute an exact Base USDC allowance.", kind: "group" },
   { path: ["circle", "source"], summary: "Submit one Base CCTP V2 source transfer.", kind: "group" },
+  ...CIRCLE_EVM_GROUPS,
   { path: ["policy"], summary: "Explicit human admission of mainnet chain assets.", kind: "group" },
   { path: ["mcp"], summary: "Serve and discover the local APN MCP transport.", kind: "group" },
   { path: ["doctor"], summary: "Inspect local APN prerequisites.", kind: "group" },
@@ -442,7 +445,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   ),
   command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Inspect one durable terminal receipt.", [operationRequired], "local_write", "May initialize local state and repair saved operation or receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ] as const;
-export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...PORTFOLIO_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...SEI_FUNDING_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS, ...UNISWAP_COMMANDS, ...UNISWAP_TOKEN_COMMANDS, ...SUNSWAP_COMMANDS, ...JUPITER_COMMANDS, ...ORCA_COMMANDS];
+export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...PORTFOLIO_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...SEI_FUNDING_COMMANDS, ...CIRCLE_EVM_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS, ...UNISWAP_COMMANDS, ...UNISWAP_TOKEN_COMMANDS, ...SUNSWAP_COMMANDS, ...JUPITER_COMMANDS, ...ORCA_COMMANDS];
 export const COMMAND_MANIFEST = {
   schema_version: "apn.command-manifest.v1",
   product: "agent-payment-node",

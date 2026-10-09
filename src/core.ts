@@ -1,4 +1,5 @@
 import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";import { readPermit2IntentStatus } from "./x402-permit2/status.js";
+import { publicCircle } from "./circle-v2-evm/operation-model.js";
 import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { failureEnvelope, successEnvelope } from "./output.js";
 import { dataOutcome, operationOutcome, receiptOutcome } from "./core-outcome.js";
 import { RuntimeContext, type CoreDependencies } from "./runtime.js";
@@ -176,6 +177,16 @@ export class ApnCore {
         const service = this.context.stargateNative;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
         return operationOutcome(await service.prepare(request));
+      }
+      case "circle.evm.prepare": {
+        const service = this.context.circleEvm; if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle EVM runtime unavailable.");
+        return operationOutcome(publicCircle(await service.prepare(request)));
+      }
+      case "circle.evm.approve-source": case "circle.evm.approve-mint": case "circle.evm.observe": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.status": {
+        const service = this.context.circleEvm; if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle EVM runtime unavailable.");
+        if (request.command === "circle.evm.status") return operationOutcome(await service.status(request.operationId));
+        const result = request.command === "circle.evm.approve-source" ? await service.approveSource(request.operationId) : request.command === "circle.evm.approve-mint" ? await service.approveMint(request.operationId) : request.command === "circle.evm.refresh-attestation" ? await service.refreshAttestation(request.operationId) : request.command === "circle.evm.cleanup" ? await service.cleanup(request.operationId) : await service.observe(request.operationId);
+        return operationOutcome(publicCircle(result));
       }
       case "stargate.native.execute": case "stargate.native.observe": case "stargate.native.status": case "stargate.native.receipt": {
         const service = this.context.stargateNative;
@@ -362,6 +373,7 @@ case "sei.funding.prepare": case "sei.funding.approve": case "sei.funding.status
       }
       case "transfer.approve": {
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "circle_route") throw new ApnError("APN_OPERATION_BLOCKED", "Use the separate Circle EVM approval, observation or cleanup command.");
         if (operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no approval or execution path." : "Permit2 production execution remains unavailable.");
         if (operation.kind === "gasless_transfer" || operation.kind === "metamask_gasless_transfer" || operation.kind === "smart_account_gasless_transfer" ||
           operation.kind === "facilitator_gasless_transfer") throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use the gasless approval command for this USDC transfer.", {
@@ -385,6 +397,7 @@ case "sei.funding.prepare": case "sei.funding.approve": case "sei.funding.status
         await this.context.ready();
         const operation = await this.operations.required(request.operationId);
         if (request.coinbaseObservationRpc !== undefined) assertCoinbaseObservationRequest(operation.kind === "direct_transfer" ? operation.record : {} as never, request.coinbaseObservationRpc, request.observeOnly !== undefined || request.waitSeconds !== undefined || request.observationRpcEnv !== undefined);
+        if (operation.kind === "circle_route") throw new ApnError("APN_OPERATION_BLOCKED", "Use the separate Circle EVM approval, observation or cleanup command.");
         if (operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no resume or execution path." : "Permit2 production execution remains unavailable.");
         if (request.observeOnly && (operation.kind !== "direct_transfer" || operation.record.providerDirect !== undefined)) {
           throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
@@ -448,6 +461,7 @@ case "sei.funding.prepare": case "sei.funding.approve": case "sei.funding.status
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "circle_route") return operationOutcome(await this.operations.status(request.operationId));
         if (operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") return operationOutcome(await this.operations.status(request.operationId));
         if (operation.kind === "smart_account_gasless_transfer") return operationOutcome(await this.smartAccountGasless.status(request.operationId));
         if (operation.kind === "facilitator_gasless_transfer") return operationOutcome(await this.facilitatorGasless.status(request.operationId));
@@ -467,6 +481,10 @@ case "sei.funding.prepare": case "sei.funding.approve": case "sei.funding.status
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
+        if (operation.kind === "circle_route") {
+          if (!operation.record.terminal) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.");
+          return receiptOutcome(publicCircle(operation.record));
+        }
         if (operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_RECEIPT_NOT_FOUND", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no receipt." : "Permit2 production has no paid receipt.");
         if (operation.kind === "smart_account_gasless_transfer") return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));
         if (operation.kind === "facilitator_gasless_transfer") return receiptOutcome(await this.facilitatorGasless.receipt(request.operationId));

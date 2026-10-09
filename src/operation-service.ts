@@ -1,4 +1,6 @@
 import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
+import { CircleRepository } from "./circle-v2-evm/repository.js";
+import { publicCircle, type CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { Permit2LegacyConflictRepository, type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
@@ -45,6 +47,7 @@ import { RelayNativeSourceJournalRepository } from "./relay/native-source.js";
 
 export type StoredMoneyOperation =
   | { readonly kind: "sei_gaszip"; readonly record: SeiFundingRecord }
+  | { readonly kind: "circle_route"; readonly record: CircleOperationV1 }
   | { readonly kind: "permit2_production"; readonly record: Permit2ProductionRecord }
   | { readonly kind: "permit2_legacy_conflict"; readonly record: Permit2LegacyConflict }
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
@@ -122,6 +125,7 @@ export class OperationService {
   async findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null> {
     const matches = [
       ...(await this.seiFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "sei_gaszip" as const, record })),
+      ...(await this.circleOperations()).filter(operation => operation.idempotencyHash === idempotencyHash).map(record => ({ kind: "circle_route" as const, record })),
       ...(await this.relayUnsigned.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "relay_unsigned" as const, record })),
       ...(await this.facilitatorGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "facilitator_gasless_transfer" as const, record })),
       ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
@@ -171,13 +175,18 @@ export class OperationService {
     await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
   }
 
-  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string): Promise<void> {
+  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false): Promise<void> {
     let wanted: ReadonlySet<string>;
     try { wanted = new Set(domains().map(conflictDomainKey)); } catch { wanted = new Set(); }
     for (const operation of await this.profileOperations(profileHash)) {
       if (operation.record.terminal || operation.record.operationId === exceptOperationId) continue;
       if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active") continue;
-      const held = storedOperationDomains(operation);
+      let held = storedOperationDomains(operation);
+      if (allowIncludedCircleSource && operation.kind === "circle_route" && operation.record.source !== null &&
+        operation.record.residualAllowanceAtomic === "0" && operation.record.effects.find(e => e.role === "burn")?.phase === "confirmed") {
+        // Only another CCTP operation may queue a source nonce after canonical inclusion. Other rails remain conservative.
+        held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
+      }
       const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
       // An unreadable network or account on either side blocks the whole profile.
       if (held !== null && wanted.size > 0 && shared === undefined) continue;
@@ -201,6 +210,7 @@ export class OperationService {
   private async profileOperations(profileHash: string): Promise<readonly StoredMoneyOperation[]> {
     return [
       ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip" as const, record })),
+      ...(await this.circleOperations(profileHash)).map(record => ({ kind: "circle_route" as const, record })),
       ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production" as const, record })),
       ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict" as const, record })),
       ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned" as const, record })),
@@ -214,6 +224,25 @@ export class OperationService {
       ...(await this.state.listX402Operations(profileHash)).map((record) => ({ kind: "x402_fetch" as const, strategy: "local" as const, record })),
       ...(await this.providerX402.listOperations(profileHash)).map((record) => ({ kind: "x402_fetch" as const, strategy: "provider_atomic" as const, record })),
     ];
+  }
+
+  private async circleOperations(profileHash?: string): Promise<readonly CircleOperationV1[]> {
+    if (this.state.root === undefined) return [];
+    const repo = new CircleRepository(this.state.root);
+    return profileHash === undefined ? repo.listAllOperations() : repo.listOperations(profileHash);
+  }
+
+  /** Both Circle signing accounts are held under their existing profile locks. */
+  async assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved = false): Promise<void> {
+    if (exceptSaved) {
+      const saved = await new CircleRepository(this.state.root).load(record.operationId);
+      if (saved === null || saved.integrityHash !== record.integrityHash) throw new ApnError("APN_OPERATION_BLOCKED", "Circle exclusion requires the exact durable journal.");
+    }
+    const except = exceptSaved ? record.operationId : undefined;
+    await this.assertConflictDomainsAvailable(record.profileHash,
+      () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], except, true);
+    await this.assertConflictDomainsAvailable(record.destinationProfileHash,
+      () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], except);
   }
 
   async assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void> {
@@ -237,6 +266,7 @@ export class OperationService {
   async required(operationId: string): Promise<StoredMoneyOperation> {
     const canonicalId = canonicalOperationId(operationId);
     const sei = await this.seiFunding.findOperation(canonicalId);
+    const circle = (await this.circleOperations()).find(record => record.operationId === canonicalId) ?? null;
     const permit2 = await new Permit2ProductionRepository(this.state.root).findOperation(canonicalId);
     const direct = await this.state.findOperation(canonicalId);
     const x402 = await this.state.findX402Operation(canonicalId);
@@ -248,11 +278,12 @@ export class OperationService {
     const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
     const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
     const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
-    if ([sei, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
+    if ([sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
       .filter((value) => value !== null).length > 1) {
       throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
     }
     if (sei !== null) return { kind: "sei_gaszip", record: sei };
+    if (circle !== null) return { kind: "circle_route", record: circle };
     if (permit2 !== null) return { kind: "permit2_production", record: permit2 };
     if (direct !== null) return { kind: "direct_transfer", record: direct };
     if (x402 !== null) return { kind: "x402_fetch", strategy: "local", record: x402 };
@@ -270,6 +301,7 @@ export class OperationService {
   async status(operationId: string): Promise<unknown> {
     const operation = await this.required(operationId);
     if (operation.kind === "sei_gaszip") return publicSeiFunding(operation.record);
+    if (operation.kind === "circle_route") return publicCircle(operation.record);
     if (operation.kind === "permit2_production") return publicPermit2Production(operation.record);
     if (operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", "Legacy Permit2 execution remains blocked.");
     if (operation.kind === "relay_unsigned") return this.relayStatus(operation.record);
