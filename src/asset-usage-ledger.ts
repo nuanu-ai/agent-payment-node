@@ -1,5 +1,6 @@
 import { JupiterHistoricalRetirementReader } from "./swap/jupiter-solana/historical-retirement-reader.js";
 import { historicalRetirementUsage } from "./swap/jupiter-solana/historical-retirement-record.js";
+import { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease } from "./metamask-native-transfer-owner.js";
 import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
 import { assertCleanup85GenericCapacityRelease, cleanup85NativeReservationMarker, sameCleanup85NativeMarker, type Cleanup85NativeReservationMarker } from "./asset-usage-ledger-cleanup85-native.js";
 import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
@@ -57,6 +58,8 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
   /** Proven asset consumption on a confirmed revert; absent on historical zero-consumption records. */
   readonly consumedAtomic?: string;
   readonly merchantNativeActualFee?: MerchantNativeActualFee;
+  readonly metamaskNativeReservation?: {readonly operationId:string;readonly quoteHash:string};
+  readonly metamaskNativeActualFee?: {readonly kind:"metamask_native_actual_fee";readonly operationId:string;readonly quoteHash:string;readonly receiptHash:string;readonly actualFee:string;readonly reservedFee:string};
   readonly cleanup85NativeReservation?: Cleanup85NativeReservationMarker;
   readonly cleanup85NativeActual?: Cleanup85NativeActualSettlement;
   readonly state: AssetUsageState;
@@ -145,6 +148,12 @@ export class AssetUsageLedger extends SecureStateStore {
 
   async reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation> { return this.reserveBound(input); }
 
+  async reserveMetaMaskNative(operationId:string,kind:"native"|"token",now:Date):Promise<AssetUsageReservation> {
+    const p=await readMetaMaskNativeReservation(this.root,operationId);
+    if(kind!=="native"&&kind!=="token")throw blocked("MetaMask reserve asset is invalid.");
+    return this.reserveBound({account:p.quote.sender,chain:`eip155:${p.quote.chainId}`,asset:kind==="native"?{kind:"native",identifier:null}:{kind:"token",identifier:p.quote.token},registry:p.registry,rail:"direct",amountAtomic:kind==="native"?p.quote.feeQuote.totalQuoteWei:"1000",idempotencyKey:`apn.metamask-native:${operationId}:${kind}`,now},undefined,{operationId,quoteHash:p.quote.quoteHash});
+  }
+
   async reserveCleanup85Native(authority: VerifiedCleanup85NativeReservation, now: Date): Promise<AssetUsageReservation> {
     const b = verifiedCleanup85NativeReservation(authority, this.root), o = b.operation;
     if (b.reservedAtomic !== "2000000000000" || BigInt(b.signedMaximumDebitAtomic) > BigInt(b.reservedAtomic) ||
@@ -152,7 +161,8 @@ export class AssetUsageLedger extends SecureStateStore {
     return this.reserveBound({account:o.walletAddress,chain:"eip155:42161",asset:{kind:"native",identifier:null},registry:b.policy.registry,rail:"direct",amountAtomic:b.reservedAtomic,idempotencyKey:b.idempotencyKey,now},authority);
   }
 
-  private async reserveBound(input: AssetUsageReserveInput, authority?: VerifiedCleanup85NativeReservation): Promise<AssetUsageReservation> {
+  private async reserveBound(input: AssetUsageReserveInput, authority?: VerifiedCleanup85NativeReservation, mm?: {readonly operationId:string;readonly quoteHash:string}): Promise<AssetUsageReservation> {
+    if(input.idempotencyKey.startsWith("apn.metamask-native:")&&mm===undefined)throw blocked("MetaMask native namespace requires normal journal authority.");
     const cleanup=authority===undefined?undefined:verifiedCleanup85NativeReservation(authority,this.root);
     if(typeof input.idempotencyKey==="string"&&input.idempotencyKey.startsWith("apn.cleanup85-native:")&&cleanup===undefined)throw blocked("Cleanup85 namespace requires root-owned reservation authority.");
     const registry = validateAssetPolicyRegistry(input.registry);
@@ -179,6 +189,7 @@ export class AssetUsageLedger extends SecureStateStore {
       }
       const existing = reservations.find((entry) => entry.reservationId === reservationId);
       if (existing !== undefined) {
+        if(canonicalJson(existing.metamaskNativeReservation ?? null)!==canonicalJson(mm ?? null))throw blocked("MetaMask reservation marker changed.");
         assertReplay(existing, initial.policyDigest, initial.registryVersion, input.rail, initial.amountAtomic, idempotencyHash);
         if((cleanup===undefined&&existing.cleanup85NativeReservation!==undefined)||(cleanup!==undefined&&!sameCleanup85NativeMarker(existing.cleanup85NativeReservation,cleanup)))throw blocked("Cleanup85 reservation marker replay mismatch.");
         if (input.retryFailedBeforeEffect === true && existing.state === "failed_before_effect") {
@@ -202,6 +213,7 @@ export class AssetUsageLedger extends SecureStateStore {
         amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
       });
       const body: ReservationBody = {
+        ...(mm===undefined?{}:{metamaskNativeReservation:mm}),
         ...(cleanup===undefined?{}:{cleanup85NativeReservation:cleanup85NativeReservationMarker(cleanup)}),
         schemaVersion: ASSET_USAGE_RESERVATION_SCHEMA,
         reservationId,
@@ -228,6 +240,7 @@ export class AssetUsageLedger extends SecureStateStore {
   async releaseDirectReservedAfter<T>(expectedValue: AssetUsageReservation,
     persistOutcome: () => Promise<{ value: T; now: Date; outcomeDigest: string }>): Promise<T> {
     const expected = structuredClone(validateAssetUsageReservation(expectedValue));
+    if (expected.metamaskNativeReservation !== undefined) throw blocked("MetaMask capacity release requires durable normal-owner outcome.");
     if (expected.cleanup85NativeReservation !== undefined) throw blocked("Cleanup85 native hold requires opaque canonical settlement.");
     if (expected.rail !== "direct" || expected.state !== "reserved") throw blocked("Only an unchanged direct reserve can close a pre-private attempt.");
     const identity = validateIdentity(expected);
@@ -238,6 +251,7 @@ export class AssetUsageLedger extends SecureStateStore {
         throw blocked("The exact no-private-entry reservation is no longer held unchanged.");
       }
       await assertCleanup85GenericCapacityRelease(this.root,expected);
+      await assertMetaMaskNativeGenericCapacityRelease(this.root,expected);
       const outcome = await persistOutcome();
       const at = instant(outcome.now), outcomeDigest = digest(outcome.outcomeDigest, "Outcome digest");
       if (at < expected.updatedAt) throw blocked("The usage reservation transition cannot move backward in time.");
@@ -266,6 +280,11 @@ export class AssetUsageLedger extends SecureStateStore {
       const value = await this.readJson(this.recordPath(identity, reservationId));
       if (value === null) throw blocked("The usage reservation does not exist.");
       const current = validateAssetUsageReservation(value);
+      if(!["submitted","unknown_finality"].includes(input.state))await assertMetaMaskNativeGenericCapacityRelease(this.root,current);
+      if(current.metamaskNativeReservation!==undefined && !["submitted","unknown_finality"].includes(input.state)) {
+        if(input.state!=="failed_before_effect")throw blocked("MetaMask native hold requires canonical normal-owner settlement.");
+        await assertMetaMaskNativeFailedBeforeEffect(this.root,current.metamaskNativeReservation.operationId);
+      }
       if (current.reservationId !== reservationId || current.policyDigest !== policyDigest ||
           canonicalJson(exactIdentity(current)) !== canonicalJson(identity)) {
         throw blocked("The usage reservation binding does not match the requested transition.");
@@ -339,6 +358,26 @@ export class AssetUsageLedger extends SecureStateStore {
       if(!["submitted","unknown_finality"].includes(current.state))throw blocked("Merchant fee hold not exposed.");
       const next=seal({...withoutDigest(current),state:"finalized",updatedAt:at,effectAt:at,outcomeDigest,consumedAtomic:proof.actualFee,merchantNativeActualFee:proof});await this.writeJson(this.recordPath(identity,reservationId),next);return next;
     });
+  }
+
+  /** Static normal-owner canonical proof; public DTOs cannot release capacity. */
+  async settleMetaMaskNativeActual(operationId:string,now:Date):Promise<void> {
+    const p=await readMetaMaskNativeSettlement(this.root,operationId),at=instant(now);
+    for(const expected of p.reservations){
+      const identity=validateIdentity(expected);await this.ready();
+      await this.withLocks([this.bucketLock(identity)],async()=>{
+        const value=await this.readJson(this.recordPath(identity,expected.reservationId));if(value===null)throw blocked("MetaMask settlement hold is absent.");
+        const current=validateAssetUsageReservation(value),native=identity.asset.kind==="native",outcomeDigest=hashObject(p.proof);
+        if(current.reservationId!==expected.reservationId||current.idempotencyHash!==expected.idempotencyHash||current.policyDigest!==p.policyDigest||current.amountAtomic!==expected.amountAtomic||canonicalJson(current.metamaskNativeReservation)!==canonicalJson(expected.metamaskNativeReservation)||current.rail!=="direct"||at<current.updatedAt)throw blocked("MetaMask settlement prior hold changed.");
+        if(current.state==="finalized"||current.state==="failed_confirmed_revert") {if(current.outcomeDigest!==outcomeDigest)throw blocked("MetaMask settlement outcome changed.");return;}
+        if(!["submitted","unknown_finality"].includes(current.state))throw blocked("MetaMask settlement has no durable effect hold.");
+        const consumed=native?p.receipt.nativeFeeAtomic:p.receipt.transferAccepted?"1000":"0";
+        if(BigInt(consumed)>BigInt(current.amountAtomic))throw blocked("MetaMask consumption exceeds hold.");
+        const next=seal({...withoutDigest(current),state:native||p.receipt.transferAccepted?"finalized":"failed_confirmed_revert",updatedAt:at,effectAt:at,outcomeDigest,
+          ...(native?{consumedAtomic:consumed,metamaskNativeActualFee:p.proof}:p.receipt.transferAccepted?{}:{consumedAtomic:"0"})});
+        await this.writeJson(this.recordPath(identity,current.reservationId),next);
+      });
+    }
   }
 
   /** Atomic cancellation in the existing schema; a delayed reserve can only replay the released row. */

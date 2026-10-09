@@ -7,6 +7,8 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 
 export type CommandRequest =
+  | {readonly command:"wallet.metamask.native-transfer";readonly chainId:number;readonly idempotencyKey:string}
+  | {readonly command:"wallet.metamask.native-transfer-status"|"wallet.metamask.native-transfer-observe";readonly operationId:string}
   | { readonly command: "sei.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "mega.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "sei.funding.approve" | "sei.funding.status"; readonly operationId: string }

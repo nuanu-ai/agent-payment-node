@@ -1,3 +1,4 @@
+import { runFixedMetaMaskNativeTransfer, readFixedMetaMaskNativeTransfer } from "./metamask-native-transfer-owner.js";
 import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";import { readPermit2IntentStatus } from "./x402-permit2/status.js";
 import { publicCircle } from "./circle-v2-evm/operation-model.js";
 import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { failureEnvelope, successEnvelope } from "./output.js";
@@ -309,6 +310,9 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
       case "wallet.permission.disable":
       case "wallet.permission.forget":
         return dataOutcome(await this.providerPermissions.execute(request), "provider_permission_binding");
+      case "wallet.metamask.native-transfer": return dataOutcome(await runFixedMetaMaskNativeTransfer(this.context.state.root,request.chainId,request.idempotencyKey),"durable_public_state");
+      case "wallet.metamask.native-transfer-status":
+      case "wallet.metamask.native-transfer-observe": return dataOutcome(await readFixedMetaMaskNativeTransfer(this.context.state.root,request.operationId,request.command==="wallet.metamask.native-transfer-observe"),"durable_public_state");
       case "wallet.status": {
         const providerStatus = await this.providerWallet.status(request.profile);
         return providerStatus === null
