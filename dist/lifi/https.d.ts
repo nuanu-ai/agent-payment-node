@@ -10,5 +10,5 @@ export declare class BridgeHttps {
     private active;
     private readonly waiting;
     constructor(resolveAddresses?: typeof resolvePublicAddresses, lifiApiKey?: string, requestTimeoutMs?: number);
-    request(endpointInput: string, method: "GET" | "POST", body: string | null, maximumBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void): Promise<LifiResponse>;
+    request(endpointInput: string, method: "GET" | "POST", body: string | null, maximumBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG", beforeSend?: () => void | Promise<void>): Promise<LifiResponse>;
 }

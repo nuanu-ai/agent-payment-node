@@ -9,3 +9,15 @@ The typed `canonical_wbtc_across_approval_continuation` policy permits at most 3
 The deterministic tests use captured public Ethereum approval/runtime reads and a synthetic offline Arbitrum approval served solely by a test transport. They assert both complete call graphs, failure under the old24 cap before signing/sending, archive batches of at most three, route/pin eligibility, exhausted unsigned recovery, retention of the original approval hash, one bridge send, and no resend. See [physical POST trace](evidence/wbtc-continuation-20261009/physical-post-trace.txt).
 
 Ethereum to Arbitrum is the funding leg. Original C1-09 acceptance remains Arbitrum to Ethereum WBTC and requires its own fresh owner-approved quote and both-chain SAFE receipt. No new financial operation was executed by this source fix.
+
+## Fresh WBTC effect authority
+
+Canonical Across WBTC between Ethereum and Arbitrum now freezes the owner policy's activation digest during normal preparation. Revoking and reactivating the same revision changes that binding. An older WBTC journal without this binding remains readable, cancellable and observable; it cannot approve, sign or send a new financial effect.
+
+Each invocation that can sign or first-send an unattempted WBTC effect requires foreground confirmation. Its private grant starts when that confirmation succeeds and ends after 60 seconds, at the original operation expiry, or at the active policy expiry, whichever comes first. Persisted approval timestamps cannot recreate this grant. Submitted, unknown or unresolved signing effects remain observation-only and do not request another confirmation.
+
+The normal service holds wallet custody, wallet/profile, true policy profile and EVM owner locks through the effect boundary. Policy activation, owner identity and the exact charged usage hold are checked again after wallet loading, before decrypting and signing, and after RPC pacing, DNS and TLS immediately before `request.end`. These file checks add no RPC requests. Existing route pins, fee/nonce checks and the typed 31/33 POST graphs remain unchanged.
+
+Create-only, fsynced SIGN and SEND claims bind each effect to the full intent, fingerprint and envelope; SEND also binds its sealed material and transaction hash. They live outside the mutable operation and usage journals. Restoring those journals or removing a usage hold cannot recreate a financial effect. An ambiguous claim or send stays unavailable for replay.
+
+Fresh preparation still accepts an exact retained allowance of 1000 for an exact 1000 WBTC request and creates one bridge effect. Another nonzero allowance refuses. It does not authorize continuing the expired historical bridge.

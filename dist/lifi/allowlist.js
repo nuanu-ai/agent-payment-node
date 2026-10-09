@@ -1,7 +1,8 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
-import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { activeAssetPolicyFromState, loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, } from "../asset-usage-ledger.js";
+import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { ApnError } from "../errors.js";
 import { bridgeAssetRow, bridgeExecutionSource, bridgeExecutionSourceCaip2, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeAddress, bridgeFailure, bridgeSame, bridgeUint } from "./validation.js";
@@ -10,9 +11,11 @@ export const LIFI_ACROSS_BRIDGE_MECHANISM = Object.freeze({ provider: "lifi", re
 export const LIFI_STARGATE_BRIDGE_MECHANISM = Object.freeze({ provider: "lifi", reference: "stargate-v2-taxi" });
 export class BridgeAllowlistGate {
     context;
+    underProfileLock;
     ledger;
-    constructor(context) {
+    constructor(context, underProfileLock = false) {
         this.context = context;
+        this.underProfileLock = underProfileLock;
         this.ledger = new AssetUsageLedger(context.state.root);
     }
     async admit(profile, owner, request, tool) {
@@ -29,7 +32,7 @@ export class BridgeAllowlistGate {
             dailyUsageAtomic: usage.amountAtomic, asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() };
         const admission = evaluate(active.registry, evaluation);
         exactMechanism(admission, mechanism);
-        return { schemaVersion: BRIDGE_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision,
+        return { schemaVersion: BRIDGE_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision, activationDigest: active.activationDigest,
             ...subject, mechanism };
     }
     async confirm(profile, request, tool, bindingValue) {
@@ -45,7 +48,8 @@ export class BridgeAllowlistGate {
         if (!bridgeSame(binding.mechanism, mechanism))
             refuse("bridge_mechanism_mismatch", "The prepared bridge mechanism differs from the selected LI.FI route.");
         const active = await this.active(profile, binding.account);
-        if (active.digest !== binding.policyDigest || active.revision !== binding.policyRevision) {
+        if (active.digest !== binding.policyDigest || active.revision !== binding.policyRevision ||
+            (binding.activationDigest !== undefined && active.activationDigest !== binding.activationDigest)) {
             refuse("allowlist_policy_changed", "The active owner allowlist policy changed after bridge preparation; prepare a new bridge operation.");
         }
         const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", mechanism, amountAtomic: binding.amountAtomic,
@@ -125,7 +129,9 @@ export class BridgeAllowlistGate {
     async active(profile, owner) {
         let active;
         try {
-            active = await loadActiveAssetPolicyRegistry(this.context, profile);
+            active = this.underProfileLock
+                ? activeAssetPolicyFromState(await new AllowlistPolicyStore(this.context.state.root).readUnderProfileLock(profile), this.context.clock.now())
+                : await loadActiveAssetPolicyRegistry(this.context, profile);
         }
         catch (error) {
             if (error instanceof ApnError && error.details?.reason === "allowlist_policy_expired") {
@@ -142,12 +148,13 @@ export class BridgeAllowlistGate {
 }
 export function validateBridgeAllowlistBinding(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "policyDigest", "policyRevision", "account", "chain", "asset",
-        "amountAtomic", "selfRecipient", "mechanism"]) || !isPlainRecord(value.asset) || !exactKeys(value.asset, ["kind", "identifier"])) {
+        "amountAtomic", "selfRecipient", "mechanism", ...(value.activationDigest === undefined ? [] : ["activationDigest"])]) || !isPlainRecord(value.asset) || !exactKeys(value.asset, ["kind", "identifier"])) {
         bridgeFailure("APN_STATE_CORRUPT", "bridge_allowlist_binding");
     }
     const binding = value;
     if (binding.schemaVersion !== BRIDGE_ALLOWLIST_SCHEMA || !/^[a-f0-9]{64}$/u.test(binding.policyDigest) ||
         !Number.isSafeInteger(binding.policyRevision) || binding.policyRevision < 1 ||
+        (binding.activationDigest !== undefined && !/^[a-f0-9]{64}$/u.test(binding.activationDigest)) ||
         bridgeAddress(binding.account, "APN_STATE_CORRUPT") !== binding.account || !bridgeExecutionSourceCaip2(binding.chain) ||
         (binding.asset.kind === "native" ? binding.asset.identifier !== null : bridgeAddress(binding.asset.identifier, "APN_STATE_CORRUPT") !== binding.asset.identifier) ||
         bridgeAddress(binding.selfRecipient, "APN_STATE_CORRUPT") !== binding.selfRecipient ||

@@ -1,3 +1,4 @@
+import { assertBridgePhysicalGrant } from "./effect-authority.js";
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -34,7 +35,7 @@ export class BridgeRpc {
         this.readSession = session;
         this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
         this.submit = session === undefined || oneAttempt === undefined ? call :
-            sessionCall?.(session) ?? (async (method, params) => await submitDirect(method, params, (m, p) => oneAttempt(m, p)));
+            sessionCall?.(session) ?? (async (method, params, beforeSend) => await submitDirect(method, params, (m, p) => oneAttempt(m, p, beforeSend)));
         this.batchCall = session === undefined ? undefined : sessionBatchCall?.(session);
         this.evm = new EvmRpc(this.call, origin, 16 * 1024);
     }
@@ -397,9 +398,13 @@ export class BridgeRpc {
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
         return quotes;
     }
-    async send(raw) {
+    async send(raw, beforeSend) {
         bridgeHex(raw, 16 * 1024, undefined, "APN_PROVIDER_EFFECT_UNAVAILABLE");
-        const hash = evmRpcHex(await this.submit("eth_sendRawTransaction", [raw]), 32);
+        if (beforeSend !== undefined) {
+            assertBridgePhysicalGrant(beforeSend, raw);
+            await beforeSend();
+        }
+        const hash = evmRpcHex(await this.submit("eth_sendRawTransaction", [raw], beforeSend), 32);
         if (hash !== keccak256(raw))
             bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
         return hash;

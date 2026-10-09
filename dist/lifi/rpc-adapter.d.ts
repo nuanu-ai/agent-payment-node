@@ -1,3 +1,4 @@
+import { type BridgeAuthorityCheck } from "./effect-authority.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import type { BridgeChainId } from "./chains.js";
@@ -131,7 +132,7 @@ export declare class BridgeRpc implements BridgeRpcPort {
         observedAt: string;
         chainId: 1 | 56 | 8453 | 42161 | 59144 | 143;
     })[]>;
-    send(raw: Hex): Promise<Hex>;
+    send(raw: Hex, beforeSend?: BridgeAuthorityCheck): Promise<Hex>;
     private basePinnedFeeValues;
     observe(hash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]): Promise<{
         transaction: BridgeTransactionProof;
