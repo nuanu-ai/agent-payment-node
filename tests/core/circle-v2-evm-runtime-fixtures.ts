@@ -48,9 +48,9 @@ export const snapshot = (chain: CircleDestinationChain): CircleAttesterSnapshot 
   chainId: chain, transmitter: CIRCLE_TRANSMITTER, blockHash, blockNumberAtomic: "10", deploymentDigest: "a".repeat(64) });
 export async function iris(proof: CircleSourceProof, bytes = message(proof.destinationChain, true)) {
   const m = decodeCircleMessage(bytes, proof.destinationChain, true), sigs = await Promise.all(signers.map(x => x.sign({ hash: keccak256(bytes) })));
-  return { sourceTxHash: proof.transactionHash, messages: [{ cctpVersion: 2, status: "complete", eventNonce: "123",
+  return { sourceTxHash: proof.transactionHash, messages: [{ cctpVersion: 2, status: "complete", eventNonce: String(m.nonce),
     message: bytes, attestation: `0x${sigs.map(x => x.slice(2)).join("")}`,
-    decodedMessage: { sourceDomain: "3", destinationDomain: String(circleRoute(proof.destinationChain).domain), nonce: m.nonce,
+    decodedMessage: { sourceDomain: "3", destinationDomain: String(circleRoute(proof.destinationChain).domain), nonce: String(m.nonce),
       sender: circleWord(CIRCLE_MESSENGER), recipient: circleWord(CIRCLE_MESSENGER), destinationCaller: CIRCLE_ZERO, messageBody: m.body,
       minFinalityThreshold: "1000", finalityThresholdExecuted: String(m.finalityExecuted), decodedMessageBody: {
         burnToken: circleWord(CIRCLE_SOURCE_TOKEN), mintRecipient: circleWord(CIRCLE_RECIPIENT), amount: "40100",

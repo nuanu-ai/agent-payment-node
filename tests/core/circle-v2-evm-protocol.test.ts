@@ -48,9 +48,9 @@ const snapshot = (chain: CircleDestinationChain): CircleAttesterSnapshot => ({ t
   chainId: chain, transmitter: CIRCLE_TRANSMITTER, blockHash, blockNumberAtomic: "10", deploymentDigest: "a".repeat(64) });
 async function iris(proof: CircleSourceProof, bytes = message(proof.destinationChain, true)) {
   const m = decodeCircleMessage(bytes, proof.destinationChain, true), sigs = await Promise.all(signers.map(x => x.sign({ hash: keccak256(bytes) })));
-  return { sourceTxHash: proof.transactionHash, messages: [{ cctpVersion: 2, status: "complete", eventNonce: "123",
+  return { sourceTxHash: proof.transactionHash, messages: [{ cctpVersion: 2, status: "complete", eventNonce: String(m.nonce),
     message: bytes, attestation: `0x${sigs.map(x => x.slice(2)).join("")}`,
-    decodedMessage: { sourceDomain: "3", destinationDomain: String(circleRoute(proof.destinationChain).domain), nonce: m.nonce,
+    decodedMessage: { sourceDomain: "3", destinationDomain: String(circleRoute(proof.destinationChain).domain), nonce: String(m.nonce),
       sender: circleWord(CIRCLE_MESSENGER), recipient: circleWord(CIRCLE_MESSENGER), destinationCaller: CIRCLE_ZERO, messageBody: m.body,
       minFinalityThreshold: "1000", finalityThresholdExecuted: String(m.finalityExecuted), decodedMessageBody: {
         burnToken: circleWord(CIRCLE_SOURCE_TOKEN), mintRecipient: circleWord(CIRCLE_RECIPIENT), amount: "40100",
@@ -147,4 +147,19 @@ test("fast issuer evidence does not turn source inclusion into finalized bridge 
   const obs=source(143),finalized=decodeCircleSource({...obs,finalityTag:"finalized"},143);verifyCircleClosureFinality(included,finalized);
   const changed={...finalized,blockHash:nonce};const {integrityHash:_,...body}=changed;
   assert.throws(()=>verifyCircleClosureFinality(included,{...body,integrityHash:hashObject(body)}),/finality/);
+});
+
+test("actual V2 issuer eventNonce is strict bytes32 and bound to the signed raw nonce", async () => {
+  // Public actual Linea response, burn0xbe0d229c...1779, 2026-10-09. Its event/decoded/raw nonce words agree.
+  const actualNonce = "0x61e1723eed95d9ff527f852541862ac14b5399f6be5d56ff029620d74e1d6384" as Hex;
+  const proof = decodeCircleSource(source(143), 143), original = message(143, true);
+  const bytes = (`${original.slice(0, 26)}${actualNonce.slice(2)}${original.slice(90)}`) as Hex, response = await iris(proof, bytes);
+  assert.equal(response.messages[0]!.eventNonce, actualNonce); assert.equal(response.messages[0]!.decodedMessage.nonce, actualNonce);
+  assert.equal((await bindCircleAttestation(proof, response, snapshot(143))).nonce, actualNonce);
+  const upper = structuredClone(response); upper.messages[0]!.eventNonce = `0x${actualNonce.slice(2).toUpperCase()}`;
+  assert.equal((await bindCircleAttestation(proof, upper, snapshot(143))).nonce, actualNonce);
+  for (const eventNonce of ["", "123", "0x", `0x${"11".repeat(31)}`, `0x${"11".repeat(33)}`, `0x${"gg".repeat(32)}`, `0x${"11".repeat(32)}`]) {
+    const wrong = structuredClone(response); wrong.messages[0]!.eventNonce = eventNonce; await assert.rejects(bindCircleAttestation(proof, wrong, snapshot(143)));
+    const decodedWrong = structuredClone(response); decodedWrong.messages[0]!.decodedMessage.nonce = eventNonce; await assert.rejects(bindCircleAttestation(proof, decodedWrong, snapshot(143)));
+  }
 });
