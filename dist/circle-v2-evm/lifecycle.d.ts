@@ -6,7 +6,8 @@ export interface CircleLifecyclePorts {
     readonly now: () => number;
     save(op: CircleOperationV1): Promise<void>;
     assertOwnerPolicyAndConflicts(op: CircleOperationV1): Promise<void>;
-    approve(op: CircleOperationV1, role: "source" | "mint" | "cleanup", deadline: string): Promise<void>;
+    authorizationDeadline(op: CircleOperationV1): Promise<string | null>;
+    approve(op: CircleOperationV1, role: "source" | "mint" | "cleanup" | "cancel", deadline: string): Promise<void>;
     preflight(op: CircleOperationV1, effect: CircleEffect): Promise<void>;
     seal(op: CircleOperationV1, effect: CircleEffect, guard: () => void): Promise<CircleMaterial>;
     loadMaterial(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null>;

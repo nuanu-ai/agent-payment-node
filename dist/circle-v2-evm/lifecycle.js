@@ -4,7 +4,10 @@ import { assertCircleAttestation } from "./protocol.js";
 const authorities = new WeakMap();
 const consentBinding = (op) => hashObject({ operationId: op.operationId, fingerprint: op.fingerprint, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
 async function consent(op, role, ports) {
-    const deadline = Math.min(ports.now() + 60_000, role === "source" ? Date.parse(op.expiresAt) : Infinity);
+    const policyDeadline = await ports.authorizationDeadline(op);
+    if (policyDeadline !== null && (!Number.isFinite(Date.parse(policyDeadline)) || new Date(policyDeadline).toISOString() !== policyDeadline))
+        circleBlocked("owner_policy_window_invalid");
+    const deadline = Math.min(ports.now() + 60_000, role === "source" ? Date.parse(op.expiresAt) : Infinity, policyDeadline === null ? Infinity : Date.parse(policyDeadline));
     if (ports.now() >= deadline)
         circleBlocked("consent_expired");
     await ports.approve(op, role, new Date(deadline).toISOString());
@@ -13,6 +16,15 @@ async function consent(op, role, ports) {
     const token = () => { };
     authorities.set(token, { ports, binding: consentBinding(op), deadline, envelopes: new Map(op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role).map(e => [e.role, e.envelope.envelopeHash])), claimed: new Set(), active: null });
     return token;
+}
+async function cancellationConsent(op, ports) {
+    const deadline = ports.now() + 60_000, binding = consentBinding(op);
+    const guard = () => { if (ports.now() >= deadline || consentBinding(op) !== binding)
+        circleBlocked("cancellation_consent_expired"); };
+    await ports.approve(op, "cancel", new Date(deadline).toISOString());
+    guard();
+    // This no-effect guard is deliberately absent from authorities: it cannot authorize signing or dispatch.
+    return guard;
 }
 function checkConsent(token, op, ports, effect) {
     const authority = token === undefined ? undefined : authorities.get(token);
@@ -219,9 +231,11 @@ export async function cleanupCircle(input, ports) {
                 circleBlocked("unsubmitted_cancel_private_material_present");
         if (await ports.allowance(op) !== "0")
             circleBlocked("unsubmitted_cancel_nonzero_allowance");
-        const token = await consent(op, "cleanup", ports);
-        checkConsent(token, op, ports);
-        return persist(op, { usage: await ports.usage(op, "failed_before_effect"), usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "explicit_no_private_entry_cancellation", ports);
+        const guard = await cancellationConsent(op, ports);
+        guard();
+        const usage = await ports.usage(op, "failed_before_effect");
+        guard();
+        return persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "explicit_no_private_entry_cancellation", ports);
     }
     if (!["prepared", "reverted"].includes(burn.phase) || !["confirmed", "reverted"].includes(approval.phase) || op.source !== null)
         circleBlocked("cleanup_requires_confirmed_approval_and_no_burn_attempt");
