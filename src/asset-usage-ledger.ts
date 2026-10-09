@@ -1,3 +1,9 @@
+import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
+import { cleanup85NativeReservationMarker, sameCleanup85NativeMarker, type Cleanup85NativeReservationMarker } from "./asset-usage-ledger-cleanup85-native.js";
+import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
+import { activeAssetPolicyFromState } from "./allowlist-active-policy.js";
+import { StateStore } from "./state.js";
+import { verifiedCleanup85NativeReservation, verifiedCleanup85NativeSettlement, sameCleanup85LedgerOperation, type VerifiedCleanup85NativeReservation, type VerifiedCleanup85NativeSettlement, type Cleanup85NativeReservationBody, type Cleanup85NativeActualSettlement } from "./circle-cleanup85-native-ledger-authority.js";
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { hashObject } from "./canonical.js";
 import { merchantNativeActualFee, type MerchantNativeActualFee } from "./x402-merchant/fee-settlement.js";
@@ -46,6 +52,8 @@ export interface AssetUsageReservation extends AssetUsageIdentity {
   /** Proven asset consumption on a confirmed revert; absent on historical zero-consumption records. */
   readonly consumedAtomic?: string;
   readonly merchantNativeActualFee?: MerchantNativeActualFee;
+  readonly cleanup85NativeReservation?: Cleanup85NativeReservationMarker;
+  readonly cleanup85NativeActual?: Cleanup85NativeActualSettlement;
   readonly state: AssetUsageState;
   readonly reservedAt: string;
   readonly updatedAt: string;
@@ -130,7 +138,16 @@ export class AssetUsageLedger extends SecureStateStore {
     });
   }
 
-  async reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation> {
+  async reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation> { return this.reserveBound(input); }
+
+  async reserveCleanup85Native(authority: VerifiedCleanup85NativeReservation, now: Date): Promise<AssetUsageReservation> {
+    const b = verifiedCleanup85NativeReservation(authority, this.root), o = b.operation;
+    if (b.reservedAtomic !== "2000000000000" || BigInt(b.signedMaximumDebitAtomic) > BigInt(b.reservedAtomic) ||
+      b.idempotencyKey !== `apn.cleanup85-native:${o.operationId}` || b.reservationId !== assetUsageReservationId({account:o.walletAddress,chain:"eip155:42161",asset:{kind:"native",identifier:null}},b.idempotencyKey)) throw blocked("Cleanup85 native reservation binding mismatch.");
+    return this.reserveBound({account:o.walletAddress,chain:"eip155:42161",asset:{kind:"native",identifier:null},registry:b.policy.registry,rail:"direct",amountAtomic:b.reservedAtomic,idempotencyKey:b.idempotencyKey,now},b);
+  }
+
+  private async reserveBound(input: AssetUsageReserveInput, cleanup?: Cleanup85NativeReservationBody): Promise<AssetUsageReservation> {
     const registry = validateAssetPolicyRegistry(input.registry);
     const at = instant(input.now);
     const initial = evaluateAssetPolicy(registry, {
@@ -144,9 +161,14 @@ export class AssetUsageLedger extends SecureStateStore {
     await this.ready();
     return await this.withLocks([this.bucketLock(identity)], async () => {
       const reservations = await this.loadBucket(identity);
+      if (cleanup !== undefined) {
+        const active=activeAssetPolicyFromState(await new AllowlistPolicyStore(this.root).readUnderProfileLock(cleanup.operation.profile),input.now);
+        if(at>=cleanup.operation.expiresAt||active===null||active.digest!==cleanup.policy.digest||active.activationDigest!==cleanup.policy.activationDigest||active.revision!==cleanup.policy.revision||!sameCleanup85LedgerOperation(cleanup.operation,await new StateStore(this.root).findOperation(cleanup.operation.operationId)))throw blocked("Cleanup85 durable reservation operation or policy changed.");
+      }
       const existing = reservations.find((entry) => entry.reservationId === reservationId);
       if (existing !== undefined) {
         assertReplay(existing, initial.policyDigest, initial.registryVersion, input.rail, initial.amountAtomic, idempotencyHash);
+        if((cleanup===undefined&&existing.cleanup85NativeReservation!==undefined)||(cleanup!==undefined&&!sameCleanup85NativeMarker(existing.cleanup85NativeReservation,cleanup)))throw blocked("Cleanup85 reservation marker replay mismatch.");
         if (input.retryFailedBeforeEffect === true && existing.state === "failed_before_effect") {
           assertBucketWindow(reservations, at);
           const usage = sumUsage(reservations, input.now);
@@ -168,6 +190,7 @@ export class AssetUsageLedger extends SecureStateStore {
         amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
       });
       const body: ReservationBody = {
+        ...(cleanup===undefined?{}:{cleanup85NativeReservation:cleanup85NativeReservationMarker(cleanup)}),
         schemaVersion: ASSET_USAGE_RESERVATION_SCHEMA,
         reservationId,
         idempotencyHash,
@@ -258,6 +281,26 @@ export class AssetUsageLedger extends SecureStateStore {
       const next = seal(body);
       await this.writeJson(this.recordPath(identity, reservationId), next);
       return next;
+    });
+  }
+
+  /** Exact root-owned cleanup85 cancellation only; public projections are never authority. */
+  async settleCleanup85Native(authority: VerifiedCleanup85NativeSettlement, now: Date): Promise<AssetUsageReservation> {
+    const {operation:o,settlement:p}=verifiedCleanup85NativeSettlement(authority,this.root);
+    const identity:AssetUsageIdentity={account:o.walletAddress,chain:"eip155:42161",asset:{kind:"native",identifier:null}},key=`apn.cleanup85-native:${o.operationId}`;
+    const reservationId=assetUsageReservationId(identity,key),at=instant(now);await this.ready();
+    return this.withLocks([this.bucketLock(identity)],async()=>{
+      if(!sameCleanup85LedgerOperation(o,await new StateStore(this.root).findOperation(o.operationId)))throw blocked("Cleanup85 durable settlement operation changed.");
+      const value=await this.readJson(this.recordPath(identity,reservationId));if(value===null)throw blocked("Cleanup85 native hold missing.");
+      const current=validateAssetUsageReservation(value);
+      const policies=await new AllowlistPolicyStore(this.root).readUnderProfileLock(o.profile),frozen=policies.records.find(row=>row.revision===o.allowlist!.policyRevision);
+      if(frozen?.registry.policyDigest!==p.policyDigest||frozen.registry.registryVersion!==current.registryVersion||!policies.entries.some(row=>row.status==="active"&&row.revision===o.allowlist!.policyRevision&&row.entryDigest===o.evm!.cleanup85Cancellation!.activationDigest))throw blocked("Cleanup85 historical reservation policy mismatch.");
+      const marker=current.cleanup85NativeReservation;
+      if(marker===undefined||marker.fingerprint!==p.fingerprint||marker.requestBinding!==p.requestBinding||marker.envelopeHash!==cleanup85OperationEnvelope(o).envelopeHash||marker.signedMaximumDebitAtomic!==(BigInt(o.economics!.gasLimitAtomic)*BigInt(o.economics!.maxFeePerGasAtomic)+1n).toString()||marker.activationDigest!==o.evm!.cleanup85Cancellation!.activationDigest)throw blocked("Cleanup85 settlement marker changed.");
+      if(current.reservationId!==p.nativeReservationId||reservationId!==p.nativeReservationId||current.idempotencyHash!==idempotency(key)||current.rail!=="direct"||current.policyDigest!==p.policyDigest||current.amountAtomic!==p.reservedAtomic||o.allowlist?.policyDigest!==p.policyDigest||o.fingerprint!==p.fingerprint||o.transactionHash!==p.transactionHash||hashObject(o.evm!.cleanup85Cancellation!.request)!==p.requestBinding||at<current.updatedAt)throw blocked("Cleanup85 actual debit hold mismatch.");
+      if(current.state==="finalized"){if(current.outcomeDigest!==p.outcomeDigest||canonicalJson(current.cleanup85NativeActual)!==canonicalJson(p))throw blocked("Cleanup85 settlement outcome changed.");return current;}
+      if(!["submitted","unknown_finality"].includes(current.state))throw blocked("Cleanup85 native hold not exposed.");
+      const next=seal({...withoutDigest(current),state:"finalized",updatedAt:at,effectAt:at,outcomeDigest:p.outcomeDigest,consumedAtomic:p.nativeConsumedAtomic,cleanup85NativeActual:p});await this.writeJson(this.recordPath(identity,reservationId),next);return next;
     });
   }
 

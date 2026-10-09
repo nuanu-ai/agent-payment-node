@@ -1,3 +1,4 @@
+import { validateCleanup85NativeUsage } from "./asset-usage-ledger-cleanup85-native.js";
 import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import { canonicalJson, hashObject, domainHash, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
@@ -28,7 +29,7 @@ export function validateAssetUsageReservation(value: unknown): AssetUsageReserva
   ]) || exactKeys(value, [
     "schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "account", "chain",
     "asset", "rail", "amountAtomic", "consumedAtomic", "state", "reservedAt", "updatedAt", "effectAt", "outcomeDigest", "reservationDigest",
-  ]) || exactKeys(value,["schemaVersion","reservationId","idempotencyHash","policyDigest","registryVersion","account","chain","asset","rail","amountAtomic","consumedAtomic","merchantNativeActualFee","state","reservedAt","updatedAt","effectAt","outcomeDigest","reservationDigest"])) || value.schemaVersion !== ASSET_USAGE_RESERVATION_SCHEMA) corrupt("The usage reservation schema is invalid.");
+  ]) || exactKeys(value,["schemaVersion","reservationId","idempotencyHash","policyDigest","registryVersion","account","chain","asset","rail","amountAtomic","consumedAtomic","merchantNativeActualFee","state","reservedAt","updatedAt","effectAt","outcomeDigest","reservationDigest"]) || exactKeys(value,["schemaVersion","reservationId","idempotencyHash","policyDigest","registryVersion","account","chain","asset","rail","amountAtomic","consumedAtomic","cleanup85NativeReservation","cleanup85NativeActual","state","reservedAt","updatedAt","effectAt","outcomeDigest","reservationDigest"]) || exactKeys(value,["schemaVersion","reservationId","idempotencyHash","policyDigest","registryVersion","account","chain","asset","rail","amountAtomic","cleanup85NativeReservation","state","reservedAt","updatedAt","effectAt","outcomeDigest","reservationDigest"])) || value.schemaVersion !== ASSET_USAGE_RESERVATION_SCHEMA) corrupt("The usage reservation schema is invalid.");
   const { reservationDigest, ...body } = value;
   validateBody(body);
   if (typeof reservationDigest !== "string" || !DIGEST.test(reservationDigest) ||
@@ -46,10 +47,11 @@ function validateBody(value: Record<string, unknown>): void {
   validateIdentity(value as unknown as AssetUsageIdentity, true);
   if (!["direct", "gasless", "x402", "bridge", "swap"].includes(value.rail as string)) corrupt("The usage rail binding is invalid.");
   atomic(value.amountAtomic, true, true);
-  if (value.consumedAtomic !== undefined && (value.state !== "failed_confirmed_revert" && value.merchantNativeActualFee===undefined ||
+  if (value.consumedAtomic !== undefined && (value.state !== "failed_confirmed_revert" && value.merchantNativeActualFee===undefined && value.cleanup85NativeActual===undefined ||
     atomic(value.consumedAtomic, false, true) > atomic(value.amountAtomic, true, true))) {
     corrupt("Confirmed-revert consumption is invalid.");
   }
+  if(value.cleanup85NativeActual!==undefined||value.cleanup85NativeReservation!==undefined) validateCleanup85NativeUsage(value);
   if(value.merchantNativeActualFee!==undefined){
     const p=value.merchantNativeActualFee;
     if(!isPlainRecord(p)||!exactKeys(p,["kind","operationId","fingerprint","receiptHash","actualFee","reservedFee"])||p.kind!=="merchant_mega_native_actual_fee"||![p.operationId,p.fingerprint,p.receiptHash].every(x=>typeof x==="string"&&DIGEST.test(x))||value.state!=="finalized"||value.account!=="0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"||value.chain!=="eip155:4326"||value.rail!=="x402"||!isPlainRecord(value.asset)||value.asset.kind!=="native"||value.asset.identifier!==null||value.idempotencyHash!==idempotency(`apn.merchant-native:${p.operationId}`)||value.reservationId!==assetUsageReservationId(value as unknown as AssetUsageIdentity,`apn.merchant-native:${p.operationId}`)||p.reservedFee!==value.amountAtomic||p.actualFee!==value.consumedAtomic||value.outcomeDigest!==hashObject(p))corrupt("Merchant native actual fee proof binding is invalid.");
@@ -95,8 +97,8 @@ export function sumUsage(records: readonly AssetUsageReservation[], now: Date): 
     if (record.state === "failed_confirmed_revert" && record.consumedAtomic === undefined) continue;
     if (record.state === "finalized" && record.effectAt!.slice(0, 10) !== day) continue;
     if (record.state === "failed_confirmed_revert" && record.effectAt!.slice(0, 10) !== day) continue;
-    total += atomic(record.state === "failed_confirmed_revert" || record.merchantNativeActualFee!==undefined ? record.consumedAtomic! : record.amountAtomic,
-      record.state !== "failed_confirmed_revert" && record.merchantNativeActualFee===undefined, true);
+    total += atomic(record.state === "failed_confirmed_revert" || record.merchantNativeActualFee!==undefined || record.cleanup85NativeActual!==undefined ? record.consumedAtomic! : record.amountAtomic,
+      record.state !== "failed_confirmed_revert" && record.merchantNativeActualFee===undefined && record.cleanup85NativeActual===undefined, true);
     if (total > MAX_UINT256) corrupt("The usage ledger total exceeds uint256.");
   }
   return total.toString();
