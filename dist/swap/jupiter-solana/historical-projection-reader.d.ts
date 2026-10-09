@@ -1,5 +1,6 @@
 import type { WrappingSecretPort } from "../../macos-keychain.js";
 import { SOLANA_MAINNET_GENESIS } from "./catalog.js";
+import { HistoricalDirectoryGuard } from "./historical-authentication-readers.js";
 export interface HistoricalJupiterProjection {
     readonly schemaVersion: "apn.jupiter-historical-authentication.v1";
     readonly operationId: string;
@@ -37,7 +38,7 @@ export interface HistoricalJupiterProjection {
 /** Plain cryptographic projection only: no private authority, expiry verdict, ledger or sending permission. */
 export declare class JupiterHistoricalProjectionReader {
     #private;
-    constructor(root: string, wrapping: WrappingSecretPort);
+    constructor(root: string, wrapping: WrappingSecretPort, guard?: HistoricalDirectoryGuard);
     read(operationId: string): Promise<{
         readonly projection: HistoricalJupiterProjection;
     }>;

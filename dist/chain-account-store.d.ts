@@ -6,6 +6,7 @@ export declare class ChainAccountStore extends SecureStateStore implements Chain
     private readonly wrappingSecret;
     private initialized;
     constructor(root: string, wrappingSecret: WrappingSecretPort, options?: ConstructorParameters<typeof SecureStateStore>[1]);
+    protected initializeStorage(): Promise<void>;
     private ready;
     account(profileInput: string, rail: DirectRailName): Promise<ChainAccount | null>;
     ownerBinding(profileInput: string, rail: DirectRailName): Promise<ChainAccount | null>;

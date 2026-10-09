@@ -56,6 +56,7 @@ export declare class JupiterV1ExecutionBindingStore extends SecureStateStore {
     bindPrepared(op: SwapOperationRecord, admission: JupiterV1OwnerBinding, material: JupiterV1PreparedMaterial): Promise<void>;
     assertPrepared(op: SwapOperationRecord, admission: JupiterV1OwnerBinding, material: JupiterV1PreparedMaterial): Promise<void>;
     private path;
+    protected initializeStorage(): Promise<void>;
     private ready;
 }
 export declare function verifySignedJupiterV1Transaction(effect: RailSignedEffect, binding: JupiterV1ExecutionBinding): Promise<void>;

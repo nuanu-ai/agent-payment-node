@@ -1,7 +1,6 @@
 import { canonicalJson, hashObject } from "../../canonical.js";
 import { approvalCode } from "../../approval-code.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
-import { StateStore } from "../../state.js";
 import { exactChainConsent } from "../../tty-approval.js";
 import { SwapOperationRepository } from "../repository.js";
 import { SOLANA_MAINNET_GENESIS } from "./catalog.js";
@@ -10,7 +9,7 @@ import { verifySignedJupiterV1Transaction } from "./v1-effects.js";
 import { guardJupiterV1WhirlpoolMaterial } from "./v1-guard.js";
 import { assertHistoricalOrdinaryRecentBlockhash } from "./historical-wire.js";
 import { routeConfigForMaterial } from "./v1-route-config.js";
-import { existingHistoricalRoot, HistoricalBindingReader, HistoricalCustodyReader, HistoricalMaterialReader, historicalAuthenticationRefused as refuse } from "./historical-authentication-readers.js";
+import { HistoricalReadState, HistoricalDirectoryGuard, HistoricalBindingReader, HistoricalCustodyReader, HistoricalMaterialReader, historicalAuthenticationRefused as refuse } from "./historical-authentication-readers.js";
 
 import { HISTORICAL_JUPITER_IDS } from "./historical-pins.js";
 export interface HistoricalJupiterProjection {
@@ -31,18 +30,18 @@ export interface HistoricalJupiterProjection {
 }
 /** Plain cryptographic projection only: no private authority, expiry verdict, ledger or sending permission. */
 export class JupiterHistoricalProjectionReader {
-  readonly #state: StateStore;
+  readonly #state: HistoricalReadState;
   readonly #wrapping: WrappingSecretPort;
-  constructor(root: string, wrapping: WrappingSecretPort) { this.#state = new StateStore(root); this.#wrapping = wrapping; }
+  constructor(root: string, wrapping: WrappingSecretPort, guard?: HistoricalDirectoryGuard) { this.#state = new HistoricalReadState(root, guard); this.#wrapping = wrapping; }
   async read(operationId: string): Promise<{ readonly projection: HistoricalJupiterProjection }> {
     if (!HISTORICAL_JUPITER_IDS.some(id => id === operationId)) refuse();
-    await existingHistoricalRoot(this.#state.root);
+    await this.#state.initialize();
     const operations = new SwapOperationRepository(this.#state.root), original = await operations.loadAny(operationId);
     if (original === null || original.quote.profile !== "solana-local" || !["unknown_finality", "submitted"].includes(original.state) || original.submissionMarker === null || original.receiptProof !== null) refuse();
     return await this.#state.withLocks([`profile:${original.ownerProfileHash}`, `profile:${this.#state.profileHash("solana-local")}`, `operation:${operationId}`, `chain-wallet-effects:solana:${this.#state.profileHash("solana-local")}`], async () => {
       const assertUnchanged = async () => { const current = await operations.loadAny(operationId); if (canonicalJson(current) !== canonicalJson(original)) refuse(); };
       await assertUnchanged();
-      const materials = new HistoricalMaterialReader(this.#state.root), bindings = new HistoricalBindingReader(this.#state.root);
+      const materials = new HistoricalMaterialReader(this.#state.root, this.#state.directoryGuard()), bindings = new HistoricalBindingReader(this.#state.root, this.#state.directoryGuard());
       const material = await materials.load(original.quote.quoteHash); if (material === null) refuse();
       if (routeConfigForMaterial(material.execution).routeId !== "whirlpool-v1-83-sol-usdc" || canonicalJson(material.quote) !== canonicalJson(original.quote) || material.execution.genesis !== SOLANA_MAINNET_GENESIS || original.quote.inputAmountAtomic !== "1000000") refuse();
       const binding = await bindings.load(original, material); if (binding === null) refuse();
@@ -55,7 +54,7 @@ export class JupiterHistoricalProjectionReader {
       let live = false, expires = 0;
       let assertPublicFrame = assertUnchanged;
       const guard = async () => { if (!live || Date.now() >= expires) refuse(); await assertPublicFrame(); if (!live || Date.now() >= expires) refuse(); };
-      const custody = new HistoricalCustodyReader(this.#state.root, { load: async () => { await guard(); const key = await this.#wrapping.load(); try { await guard(); return key; } catch (error) { key?.fill(0); throw error; } }, create: async () => refuse() });
+      const custody = new HistoricalCustodyReader(this.#state.root, { load: async () => { await guard(); const key = await this.#wrapping.load(); try { await guard(); return key; } catch (error) { key?.fill(0); throw error; } }, create: async () => refuse() }, this.#state.directoryGuard());
       const owner = await custody.account("solana-local", "solana"), envelopeOwner = await custody.ownerBinding("solana-local", "solana");
       if (owner === null || canonicalJson(owner) !== canonicalJson(envelopeOwner) || owner.provider !== "local" || owner.custody !== "local_software" || owner.network !== "mainnet" || owner.address !== original.quote.account || jupiterV1AccountBindingHash(owner) !== binding.accountBindingHash) refuse();
       const admission: JupiterV1OwnerBinding = { account: owner, accountBindingHash: binding.accountBindingHash, policyDigest: binding.policyDigest, activationDigest: binding.activationDigest, admissionHash: binding.ownerAdmissionHash };
