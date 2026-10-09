@@ -41,5 +41,6 @@ export declare function merchantCurrent(rpc: MerchantRpcPort): Promise<{
     token: string;
 }>;
 export declare function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope): void;
+export declare function merchantHeader(value: unknown): Record<string, unknown>;
 /** Independent canonical finalized receipt + full transaction + exact token Transfer. No HTTP settlement inference. */
 export declare function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation): Promise<MerchantReceipt | null>;

@@ -83,6 +83,37 @@ export function checkMerchantEnvelope(current, envelope) {
         BigInt(current.native) < BigInt(envelope.maximumNativeFee) || BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
         refuse("merchant_nonce_fee_balance_changed");
 }
+export function merchantHeader(value) {
+    const b = object(value), result = {};
+    for (const key of ["hash", "parentHash", "stateRoot", "transactionsRoot", "receiptsRoot", "sha3Uncles"])
+        result[key] = hexHash(b[key]);
+    for (const key of ["number", "timestamp", "gasLimit", "gasUsed", "baseFeePerGas", "difficulty"])
+        result[key] = quantity(b[key]).toString();
+    for (const [key, length] of [["logsBloom", 514], ["nonce", 18]]) {
+        const v = bytes(b[key]);
+        if (v.length !== length)
+            refuse("merchant_header_bytes");
+        result[key] = v;
+    }
+    result.miner = getAddress(String(b.miner));
+    result.extraData = bytes(b.extraData);
+    if (String(result.extraData).length > 514 || BigInt(String(result.gasUsed)) > BigInt(String(result.gasLimit)))
+        refuse("merchant_header_bounds");
+    return result;
+}
+function transactionBinding(value) {
+    const tx = object(value), result = {};
+    for (const key of ["hash", "blockHash"])
+        result[key] = hexHash(tx[key]);
+    for (const key of ["blockNumber", "transactionIndex", "type", "value", "nonce", "chainId", "gas", "maxFeePerGas", "maxPriorityFeePerGas"])
+        result[key] = quantity(tx[key]).toString();
+    result.from = getAddress(String(tx.from));
+    result.to = getAddress(String(tx.to));
+    result.input = bytes(tx.input);
+    if (!Array.isArray(tx.accessList) || tx.accessList.length !== 0 || result.type !== "2")
+        refuse("merchant_receipt_transaction_type");
+    return result;
+}
 /** Independent canonical finalized receipt + full transaction + exact token Transfer. No HTTP settlement inference. */
 export async function merchantReceipt(rpc, o) {
     if (o.submissionAttempts !== 1 || o.txHash === null)
@@ -92,17 +123,30 @@ export async function merchantReceipt(rpc, o) {
         refuse("merchant_receipt_chain");
     if (first[1] === null || first[2] === null)
         return null;
-    const r = object(first[1]), tx = object(first[2]), head = object(first[3]);
+    const r = object(first[1]), tx = object(first[2]), head = object(first[3]), headIdentity = merchantHeader(head);
     if (quantity(r.blockNumber) > quantity(head.number))
         return null;
-    const [block, code, impl, storage] = await rpc.batch([{ method: "eth_getBlockByNumber", params: [r.blockNumber, false] }, { method: "eth_getCode", params: [MERCHANT_TOKEN, r.blockNumber] },
-        { method: "eth_getCode", params: [MERCHANT_IMPLEMENTATION, r.blockNumber] }, { method: "eth_getStorageAt", params: [MERCHANT_TOKEN, IMPLEMENTATION_SLOT, r.blockNumber] }]);
+    const [block, code, impl, storage, headAnchor] = await rpc.batch([{ method: "eth_getBlockByNumber", params: [r.blockNumber, true] }, { method: "eth_getCode", params: [MERCHANT_TOKEN, r.blockNumber] },
+        { method: "eth_getCode", params: [MERCHANT_IMPLEMENTATION, r.blockNumber] }, { method: "eth_getStorageAt", params: [MERCHANT_TOKEN, IMPLEMENTATION_SLOT, r.blockNumber] }, { method: "eth_getBlockByNumber", params: [head.number, false] }]);
+    const blockIdentity = merchantHeader(block), fullBlock = object(block), index = quantity(r.transactionIndex), boundTransaction = transactionBinding(tx);
+    if (!Array.isArray(fullBlock.transactions) || fullBlock.transactions.length > 65536 || index >= BigInt(fullBlock.transactions.length) ||
+        canonicalJson(transactionBinding(fullBlock.transactions[Number(index)])) !== canonicalJson(boundTransaction) ||
+        quantity(tx.transactionIndex) !== index || fullBlock.transactions.filter(v => hexHash(object(v).hash) === o.txHash).length !== 1 ||
+        canonicalJson(merchantHeader(headAnchor)) !== canonicalJson(headIdentity) || quantity(fullBlock.number) !== quantity(r.blockNumber) ||
+        quantity(fullBlock.timestamp) > quantity(head.timestamp))
+        refuse("merchant_receipt_membership_anchor");
     if (hexHash(object(block).hash) !== hexHash(r.blockHash) || hexHash(r.transactionHash) !== o.txHash || hexHash(tx.hash) !== o.txHash || hexHash(tx.blockHash) !== hexHash(r.blockHash) || quantity(tx.blockNumber) !== quantity(r.blockNumber) ||
         getAddress(String(tx.from)) !== MERCHANT_OWNER || getAddress(String(tx.to)) !== MERCHANT_TOKEN || bytes(tx.input) !== MERCHANT_DATA || quantity(tx.value) !== 0n || quantity(tx.nonce) !== BigInt(o.envelope.nonce) || quantity(tx.chainId) !== 4326n ||
         quantity(tx.gas) !== BigInt(o.envelope.gas) || quantity(tx.maxFeePerGas) !== BigInt(o.envelope.maxFeePerGas) || quantity(tx.maxPriorityFeePerGas) !== BigInt(o.envelope.maxPriorityFeePerGas) ||
         keccak256(bytes(code)) !== MERCHANT_PROXY_HASH || keccak256(bytes(impl)) !== MERCHANT_IMPLEMENTATION_HASH || bytes(storage) !== `0x${MERCHANT_IMPLEMENTATION.slice(2).toLowerCase().padStart(64, "0")}`)
         refuse("merchant_receipt_binding");
-    const gasUsed = quantity(r.gasUsed), effectiveGasPrice = quantity(r.effectiveGasPrice);
+    const gasUsed = quantity(r.gasUsed), effectiveGasPrice = quantity(r.effectiveGasPrice), baseFee = quantity(fullBlock.baseFeePerGas);
+    const signedPrice = BigInt(o.envelope.maxFeePerGas), offeredPrice = baseFee + BigInt(o.envelope.maxPriorityFeePerGas);
+    if (effectiveGasPrice !== (signedPrice < offeredPrice ? signedPrice : offeredPrice))
+        refuse("merchant_receipt_effective_fee");
+    if (gasUsed === 0n || quantity(r.type) !== 2n || effectiveGasPrice < baseFee || effectiveGasPrice > baseFee + BigInt(o.envelope.maxPriorityFeePerGas) ||
+        r.l1Fee !== undefined && quantity(r.l1Fee) !== 0n || r.blobGasUsed !== undefined && quantity(r.blobGasUsed) !== 0n)
+        refuse("merchant_receipt_fee_type");
     if (gasUsed > BigInt(o.envelope.gas) || effectiveGasPrice > BigInt(o.envelope.maxFeePerGas) || gasUsed * effectiveGasPrice > BigInt(o.envelope.maximumNativeFee))
         refuse("merchant_receipt_fee_ceiling");
     const status = quantity(r.status);
@@ -110,6 +154,8 @@ export async function merchantReceipt(rpc, o) {
         refuse("merchant_receipt_status");
     if (!Array.isArray(r.logs))
         refuse("merchant_receipt_logs");
+    if (status === 0n && r.logs.length !== 0)
+        refuse("merchant_receipt_reverted_logs");
     if (status === 1n) {
         const transfers = r.logs.filter(v => {
             const log = object(v);
@@ -117,8 +163,9 @@ export async function merchantReceipt(rpc, o) {
                 return false;
             try {
                 const e = decodeEventLog({ abi: erc20Abi, eventName: "Transfer", topics: log.topics, data: bytes(log.data) });
-                return getAddress(e.args.from) === MERCHANT_OWNER && getAddress(e.args.to) === MERCHANT_PAYEE && e.args.value === BigInt(MERCHANT_AMOUNT) && log.removed !== true &&
-                    hexHash(log.transactionHash) === o.txHash && hexHash(log.blockHash) === hexHash(r.blockHash);
+                return getAddress(e.args.from) === MERCHANT_OWNER && getAddress(e.args.to) === MERCHANT_PAYEE && e.args.value === BigInt(MERCHANT_AMOUNT) && log.removed === false && Array.isArray(log.topics) && log.topics.length === 3 && bytes(log.data).length === 66 &&
+                    hexHash(log.transactionHash) === o.txHash && hexHash(log.blockHash) === hexHash(r.blockHash) &&
+                    quantity(log.blockNumber) === quantity(r.blockNumber) && quantity(log.transactionIndex) === index && quantity(log.logIndex) >= 0n;
             }
             catch {
                 return false;
@@ -127,9 +174,30 @@ export async function merchantReceipt(rpc, o) {
         if (transfers.length !== 1)
             refuse("merchant_exact_transfer_missing");
     }
-    const recheck = object(await rpc.call("eth_getBlockByNumber", [r.blockNumber, false]));
-    if (hexHash(recheck.hash) !== hexHash(r.blockHash))
+    const [recheck, finalHead, finalAnchor] = await rpc.batch([
+        { method: "eth_getBlockByNumber", params: [r.blockNumber, true] },
+        { method: "eth_getBlockByNumber", params: ["finalized", false] },
+        { method: "eth_getBlockByNumber", params: [head.number, false] },
+    ]);
+    if (canonicalJson(merchantHeader(recheck)) !== canonicalJson(blockIdentity) || canonicalJson(object(recheck).transactions) !== canonicalJson(fullBlock.transactions) ||
+        canonicalJson(merchantHeader(finalAnchor)) !== canonicalJson(headIdentity))
         refuse("merchant_receipt_reorg");
-    return { transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: (gasUsed * effectiveGasPrice).toString(), evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, code, impl, storage }) };
+    const currentHead = object(finalHead), currentIdentity = merchantHeader(currentHead);
+    if (quantity(currentHead.number) < quantity(head.number) || quantity(currentHead.timestamp) < quantity(head.timestamp))
+        refuse("merchant_receipt_finalized_regressed");
+    if (quantity(currentHead.number) === quantity(head.number)) {
+        if (canonicalJson(currentIdentity) !== canonicalJson(headIdentity))
+            refuse("merchant_receipt_finalized_changed");
+    }
+    else {
+        if (quantity(currentHead.number) === quantity(head.number) + 1n && hexHash(currentHead.parentHash) !== hexHash(head.hash))
+            refuse("merchant_receipt_finalized_parent");
+        const currentAnchor = await rpc.call("eth_getBlockByNumber", [currentHead.number, false]);
+        if (canonicalJson(merchantHeader(currentAnchor)) !== canonicalJson(currentIdentity))
+            refuse("merchant_receipt_finalized_changed");
+    }
+    return { transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: (gasUsed * effectiveGasPrice).toString(),
+        canonical: { transactionIndex: index.toString(), blockHeaderHash: hashObject(blockIdentity), finalizedNumber: quantity(currentHead.number).toString(), finalizedHash: hexHash(currentHead.hash), finalizedHeaderHash: hashObject(currentIdentity) },
+        evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, currentFinalizedHead: currentHead, code, impl, storage }) };
 }
 //# sourceMappingURL=rpc.js.map

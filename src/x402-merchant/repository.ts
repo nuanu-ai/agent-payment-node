@@ -23,9 +23,11 @@ export class MerchantRepository extends SecureStateStore {
         await this.ensureDirectory("merchant-x402");
         const prior = await this.findOperation(o.operationId);
         const edges: Record<MerchantOperation["state"], readonly MerchantOperation["state"][]> = { prepared:["signing_started"], signing_started:["submission_started","unknown_finality"], submission_started:["unknown_finality","payment_finalized","reverted"], unknown_finality:["payment_finalized","reverted"], payment_finalized:["delivery_unknown"], delivery_unknown:["delivered"], delivered:[], reverted:[] };
+        const auditAppend = prior !== null && canonicalJson(o.canonicalObservations?.slice(0, prior.canonicalObservations?.length ?? 0) ?? []) === canonicalJson(prior.canonicalObservations ?? []);
+        const stripAudit = (value: MerchantOperation) => { const { integrityHash: _, canonicalObservations: __, ...body } = value; return body; };
         if (prior !== null && (prior.state !== o.state && !edges[prior.state].includes(o.state) ||prior.fingerprint !== o.fingerprint || prior.signingAttempts > o.signingAttempts || prior.submissionAttempts > o.submissionAttempts ||
             prior.txHash !== null && prior.txHash !== o.txHash || prior.receipt !== null && canonicalJson(prior.receipt) !== canonicalJson(o.receipt) ||
-            prior.terminal && prior.integrityHash !== o.integrityHash || canonicalJson(o.events.slice(0, prior.events.length)) !== canonicalJson(prior.events) ||
+            !auditAppend || prior.terminal && canonicalJson(stripAudit(prior)) !== canonicalJson(stripAudit(o)) || canonicalJson(o.events.slice(0, prior.events.length)) !== canonicalJson(prior.events) ||
             canonicalJson(o.deliveryAttempts.slice(0, prior.deliveryAttempts.length)) !== canonicalJson(prior.deliveryAttempts)))
             refuse("merchant_journal_append");
         if (prior === null && (o.state !== "prepared" || o.signingAttempts !== 0 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null || o.deliveryAttempts.length !== 0))
