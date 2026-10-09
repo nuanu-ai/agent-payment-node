@@ -156,7 +156,7 @@ export class TransferService {
             return await this.providerDirect.approve(operationId);
         const localFound = requiredLocal(found);
         const { profile, profileHash } = localFound;
-        return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
+        return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, ...(localFound.evm?.circleNativeAdmission === undefined ? [] : [`profile:${localFound.evm.circleNativeAdmission.recipientCustody.profileHash}`])], async () => {
             let operation = requiredLocal(await this.requiredOperation(operationId));
             if (operation.terminal)
                 return publicOperation(await this.followUsage(operation));

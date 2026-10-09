@@ -1,3 +1,4 @@
+import { validateCircleNativeAdmission } from "./circle-native-admission.js";
 import { encodeFunctionData } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -51,12 +52,17 @@ export function validateEvmFeeQuote(value, economics) {
     return quote;
 }
 export function validateEvmDirectBinding(value, economics) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote", ...(value.nativeCustody === undefined ? [] : ["nativeCustody"])])) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote", ...(value.nativeCustody === undefined ? [] : ["nativeCustody"]), ...(value.circleNativeAdmission === undefined ? [] : ["circleNativeAdmission"])])) {
         throw new ApnError("APN_STATE_CORRUPT", "EVM direct binding schema is invalid.");
     }
     const binding = value;
     if (binding.nativeCustody !== undefined)
         validateEvmNativeCustody(binding.nativeCustody);
+    if (binding.circleNativeAdmission !== undefined) {
+        validateCircleNativeAdmission(binding.circleNativeAdmission);
+        if (binding.asset.chainId !== 42161 || binding.asset.kind !== "native" || binding.circleNativeAdmission.recipientCustody.walletAddress !== binding.transactionTo)
+            throw new ApnError("APN_STATE_CORRUPT", "Circle admission differs from the exact native recipient.");
+    }
     const asset = validateEvmAsset(binding.asset);
     const quote = validateEvmFeeQuote(binding.feeQuote, economics);
     if (binding.schemaVersion !== "apn.evm-direct.v1" || quote.chainId !== asset.chainId ||

@@ -1,3 +1,4 @@
+import { circleNativeSourceIdentity, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
@@ -170,6 +171,12 @@ export class OperationService {
     await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
   }
 
+  async assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void> {
+    const sources = verifiedCircleNativeSources(proof, profileHash, account);
+    if (exceptOperation !== undefined && (exceptOperation.profileHash !== profileHash || exceptOperation.walletAddress !== account || exceptOperation.chainId !== 42161 || exceptOperation.evm?.asset.kind !== "native" || exceptOperation.evm.circleNativeAdmission === undefined || (await this.state.findOperation(exceptOperation.operationId))?.integrityHash !== exceptOperation.integrityHash)) throw new ApnError("APN_OPERATION_BLOCKED", "Native exclusion requires its exact saved operation.");
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], exceptOperation?.operationId, false, sources);
+  }
+
   /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
   async assertPermit2AccountAvailable(record: Permit2ProductionRecord): Promise<void> {
     validatePermit2ProductionRecord(record);
@@ -184,7 +191,7 @@ export class OperationService {
     await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
   }
 
-  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false): Promise<void> {
+  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>): Promise<void> {
     let wanted: ReadonlySet<string>;
     try { wanted = new Set(domains().map(conflictDomainKey)); } catch { wanted = new Set(); }
     for (const operation of await this.profileOperations(profileHash)) {
@@ -196,6 +203,8 @@ export class OperationService {
         // Only another CCTP operation may queue a source nonce after canonical inclusion. Other rails remain conservative.
         held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       }
+      if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
+        held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
       // An unreadable network or account on either side blocks the whole profile.
       if (held !== null && wanted.size > 0 && shared === undefined) continue;
