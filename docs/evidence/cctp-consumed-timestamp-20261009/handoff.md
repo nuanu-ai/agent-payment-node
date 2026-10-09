@@ -1,0 +1,5 @@
+The V17 refusal occurred before foreground approval because archive transaction metadata omitted blockTimestamp. This correction reconstructs only an absent property for the exact consumed85 variant, after canonical and rechecked block identity, quantity, timestamp and membership checks. Present invalid metadata and all other drift refuse. Both complete original saved digests remain mandatory.
+
+The authentic Nodies observation and official transaction fixtures exercise the real CircleRpc JSON-RPC observation, approval validation and normal production retirement with fake financial ports. All 73 focused cases pass; strict builds and 2469 repeat-emitted files match. Saved journals, private material, durable claims, policies and live ledger remain untouched.
+
+Normal command remains circle evm cleanup-nonce --operation 4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33 with APN_ARBITRUM_RPC_URL=https://arbitrum-one-public.nodies.app. Independent review and a new installed consumer plus explicit financial grant are required before execution. No grant is active.

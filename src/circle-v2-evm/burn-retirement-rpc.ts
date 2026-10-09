@@ -4,6 +4,7 @@ import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN } from "./catalog.js";
 import { circleBlocked, type CircleEffect, type CircleOperationV1 } from "./operation-model.js";
 import { circleHex, circleRecord, circleUint, verifyCircleApproval, type CircleReceiptProof } from "./protocol.js";
 import type { CircleRpc } from "./rpc.js";
+import { consumedApprovalTimestamp } from "./consumed-approval-timestamp.js";
 export interface SealedBurnEvidence { readonly approvalProof: CircleReceiptProof; readonly usdcBalanceAtomic: string; }
 export function assertRetirementObservedEnvelope(effect: CircleEffect, input: unknown): void {
   const t = circleRecord(input), e = effect.envelope;
@@ -14,9 +15,10 @@ export function assertRetirementObservedEnvelope(effect: CircleEffect, input: un
 export function approvalReceiptIdentity(proof: CircleReceiptProof): string {
   const { finalityTag: _tag, finalityBlockHash: _head, finalityBlockNumberAtomic: _number, ...body } = proof; return hashObject(body);
 }
-export async function sealedBurnEvidence(source: CircleRpc, op: CircleOperationV1, allowance: (tag: string) => Promise<string>): Promise<SealedBurnEvidence> {
-  const approval = op.effects[0]!, observation = await source.observation(approval.transactionHash!, "finalized");
+export async function sealedBurnEvidence(source: CircleRpc, op: CircleOperationV1, allowance: (tag: string) => Promise<string>, mode?: "consumed_nonce85"): Promise<SealedBurnEvidence> {
+  const approval = op.effects[0]!; let observation = await source.observation(approval.transactionHash!, "finalized");
   if (observation === null) circleBlocked("retirement_original_approval_not_finalized");
+  if (mode === "consumed_nonce85") observation = consumedApprovalTimestamp(observation, op);
   assertRetirementObservedEnvelope(approval, observation.transaction);
   const receipt = circleRecord(observation.receipt), proof = verifyCircleApproval(observation, false, await allowance(String(receipt.blockNumber)));
   if (approval.proof === null || approvalReceiptIdentity(proof) !== approvalReceiptIdentity(approval.proof)) circleBlocked("retirement_original_approval_reorg");

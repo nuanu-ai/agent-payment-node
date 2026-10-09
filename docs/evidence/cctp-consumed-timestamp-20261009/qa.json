@@ -1,0 +1,53 @@
+{
+  "capturedAt": "2026-10-09T11:13:35.534263+00:00",
+  "parent": "9c358e23bc48348975ae3df6dc05dc5ee4bdee7b",
+  "sourceScope": "exact consumed_nonce85 only; legacy84 and generic raw transaction digest contracts unchanged",
+  "rootCause": "three archive RPCs omit optional blockTimestamp; saved original tx includes it; receipts/logs/canonical identities unchanged",
+  "strictProductionBuild": "PASS",
+  "strictFocusedBuildWithPinnedTypeRoots": "PASS",
+  "skipLibCheckInherited": true,
+  "node": "24.15.0",
+  "typescript": "5.9.2",
+  "tests": {
+    "pass": 73,
+    "fail": 0,
+    "consumedProductionRuntime": 50,
+    "legacyTimestamp": 2,
+    "legacyBurnRetirementRuntime": 21
+  },
+  "repeatEmission": {
+    "files": 2469,
+    "mismatches": [],
+    "foreignCompilerDeclarationsRestored": [
+      "dist/facilitator-gasless/receipt.d.ts",
+      "dist/facilitator-gasless/schema.d.ts",
+      "dist/facilitator-gasless/service.d.ts",
+      "dist/gasless/catalog.d.ts",
+      "dist/gasless/schema.d.ts",
+      "dist/lifi/non-evm-source-journal.d.ts",
+      "dist/lifi/receipt.d.ts",
+      "dist/lifi/rpc-adapter.d.ts",
+      "dist/lifi/rpc-batch-codec.d.ts",
+      "dist/lifi/schema.d.ts",
+      "dist/lifi/service.d.ts",
+      "dist/metamask-gasless/catalog.d.ts",
+      "dist/metamask-smart-account-vendor.d.ts",
+      "dist/relay/status.d.ts",
+      "dist/x402-network.d.ts"
+    ]
+  },
+  "savedTransactionBinding": "2863adadea86047a2de352d5a8d02d6f0655204abdf29f12a070c50dc9e8533d",
+  "savedApprovalIdentity": "b9af6f9f65b2fc0f3ac51f3cad9fa47c9411824c4dd646715b5dde0edba4827b",
+  "financialEffects": false,
+  "originalJournalMaterialClaimsLedgerPoliciesUntouched": true,
+  "fixtureProvenance": [
+    "paid-cctp-v4/nonce-cleanup-live-v17/production-cause-20261009T110115556Z.json",
+    "paid-cctp-v4/nonce-cleanup-live-v17/refused-20261009T105917Z/public-rpc-responses.json"
+  ],
+  "sourceHashes": {
+    "src/circle-v2-evm/consumed-approval-timestamp.ts": "8d3b6350d6c394b2016bc7ed9af3c1f53e3a8f4358941e09ba81f1a56f472407",
+    "src/circle-v2-evm/burn-retirement-rpc.ts": "364e21e441c2fe6cdf2ab7f5532052f503dd63af6ad158cbcba90d2f607113df",
+    "src/circle-v2-evm/consumed-burn-rpc.ts": "9f1c30b0b05745cb41620cf910e23a465b97d05cde00f4e7dc2bb97ecdc8e1a5"
+  },
+  "ownedMaxLines": 203
+}

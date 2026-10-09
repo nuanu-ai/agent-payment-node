@@ -3,6 +3,7 @@ import { hashObject } from "../canonical.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN } from "./catalog.js";
 import { circleBlocked } from "./operation-model.js";
 import { circleHex, circleRecord, circleUint, verifyCircleApproval } from "./protocol.js";
+import { consumedApprovalTimestamp } from "./consumed-approval-timestamp.js";
 export function assertRetirementObservedEnvelope(effect, input) {
     const t = circleRecord(input), e = effect.envelope;
     if (circleHex(t.hash, 32) !== effect.transactionHash || circleUint(t.nonce).toString() !== e.nonceAtomic || circleUint(t.gas).toString() !== e.gasLimitAtomic ||
@@ -14,10 +15,13 @@ export function approvalReceiptIdentity(proof) {
     const { finalityTag: _tag, finalityBlockHash: _head, finalityBlockNumberAtomic: _number, ...body } = proof;
     return hashObject(body);
 }
-export async function sealedBurnEvidence(source, op, allowance) {
-    const approval = op.effects[0], observation = await source.observation(approval.transactionHash, "finalized");
+export async function sealedBurnEvidence(source, op, allowance, mode) {
+    const approval = op.effects[0];
+    let observation = await source.observation(approval.transactionHash, "finalized");
     if (observation === null)
         circleBlocked("retirement_original_approval_not_finalized");
+    if (mode === "consumed_nonce85")
+        observation = consumedApprovalTimestamp(observation, op);
     assertRetirementObservedEnvelope(approval, observation.transaction);
     const receipt = circleRecord(observation.receipt), proof = verifyCircleApproval(observation, false, await allowance(String(receipt.blockNumber)));
     if (approval.proof === null || approvalReceiptIdentity(proof) !== approvalReceiptIdentity(approval.proof))
