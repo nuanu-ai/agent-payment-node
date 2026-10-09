@@ -32,6 +32,8 @@ export declare function verifyNativeCancellationRawFields(e: {
     readonly maxFeePerGasAtomic: string;
     readonly maxPriorityFeePerGasAtomic: string;
 }, raw: Hex): Promise<Hex>;
+/** RPC transaction signature values are QUANTITYs. Accept fixed-width DATA only for providers retaining the legacy word form. */
+export declare function evmRpcSignatureScalar(value: unknown): Hex;
 export interface Cleanup85NativeReceipt {
     readonly transactionHash: Hex;
     readonly blockHash: Hex;

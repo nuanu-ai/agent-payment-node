@@ -73,7 +73,12 @@ function transactionWire(t: Record<string, unknown>): TransactionSerializedEIP15
   if (parity > 1n) cleanup85Blocked("wire_parity");
   return serializeTransaction({ type: "eip1559", chainId: Number(quantity(t.chainId)), nonce: Number(quantity(t.nonce)), to: address(t.to),
     data: hex(t.input), value: quantity(t.value), gas: quantity(t.gas), maxFeePerGas: quantity(t.maxFeePerGas), maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGas), accessList: [] },
-    { r: hex(t.r, 32), s: hex(t.s, 32), yParity: Number(parity) });
+    { r: evmRpcSignatureScalar(t.r), s: evmRpcSignatureScalar(t.s), yParity: Number(parity) });
+}
+/** RPC transaction signature values are QUANTITYs. Accept fixed-width DATA only for providers retaining the legacy word form. */
+export function evmRpcSignatureScalar(value: unknown): Hex {
+  if (typeof value === "string" && /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/u.test(value)) return `0x${value.slice(2).padStart(64, "0")}` as Hex;
+  try { return hex(value, 32); } catch { cleanup85Blocked("signature_scalar"); }
 }
 export interface Cleanup85NativeReceipt {
   readonly transactionHash: Hex; readonly blockHash: Hex; readonly blockNumberAtomic: string;
