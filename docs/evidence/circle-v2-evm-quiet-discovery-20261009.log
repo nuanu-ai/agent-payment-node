@@ -1,0 +1,11 @@
+✔ actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile (1514.799375ms)
+✔ actual compiled Stargate status needs no RPC environment and creates no state (1135.331167ms)
+✔ actual compiled discovery is raw and no-effect with empty or unwritable caller HOME (8001.010542ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12073.268458
