@@ -75,8 +75,8 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
             completed: "completed";
             failed_before_effect: "failed_before_effect";
             abandoned_unknown: "abandoned_unknown";
-            expired_unused: "expired_unused";
             approved: "approved";
+            expired_unused: "expired_unused";
             verify_started: "verify_started";
             settle_started: "settle_started";
             settle_submitted: "settle_submitted";
@@ -164,8 +164,8 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         completed: "completed";
         failed_before_effect: "failed_before_effect";
         abandoned_unknown: "abandoned_unknown";
-        expired_unused: "expired_unused";
         approved: "approved";
+        expired_unused: "expired_unused";
         verify_started: "verify_started";
         settle_started: "settle_started";
         settle_submitted: "settle_submitted";
