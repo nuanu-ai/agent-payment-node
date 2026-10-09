@@ -36,6 +36,7 @@ export interface SeiCorrelatedDelivery {
     readonly signer: string;
     readonly nonce: string;
     readonly providerDigest: string;
+    readonly grossNative?: true;
 }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
 export declare function inspectSeiDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): SeiCorrelatedDelivery | null;

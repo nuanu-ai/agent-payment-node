@@ -1,3 +1,4 @@
+import { gaszipNativeNet } from "./gaszip-native-delivery.js";
 import { assertGaszipPhysicalGuard } from "./gaszip-authority.js";
 import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi, type Hex } from "viem";
@@ -5,7 +6,7 @@ import { canonicalJson, hashObject } from "../canonical.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { BridgeHttps } from "./https.js";
-import { SEI_FUNDING, seiAddress, seiFail, seiHash, seiObject, seiQuantity, type SeiCorrelatedDelivery } from "./sei-gaszip-contract.js";
+import { SEI_FUNDING, seiAddress, seiFail, seiHash, seiObject, seiQuantity, seiUint, seiExact, type SeiCorrelatedDelivery } from "./sei-gaszip-contract.js";
 import type { SeiFundingPlan, SeiFundingRecord } from "./sei-gaszip-journal.js";
 const ORACLE="0x420000000000000000000000000000000000000F";
 const ABI=parseAbi(["function getL1FeeUpperBound(uint256) view returns (uint256)","function getOperatorFee(uint256) view returns (uint256)"]);
@@ -56,7 +57,7 @@ export interface SeiSafeProof { readonly hash: Hex; readonly blockHash: Hex; rea
   readonly transactionDigest:string; readonly receiptDigest:string; readonly amount:string; readonly actualFee:string|null }
 /** The exact transaction and receipt must agree, have canonical block identity, and lie at or below a fresh safe head. */
 export async function proveSeiSafeTransaction(rpc:SeiRpcPort,chain:8453|1329,hash:Hex,
-  expected:{from:string;to:string;data:Hex;value:string;nonce:string;gas?:string;maxFee?:string;tip?:string}):Promise<SeiSafeProof|null>{
+  expected:{from:string;to:string;data:Hex;value:string;nonce:string;gas?:string;maxFee?:string;tip?:string;gasPrice?:string}):Promise<SeiSafeProof|null>{
   if(seiQuantity(await rpc.call("eth_chainId",[]))!==BigInt(chain))seiFail("proof_chain");
   const [tv,rv,sv]=await Promise.all([rpc.call("eth_getTransactionByHash",[hash]),rpc.call("eth_getTransactionReceipt",[hash]),rpc.call("eth_getBlockByNumber",["safe",false])]);
   if(tv===null || rv===null)return null;const t=seiObject(tv),r=seiObject(rv),safe=seiObject(sv);
@@ -66,7 +67,9 @@ export async function proveSeiSafeTransaction(rpc:SeiRpcPort,chain:8453|1329,has
     seiAddress(t.from)!==expected.from || seiAddress(r.from)!==expected.from || seiAddress(t.to)!==expected.to || seiAddress(r.to)!==expected.to ||
     t.input!==expected.data || seiQuantity(t.value).toString()!==expected.value || seiQuantity(t.nonce).toString()!==expected.nonce ||
     seiQuantity(t.chainId)!==BigInt(chain) || (expected.gas!==undefined && seiQuantity(t.gas).toString()!==expected.gas) ||
-    (expected.maxFee!==undefined && seiQuantity(t.maxFeePerGas).toString()!==expected.maxFee) || (expected.tip!==undefined && seiQuantity(t.maxPriorityFeePerGas).toString()!==expected.tip))seiFail("proof_binding");
+    (expected.maxFee!==undefined && seiQuantity(t.maxFeePerGas).toString()!==expected.maxFee) || (expected.tip!==undefined && seiQuantity(t.maxPriorityFeePerGas).toString()!==expected.tip) ||
+    (expected.gasPrice!==undefined && (seiQuantity(t.type)!==0n || seiQuantity(r.type)!==0n || seiQuantity(t.gasPrice).toString()!==expected.gasPrice ||
+      seiQuantity(r.effectiveGasPrice).toString()!==expected.gasPrice || seiQuantity(r.gasUsed)===0n || !Array.isArray(r.logs) || r.logs.length!==0 || r.contractAddress!==null)))seiFail("proof_binding");
   const included=seiObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));
   if(seiHash(included.hash)!==blockHash || seiQuantity(r.status)!==0n && seiQuantity(r.status)!==1n)seiFail("proof_reorg_or_status");
   if(expected.gas!==undefined && seiQuantity(r.gasUsed)>BigInt(expected.gas) || expected.maxFee!==undefined && seiQuantity(r.effectiveGasPrice)>BigInt(expected.maxFee))seiFail("source_receipt_gas_binding");
@@ -86,13 +89,21 @@ export async function proveSeiSafeTransaction(rpc:SeiRpcPort,chain:8453|1329,has
     transactionDigest:hashObject(t),receiptDigest:hashObject(r),amount:expected.value,actualFee};
 }
 export async function proveSeiDelivery(rpc:SeiRpcPort,owner:string,d:SeiCorrelatedDelivery):Promise<SeiSafeProof|null>{
-  const p=await proveSeiSafeTransaction(rpc,1329,d.hash,{from:d.signer,to:owner,data:"0x",value:d.amount,nonce:d.nonce});
+  let amount=d.amount;let signedBudget:{gas:string;gasPrice:string}|undefined;
+  if(d.grossNative===true){const tv=await rpc.call("eth_getTransactionByHash",[d.hash]);if(tv===null)return null;
+    const t=seiObject(tv);signedBudget={gas:seiQuantity(t.gas).toString(),gasPrice:seiQuantity(t.gasPrice).toString()};
+    amount=await gaszipNativeNet(tv,d,owner,1329,SEI_FUNDING.minimumOutput,
+      {fail:seiFail,object:seiObject,uint:seiUint,quantity:seiQuantity,hash:seiHash,address:seiAddress,exact:seiExact});}
+  const p=await proveSeiSafeTransaction(rpc,1329,d.hash,{from:d.signer,to:owner,data:"0x",value:amount,nonce:d.nonce,...signedBudget});
   if(p===null)return null;if(p.status!=="success")seiFail("destination_revert");
   const number=BigInt(p.blockNumber);if(number===0n)seiFail("destination_genesis");
   const previous=seiObject(await rpc.call("eth_getBlockByNumber",[hex(number-1n),false]));const previousHash=seiHash(previous.hash);
+  if(d.grossNative===true){const included=seiObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));
+    if(seiQuantity(previous.number)!==number-1n || seiQuantity(included.number)!==number || seiHash(included.hash)!==p.blockHash ||
+      seiHash(included.parentHash)!==previousHash || !Array.isArray(included.transactions) || included.transactions.filter(x=>x===d.hash).length!==1)seiFail("destination_canonical_membership");}
   const [before,after,code]=await Promise.all([rpc.call("eth_getBalance",[owner,{blockHash:previousHash,requireCanonical:true}]),
     rpc.call("eth_getBalance",[owner,{blockHash:p.blockHash,requireCanonical:true}]),rpc.call("eth_getCode",[owner,{blockHash:previousHash,requireCanonical:true}])]);
-  if(code!=="0x" || seiQuantity(after)-seiQuantity(before)!==BigInt(d.amount))seiFail("destination_exact_delta");return p;
+  if(code!=="0x" || seiQuantity(after)-seiQuantity(before)!==BigInt(p.amount))seiFail("destination_exact_delta");return p;
 }
 export async function proveSeiSource(rpc:SeiRpcPort,r:SeiFundingRecord):Promise<SeiSafeProof|null>{
   if(r.transactionHash===null)return null;return proveSeiSafeTransaction(rpc,8453,r.transactionHash,{from:r.owner.address,to:SEI_FUNDING.target,

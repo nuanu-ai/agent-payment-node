@@ -246,11 +246,11 @@ export class MegaFundingService {
             const d = inspectMegaDelivery(megaJson(response.body), r.transactionHash, r.owner.address, r.amountAtomic, source.blockNumber);
             if (d === null)
                 return publicMegaFunding(r);
-            if (BigInt(d.amount) < BigInt(r.minimumOutputAtomic))
-                megaFail("delivery_owner_floor");
             const proof = await proveMegaDelivery(this.rpc("destination"), r.owner.address, d);
             if (proof === null)
                 return publicMegaFunding(r);
+            if (BigInt(proof.amount) < BigInt(r.minimumOutputAtomic))
+                megaFail("delivery_owner_floor");
             destination = { ...proof, providerDigest: d.providerDigest };
             claimHash = d.hash;
         }

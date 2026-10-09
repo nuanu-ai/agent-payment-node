@@ -1,3 +1,4 @@
+import { gaszipNativeNet } from "./gaszip-native-delivery.js";
 import { assertGaszipPhysicalGuard } from "./gaszip-authority.js";
 import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi } from "viem";
@@ -5,7 +6,7 @@ import { canonicalJson, hashObject } from "../canonical.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { BridgeHttps } from "./https.js";
-import { MEGA_FUNDING, megaAddress, megaFail, megaHash, megaObject, megaQuantity } from "./mega-gaszip-contract.js";
+import { MEGA_FUNDING, megaAddress, megaFail, megaHash, megaObject, megaQuantity, megaUint, megaExact } from "./mega-gaszip-contract.js";
 const ORACLE = "0x420000000000000000000000000000000000000F";
 const ABI = parseAbi(["function getL1FeeUpperBound(uint256) view returns (uint256)", "function getOperatorFee(uint256) view returns (uint256)"]);
 const hex = (x) => `0x${x.toString(16)}`;
@@ -98,7 +99,9 @@ export async function proveMegaSafeTransaction(rpc, chain, hash, expected) {
         megaAddress(t.from) !== expected.from || megaAddress(r.from) !== expected.from || megaAddress(t.to) !== expected.to || megaAddress(r.to) !== expected.to ||
         t.input !== expected.data || megaQuantity(t.value).toString() !== expected.value || megaQuantity(t.nonce).toString() !== expected.nonce ||
         megaQuantity(t.chainId) !== BigInt(chain) || (expected.gas !== undefined && megaQuantity(t.gas).toString() !== expected.gas) ||
-        (expected.maxFee !== undefined && megaQuantity(t.maxFeePerGas).toString() !== expected.maxFee) || (expected.tip !== undefined && megaQuantity(t.maxPriorityFeePerGas).toString() !== expected.tip))
+        (expected.maxFee !== undefined && megaQuantity(t.maxFeePerGas).toString() !== expected.maxFee) || (expected.tip !== undefined && megaQuantity(t.maxPriorityFeePerGas).toString() !== expected.tip) ||
+        (expected.gasPrice !== undefined && (megaQuantity(t.type) !== 0n || megaQuantity(r.type) !== 0n || megaQuantity(t.gasPrice).toString() !== expected.gasPrice ||
+            megaQuantity(r.effectiveGasPrice).toString() !== expected.gasPrice || megaQuantity(r.gasUsed) === 0n || !Array.isArray(r.logs) || r.logs.length !== 0 || r.contractAddress !== null)))
         megaFail("proof_binding");
     const included = megaObject(await rpc.call("eth_getBlockByNumber", [hex(number), false]));
     if (megaHash(included.hash) !== blockHash || megaQuantity(r.status) !== 0n && megaQuantity(r.status) !== 1n)
@@ -125,7 +128,17 @@ export async function proveMegaSafeTransaction(rpc, chain, hash, expected) {
         transactionDigest: hashObject(t), receiptDigest: hashObject(r), amount: expected.value, actualFee };
 }
 export async function proveMegaDelivery(rpc, owner, d) {
-    const p = await proveMegaSafeTransaction(rpc, 4326, d.hash, { from: d.signer, to: owner, data: "0x", value: d.amount, nonce: d.nonce });
+    let amount = d.amount;
+    let signedBudget;
+    if (d.grossNative === true) {
+        const tv = await rpc.call("eth_getTransactionByHash", [d.hash]);
+        if (tv === null)
+            return null;
+        const t = megaObject(tv);
+        signedBudget = { gas: megaQuantity(t.gas).toString(), gasPrice: megaQuantity(t.gasPrice).toString() };
+        amount = await gaszipNativeNet(tv, d, owner, 4326, MEGA_FUNDING.minimumOutput, { fail: megaFail, object: megaObject, uint: megaUint, quantity: megaQuantity, hash: megaHash, address: megaAddress, exact: megaExact });
+    }
+    const p = await proveMegaSafeTransaction(rpc, 4326, d.hash, { from: d.signer, to: owner, data: "0x", value: amount, nonce: d.nonce, ...signedBudget });
     if (p === null)
         return null;
     if (p.status !== "success")
@@ -135,9 +148,15 @@ export async function proveMegaDelivery(rpc, owner, d) {
         megaFail("destination_genesis");
     const previous = megaObject(await rpc.call("eth_getBlockByNumber", [hex(number - 1n), false]));
     const previousHash = megaHash(previous.hash);
+    if (d.grossNative === true) {
+        const included = megaObject(await rpc.call("eth_getBlockByNumber", [hex(number), false]));
+        if (megaQuantity(previous.number) !== number - 1n || megaQuantity(included.number) !== number || megaHash(included.hash) !== p.blockHash ||
+            megaHash(included.parentHash) !== previousHash || !Array.isArray(included.transactions) || included.transactions.filter(x => x === d.hash).length !== 1)
+            megaFail("destination_canonical_membership");
+    }
     const [before, after, code] = await Promise.all([rpc.call("eth_getBalance", [owner, { blockHash: previousHash, requireCanonical: true }]),
         rpc.call("eth_getBalance", [owner, { blockHash: p.blockHash, requireCanonical: true }]), rpc.call("eth_getCode", [owner, { blockHash: previousHash, requireCanonical: true }])]);
-    if (code !== "0x" || megaQuantity(after) - megaQuantity(before) !== BigInt(d.amount))
+    if (code !== "0x" || megaQuantity(after) - megaQuantity(before) !== BigInt(p.amount))
         megaFail("destination_exact_delta");
     return p;
 }

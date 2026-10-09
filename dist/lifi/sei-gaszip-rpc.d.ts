@@ -36,6 +36,7 @@ export declare function proveSeiSafeTransaction(rpc: SeiRpcPort, chain: 8453 | 1
     gas?: string;
     maxFee?: string;
     tip?: string;
+    gasPrice?: string;
 }): Promise<SeiSafeProof | null>;
 export declare function proveSeiDelivery(rpc: SeiRpcPort, owner: string, d: SeiCorrelatedDelivery): Promise<SeiSafeProof | null>;
 export declare function proveSeiSource(rpc: SeiRpcPort, r: SeiFundingRecord): Promise<SeiSafeProof | null>;

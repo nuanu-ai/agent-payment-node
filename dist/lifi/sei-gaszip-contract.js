@@ -1,3 +1,4 @@
+import { inspectGaszipNativeDelivery } from "./gaszip-native-delivery.js";
 import { getAddress } from "viem";
 import { ApnError } from "../errors.js";
 import { hashObject } from "../canonical.js";
@@ -80,6 +81,8 @@ export function inspectSeiDelivery(value, sourceHash, owner, amount, sourceBlock
     const v = seiObject(value);
     seiExact(v, ["deposit", "txs"]);
     const d = seiObject(v.deposit);
+    if (Object.hasOwn(d, "seen"))
+        return inspectGaszipNativeDelivery(value, sourceHash, owner, amount, sourceBlock, 1329, 246, SEI_FUNDING.minimumOutput, { fail: seiFail, object: seiObject, uint: seiUint, quantity: seiQuantity, hash: seiHash, address: seiAddress, exact: seiExact });
     seiExact(d, ["block", "chain", "hash", "log", "sender", "shorts", "status", "time", "to", "usd", "value"]);
     if (seiHash(d.hash) !== sourceHash || seiUint(d.chain) !== 8453n || seiAddress(d.sender) !== owner || seiUint(d.value) !== seiUint(amount) ||
         seiAddress(d.to) !== owner || !Array.isArray(d.shorts) || d.shorts.length !== 1 || seiUint(d.shorts[0]) !== 246n)

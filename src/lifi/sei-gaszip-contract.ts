@@ -1,3 +1,4 @@
+import { inspectGaszipNativeDelivery } from "./gaszip-native-delivery.js";
 import { getAddress, type Hex } from "viem";
 import { ApnError } from "../errors.js";
 import { hashObject } from "../canonical.js";
@@ -49,10 +50,12 @@ export function inspectSeiFundingQuote(value: unknown, now: number): SeiFundingQ
   if (expires>BigInt(Number.MAX_SAFE_INTEGER) || Number(expires)*1000-now<30_000 || Number(expires)*1000-now>90_000) seiFail("quote_expiry");
   return { digest: hashObject(value), expiresAt: new Date(Number(expires)*1000).toISOString(), expectedAtomic: seiUint(q.expected).toString(), body:value };
 }
-export interface SeiCorrelatedDelivery { readonly hash: Hex; readonly amount: string; readonly signer: string; readonly nonce: string; readonly providerDigest: string }
+export interface SeiCorrelatedDelivery { readonly hash: Hex; readonly amount: string; readonly signer: string; readonly nonce: string; readonly providerDigest: string; readonly grossNative?: true }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
 export function inspectSeiDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): SeiCorrelatedDelivery | null {
   const v=seiObject(value); seiExact(v,["deposit","txs"]); const d=seiObject(v.deposit);
+  if(Object.hasOwn(d,"seen"))return inspectGaszipNativeDelivery(value,sourceHash,owner,amount,sourceBlock,1329,246,SEI_FUNDING.minimumOutput,
+    {fail:seiFail,object:seiObject,uint:seiUint,quantity:seiQuantity,hash:seiHash,address:seiAddress,exact:seiExact});
   seiExact(d,["block","chain","hash","log","sender","shorts","status","time","to","usd","value"]);
   if (seiHash(d.hash)!==sourceHash || seiUint(d.chain)!==8453n || seiAddress(d.sender)!==owner || seiUint(d.value)!==seiUint(amount) ||
     seiAddress(d.to)!==owner || !Array.isArray(d.shorts) || d.shorts.length!==1 || seiUint(d.shorts[0])!==246n) seiFail("deposit_binding");

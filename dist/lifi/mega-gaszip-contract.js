@@ -1,3 +1,4 @@
+import { inspectGaszipNativeDelivery } from "./gaszip-native-delivery.js";
 import { getAddress } from "viem";
 import { ApnError } from "../errors.js";
 import { hashObject } from "../canonical.js";
@@ -83,6 +84,8 @@ export function inspectMegaDelivery(value, sourceHash, owner, amount, sourceBloc
     const v = megaObject(value);
     megaExact(v, ["deposit", "txs"]);
     const d = megaObject(v.deposit);
+    if (Object.hasOwn(d, "seen"))
+        return inspectGaszipNativeDelivery(value, sourceHash, owner, amount, sourceBlock, 4326, 514, MEGA_FUNDING.minimumOutput, { fail: megaFail, object: megaObject, uint: megaUint, quantity: megaQuantity, hash: megaHash, address: megaAddress, exact: megaExact });
     megaExact(d, ["block", "chain", "hash", "log", "sender", "shorts", "status", "time", "to", "usd", "value"]);
     if (megaHash(d.hash) !== sourceHash || megaUint(d.chain) !== 8453n || megaAddress(d.sender) !== owner || megaUint(d.value) !== megaUint(amount) ||
         megaAddress(d.to) !== owner || !Array.isArray(d.shorts) || d.shorts.length !== 1 || megaUint(d.shorts[0]) !== 514n)

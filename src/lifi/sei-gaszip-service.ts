@@ -144,8 +144,9 @@ export class SeiFundingService {
     if(source.status==="success"){
       const response=await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`,"GET",null,256*1024,"APN_HTTP_CONFIG");
       if(response.status!==200)seiFail("status_http");const d=inspectSeiDelivery(seiJson(response.body),r.transactionHash,r.owner.address,r.amountAtomic,source.blockNumber);
-      if(d===null)return publicSeiFunding(r);if(BigInt(d.amount)<BigInt(r.minimumOutputAtomic))seiFail("delivery_owner_floor");
+      if(d===null)return publicSeiFunding(r);
       const proof=await proveSeiDelivery(this.rpc("destination"),r.owner.address,d);if(proof===null)return publicSeiFunding(r);
+      if(BigInt(proof.amount)<BigInt(r.minimumOutputAtomic))seiFail("delivery_owner_floor");
       destination={...proof,providerDigest:d.providerDigest};claimHash=d.hash;
     }
     r=await this.state.withLocks([...this.locks(r),"sei-gaszip:destination-claims"],async()=>{

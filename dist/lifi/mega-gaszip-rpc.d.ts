@@ -36,6 +36,7 @@ export declare function proveMegaSafeTransaction(rpc: MegaRpcPort, chain: 8453 |
     gas?: string;
     maxFee?: string;
     tip?: string;
+    gasPrice?: string;
 }): Promise<MegaSafeProof | null>;
 export declare function proveMegaDelivery(rpc: MegaRpcPort, owner: string, d: MegaCorrelatedDelivery): Promise<MegaSafeProof | null>;
 export declare function proveMegaSource(rpc: MegaRpcPort, r: MegaFundingRecord): Promise<MegaSafeProof | null>;

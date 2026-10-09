@@ -1,3 +1,4 @@
+import { inspectGaszipNativeDelivery } from "./gaszip-native-delivery.js";
 import { getAddress, type Hex } from "viem";
 import { ApnError } from "../errors.js";
 import { hashObject } from "../canonical.js";
@@ -50,11 +51,13 @@ export function inspectMegaFundingQuote(value: unknown, now: number): MegaFundin
   if (expires>BigInt(Number.MAX_SAFE_INTEGER) || Number(expires)*1000-now<30_000 || Number(expires)*1000-now>90_000) megaFail("quote_expiry");
   return { digest: hashObject(value), expiresAt: new Date(Number(expires)*1000).toISOString(), expectedAtomic: megaUint(q.expected).toString(), body:value };
 }
-export interface MegaCorrelatedDelivery { readonly hash: Hex; readonly amount: string; readonly signer: string; readonly nonce: string; readonly providerDigest: string }
+export interface MegaCorrelatedDelivery { readonly hash: Hex; readonly amount: string; readonly signer: string; readonly nonce: string; readonly providerDigest: string; readonly grossNative?: true }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
 export function inspectMegaDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): MegaCorrelatedDelivery | null {
   if(owner!==MEGA_FUNDING.owner)megaFail("owner_pin");
   const v=megaObject(value); megaExact(v,["deposit","txs"]); const d=megaObject(v.deposit);
+  if(Object.hasOwn(d,"seen"))return inspectGaszipNativeDelivery(value,sourceHash,owner,amount,sourceBlock,4326,514,MEGA_FUNDING.minimumOutput,
+    {fail:megaFail,object:megaObject,uint:megaUint,quantity:megaQuantity,hash:megaHash,address:megaAddress,exact:megaExact});
   megaExact(d,["block","chain","hash","log","sender","shorts","status","time","to","usd","value"]);
   if (megaHash(d.hash)!==sourceHash || megaUint(d.chain)!==8453n || megaAddress(d.sender)!==owner || megaUint(d.value)!==megaUint(amount) ||
     megaAddress(d.to)!==owner || !Array.isArray(d.shorts) || d.shorts.length!==1 || megaUint(d.shorts[0])!==514n) megaFail("deposit_binding");
