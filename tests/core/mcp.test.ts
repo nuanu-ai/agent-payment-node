@@ -21,7 +21,7 @@ import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js"
 
 const TOOL_NAMES = [
   "apn_circle_evm_adopt_external_mint",
-  "apn_circle_evm_prepare", "apn_circle_evm_approve_source", "apn_circle_evm_approve_mint", "apn_circle_evm_observe", "apn_circle_evm_refresh_attestation", "apn_circle_evm_cleanup", "apn_circle_evm_cleanup_nonce", "apn_circle_evm_status",
+  "apn_circle_evm_prepare", "apn_circle_evm_approve_source", "apn_circle_evm_approve_mint", "apn_circle_evm_observe", "apn_circle_evm_refresh_attestation", "apn_circle_evm_cleanup", "apn_circle_evm_cleanup_nonce", "apn_circle_evm_cleanup85_prepare", "apn_circle_evm_cleanup85_cancel", "apn_circle_evm_cleanup86_approve", "apn_circle_evm_status",
   "apn_swap_ethereum_uniswap_inventory",
   "apn_swap_ethereum_uniswap_quote",
   "apn_swap_ethereum_uniswap_prepare",
@@ -173,6 +173,9 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_circle_evm_refresh_attestation", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_cleanup", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_cleanup_nonce", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup85_prepare", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup85_cancel", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup86_approve", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_inventory", properties: [], required: [], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_quote", properties: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], required: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], defaults: {} },
