@@ -49,6 +49,7 @@ export function validateJupiterV1ExecutionBinding(value:unknown,operationValue:S
 }
 export interface JupiterV1SendClaim {readonly schemaVersion:"apn.jupiter-v1-send-claim.v1";readonly operationId:string;
  readonly markerHash:string;readonly bindingHash:string;readonly signature:string;readonly rawPayloadHash:string;readonly claimedAt:string;readonly claimHash:string}
+export interface JupiterV1SignedMarker {readonly schemaVersion:"apn.jupiter-v1-signed-marker.v1";readonly operationId:string;readonly markerHash:string;readonly bindingHash:string;readonly signature:string;readonly rawPayloadHash:string;readonly recordHash:string}
 /** Public hashes and signature only. Exact signed bytes stay in encrypted custody. Every create is fsynced. */
 export class JupiterV1ExecutionBindingStore extends SecureStateStore {
  private initialized:Promise<void>|undefined;
@@ -75,9 +76,10 @@ export class JupiterV1ExecutionBindingStore extends SecureStateStore {
  await this.ready();await verifySignedJupiterV1Transaction(effect,b);const body={schemaVersion:"apn.jupiter-v1-signed-marker.v1",operationId:op.operationId,markerHash:op.submissionMarker!.markerHash,bindingHash:b.bindingHash,signature:effect.transactionId,rawPayloadHash:effect.rawPayloadHash},record={...body,recordHash:domainHash(body.schemaVersion,canonicalJson(body))};
  await this.ensureDirectory(`jupiter-v1-signatures/${op.ownerProfileHash}`);const path=`jupiter-v1-signatures/${op.ownerProfileHash}/${op.operationId}.json`,old=await this.readJson(path);if(old!==null){if(canonicalJson(old)!==canonicalJson(record))corrupt();return;}await this.writeJson(path,record,true);
  }
- async loadSignature(op:SwapOperationRecord,b:JupiterV1ExecutionBinding):Promise<string|null>{
+ async loadSignature(op:SwapOperationRecord,b:JupiterV1ExecutionBinding):Promise<string|null>{return (await this.loadSignedMarker(op,b))?.signature??null;}
+ async loadSignedMarker(op:SwapOperationRecord,b:JupiterV1ExecutionBinding):Promise<JupiterV1SignedMarker|null>{
  await this.ready();const raw=await this.readJson(`jupiter-v1-signatures/${op.ownerProfileHash}/${op.operationId}.json`);if(raw===null)return null;
- if(!isPlainRecord(raw)||!exactKeys(raw,["schemaVersion","operationId","markerHash","bindingHash","signature","rawPayloadHash","recordHash"])||typeof raw.rawPayloadHash!=="string"||!/^[a-f0-9]{64}$/u.test(raw.rawPayloadHash)||raw.schemaVersion!=="apn.jupiter-v1-signed-marker.v1"||raw.operationId!==op.operationId||raw.markerHash!==op.submissionMarker!.markerHash||raw.bindingHash!==b.bindingHash||typeof raw.signature!=="string"||!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/u.test(raw.signature))corrupt();const {recordHash,...body}=raw;if(recordHash!==domainHash(raw.schemaVersion,canonicalJson(body)))corrupt();return raw.signature;
+ if(!isPlainRecord(raw)||!exactKeys(raw,["schemaVersion","operationId","markerHash","bindingHash","signature","rawPayloadHash","recordHash"])||typeof raw.rawPayloadHash!=="string"||!/^[a-f0-9]{64}$/u.test(raw.rawPayloadHash)||raw.schemaVersion!=="apn.jupiter-v1-signed-marker.v1"||raw.operationId!==op.operationId||raw.markerHash!==op.submissionMarker!.markerHash||raw.bindingHash!==b.bindingHash||typeof raw.signature!=="string"||!/^[1-9A-HJ-NP-Za-km-z]{64,88}$/u.test(raw.signature))corrupt();const {recordHash,...body}=raw;if(recordHash!==domainHash(raw.schemaVersion,canonicalJson(body)))corrupt();return detached(raw as unknown as JupiterV1SignedMarker);
  }
  async saveFresh(op:SwapOperationRecord,fresh:JupiterV1ResolvedMaterial,proof:JupiterV1SimulationProof):Promise<void>{
  validateJupiterV1Material(fresh);await this.ready();const bytes=Buffer.from(canonicalJson({fresh,proof})),chunks:{hash:string;length:number}[]=[];

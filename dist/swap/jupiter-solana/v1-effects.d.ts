@@ -38,6 +38,15 @@ export interface JupiterV1SendClaim {
     readonly claimedAt: string;
     readonly claimHash: string;
 }
+export interface JupiterV1SignedMarker {
+    readonly schemaVersion: "apn.jupiter-v1-signed-marker.v1";
+    readonly operationId: string;
+    readonly markerHash: string;
+    readonly bindingHash: string;
+    readonly signature: string;
+    readonly rawPayloadHash: string;
+    readonly recordHash: string;
+}
 /** Public hashes and signature only. Exact signed bytes stay in encrypted custody. Every create is fsynced. */
 export declare class JupiterV1ExecutionBindingStore extends SecureStateStore {
     private initialized;
@@ -48,6 +57,7 @@ export declare class JupiterV1ExecutionBindingStore extends SecureStateStore {
     claim(op: SwapOperationRecord, b: JupiterV1ExecutionBinding, effect: RailSignedEffect, now: Date): Promise<void>;
     saveSignature(op: SwapOperationRecord, b: JupiterV1ExecutionBinding, effect: RailSignedEffect): Promise<void>;
     loadSignature(op: SwapOperationRecord, b: JupiterV1ExecutionBinding): Promise<string | null>;
+    loadSignedMarker(op: SwapOperationRecord, b: JupiterV1ExecutionBinding): Promise<JupiterV1SignedMarker | null>;
     saveFresh(op: SwapOperationRecord, fresh: JupiterV1ResolvedMaterial, proof: JupiterV1SimulationProof): Promise<void>;
     loadFresh(op: SwapOperationRecord, b: JupiterV1ExecutionBinding): Promise<{
         fresh: JupiterV1ResolvedMaterial;

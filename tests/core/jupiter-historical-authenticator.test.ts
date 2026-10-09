@@ -2,11 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { readFile, writeFile, readdir, rm } from "node:fs/promises";
+import { readFile, writeFile, readdir, rm, rename, mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { JupiterHistoricalAuthenticator as FixedHistoricalAuthenticator, HISTORICAL_JUPITER_IDS } from "../../src/swap/jupiter-solana/historical-authenticator.js";
 import { JupiterHistoricalProjectionReader } from "../../src/swap/jupiter-solana/historical-projection-reader.js";
+import { HistoricalBindingReader } from "../../src/swap/jupiter-solana/historical-authentication-readers.js";
 import { historicalFixture } from "./jupiter-historical-authentication-fixture.js";
 import { temporaryState } from "./helpers.js";
 async function snapshot(root: string, prefix=""): Promise<Record<string,string>> {
@@ -63,3 +64,67 @@ const rehashTitle="plain projection reader rejects recomputed public binding has
 test(rehashTitle,async()=>inPty(rehashTitle,async()=>{const f=await historicalFixture();try{const dir=f.op.ownerProfileHash;for(const [kind,field,domain] of [["bindings","bindingHash","apn.jupiter-v1-execution-binding.v1"],["claims","claimHash","apn.jupiter-v1-send-claim.v1"],["signatures","recordHash","apn.jupiter-v1-signed-marker.v1"]] as const){const path=join(f.temp.root,`jupiter-v1-${kind}`,dir,`${f.op.operationId}.json`),v=JSON.parse(await readFile(path,"utf8"));if(kind==="bindings"){v.checkedAt=new Date(Date.parse(v.checkedAt)+1).toISOString();const {[field]:_,...body}=v;v[field]=domainHash(domain,canonicalJson(body));await writeFile(path,canonicalJson(v),{mode:0o600});}else{const b=JSON.parse(await readFile(join(f.temp.root,"jupiter-v1-bindings",dir,`${f.op.operationId}.json`),"utf8"));v.bindingHash=b.bindingHash;const {[field]:_,...body}=v;v[field]=domainHash(domain,canonicalJson(body));await writeFile(path,canonicalJson(v),{mode:0o600});}}let keys=0;await assert.rejects(new JupiterHistoricalProjectionReader(f.temp.root,{load:async()=>{keys++;return Buffer.alloc(32,77);},create:async()=>{throw Error();}}).read(f.op.operationId));assert.equal(keys,1);}finally{await f.temp.cleanup();}}));
 
 for (const id of HISTORICAL_JUPITER_IDS) test(`fixed historical issuer refuses generated wrong owner ${id}`,async t=>{const f=await historicalFixture({operationId:id});t.after(f.temp.cleanup);let keys=0;const before=await snapshot(f.temp.root);const issuer=new FixedHistoricalAuthenticator(f.temp.root,{load:async()=>{keys++;return Buffer.alloc(32,77);},create:async()=>{throw Error();}});await assert.rejects(issuer.authenticate(id));assert.equal(keys,0);assert.deepEqual(await snapshot(f.temp.root),before);const dto={projection:{operationId:id},authority:{}};await assert.rejects(issuer.consume(dto.authority as never,id));await assert.rejects(issuer.consume({...dto.authority} as never,id));});
+
+const ea25 = HISTORICAL_JUPITER_IDS[1];
+const signedOnlyPositive = "exact ea25 authenticates generated TEST signed material with no retained send claim";
+test(signedOnlyPositive, async () => inPty(signedOnlyPositive, async () => {
+ const f=await historicalFixture({operationId:ea25,omitClaim:true});
+ try {
+  const before=await snapshot(f.temp.root), a=new JupiterHistoricalProjectionReader(f.temp.root,f.wrapping), {projection}=await a.read(ea25);
+  assert.equal(projection.signature,f.effect.transactionId); assert.equal(projection.rawPayloadHash,f.effect.rawPayloadHash);
+  assert.equal(projection.originalBindingHash,f.binding.bindingHash);assert.equal(projection.maximumNativeExpenseLamports,"6000000");
+  assert.equal(projection.retainedClaimEvidence.kind,"retained_send_claim_absent");
+  if(projection.retainedClaimEvidence.kind!=="retained_send_claim_absent")assert.fail();
+  assert.equal(projection.retainedClaimEvidence.observation,"current_observation");assert.equal(projection.retainedClaimEvidence.submissionHistory,"unknown");
+  assert.equal(projection.retainedClaimEvidence.transactionMayHaveBeenSubmitted,true);
+  assert.match(projection.retainedClaimEvidence.absenceSnapshotHash,/^[a-f0-9]{64}$/u);
+  assert.deepEqual(await snapshot(f.temp.root),before);assert.equal("wasSubmitted" in projection,false);
+  assert.equal(JSON.stringify(projection).includes(f.effect.rawPayload),false);
+  await assert.rejects(new FixedHistoricalAuthenticator(f.temp.root,f.wrapping).consume(projection as never,ea25));
+ } finally {await f.temp.cleanup();}
+}));
+for(const id of [HISTORICAL_JUPITER_IDS[0],HISTORICAL_JUPITER_IDS[2]])test(`missing retained claim for other finite target ${id} refuses before private wrapping`,async t=>{
+ const f=await historicalFixture({operationId:id,omitClaim:true});t.after(f.temp.cleanup);let keys=0;
+ await assert.rejects(new JupiterHistoricalProjectionReader(f.temp.root,{load:async()=>{keys++;return Buffer.alloc(32,77);},create:async()=>{throw Error();}}).read(id));assert.equal(keys,0);
+});
+for(const kind of ["corrupt occupied claim","valid wrong binding claim","valid wrong raw hash claim","valid wrong signature claim","invalid signed marker","missing signed marker","symlink claim","missing claim directory"]){
+ test(`exact ea25 signed-only ${kind} refuses before private wrapping`,async t=>{
+  const f=await historicalFixture({operationId:ea25,omitClaim:kind!=="corrupt occupied claim"&&!kind.startsWith("valid wrong")});t.after(f.temp.cleanup);
+  const claimPath=join(f.temp.root,"jupiter-v1-claims",f.op.ownerProfileHash,`${ea25}.json`),markerPath=join(f.temp.root,"jupiter-v1-signatures",f.op.ownerProfileHash,`${ea25}.json`);
+  if(kind==="corrupt occupied claim")await writeFile(claimPath,"{}",{mode:0o600});
+  else if(kind.startsWith("valid wrong")){const v=JSON.parse(await readFile(claimPath,"utf8"));if(kind==="valid wrong binding claim")v.bindingHash="f".repeat(64);else if(kind==="valid wrong raw hash claim")v.rawPayloadHash="f".repeat(64);else v.signature="1".repeat(88);const {claimHash:_,...body}=v;v.claimHash=domainHash(v.schemaVersion,canonicalJson(body));await writeFile(claimPath,canonicalJson(v),{mode:0o600});}
+  else if(kind==="invalid signed marker"){const v=JSON.parse(await readFile(markerPath,"utf8"));v.rawPayloadHash="f".repeat(64);await writeFile(markerPath,canonicalJson(v),{mode:0o600});}
+  else if(kind==="missing signed marker")await rm(markerPath);
+  else if(kind==="symlink claim")await symlink(markerPath,claimPath);
+  else await rm(join(f.temp.root,"jupiter-v1-claims",f.op.ownerProfileHash),{recursive:true});
+  let keys=0;await assert.rejects(new JupiterHistoricalProjectionReader(f.temp.root,{load:async()=>{keys++;return Buffer.alloc(32,77);},create:async()=>{throw Error();}}).read(ea25));assert.equal(keys,0);
+ });
+}
+for(const kind of ["claim appears","claim appears then disappears","claim directory replaced","root replaced","signed marker changed","authenticated hash mismatch","bad authenticated signature"]){
+ const title=`exact ea25 signed-only rejects ${kind} after genuine TEST consent`;
+ test(title,async()=>inPty(title,async()=>{
+  const f=await historicalFixture({operationId:ea25,omitClaim:true, ...(kind==="bad authenticated signature"?{mutateSealedEffect:(e:import("../../src/direct-rail-ports.js").RailSignedEffect)=>{const b=Buffer.from(e.rawPayload,"base64");b[1]=b[1]!^1;const rawPayload=b.toString("base64");return {...e,rawPayload,rawPayloadHash:sha256(rawPayload)};}}:{})});
+  try{
+   if(kind==="authenticated hash mismatch"){const path=join(f.temp.root,"jupiter-v1-signatures",f.op.ownerProfileHash,`${ea25}.json`),v=JSON.parse(await readFile(path,"utf8"));v.rawPayloadHash="f".repeat(64);const {recordHash:_,...body}=v;v.recordHash=domainHash(v.schemaVersion,canonicalJson(body));await writeFile(path,canonicalJson(v),{mode:0o600});}
+   let keys=0;const reader=new JupiterHistoricalProjectionReader(f.temp.root,{load:async()=>{keys++;
+    const dir=join(f.temp.root,"jupiter-v1-claims",f.op.ownerProfileHash),path=join(dir,`${ea25}.json`);
+    if(kind.startsWith("claim appears")){await f.bindings.claim(f.op,f.binding,f.effect,new Date());if(kind.endsWith("disappears"))await rm(path);}
+    else if(kind==="claim directory replaced"){await rename(dir,join(f.temp.base,"retained-claims"));await mkdir(dir,{mode:0o700});}
+    else if(kind==="root replaced"){await rename(f.temp.root,join(f.temp.base,"retained-root"));await mkdir(f.temp.root,{mode:0o700});}
+    else if(kind==="signed marker changed"){const marker=join(f.temp.root,"jupiter-v1-signatures",f.op.ownerProfileHash,`${ea25}.json`),v=JSON.parse(await readFile(marker,"utf8"));v.rawPayloadHash="f".repeat(64);const {recordHash:_,...body}=v;v.recordHash=domainHash(v.schemaVersion,canonicalJson(body));await writeFile(marker,canonicalJson(v),{mode:0o600});}
+    return Buffer.alloc(32,77);
+   },create:async()=>{throw Error();}});
+   await assert.rejects(reader.read(ea25));assert.equal(keys,1);
+  }finally{await f.temp.cleanup();}
+ }));
+}
+
+test("production absent-mode original marker anchor refuses generated self-consistent TEST signature",async t=>{
+ const f=await historicalFixture({operationId:ea25,omitClaim:true});t.after(f.temp.cleanup);const reader=new HistoricalBindingReader(f.temp.root);
+ const retained=await reader.retainedEvidence(f.op,f.binding);await assert.rejects(reader.assertOriginalAbsentSignedMarker(f.op,retained));
+ let keys=0;await assert.rejects(new FixedHistoricalAuthenticator(f.temp.root,{load:async()=>{keys++;return Buffer.alloc(32,77);},create:async()=>{throw Error();}}).authenticate(ea25));assert.equal(keys,0);
+});
+test("production original marker anchor leaves present-claim legacy route unpinned",async t=>{
+ const f=await historicalFixture({operationId:ea25});t.after(f.temp.cleanup);const reader=new HistoricalBindingReader(f.temp.root),retained=await reader.retainedEvidence(f.op,f.binding);
+ assert.equal(retained.evidence.kind,"retained_send_claim_present");await reader.assertOriginalAbsentSignedMarker(f.op,retained);
+});

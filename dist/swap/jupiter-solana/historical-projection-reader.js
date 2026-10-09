@@ -61,10 +61,8 @@ export class JupiterHistoricalProjectionReader {
                 refuse();
             const admission = { account: owner, accountBindingHash: binding.accountBindingHash, policyDigest: binding.policyDigest, activationDigest: binding.activationDigest, admissionHash: binding.ownerAdmissionHash };
             await bindings.assertPrepared(original, admission, material);
-            const publicSignature = await bindings.loadSignature(original, binding), claim = await bindings.loadClaim(original);
-            if (publicSignature === null || claim === null || claim.signature !== publicSignature || claim.bindingHash !== binding.bindingHash)
-                refuse();
-            const initialFrame = canonicalJson({ material, binding, fresh, owner, claim, publicSignature });
+            const retained = await bindings.retainedEvidence(original, binding);
+            const initialFrame = canonicalJson({ material, binding, fresh, owner, retained });
             assertPublicFrame = async () => {
                 await assertUnchanged();
                 const currentMaterial = await materials.load(original.quote.quoteHash);
@@ -76,7 +74,7 @@ export class JupiterHistoricalProjectionReader {
                 const currentFresh = await bindings.loadFresh(original, currentBinding);
                 const currentOwner = await custody.ownerBinding("solana-local", "solana");
                 await bindings.assertPrepared(original, admission, currentMaterial);
-                if (canonicalJson({ material: currentMaterial, binding: currentBinding, fresh: currentFresh.fresh, owner: currentOwner, claim: await bindings.loadClaim(original), publicSignature: await bindings.loadSignature(original, currentBinding) }) !== initialFrame)
+                if (canonicalJson({ material: currentMaterial, binding: currentBinding, fresh: currentFresh.fresh, owner: currentOwner, retained: await bindings.retainedEvidence(original, currentBinding) }) !== initialFrame)
                     refuse();
             };
             const deadline = new Date(Date.now() + 60_000).toISOString();
@@ -91,13 +89,13 @@ export class JupiterHistoricalProjectionReader {
                 await guard();
                 await verifySignedJupiterV1Transaction(effect, binding);
                 assertHistoricalOrdinaryRecentBlockhash(effect.rawPayload, material.execution.rawInstructions);
-                if (effect.transactionId !== publicSignature || claim.rawPayloadHash !== effect.rawPayloadHash)
+                if (effect.transactionId !== retained.signedMarker.signature || retained.signedMarker.rawPayloadHash !== effect.rawPayloadHash)
                     refuse();
                 const currentOwner = await custody.ownerBinding("solana-local", "solana");
                 if (canonicalJson(currentOwner) !== canonicalJson(owner))
                     refuse();
                 await guard();
-                const projection = Object.freeze({ schemaVersion: "apn.jupiter-historical-authentication.v1", operationId, operationIntegrityHash: original.integrityHash, rootBinding: hashObject({ root: this.#state.root }), ownerProfileHash: original.ownerProfileHash, accountBindingHash: binding.accountBindingHash, payer: owner.address, policyDigest: binding.policyDigest, activationDigest: binding.activationDigest, originalBindingHash: binding.bindingHash, originalMaterialDigest: material.execution.materialDigest, freshMaterialDigest: fresh.materialDigest, markerHash: original.submissionMarker.markerHash, principalLamports: original.quote.inputAmountAtomic, maximumNativeExpenseLamports: material.execution.maximumNativeExpenseLamports, freshMaximumNativeExpenseLamports: fresh.maximumNativeExpenseLamports, networkFeeLamports: material.execution.networkFeeLamports, tokenAccountRentLamports: material.execution.tokenAccountRentLamports, genesis: SOLANA_MAINNET_GENESIS, blockhash: material.execution.lifetime.blockhash, lastValidBlockHeight: material.execution.lifetime.lastValidBlockHeight, freshBlockhash: fresh.lifetime.blockhash, freshLastValidBlockHeight: fresh.lifetime.lastValidBlockHeight, heightBinding: "authenticated_material_not_signed_message", originalQuoteRpcLifetime: material.execution.quoteRpcLifetime === undefined ? null : Object.freeze(structuredClone(material.execution.quoteRpcLifetime)), signature: effect.transactionId, rawPayloadHash: effect.rawPayloadHash, messageHash: binding.messageHash, lifetimeProvenance: material.execution.quoteRpcLifetime === undefined ? "original_provider_build" : "configured_mainnet_rpc_before_quote_freeze", ordinaryRecentBlockhash: true, authenticationExpiresAt: deadline, authenticatedAt: new Date().toISOString() });
+                const projection = Object.freeze({ schemaVersion: "apn.jupiter-historical-authentication.v1", operationId, operationIntegrityHash: original.integrityHash, rootBinding: hashObject({ root: this.#state.root }), ownerProfileHash: original.ownerProfileHash, accountBindingHash: binding.accountBindingHash, payer: owner.address, policyDigest: binding.policyDigest, activationDigest: binding.activationDigest, originalBindingHash: binding.bindingHash, originalMaterialDigest: material.execution.materialDigest, freshMaterialDigest: fresh.materialDigest, markerHash: original.submissionMarker.markerHash, principalLamports: original.quote.inputAmountAtomic, maximumNativeExpenseLamports: material.execution.maximumNativeExpenseLamports, freshMaximumNativeExpenseLamports: fresh.maximumNativeExpenseLamports, networkFeeLamports: material.execution.networkFeeLamports, tokenAccountRentLamports: material.execution.tokenAccountRentLamports, genesis: SOLANA_MAINNET_GENESIS, blockhash: material.execution.lifetime.blockhash, lastValidBlockHeight: material.execution.lifetime.lastValidBlockHeight, freshBlockhash: fresh.lifetime.blockhash, freshLastValidBlockHeight: fresh.lifetime.lastValidBlockHeight, heightBinding: "authenticated_material_not_signed_message", originalQuoteRpcLifetime: material.execution.quoteRpcLifetime === undefined ? null : Object.freeze(structuredClone(material.execution.quoteRpcLifetime)), signature: effect.transactionId, rawPayloadHash: effect.rawPayloadHash, messageHash: binding.messageHash, lifetimeProvenance: material.execution.quoteRpcLifetime === undefined ? "original_provider_build" : "configured_mainnet_rpc_before_quote_freeze", retainedClaimEvidence: Object.freeze(structuredClone(retained.evidence)), ordinaryRecentBlockhash: true, authenticationExpiresAt: deadline, authenticatedAt: new Date().toISOString() });
                 return { projection: Object.freeze(structuredClone(projection)) };
             }
             finally {

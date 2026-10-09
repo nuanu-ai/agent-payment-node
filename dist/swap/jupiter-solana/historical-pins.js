@@ -6,4 +6,7 @@ export const HISTORICAL_JUPITER_IDS = Object.freeze([
 export const HISTORICAL_JUPITER_PAYER = "GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki";
 export const HISTORICAL_JUPITER_ACCOUNT_BINDING = "6300729b2c444cb67eaf0d75a49f8dd2eb39ea095a7dfdf20c8bf3279da066a1";
 export const HISTORICAL_JUPITER_OWNER_PROFILE = "3b39c575c04b7b84570f0b98c721accfb75743d1aa3fe0275c54e8931d366193";
+// Original public signed-marker raw file bytes, matched by both unchanged attempt8 inventories.
+// This anchor admits material authentication only and says nothing about submission history.
+export const HISTORICAL_JUPITER_EA25_SIGNED_MARKER_SHA256 = "45d36d569a31a454125d328d5f4d3a434a30bb76216a536aa13420244181282e";
 //# sourceMappingURL=historical-pins.js.map

@@ -95,7 +95,8 @@ export class JupiterV1ExecutionBindingStore extends SecureStateStore {
         }
         await this.writeJson(path, record, true);
     }
-    async loadSignature(op, b) {
+    async loadSignature(op, b) { return (await this.loadSignedMarker(op, b))?.signature ?? null; }
+    async loadSignedMarker(op, b) {
         await this.ready();
         const raw = await this.readJson(`jupiter-v1-signatures/${op.ownerProfileHash}/${op.operationId}.json`);
         if (raw === null)
@@ -105,7 +106,7 @@ export class JupiterV1ExecutionBindingStore extends SecureStateStore {
         const { recordHash, ...body } = raw;
         if (recordHash !== domainHash(raw.schemaVersion, canonicalJson(body)))
             corrupt();
-        return raw.signature;
+        return detached(raw);
     }
     async saveFresh(op, fresh, proof) {
         validateJupiterV1Material(fresh);
