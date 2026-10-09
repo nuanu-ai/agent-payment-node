@@ -11,7 +11,7 @@ import type { CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.
 import type { CircleNonceRetirementIntent } from "../../src/circle-v2-evm/nonce-retirement-store.js";
 import type { WalletRecord } from "../../src/model.js";
 import type { ProviderProfileRecord } from "../../src/provider-profile.js";
-export const fixtureNow=Date.parse("2026-10-09T12:20:00.000Z");
+export const fixtureNow=Date.parse("2026-10-09T13:06:00.000Z");
 /** Actual captured unsigned public metadata. Dummy encrypted headers never contain a private key
  * and the production fixture broker must throw before any decryption or signing. */
 export async function cleanup85PublicState(root:string){
