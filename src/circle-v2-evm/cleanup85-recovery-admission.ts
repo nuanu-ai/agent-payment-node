@@ -24,7 +24,8 @@ export async function verifyCleanup85RecoveryAdmission(state: StateStore, source
   const op = await new CircleRepository(state.root).load(request.parentOperationId); if (op === null || op.terminal || op.usageFinalized || op.residualAllowanceAtomic !== "40100") circleBlocked("cleanup85_parent_unavailable");
   assertCleanup85Parent(op);
   const old = new CircleNonceRetirementStore(state.root), parent = await old.intent(op); if (parent === null || !await old.hasClaim(op, "sign") || await old.hasClaim(op, "send")) circleBlocked("cleanup85_original_claim_identity_required");
-  const intent = await new Cleanup85RecoveryStore(state.root).load(op, parent); if (intent === null || hashObject(cleanup85CancellationRequest(intent)) !== hashObject(request)) circleBlocked("cleanup85_request_binding");
+  const store = new Cleanup85RecoveryStore(state.root); await store.assertRetainedMaterialHeaders(op);
+  const intent = await store.load(op, parent); if (intent === null || hashObject(cleanup85CancellationRequest(intent)) !== hashObject(request)) circleBlocked("cleanup85_request_binding");
   await assertEvmNativeCustody(state, op.profile, op.sourceCustody); await assertEvmNativeCustody(state, "default", intent.recipientCustody);
   if (source.chainId !== 42161 || destination.chainId !== 1329) circleBlocked("cleanup85_rpc_identity");
   await currentCircleDeployments(source, destination, 1329);
