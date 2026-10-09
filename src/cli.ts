@@ -4,6 +4,7 @@ import { catalogNextActions } from "./command-catalog.js";
 import type { OutputEnvelope } from "./commands.js";
 import { OUTPUT_VERSION } from "./constants.js";
 import { asApnError } from "./errors.js";
+import { isHistoricalJupiterCli, executeHistoricalJupiterCli } from "./swap/jupiter-solana/historical-cli.js";
 import {
   effectiveStateRoot,
   executeBoundCommand,
@@ -23,6 +24,8 @@ export async function runCli(
   options: CliRuntimeOptions = {},
 ): Promise<OutputEnvelope> {
   try {
+    if (isHistoricalJupiterCli(argv)) return await executeHistoricalJupiterCli(argv,
+      () => options.stateRoot ?? effectiveStateRoot());
     return await executeBoundCommand(parseArgv(argv), options);
   } catch (error) {
     const safe = asApnError(error);
