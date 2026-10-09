@@ -98,3 +98,15 @@ test("enabled pacing keeps broadcast single-attempt and native physical guard at
   });
   assert.equal(nativePosts, 1); assert.equal(checks, 2); assert.equal(f.now(), 0);
 });
+
+for (const [name, url, method, interval] of [
+  ["default zero", endpoint, "eth_chainId", 0],
+  ["official non-Nodies origin", "https://arb1.arbitrum.io/rpc", "eth_chainId", 300],
+  ["broadcast bypass", endpoint, "eth_sendRawTransaction", 300],
+  ["paced read", endpoint, "eth_chainId", 300],
+] as const) test(`pre-aborted ${name} refuses before dispatch or scheduling`, async () => {
+  const f = fixture(), abort = new AbortController(); let guards = 0, posts = 0;
+  const reason = new Error("synthetic pre-aborted read"); abort.abort(reason);
+  await assert.rejects(f.pacer.start(url, method, interval, () => { guards++; }, async () => { posts++; }, abort.signal), error => error === reason);
+  assert.equal(guards, 0); assert.equal(posts, 0); assert.equal(f.now(), 0);
+});
