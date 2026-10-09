@@ -1,0 +1,16 @@
+positive: actual runtime/current policy and old ledger history verified; no private key/sign/send
+✔ independent real runtime current policy positive (516.855875ms)
+missing_native: actual runtime/current policy and old ledger history verified; no private key/sign/send
+✔ independent real runtime current policy missing_native (303.559833ms)
+expired: actual runtime/current policy and old ledger history verified; no private key/sign/send
+✔ independent real runtime current policy expired (240.912042ms)
+changed_again: actual runtime/current policy and old ledger history verified; no private key/sign/send
+✔ independent real runtime current policy changed_again (516.74925ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2305.546583
