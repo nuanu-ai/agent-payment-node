@@ -22,7 +22,7 @@ import { jupiterV1AccountBindingHash } from "../../src/swap/jupiter-solana/v1-ad
 import { JUPITER_V1_OLD_ROUTE as route } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { HISTORICAL_JUPITER_IDS } from "../../src/swap/jupiter-solana/historical-authenticator.js";
-export async function historicalFixture(options: { cap?: string; mutateSealedEffect?: (effect: import("../../src/direct-rail-ports.js").RailSignedEffect) => import("../../src/direct-rail-ports.js").RailSignedEffect } = {}) {
+export async function historicalFixture(options: { cap?: string; operationId?: string; mutateSealedEffect?: (effect: import("../../src/direct-rail-ports.js").RailSignedEffect) => import("../../src/direct-rail-ports.js").RailSignedEffect } = {}) {
   const temp = await temporaryState(), state = new StateStore(temp.root); await state.initialize();
   const seed = Buffer.alloc(32, 21), signer = await createKeyPairSignerFromPrivateKeyBytes(seed), owner = signer.address;
   const old = fixture(), source = await associatedTokenAddress(owner, WRAPPED_SOL_MINT, TOKEN_PROGRAM), dest = await associatedTokenAddress(owner, SOLANA_USDC_MINT, TOKEN_PROGRAM);
@@ -43,7 +43,7 @@ export async function historicalFixture(options: { cap?: string; mutateSealedEff
   const account=await custody.ensureLocal({profile:"solana-local",rail:"solana",create:async()=>({address:owner,seed:Buffer.from(seed)})});
   const registry=sealAssetPolicyRegistry({schemaVersion:"apn.asset-policy-registry.v1",registryVersion:"historical-test.1",publishedAt:new Date(now.getTime()-2000).toISOString(),effectiveDate:now.toISOString().slice(0,10),effectiveAt:new Date(now.getTime()-1000).toISOString(),expiresAt:new Date(now.getTime()+86400000).toISOString(),chains:[{chain:route.mechanismPin.chain,family:"solana",name:"Solana",assets:[{kind:"native",identifier:null,symbol:"SOL",decimals:9,rails:{direct:false,gasless:false,x402:false,bridge:false,swap:true},caps:{maximumPerTransferAtomic:"1000000",dailyLimitAtomic:"2000000"},mechanismPins:{swap:route.mechanismPin}}]}]});
   const ledger=new AssetUsageLedger(temp.root), lease=await ledger.reserve({account:owner,chain:quote.sourceAsset.chain,asset:{kind:"native",identifier:null},registry,rail:"swap",amountAtomic:"1000000",idempotencyKey:"historical-test",now});
-  let op=newSwapOperation({operationId:HISTORICAL_JUPITER_IDS[0],idempotencyHash:sha256("historical-test"),quote,policyDigest:registry.policyDigest,policyVersion:registry.registryVersion,protocolRegistryDigest:route.protocolRegistry.registryDigest,protocolRegistryVersion:route.protocolRegistry.registryVersion,mechanismDigest:swapMechanismDigest(route.mechanismPin),approvalCapAtomic:"0",now});
+  let op=newSwapOperation({operationId:options.operationId ?? HISTORICAL_JUPITER_IDS[0],idempotencyHash:sha256("historical-test"),quote,policyDigest:registry.policyDigest,policyVersion:registry.registryVersion,protocolRegistryDigest:route.protocolRegistry.registryDigest,protocolRegistryVersion:route.protocolRegistry.registryVersion,mechanismDigest:swapMechanismDigest(route.mechanismPin),approvalCapAtomic:"0",now});
   for(const phase of ["prepared","awaiting_approval"] as const)op=transitionSwapOperation(op,phase,{},now);
   op=transitionSwapOperation(op,"reserved",{usageLease:lease},now);
   const markerBody={operationId:op.operationId,operationIntegrityHash:op.integrityHash,unsignedTransactionPayloadHash:quote.unsignedTransactionPayloadHash,markedAt:now.toISOString()};
