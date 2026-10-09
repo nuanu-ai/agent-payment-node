@@ -2,11 +2,14 @@ import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { CLEANUP85_FEE_CAP, CLEANUP85_OWNER, CLEANUP85_RECIPIENT, CLEANUP85_RECIPIENT_CODE, CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH, cleanup85Blocked, validateCleanup85Request, validateCleanup85Envelope } from "./circle-cleanup85-native-codec.js";
 import { validateEvmNativeCustody } from "./evm-native-custody.js";
 export function validateCleanup85NativeBinding(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["version", "request", "recipientCustody", "activationDigest", "nativeReservationId", "nativeReserveAtomic", "senderCode", "recipientCode", "recipientDelegateCodeHash"]) ||
-        value.version !== "apn.circle-cleanup85-native-binding.v1" || value.nativeReserveAtomic !== "2000000000000" ||
+    const successor = isPlainRecord(value) && value.version === "apn.circle-cleanup85-native-binding.v2";
+    if (!isPlainRecord(value) || !exactKeys(value, ["version", "request", "recipientCustody", "activationDigest", "nativeReservationId", "nativeReserveAtomic", "senderCode", "recipientCode", "recipientDelegateCodeHash", ...(successor ? ["successor"] : [])]) ||
+        !["apn.circle-cleanup85-native-binding.v1", "apn.circle-cleanup85-native-binding.v2"].includes(value.version) || value.nativeReserveAtomic !== "2000000000000" ||
         value.senderCode !== "0x" || value.recipientCode !== CLEANUP85_RECIPIENT_CODE || value.recipientDelegateCodeHash !== CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH ||
         ![value.activationDigest, value.nativeReservationId].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)))
         cleanup85Blocked("native_binding_shape");
+    if (successor && (!isPlainRecord(value.successor) || !exactKeys(value.successor, ["originalOperationId", "retirementProofHash"]) || ![value.successor.originalOperationId, value.successor.retirementProofHash].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x))))
+        cleanup85Blocked("native_successor_binding");
     validateCleanup85Request(value.request);
     const custody = validateEvmNativeCustody(value.recipientCustody);
     if (custody.walletAddress !== CLEANUP85_RECIPIENT)

@@ -1,0 +1,24 @@
+✖ whole normal successor marker_loss preserves original and full2T (182.640208ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1138.080958
+
+✖ failing tests:
+
+test at dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:23:5
+✖ whole normal successor marker_loss preserves original and full2T (182.640208ms)
+  Error [ApnError]: The usage reservation schema is invalid.
+      at corrupt (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-record.js:242:42)
+      at validateAssetUsageReservation (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-record.js:26:9)
+      at seal (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-record.js:92:12)
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:34:66)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'APN_STATE_CORRUPT',
+    details: undefined
+  }

@@ -1,0 +1,15 @@
+✔ actual original unsigned metadata retains original binding and C denial lookup identity (81.507541ms)
+✔ versioned successor comparator preserves public request/wire and requires separate identity/slot (9.2465ms)
+✔ pure successor operationId mutation cannot retain lineage binding (1.3945ms)
+✔ pure successor idempotencyHash mutation cannot retain lineage binding (5.040875ms)
+✔ pure successor requestHash mutation cannot retain lineage binding (4.531417ms)
+✔ pure successor originalOperationId mutation cannot retain lineage binding (1.270125ms)
+✔ pure successor retirementProofHash mutation cannot retain lineage binding (4.398333ms)
+✔ pure successor nativeReservationId mutation cannot retain lineage binding (4.28025ms)
+✔ pure successor version mutation cannot retain lineage binding (1.112791ms)
+✔ v1 absence bytes remain compatible and v1 cannot smuggle successor fields (0.676334ms)
+✔ plain or cloned source lineage/admission DTOs grant no private capability (1.109584ms)
+
+Interrupted while running:
+
+⚠ dist-test-successor/tests/core/cleanup85-native-successor-production.test.js (dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:1:1)
