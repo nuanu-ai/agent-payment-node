@@ -12,8 +12,12 @@ import { MERCHANT_DATA } from "./rpc.js";
 import { refuse } from "./protocol.js";
 export async function verifyMerchantRaw(o, raw) {
     const tx = parseTransaction(raw), owner = await recoverTransactionAddress({ serializedTransaction: raw }), e = o.envelope;
-    if (owner !== MERCHANT_OWNER || tx.type !== "eip1559" || tx.chainId !== 4326 || tx.to?.toLowerCase() !== MERCHANT_TOKEN.toLowerCase() || tx.data !== MERCHANT_DATA || tx.value !== 0n ||
-        tx.nonce !== Number(e.nonce) || tx.gas !== BigInt(e.gas) || tx.maxFeePerGas !== BigInt(e.maxFeePerGas) || tx.maxPriorityFeePerGas !== BigInt(e.maxPriorityFeePerGas) || tx.accessList?.length !== 0)
+    // viem omits canonical RLP zero values and the empty access list.
+    const value = tx.value === undefined ? 0n : tx.value;
+    const priority = tx.maxPriorityFeePerGas === undefined ? 0n : tx.maxPriorityFeePerGas;
+    const accessList = tx.accessList === undefined ? [] : tx.accessList;
+    if (owner !== MERCHANT_OWNER || tx.type !== "eip1559" || tx.chainId !== 4326 || tx.to?.toLowerCase() !== MERCHANT_TOKEN.toLowerCase() || tx.data !== MERCHANT_DATA || value !== 0n ||
+        tx.nonce !== Number(e.nonce) || tx.gas !== BigInt(e.gas) || tx.maxFeePerGas !== BigInt(e.maxFeePerGas) || priority !== BigInt(e.maxPriorityFeePerGas) || !Array.isArray(accessList) || accessList.length !== 0)
         refuse("merchant_signed_transaction_binding");
     return keccak256(raw);
 }
