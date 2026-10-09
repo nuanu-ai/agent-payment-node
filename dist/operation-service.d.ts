@@ -115,6 +115,8 @@ export declare class OperationService {
     private permit2LegacyOperations;
     private profileOperations;
     private circleOperations;
+    /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
+    assertCleanup85PreparationAccountsAvailable(record: CircleOperationV1, now: number): Promise<void>;
     /** Both Circle signing accounts are held under their existing profile locks. */
     assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved?: boolean, effectRole?: CircleRole): Promise<void>;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;

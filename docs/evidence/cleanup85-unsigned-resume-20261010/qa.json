@@ -1,0 +1,21 @@
+{
+  "parent": "2c210a9ecb9b0f48d2225440a18509a6f469c5bd",
+  "kind": "implementation_milestone_not_acceptance",
+  "productionStrict": "PASS pinned Node24.15.0",
+  "focusedStrict": "PASS",
+  "runtime": {
+    "total": 17,
+    "passed": 17,
+    "newWholeController": 9,
+    "unchangedAliasGuards": 8
+  },
+  "expiryProtocol": "fail-closed stub; not implemented",
+  "sourceHashes": {
+    "src/circle-cleanup85-unsigned-resume.ts": "21da3e6499dbacf0624450418988d0df3fbf9c1d2521cdf0696f98251c712a50",
+    "src/circle-cleanup85-unsigned-retirement.ts": "8bcebf76d4e6b55384f6ac64532dfddc60a1fa373418e8345af4b2f3fd376990",
+    "src/circle-v2-evm/cleanup85-recovery-prepare.ts": "a6c6453ddb6e9e09f6f75043ba8c61254ece30b9cb249f42215128aef107c66a",
+    "src/operation-service.ts": "e17358282fb0f7b6d75170635e00e8a1400267588f73a4f1903c0fd340e60033",
+    "tests/core/circle-cleanup85-unsigned-resume.test.ts": "1efeffd55b02b7534be58e2fa4de8b1893a32040886826c212974a768464e0a1"
+  },
+  "maxOwnedLines": 500
+}

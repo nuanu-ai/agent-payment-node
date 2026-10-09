@@ -1,0 +1,25 @@
+✔ entire normal cleanup85 controller unsigned publication resume (1354.333958ms)
+✔ entire normal cleanup85 controller unsigned publication expired (940.484541ms)
+✔ entire normal cleanup85 controller unsigned publication sign (788.184541ms)
+✔ entire normal cleanup85 controller unsigned publication signed (825.479834ms)
+✔ entire normal cleanup85 controller unsigned publication send (795.081792ms)
+✔ entire normal cleanup85 controller unsigned publication prepared (782.438292ms)
+✔ entire normal cleanup85 controller unsigned publication slot (788.114084ms)
+✔ entire normal cleanup85 controller unsigned publication custody (794.194625ms)
+✔ entire normal cleanup85 controller unsigned publication foreign (798.854583ms)
+✔ captured four delegated Buyer aliases reach normal native prepare/reserve/foreground without changing finite wire (599.897084ms)
+✔ normal native sender_raw_wallet refuses before reservation/foreground/private entry (251.359666ms)
+✔ normal native recipient_raw_wallet refuses before reservation/foreground/private entry (287.450958ms)
+✔ normal native sender_raw_provider refuses before reservation/foreground/private entry (233.359375ms)
+✔ normal native recipient_raw_provider refuses before reservation/foreground/private entry (322.0605ms)
+✔ normal native wrong_trust_class refuses before reservation/foreground/private entry (226.775042ms)
+✔ normal native wrong_provider_kind refuses before reservation/foreground/private entry (242.867541ms)
+✔ normal native unknown_trust_class refuses before reservation/foreground/private entry (253.321542ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8662.833875
