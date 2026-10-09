@@ -30,7 +30,9 @@ export class RelayRpcInvocation {
   get rpc(): Rpc {
     return {
       batchCall: async calls => await this.post(() => this.transport.batchCall(calls)),
-      submitRawTransaction: async raw => await this.post(() => this.transport.submitRawTransaction(raw)),
+      submitRawTransaction: async (raw, beforeSend) => await this.post(() => {
+        beforeSend?.(); return this.transport.submitRawTransaction(raw, beforeSend);
+      }),
     };
   }
 

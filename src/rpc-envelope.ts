@@ -111,13 +111,15 @@ export async function postJson(
   allowJsonRpcClientError = false,
   abortSignal?: AbortSignal,
   counters?: RpcObservationCounters,
+  beforeSend?: () => void,
 ): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const selected = addresses[0];
     if (selected === undefined) { reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address.")); return; }
+    try { beforeSend?.(); } catch (error) { reject(error); return; }
     let requestTimedOut = false;
     const request = httpsRequest(endpoint, {
-      method: "POST",
+      method: "POST", ...(beforeSend === undefined ? {} : { agent: false }),
       signal: abortSignal,
       family: selected.family,
       headers: jsonRpcRequestHeaders(body),
@@ -154,7 +156,11 @@ export async function postJson(
         "Relay execution reached its wall deadline; resume the saved operation explicitly.", { reason: "relay_wall_deadline" }));
       else if (requestTimedOut) reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.", { reason: "request_deadline" }));
     });
-    request.end(body);
+    if (beforeSend === undefined) request.end(body);
+    else request.on("socket", socket => socket.once("secureConnect", () => {
+      try { beforeSend(); request.end(body); }
+      catch (error) { reject(error); request.destroy(); }
+    }));
   });
 }
 

@@ -33,6 +33,7 @@ const body = z.strictObject({
   arbitrumDraft: z.custom<RelayArbitrumSourceDraft>((value) => value !== null && typeof value === "object" && !Array.isArray(value)).optional(),
   policyDigest: hash.optional(),
   policyRevision: z.number().int().positive().optional(),
+  policyActivationDigest: hash.optional(),
   approvalNetworkFeeCeilingWei: positiveAtomic.optional(),
   depositNetworkFeeCeilingWei: positiveAtomic.optional(),
   amountAtomic: positiveAtomic,

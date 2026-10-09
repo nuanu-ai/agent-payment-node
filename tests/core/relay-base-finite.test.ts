@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { keccak256, type Hex } from "viem";
-import { hashObject } from "../../src/canonical.js";
+import { hashObject, canonicalJson } from "../../src/canonical.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
@@ -23,7 +23,7 @@ async function op(state: StateStore, mega = true) {
   return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned", state: "prepared", terminal: false,
     profileHash: state.profileHash("evm-live-seller"), operationId: (mega ? "1" : "2").repeat(64), idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64),
     sourceChainId: 8453, destinationChainId: mega ? 4326 : 137, sourceAccount: quote.payer, recipient: quote.recipient,
-    quoteDigest: quote.quoteDigest, nativeQuote: quote, statusLocator: quote.statusLocator!, policyDigest: "5".repeat(64), policyRevision: 1,
+    quoteDigest: quote.quoteDigest, nativeQuote: quote, statusLocator: quote.statusLocator!, policyDigest: "5".repeat(64), policyRevision: 1, policyActivationDigest: "a".repeat(64),
     depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei, amountAtomic: quote.principalAtomic, minOutputAtomic: quote.minimumOutputWei,
     createdAt: new Date(clock * 1000).toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
 }
@@ -122,7 +122,7 @@ test("Base funding rechecks chain, balance plus full fee, nonce and pinned block
   await assert.rejects((runtime as any).funding(saved, rpc(50999999999999n)), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects((runtime as any).funding(saved, rpc(51000000000000n, true)), { code: "APN_OPERATION_BLOCKED" });
 });
-for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} unsigned crash closes native usage and permits exact seller retirement`, async t => {
+for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} lost signed material retains hold and forbids exact seller retirement`, async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root);
   const { AssetUsageLedger, assetUsageReservationId } = await import("../../src/asset-usage-ledger.js");
   const { RelayNativeSourceRuntime } = await import("../../src/relay/native-source.js");
@@ -144,8 +144,89 @@ for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} unsigned c
   const runtime = new RelayNativeSourceRuntime(state, wrapping, { confirm: async () => true, rpc: {
     batchCall: async () => { throw new Error("no RPC after unsigned crash"); }, submitRawTransaction: async () => { throw new Error("no send after unsigned crash"); } } }, { now: () => now });
   Object.assign(runtime, { wallets: { describe: async () => ({ identity: { address: RELAY_BASE_SOURCE }, secret: { directEffects: {} } }), clear: () => {} } });
-  assert.equal((await runtime.execute(saved.operationId)).phase, "failed_before_effect");
-  assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
-  assert.equal((await runtime.execute(saved.operationId)).phase, "failed_before_effect");
-  assert.equal((await new RelayRetireService(state, { now: () => now }, wrapping).retire({ profile, operationId: saved.operationId })).state, "retired");
+  assert.equal((await runtime.execute(saved.operationId)).phase, "signing_started");
+  assert.equal((await ledger.load(identity, reservationId))?.state, "unknown_finality");
+  assert.equal((await runtime.execute(saved.operationId)).phase, "signing_started");
+  await assert.rejects(new RelayRetireService(state, { now: () => now }, wrapping).retire({ profile, operationId: saved.operationId }));
+});
+
+test("Base immutable broadcast claim survives restoration of a sealed journal", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root), saved = await op(state);
+  const store = new RelayNativeSourceJournalRepository(tmp.root); let j = await store.advance(saved, null, "pending");
+  j = await store.advance(saved, j.integrityHash, "signing_started"); const raw = "0x0102" as Hex;
+  j = await store.advance(saved, j.integrityHash, "sealed", keccak256(raw)); const original = j; let sends = 0;
+  await dispatchRelayNativeDepositOnce(saved, j, store, async () => { sends++; throw new Error("lost response"); }, raw, new Date());
+  const { writeFile } = await import("node:fs/promises"), { join } = await import("node:path");
+  await writeFile(join(tmp.root, "relay-native-source-journals", saved.profileHash, `${saved.operationId}.json`), canonicalJson(original), { mode: 0o600 });
+  const restored = await dispatchRelayNativeDepositOnce(saved, original, store, async () => { sends++; return ""; }, raw, new Date());
+  assert.equal(restored.phase, "submitting"); assert.equal(sends, 1);
+  await assert.rejects(store.claimBroadcast(saved, "0x0304"));
+});
+
+test("Base authority fences activation, wallet-await expiry, disposal and invocation abort", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root), saved = await op(state);
+  const { RelayNativeAuthority } = await import("../../src/relay/native-authority.js");
+  let at = new Date(clock * 1000); const controller = new AbortController(), policy = active();
+  const grant = new RelayNativeAuthority({ ...saved, policyDigest: policy.digest }, policy, { now: () => at }, controller.signal);
+  const { policyActivationDigest: _missing, ...historical } = saved;
+  assert.throws(() => new RelayNativeAuthority({ ...historical, policyDigest: policy.digest }, policy, { now: () => at }, controller.signal), /authority expired or changed/u);
+  const { policyDigest: _registryDigest, ...body } = policy.registry;
+  const shortRegistry = sealAssetPolicyRegistry({ ...body, expiresAt: new Date(at.getTime() + 1000).toISOString() });
+  const shortPolicy = { ...policy, registry: shortRegistry, digest: shortRegistry.policyDigest };
+  const short = new RelayNativeAuthority({ ...saved, policyDigest: shortPolicy.digest }, shortPolicy, { now: () => at }, controller.signal);
+  assert.equal(short.deadline, shortRegistry.expiresAt); at = new Date(at.getTime() + 1000);
+  assert.throws(() => short.assert(), /authority expired or changed/u); at = new Date(clock * 1000);
+  assert.throws(() => grant.assert({ ...policy, activationDigest: "b".repeat(64) }), /authority expired or changed/u);
+  at = new Date(Date.parse(saved.deadline) - 60000); assert.throws(() => grant.assert(), /authority expired or changed/u);
+  at = new Date(clock * 1000); grant.dispose(); assert.throws(() => grant.assert(), /authority expired or changed/u);
+  const live = new RelayNativeAuthority({ ...saved, policyDigest: policy.digest }, policy, { now: () => at }, controller.signal);
+  controller.abort(); assert.throws(() => live.assert(), /authority expired or changed/u);
+});
+
+test("Base delayed wallet load is refused before private key access or send", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root);
+  const policy = active(), original = await op(state), { integrityHash: _, ...fields } = original;
+  const saved = freezeRelayUnsignedOperation({ ...fields, policyDigest: policy.digest }); let at = new Date(clock * 1000), keyReads = 0, sends = 0;
+  const { RelayNativeSourceRuntime } = await import("../../src/relay/native-source.js");
+  const runtime = new RelayNativeSourceRuntime(state, { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) },
+    { confirm: async () => true, rpc: { batchCall: async () => [], submitRawTransaction: async () => { sends++; return "0x00" as Hex; } } }, { now: () => at });
+  Object.assign(runtime, { owner: async () => {}, admission: async () => policy, funding: async () => 0n,
+    wallets: { describe: async () => { at = new Date(Date.parse(saved.deadline)); return { identity: { address: saved.sourceAccount }, secret: { get privateKey() { keyReads++; throw new Error("must not access private key"); } } }; }, clear: () => {} } });
+  await assert.rejects((runtime as any).run(saved, (runtime as any).ports.rpc, new AbortController().signal), /authority expired or changed/u);
+  assert.equal(keyReads, 0); assert.equal(sends, 0); assert.equal((await new RelayNativeSourceJournalRepository(tmp.root).load(saved))?.phase, "signing_started");
+});
+
+test("Base execution retains exact allowlist lock through the asynchronous critical section", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root), saved = await op(state);
+  await new RelayUnsignedOperationRepository(tmp.root).persistLocked(saved);
+  const { RelayNativeSourceRuntime } = await import("../../src/relay/native-source.js");
+  const { AllowlistPolicyStore } = await import("../../src/allowlist-policy-store.js");
+  const { allowlistProfileHash } = await import("../../src/allowlist-policy-overlay.js");
+  assert.notEqual(saved.profileHash, allowlistProfileHash("evm-live-seller"));
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(r => { entered = r; }), paused = new Promise<void>(r => { release = r; });
+  const runtime = new RelayNativeSourceRuntime(state, { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) },
+    { confirm: async () => true, rpc: { batchCall: async () => [], submitRawTransaction: async () => "0x00" as Hex } }, { now: () => new Date(clock * 1000) });
+  Object.assign(runtime, { owner: async () => { entered(); await paused; throw new Error("stop after lock witness"); } });
+  const running = runtime.execute(saved.operationId); await started;
+  const policies = new AllowlistPolicyStore(tmp.root); Object.assign(policies, { lockWaitMs: 0 });
+  try {
+    await assert.rejects(policies.read("evm-live-seller"), { code: "APN_STATE_BUSY" });
+    await assert.rejects(policies.appendDecision("evm-live-seller", null, { status: "revoked", revision: 1, stagedRecordDigest: "a".repeat(64), policyDigest: "b".repeat(64), approvalFingerprint: "c".repeat(64), decidedAt: new Date(clock * 1000).toISOString() }), { code: "APN_STATE_BUSY" });
+  }
+  finally { release(); await assert.rejects(running, /stop after lock witness/u); }
+});
+
+test("permanent signing claim rejects restored pending attempts and no-effect retirement", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root), saved = await op(state);
+  await new RelayUnsignedOperationRepository(tmp.root).persistLocked(saved);
+  const journals = new RelayNativeSourceJournalRepository(tmp.root); await journals.advance(saved, null, "pending");
+  await journals.claimSigning(saved, 0n); await assert.rejects(journals.claimSigning(saved, 0n));
+  const { RelayNativeSourceRuntime } = await import("../../src/relay/native-source.js"), { RelayRetireService } = await import("../../src/relay/retire.js");
+  const wrapping = { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) };
+  const runtime = new RelayNativeSourceRuntime(state, wrapping, { confirm: async () => { throw new Error("no foreground or sign allowed"); }, rpc: {
+    batchCall: async () => { throw new Error("no reads allowed"); }, submitRawTransaction: async () => { throw new Error("no sends allowed"); } } });
+  Object.assign(runtime, { owner: async () => {} });
+  await assert.rejects((runtime as any).run(saved, (runtime as any).ports.rpc, new AbortController().signal), (error: any) => error.details?.reason === "permanent_effect_claim_requires_observation");
+  await assert.rejects(new RelayRetireService(state, { now: () => new Date(clock * 1000) }, wrapping).retire({ profile: "evm-live-seller", operationId: saved.operationId }), /permanent native effect claim/u);
 });

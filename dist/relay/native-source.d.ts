@@ -40,6 +40,10 @@ export declare function publicRelayNativeSourceJournal(journal: RelayNativeSourc
 export declare class RelayNativeSourceJournalRepository extends SecureStateStore {
     private path;
     load(op: RelayUnsignedOperation): Promise<RelayNativeSourceJournal | null>;
+    hasEffectClaim(op: RelayUnsignedOperation): Promise<boolean>;
+    claimSigning(op: RelayUnsignedOperation, nonce: bigint): Promise<void>;
+    /** Independent create-only fence survives restoration of an older mutable journal. */
+    claimBroadcast(op: RelayUnsignedOperation, raw: Hex): Promise<void>;
     advance(op: RelayUnsignedOperation, expected: string | null, phase: Phase, hash?: string | null, now?: Date): Promise<RelayNativeSourceJournal>;
 }
 /** Persist the single dispatch marker before the send. Replays only return the marker. */

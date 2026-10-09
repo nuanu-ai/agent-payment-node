@@ -74,7 +74,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly to: Address;
         readonly data: Hex;
     }): Promise<FeeEstimate>;
-    submitRawTransaction(rawTransaction: Hex): Promise<Hex>;
+    submitRawTransaction(rawTransaction: Hex, beforeSend?: () => void): Promise<Hex>;
     getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
     getLatestConfirmedNonce(address: Address): Promise<string>;
     getConfirmedTransactionAtNonce(address: Address, nonceAtomic: string, startBlockNumberAtomic: string): Promise<Hex | null>;

@@ -255,6 +255,7 @@ export class RelayUnsignedPrepareService {
             requestHash, sourceChainId: route.sourceChainId, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
             quoteDigest, nativeQuote: quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
             policyDigest: active.digest, policyRevision: active.revision,
+            ...(route.sourceChainId === 8453 ? { policyActivationDigest: active.activationDigest } : {}),
             depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
             amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
             createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });

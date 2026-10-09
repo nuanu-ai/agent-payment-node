@@ -99,16 +99,23 @@ export function classifyX402LogAvailabilityMessage(message) {
     const boundedFailure = /\b(?:too (?:wide|large)|too many results?|exceed(?:s|ed|ing)?|maximum|max|limit(?:ed)?|more than|returned more|at most|up to)\b/u.test(text);
     return rangeSubject && boundedFailure ? "range_unavailable" : null;
 }
-export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false, abortSignal, counters) {
+export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, allowJsonRpcClientError = false, abortSignal, counters, beforeSend) {
     return await new Promise((resolve, reject) => {
         const selected = addresses[0];
         if (selected === undefined) {
             reject(new ApnError("APN_RPC_CONFIG", "RPC host has no validated address."));
             return;
         }
+        try {
+            beforeSend?.();
+        }
+        catch (error) {
+            reject(error);
+            return;
+        }
         let requestTimedOut = false;
         const request = httpsRequest(endpoint, {
-            method: "POST",
+            method: "POST", ...(beforeSend === undefined ? {} : { agent: false }),
             signal: abortSignal,
             family: selected.family,
             headers: jsonRpcRequestHeaders(body),
@@ -162,7 +169,19 @@ export async function postJson(endpoint, body, addresses, timeoutMs, rpcMethod, 
             else if (requestTimedOut)
                 reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.", { reason: "request_deadline" }));
         });
-        request.end(body);
+        if (beforeSend === undefined)
+            request.end(body);
+        else
+            request.on("socket", socket => socket.once("secureConnect", () => {
+                try {
+                    beforeSend();
+                    request.end(body);
+                }
+                catch (error) {
+                    reject(error);
+                    request.destroy();
+                }
+            }));
     });
 }
 export function acceptRpcHttpBody(status, allowJsonRpcClientError) {

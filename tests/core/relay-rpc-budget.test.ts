@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -81,4 +82,29 @@ test("contended persistent provider lock refuses before transport", async t => {
   try { await assert.rejects(invocation.rpc.batchCall(read), { code: "APN_STATE_BUSY" }); }
   finally { release(); await holding; }
   assert.equal(attempts, 0);
+});
+
+test("late foreground expiry after DNS preparation refuses before physical send", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const state = new StateStore(temp.root); await state.initialize();
+  let expired = false, sends = 0;
+  const invocation = new RelayRpcInvocation(state, origin, { batchCall: async () => [],
+    submitRawTransaction: async (_raw, beforeSend) => { beforeSend?.(); sends++; return `0x${"aa".repeat(32)}`; } },
+    undefined, async () => { expired = true; });
+  await assert.rejects(invocation.rpc.submitRawTransaction(raw, () => { if (expired) throw new ApnError("APN_OPERATION_BLOCKED", "expired authority"); }), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(sends, 0);
+});
+
+test("physical transport retains the foreground check through its final asynchronous wait", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const state = new StateStore(temp.root); await state.initialize();
+  let expired = false, sends = 0, checks = 0;
+  const invocation = new RelayRpcInvocation(state, origin, { batchCall: async () => [],
+    submitRawTransaction: async (_raw, beforeSend) => { await Promise.resolve(); expired = true; beforeSend?.(); sends++; return `0x${"aa".repeat(32)}`; } });
+  await assert.rejects(invocation.rpc.submitRawTransaction(raw, () => { checks++; if (expired) throw new ApnError("APN_OPERATION_BLOCKED", "expired authority"); }), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(checks, 2); assert.equal(sends, 0);
+});
+
+test("actual HTTPS request.end rechecks authority after TLS and sends no body on expiry", () => {
+  const result = spawnSync(process.execPath, ["--experimental-test-module-mocks", "tests/core/relay-fixtures/relay-native-physical-post-guard.mjs",
+    new URL("../../src/rpc-envelope.js", import.meta.url).href], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /checks=2, sends=0/u);
 });
