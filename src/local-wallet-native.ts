@@ -335,9 +335,9 @@ export class LocalWalletNative implements NativePort {
     await assertEvmNativeCustody(this.state, profile, await evmNativeCustody(this.state, profile), walletEnvelopeIdentity(envelope, profile));
     return { found: true, profile: wallet.profile, address: wallet.address, createdAt: wallet.createdAt, bindingHash: wallet.bindingHash };
   }
-
   private async approveAndSign(payload: Readonly<Record<string, unknown>>): Promise<unknown> {
     const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
+    if (intent.evm?.cleanup85Cancellation !== undefined) throw protocol("Finite cleanup85 signing requires its private scoped controller.");
     const frozen = await this.state.findOperation(intent.operationId), journal = new DirectPublicEffectJournal(this.state);
     if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
         hashObject(directCustodyPayload(frozen)) !== hashObject(payload)) throw protocol("Native request differs from its saved fresh operation.");

@@ -11,6 +11,7 @@ import { canonicalAddress } from "./wallet-policy.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 
 import { validateEvmNativeCustody, type EvmNativeCustody } from "./evm-native-custody.js";
+import { cleanup85OperationEnvelope, validateCleanup85NativeBinding, type Cleanup85NativeBinding } from "./circle-cleanup85-native-binding.js";
 
 export interface EvmDirectBinding {
   readonly schemaVersion: "apn.evm-direct.v1";
@@ -21,6 +22,7 @@ export interface EvmDirectBinding {
   readonly feeQuote: EvmFeeQuote;
   readonly nativeCustody?: EvmNativeCustody;
   readonly circleNativeAdmission?: CircleNativeAdmission;
+  readonly cleanup85Cancellation?: Cleanup85NativeBinding;
 }
 
 export function requireEvmRpc(rpc: RpcPort): EvmRpcPort {
@@ -73,11 +75,16 @@ export function validateEvmFeeQuote(value: unknown, economics?: Economics): EvmF
 }
 
 export function validateEvmDirectBinding(value: unknown, economics?: Economics): EvmDirectBinding {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote", ...(value.nativeCustody === undefined ? [] : ["nativeCustody"]), ...(value.circleNativeAdmission === undefined ? [] : ["circleNativeAdmission"])])) {
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "asset", "transactionTo", "valueAtomic", "maxFeeWei", "feeQuote", ...(value.nativeCustody === undefined ? [] : ["nativeCustody"]), ...(value.circleNativeAdmission === undefined ? [] : ["circleNativeAdmission"]), ...(value.cleanup85Cancellation === undefined ? [] : ["cleanup85Cancellation"])])) {
     throw new ApnError("APN_STATE_CORRUPT", "EVM direct binding schema is invalid.");
   }
   const binding = value as unknown as EvmDirectBinding;
   if (binding.nativeCustody !== undefined) validateEvmNativeCustody(binding.nativeCustody);
+  if (binding.cleanup85Cancellation !== undefined) {
+    validateCleanup85NativeBinding(binding.cleanup85Cancellation);
+    if (binding.asset.chainId !== 42161 || binding.asset.kind !== "native" || binding.circleNativeAdmission !== undefined || binding.nativeCustody === undefined ||
+      binding.transactionTo !== binding.cleanup85Cancellation.recipientCustody.walletAddress || binding.valueAtomic !== "1") throw new ApnError("APN_STATE_CORRUPT", "Finite cleanup85 native binding differs from its wire.");
+  }
   if (binding.circleNativeAdmission !== undefined) { validateCircleNativeAdmission(binding.circleNativeAdmission);
     if (binding.asset.chainId !== 42161 || binding.asset.kind !== "native" || binding.circleNativeAdmission.recipientCustody.walletAddress !== binding.transactionTo) throw new ApnError("APN_STATE_CORRUPT", "Circle admission differs from the exact native recipient."); }
   const asset = validateEvmAsset(binding.asset);
@@ -92,6 +99,7 @@ export function validateEvmDirectBinding(value: unknown, economics?: Economics):
 
 export function validateEvmOperation(operation: OperationRecord): void {
   const binding = validateEvmDirectBinding(operation.evm, operation.economics);
+  if (binding.cleanup85Cancellation !== undefined) cleanup85OperationEnvelope(operation);
   if (binding.nativeCustody !== undefined && (binding.nativeCustody.walletAddress !== operation.walletAddress ||
     binding.nativeCustody.profileHash !== operation.profileHash)) throw new ApnError("APN_STATE_CORRUPT", "Generic native custody identity differs from the operation owner.");
   const transaction = evmTransaction(binding.asset, operation.walletAddress, operation.recipient, operation.amountAtomic);

@@ -388,6 +388,8 @@ export class LocalWalletNative {
     }
     async approveAndSign(payload) {
         const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
+        if (intent.evm?.cleanup85Cancellation !== undefined)
+            throw protocol("Finite cleanup85 signing requires its private scoped controller.");
         const frozen = await this.state.findOperation(intent.operationId), journal = new DirectPublicEffectJournal(this.state);
         if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
             hashObject(directCustodyPayload(frozen)) !== hashObject(payload))
