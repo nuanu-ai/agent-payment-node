@@ -31,7 +31,7 @@ export async function verifyMetaMaskOuterTransaction(raw: Record<string, unknown
   const to = rpcAddress(raw.to), from = rpcAddress(raw.from);
   if (type > 4n || rpcHex(raw.hash, 32, 32) !== expectedHash) mmFail("mm_gasless_evidence_invalid");
   const input = rpcHex(raw.input, 256 * 1024), gas = rpcQuantity(raw.gas), value = rpcQuantity(raw.value);
-  const r = rpcHex(raw.r, 32, 32), s = rpcHex(raw.s, 32, 32);
+  const r = rpcSignatureScalar(raw.r), s = rpcSignatureScalar(raw.s);
   assertSignatureParts(r, s);
   let y: number;
   if (type === 0n) {
@@ -107,7 +107,7 @@ async function parseAuthorization(value: unknown, intent: MetaMaskGaslessIntent)
     mmFail("mm_gasless_evidence_invalid");
   }
   const address = rpcAddress(row.address), nonce = safeNumber(rpcQuantity(row.nonce));
-  const r = rpcHex(row.r, 32, 32), s = rpcHex(row.s, 32, 32), yParity = safeNumber(rpcQuantity(row.yParity));
+  const r = rpcSignatureScalar(row.r), s = rpcSignatureScalar(row.s), yParity = safeNumber(rpcQuantity(row.yParity));
   if (chainId === 0 || chainId !== intent.request.chainId ||
     address !== mmRegistry(intent.request.chainId).row.protocol.delegate.address || (yParity !== 0 && yParity !== 1)) {
     mmFail("mm_gasless_evidence_invalid");
@@ -119,6 +119,15 @@ async function parseAuthorization(value: unknown, intent: MetaMaskGaslessIntent)
   catch { return mmFail("mm_gasless_evidence_invalid"); }
   if (owner !== intent.binding.address) mmFail("mm_gasless_evidence_invalid");
   return { owner, authorization };
+}
+
+/** RPC signature scalars are quantities; older endpoints also return exact 32-byte DATA. */
+function rpcSignatureScalar(value: unknown): Hex {
+  if (typeof value !== "string" ||
+    !/^0x(?:[0-9a-fA-F]{64}|0|[1-9a-fA-F][0-9a-fA-F]{0,63})$/u.test(value)) {
+    mmFail("mm_gasless_evidence_invalid");
+  }
+  return `0x${value.slice(2).toLowerCase().padStart(64, "0")}` as Hex;
 }
 
 function assertSignatureParts(r: Hex, s: Hex): void {
