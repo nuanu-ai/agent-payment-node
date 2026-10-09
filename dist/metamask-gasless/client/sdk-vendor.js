@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 const root = new URL("../../../vendor/metamask-evm-sdk/", import.meta.url);
-const MANIFEST_SHA256 = "31863561a74b0fdc5ba37afe70fc827ca9e9f171d83d12b56f2b7221dfdd6c1c";
+const MANIFEST_SHA256 = "0d85528a42112636bf1d6e6d7d4b82301dd11011725f61d75c5ee6780ba5f9f2";
 const MAX_BYTES = 12 * 1024 * 1024;
 const entries = new Set(["sdk-root", "sdk-base", "sdk-evm", "fox-evm", "fox-keyring", "controller"]);
 let verified = false;

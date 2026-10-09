@@ -1,0 +1,17 @@
+Bundled license information:
+
+@noble/curves/esm/abstract/bls.js:
+@noble/curves/esm/abstract/tower.js:
+@noble/curves/esm/bls12-381.js:
+@noble/curves/esm/abstract/edwards.js:
+@noble/curves/esm/abstract/montgomery.js:
+@noble/curves/esm/ed25519.js:
+@noble/curves/esm/nist.js:
+@noble/curves/esm/p256.js:
+  /*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) */
+
+@noble/ciphers/esm/utils.js:
+  /*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) */
+
+@scure/bip39/esm/index.js:
+  /*! scure-bip39 - MIT License (c) 2022 Patricio Palladino, Paul Miller (paulmillr.com) */

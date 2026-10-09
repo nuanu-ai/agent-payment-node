@@ -83,3 +83,15 @@ for (const kind of ["entry", "shared-chunk", "manifest", "file-symlink", "direct
     run(f.loader, true);
   });
 }
+
+for (const directory of ["metamask-evm-sdk", "metamask-smart-account", "relay-order-id", "tron-utils"]) test(`shipped ${directory} records emitted code separately from analyzed inputs`, async () => {
+  const provenance = JSON.parse(await readFile(join(product, "vendor", directory, "provenance.json"), "utf8"));
+  const contributed = new Set(provenance.outputContributions.map(row => {
+    assert.ok(Number.isInteger(row.bytesInOutput) && row.bytesInOutput > 0);
+    assert.ok(provenance.inputFiles.some(input => input.identity === row.identity && input.file === row.file));
+    return row.identity;
+  }));
+  assert.deepEqual([...contributed].sort(), Object.keys(provenance.emittedPackages).sort());
+  assert.equal(Object.values(provenance.emittedPackages).some(row => ["elliptic", "@toruslabs/ffjavascript", "rpc-websockets"].includes(row.name)), false);
+  assert.ok(Object.keys(provenance.packages).length >= contributed.size);
+});

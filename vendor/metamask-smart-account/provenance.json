@@ -4,6 +4,158 @@
     "target": "node24",
     "version": "0.28.2"
   },
+  "emittedPackages": {
+    "@metamask/7715-permission-types@2.0.0": {
+      "license": "(MIT-0 OR Apache-2.0)",
+      "name": "@metamask/7715-permission-types",
+      "version": "2.0.0"
+    },
+    "@metamask/abi-utils@3.0.0": {
+      "license": "(Apache-2.0 AND MIT)",
+      "name": "@metamask/abi-utils",
+      "version": "3.0.0"
+    },
+    "@metamask/delegation-abis@2.0.0": {
+      "license": "(MIT-0 OR Apache-2.0)",
+      "name": "@metamask/delegation-abis",
+      "version": "2.0.0"
+    },
+    "@metamask/delegation-core@3.0.0": {
+      "license": "(MIT-0 OR Apache-2.0)",
+      "name": "@metamask/delegation-core",
+      "version": "3.0.0"
+    },
+    "@metamask/delegation-deployments@2.0.0": {
+      "license": "(MIT-0 OR Apache-2.0)",
+      "name": "@metamask/delegation-deployments",
+      "version": "2.0.0"
+    },
+    "@metamask/scure-bip39@2.1.1": {
+      "license": "MIT",
+      "name": "@metamask/scure-bip39",
+      "version": "2.1.1"
+    },
+    "@metamask/smart-accounts-kit@2.0.0": {
+      "license": "(MIT-0 OR Apache-2.0)",
+      "name": "@metamask/smart-accounts-kit",
+      "version": "2.0.0"
+    },
+    "@metamask/superstruct@3.4.1": {
+      "license": "MIT",
+      "name": "@metamask/superstruct",
+      "version": "3.4.1"
+    },
+    "@metamask/utils@11.12.0": {
+      "license": "ISC",
+      "name": "@metamask/utils",
+      "version": "11.12.0"
+    },
+    "@metamask/x402@1.0.0": {
+      "license": "(MIT-0 OR Apache-2.0)",
+      "name": "@metamask/x402",
+      "version": "1.0.0"
+    },
+    "@noble/curves@1.9.1": {
+      "license": "MIT",
+      "name": "@noble/curves",
+      "version": "1.9.1"
+    },
+    "@noble/hashes@1.8.0": {
+      "license": "MIT",
+      "name": "@noble/hashes",
+      "version": "1.8.0"
+    },
+    "@scure/base@1.2.6": {
+      "license": "MIT",
+      "name": "@scure/base",
+      "version": "1.2.6"
+    },
+    "@x402/evm@2.23.0": {
+      "license": "Apache-2.0",
+      "name": "@x402/evm",
+      "version": "2.23.0"
+    },
+    "abitype@1.2.3": {
+      "license": "MIT",
+      "name": "abitype",
+      "version": "1.2.3"
+    },
+    "bufferutil@4.1.0": {
+      "license": "MIT",
+      "name": "bufferutil",
+      "version": "4.1.0"
+    },
+    "debug@4.4.3": {
+      "license": "MIT",
+      "name": "debug",
+      "version": "4.4.3"
+    },
+    "has-flag@4.0.0": {
+      "license": "MIT",
+      "name": "has-flag",
+      "version": "4.0.0"
+    },
+    "isows@1.0.7": {
+      "license": "MIT",
+      "name": "isows",
+      "version": "1.0.7"
+    },
+    "lodash@4.18.1": {
+      "license": "MIT",
+      "name": "lodash",
+      "version": "4.18.1"
+    },
+    "ms@2.1.3": {
+      "license": "MIT",
+      "name": "ms",
+      "version": "2.1.3"
+    },
+    "node-gyp-build@4.8.4": {
+      "license": "MIT",
+      "name": "node-gyp-build",
+      "version": "4.8.4"
+    },
+    "openapi-fetch@0.13.8": {
+      "license": "MIT",
+      "name": "openapi-fetch",
+      "version": "0.13.8"
+    },
+    "ox@0.14.34": {
+      "license": "MIT",
+      "name": "ox",
+      "version": "0.14.34"
+    },
+    "pony-cause@2.1.11": {
+      "license": "0BSD",
+      "name": "pony-cause",
+      "version": "2.1.11"
+    },
+    "semver@7.8.5": {
+      "license": "ISC",
+      "name": "semver",
+      "version": "7.8.5"
+    },
+    "supports-color@8.1.1": {
+      "license": "MIT",
+      "name": "supports-color",
+      "version": "8.1.1"
+    },
+    "utf-8-validate@6.0.6": {
+      "license": "MIT",
+      "name": "utf-8-validate",
+      "version": "6.0.6"
+    },
+    "viem@2.55.19": {
+      "license": "MIT",
+      "name": "viem",
+      "version": "2.55.19"
+    },
+    "ws@8.21.3": {
+      "license": "MIT",
+      "name": "ws",
+      "version": "8.21.3"
+    }
+  },
   "externalImports": [
     "buffer",
     "crypto",
@@ -6226,6 +6378,2213 @@
       "file": "wrapper.mjs",
       "identity": "ws@8.21.3",
       "sha256": "fe154662301fd558f935f9c217fccbe7a7dac02ff39e648a000589403ff27c7f"
+    }
+  ],
+  "outputContributions": [
+    {
+      "bytesInOutput": 37741,
+      "file": "dist/index.mjs",
+      "identity": "@metamask/7715-permission-types@2.0.0"
+    },
+    {
+      "bytesInOutput": 1983,
+      "file": "dist/abi.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 1271,
+      "file": "dist/errors.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 1062,
+      "file": "dist/index.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 846,
+      "file": "dist/iterator.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 4552,
+      "file": "dist/packer.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 2631,
+      "file": "dist/parsers/address.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 6711,
+      "file": "dist/parsers/array.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 2944,
+      "file": "dist/parsers/bool.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 2359,
+      "file": "dist/parsers/bytes.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 2761,
+      "file": "dist/parsers/fixed-bytes.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 3285,
+      "file": "dist/parsers/function.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 1394,
+      "file": "dist/parsers/index.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 4836,
+      "file": "dist/parsers/number.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 198,
+      "file": "dist/parsers/parser.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 2016,
+      "file": "dist/parsers/string.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 4033,
+      "file": "dist/parsers/tuple.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 191,
+      "file": "dist/types/abi.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 979,
+      "file": "dist/types/index.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 1018,
+      "file": "dist/utils/buffer.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 981,
+      "file": "dist/utils/index.js",
+      "identity": "@metamask/abi-utils@3.0.0"
+    },
+    {
+      "bytesInOutput": 479,
+      "file": "dist/abis/Address.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3729,
+      "file": "dist/abis/AllowedCalldataEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3637,
+      "file": "dist/abis/AllowedMethodsEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3639,
+      "file": "dist/abis/AllowedTargetsEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3296,
+      "file": "dist/abis/ApprovalRevocationEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4061,
+      "file": "dist/abis/ArgsEqualityCheckEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/Base64.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/Base64URL.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/BitMaps.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3741,
+      "file": "dist/abis/BlockNumberEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3264,
+      "file": "dist/abis/CaveatEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/Context.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 487,
+      "file": "dist/abis/Create2.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 22053,
+      "file": "dist/abis/DeleGatorCore.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 19145,
+      "file": "dist/abis/DelegationManager.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16387,
+      "file": "dist/abis/DelegationMetaSwapAdapter.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5450,
+      "file": "dist/abis/DeployedEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 486,
+      "file": "dist/abis/ECDSA.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1253,
+      "file": "dist/abis/EIP712.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 19418,
+      "file": "dist/abis/EIP7702DeleGatorCore.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 20912,
+      "file": "dist/abis/EIP7702StatelessDeleGator.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5525,
+      "file": "dist/abis/ERC1155BalanceChangeEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/ERC1271Lib.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 356,
+      "file": "dist/abis/ERC165.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1172,
+      "file": "dist/abis/ERC1967Proxy.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1525,
+      "file": "dist/abis/ERC1967Utils.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5205,
+      "file": "dist/abis/ERC20BalanceChangeEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 7062,
+      "file": "dist/abis/ERC20PeriodTransferEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 6943,
+      "file": "dist/abis/ERC20StreamingEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5001,
+      "file": "dist/abis/ERC20TransferAmountEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5313,
+      "file": "dist/abis/ERC721BalanceChangeEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3760,
+      "file": "dist/abis/ERC721TransferEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/EncoderLib.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 21282,
+      "file": "dist/abis/EntryPoint.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4046,
+      "file": "dist/abis/ExactCalldataBatchEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3626,
+      "file": "dist/abis/ExactCalldataEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4046,
+      "file": "dist/abis/ExactExecutionBatchEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4041,
+      "file": "dist/abis/ExactExecutionEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/Exec.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 476,
+      "file": "dist/abis/ExecutionHelper.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 99,
+      "file": "dist/abis/ExecutionLib.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 30450,
+      "file": "dist/abis/HybridDeleGator.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1791,
+      "file": "dist/abis/IAccount.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1557,
+      "file": "dist/abis/IAccountExecute.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4658,
+      "file": "dist/abis/IAggregator.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 248,
+      "file": "dist/abis/IBeacon.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3536,
+      "file": "dist/abis/ICaveatEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 937,
+      "file": "dist/abis/IDeleGatorCore.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 13149,
+      "file": "dist/abis/IDelegationManager.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5677,
+      "file": "dist/abis/IERC1155.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1875,
+      "file": "dist/abis/IERC1155Receiver.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 467,
+      "file": "dist/abis/IERC1271.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 6889,
+      "file": "dist/abis/IERC1363.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 356,
+      "file": "dist/abis/IERC165.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 867,
+      "file": "dist/abis/IERC173.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 247,
+      "file": "dist/abis/IERC1822Proxiable.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3395,
+      "file": "dist/abis/IERC20.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 993,
+      "file": "dist/abis/IERC5267.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5410,
+      "file": "dist/abis/IERC721.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 669,
+      "file": "dist/abis/IERC721Receiver.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4411,
+      "file": "dist/abis/IERC7579Account.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 696,
+      "file": "dist/abis/IERC7821.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16749,
+      "file": "dist/abis/IEntryPoint.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 2104,
+      "file": "dist/abis/IMetaSwap.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 697,
+      "file": "dist/abis/INonceManager.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 2471,
+      "file": "dist/abis/IPaymaster.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4866,
+      "file": "dist/abis/IStakeManager.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4796,
+      "file": "dist/abis/IdEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 409,
+      "file": "dist/abis/Initializable.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4867,
+      "file": "dist/abis/LimitedCallsEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4484,
+      "file": "dist/abis/LogicalOrWrapperEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/Math.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/MessageHashUtils.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3737,
+      "file": "dist/abis/MockCaveatEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3495,
+      "file": "dist/abis/MockFailureCaveatEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/ModeLib.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 28838,
+      "file": "dist/abis/MultiSigDeleGator.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 8506,
+      "file": "dist/abis/MultiTokenPeriodEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4997,
+      "file": "dist/abis/NativeBalanceChangeEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5515,
+      "file": "dist/abis/NativeTokenPaymentEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 6829,
+      "file": "dist/abis/NativeTokenPeriodTransferEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 6710,
+      "file": "dist/abis/NativeTokenStreamingEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4876,
+      "file": "dist/abis/NativeTokenTransferAmountEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4837,
+      "file": "dist/abis/NonceEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1134,
+      "file": "dist/abis/NonceManager.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1392,
+      "file": "dist/abis/Ownable.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 2141,
+      "file": "dist/abis/Ownable2Step.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 4311,
+      "file": "dist/abis/OwnershipTransferEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/P256SCLVerifierLib.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/P256VerifierLib.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 16,
+      "file": "dist/abis/Panic.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 844,
+      "file": "dist/abis/Pausable.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 82,
+      "file": "dist/abis/Proxy.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3633,
+      "file": "dist/abis/RedeemerEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 108,
+      "file": "dist/abis/ReentrancyGuard.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 741,
+      "file": "dist/abis/SCL_RIP7212.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 86,
+      "file": "dist/abis/SCL_Wrapper.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1002,
+      "file": "dist/abis/SafeCast.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 644,
+      "file": "dist/abis/SafeERC20.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 365,
+      "file": "dist/abis/SenderCreator.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 277,
+      "file": "dist/abis/ShortStrings.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 17,
+      "file": "dist/abis/SignedMath.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1812,
+      "file": "dist/abis/SimpleFactory.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5361,
+      "file": "dist/abis/SpecificActionERC20TransferBatchEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 5686,
+      "file": "dist/abis/StakeManager.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 17,
+      "file": "dist/abis/StorageSlot.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 319,
+      "file": "dist/abis/Strings.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3750,
+      "file": "dist/abis/TimestampEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 1916,
+      "file": "dist/abis/UUPSUpgradeable.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 750,
+      "file": "dist/abis/UserOperationLib.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3627,
+      "file": "dist/abis/ValueLteEnforcer.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 17,
+      "file": "dist/abis/WebAuthn.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 2037,
+      "file": "dist/bytecode/ERC1967Proxy.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 3639,
+      "file": "dist/index.mjs",
+      "identity": "@metamask/delegation-abis@2.0.0"
+    },
+    {
+      "bytesInOutput": 39513,
+      "file": "dist/index.mjs",
+      "identity": "@metamask/delegation-core@3.0.0"
+    },
+    {
+      "bytesInOutput": 10225,
+      "file": "dist/index.mjs",
+      "identity": "@metamask/delegation-deployments@2.0.0"
+    },
+    {
+      "bytesInOutput": 13389,
+      "file": "dist/wordlists/english.js",
+      "identity": "@metamask/scure-bip39@2.1.1"
+    },
+    {
+      "bytesInOutput": 5869,
+      "file": "dist/chunk-56QPXKWD.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 18583,
+      "file": "dist/chunk-5ENRJKXL.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 4233,
+      "file": "dist/chunk-GMGJRC3D.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 279,
+      "file": "dist/chunk-IMO6XNDJ.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 22592,
+      "file": "dist/chunk-RDTAD64U.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 54098,
+      "file": "dist/chunk-XBHL6PDR.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 30629,
+      "file": "dist/chunk-Z4MVJILE.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 10507,
+      "file": "dist/experimental/index.mjs",
+      "identity": "@metamask/smart-accounts-kit@2.0.0"
+    },
+    {
+      "bytesInOutput": 899,
+      "file": "dist/error.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 567,
+      "file": "dist/error.mjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 1258,
+      "file": "dist/index.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 4733,
+      "file": "dist/struct.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 3146,
+      "file": "dist/struct.mjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 1628,
+      "file": "dist/structs/coercions.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 3540,
+      "file": "dist/structs/refinements.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 570,
+      "file": "dist/structs/refinements.mjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 6057,
+      "file": "dist/structs/sensitive.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 13250,
+      "file": "dist/structs/types.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 160,
+      "file": "dist/structs/types.mjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 3873,
+      "file": "dist/structs/utilities.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 100,
+      "file": "dist/structs/utilities.mjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 4550,
+      "file": "dist/utils.cjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 3289,
+      "file": "dist/utils.mjs",
+      "identity": "@metamask/superstruct@3.4.1"
+    },
+    {
+      "bytesInOutput": 1863,
+      "file": "dist/assert.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 639,
+      "file": "dist/assert.mjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 1044,
+      "file": "dist/base64.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 7992,
+      "file": "dist/bytes.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 1687,
+      "file": "dist/bytes.mjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 11266,
+      "file": "dist/caip-types.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 2794,
+      "file": "dist/caip-types.mjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 445,
+      "file": "dist/checksum.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 3067,
+      "file": "dist/coercers.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 4229,
+      "file": "dist/collections.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 207,
+      "file": "dist/encryption-types.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 2278,
+      "file": "dist/errors.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 1457,
+      "file": "dist/hashing.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 4648,
+      "file": "dist/hex.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 2572,
+      "file": "dist/hex.mjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 5337,
+      "file": "dist/index.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 9609,
+      "file": "dist/json.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 189,
+      "file": "dist/keyring.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 840,
+      "file": "dist/logging.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 2840,
+      "file": "dist/misc.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 1026,
+      "file": "dist/mnemonic.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 1548,
+      "file": "dist/number.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 523,
+      "file": "dist/number.mjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 187,
+      "file": "dist/opaque.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 695,
+      "file": "dist/promise.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 499,
+      "file": "dist/superstruct.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 147,
+      "file": "dist/superstruct.mjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 1396,
+      "file": "dist/time.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 209,
+      "file": "dist/transaction-types.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 5905,
+      "file": "dist/unitsConversion.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 2275,
+      "file": "dist/versions.cjs",
+      "identity": "@metamask/utils@11.12.0"
+    },
+    {
+      "bytesInOutput": 1944,
+      "file": "dist/index.mjs",
+      "identity": "@metamask/x402@1.0.0"
+    },
+    {
+      "bytesInOutput": 296,
+      "file": "esm/_shortw_utils.js",
+      "identity": "@noble/curves@1.9.1"
+    },
+    {
+      "bytesInOutput": 7406,
+      "file": "esm/abstract/curve.js",
+      "identity": "@noble/curves@1.9.1"
+    },
+    {
+      "bytesInOutput": 4924,
+      "file": "esm/abstract/hash-to-curve.js",
+      "identity": "@noble/curves@1.9.1"
+    },
+    {
+      "bytesInOutput": 7866,
+      "file": "esm/abstract/modular.js",
+      "identity": "@noble/curves@1.9.1"
+    },
+    {
+      "bytesInOutput": 6859,
+      "file": "esm/abstract/utils.js",
+      "identity": "@noble/curves@1.9.1"
+    },
+    {
+      "bytesInOutput": 32754,
+      "file": "esm/abstract/weierstrass.js",
+      "identity": "@noble/curves@1.9.1"
+    },
+    {
+      "bytesInOutput": 7657,
+      "file": "esm/secp256k1.js",
+      "identity": "@noble/curves@1.9.1"
+    },
+    {
+      "bytesInOutput": 5184,
+      "file": "_md.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 3422,
+      "file": "_u64.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 410,
+      "file": "cryptoNode.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 3271,
+      "file": "esm/_md.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 761,
+      "file": "esm/_u64.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 182,
+      "file": "esm/cryptoNode.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 1894,
+      "file": "esm/hmac.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 2947,
+      "file": "esm/sha2.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 22,
+      "file": "esm/sha256.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 5210,
+      "file": "esm/sha3.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 3154,
+      "file": "esm/utils.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 15723,
+      "file": "sha2.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 451,
+      "file": "sha256.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 7451,
+      "file": "sha3.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 723,
+      "file": "sha512.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 8651,
+      "file": "utils.js",
+      "identity": "@noble/hashes@1.8.0"
+    },
+    {
+      "bytesInOutput": 21100,
+      "file": "lib/index.js",
+      "identity": "@scure/base@1.2.6"
+    },
+    {
+      "bytesInOutput": 533,
+      "file": "dist/esm/chunk-SGFNIWGK.mjs",
+      "identity": "@x402/evm@2.23.0"
+    },
+    {
+      "bytesInOutput": 1603,
+      "file": "dist/esm/errors.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 756,
+      "file": "dist/esm/human-readable/errors/abiItem.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 2233,
+      "file": "dist/esm/human-readable/errors/abiParameter.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 1033,
+      "file": "dist/esm/human-readable/errors/signature.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 465,
+      "file": "dist/esm/human-readable/errors/splitParameters.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 366,
+      "file": "dist/esm/human-readable/errors/struct.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 887,
+      "file": "dist/esm/human-readable/formatAbiItem.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 809,
+      "file": "dist/esm/human-readable/formatAbiParameter.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 303,
+      "file": "dist/esm/human-readable/formatAbiParameters.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 328,
+      "file": "dist/esm/human-readable/parseAbi.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 2562,
+      "file": "dist/esm/human-readable/runtime/cache.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 2156,
+      "file": "dist/esm/human-readable/runtime/signatures.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 2435,
+      "file": "dist/esm/human-readable/runtime/structs.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 7891,
+      "file": "dist/esm/human-readable/runtime/utils.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 337,
+      "file": "dist/esm/regex.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 23,
+      "file": "dist/esm/version.js",
+      "identity": "abitype@1.2.3"
+    },
+    {
+      "bytesInOutput": 496,
+      "file": "fallback.js",
+      "identity": "bufferutil@4.1.0"
+    },
+    {
+      "bytesInOutput": 258,
+      "file": "index.js",
+      "identity": "bufferutil@4.1.0"
+    },
+    {
+      "bytesInOutput": 4707,
+      "file": "src/browser.js",
+      "identity": "debug@4.4.3"
+    },
+    {
+      "bytesInOutput": 5923,
+      "file": "src/common.js",
+      "identity": "debug@4.4.3"
+    },
+    {
+      "bytesInOutput": 313,
+      "file": "src/index.js",
+      "identity": "debug@4.4.3"
+    },
+    {
+      "bytesInOutput": 4320,
+      "file": "src/node.js",
+      "identity": "debug@4.4.3"
+    },
+    {
+      "bytesInOutput": 457,
+      "file": "index.js",
+      "identity": "has-flag@4.0.0"
+    },
+    {
+      "bytesInOutput": 190,
+      "file": "_esm/index.js",
+      "identity": "isows@1.0.7"
+    },
+    {
+      "bytesInOutput": 391,
+      "file": "_esm/utils.js",
+      "identity": "isows@1.0.7"
+    },
+    {
+      "bytesInOutput": 224957,
+      "file": "lodash.js",
+      "identity": "lodash@4.18.1"
+    },
+    {
+      "bytesInOutput": 2881,
+      "file": "index.js",
+      "identity": "ms@2.1.3"
+    },
+    {
+      "bytesInOutput": 405,
+      "file": "index.js",
+      "identity": "node-gyp-build@4.8.4"
+    },
+    {
+      "bytesInOutput": 6455,
+      "file": "node-gyp-build.js",
+      "identity": "node-gyp-build@4.8.4"
+    },
+    {
+      "bytesInOutput": 14861,
+      "file": "dist/index.js",
+      "identity": "openapi-fetch@0.13.8"
+    },
+    {
+      "bytesInOutput": 971,
+      "file": "_esm/core/BlockOverrides.js",
+      "identity": "ox@0.14.34"
+    },
+    {
+      "bytesInOutput": 3866,
+      "file": "_esm/core/Errors.js",
+      "identity": "ox@0.14.34"
+    },
+    {
+      "bytesInOutput": 1975,
+      "file": "_esm/core/Hex.js",
+      "identity": "ox@0.14.34"
+    },
+    {
+      "bytesInOutput": 222,
+      "file": "_esm/core/Withdrawal.js",
+      "identity": "ox@0.14.34"
+    },
+    {
+      "bytesInOutput": 45,
+      "file": "_esm/core/internal/errors.js",
+      "identity": "ox@0.14.34"
+    },
+    {
+      "bytesInOutput": 398,
+      "file": "_esm/core/internal/hex.js",
+      "identity": "ox@0.14.34"
+    },
+    {
+      "bytesInOutput": 24,
+      "file": "_esm/core/version.js",
+      "identity": "ox@0.14.34"
+    },
+    {
+      "bytesInOutput": 642,
+      "file": "index.js",
+      "identity": "pony-cause@2.1.11"
+    },
+    {
+      "bytesInOutput": 652,
+      "file": "lib/error-with-cause.js",
+      "identity": "pony-cause@2.1.11"
+    },
+    {
+      "bytesInOutput": 2451,
+      "file": "lib/helpers.js",
+      "identity": "pony-cause@2.1.11"
+    },
+    {
+      "bytesInOutput": 3732,
+      "file": "classes/comparator.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 13028,
+      "file": "classes/range.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 9869,
+      "file": "classes/semver.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 334,
+      "file": "functions/clean.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 1216,
+      "file": "functions/cmp.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 1634,
+      "file": "functions/coerce.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 422,
+      "file": "functions/compare-build.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 263,
+      "file": "functions/compare-loose.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 277,
+      "file": "functions/compare.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 1288,
+      "file": "functions/diff.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 235,
+      "file": "functions/eq.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 233,
+      "file": "functions/gt.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 238,
+      "file": "functions/gte.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 634,
+      "file": "functions/inc.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 233,
+      "file": "functions/lt.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 238,
+      "file": "functions/lte.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 242,
+      "file": "functions/major.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 242,
+      "file": "functions/minor.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 239,
+      "file": "functions/neq.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 488,
+      "file": "functions/parse.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 242,
+      "file": "functions/patch.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 371,
+      "file": "functions/prerelease.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 253,
+      "file": "functions/rcompare.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 278,
+      "file": "functions/rsort.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 392,
+      "file": "functions/satisfies.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 274,
+      "file": "functions/sort.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 1230,
+      "file": "functions/truncate.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 305,
+      "file": "functions/valid.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 2545,
+      "file": "index.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 771,
+      "file": "internal/constants.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 344,
+      "file": "internal/debug.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 693,
+      "file": "internal/identifiers.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 932,
+      "file": "internal/lrucache.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 464,
+      "file": "internal/parse-options.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 5169,
+      "file": "internal/re.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 259,
+      "file": "ranges/gtr.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 356,
+      "file": "ranges/intersects.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 259,
+      "file": "ranges/ltr.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 714,
+      "file": "ranges/max-satisfying.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 713,
+      "file": "ranges/min-satisfying.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 1699,
+      "file": "ranges/min-version.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 2054,
+      "file": "ranges/outside.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 1415,
+      "file": "ranges/simplify.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 5380,
+      "file": "ranges/subset.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 348,
+      "file": "ranges/to-comparators.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 352,
+      "file": "ranges/valid.js",
+      "identity": "semver@7.8.5"
+    },
+    {
+      "bytesInOutput": 3522,
+      "file": "index.js",
+      "identity": "supports-color@8.1.1"
+    },
+    {
+      "bytesInOutput": 1240,
+      "file": "fallback.js",
+      "identity": "utf-8-validate@6.0.6"
+    },
+    {
+      "bytesInOutput": 267,
+      "file": "index.js",
+      "identity": "utf-8-validate@6.0.6"
+    },
+    {
+      "bytesInOutput": 487,
+      "file": "_esm/account-abstraction/utils/userOperation/getInitCode.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1466,
+      "file": "_esm/account-abstraction/utils/userOperation/toPackedUserOperation.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 139,
+      "file": "_esm/accounts/utils/parseAccount.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 159,
+      "file": "_esm/accounts/utils/publicKeyToAddress.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 8686,
+      "file": "_esm/actions/public/call.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1747,
+      "file": "_esm/actions/public/estimateFeesPerGas.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2368,
+      "file": "_esm/actions/public/estimateGas.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1329,
+      "file": "_esm/actions/public/estimateMaxPriorityFeePerGas.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 4284,
+      "file": "_esm/actions/public/fillTransaction.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 906,
+      "file": "_esm/actions/public/getBlock.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 166,
+      "file": "_esm/actions/public/getChainId.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 479,
+      "file": "_esm/actions/public/getCode.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 141,
+      "file": "_esm/actions/public/getGasPrice.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 481,
+      "file": "_esm/actions/public/getTransactionCount.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 648,
+      "file": "_esm/actions/public/readContract.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1291,
+      "file": "_esm/actions/public/simulateContract.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 9999,
+      "file": "_esm/actions/wallet/prepareTransactionRequest.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 198,
+      "file": "_esm/actions/wallet/sendRawTransaction.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 5817,
+      "file": "_esm/actions/wallet/sendTransaction.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1112,
+      "file": "_esm/actions/wallet/writeContract.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 4498,
+      "file": "_esm/constants/abis.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 354,
+      "file": "_esm/constants/blob.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 40,
+      "file": "_esm/constants/contract.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 13512,
+      "file": "_esm/constants/contracts.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 3506,
+      "file": "_esm/constants/number.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 823,
+      "file": "_esm/constants/solidity.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 7838,
+      "file": "_esm/errors/abi.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 659,
+      "file": "_esm/errors/account.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 341,
+      "file": "_esm/errors/address.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2509,
+      "file": "_esm/errors/base.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 401,
+      "file": "_esm/errors/blob.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 374,
+      "file": "_esm/errors/block.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1435,
+      "file": "_esm/errors/ccip.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1616,
+      "file": "_esm/errors/chain.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 8088,
+      "file": "_esm/errors/contract.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 664,
+      "file": "_esm/errors/cursor.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 881,
+      "file": "_esm/errors/data.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 816,
+      "file": "_esm/errors/encoding.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1182,
+      "file": "_esm/errors/estimateGas.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 632,
+      "file": "_esm/errors/fee.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 6266,
+      "file": "_esm/errors/node.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1859,
+      "file": "_esm/errors/request.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 12701,
+      "file": "_esm/errors/rpc.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1221,
+      "file": "_esm/errors/stateOverride.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2801,
+      "file": "_esm/errors/transaction.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 730,
+      "file": "_esm/errors/utils.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 26,
+      "file": "_esm/errors/version.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 6603,
+      "file": "_esm/utils/abi/decodeAbiParameters.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 718,
+      "file": "_esm/utils/abi/decodeErrorResult.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 585,
+      "file": "_esm/utils/abi/decodeFunctionData.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 762,
+      "file": "_esm/utils/abi/decodeFunctionResult.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 6726,
+      "file": "_esm/utils/abi/encodeAbiParameters.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 706,
+      "file": "_esm/utils/abi/encodeDeployData.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 818,
+      "file": "_esm/utils/abi/encodeErrorResult.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 501,
+      "file": "_esm/utils/abi/encodeFunctionData.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 893,
+      "file": "_esm/utils/abi/encodeFunctionResult.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1875,
+      "file": "_esm/utils/abi/encodePacked.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 771,
+      "file": "_esm/utils/abi/formatAbiItem.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 441,
+      "file": "_esm/utils/abi/formatAbiItemWithArgs.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 4134,
+      "file": "_esm/utils/abi/getAbiItem.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 612,
+      "file": "_esm/utils/abi/prepareEncodeFunctionData.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1054,
+      "file": "_esm/utils/address/getAddress.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 595,
+      "file": "_esm/utils/address/isAddress.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 262,
+      "file": "_esm/utils/address/isAddressEqual.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 407,
+      "file": "_esm/utils/authorization/hashAuthorization.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 228,
+      "file": "_esm/utils/authorization/recoverAuthorizationAddress.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 489,
+      "file": "_esm/utils/blob/blobsToCommitments.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 706,
+      "file": "_esm/utils/blob/blobsToProofs.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 352,
+      "file": "_esm/utils/blob/commitmentToVersionedHash.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 386,
+      "file": "_esm/utils/blob/commitmentsToVersionedHashes.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 503,
+      "file": "_esm/utils/blob/toBlobSidecars.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1040,
+      "file": "_esm/utils/blob/toBlobs.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 469,
+      "file": "_esm/utils/block/formatBlockParameter.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 3523,
+      "file": "_esm/utils/ccip.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 205,
+      "file": "_esm/utils/chain/assertCurrentChain.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 507,
+      "file": "_esm/utils/chain/getChainContractAddress.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 4938,
+      "file": "_esm/utils/cursor.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 506,
+      "file": "_esm/utils/data/concat.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 208,
+      "file": "_esm/utils/data/isHex.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1068,
+      "file": "_esm/utils/data/pad.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 134,
+      "file": "_esm/utils/data/size.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1204,
+      "file": "_esm/utils/data/slice.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 619,
+      "file": "_esm/utils/data/trim.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 935,
+      "file": "_esm/utils/encoding/fromBytes.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 944,
+      "file": "_esm/utils/encoding/fromHex.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2179,
+      "file": "_esm/utils/encoding/toBytes.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2080,
+      "file": "_esm/utils/encoding/toHex.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2582,
+      "file": "_esm/utils/encoding/toRlp.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1173,
+      "file": "_esm/utils/ens/localBatchGatewayRequest.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 307,
+      "file": "_esm/utils/errors/getCallError.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1159,
+      "file": "_esm/utils/errors/getContractError.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 299,
+      "file": "_esm/utils/errors/getEstimateGasError.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1961,
+      "file": "_esm/utils/errors/getNodeError.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 299,
+      "file": "_esm/utils/errors/getTransactionError.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1097,
+      "file": "_esm/utils/formatters/block.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 494,
+      "file": "_esm/utils/formatters/extract.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2864,
+      "file": "_esm/utils/formatters/transaction.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2609,
+      "file": "_esm/utils/formatters/transactionRequest.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 329,
+      "file": "_esm/utils/getAction.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 101,
+      "file": "_esm/utils/hash/hashSignature.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 211,
+      "file": "_esm/utils/hash/keccak256.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 960,
+      "file": "_esm/utils/hash/normalizeSignature.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 206,
+      "file": "_esm/utils/hash/sha256.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 39,
+      "file": "_esm/utils/hash/toEventSelector.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 67,
+      "file": "_esm/utils/hash/toFunctionSelector.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 181,
+      "file": "_esm/utils/hash/toSignature.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 74,
+      "file": "_esm/utils/hash/toSignatureHash.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 690,
+      "file": "_esm/utils/lru.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1457,
+      "file": "_esm/utils/promise/createBatchScheduler.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 234,
+      "file": "_esm/utils/promise/withResolvers.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 247,
+      "file": "_esm/utils/regex.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 129,
+      "file": "_esm/utils/signature/recoverAddress.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1273,
+      "file": "_esm/utils/signature/recoverPublicKey.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1708,
+      "file": "_esm/utils/stateOverride.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 244,
+      "file": "_esm/utils/stringify.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 623,
+      "file": "_esm/utils/transaction/assertRequest.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 775,
+      "file": "_esm/utils/transaction/getTransactionType.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 1182,
+      "file": "_esm/utils/unit/Value.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 78,
+      "file": "_esm/utils/unit/formatEther.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 76,
+      "file": "_esm/utils/unit/formatGwei.js",
+      "identity": "viem@2.55.19"
+    },
+    {
+      "bytesInOutput": 2319,
+      "file": "lib/buffer-util.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 730,
+      "file": "lib/constants.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 7758,
+      "file": "lib/event-target.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 5677,
+      "file": "lib/extension.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 1216,
+      "file": "lib/limiter.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 14571,
+      "file": "lib/permessage-deflate.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 19385,
+      "file": "lib/receiver.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 17617,
+      "file": "lib/sender.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 2932,
+      "file": "lib/stream.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 1509,
+      "file": "lib/subprotocol.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 3610,
+      "file": "lib/validation.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 16129,
+      "file": "lib/websocket-server.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 31962,
+      "file": "lib/websocket.js",
+      "identity": "ws@8.21.3"
+    },
+    {
+      "bytesInOutput": 1004,
+      "file": "wrapper.mjs",
+      "identity": "ws@8.21.3"
     }
   ],
   "packages": {

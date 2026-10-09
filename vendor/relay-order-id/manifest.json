@@ -11,12 +11,12 @@
   ],
   "files": {
     "order-id.mjs": {
-      "bytes": 7839659,
-      "sha256": "e7c11c7e433c8b936420409680f2e16712c89333e6e945606bf093bc0bb49d79"
+      "bytes": 5568281,
+      "sha256": "af95223ffa7f81ae66a5c4187c67a5ceb15f3a113173109b3f560d3193c95343"
     },
     "order-id.mjs.LEGAL.txt": {
-      "bytes": 11551,
-      "sha256": "7319ca760bca0e83d247cd9b489ca00a1055162a652006612be197f9add2bc58"
+      "bytes": 1581,
+      "sha256": "ca784819588b95e12a550a4bb7e0e3ace35c2311ad369098feccab4843c7c86c"
     }
   },
   "schemaVersion": "apn.relay-order-id.v1",
