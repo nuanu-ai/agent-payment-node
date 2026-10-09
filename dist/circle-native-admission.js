@@ -36,21 +36,6 @@ export function circleNativeSourceIdentity(op) {
     return hashObject({ sourceCustody: op.sourceCustody, source: op.source, attestation: op.attestation,
         effects: op.effects.filter(e => e.role !== "mint"), residualAllowanceAtomic: op.residualAllowanceAtomic });
 }
-/** Exactly fourteen scalar read POSTs for one saved source. No journal mutation or custody entry. */
-class PublicCircleReads extends CircleRpc {
-    port;
-    count = 0;
-    constructor(port) {
-        super("https://public.invalid", 42161);
-        this.port = port;
-    }
-    async call(method, params) {
-        if (++this.count > 14 || !["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_call"].includes(method) ||
-            this.port.coinbaseGaslessCall === undefined)
-            blocked();
-        return await this.port.coinbaseGaslessCall(method, params);
-    }
-}
 function envelope(effect, input) {
     const t = circleRecord(input), e = effect.envelope;
     if (circleHex(t.hash, 32) !== effect.transactionHash || circleUint(t.nonce).toString() !== e.nonceAtomic ||
@@ -90,6 +75,21 @@ export async function verifyCircleNativeAdmission(state, port, profile, account,
         blocked();
     port.armEvmDirectRpcGuard?.();
     assertCircleAttestation(op.source, op.attestation);
+    /** Exactly fourteen scalar read POSTs for one saved source. No journal mutation or custody entry. */
+    class PublicCircleReads extends CircleRpc {
+        port;
+        count = 0;
+        constructor(port) {
+            super("https://public.invalid", 42161);
+            this.port = port;
+        }
+        async call(method, params) {
+            if (++this.count > 14 || !["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_call"].includes(method) ||
+                this.port.coinbaseGaslessCall === undefined)
+                blocked();
+            return await this.port.coinbaseGaslessCall(method, params);
+        }
+    }
     const rpc = new PublicCircleReads(port), approval = op.effects.find(e => e.role === "approval"), burn = op.effects.find(e => e.role === "burn");
     const a = await rpc.observation(approval.transactionHash, "finalized"), b = await rpc.observation(burn.transactionHash, "finalized");
     if (a === null || b === null)
