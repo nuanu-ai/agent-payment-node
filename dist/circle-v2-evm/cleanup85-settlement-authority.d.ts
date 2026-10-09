@@ -8,5 +8,8 @@ import type { CircleRpc } from "./rpc.js";
 export interface VerifiedCleanup85Settlement {
     readonly kind: "verified-cleanup85-settlement";
 }
-export declare function consumeCleanup85Settlement(token: VerifiedCleanup85Settlement, state: StateStore, op: CircleOperationV1, proof: CircleNonceRetirementProof): void;
+export declare function consumeCleanup85Settlement(token: VerifiedCleanup85Settlement, state: StateStore, op: CircleOperationV1, proof: CircleNonceRetirementProof): Promise<{
+    readonly operation: CircleOperationV1;
+    readonly proof: CircleNonceRetirementProof;
+}>;
 export declare function verifyCleanup85Settlement(state: StateStore, op: CircleOperationV1, proof: CircleNonceRetirementProof, source: CircleRpc, accounting?: (state: StateStore, request: Cleanup85CancellationRequest, proof: Cleanup85CancellationProof) => Promise<void>): Promise<VerifiedCleanup85Settlement>;

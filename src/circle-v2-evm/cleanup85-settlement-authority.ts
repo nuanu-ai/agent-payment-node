@@ -1,3 +1,4 @@
+import { CircleRepository } from "./repository.js";
 import { canonicalJson } from "../canonical.js";
 import { verifyCleanup85HistoricalAcceptance } from "./cleanup85-historical-acceptance.js";
 import { hashObject } from "../canonical.js";
@@ -19,12 +20,23 @@ import type { CircleRpc } from "./rpc.js";
 /** Public JSON is evidence, never authority to release held assets. Only this live canonical
  * verifier can issue the private, operation/root/proof-bound one-use settlement capability. */
 export interface VerifiedCleanup85Settlement { readonly kind: "verified-cleanup85-settlement"; }
-const verified = new WeakMap<VerifiedCleanup85Settlement, { root: string; operationId: string; fingerprint: string; proofHash: string }>();
-export function consumeCleanup85Settlement(token: VerifiedCleanup85Settlement, state: StateStore, op: CircleOperationV1, proof: CircleNonceRetirementProof): void {
+const verified = new WeakMap<VerifiedCleanup85Settlement, { root: string; operationId: string; fingerprint: string; proofHash: string; operationDigest: string; proofDigest: string; operation: CircleOperationV1; proof: CircleNonceRetirementProof }>();
+export async function consumeCleanup85Settlement(token: VerifiedCleanup85Settlement, state: StateStore, op: CircleOperationV1, proof: CircleNonceRetirementProof): Promise<{ readonly operation: CircleOperationV1; readonly proof: CircleNonceRetirementProof }> {
+  op = detachedFrozen(op); proof = detachedFrozen(proof);
   const body = verified.get(token); verified.delete(token);
-  if (body === undefined || body.root !== state.root || body.operationId !== op.operationId || body.fingerprint !== op.fingerprint || body.proofHash !== proof.proofHash) circleBlocked("private_cleanup85_settlement_required");
+  if (body === undefined || body.root !== state.root || body.operationId !== op.operationId || body.fingerprint !== op.fingerprint || body.proofHash !== proof.proofHash || body.operationDigest !== hashObject(op) || body.proofDigest !== hashObject(proof)) circleBlocked("private_cleanup85_settlement_required");
+  await assertDurableSettlementOperation(state, op);
+  return Object.freeze({ operation: body.operation, proof: body.proof });
+}
+async function assertDurableSettlementOperation(state: StateStore, op: CircleOperationV1): Promise<void> {
+  const saved = await new CircleRepository(state.root).load(op.operationId);
+  if (saved === null || canonicalJson(saved) !== canonicalJson(op)) circleBlocked("cleanup85_settlement_durable_operation_changed");
+}
+function detachedFrozen<T>(value: T): T {
+  const copy = structuredClone(value); const freeze = (v: unknown): void => { if (v !== null && typeof v === "object") { for (const child of Object.values(v)) freeze(child); Object.freeze(v); } }; freeze(copy); return copy;
 }
 export async function verifyCleanup85Settlement(state: StateStore, op: CircleOperationV1, proof: CircleNonceRetirementProof, source: CircleRpc, accounting?: (state: StateStore, request: Cleanup85CancellationRequest, proof: Cleanup85CancellationProof) => Promise<void>): Promise<VerifiedCleanup85Settlement> {
+  op = detachedFrozen(op); proof = detachedFrozen(proof); await assertDurableSettlementOperation(state, op);
   validateCleanup85RecoveryProof(proof, op); const p = proof.cleanup85Recovery!, old = new CircleNonceRetirementStore(state.root), parent = await old.intent(op), recoveryStore = new Cleanup85RecoveryStore(state.root);
   if (parent === null || parent.intentHash !== p.parentIntentHash || !await old.hasClaim(op, "sign")) circleBlocked("cleanup85_settlement_original_sign_required");
   await old.hasClaim(op, "send"); await recoveryStore.assertRetainedMaterialHeaders(op, p.mode === "observed_original");
@@ -60,5 +72,6 @@ export async function verifyCleanup85Settlement(state: StateStore, op: CircleOpe
     const head = await source.block("0x" + BigInt(saved.finalityBlockNumberAtomic).toString(16));
     if (circleHex(head.hash, 32) !== saved.finalityBlockHash || circleUint(head.number).toString() !== saved.finalityBlockNumberAtomic) circleBlocked("cleanup85_settlement_frozen_head_changed");
   }
-  const token = Object.freeze({ kind: "verified-cleanup85-settlement" as const }); verified.set(token, { root: state.root, operationId: op.operationId, fingerprint: op.fingerprint, proofHash: proof.proofHash }); return token;
+  await assertDurableSettlementOperation(state, op);
+  const token = Object.freeze({ kind: "verified-cleanup85-settlement" as const }); verified.set(token, { root: state.root, operationId: op.operationId, fingerprint: op.fingerprint, proofHash: proof.proofHash, operationDigest: hashObject(op), proofDigest: hashObject(proof), operation: op, proof }); return token;
 }
