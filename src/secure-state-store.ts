@@ -276,6 +276,9 @@ export class SecureStateStore {
     }
   }
 
+  /** Optional internal assertion seam for specialized create-only stores. */
+  protected async beforeCreateOnlyPublication(_relativePath: string, _value: unknown): Promise<void> {}
+
   protected async writeJson(relativePath: string, value: unknown, createOnly = false): Promise<void> {
     const target = this.resolveRelative(relativePath);
     const parent = dirname(target);
@@ -330,6 +333,11 @@ export class SecureStateStore {
         }
       }
       if (createOnly) {
+        // Keep ordinary stores on the original path; only a subclass that
+        // supplies a publication assertion adds work at this atomic seam.
+        if (this.beforeCreateOnlyPublication !== SecureStateStore.prototype.beforeCreateOnlyPublication) {
+          await this.beforeCreateOnlyPublication(relativePath, value);
+        }
         try {
           await link(temporary, target);
         } catch (error) {

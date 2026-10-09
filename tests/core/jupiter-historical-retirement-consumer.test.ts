@@ -1,6 +1,7 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { canonicalJson, domainHash, hashObject, sha256 } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
@@ -32,6 +33,7 @@ let currentActive: ActiveAssetPolicy | undefined;
 let currentWitness: any;
 let canonicalCalls = 0;
 let policyDecodeCalls = 0;
+let policyDecodeHook: (() => void) | undefined;
 const ownerMock = {
   async claimOwnedJupiterRetirementScope(token: unknown, context: unknown): Promise<void> {
     if (token !== currentToken || context !== currentContext) throw new Error("test scope mismatch");
@@ -54,6 +56,7 @@ mock.module("../../src/swap/jupiter-solana/canonical-future-invalidity.js", { na
 mock.module("../../src/allowlist-active-policy.js", { namedExports: {
   activeAssetPolicyFromState(): ActiveAssetPolicy {
     policyDecodeCalls += 1;
+    policyDecodeHook?.();
     if (currentActive === undefined) throw new Error("test policy unavailable");
     return currentActive;
   },
@@ -196,6 +199,19 @@ function activate(f: Awaited<ReturnType<typeof fixture>>): void {
   currentWitness = f.witness;
 }
 
+async function stageExactAccountingTemp(f: Awaited<ReturnType<typeof fixture>>, publishLink: boolean): Promise<{
+  target: string; temporary: string;
+}> {
+  const operationId = f.context.operation.operationId;
+  const directory = join(f.context.state.root, recordNamespace);
+  await mkdir(directory, { mode: 0o700 });
+  const target = join(directory, `${operationId}.json`);
+  const temporary = join(directory, `.${sha256(target).slice(0, 12)}.${"a".repeat(24)}.tmp`);
+  await writeFile(temporary, `${canonicalJson(f.record)}\n`, { mode: 0o600, flag: "wx" });
+  if (publishLink) await link(temporary, target);
+  return { target, temporary };
+}
+
 async function runConsumer(f: Awaited<ReturnType<typeof fixture>>) {
   activate(f);
   return await consumeJupiterHistoricalRetirement(f.token as never, f.context as never);
@@ -220,7 +236,7 @@ test("TEST-MOCKED C2 writer commits one UNKNOWN record then separate journal/typ
   assert.equal(result.transactionOutcome, "unknown");
   assert.equal(result.transactionMayHaveBeenSubmitted, true);
   assert.equal(result.idempotentRecovered, false);
-  assert.equal(policyDecodeCalls, policyReadsBefore + 1);
+  assert.equal(policyDecodeCalls, policyReadsBefore + 2, "the create-only publication seam rechecks live policy");
   assert.equal(canonicalCalls, rpcCallsBefore + 1);
   assert.deepEqual(await readdir(join(tmp.root, recordNamespace)), [`${result.operationId}.json`]);
   assert.deepEqual(await readdir(join(tmp.root, "jupiter-historical-retirement-journals")), [`${result.operationId}.json`]);
@@ -289,6 +305,82 @@ test("TEST-MOCKED orphan typed receipt blocks before the accounting record is cr
   await writeFile(join(dir, `${f.context.operation.operationId}.json`), `${canonicalJson({ orphan: true })}\n`, { mode: 0o600 });
   await assert.rejects(runConsumer(f));
   await assert.rejects(readFile(join(tmp.root, recordNamespace, `${f.context.operation.operationId}.json`)), { code: "ENOENT" });
+  await assertOriginalBytes(f);
+});
+
+test("TEST-MOCKED authority expiry after tempfile fsync blocks the final publication link", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const f = await fixture(tmp.root); activate(f);
+  const probe = await open(f.leasePath, "r");
+  const handlePrototype = Object.getPrototypeOf(probe) as { sync: (...args: unknown[]) => Promise<unknown> };
+  await probe.close();
+  const originalSync = handlePrototype.sync, originalNow = Date.now;
+  let advanced = false;
+  handlePrototype.sync = async function(...args: unknown[]): Promise<unknown> {
+    const value = await originalSync.apply(this, args);
+    if (!advanced) {
+      advanced = true;
+      Date.now = () => Date.parse(f.context.deadline) + 1;
+    }
+    return value;
+  };
+  try {
+    await assert.rejects(runConsumer(f), (error: unknown) => error instanceof Error && "code" in error &&
+      (error as { code?: unknown }).code === "APN_OPERATION_BLOCKED");
+  } finally {
+    handlePrototype.sync = originalSync;
+    Date.now = originalNow;
+  }
+  assert.equal(advanced, true, "the clock changed only after the create-only tempfile fsync");
+  await assert.rejects(readFile(join(tmp.root, recordNamespace, `${f.context.operation.operationId}.json`)), { code: "ENOENT" });
+  await assertOriginalBytes(f);
+});
+
+test("TEST-MOCKED raw lease bytes changed during final policy decode block record publication", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const f = await fixture(tmp.root); activate(f);
+  const before = policyDecodeCalls;
+  policyDecodeHook = () => {
+    if (policyDecodeCalls === before + 2) {
+      // Same decoded value, but the persisted row has lost its canonical trailing newline.
+      writeFileSync(f.leasePath, canonicalJson(f.context.operation.usageLease), { mode: 0o600 });
+    }
+  };
+  try {
+    await assert.rejects(runConsumer(f), (error: unknown) => error instanceof Error && "code" in error &&
+      (error as { code?: unknown }).code === "APN_STATE_CORRUPT");
+  } finally {
+    policyDecodeHook = undefined;
+  }
+  assert.deepEqual(await readFile(f.leasePath), Buffer.from(canonicalJson(f.context.operation.usageLease)));
+  await assert.rejects(readFile(join(tmp.root, recordNamespace, `${f.context.operation.operationId}.json`)), { code: "ENOENT" });
+  assert.deepEqual(await readFile(f.operationPath), f.operationBytes);
+  assert.deepEqual(await readFile(f.originalReceiptPath), f.originalReceiptBytes);
+});
+
+test("TEST-MOCKED recovery reconciles an exact record-plus-temp hardlink and returns one committed record", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const f = await fixture(tmp.root);
+  const { target, temporary } = await stageExactAccountingTemp(f, true);
+  const recovered = await recoverCommittedJupiterHistoricalRetirement(f.context.operation.operationId, f.state as never);
+  assert.equal(recovered?.idempotentRecovered, true);
+  assert.deepEqual(await readdir(join(tmp.root, recordNamespace)), [`${f.context.operation.operationId}.json`]);
+  await assert.rejects(readFile(temporary), { code: "ENOENT" });
+  assert.equal((await readFile(target)).toString("utf8"), `${canonicalJson(f.record)}\n`);
+  await assertOriginalBytes(f);
+});
+
+test("TEST-MOCKED recovery removes an exact temp-only record before fresh authorization retries", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  const f = await fixture(tmp.root);
+  const { target, temporary } = await stageExactAccountingTemp(f, false);
+  assert.equal(await recoverCommittedJupiterHistoricalRetirement(f.context.operation.operationId, f.state as never), null);
+  await assert.rejects(readFile(temporary), { code: "ENOENT" });
+  await assert.rejects(readFile(target), { code: "ENOENT" });
+  const result = await runConsumer(f);
+  assert.equal(result.status, "retired_unknown");
+  assert.equal(result.idempotentRecovered, false);
+  assert.deepEqual(await readdir(join(tmp.root, recordNamespace)), [`${f.context.operation.operationId}.json`]);
   await assertOriginalBytes(f);
 });
 

@@ -28,6 +28,8 @@ export declare class SecureStateStore {
     private directorySnapshot;
     private assertSameDirectorySnapshot;
     protected readJson(relativePath: string): Promise<unknown | null>;
+    /** Optional internal assertion seam for specialized create-only stores. */
+    protected beforeCreateOnlyPublication(_relativePath: string, _value: unknown): Promise<void>;
     protected writeJson(relativePath: string, value: unknown, createOnly?: boolean): Promise<void>;
     protected removeFile(relativePath: string): Promise<boolean>;
     private acquireLock;
