@@ -1,3 +1,4 @@
+import { assertGaszipPhysicalGuard } from "./gaszip-authority.js";
 import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi, type Hex } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
@@ -9,16 +10,17 @@ import type { SeiFundingPlan, SeiFundingRecord } from "./sei-gaszip-journal.js";
 const ORACLE="0x420000000000000000000000000000000000000F";
 const ABI=parseAbi(["function getL1FeeUpperBound(uint256) view returns (uint256)","function getOperatorFee(uint256) view returns (uint256)"]);
 const hex=(x:bigint):Hex=>`0x${x.toString(16)}`;
-export interface SeiRpcPort { call(method:string,params:readonly unknown[]):Promise<unknown> }
+export interface SeiRpcPort { call(method:string,params:readonly unknown[],beforeSend?:()=>void):Promise<unknown> }
 /** Finite public RPC transport shares DNS pinning, response bounds, TLS and no-redirect/no-retry HTTP. */
 export class SeiFundingRpc implements SeiRpcPort {
   private sequence=0; private reads=0; private readonly url:string;
   constructor(url:string,private readonly https:Pick<BridgeHttps,"request">=new BridgeHttps()){
     const u=parsePublicHttpsUrl(url,"APN_RPC_CONFIG","GasZip RPC",2048);if(u.search!=="" || u.hash!=="")seiFail("rpc_url");this.url=u.toString();
   }
-  async call(method:string,params:readonly unknown[]):Promise<unknown>{
+  async call(method:string,params:readonly unknown[],beforeSend?:()=>void):Promise<unknown>{
     if(!["eth_chainId","eth_getBlockByNumber","eth_getBalance","eth_getCode","eth_getTransactionCount","eth_call","eth_estimateGas","eth_maxPriorityFeePerGas","eth_sendRawTransaction","eth_getTransactionByHash","eth_getTransactionReceipt"].includes(method)|| ++this.reads>64)seiFail("rpc_method_or_budget");
-    const id=String(++this.sequence);const r=await this.https.request(this.url,"POST",canonicalJson({jsonrpc:"2.0",id,method,params}),1024*1024,"APN_RPC_CONFIG");
+    if(method==="eth_sendRawTransaction"){if(params.length!==1)seiFail("send_parameters");assertGaszipPhysicalGuard(beforeSend,params[0]);}
+    const id=String(++this.sequence);const r=await this.https.request(this.url,"POST",canonicalJson({jsonrpc:"2.0",id,method,params}),1024*1024,"APN_RPC_CONFIG",beforeSend);
     if(r.status!==200)seiFail("rpc_http");let v:Record<string,unknown>;try{v=seiObject(JSON.parse(r.body));}catch{return seiFail("rpc_json");}
     if(v.jsonrpc!=="2.0" || v.id!==id || !Object.hasOwn(v,"result") || Object.hasOwn(v,"error"))seiFail("rpc_result");return v.result;
   }

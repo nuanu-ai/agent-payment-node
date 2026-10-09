@@ -32,12 +32,12 @@ test("provider mapping refuses alternate source, destination, refunds, missing o
  assert.equal(inspectSeiDelivery(provider(owner,source,{status:"PENDING"}),source,owner,"10000000000000"),null);
 });
 class SyntheticSource implements SeiRpcPort {
- raw:Hex|null=null;sends=0;hidden=false;wrongData=false;reverted=false;feeOver=false;balance=100_000_000_000_000n;baseFee=5_000_000n;
- async call(m:string,p:readonly unknown[]):Promise<unknown>{
+ queueHook:()=>Promise<void>=async()=>{};tlsHook:()=>Promise<void>=async()=>{};guard:(()=>void)|undefined;raw:Hex|null=null;sends=0;hidden=false;wrongData=false;reverted=false;feeOver=false;balance=100_000_000_000_000n;baseFee=5_000_000n;
+ async call(m:string,p:readonly unknown[],guard?:()=>void):Promise<unknown>{
   if(m==="eth_chainId")return h(8453n);if(m==="eth_getBlockByNumber")return {hash:SOURCE_BLOCK,number:h(100n),baseFeePerGas:h(this.baseFee)};
   if(m==="eth_getCode")return "0x";if(m==="eth_getBalance")return h(this.balance);if(m==="eth_getTransactionCount")return "0x0";
   if(m==="eth_estimateGas")return h(21256n);if(m==="eth_call")return `0x${"0".repeat(64)}`;
-  if(m==="eth_sendRawTransaction"){this.sends++;this.raw=p[0] as Hex;return keccak256(this.raw);}
+  if(m==="eth_sendRawTransaction"){this.guard=guard;await this.queueHook();guard!();await this.tlsHook();guard!();this.sends++;this.raw=p[0] as Hex;return keccak256(this.raw);}
   if(m==="eth_getTransactionByHash" || m==="eth_getTransactionReceipt"){
    if(this.raw===null || this.hidden)return null;const tx=parseTransaction(this.raw),hash=keccak256(this.raw);
    const common={hash,transactionHash:hash,from:this.owner,to:SEI_FUNDING.target,blockHash:SOURCE_BLOCK,blockNumber:h(100n)};
@@ -68,13 +68,13 @@ async function setup(t:test.TestContext){
  const owner=(ensured.data as {address:string}).address;
  const file=join(temp.base,"policy.json");await writeFile(file,JSON.stringify({schemaVersion:"apn.allowlist-policy-file.v1",overlayVersion:"synthetic.gaszip.1",accounts:{evm:owner},effectiveAt:new Date(now-60000).toISOString(),expiresAt:new Date(now+3600000).toISOString(),admissions:[{chain:"eip155:8453",kind:"native",rail:"bridge",maximumPerTransferAtomic:"10000000000000",dailyLimitAtomic:"20000000000000",mechanism:SEI_FUNDING.mechanism}]}),{mode:0o600});
  const staged=await runCli(["allowlist","policy","stage","--profile","gaszip-test","--file",file],{},{stateRoot:temp.root});assert.equal(staged.ok,true,JSON.stringify(staged.error));
- let screen="";const approval=new TtyAllowlistPolicyApproval({isTerminal:()=>true,openTerminal:async()=>({fd:11,write:async(s:string)=>{screen+=s;},read:async function*(){yield Buffer.from(/Type ([a-f0-9]{6})/u.exec(screen)![1]!+"\n");},close:async()=>{}})});
+ let screen="";const approval=new TtyAllowlistPolicyApproval({isTerminal:()=>true,openTerminal:async()=>({fd:11,write:async(s:string)=>{screen+=s;},read:async function*(){yield Buffer.from([...screen.matchAll(/Type ([a-f0-9]{6})/gu)].at(-1)![1]!+"\n");},close:async()=>{}})});
  const activated=await runCli(["allowlist","policy","activate","--profile","gaszip-test","--revision","1"],{},{stateRoot:temp.root,allowlistPolicyApproval:approval});assert.equal(activated.ok,true,JSON.stringify(activated.error));
  const source=new SyntheticSource();source.owner=owner;const destination=new SyntheticDestination(owner);let providerPending=false,approvals=0;
  const https={request:async(url:string)=>({status:200,body:url.includes("/quotes/")?quote(now):JSON.stringify(provider(owner,keccak256(source.raw!),providerPending?{status:"PENDING"}:{}))})};
  const service=new SeiFundingService(state,wrapping,{}, {https,source:()=>source,destination:()=>destination,approve:async()=>{approvals++;},now:()=>now});
  const input={profile:"gaszip-test",expectedPayer:owner,amountAtomic:"10000000000000",minimumOutputAtomic:"250000000000000000",maximumFeeAtomic:"1000000000000",idempotencyKey:"synthetic-gaszip-first"};
- return {temp,state,source,destination,service,input,owner,advance:()=>{now+=120000;},pending:()=>{providerPending=true;},approvals:()=>approvals};
+ return {temp,state,source,destination,service,input,owner,file,approval,policyExpiry:now+3600000,setNow:(n:number)=>{now=n;},advance:()=>{now+=120000;},pending:()=>{providerPending=true;},approvals:()=>approvals};
 }
 test("shared preparation conflict, exact foreground-sign-once/send-once and terminal correlated delivery",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;assert.equal(r.state,"prepared");assert.equal(f.source.sends,0);
@@ -121,3 +121,34 @@ test("fresh lower fees cannot weaken the frozen signed envelope affordability ch
  assert.equal(f.source.sends,0);assert.equal(f.source.raw,null);
  assert.equal((await f.service.status(r.operationId) as SeiFundingRecord).state,"prepared");
 });
+
+ test("policy expiry during awaited wallet read prevents the signing fence",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;
+ const original=EncryptedWalletStore.prototype.describe;
+ t.mock.method(EncryptedWalletStore.prototype,"describe",async function(this:EncryptedWalletStore,p:string){const loaded=await original.call(this,p);f.setNow(f.policyExpiry+1);return loaded;});
+ await assert.rejects(f.service.approve(r.operationId));
+ const saved=await new SeiFundingJournal(f.state.root).findOperation(r.operationId);assert.equal(saved?.state,"prepared");assert.equal(saved?.rawTransaction,null);assert.equal(f.source.sends,0);
+ });
+ for(const point of ["queueHook","tlsHook"] as const)test(`expiry at ${point} retains unknown fence and never sends again`,async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;f.source[point]=async()=>{f.advance();};
+ await f.service.approve(r.operationId);const saved=await new SeiFundingJournal(f.state.root).findOperation(r.operationId);
+ assert.equal(saved?.state,"unknown_finality");assert.equal(saved?.submissionAttempts,1);assert.equal(f.source.sends,0);
+ assert.throws(()=>f.source.guard!());await f.service.approve(r.operationId);await f.service.status(r.operationId);assert.equal(f.source.sends,0);
+ });
+ test("legacy prepared activation absence preserves its hash and refuses foreground effects",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;const full=(await new SeiFundingJournal(f.state.root).findOperation(r.operationId))!;const {activationDigest:_,...legacy}=full;const sealed=sealSeiFunding(legacy);
+ assert.equal(validateSeiFunding(sealed).integrityHash,sealed.integrityHash);
+ const journal=new SeiFundingJournal(f.state.root);await journal.withLocks([`operation:${r.operationId}`],()=>journal.saveLocked(sealed));
+ await assert.rejects(f.service.approve(r.operationId),/legacy_activation_missing/);assert.equal(f.source.sends,0);assert.equal(f.approvals(),0);
+ });
+
+ test("true allowlist revocation waits through the physical send and response",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;let revoked=false;let revocation:Promise<unknown>|undefined;
+ f.source.queueHook=async()=>{revocation=runCli(["allowlist","policy","revoke","--profile","gaszip-test","--revision","1"],{},{stateRoot:f.temp.root,allowlistPolicyApproval:f.approval}).then(result=>{assert.equal(result.ok,true,JSON.stringify(result.error));revoked=true;});await new Promise(resolve=>setTimeout(resolve,40));assert.equal(revoked,false);};
+ f.source.tlsHook=async()=>{assert.equal(revoked,false);};await f.service.approve(r.operationId);await revocation;assert.equal(revoked,true);assert.equal(f.source.sends,1);
+ });
+ test("revoke and reactivate same revision invalidates the frozen activation",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;
+ for(const action of ["revoke","activate"])assert.equal((await runCli(["allowlist","policy",action,"--profile","gaszip-test","--revision","1"],{},{stateRoot:f.temp.root,allowlistPolicyApproval:f.approval})).ok,true);
+ await assert.rejects(f.service.approve(r.operationId),/policy_drift/);assert.equal(f.source.sends,0);assert.equal(f.approvals(),0);
+ });

@@ -3,7 +3,7 @@ import { BridgeHttps } from "./https.js";
 import { type SeiCorrelatedDelivery } from "./sei-gaszip-contract.js";
 import type { SeiFundingPlan, SeiFundingRecord } from "./sei-gaszip-journal.js";
 export interface SeiRpcPort {
-    call(method: string, params: readonly unknown[]): Promise<unknown>;
+    call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
 }
 /** Finite public RPC transport shares DNS pinning, response bounds, TLS and no-redirect/no-retry HTTP. */
 export declare class SeiFundingRpc implements SeiRpcPort {
@@ -12,7 +12,7 @@ export declare class SeiFundingRpc implements SeiRpcPort {
     private reads;
     private readonly url;
     constructor(url: string, https?: Pick<BridgeHttps, "request">);
-    call(method: string, params: readonly unknown[]): Promise<unknown>;
+    call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
 }
 export declare function readSeiFundingPlan(rpc: SeiRpcPort, owner: string, amount: string, maxFee: string, frozenFeeUpper?: string): Promise<SeiFundingPlan>;
 export declare function assertSeiFundingFresh(initial: SeiFundingPlan, fresh: SeiFundingPlan): void;

@@ -2,11 +2,15 @@ import { privateKeyToAccount } from "viem/accounts";
 import {} from "viem";
 import { approvalCode } from "../approval-code.js";
 import { hashObject } from "../canonical.js";
-import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
+import { activeAssetPolicyFromState, loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
-import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
-import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
+import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
+import { withGaszipForegroundAuthority, gaszipEffectBinding } from "./gaszip-authority.js";
+import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
+import { assertExclusiveEvmOwner, assertExclusiveEvmOwnerIncludingGrants, evmAddressLock } from "../evm-address-ownership.js";
 import { OperationService } from "../operation-service.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { exactChainConsent } from "../tty-approval.js";
@@ -48,14 +52,14 @@ export class MegaFundingService {
         return new MegaFundingRpc(url, this.https);
     }
     identity(r) { return { account: r.owner.address, chain: "eip155:8453", asset: { kind: "native", identifier: null } }; }
-    async policy(r, expected) {
-        const p = await loadActiveAssetPolicyRegistry(this.state.root, r.profile, new Date(this.now()));
-        if (p === null || p.accounts.evm !== r.owner.address || expected !== undefined && (p.digest !== expected.policyDigest || p.revision !== expected.policyRevision))
+    async policy(r, expected, underLock = false) {
+        const p = underLock ? activeAssetPolicyFromState(await new AllowlistPolicyStore(this.state.root).readUnderProfileLock(r.profile), new Date(this.now())) : await loadActiveAssetPolicyRegistry(this.state.root, r.profile, new Date(this.now()));
+        if (p === null || p.accounts.evm !== r.owner.address || expected !== undefined && (p.digest !== expected.policyDigest || p.revision !== expected.policyRevision || p.activationDigest !== expected.activationDigest))
             megaFail("owner_policy_drift");
         const u = await this.ledger.usage(this.identity(r), new Date(this.now()));
         const reference = r.usageReservationId;
         const own = reference === undefined || reference === null ? null : await this.ledger.load(this.identity(r), reference);
-        if (own !== null && (own.policyDigest !== p.digest || own.amountAtomic !== r.amountAtomic || own.state !== "reserved"))
+        if (own !== null && (own.policyDigest !== p.digest || own.amountAtomic !== r.amountAtomic || !["reserved", "unknown_finality"].includes(own.state)))
             megaFail("prepared_usage_binding");
         const daily = (BigInt(u.amountAtomic) - (own === null ? 0n : BigInt(own.amountAtomic))).toString();
         evaluateAssetPolicy(p.registry, { chain: "eip155:8453", asset: { kind: "native", identifier: null }, rail: "bridge", mechanism: MEGA_FUNDING.mechanism,
@@ -95,10 +99,10 @@ export class MegaFundingService {
             megaFail("prepare_quote_expired");
         const record = sealMegaFunding({ schemaVersion: "apn.mega-gaszip-operation.v1", operationId, profileHash: bound.owner.profileHash, idempotencyHash, requestHash, profile, ...bound,
             amountAtomic: amount.toString(), minimumOutputAtomic: floor.toString(), maximumFeeAtomic: fee.toString(), quoteDigest: quote.digest, quoteExpectedAtomic: quote.expectedAtomic,
-            expiresAt: quote.expiresAt, policyDigest: p.digest, policyRevision: p.revision, plan, state: "prepared", terminal: false, rawTransaction: null, transactionHash: null,
+            expiresAt: quote.expiresAt, policyDigest: p.digest, policyRevision: p.revision, activationDigest: p.activationDigest, plan, state: "prepared", terminal: false, rawTransaction: null, transactionHash: null,
             submissionAttempts: 0, usageReservationId: assetUsageReservationId({ account: bound.owner.address, chain: "eip155:8453", asset: { kind: "native", identifier: null } }, `mega-gaszip:${operationId}`), outcomeDigest: null, sourceProof: null, destinationProof: null });
         await this.state.initialize();
-        return this.state.withLocks([...this.locks(record), `operation:idempotency:${idempotencyHash}`], async () => {
+        return this.state.withLocks([...this.locks(record), `operation:idempotency:${idempotencyHash}`], async () => this.state.withLocks([`profile:${allowlistProfileHash(profile)}`], async () => {
             const found = await ops.resolvePrepare({ kind: "mega_gaszip", profileHash: record.profileHash, operationId, idempotencyHash, requestHash });
             if (found !== null) {
                 if (found.kind !== "mega_gaszip")
@@ -108,59 +112,53 @@ export class MegaFundingService {
             await ops.assertEvmAccountAvailable(record.profileHash, 8453, record.owner.address);
             await assertExclusiveEvmOwner(this.state, record.owner.address, record.profileHash);
             await assertBridgeOwner(this.state, record);
+            await this.policy(record, record, true);
             await this.journal.saveLocked(record, true);
             return publicMegaFunding(record);
-        });
+        }));
     }
     async approve(id) {
         let r = await this.required(id);
         if (r.state !== "prepared")
             return publicMegaFunding(r);
+        if (r.activationDigest === undefined)
+            megaFail("legacy_activation_missing");
         await assertBridgeOwner(this.state, r);
         await this.policy(r, r);
         if (Date.parse(r.expiresAt) - this.now() < 20_000)
             megaFail("approval_expiry");
-        if (this.ports.approve !== undefined)
-            await this.ports.approve(r);
-        else
-            await exactChainConsent([
-                `GasZip direct Base ETH -> Mega ETH SELF ONLY`, `Profile ${r.profile}; owner and recipient ${r.owner.address}`,
-                `Source ${r.amountAtomic} wei; source network fee quote ceiling ${r.maximumFeeAtomic} wei (Base total is not an on-chain cap)`,
-                `Target ${MEGA_FUNDING.target}; calldata ${MEGA_FUNDING.data}; minimum delivered ${r.minimumOutputAtomic} wei ETH`,
-                `Destination floor is an acceptance requirement, not enforced by the source transaction.`,
-                `No approval transactions. One signature and one send. Unknown outcomes retain their hold.`,
-                `Operation ${r.operationId}; policy ${r.policyDigest}; quote ${r.quoteDigest}; expires ${r.expiresAt}`,
-            ], approvalCode("bridge", r.operationId, r.integrityHash), r.expiresAt, {});
-        const fresh = await readMegaFundingPlan(this.rpc("source"), r.owner.address, r.amountAtomic, r.maximumFeeAtomic, r.plan.feeUpper);
-        assertMegaFundingFresh(r.plan, fresh);
-        if (Date.parse(r.expiresAt) - this.now() < 10_000)
-            megaFail("post_approval_expiry");
-        const p = await this.policy(r, r);
-        const reservation = await this.ledger.reserve({ ...this.identity(r), registry: p.registry, rail: "bridge", mechanism: MEGA_FUNDING.mechanism,
-            amountAtomic: r.amountAtomic, idempotencyKey: `mega-gaszip:${id}`, now: new Date(this.now()) });
-        if (reservation.reservationId !== r.usageReservationId)
-            megaFail("reservation_reference");
-        r = await this.state.withLocks(this.locks(r), async () => {
-            const saved = await this.required(id);
+        const binding = gaszipEffectBinding(r, "mega");
+        return withGaszipForegroundAuthority(binding, r.expiresAt, this.now, async () => {
+            if (this.ports.approve !== undefined)
+                await this.ports.approve(r);
+            else
+                await exactChainConsent([
+                    `GasZip direct Base ETH -> Mega ETH SELF ONLY`, `Profile ${r.profile}; owner and recipient ${r.owner.address}`,
+                    `Source ${r.amountAtomic} wei; source network fee quote ceiling ${r.maximumFeeAtomic} wei (Base total is not an on-chain cap)`,
+                    `Target ${MEGA_FUNDING.target}; calldata ${MEGA_FUNDING.data}; minimum delivered ${r.minimumOutputAtomic} wei ETH`,
+                    `Destination floor is an acceptance requirement, not enforced by the source transaction.`,
+                    `No approval transactions. One signature and one send. Unknown outcomes retain their hold.`,
+                    `Operation ${r.operationId}; policy ${r.policyDigest}; quote ${r.quoteDigest}; expires ${r.expiresAt}`,
+                ], approvalCode("bridge", r.operationId, r.integrityHash), r.expiresAt, {});
+        }, async (authority) => this.state.withLocks([walletCustodyLock(this.state, r.profile)], async () => this.state.withLocks(this.locks(r), async () => this.state.withLocks([`profile:${allowlistProfileHash(r.profile)}`], async () => {
+            let saved = await this.required(id);
             if (saved.state !== "prepared" || saved.integrityHash !== r.integrityHash)
                 megaFail("approval_record_drift");
-            await assertBridgeOwner(this.state, saved);
-            await assertExclusiveEvmOwner(this.state, saved.owner.address, saved.profileHash);
-            await this.journal.claimSigningLocked(saved);
-            const next = sealMegaFunding({ ...saved, state: "signing_started", usageReservationId: reservation.reservationId });
-            await this.journal.saveLocked(next);
-            return next;
-        });
-        await this.usage(r, "unknown_finality");
-        r = await this.state.withLocks(this.locks(r), async () => {
-            const saved = await this.required(id);
-            if (saved.integrityHash !== r.integrityHash || saved.state !== "signing_started" || Date.parse(saved.expiresAt) - this.now() < 5_000)
-                megaFail("signing_record_drift");
-            await assertBridgeOwner(this.state, saved);
-            await assertExclusiveEvmOwner(this.state, saved.owner.address, saved.profileHash);
-            const active = await loadActiveAssetPolicyRegistry(this.state.root, saved.profile, new Date(this.now()));
-            if (active?.digest !== saved.policyDigest || active.revision !== saved.policyRevision)
-                megaFail("signing_policy_drift");
+            const check = async () => {
+                await assertBridgeOwner(this.state, saved);
+                await assertExclusiveEvmOwnerIncludingGrants(this.state, new EncryptedSmartAccountPermissionStore(this.state, this.wrapping), saved.owner.address, saved.profileHash);
+                const active = await this.policy(saved, saved, true);
+                authority.assert(gaszipEffectBinding(saved, "mega"), active.registry.expiresAt);
+                return active;
+            };
+            let active = await check();
+            const fresh = await readMegaFundingPlan(this.rpc("source"), saved.owner.address, saved.amountAtomic, saved.maximumFeeAtomic, saved.plan.feeUpper);
+            assertMegaFundingFresh(saved.plan, fresh);
+            active = await check();
+            const reservation = await this.ledger.reserve({ ...this.identity(saved), registry: active.registry, rail: "bridge", mechanism: MEGA_FUNDING.mechanism,
+                amountAtomic: saved.amountAtomic, idempotencyKey: `mega-gaszip:${id}`, now: new Date(this.now()) });
+            if (reservation.reservationId !== saved.usageReservationId)
+                megaFail("reservation_reference");
             const wallet = new EncryptedWalletStore(this.state, this.wrapping), loaded = await wallet.describe(saved.profile);
             if (loaded === null)
                 megaFail("wallet_missing");
@@ -168,44 +166,42 @@ export class MegaFundingService {
                 const account = privateKeyToAccount(loaded.secret.privateKey);
                 if (account.address !== saved.owner.address || loaded.identity.bindingHash !== saved.owner.walletBindingHash)
                     megaFail("signing_owner");
+                await check();
+                authority.assert(binding);
+                if (Date.parse(saved.expiresAt) - this.now() < 10_000)
+                    megaFail("post_approval_expiry");
+                await this.journal.claimSigningLocked(saved);
+                saved = sealMegaFunding({ ...saved, state: "signing_started" });
+                await this.journal.saveLocked(saved);
+                await this.usage(saved, "unknown_finality");
+                authority.assert(binding);
                 const raw = await account.signTransaction({ type: "eip1559", chainId: 8453, to: MEGA_FUNDING.target, data: MEGA_FUNDING.data, value: BigInt(saved.amountAtomic),
                     nonce: Number(BigInt(saved.plan.nonce)), gas: BigInt(saved.plan.gas), maxFeePerGas: BigInt(saved.plan.maxFee), maxPriorityFeePerGas: BigInt(saved.plan.tip) });
-                return await this.journal.sealTransaction(saved, raw);
+                saved = await this.journal.sealTransaction(saved, raw);
             }
             finally {
                 wallet.clear(loaded.secret);
             }
-        });
-        r = await this.state.withLocks(this.locks(r), async () => {
-            const saved = await this.required(id);
-            if (saved.integrityHash !== r.integrityHash || saved.state !== "sealed" || Date.parse(saved.expiresAt) - this.now() < 3_000)
-                megaFail("send_record_drift");
-            await assertBridgeOwner(this.state, saved);
-            await assertExclusiveEvmOwner(this.state, saved.owner.address, saved.profileHash);
-            const active = await loadActiveAssetPolicyRegistry(this.state.root, saved.profile, new Date(this.now()));
-            if (active?.digest !== saved.policyDigest || active.revision !== saved.policyRevision)
-                megaFail("send_policy_drift");
+            await check();
+            authority.assert(binding);
+            if (saved.rawTransaction === null || saved.transactionHash === null)
+                megaFail("sealed_material_missing");
+            const guard = authority.beforeSend(binding, saved.rawTransaction, saved.transactionHash);
             await this.journal.claimSendLocked(saved);
-            const next = sealMegaFunding({ ...saved, state: "submitting", submissionAttempts: 1 });
-            await this.journal.saveLocked(next);
-            return next;
-        });
-        let sent = false;
-        try {
-            const returned = await this.rpc("source").call("eth_sendRawTransaction", [r.rawTransaction]);
-            if (megaHash(returned) !== r.transactionHash)
-                megaFail("send_hash");
-            sent = true;
-        }
-        catch { /* The durable attempt stays observe only on every ambiguous response. */ }
-        return this.state.withLocks(this.locks(r), async () => {
-            const saved = await this.required(id);
-            if (saved.state !== "submitting")
-                return publicMegaFunding(saved);
-            const next = sealMegaFunding({ ...saved, state: sent ? "submitted" : "unknown_finality" });
-            await this.journal.saveLocked(next);
-            return publicMegaFunding(next);
-        });
+            saved = sealMegaFunding({ ...saved, state: "submitting", submissionAttempts: 1 });
+            await this.journal.saveLocked(saved);
+            let sent = false;
+            try {
+                const returned = await this.rpc("source").call("eth_sendRawTransaction", [saved.rawTransaction], guard);
+                if (megaHash(returned) !== saved.transactionHash)
+                    megaFail("send_hash");
+                sent = true;
+            }
+            catch { /* Every fenced failure retains unknown finality and never repeats the send. */ }
+            saved = sealMegaFunding({ ...saved, state: sent ? "submitted" : "unknown_finality" });
+            await this.journal.saveLocked(saved);
+            return publicMegaFunding(saved);
+        }))));
     }
     async usage(r, state) {
         if (r.usageReservationId === null || await this.ledger.load(this.identity(r), r.usageReservationId) === null)

@@ -1,3 +1,4 @@
+import { assertGaszipPhysicalGuard } from "./gaszip-authority.js";
 import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
@@ -21,11 +22,16 @@ export class MegaFundingRpc {
             megaFail("rpc_url");
         this.url = u.toString();
     }
-    async call(method, params) {
+    async call(method, params, beforeSend) {
         if (!["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionByHash", "eth_getTransactionReceipt"].includes(method) || ++this.reads > 64)
             megaFail("rpc_method_or_budget");
+        if (method === "eth_sendRawTransaction") {
+            if (params.length !== 1)
+                megaFail("send_parameters");
+            assertGaszipPhysicalGuard(beforeSend, params[0]);
+        }
         const id = String(++this.sequence);
-        const r = await this.https.request(this.url, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG");
+        const r = await this.https.request(this.url, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", beforeSend);
         if (r.status !== 200)
             megaFail("rpc_http");
         let v;

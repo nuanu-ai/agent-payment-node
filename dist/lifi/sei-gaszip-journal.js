@@ -10,6 +10,8 @@ export function validateSeiFunding(value) {
     const { integrityHash, ...body } = r;
     if (r.schemaVersion !== "apn.sei-gaszip-operation.v1" || hashObject(body) !== integrityHash)
         seiFail("record_integrity");
+    if (r.activationDigest !== undefined)
+        stateIdentifier(r.activationDigest, "GasZip policy activation");
     for (const s of [r.operationId, r.profileHash, r.idempotencyHash, r.requestHash, r.policyDigest, r.quoteDigest])
         stateIdentifier(s, "GasZip record identity");
     if (r.profileHash !== r.owner.profileHash || r.profile !== r.owner.profile || seiUint(r.amountAtomic) <= 0n || seiUint(r.amountAtomic) > SEI_FUNDING.maximumAmount ||

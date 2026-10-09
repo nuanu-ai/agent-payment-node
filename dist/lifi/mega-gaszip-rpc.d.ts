@@ -3,7 +3,7 @@ import { BridgeHttps } from "./https.js";
 import { type MegaCorrelatedDelivery } from "./mega-gaszip-contract.js";
 import type { MegaFundingPlan, MegaFundingRecord } from "./mega-gaszip-journal.js";
 export interface MegaRpcPort {
-    call(method: string, params: readonly unknown[]): Promise<unknown>;
+    call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
 }
 /** Finite public RPC transport shares DNS pinning, response bounds, TLS and no-redirect/no-retry HTTP. */
 export declare class MegaFundingRpc implements MegaRpcPort {
@@ -12,7 +12,7 @@ export declare class MegaFundingRpc implements MegaRpcPort {
     private reads;
     private readonly url;
     constructor(url: string, https?: Pick<BridgeHttps, "request">);
-    call(method: string, params: readonly unknown[]): Promise<unknown>;
+    call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
 }
 export declare function readMegaFundingPlan(rpc: MegaRpcPort, owner: string, amount: string, maxFee: string, frozenFeeUpper?: string): Promise<MegaFundingPlan>;
 export declare function assertMegaFundingFresh(initial: MegaFundingPlan, fresh: MegaFundingPlan): void;
