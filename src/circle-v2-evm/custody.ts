@@ -1,3 +1,5 @@
+import { assertCircleEffectGuard } from "./lifecycle.js";
+import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction, type Hex, type TransactionSerialized } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -17,6 +19,14 @@ interface EncryptedMaterial extends Header { readonly ciphertext: string; readon
 export class CircleEffectStore extends SecureStateStore {
   constructor(root: string, private readonly wrapping: WrappingSecretPort) { super(root); }
   private path(op: CircleOperationV1, role: CircleRole) { validateCircle(op); return `circle-v2-evm-effects/${op.operationId}-${role}.json`; }
+  async assertCleanupAbsent(op: CircleOperationV1): Promise<void> { if (await this.readJson(this.path(op, "cleanup")) !== null) circleBlocked("retirement_unclaimed_cleanup_material_present"); }
+  async assertRetirementHeaders(op: CircleOperationV1): Promise<void> {
+    const approval = op.effects[0]!, burn = op.effects[1]!;
+    const value = await this.readJson(this.path(op, "approval"));
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) ||
+      value.schemaVersion !== VERSION || value.operationId !== op.operationId || value.role !== "approval" || value.fingerprint !== op.fingerprint || value.envelopeHash !== approval.envelope.envelopeHash ||
+      typeof value.ciphertext !== "string" || value.ciphertext.length === 0 || await this.readJson(this.path(op, burn.role)) !== null) circleBlocked("retirement_original_material_or_burn_guard");
+  }
   async load(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null> {
     const value = await this.readJson(this.path(op, effect.role)); if (value === null) return null;
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"])) circleCorrupt("material_envelope");
@@ -50,9 +60,11 @@ export class CircleEffectStore extends SecureStateStore {
 export class LocalCircleCustody {
   private readonly wallets: EncryptedWalletStore; private readonly material: CircleEffectStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort) { this.wallets = new EncryptedWalletStore(state, wrapping); this.material = new CircleEffectStore(state.root, wrapping); }
+  async assertCleanupAbsent(op: CircleOperationV1) { return this.material.assertCleanupAbsent(op); }
+  async assertRetirementHeaders(op: CircleOperationV1) { return this.material.assertRetirementHeaders(op); }
   async load(op: CircleOperationV1, effect: CircleEffect) { return await this.material.load(op, effect); }
   async seal(op: CircleOperationV1, effect: CircleEffect, guard: () => void): Promise<CircleMaterial> {
-    guard(); if (op.terminal || effect.phase !== "signing_started") circleBlocked("signing_gate");
+    guard(); if (effect.role === "approval" || effect.role === "burn") await new CircleNonceRetirementStore(this.state.root).assertOriginalEffectsAvailable(op.operationId); guard(); if (effect.role === "cleanup" && await new CircleNonceRetirementStore(this.state.root).intent(op) !== null) { assertCircleEffectGuard(op, effect, guard); await new CircleNonceRetirementStore(this.state.root).assertClaim(op, "sign"); } guard(); if (op.terminal || effect.phase !== "signing_started") circleBlocked("signing_gate");
     const destination = effect.role === "mint", profile = destination ? op.destinationProfile : op.profile, custody = destination ? op.destinationCustody : op.sourceCustody;
     return this.state.withLocks([`custody:${custody.profileHash}`], async () => {
       guard(); await assertEvmNativeCustody(this.state, profile, custody); guard(); const existing = await this.material.load(op, effect); guard(); if (existing !== null) return existing;

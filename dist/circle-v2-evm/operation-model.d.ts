@@ -1,3 +1,4 @@
+import { type CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { type Address, type Hex } from "viem";
 import { type EvmNativeCustody } from "../evm-native-custody.js";
 import { type AssetUsageReservation } from "../asset-usage-ledger.js";
@@ -50,7 +51,7 @@ export interface CircleOperationV1 {
     readonly expiresAt: string;
     readonly deploymentDigest: string;
     readonly feeQuoteAtomic: string;
-    readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted";
+    readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired";
     readonly terminal: boolean;
     readonly effects: readonly CircleEffect[];
     readonly source: CircleSourceProof | null;
@@ -67,6 +68,7 @@ export interface CircleOperationV1 {
         readonly snapshotHash: string;
     }[];
     readonly integrityHash: string;
+    readonly nonceRetirement?: CircleNonceRetirementProof;
 }
 export declare function circleBlocked(reason: string): never;
 export declare function circleCorrupt(reason: string): never;
@@ -76,9 +78,11 @@ export declare function circleEnvelope(input: Omit<CircleEnvelope, "envelopeHash
 export declare function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, destinationProfile?: string): void;
 export declare function validateCircle(value: unknown): CircleOperationV1;
 export declare function publicCircle(op: CircleOperationV1): {
+    next_actions: string[];
+    cleanup_retirement_receipt?: CircleNonceRetirementProof;
     operation_id: string;
     kind: string;
-    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted";
+    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;
@@ -97,6 +101,5 @@ export declare function publicCircle(op: CircleOperationV1): {
     residual_allowance_atomic: string;
     usage_finalized: boolean;
     integrity_hash: string;
-    next_actions: string[];
 };
 export declare function circleSame(a: unknown, b: unknown): boolean;

@@ -25,6 +25,7 @@ export interface CircleLifecyclePorts {
 type Consent = () => void;
 interface Authority { readonly ports: CircleLifecyclePorts; readonly binding: string; readonly deadline: number; readonly envelopes: ReadonlyMap<CircleRole, string>; readonly claimed: Set<CircleRole>; active: CircleRole | null; }
 const authorities = new WeakMap<Consent, Authority>();
+const effectGuards = new WeakMap<() => void, { readonly token: Consent; readonly ports: CircleLifecyclePorts; readonly role: CircleRole }>();
 const consentBinding = (op: CircleOperationV1) => hashObject({ operationId: op.operationId, fingerprint: op.fingerprint, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
 async function consent(op: CircleOperationV1, role: "source" | "mint" | "cleanup", ports: CircleLifecyclePorts): Promise<Consent> {
   const policyDeadline = await ports.authorizationDeadline(op);
@@ -78,6 +79,7 @@ export async function executeCircleEffect(input: CircleOperationV1, role: Circle
   if (authority.claimed.has(role) || authority.active !== null || authority.envelopes.get(role) !== effect.envelope.envelopeHash) circleBlocked("consent_effect_reuse_or_mismatch");
   authority.claimed.add(role); authority.active = role;
   const guard = () => { checkConsent(token, op, ports, effect); };
+  effectGuards.set(guard, { token: token!, ports, role });
   try {
     guard(); await ports.assertOwnerPolicyAndConflicts(op, role); guard(); await ports.preflight(op, effect); guard();
     if (effect.phase === "prepared") {
@@ -98,7 +100,7 @@ export async function executeCircleEffect(input: CircleOperationV1, role: Circle
   } catch (error) {
     if (op.effects.find(e => e.role === role)!.phase === "prepared") throw error;
     return await persist(op, { effects: updateEffect(op, role, { phase: "unknown" }) }, `${role}_fenced_unknown_observe_only`, ports);
-  } finally { authority.active = null; }
+  } finally { effectGuards.delete(guard); authority.active = null; }
 }
 export async function approveCircleMint(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
   let op = await observeCircle(input, ports); if (op.terminal) return op;
@@ -197,4 +199,16 @@ export async function cleanupCircle(input: CircleOperationV1, ports: CircleLifec
     op = await persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cleaned", terminal: true }, "explicit_zero_allowance_cleanup_finalized", ports);
   }
   return op;
+}
+
+/** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
+export async function executeCircleCleanupWithConsent(op: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
+  await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "cleanup", ports);
+  try { return await executeCircleEffect(op, "cleanup", ports, token); } finally { authorities.delete(token); }
+}
+
+/** Production retirement custody accepts only the private controller's currently active exact guard. */
+export function assertCircleEffectGuard(op: CircleOperationV1, effect: CircleEffect, guard: () => void): void {
+  const record = effectGuards.get(guard); if (record === undefined || record.role !== effect.role) circleBlocked("private_exact_effect_guard_required");
+  checkConsent(record.token, op, record.ports, effect); guard();
 }

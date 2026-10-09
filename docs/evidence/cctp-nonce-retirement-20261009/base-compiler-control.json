@@ -1,0 +1,11 @@
+{
+  "base": "dbaff31129afae30b3b0ba69a5b0393c551a4904",
+  "control": "/var/folders/jk/7l86_s0n3xz7csjbz0g4jkbr0000gn/T/apn-cctp-mcp-control-50pxu3bd",
+  "exitCode": 0,
+  "diagnostic": "",
+  "include": [
+    "circle-v2-evm-*.ts",
+    "mcp.test.ts",
+    "command-discovery.test.ts"
+  ]
+}

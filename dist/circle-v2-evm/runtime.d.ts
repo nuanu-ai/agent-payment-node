@@ -21,12 +21,15 @@ export declare class CircleEvmService {
     private readonly usage;
     private readonly custody;
     private readonly operations;
+    private readonly retirements;
     constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number, ttyOptions?: TtyTransferApprovalOptions, https?: Pick<BridgeHttps, "request">);
     prepare(input: CirclePrepareInput): Promise<CircleOperationV1>;
     status(id: string): Promise<{
+        next_actions: string[];
+        cleanup_retirement_receipt?: import("./nonce-retirement-proof.js").CircleNonceRetirementProof;
         operation_id: string;
         kind: string;
-        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted";
+        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired";
         terminal: boolean;
         source_profile: string;
         destination_profile: string;
@@ -45,12 +48,12 @@ export declare class CircleEvmService {
         residual_allowance_atomic: string;
         usage_finalized: boolean;
         integrity_hash: string;
-        next_actions: string[];
     }>;
     approveSource(id: string): Promise<CircleOperationV1>;
     approveMint(id: string): Promise<CircleOperationV1>;
     observe(id: string): Promise<CircleOperationV1>;
     refreshAttestation(id: string): Promise<CircleOperationV1>;
+    cleanupNonce(id: string): Promise<CircleOperationV1>;
     cleanup(id: string): Promise<CircleOperationV1>;
     private required;
     private run;

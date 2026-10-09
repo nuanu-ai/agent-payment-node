@@ -20,7 +20,7 @@ import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./
 import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 
 const TOOL_NAMES = [
-  "apn_circle_evm_prepare", "apn_circle_evm_approve_source", "apn_circle_evm_approve_mint", "apn_circle_evm_observe", "apn_circle_evm_refresh_attestation", "apn_circle_evm_cleanup", "apn_circle_evm_status",
+  "apn_circle_evm_prepare", "apn_circle_evm_approve_source", "apn_circle_evm_approve_mint", "apn_circle_evm_observe", "apn_circle_evm_refresh_attestation", "apn_circle_evm_cleanup", "apn_circle_evm_cleanup_nonce", "apn_circle_evm_status",
   "apn_swap_ethereum_uniswap_inventory",
   "apn_swap_ethereum_uniswap_quote",
   "apn_swap_ethereum_uniswap_prepare",
@@ -170,6 +170,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_circle_evm_observe", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_refresh_attestation", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_cleanup", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup_nonce", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_inventory", properties: [], required: [], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_quote", properties: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], required: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], defaults: {} },
@@ -295,7 +296,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_gasless_capabilities", properties: ["profile"], required: [], defaults: {} },
       { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], defaults: {} },
       { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url", "rpc_max_batch_items"], required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], defaults: {} },
-      { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], defaults: {} },
+      { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"], required: ["profile", "chain", "to", "idempotency_key"], defaults: {} },
       { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_gasless_transfer_approve_sealed", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_oneclick_source_submit", properties: ["lane", "profile", "expected_payer", "recipient", "amount_atomic", "min_output_atomic", "max_quoted_loss_atomic", "max_gas_limit_atomic", "max_fee_per_gas_wei", "max_priority_fee_per_gas_wei", "max_native_debit_wei", "idempotency_key"], required: ["lane", "profile", "expected_payer", "recipient", "amount_atomic", "min_output_atomic", "max_quoted_loss_atomic", "max_gas_limit_atomic", "max_fee_per_gas_wei", "max_priority_fee_per_gas_wei", "max_native_debit_wei", "idempotency_key"], defaults: {} },
@@ -781,8 +782,8 @@ function cloneManifest(): {
   return structuredClone(COMMAND_MANIFEST) as never;
 }
 test("Circle financial MCP tools return exact foreground CLI handoff before runtime entry", async t => {
-  let entries = 0; const connection = await connectMcp({ circleEvm: { approveSource: async () => { entries++; }, approveMint: async () => { entries++; }, cleanup: async () => { entries++; } } as never }); t.after(connection.close);
-  for (const action of ["approve_source", "approve_mint", "cleanup"]) {
+  let entries = 0; const connection = await connectMcp({ circleEvm: { approveSource: async () => { entries++; }, approveMint: async () => { entries++; }, cleanup: async () => { entries++; }, cleanupNonce: async () => { entries++; } } as never }); t.after(connection.close);
+  for (const action of ["approve_source", "approve_mint", "cleanup", "cleanup_nonce"]) {
     const envelope = decodeResult(await connection.client.callTool({ name: `apn_circle_evm_${action}`, arguments: { operation: "a".repeat(64) } }));
     assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.match(JSON.stringify(envelope.error?.details), new RegExp(`circle.*evm.*${action.replaceAll("_", "-")}`));
   }

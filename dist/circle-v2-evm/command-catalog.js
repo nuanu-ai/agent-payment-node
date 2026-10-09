@@ -12,6 +12,7 @@ export const CIRCLE_EVM_COMMANDS = [
     command("observe", [operation], "Observe canonical source, issuer signature, destination mint and independent finality without signing or resending.", "network_read"),
     command("refresh-attestation", [operation], "Read-only issuer refresh for the same burn and nonce before mint; never reburn.", "network_read"),
     command("cleanup", [operation], "Explicit foreground approve-zero cleanup after confirmed approval/revert, or cancellation before private entry.", "payment_submit"),
+    command("cleanup-nonce", [operation], "Foreground-confirm one exact approve-zero at the expired unknown Monad approval nonce; finalized cleanup proof retires unused holds.", "payment_submit"),
     command("status", [operation], "Read the checked durable local Circle operation with both signing profiles.", "local_read"),
 ];
 function command(action, options, summary, effect) {
@@ -19,7 +20,7 @@ function command(action, options, summary, effect) {
     return { path: ["circle", "evm", action], synopsis: `apn circle evm ${action}${options.map(o => ` ${o.name} <${o.type}>`).join("")}`, summary, options,
         effect: { class: effect, summary }, approval: { class: foreground ? "foreground_tty" : "none", when: foreground ? "Exact physical foreground TTY consent before signing; MCP provides the CLI handoff." : "No financial effect." },
         output: { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1, success: "Checked Circle operation, receipts and usage state.", failures: ["Classified refusal; ambiguous effects hold all reservations and are never resent."] },
-        states: { terminal: ["completed", "cleaned", "cancelled_unsubmitted"], non_terminal: ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required"] },
+        states: { terminal: ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired"], non_terminal: ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required"] },
         recovery: [{ command_path: ["circle", "evm", "observe"], when: "Any prior effect marker exists." }], examples: [`apn circle evm ${action}`] };
 }
 export function bindCircleEvmCommand(path, input) {
@@ -34,7 +35,7 @@ export function bindCircleEvmCommand(path, input) {
             invalid();
         return { command: "circle.evm.prepare", profile: input["--profile"], destinationProfile: input["--destination-profile"], destinationChain: Number(chain), idempotencyKey: input["--idempotency-key"] };
     }
-    if (!["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "status"].includes(action) || !exactKeys(input, ["--operation"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]))
+    if (!["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "cleanup-nonce", "status"].includes(action) || !exactKeys(input, ["--operation"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]))
         invalid();
     return { command: `circle.evm.${action}`, operationId: input["--operation"] };
 }
