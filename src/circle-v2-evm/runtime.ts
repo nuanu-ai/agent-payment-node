@@ -247,7 +247,7 @@ export class CircleEvmService {
         const envelope = await source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), nonce);
         // Strict cleanup schema includes the FULL signed gas upper <=15T, never only the estimate.
         const effect: CircleEffect = { role: "cleanup", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null };
-        validateCircle(sealCircle({ ...op, effects: [...op.effects, effect] }));
+        validateCircle(advanceCircle(op, { effects: [...op.effects, effect], state: "cleanup_required" }, "nonce_retirement_cleanup_frozen", this.now()));
         return this.retirements.start(op, envelope);
       },
       retirementProof: async (op, intent) => {
