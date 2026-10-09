@@ -144,7 +144,10 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
         return mismatch("destination_receipt_failed");
     let block, safe, safeCanonical;
     try {
-        [block, safe] = await Promise.all([ports.block(receipt.blockNumber), ports.finalityCheckpoint()]);
+        if (op.sourceChainId === 8453 && expectedChainId === 137 && !ports.polygonFinalizedCheckpoint)
+            return unproven("polygon_consensus_finality_unavailable");
+        [block, safe] = await Promise.all([ports.block(receipt.blockNumber),
+            op.sourceChainId === 8453 && expectedChainId === 137 ? ports.polygonFinalizedCheckpoint() : ports.finalityCheckpoint()]);
         safeCanonical = safe === null ? null : await ports.block(safe.number);
     }
     catch {
@@ -158,6 +161,17 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
         return mismatch("destination_noncanonical_block");
     if (safe.number < receipt.blockNumber)
         return pending("destination_not_safe");
+    if (op.sourceChainId === 8453 && expectedChainId === 137) {
+        let inclusionAgain;
+        try {
+            inclusionAgain = await ports.block(receipt.blockNumber);
+        }
+        catch {
+            return unproven("polygon_inclusion_recheck_unavailable");
+        }
+        if (inclusionAgain === null || inclusionAgain.number !== receipt.blockNumber || !same(inclusionAgain.hash, receipt.blockHash))
+            return mismatch("destination_noncanonical_block");
+    }
     const minimum = BigInt(op.minOutputAtomic);
     let credited, method;
     if (expectedChainId === 4326) {
@@ -245,6 +259,7 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
             operationId: op.operationId, operationIntegrityHash: op.integrityHash, quoteDigest: op.quoteDigest,
             orderId: op.nativeQuote?.orderId ?? op.quote.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
             destinationBlockNumber: receipt.blockNumber.toString(), destinationBlockHash: receipt.blockHash.toLowerCase(),
+            ...(op.sourceChainId === 8453 && expectedChainId === 137 ? { finalityKind: "polygon_milestone_finalized" } : {}),
             finalityBlockNumber: safe.number.toString(), finalityBlockHash: safe.hash.toLowerCase(),
             recipient: op.recipient.toLowerCase(), minimumOutputWei: op.minOutputAtomic, creditedWei: credited.toString(), method
         } };

@@ -30,6 +30,7 @@ export interface RelayObserveResult {
   readonly causalLinkCryptographicallyProven: false;
   readonly paidAcceptance: false;
   readonly operationalAcceptance: boolean;
+  readonly sourceActualFee?: import("./source-fee-proof.js").RelayBaseReceiptFee;
 }
 
 /** No signer, send, or retry surface is reachable here. */

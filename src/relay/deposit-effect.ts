@@ -69,7 +69,7 @@ export class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
 }
 export interface RelayDepositObservation {
   readonly transaction: Readonly<{ hash: string; from: string; to: string | null; input: string; value: bigint; chainId: number }>;
-  readonly receipt: Readonly<{ transactionHash: string; status: "success" | "reverted"; blockNumber: bigint; blockHash: string }>;
+  readonly receipt: Readonly<{ transactionHash: string; status: "success" | "reverted"; blockNumber: bigint; blockHash: string; actualFee?: import("./source-fee-proof.js").RelayBaseReceiptFee }>;
   readonly canonicalBlockHash: string;
 }
 export interface RelayDepositPorts {

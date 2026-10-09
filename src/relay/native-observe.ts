@@ -8,6 +8,8 @@ import type { RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import type { RelayDepositObservation } from "./deposit-effect.js";
 import { proveRelayNativeDestination, type RelayBnbProofPorts } from "./destination-proof.js";
+import { RelayDestinationClaimRepository } from "./destination-claim.js";
+import { verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayNativeSourceJournalRepository } from "./native-source.js";
 import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
 import type { RelaySourceFinalityPorts, RelayObserveResult, RelayObserveState } from "./observe.js";
@@ -25,6 +27,7 @@ export function verifyRelayNativeSourceObservation(op: RelayUnsignedOperation, h
     !same(tx.input, deposit.data) || tx.value !== BigInt(deposit.value) ||
     !same(receipt.blockHash, observation.canonicalBlockHash) || receipt.blockNumber < 0n ||
     !/^0x[0-9a-fA-F]{64}$/u.test(receipt.blockHash)) blocked("source_transaction_binding");
+  if (op.sourceChainId === 8453) verifyRelayBaseReceiptFee(receipt.actualFee, op.depositNetworkFeeCeilingWei!);
   return receipt.status === "success" ? "confirmed" : "failed";
 }
 
@@ -118,6 +121,13 @@ export class RelayNativeObserveService {
       proof.reason, true, provider.status, sourceBound, proof);
     if (provider.status !== "success" || !sourceBound) return this.result(op.operationId, "recipient_credit_observed",
       "provider_success_or_source_binding_unproven", true, provider.status, sourceBound, proof);
+    if (op.sourceChainId === 8453) {
+      try { await new RelayDestinationClaimRepository(this.state.root).claim(op, hash, proof.proof); }
+      catch { return this.result(op.operationId, "provider_candidate_unproven", "destination_payout_claim_conflict", true, provider.status, true, proof); }
+      return { ...this.result(op.operationId, "operational_acceptance",
+        "source_safe_provider_success_and_canonical_recipient_credit", true, provider.status, true, proof),
+        sourceActualFee: source.receipt.actualFee! };
+    }
     return this.result(op.operationId, "operational_acceptance",
       "source_finalized_provider_success_and_safe_recipient_credit", true, provider.status, true, proof);
   }

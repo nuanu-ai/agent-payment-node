@@ -4,6 +4,7 @@ import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcWord
 import { ApnError } from "../errors.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc } from "../rpc.js";
+import { decodeRelayBaseReceiptFee } from "./source-fee-proof.js";
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 /** The shared provider lock stays held until 750 ms after a POST settles.
  * This covers the delay between the scheduler's persisted reservation and the
@@ -85,7 +86,8 @@ export class RelayEthereumFinalityRpc {
         return { transaction: { hash: evmRpcHex(tx.hash, 32), from: evmRpcAddress(tx.from),
                 to: optionalAddress(tx.to), input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value), chainId: this.expectedChainId },
             receipt: { transactionHash: evmRpcHex(receipt.transactionHash, 32), status: status(receipt.status),
-                blockNumber: number, blockHash: evmRpcHex(receipt.blockHash, 32) }, canonicalBlockHash: included.hash };
+                blockNumber: number, blockHash: evmRpcHex(receipt.blockHash, 32),
+                ...(this.expectedChainId === 8453 ? { actualFee: decodeRelayBaseReceiptFee(receipt) } : {}) }, canonicalBlockHash: included.hash };
     }
 }
 export class RelayBnbReadOnlyRpc {
@@ -151,6 +153,11 @@ export class RelayBnbReadOnlyRpc {
         if (latest === null || latest.number < 15n)
             return null;
         return this.block(latest.number - 15n);
+    }
+    async polygonFinalizedCheckpoint() {
+        if (this.expectedChainId !== 137)
+            throw new ApnError("APN_CHAIN_MISMATCH", "Polygon finality requires Polygon RPC.");
+        return block(await this.read("eth_getBlockByNumber", ["finalized", false]), "finalized");
     }
     async nativeTrace() { return null; }
     async routerCodeHash(address, blockNumber) {
