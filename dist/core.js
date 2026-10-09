@@ -24,9 +24,7 @@ import { solanaCapabilities } from "./chain-policy-service.js";
 import { tronCapabilities } from "./tron/catalog.js";
 import { bridgeCapabilities } from "./lifi/catalog.js";
 import { BridgeService } from "./lifi/service.js";
-import { bridgeOwner } from "./lifi/owner.js";
-import { publicCircleApproval } from "./lifi/circle-v2-approval-executor.js";
-import { confirmCircleApproval } from "./lifi/circle-v2-approval-tty.js";
+import { executeCircleCommand } from "./circle-command-service.js";
 import { GaslessService } from "./gasless/service.js";
 import { gaslessCapabilities } from "./gasless/catalog.js";
 import { gaslessChain } from "./gasless/validation.js";
@@ -198,26 +196,17 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
                 return operationOutcome(await service.prepare(request));
             }
-            case "circle.evm.prepare": {
-                const service = this.context.circleEvm;
-                if (service === undefined)
-                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle EVM runtime unavailable.");
-                return operationOutcome(publicCircle(await service.prepare(request)));
-            }
+            case "circle.evm.prepare":
             case "circle.evm.approve-source":
             case "circle.evm.approve-mint":
             case "circle.evm.observe":
             case "circle.evm.refresh-attestation":
             case "circle.evm.cleanup":
-            case "circle.evm.status": {
-                const service = this.context.circleEvm;
-                if (service === undefined)
-                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle EVM runtime unavailable.");
-                if (request.command === "circle.evm.status")
-                    return operationOutcome(await service.status(request.operationId));
-                const result = request.command === "circle.evm.approve-source" ? await service.approveSource(request.operationId) : request.command === "circle.evm.approve-mint" ? await service.approveMint(request.operationId) : request.command === "circle.evm.refresh-attestation" ? await service.refreshAttestation(request.operationId) : request.command === "circle.evm.cleanup" ? await service.cleanup(request.operationId) : await service.observe(request.operationId);
-                return operationOutcome(publicCircle(result));
-            }
+            case "circle.evm.status":
+            case "circle.approval.prepare":
+            case "circle.approval.execute":
+            case "circle.approval.status":
+            case "circle.source.submit": return await executeCircleCommand(request, this.context);
             case "stargate.native.execute":
             case "stargate.native.observe":
             case "stargate.native.status":
@@ -307,26 +296,6 @@ export class ApnCore {
             case "allowlist.policy.stage":
             case "allowlist.policy.activate":
             case "allowlist.policy.revoke": return await executeAllowlistPolicyCommand(request, this.context);
-            case "circle.approval.prepare": {
-                await this.context.ready();
-                const owner = (await bridgeOwner(this.context.state, request.profile)).owner;
-                const executor = this.context.circleApproval;
-                if (executor === undefined)
-                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle approval executor is unavailable.");
-                return dataOutcome(publicCircleApproval(await executor.prepare({ profile: owner.profile, payer: owner.address,
-                    walletBindingHash: owner.walletBindingHash, walletCreatedAt: owner.walletCreatedAt,
-                    approvalCapAtomic: request.approvalCapAtomic })), "circle_approval_prepared_unsigned");
-            }
-            case "circle.approval.execute":
-            case "circle.approval.status": {
-                const executor = this.context.circleApproval;
-                if (executor === undefined)
-                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle approval executor is unavailable.");
-                const record = request.command === "circle.approval.execute"
-                    ? await executor.execute(request.operationId, confirmCircleApproval)
-                    : await executor.status(request.operationId);
-                return dataOutcome(publicCircleApproval(record), record.phase === "completed" ? "circle_approval_safe_receipt_and_allowance" : "circle_approval_journal_state");
-            }
             case "oneclick.source.submit": {
                 const service = this.context.oneClickSource;
                 if (service === undefined)
@@ -346,12 +315,6 @@ export class ApnCore {
                 if (service === undefined)
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Sei funding runtime unavailable.");
                 return dataOutcome(request.command === "sei.funding.prepare" ? await service.prepare(request) : request.command === "sei.funding.approve" ? await service.approve(request.operationId) : await service.status(request.operationId), "sei_gaszip_durable_operation");
-            }
-            case "circle.source.submit": {
-                const service = this.context.circleSource;
-                if (service === undefined)
-                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle source runtime is unavailable.");
-                return dataOutcome(await service.submit(request), "circle_base_source_submission_only");
             }
             case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
             case "gasless.balance": {
