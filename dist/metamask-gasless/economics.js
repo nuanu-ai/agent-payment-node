@@ -9,7 +9,14 @@ export function mmEconomics(request) {
     mmRequest(request);
     const gross = mmUint(request.grossAtomic, true), minimum = mmUint(request.minReceivedAtomic, true);
     const maximum = mmUint(request.maxFeeAtomic), cap = maximum < gross - minimum ? maximum : gross - minimum;
-    return { gross, cap, initialNet: gross - cap };
+    return { gross, cap, initialNet: request.fixedNet ? mmUint(request.fixedNet.netAtomic, true) : gross - cap };
+}
+/** Actual debit always equals the exact two-transfer batch, independent of the owner ceiling. */
+export function mmActualGross(quote, reason = "mm_gasless_input") {
+    return (mmUint(quote.netAtomic, true, reason) + mmUint(quote.feeAtomic, false, reason)).toString();
+}
+export function mmUnusedGross(request, quote) {
+    return (mmUint(request.grossAtomic, true) - BigInt(mmActualGross(quote))).toString();
 }
 export function mmQuoteHash(quote) {
     return hashObject({ netAtomic: quote.netAtomic, feeAtomic: quote.feeAtomic,
@@ -20,7 +27,7 @@ export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasl
     const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash"], reason);
     const { row } = mmRegistry(request.chainId), economics = mmEconomics(request);
     const net = mmUint(q.netAtomic, true, reason), fee = mmUint(q.feeAtomic, false, reason);
-    if (q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic))
+    if ((request.fixedNet && q.netAtomic !== request.fixedNet.netAtomic) || q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic))
         mmFail(reason);
     if (fee > economics.cap)
         mmFail(reason === "mm_gasless_state_corrupt" ? reason : "mm_gasless_fee_cap");
@@ -43,7 +50,12 @@ export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasl
     return quote;
 }
 export function mmAssertStableQuote(request, quote, reason = "mm_gasless_quote_invalid") {
-    if (mmUint(quote.netAtomic, true, reason) + mmUint(quote.feeAtomic, false, reason) !== mmUint(request.grossAtomic, true, reason))
+    const actual = BigInt(mmActualGross(quote, reason));
+    if (request.fixedNet) {
+        if (quote.netAtomic !== request.fixedNet.netAtomic || actual > mmUint(request.fixedNet.maxGrossAtomic, true, reason))
+            mmFail(reason);
+    }
+    else if (actual !== mmUint(request.grossAtomic, true, reason))
         mmFail(reason);
 }
 /**
@@ -60,7 +72,8 @@ export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless
 export function mmPolicyHash(profileHash, binding, request) {
     return hashObject({ purpose: "apn.metamask-gasless.policy.v1", profileHash, binding,
         chainId: request.chainId, token: mmRegistry(request.chainId).row.token, recipient: request.recipient,
-        grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic });
+        grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic,
+        ...(request.fixedNet ? { fixedNet: request.fixedNet } : {}) });
 }
 export function mmAssertIntentEconomics(intent, profileHash) {
     const r = mmRequest(intent.request, "mm_gasless_state_corrupt");

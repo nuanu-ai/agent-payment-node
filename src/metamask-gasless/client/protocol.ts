@@ -108,12 +108,14 @@ function quoteOutput(value: unknown, input: MetaMaskGaslessQuoteInput): MetaMask
 function intent(value: unknown): MetaMaskGaslessIntent {
   const keys = ["profile", "request", "binding", "token", "decimals", "deploymentEvidenceHash", "initialSnapshot", "quote",
     "requestId", "preparedAt", "expiresAt", "policyHash", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"];
-  const i = mmExact(value, keys, "mm_gasless_state_corrupt");
+  const i = mmExact(value, [...keys, ...(isPlainRecord(value) && Object.hasOwn(value, "preparedGrossAtomic") ? ["preparedGrossAtomic"] : [])], "mm_gasless_state_corrupt");
   if (typeof i.profile !== "string" || i.profile.length < 1 || i.profile.length > 128 || i.decimals !== 6) mmFail("mm_gasless_state_corrupt");
   const request = mmRequest(i.request, "mm_gasless_state_corrupt"), binding = mmBinding(i.binding, "mm_gasless_state_corrupt");
   mmCanonicalAddress(i.token, "mm_gasless_state_corrupt"); mmHash(i.deploymentEvidenceHash, "mm_gasless_state_corrupt");
   mmHash(i.policyHash, "mm_gasless_state_corrupt"); mmUuid(i.requestId, "mm_gasless_state_corrupt");
   mmIso(i.preparedAt, "mm_gasless_state_corrupt"); mmIso(i.expiresAt, "mm_gasless_state_corrupt");
+  if (request.fixedNet ? typeof i.preparedGrossAtomic !== "string" : Object.hasOwn(i, "preparedGrossAtomic")) mmFail("mm_gasless_state_corrupt");
+  if (request.fixedNet) mmUint(i.preparedGrossAtomic, true, "mm_gasless_state_corrupt");
   const quote = quoteResult(i.quote), typed = i as unknown as MetaMaskGaslessIntent;
   const deployment = mmRegistry(request.chainId);
   if (i.token !== deployment.row.token || i.deploymentEvidenceHash !== deployment.deploymentEvidenceHash) mmFail("mm_gasless_state_corrupt");

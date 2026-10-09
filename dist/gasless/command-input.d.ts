@@ -4,6 +4,10 @@ export declare const GASLESS_COMMAND_CHAINS: readonly [1, 10, 130, 137, 143, 132
 export type GaslessCommandChainId = typeof GASLESS_COMMAND_CHAINS[number];
 export type GaslessCommandRequest = Omit<GaslessRequest, "chainId"> & {
     readonly chainId: GaslessCommandChainId;
+    readonly fixedNet?: {
+        readonly netAtomic: string;
+        readonly maxGrossAtomic: string;
+    };
 };
 export declare function gaslessCommandChain(value: number): GaslessCommandChainId;
 export declare function gaslessCommandRequest(request: GaslessCommandRequest): GaslessCommandRequest;

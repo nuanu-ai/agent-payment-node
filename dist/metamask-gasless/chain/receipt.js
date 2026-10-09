@@ -1,3 +1,4 @@
+import { mmAssertStableQuote } from "../economics.js";
 import { mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { addressWord, MM_APPROVAL_TOPIC, MM_INCREASED_COUNT_TOPIC, MM_TRANSFER_TOPIC, rpcAddress, rpcHex, rpcQuantity, topicAddress, twoWords } from "./abi.js";
@@ -40,8 +41,7 @@ export function verifyMetaMaskReceiptAccounting(intent, outerSender, logs) {
         BigInt(transferIndexes[0]) >= BigInt(transferIndexes[1]))
         mmFail("mm_gasless_evidence_invalid");
     const delivered = BigInt(intent.quote.netAtomic), fee = BigInt(intent.quote.feeAtomic);
-    if (delivered + fee !== BigInt(intent.request.grossAtomic))
-        mmFail("mm_gasless_evidence_invalid");
+    mmAssertStableQuote(intent.request, intent.quote, "mm_gasless_evidence_invalid");
     return { deliveredAtomic: delivered.toString(), feeAtomic: fee.toString(),
         debitAtomic: (delivered + fee).toString(), firstTransferIndexAtomic: transferIndexes[0],
         secondTransferIndexAtomic: transferIndexes[1], counterIndexAtomic: count.logIndexAtomic };

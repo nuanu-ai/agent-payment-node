@@ -1,3 +1,4 @@
+import { mmUnusedGross } from "../economics.js";
 import { hashObject } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
@@ -136,7 +137,7 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
     receiptHash: receiptHash(intent.request.chainId, transactionHash, included, status, logs),
     protocolHash, tokenImplementationHash, deliveredAtomic: accounting.deliveredAtomic,
     feeAtomic: accounting.feeAtomic, debitAtomic: accounting.debitAtomic, refundAtomic: "0",
-    unusedGrossAtomic: "0", designation: "pinned", permission: "consumed",
+    unusedGrossAtomic: mmUnusedGross(intent.request, intent.quote), designation: "pinned", permission: "consumed",
     receiptCounterAtomic: "1", finalityCounterAtomic: "1",
   };
   return { kind: "success", settlement };

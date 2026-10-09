@@ -84,6 +84,7 @@ export interface ProjectedMcpTool {
     readonly properties: Record<string, JsonValue>;
     readonly required: string[];
     readonly additionalProperties: false;
+    readonly oneOf?: JsonValue[];
   };
   readonly command: CommandDefinition;
 }
@@ -146,7 +147,11 @@ function inputSchema(command: CommandDefinition): ProjectedMcpTool["inputSchema"
     properties[field] = optionSchema(option);
     if (option.required) required.push(field);
   }
-  return { type: "object", properties, required, additionalProperties: false };
+  return { type: "object", properties, required, additionalProperties: false,
+    ...(command.path.join(" ") === "gasless transfer prepare" ? { oneOf: [
+      { required: ["amount", "max_fee", "min_received"], not: { anyOf: ["net_amount_atomic", "max_gross_atomic", "max_fee_atomic"].map(field => ({ required: [field] })) } },
+      { required: ["net_amount_atomic", "max_gross_atomic", "max_fee_atomic"], not: { anyOf: ["amount", "max_fee", "min_received"].map(field => ({ required: [field] })) } },
+    ] } : {}) };
 }
 
 function optionSchema(option: CommandOption): { [key: string]: JsonValue } {

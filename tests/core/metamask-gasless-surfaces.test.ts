@@ -30,6 +30,7 @@ const GASLESS_PATHS = [
   "gasless transfer quote",
   "gasless transfer prepare",
   "gasless transfer approve",
+  "gasless transfer approve-sealed",
 ] as const;
 const GASLESS_TOOLS = [
   "apn_gasless_usdt_prepare",
@@ -40,6 +41,7 @@ const GASLESS_TOOLS = [
   "apn_gasless_transfer_quote",
   "apn_gasless_transfer_prepare",
   "apn_gasless_transfer_approve",
+  "apn_gasless_transfer_approve_sealed",
 ] as const;
 const OPERATION_ID = "a".repeat(64);
 
@@ -94,8 +96,8 @@ test("CLI and MCP share strict ten-chain input while the local adapter rejects i
     required: prepare.inputSchema.required,
     additionalProperties: prepare.inputSchema.additionalProperties,
   }, {
-    properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"],
-    required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"],
+    properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"],
+    required: ["profile", "chain", "to", "idempotency_key"],
     additionalProperties: false,
   });
 

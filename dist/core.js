@@ -606,6 +606,8 @@ export class ApnCore {
         }
     }
     async prepareGasless(request) {
+        if (request.request.fixedNet && await gaslessProvider(this.context, request.profile) !== "metamask-agent-wallet")
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Fixed-net gasless transfers require a MetaMask server wallet.");
         const key = canonicalIdempotencyKey(request.idempotencyKey);
         const existing = await this.operations.findIdempotency(this.context.state.idempotencyHash(key));
         if (existing?.kind === "direct_transfer" && existing.record.providerDirect?.coinbaseGasless !== undefined)

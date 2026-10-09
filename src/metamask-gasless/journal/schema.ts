@@ -15,7 +15,7 @@ import type {
   MetaMaskGaslessState,
 } from "../model.js";
 import { MM_MIN_REMAINING_MS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
-import { mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
+import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
 import { mmRegistry } from "../registry.js";
 import { MM_REASON_CODES, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
@@ -82,14 +82,16 @@ function snapshot(value: unknown, chainId: MetaMaskGaslessIntent["request"]["cha
 export function mmJournalIntent(value: unknown, profileHash: string): MetaMaskGaslessIntent {
   const i = mmExact(value, ["profile", "request", "binding", "token", "decimals", "deploymentEvidenceHash",
     "initialSnapshot", "quote", "requestId", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo",
-    "mode", "preparedAt", "expiresAt", "policyHash"]);
+    "mode", "preparedAt", "expiresAt", "policyHash",
+    ...(typeof value === "object" && value !== null && Object.hasOwn(value, "preparedGrossAtomic") ? ["preparedGrossAtomic"] : [])]);
   if (typeof i.profile !== "string" || !PROFILE.test(i.profile)) corrupt();
   const request = mmRequest(i.request, "mm_gasless_state_corrupt"), binding = mmBinding(i.binding, "mm_gasless_state_corrupt");
   mmCanonicalAddress(i.token); mmHash(i.deploymentEvidenceHash); mmUuid(i.requestId);
   const initial = snapshot(i.initialSnapshot, request.chainId);
   const preparedAt = mmIso(i.preparedAt), expiresAt = mmIso(i.expiresAt);
   if (time(expiresAt) - time(preparedAt) !== MM_TTL_MS || time(initial.observedAt) > time(preparedAt)) corrupt();
-  const gross = mmUint(request.grossAtomic, true, "mm_gasless_state_corrupt");
+  const gross = mmUint(mmActualGross(i.quote as MetaMaskGaslessQuote, "mm_gasless_state_corrupt"), true, "mm_gasless_state_corrupt");
+  if (request.fixedNet ? i.preparedGrossAtomic !== gross.toString() : Object.hasOwn(i, "preparedGrossAtomic")) corrupt();
   if (mmUint(initial.safeState.usdcBalanceAtomic, false, "mm_gasless_state_corrupt") < gross ||
     mmUint(initial.headState.usdcBalanceAtomic, false, "mm_gasless_state_corrupt") < gross) corrupt();
   mmHash(i.policyHash); mmHex(i.delegationHash, 32); mmHex(i.signingDigest, 32);
@@ -195,7 +197,7 @@ function settlement(value: unknown, intent: MetaMaskGaslessIntent, dispatched: M
     receipt: { block: transaction, ...tokenState }, finality: { block: finality, ...tokenState } });
   if (s.protocolHash !== protocolHash || s.tokenImplementationHash !== tokenImplementationHash ||
     s.deliveredAtomic !== dispatched.netAtomic || s.feeAtomic !== dispatched.feeAtomic ||
-    s.debitAtomic !== intent.request.grossAtomic || s.refundAtomic !== "0" || s.unusedGrossAtomic !== "0" ||
+    s.debitAtomic !== mmActualGross(dispatched) || s.refundAtomic !== "0" || s.unusedGrossAtomic !== mmUnusedGross(intent.request, dispatched) ||
     s.designation !== "pinned" || s.permission !== "consumed" || s.receiptCounterAtomic !== "1" || s.finalityCounterAtomic !== "1") corrupt();
   return s as unknown as MetaMaskGaslessSettlement;
 }

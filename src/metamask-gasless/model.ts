@@ -10,12 +10,17 @@ export const MM_MAX_UINT = (1n << 256n) - 1n;
 export const MM_ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 export const MM_ZERO_HASH = "0".repeat(64);
 
+export interface MetaMaskGaslessFixedNet {
+  readonly netAtomic: string;
+  readonly maxGrossAtomic: string;
+}
 export interface MetaMaskGaslessRequest {
   readonly chainId: MetaMaskGaslessChainId;
   readonly recipient: Address;
   readonly grossAtomic: string;
   readonly maxFeeAtomic: string;
   readonly minReceivedAtomic: string;
+  readonly fixedNet?: MetaMaskGaslessFixedNet;
 }
 /** Public legacy profile identity. Private provider selection never crosses the helper boundary. */
 export interface MetaMaskGaslessProfileIdentity {
@@ -136,6 +141,7 @@ export interface MetaMaskGaslessIntent extends MetaMaskGaslessUnsignedResult {
   readonly decimals: 6;
   readonly deploymentEvidenceHash: string;
   readonly initialSnapshot: MetaMaskGaslessSnapshot;
+  readonly preparedGrossAtomic?: string;
   readonly quote: MetaMaskGaslessQuote;
   readonly requestId: string;
   readonly preparedAt: string;
@@ -195,7 +201,7 @@ export interface MetaMaskGaslessSettlement {
   readonly feeAtomic: string;
   readonly debitAtomic: string;
   readonly refundAtomic: "0";
-  readonly unusedGrossAtomic: "0";
+  readonly unusedGrossAtomic: string;
   readonly designation: "pinned";
   readonly permission: "consumed";
   readonly receiptCounterAtomic: "1";

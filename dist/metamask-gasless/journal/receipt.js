@@ -1,3 +1,4 @@
+import { mmActualGross } from "../economics.js";
 import { hashObject } from "../../canonical.js";
 import { mmDispatchIntent } from "../dispatch.js";
 import { mmPrivateHash } from "../identity.js";
@@ -50,7 +51,9 @@ export function publicMetaMaskGaslessOperation(operation) {
         proof_class: metaMaskGaslessProofClass(op),
         transfer: { chain_id: intent.request.chainId, token: intent.token, symbol: "USDC", decimals: 6,
             sender: intent.binding.address, recipient: intent.request.recipient, fee_recipient: intent.quote.feeRecipient,
-            gross_atomic: intent.request.grossAtomic, user_max_fee_atomic: intent.request.maxFeeAtomic,
+            ...(intent.request.fixedNet ? { requested_fixed_net_atomic: intent.request.fixedNet.netAtomic,
+                maximum_gross_atomic: intent.request.fixedNet.maxGrossAtomic } : {}),
+            gross_atomic: mmActualGross(intent.quote), user_max_fee_atomic: intent.request.maxFeeAtomic,
             minimum_received_atomic: intent.request.minReceivedAtomic, frozen_net_atomic: intent.quote.netAtomic,
             frozen_fee_atomic: intent.quote.feeAtomic, actual_delivered_atomic: settlement?.deliveredAtomic ?? null,
             actual_sender_debit_atomic: settlement?.debitAtomic ?? null },

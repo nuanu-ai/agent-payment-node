@@ -128,7 +128,11 @@ function inputSchema(command) {
         if (option.required)
             required.push(field);
     }
-    return { type: "object", properties, required, additionalProperties: false };
+    return { type: "object", properties, required, additionalProperties: false,
+        ...(command.path.join(" ") === "gasless transfer prepare" ? { oneOf: [
+                { required: ["amount", "max_fee", "min_received"], not: { anyOf: ["net_amount_atomic", "max_gross_atomic", "max_fee_atomic"].map(field => ({ required: [field] })) } },
+                { required: ["net_amount_atomic", "max_gross_atomic", "max_fee_atomic"], not: { anyOf: ["amount", "max_fee", "min_received"].map(field => ({ required: [field] })) } },
+            ] } : {}) };
 }
 function optionSchema(option) {
     if (!new Set(["public", "operator_input"]).has(option.sensitivity)) {
