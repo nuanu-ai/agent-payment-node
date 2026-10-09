@@ -1,5 +1,5 @@
 import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
-import { type CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
+import { type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
 import { MegaFundingJournal, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
@@ -112,7 +112,7 @@ export declare class OperationService {
     private profileOperations;
     private circleOperations;
     /** Both Circle signing accounts are held under their existing profile locks. */
-    assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved?: boolean): Promise<void>;
+    assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved?: boolean, effectRole?: CircleRole): Promise<void>;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
     private merchantOperations;
     assertMerchantAccountAvailable(record: MerchantOperation): Promise<void>;

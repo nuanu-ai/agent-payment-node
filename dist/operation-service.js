@@ -1,3 +1,4 @@
+import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import { SeiFundingJournal, publicSeiFunding } from "./lifi/sei-gaszip-journal.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { publicCircle } from "./circle-v2-evm/operation-model.js";
@@ -215,14 +216,21 @@ export class OperationService {
         return profileHash === undefined ? repo.listAllOperations() : repo.listOperations(profileHash);
     }
     /** Both Circle signing accounts are held under their existing profile locks. */
-    async assertCircleAccountsAvailable(record, exceptSaved = false) {
+    async assertCircleAccountsAvailable(record, exceptSaved = false, effectRole) {
         if (exceptSaved) {
             const saved = await new CircleRepository(this.state.root).load(record.operationId);
             if (saved === null || saved.integrityHash !== record.integrityHash)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Circle exclusion requires the exact durable journal.");
         }
         const except = exceptSaved ? record.operationId : undefined;
-        await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], except, true);
+        const settledSourceMint = exceptSaved && effectRole === "mint" && record.source?.finalityTag === "finalized" &&
+            record.attestation !== null && record.residualAllowanceAtomic === "0" && record.effects.find(e => e.role === "burn")?.phase === "confirmed" &&
+            record.effects.filter(e => e.role !== "mint").every(e => e.phase === "confirmed");
+        // Finalized source settlement is read-only during mint. Its signer remains occupied for all other financial roles.
+        if (settledSourceMint)
+            assertCircleAttestation(record.source, record.attestation);
+        else
+            await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], except, true);
         await this.assertConflictDomainsAvailable(record.destinationProfileHash, () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], except);
     }
     async assertProviderAccountAvailable(providerId, accountBindingHash, payer, exceptOperationId) {
