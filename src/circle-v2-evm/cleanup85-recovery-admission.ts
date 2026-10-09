@@ -11,7 +11,7 @@ import { currentCircleDeployments, type CircleRpc } from "./rpc.js";
 import { circleBlocked, type CircleOperationV1 } from "./operation-model.js";
 /** Detached private verification provenance, never a caller-supplied boolean or persisted authority. */
 export interface VerifiedCleanup85RecoveryAdmission { readonly kind: "verified-cleanup85-recovery-admission"; }
-interface VerifiedBody { readonly request: Cleanup85CancellationRequest; readonly intent: Cleanup85RecoveryIntent; readonly parent: CircleOperationV1; readonly evidence: ConsumedBurnEvidence; }
+interface VerifiedBody { readonly request: Cleanup85CancellationRequest; readonly intent: Cleanup85RecoveryIntent; readonly parent: CircleOperationV1; readonly evidence: ConsumedBurnEvidence; readonly deployments: Readonly<Awaited<ReturnType<typeof currentCircleDeployments>>>; }
 const verified = new WeakMap<VerifiedCleanup85RecoveryAdmission, VerifiedBody>();
 export function verifiedCleanup85RecoveryAdmission(token: VerifiedCleanup85RecoveryAdmission, request: Cleanup85CancellationRequest): VerifiedBody {
   const body = verified.get(token); if (body === undefined || hashObject(body.request) !== hashObject(request)) circleBlocked("private_cleanup85_admission_required");
@@ -28,11 +28,11 @@ export async function verifyCleanup85RecoveryAdmission(state: StateStore, source
   const intent = await store.load(op, parent); if (intent === null || hashObject(cleanup85CancellationRequest(intent)) !== hashObject(request)) circleBlocked("cleanup85_request_binding");
   await assertEvmNativeCustody(state, op.profile, op.sourceCustody); await assertEvmNativeCustody(state, "default", intent.recipientCustody);
   if (source.chainId !== 42161 || destination.chainId !== 1329) circleBlocked("cleanup85_rpc_identity");
-  await currentCircleDeployments(source, destination, 1329);
+  const deployments = await currentCircleDeployments(source, destination, 1329);
   // Canonical receipt race always stops cancellation. Null is not an absence/effect verdict.
   if (await source.call("eth_getTransactionReceipt", [request.oldCleanupTransactionHash]) !== null) circleBlocked("cleanup85_original_receipt_requires_public_reconciliation");
   const evidence = await consumedBurnEvidence(source, op);
   if (approvalReceiptIdentity(evidence.approvalProof) !== approvalReceiptIdentity(intent.evidence.approvalProof) || approvalReceiptIdentity(evidence.consumerProof) !== approvalReceiptIdentity(intent.evidence.consumerProof)) circleBlocked("cleanup85_original_evidence_changed");
   const token = Object.freeze({ kind: "verified-cleanup85-recovery-admission" as const });
-  verified.set(token, structuredClone({ request, intent, parent: op, evidence })); return token;
+  verified.set(token, structuredClone({ request, intent, parent: op, evidence, deployments })); return token;
 }
