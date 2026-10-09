@@ -512,9 +512,9 @@ export declare const stateSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     failed_before_effect: "failed_before_effect";
     awaiting_approval: "awaiting_approval";
+    completed: "completed";
     submitted_pending: "submitted_pending";
     abandoned_unknown: "abandoned_unknown";
-    completed: "completed";
     execution_pending: "execution_pending";
     included_success: "included_success";
     included_revert: "included_revert";
@@ -604,9 +604,9 @@ export declare const transitionSchema: z.ZodObject<{
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         awaiting_approval: "awaiting_approval";
+        completed: "completed";
         submitted_pending: "submitted_pending";
         abandoned_unknown: "abandoned_unknown";
-        completed: "completed";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";
@@ -1058,9 +1058,9 @@ export declare const operationSchema: z.ZodObject<{
             unknown_finality: "unknown_finality";
             failed_before_effect: "failed_before_effect";
             awaiting_approval: "awaiting_approval";
+            completed: "completed";
             submitted_pending: "submitted_pending";
             abandoned_unknown: "abandoned_unknown";
-            completed: "completed";
             execution_pending: "execution_pending";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -1394,9 +1394,9 @@ export declare const operationSchema: z.ZodObject<{
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         awaiting_approval: "awaiting_approval";
+        completed: "completed";
         submitted_pending: "submitted_pending";
         abandoned_unknown: "abandoned_unknown";
-        completed: "completed";
         execution_pending: "execution_pending";
         included_success: "included_success";
         included_revert: "included_revert";
