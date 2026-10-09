@@ -19,7 +19,7 @@ let allowTransport = false, currentChecks = 0, rejectAfterHandoff = false;
 const buffers: Buffer[] = [];
 // These doubles test the transport contract only. They cannot prove an owned private issuer positive.
 mock.module("../../src/metamask-package.js", {namedExports: {resolveMetaMaskBin: async () => "/test-only-pinned-package"}});
-mock.module("../../src/metamask-process-runner.js", {namedExports: {NodeMetaMaskProcessRunner: class {
+mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
   async runJson(argv:readonly string[], timeout?:number) {
     calls.push({argv, ...(timeout === undefined ? {} : {timeout})});
     const value = queue.shift(); assert.ok(value, "unexpected child call"); if (argv[1] === "send-transaction") policyQueue({project:postProject??PROJECT}); return value;
@@ -32,6 +32,9 @@ mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
   readMetaMaskNativeSettlement: async () => {throw new Error("not a settlement fixture");},
   readMetaMaskNativeReservation: async () => {throw new Error("not a ledger fixture");},
   assertMetaMaskNativeFailedBeforeEffect: async () => {throw new Error("not a release fixture");},
+  assertMetaMaskNativeGenericCapacityRelease: async () => {throw new Error("not a release fixture");},
+  assertMetaMaskNativeConflictDomainAvailable: async () => {throw new Error("not a conflict-domain fixture");},
+  assertMetaMaskNativeOwnedConflictDomainAvailable: async () => {throw new Error("not a conflict-domain fixture");},
 }});
 const {readFixedMetaMaskNativePolicy, submitOwnedMetaMaskNative, readFixedMetaMaskNativeRequest} = await import("../../src/metamask-native-transfer-adapter.js");
 function result(data:unknown, exitCode=0) {const stdout=Buffer.from(JSON.stringify({ok:true,data})); buffers.push(stdout); return {exitCode,stdout};}
