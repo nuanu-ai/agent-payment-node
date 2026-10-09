@@ -1,3 +1,7 @@
+import { resolveCleanup85NativeLineage, verifiedCleanup85NativeLineage } from "../circle-cleanup85-unsigned-retirement.js";
+import { withCleanup85FinancialScope } from "../circle-cleanup85-financial-scope.js";
+import { Cleanup85UnsignedRetirementStore } from "../circle-cleanup85-unsigned-retirement-store.js";
+import { verifyCleanup86RecoveryContext, verifiedCleanup86RecoveryContext } from "./cleanup85-effective-context.js";
 import { hashObject } from "../canonical.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
@@ -71,6 +75,12 @@ export class Cleanup85RecoveryRuntime {
     }
     async cancel(id) {
         const backend = this.backend(), { source, destination } = this.remotes();
+        const parent = await this.repo.load(id), old = parent === null ? null : await new CircleNonceRetirementStore(this.state.root).intent(parent), saved = parent === null || old === null ? null : await new Cleanup85RecoveryStore(this.state.root).load(parent, old);
+        if (saved !== null) {
+            const request = cleanup85CancellationRequest(saved), lineage = verifiedCleanup85NativeLineage(await resolveCleanup85NativeLineage(this.state, request), this.state, request), native = await this.state.findOperation(lineage.operationId);
+            if (native !== null && native.state !== "awaiting_approval")
+                return backend.cancellation.inspect(request);
+        }
         const request = await prepareCleanup85Recovery(this.state, source, destination, id, this.now);
         // B independently refuses its own durable SIGN/SEND, before any new TTY/private access.
         return backend.cancellation.execute(request);
@@ -89,6 +99,7 @@ export class Cleanup85RecoveryRuntime {
             const store = new Cleanup86Store(this.state.root), existing = await store.intent(op, recovery);
             if (existing !== null && (await store.claimed(op, existing, "sign") || await store.claimed(op, existing, "send")))
                 circleBlocked("cleanup86_claimed_observe_only");
+            const authority = await this.financialFrame(op, recovery);
             await this.financialGuard(op, recovery);
             const cancellation = await this.verifyCancellation(initial.request, status.proof, recovery, source);
             const evidence = await consumedBurnEvidence(source, op, "cancel85");
@@ -96,7 +107,7 @@ export class Cleanup85RecoveryRuntime {
             if (await source.call("eth_getTransactionReceipt", [CLEANUP85_HASH]) !== null)
                 circleBlocked("cleanup85_original_receipt_requires_public_reconciliation");
             const envelope = existing?.envelope ?? await source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), "86");
-            const intent = existing ?? await store.start(op, recovery, { cancellationProofHash: status.proof.proofHash, envelope, policies: recovery.policies, capturedAt: new Date(this.now()).toISOString(), windowEndsAt: recovery.windowEndsAt });
+            const intent = existing ?? await store.start(op, recovery, { cancellationProofHash: status.proof.proofHash, envelope, policies: authority.policies, capturedAt: new Date(this.now()).toISOString(), windowEndsAt: authority.windowEndsAt });
             if (intent.cancellationProofHash !== status.proof.proofHash)
                 circleBlocked("cleanup86_cancellation_identity_changed");
             const submission = new CircleRpc("https://arb1.arbitrum.io/rpc", 42161, this.https);
@@ -148,19 +159,22 @@ export class Cleanup85RecoveryRuntime {
         await this.backend().verifyCancellationAccounting(this.state, request, proof);
         return observation;
     }
+    async financialFrame(op, recovery) { if (await new Cleanup85UnsignedRetirementStore(this.state.root).load() === null)
+        return recovery; return verifiedCleanup86RecoveryContext(await verifyCleanup86RecoveryContext(this.state, op, recovery), this.state, op, recovery).readmission; }
     async financialGuard(op, recovery) {
-        assertCleanup85Window(recovery, this.now());
+        const authority = await this.financialFrame(op, recovery);
+        assertCleanup85Window(authority, this.now());
         for (const [profile, custody] of [[op.profile, op.sourceCustody], [op.destinationProfile, op.destinationCustody], ["default", recovery.recipientCustody]]) {
             await assertEvmNativeCustody(this.state, profile, custody);
             await assertExclusiveEvmRawSigner(this.state, custody.walletAddress, custody.profileHash);
         }
         await new OperationService(this.state).assertCircleAccountsAvailable(op, true, "cleanup");
-        await this.usage.confirm(op, recovery.policies);
-        await this.usage.authorizationDeadline(op, recovery.policies);
+        await this.usage.confirm(op, authority.policies);
+        await this.usage.authorizationDeadline(op, authority.policies);
     }
     async locked(id, proof, action) {
         const initial = await this.frame(id), r = initial.recovery;
-        return this.state.withLocks([`profile:${initial.op.profileHash}`, `profile:${initial.op.destinationProfileHash}`, `profile:${r.recipientCustody.profileHash}`, `operation:${id}`, `operation:${proof.operationId}`, `operation:idempotency:${initial.op.idempotencyHash}`, evmAddressLock(r.sourceCustody.walletAddress), evmAddressLock(r.destinationCustody.walletAddress), evmAddressLock(r.recipientCustody.walletAddress)], () => this.usage.withPolicyLocks([initial.op.profile, initial.op.destinationProfile, "default"], async () => {
+        return withCleanup85FinancialScope(this.state, initial.request, proof.operationId, scope => this.usage.withCleanup85HeldPolicyScope(scope, initial.request, proof.operationId, async () => {
             const fresh = await this.frame(id), { source, destination } = this.remotes();
             if (fresh.recovery.recoveryBinding !== r.recoveryBinding)
                 circleBlocked("cleanup85_recovery_frame_changed");

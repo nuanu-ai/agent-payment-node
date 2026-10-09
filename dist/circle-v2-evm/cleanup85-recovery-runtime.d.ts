@@ -45,6 +45,7 @@ export declare class Cleanup85RecoveryRuntime {
     approve86(id: string): Promise<CircleOperationV1>;
     observe(id: string): Promise<CircleOperationV1>;
     private verifyCancellation;
+    private financialFrame;
     private financialGuard;
     private locked;
 }

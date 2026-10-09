@@ -1,3 +1,4 @@
+import { assertHeldCleanup85Scope } from "../circle-cleanup85-financial-scope.js";
 import { consumeHistoricalPaidClosure } from "./historical-paid-closure.js";
 import { consumeCleanup85Settlement } from "./cleanup85-settlement-authority.js";
 import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
@@ -49,11 +50,27 @@ export class CircleUsage {
             } });
         });
     }
+    /** Finite cleanup scope only: the private wrapper already owns every policy lock. */
+    async withCleanup85HeldPolicyScope(held, request, operationId, action) {
+        if (this.policyScope.getStore() !== undefined)
+            circleBlocked("policy_lock_scope_reentry");
+        const guard = () => assertHeldCleanup85Scope(held, this.state, request, operationId);
+        guard();
+        const scope = { profiles: new Set(["evm-live-buyer", "evm-live-seller", "default"]), active: true, guard };
+        return this.policyScope.run(scope, async () => { try {
+            return await action();
+        }
+        finally {
+            scope.active = false;
+        } });
+    }
     async active(profile, account) {
         const scope = this.policyScope.getStore();
         if (scope?.active !== true || !scope.profiles.has(profile))
             circleBlocked("owner_policy_lock_required");
+        scope.guard?.();
         const stored = await this.policiesStore.readUnderProfileLock(profile);
+        scope.guard?.();
         if (!scope.active)
             circleBlocked("owner_policy_lock_required");
         const active = activeAssetPolicyFromState(stored, new Date(this.now()));

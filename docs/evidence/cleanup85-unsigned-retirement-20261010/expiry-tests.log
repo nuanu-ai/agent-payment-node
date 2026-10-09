@@ -1,0 +1,18 @@
+✔ actual captured expired4b5 finite retirement retire (1219.623792ms)
+✔ actual captured expired4b5 finite retirement crash (1323.516875ms)
+✔ actual captured expired4b5 finite retirement sign (282.829209ms)
+✔ actual captured expired4b5 finite retirement signed (286.631ms)
+✔ actual captured expired4b5 finite retirement send (310.710292ms)
+✔ actual captured expired4b5 finite retirement prepared (284.383375ms)
+✔ actual captured expired4b5 finite retirement bad_slot (300.849667ms)
+✔ actual captured expired4b5 finite retirement wrong_policy (378.63575ms)
+✔ actual captured expired4b5 finite retirement nonce_drift (352.907167ms)
+✔ actual captured expired4b5 finite retirement copied_token (1060.465333ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6572.279708
