@@ -220,3 +220,26 @@ test("expired or revised policy cannot prevent proven-unsubmitted cancellation o
   const unknown = advanceCircle(op, { state: "source_unknown", effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "unknown", transactionHash: tx, materialHash: "9".repeat(64) } : e) }, "unknown_signing", at);
   const held = ports(unknown, { usage: async () => { throw new Error("must_not_release"); }, authorizationDeadline: async () => null }); await assert.rejects(cleanupCircle(unknown, held.p), /cleanup_requires/); assert.equal(held.signs(), 0); assert.equal(held.sends(), 0);
 });
+
+test("saved included source with pending finality acquires fresh issuer proof without closing holds", async () => {
+  const ready = await sourceReady(), op = advanceCircle(ready, { attestation: null }, "issuer_pending", at); const requested: boolean[] = []; let issuers = 0;
+  const p = ports(op, { observeSource: async (_op, finalized) => { requested.push(finalized); return finalized ? null : op.source; }, attestation: async () => { issuers++; return ready.attestation; } });
+  const observed = await observeCircle(op, p.p); assert.deepEqual(requested, [true, false]); assert.equal(issuers, 1); assert.deepEqual(observed.attestation, ready.attestation);
+  assert.equal(observed.source!.finalityTag, "included"); assert.equal(observed.terminal, false); assert.equal(observed.usageFinalized, false); assert.ok(observed.usage.every(u => u.state === "unknown_finality")); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+});
+test("pending-finality fallback requires exact fresh canonical source and never manufactures issuer proof", async () => {
+  const ready = await sourceReady(), op = advanceCircle(ready, { attestation: null }, "issuer_pending", at);
+  for (const key of ["transactionHash", "blockHash", "receiptHash", "sourceMessageHash"] as const) {
+    let issuers = 0; const changed = { ...op.source!, [key]: key === "receiptHash" ? "f".repeat(64) : `0x${"ff".repeat(32)}` };
+    const p = ports(op, { observeSource: async (_op, finalized) => finalized ? null : changed, attestation: async () => { issuers++; return ready.attestation; } });
+    await assert.rejects(observeCircle(op, p.p), /source_reorg_holds_required/); assert.equal(issuers, 0); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+  }
+  for (const canonical of [null, op.source]) {
+    let issuers = 0; const p = ports(op, { observeSource: async (_op, finalized) => finalized ? null : canonical, attestation: async () => { issuers++; return null; } });
+    const observed = await observeCircle(op, p.p); assert.equal(observed.attestation, null); assert.equal(issuers, canonical === null ? 0 : 1); assert.equal(observed.terminal, false); assert.equal(observed.usageFinalized, false);
+  }
+});
+test("saved finalized source cannot use included fallback to mask absent finalized canonical proof", async () => {
+  const op = await sourceReady(true), requested: boolean[] = []; const p = ports(op, { observeSource: async (_op, finalized) => { requested.push(finalized); return null; } });
+  const observed = await observeCircle(op, p.p); assert.deepEqual(requested, [true]); assert.equal(observed.terminal, false); assert.equal(observed.usageFinalized, false);
+});
