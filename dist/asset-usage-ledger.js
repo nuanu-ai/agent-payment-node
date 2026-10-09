@@ -1,5 +1,5 @@
 import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
-import { cleanup85NativeReservationMarker, sameCleanup85NativeMarker } from "./asset-usage-ledger-cleanup85-native.js";
+import { assertCleanup85GenericCapacityRelease, cleanup85NativeReservationMarker, sameCleanup85NativeMarker } from "./asset-usage-ledger-cleanup85-native.js";
 import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
 import { activeAssetPolicyFromState } from "./allowlist-active-policy.js";
 import { StateStore } from "./state.js";
@@ -45,9 +45,12 @@ export class AssetUsageLedger extends SecureStateStore {
         if (b.reservedAtomic !== "2000000000000" || BigInt(b.signedMaximumDebitAtomic) > BigInt(b.reservedAtomic) ||
             b.idempotencyKey !== `apn.cleanup85-native:${o.operationId}` || b.reservationId !== assetUsageReservationId({ account: o.walletAddress, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, b.idempotencyKey))
             throw blocked("Cleanup85 native reservation binding mismatch.");
-        return this.reserveBound({ account: o.walletAddress, chain: "eip155:42161", asset: { kind: "native", identifier: null }, registry: b.policy.registry, rail: "direct", amountAtomic: b.reservedAtomic, idempotencyKey: b.idempotencyKey, now }, b);
+        return this.reserveBound({ account: o.walletAddress, chain: "eip155:42161", asset: { kind: "native", identifier: null }, registry: b.policy.registry, rail: "direct", amountAtomic: b.reservedAtomic, idempotencyKey: b.idempotencyKey, now }, authority);
     }
-    async reserveBound(input, cleanup) {
+    async reserveBound(input, authority) {
+        const cleanup = authority === undefined ? undefined : verifiedCleanup85NativeReservation(authority, this.root);
+        if (typeof input.idempotencyKey === "string" && input.idempotencyKey.startsWith("apn.cleanup85-native:") && cleanup === undefined)
+            throw blocked("Cleanup85 namespace requires root-owned reservation authority.");
         const registry = validateAssetPolicyRegistry(input.registry);
         const at = instant(input.now);
         const initial = evaluateAssetPolicy(registry, {
@@ -116,6 +119,8 @@ export class AssetUsageLedger extends SecureStateStore {
      * The callback must not acquire this bucket lock. Its owning profile/operation/custody locks remain held. */
     async releaseDirectReservedAfter(expectedValue, persistOutcome) {
         const expected = structuredClone(validateAssetUsageReservation(expectedValue));
+        if (expected.cleanup85NativeReservation !== undefined)
+            throw blocked("Cleanup85 native hold requires opaque canonical settlement.");
         if (expected.rail !== "direct" || expected.state !== "reserved")
             throw blocked("Only an unchanged direct reserve can close a pre-private attempt.");
         const identity = validateIdentity(expected);
@@ -125,6 +130,7 @@ export class AssetUsageLedger extends SecureStateStore {
             if (value === null || canonicalJson(validateAssetUsageReservation(value)) !== canonicalJson(expected)) {
                 throw blocked("The exact no-private-entry reservation is no longer held unchanged.");
             }
+            await assertCleanup85GenericCapacityRelease(this.root, expected);
             const outcome = await persistOutcome();
             const at = instant(outcome.now), outcomeDigest = digest(outcome.outcomeDigest, "Outcome digest");
             if (at < expected.updatedAt)
@@ -160,6 +166,8 @@ export class AssetUsageLedger extends SecureStateStore {
                 throw blocked("The usage reservation transition cannot move backward in time.");
             const terminal = input.state === "finalized" || input.state === "failed_before_effect" ||
                 input.state === "released_unsubmitted" || input.state === "failed_confirmed_revert";
+            if (terminal)
+                await assertCleanup85GenericCapacityRelease(this.root, current);
             const outcomeDigest = terminal ? digest(input.outcomeDigest, "Outcome digest") : null;
             const consumedAtomic = input.consumedAtomic === undefined ? undefined : atomic(input.consumedAtomic, false, true).toString();
             if (consumedAtomic !== undefined && (input.state !== "failed_confirmed_revert" ||

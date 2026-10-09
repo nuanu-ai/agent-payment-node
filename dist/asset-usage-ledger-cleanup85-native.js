@@ -1,5 +1,7 @@
+import { loadCleanup85NativeReservationIdentity } from "./circle-cleanup85-native-records.js";
+import { StateStore } from "./state.js";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
-import { assetUsageReservationId, atomic, corrupt, idempotency } from "./asset-usage-ledger-record.js";
+import { assetUsageReservationId, atomic, blocked, corrupt, idempotency } from "./asset-usage-ledger-record.js";
 import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
 /** Data projection of the opaque verified body, never an authority creator. */
 export function cleanup85NativeReservationMarker(b) {
@@ -17,7 +19,7 @@ export function validateCleanup85NativeUsage(value) {
     if (value.idempotencyHash !== idempotency(key) || value.reservationId !== assetUsageReservationId(value, key) || value.state === "failed_confirmed_revert")
         corrupt("Cleanup85 native reservation binding is invalid.");
     if (p === undefined) {
-        if (value.state === "finalized" || value.consumedAtomic !== undefined)
+        if (!["reserved", "submitted", "unknown_finality"].includes(value.state) || value.consumedAtomic !== undefined)
             corrupt("Cleanup85 native settlement proof is required.");
         return;
     }
@@ -28,5 +30,15 @@ export function validateCleanup85NativeUsage(value) {
     const { outcomeDigest, ...body } = p;
     if (value.reservationId !== p.nativeReservationId || value.outcomeDigest !== outcomeDigest || hashObject(body) !== outcomeDigest || value.consumedAtomic !== p.nativeConsumedAtomic || atomic(p.nativeConsumedAtomic, true, true) !== atomic(p.actualFeeAtomic, false, true) + 1n || atomic(p.nativeConsumedAtomic, true, true) > atomic(m.signedMaximumDebitAtomic, true, true) || atomic(p.blockNumberAtomic, true, true) === 0n)
         corrupt("Cleanup85 native actual debit conservation or binding is invalid.");
+}
+/** One public permanent slot and one operation only; never a profile/global scan. */
+export async function assertCleanup85GenericCapacityRelease(root, row) {
+    if (row.cleanup85NativeReservation !== undefined)
+        throw blocked("Cleanup85 native hold requires opaque canonical settlement.");
+    if (row.account !== "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7" || row.chain !== "eip155:42161" || row.rail !== "direct" || row.asset.kind !== "native")
+        return;
+    const own = await loadCleanup85NativeReservationIdentity(new StateStore(root));
+    if (own?.nativeReservationId === row.reservationId)
+        throw blocked("Cleanup85 native hold marker is missing; opaque canonical settlement required.");
 }
 //# sourceMappingURL=asset-usage-ledger-cleanup85-native.js.map

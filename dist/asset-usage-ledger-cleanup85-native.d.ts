@@ -1,4 +1,5 @@
 import type { Cleanup85NativeReservationBody } from "./circle-cleanup85-native-ledger-authority.js";
+import type { AssetUsageReservation } from "./asset-usage-ledger.js";
 export interface Cleanup85NativeReservationMarker {
     readonly version: "apn.cleanup85-native-reservation.v1";
     readonly operationId: string;
@@ -15,3 +16,5 @@ export declare function cleanup85NativeReservationMarker(b: Cleanup85NativeReser
 export declare function sameCleanup85NativeMarker(value: unknown, b: Cleanup85NativeReservationBody): boolean;
 /** Stored public accounting data only. The root-owned opaque getter authorizes all ledger writes. */
 export declare function validateCleanup85NativeUsage(value: Record<string, unknown>): void;
+/** One public permanent slot and one operation only; never a profile/global scan. */
+export declare function assertCleanup85GenericCapacityRelease(root: string, row: AssetUsageReservation): Promise<void>;
