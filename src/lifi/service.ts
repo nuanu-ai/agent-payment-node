@@ -1,3 +1,4 @@
+import { bridgeRpcPhysicalPolicy } from "./rpc-execution-budget.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
@@ -179,7 +180,7 @@ export class BridgeService {
   }
   private execution(op: BridgeOperationRecord) {
     const d = this.dependencies(), m = op.intent.materialization;
-    const physicalBudget = new BridgeRpcPhysicalBudget();
+    const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeRpcPhysicalPolicy(op));
     // The modeled worst-case first token guard spends 19 requests: two safe heads, 6+9 Ethereum/Base archive chunks and two account batches.
     // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof. Arbitrum code remains fully fresh
     // because this verifier lacks an exact fork activation point: two safe heads, four Base plus five Arbitrum chunks,

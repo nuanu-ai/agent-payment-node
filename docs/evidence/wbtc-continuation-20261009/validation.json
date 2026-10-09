@@ -1,0 +1,39 @@
+{
+  "base": "0bf2c917a1bebba6a1175f2f353e20df1e4abcf5",
+  "sourceAndTestBuild": "passed",
+  "defaultPhysicalPostCap": 24,
+  "typedCanonicalWbtcAcrossContinuationCap": 33,
+  "graphs": {
+    "ethereumToArbitrum": {
+      "approvalHistory": 11,
+      "firstGuard": 17,
+      "secondGuard": 2,
+      "send": 1,
+      "total": 31
+    },
+    "arbitrumToEthereum": {
+      "approvalHistory": 13,
+      "firstGuard": 17,
+      "secondGuard": 2,
+      "send": 1,
+      "total": 33
+    }
+  },
+  "targetedTests": {
+    "passed": 90,
+    "failed": 0
+  },
+  "sourceDistParity": true,
+  "forbiddenSurface": "passed",
+  "whitespace": "passed",
+  "changedSourceFilesUnder500Lines": true,
+  "liveFrozenSourceAndDestinationContractCodeConfigurationPinsMatch": true,
+  "financialEffectsOfSourceFix": 0,
+  "oldOperation": {
+    "id": "744a5f567bafa888f4dd38b85fb9e344058271bbf5cc01ad1651447cb663942b",
+    "state": "failed_after_approval",
+    "bridgeSubmissionAttempts": 0,
+    "residualAllowanceAtomic": "1000",
+    "terminalReceiptHash": "8e10b63ae076827049b3baebb3879a98758f2d392f32490edf20f07a7ec2d3d8"
+  }
+}

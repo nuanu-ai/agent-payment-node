@@ -1,19 +1,22 @@
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { WBTC_ACROSS_CONTINUATION_POST_LIMIT } from "./rpc-execution-budget.js";
 export const MAX_READ_ATTEMPTS = 2;
 export const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
 /** One invocation's physical transport gate, shared by every chain and read/observation session. */
 export class BridgeRpcPhysicalBudget {
     now;
     wait;
+    policy;
     posts = 0;
     lastStart = Number.NEGATIVE_INFINITY;
     tail = Promise.resolve();
-    constructor(now = Date.now, wait = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms))) {
+    constructor(now = Date.now, wait = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)), policy = "default") {
         this.now = now;
         this.wait = wait;
+        this.policy = policy;
     }
-    remaining() { return BRIDGE_INVOCATION_RPC_POST_LIMIT - this.posts; }
+    remaining() { return (this.policy === "canonical_wbtc_across_approval_continuation" ? WBTC_ACROSS_CONTINUATION_POST_LIMIT : BRIDGE_INVOCATION_RPC_POST_LIMIT) - this.posts; }
     require(posts, method) {
         if (this.remaining() < posts)
             throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC invocation POST budget exhausted.", { reason: "physical_post_limit", rpcMethod: method, physicalPosts: this.posts.toString(), remainingPhysicalPosts: this.remaining().toString() });
