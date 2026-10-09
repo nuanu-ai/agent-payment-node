@@ -26,6 +26,9 @@ mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
   claimMetaMaskNativeOwnedScope: () => {if (!allowTransport) throw new Error("unowned");},
   assertMetaMaskNativeOwnedScope: () => {},
   assertMetaMaskNativeOwnedContextCurrent: async () => {currentChecks++; if (rejectAfterHandoff && currentChecks === 3) throw new Error("expired");},
+  readMetaMaskNativeSettlement: async () => {throw new Error("not a settlement fixture");},
+  readMetaMaskNativeReservation: async () => {throw new Error("not a ledger fixture");},
+  assertMetaMaskNativeFailedBeforeEffect: async () => {throw new Error("not a release fixture");},
 }});
 const {readFixedMetaMaskNativePolicy, submitOwnedMetaMaskNative} = await import("../../src/metamask-native-transfer-adapter.js");
 function result(data:unknown, exitCode=0) {const stdout=Buffer.from(JSON.stringify({ok:true,data})); buffers.push(stdout); return {exitCode,stdout};}
@@ -68,5 +71,7 @@ test("test-owned transport constructs only exact finite type2 ERC20 payload and 
 test("counterfeit transport scope refuses before child through the statically imported claim gate",async()=>{setup();await assert.rejects(submitOwnedMetaMaskNative(scope,context()));assert.equal(calls.length,0);});
 test("post-handoff guard failure preserves the actual transaction hash as UNKNOWN",async()=>{setup();allowTransport=true;rejectAfterHandoff=true;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:TX}));const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal("transactionHash" in value&&value.transactionHash,TX);assert.equal(calls.filter(c=>c.argv[1]==="send-transaction").length,1);});
 test("nonzero provider exit preserves returned hash without claiming acknowledgement",async()=>{setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:TX},1));const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal("transactionHash" in value&&value.transactionHash,TX);});
+test("returned hash casing is canonicalized for the immutable owner journal",async()=>{setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:PAYER,hash:`0x${"A".repeat(64)}`}));assert.deepEqual(await submitOwnedMetaMaskNative(scope,context()),{disposition:"acknowledged",transactionHash:TX});});
+test("nonzero provider exit preserves returned request ID as UNKNOWN",async()=>{setup();allowTransport=true;policyQueue();queue.push(result({mode:"server",address:PAYER,status:"AWAITING_MFA",pollingId:RID},1));const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal("requestId" in value&&value.requestId,RID);});
 test("post-handoff guard failure preserves the actual pending request ID as UNKNOWN",async()=>{setup();allowTransport=true;rejectAfterHandoff=true;policyQueue();queue.push(result({mode:"server",address:PAYER,status:"AWAITING_MFA",pollingId:RID}));const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal("requestId" in value&&value.requestId,RID);});
 test("late ambiguous response has UNKNOWN outcome and no automatic resend",async()=>{setup();allowTransport=true;policyQueue();queue.push({exitCode:1,stdout:Buffer.from("malformed")});const value=await submitOwnedMetaMaskNative(scope,context());assert.equal(value.disposition,"unknown");assert.equal(calls.filter(c=>c.argv[1]==="send-transaction").length,1);});
