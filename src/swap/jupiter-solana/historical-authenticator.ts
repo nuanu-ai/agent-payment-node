@@ -1,9 +1,8 @@
 import { canonicalJson, hashObject } from "../../canonical.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
-import { StateStore } from "../../state.js";
 import { SwapOperationRepository } from "../repository.js";
 import { jupiterV1AccountBindingHash } from "./v1-admission.js";
-import { existingHistoricalRoot, HistoricalBindingReader, HistoricalCustodyReader, HistoricalMaterialReader, historicalAuthenticationRefused as refuse } from "./historical-authentication-readers.js";
+import { HistoricalReadState, HistoricalBindingReader, HistoricalCustodyReader, HistoricalMaterialReader, historicalAuthenticationRefused as refuse } from "./historical-authentication-readers.js";
 import { JupiterHistoricalProjectionReader, type HistoricalJupiterProjection } from "./historical-projection-reader.js";
 import { HISTORICAL_JUPITER_IDS, HISTORICAL_JUPITER_PAYER, HISTORICAL_JUPITER_ACCOUNT_BINDING, HISTORICAL_JUPITER_OWNER_PROFILE } from "./historical-pins.js";
 export { HISTORICAL_JUPITER_IDS } from "./historical-pins.js";
@@ -12,19 +11,19 @@ const brand: unique symbol = Symbol("HistoricalJupiterMaterialAuthority");
 export interface HistoricalJupiterMaterialAuthority { readonly [brand]: true }
 /** Finite historical owner issuer. Neither a public DTO nor a caller-supplied reader can issue authority. */
 export class JupiterHistoricalAuthenticator {
-  readonly #state: StateStore;
+  readonly #state: HistoricalReadState;
   readonly #reader: JupiterHistoricalProjectionReader;
   readonly #tokens = new WeakMap<HistoricalJupiterMaterialAuthority, { readonly projection: HistoricalJupiterProjection; readonly expires: number }>();
-  constructor(root: string, wrapping: WrappingSecretPort) { this.#state = new StateStore(root); this.#reader = new JupiterHistoricalProjectionReader(this.#state.root, wrapping); }
+  constructor(root: string, wrapping: WrappingSecretPort) { this.#state = new HistoricalReadState(root); this.#reader = new JupiterHistoricalProjectionReader(this.#state.root, wrapping, this.#state.directoryGuard()); }
   async #fixedOwner(operationId: string): Promise<{ readonly integrityHash: string; readonly materialDigest: string; readonly bindingHash: string; readonly freshMaterialDigest: string; readonly markerHash: string }> {
     if (!HISTORICAL_JUPITER_IDS.some(id => id === operationId)) refuse();
-    await existingHistoricalRoot(this.#state.root);
+    await this.#state.initialize();
     const original = await new SwapOperationRepository(this.#state.root).loadAny(operationId);
     if (original === null || original.ownerProfileHash !== HISTORICAL_JUPITER_OWNER_PROFILE || original.quote.profile !== "solana-local" || original.quote.account !== HISTORICAL_JUPITER_PAYER) refuse();
-    const material = await new HistoricalMaterialReader(this.#state.root).load(original.quote.quoteHash); if (material === null || material.execution.payer !== HISTORICAL_JUPITER_PAYER) refuse();
-    const bindings = new HistoricalBindingReader(this.#state.root), binding = await bindings.load(original, material); if (binding === null || binding.accountBindingHash !== HISTORICAL_JUPITER_ACCOUNT_BINDING) refuse();
+    const material = await new HistoricalMaterialReader(this.#state.root, this.#state.directoryGuard()).load(original.quote.quoteHash); if (material === null || material.execution.payer !== HISTORICAL_JUPITER_PAYER) refuse();
+    const bindings = new HistoricalBindingReader(this.#state.root, this.#state.directoryGuard()), binding = await bindings.load(original, material); if (binding === null || binding.accountBindingHash !== HISTORICAL_JUPITER_ACCOUNT_BINDING) refuse();
     await bindings.loadFresh(original, binding);
-    const custody = new HistoricalCustodyReader(this.#state.root, { load: async () => refuse(), create: async () => refuse() });
+    const custody = new HistoricalCustodyReader(this.#state.root, { load: async () => refuse(), create: async () => refuse() }, this.#state.directoryGuard());
     const owner = await custody.account("solana-local", "solana"), envelope = await custody.ownerBinding("solana-local", "solana");
     if (owner === null || canonicalJson(owner) !== canonicalJson(envelope) || owner.address !== HISTORICAL_JUPITER_PAYER || jupiterV1AccountBindingHash(owner) !== HISTORICAL_JUPITER_ACCOUNT_BINDING) refuse();
     return {integrityHash:original.integrityHash, materialDigest:material.execution.materialDigest, bindingHash:binding.bindingHash, freshMaterialDigest:binding.freshMaterialDigest, markerHash:binding.markerHash};

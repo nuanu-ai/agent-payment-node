@@ -110,7 +110,8 @@ export class JupiterV1ExecutionBindingStore extends SecureStateStore {
  const {preparedHash,...body}=value;if(preparedHash!==domainHash("apn.jupiter-v1-prepared-owner.v1",canonicalJson(body)))corrupt();
  }
  private path(op:SwapOperationRecord,kind:"bindings"|"claims"):string{stateIdentifier(op.ownerProfileHash,"Jupiter profile");stateIdentifier(op.operationId,"Jupiter operation");return `jupiter-v1-${kind}/${op.ownerProfileHash}/${op.operationId}.json`;}
- private async ready():Promise<void>{this.initialized??=(async()=>{await super.initialize();await this.ensureDirectory("jupiter-v1-bindings");await this.ensureDirectory("jupiter-v1-claims");await this.ensureDirectory("jupiter-v1-prepared");await this.ensureDirectory("jupiter-v1-fresh");await this.ensureDirectory("jupiter-v1-signatures");})();await this.initialized;}
+  protected async initializeStorage(): Promise<void> { await super.initialize(); }
+ private async ready():Promise<void>{this.initialized??=(async()=>{await this.initializeStorage();await this.ensureDirectory("jupiter-v1-bindings");await this.ensureDirectory("jupiter-v1-claims");await this.ensureDirectory("jupiter-v1-prepared");await this.ensureDirectory("jupiter-v1-fresh");await this.ensureDirectory("jupiter-v1-signatures");})();await this.initialized;}
 }
 export async function verifySignedJupiterV1Transaction(effect:RailSignedEffect,binding:JupiterV1ExecutionBinding):Promise<void>{
  try{const bytes=Buffer.from(effect.rawPayload,"base64"),tx=getTransactionDecoder().decode(bytes),sig=tx.signatures[address(Object.keys(tx.signatures)[0]!)];

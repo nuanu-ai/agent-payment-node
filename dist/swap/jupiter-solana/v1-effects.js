@@ -186,7 +186,8 @@ export class JupiterV1ExecutionBindingStore extends SecureStateStore {
             corrupt();
     }
     path(op, kind) { stateIdentifier(op.ownerProfileHash, "Jupiter profile"); stateIdentifier(op.operationId, "Jupiter operation"); return `jupiter-v1-${kind}/${op.ownerProfileHash}/${op.operationId}.json`; }
-    async ready() { this.initialized ??= (async () => { await super.initialize(); await this.ensureDirectory("jupiter-v1-bindings"); await this.ensureDirectory("jupiter-v1-claims"); await this.ensureDirectory("jupiter-v1-prepared"); await this.ensureDirectory("jupiter-v1-fresh"); await this.ensureDirectory("jupiter-v1-signatures"); })(); await this.initialized; }
+    async initializeStorage() { await super.initialize(); }
+    async ready() { this.initialized ??= (async () => { await this.initializeStorage(); await this.ensureDirectory("jupiter-v1-bindings"); await this.ensureDirectory("jupiter-v1-claims"); await this.ensureDirectory("jupiter-v1-prepared"); await this.ensureDirectory("jupiter-v1-fresh"); await this.ensureDirectory("jupiter-v1-signatures"); })(); await this.initialized; }
 }
 export async function verifySignedJupiterV1Transaction(effect, binding) {
     try {

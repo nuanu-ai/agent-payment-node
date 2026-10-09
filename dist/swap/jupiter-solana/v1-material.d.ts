@@ -94,5 +94,6 @@ export declare class SavedJupiterV1MaterialStore extends SecureStateStore {
     load(hash: string): Promise<JupiterV1PreparedMaterial | null>;
     private readMaterial;
     private path;
+    protected initializeStorage(): Promise<void>;
     private ready;
 }

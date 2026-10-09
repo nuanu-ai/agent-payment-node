@@ -151,7 +151,8 @@ export class SavedJupiterV1MaterialStore extends SecureStateStore {
         return result;
     }
     path(hash) { return `jupiter-v1-quotes/${hash}.json`; }
-    async ready() { this.initialized ??= (async () => { await super.initialize(); await this.ensureDirectory("jupiter-v1-quotes"); await this.ensureDirectory("jupiter-v1-quotes/chunks"); })(); await this.initialized; }
+    async initializeStorage() { await super.initialize(); }
+    async ready() { this.initialized ??= (async () => { await this.initializeStorage(); await this.ensureDirectory("jupiter-v1-quotes"); await this.ensureDirectory("jupiter-v1-quotes/chunks"); })(); await this.initialized; }
 }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "Jupiter V1 material integrity or binding is invalid."); }
 //# sourceMappingURL=v1-material.js.map
