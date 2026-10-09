@@ -194,7 +194,8 @@ export async function bindCircleAttestation(source, response, snapshot) {
         [b.maxFee, CIRCLE_MAX_FEE], [b.feeExecuted, BigInt(m.feeExecutedAtomic)], [b.expirationBlock, BigInt(m.expirationBlock)]])
         if (v !== undefined && circleUint(v) !== expected)
             circleFail("iris_decoded_optional");
-    if (b.hookData !== undefined && b.hookData !== "0x")
+    // decodeCircleMessage already requires exactly 376 signed bytes: its 228-byte body has no hook.
+    if (b.hookData !== undefined && b.hookData !== null && b.hookData !== "0x")
         circleFail("iris_hook");
     const signers = await verifyCircleAttestationSigners(m, attestation, snapshot);
     const body = { kind: "circle_v2_evm_attestation", ...m, attestation, sourceTransactionHash: source.transactionHash,
