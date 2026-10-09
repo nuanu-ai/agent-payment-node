@@ -44,6 +44,8 @@ export interface RelayBnbProofPorts {
   block(number: bigint): Promise<RelayBnbBlock | null>;
   /** A consensus safe or finalized checkpoint; null when the RPC cannot supply one. */
   finalityCheckpoint(): Promise<RelayBnbBlock | null>;
+  /** Polygon milestone consensus finality, required by the new Base source lane. */
+  polygonFinalizedCheckpoint?(): Promise<RelayBnbBlock | null>;
   /** null when trace support or exhaustive success semantics are unavailable. */
   nativeTrace(hash: string): Promise<RelayBnbNativeTrace | null>;
   /** Base only: bytecode identity and two balances from one pinned inclusion window. */
@@ -65,6 +67,7 @@ export interface RelayBnbRecipientCreditEvidence {
   readonly destinationTransactionHash: string;
   readonly destinationBlockNumber: string;
   readonly destinationBlockHash: string;
+  readonly finalityKind?: "polygon_milestone_finalized";
   readonly finalityBlockNumber: string;
   readonly finalityBlockHash: string;
   readonly recipient: string;
@@ -192,7 +195,10 @@ async function inspectCandidate(op: RelayUnsignedOperation, sourceHash: string, 
   if (receipt.status !== "success") return mismatch("destination_receipt_failed");
   let block: RelayBnbBlock | null, safe: RelayBnbBlock | null, safeCanonical: RelayBnbBlock | null;
   try {
-    [block, safe] = await Promise.all([ports.block(receipt.blockNumber), ports.finalityCheckpoint()]);
+    if (op.sourceChainId === 8453 && expectedChainId === 137 && !ports.polygonFinalizedCheckpoint)
+      return unproven("polygon_consensus_finality_unavailable");
+    [block, safe] = await Promise.all([ports.block(receipt.blockNumber),
+      op.sourceChainId === 8453 && expectedChainId === 137 ? ports.polygonFinalizedCheckpoint!() : ports.finalityCheckpoint()]);
     safeCanonical = safe === null ? null : await ports.block(safe.number);
   } catch { return unproven("bnb_finality_rpc_unavailable"); }
   if (block === null || safe === null || safeCanonical === null) return pending("destination_finality_unavailable");
@@ -200,6 +206,13 @@ async function inspectCandidate(op: RelayUnsignedOperation, sourceHash: string, 
     safeCanonical.number !== safe.number || !same(safeCanonical.hash, safe.hash) ||
     !HASH.test(safe.hash)) return mismatch("destination_noncanonical_block");
   if (safe.number < receipt.blockNumber) return pending("destination_not_safe");
+  if (op.sourceChainId === 8453 && expectedChainId === 137) {
+    let inclusionAgain: RelayBnbBlock | null;
+    try { inclusionAgain = await ports.block(receipt.blockNumber); }
+    catch { return unproven("polygon_inclusion_recheck_unavailable"); }
+    if (inclusionAgain === null || inclusionAgain.number !== receipt.blockNumber || !same(inclusionAgain.hash, receipt.blockHash))
+      return mismatch("destination_noncanonical_block");
+  }
   const minimum = BigInt(op.minOutputAtomic);
   let credited: bigint, method: RelayBnbRecipientCreditEvidence["method"];
   if (expectedChainId === 4326) {
@@ -259,6 +272,7 @@ async function inspectCandidate(op: RelayUnsignedOperation, sourceHash: string, 
     operationId: op.operationId, operationIntegrityHash: op.integrityHash, quoteDigest: op.quoteDigest,
     orderId: op.nativeQuote?.orderId ?? op.quote!.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
     destinationBlockNumber: receipt.blockNumber.toString(), destinationBlockHash: receipt.blockHash.toLowerCase(),
+    ...(op.sourceChainId === 8453 && expectedChainId === 137 ? { finalityKind: "polygon_milestone_finalized" as const } : {}),
     finalityBlockNumber: safe.number.toString(), finalityBlockHash: safe.hash.toLowerCase(),
     recipient: op.recipient.toLowerCase(), minimumOutputWei: op.minOutputAtomic, creditedWei: credited.toString(), method } };
 }

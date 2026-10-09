@@ -5,6 +5,7 @@ import { ApnError } from "../errors.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc, type ReadOnlyRpcBatchCall } from "../rpc.js";
 import type { StateStore } from "../state.js";
+import { decodeRelayBaseReceiptFee } from "./source-fee-proof.js";
 import type { RelayDepositObservation } from "./deposit-effect.js";
 import type { RelayBnbProofPorts, RelayBnbBlock, RelayBnbReceipt, RelayBnbTransaction } from "./destination-proof.js";
 import type { RelaySourceFinalityPorts } from "./observe.js";
@@ -76,7 +77,8 @@ export class RelayEthereumFinalityRpc implements RelaySourceFinalityPorts {
     return { transaction: { hash: evmRpcHex(tx.hash, 32), from: evmRpcAddress(tx.from),
       to: optionalAddress(tx.to), input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value), chainId: this.expectedChainId },
     receipt: { transactionHash: evmRpcHex(receipt.transactionHash, 32), status: status(receipt.status),
-      blockNumber: number, blockHash: evmRpcHex(receipt.blockHash, 32) }, canonicalBlockHash: included.hash };
+      blockNumber: number, blockHash: evmRpcHex(receipt.blockHash, 32),
+      ...(this.expectedChainId === 8453 ? { actualFee: decodeRelayBaseReceiptFee(receipt) } : {}) }, canonicalBlockHash: included.hash };
   }
 }
 
@@ -137,6 +139,10 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     const latest = block(await this.read("eth_getBlockByNumber", ["latest", false]), "latest");
     if (latest === null || latest.number < 15n) return null;
     return this.block(latest.number - 15n);
+  }
+  async polygonFinalizedCheckpoint(): Promise<RelayBnbBlock | null> {
+    if (this.expectedChainId !== 137) throw new ApnError("APN_CHAIN_MISMATCH", "Polygon finality requires Polygon RPC.");
+    return block(await this.read("eth_getBlockByNumber", ["finalized", false]), "finalized");
   }
   async nativeTrace(): Promise<null> { return null; }
   async routerCodeHash(address: string, blockNumber: bigint): Promise<string> {
