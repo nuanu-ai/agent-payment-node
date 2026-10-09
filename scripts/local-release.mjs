@@ -1,3 +1,4 @@
+import { runLoggedGate } from "./local-release-gate.mjs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -122,8 +123,8 @@ async function main(args) {
   ];
   const records = [];
   for (const [index, [command, argv]] of gates.entries()) {
-    const log = run(command, argv), name = `gate-${index + 1}.log`;
-    await writeFile(resolve(output, name), log, { flag: "wx" });
+    const name = `gate-${index + 1}.log`;
+    const log = runLoggedGate(command, argv, root, resolve(output, name));
     records.push({ command: [command === process.execPath ? "node" : command, ...argv], result: "passed", log: name, sha256: digest(log) });
   }
   await sourceIdentity(args); // also proves tracked source/dist parity after build
