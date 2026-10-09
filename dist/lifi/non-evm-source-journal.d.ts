@@ -34,19 +34,19 @@ declare const rpcObservedSafe: z.ZodObject<{
     bridgeCompletion: z.ZodLiteral<false>;
 }, z.core.$strict>;
 declare const rpcObservedNearSafe: z.ZodObject<{
-    observedAt: z.ZodString;
+    blockHash: z.ZodString;
+    transactionHash: z.ZodString;
     status: z.ZodEnum<{
         success: "success";
         reverted: "reverted";
     }>;
-    transactionHash: z.ZodString;
-    blockHash: z.ZodString;
     blockNumberAtomic: z.ZodString;
     receiptHash: z.ZodString;
     logsHash: z.ZodString;
-    rpcOrigin: z.ZodString;
+    observedAt: z.ZodString;
     safeBlockNumberAtomic: z.ZodString;
     safeBlockHash: z.ZodString;
+    rpcOrigin: z.ZodString;
     executionAdmitted: z.ZodLiteral<false>;
     bridgeCompletion: z.ZodLiteral<false>;
     protocolInputDigest: z.ZodString;
@@ -59,8 +59,8 @@ declare const schemaV1: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         phase: z.ZodEnum<{
-            submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
+            submitted_pending: "submitted_pending";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
@@ -105,19 +105,19 @@ declare const schemaV1: z.ZodObject<{
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
         }, z.core.$strict>, z.ZodObject<{
-            observedAt: z.ZodString;
+            blockHash: z.ZodString;
+            transactionHash: z.ZodString;
             status: z.ZodEnum<{
                 success: "success";
                 reverted: "reverted";
             }>;
-            transactionHash: z.ZodString;
-            blockHash: z.ZodString;
             blockNumberAtomic: z.ZodString;
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
-            rpcOrigin: z.ZodString;
+            observedAt: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
+            rpcOrigin: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
@@ -128,8 +128,8 @@ declare const schemaV1: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     phase: z.ZodEnum<{
-        submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        submitted_pending: "submitted_pending";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
@@ -174,19 +174,19 @@ declare const schemaV1: z.ZodObject<{
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
     }, z.core.$strict>, z.ZodObject<{
-        observedAt: z.ZodString;
+        blockHash: z.ZodString;
+        transactionHash: z.ZodString;
         status: z.ZodEnum<{
             success: "success";
             reverted: "reverted";
         }>;
-        transactionHash: z.ZodString;
-        blockHash: z.ZodString;
         blockNumberAtomic: z.ZodString;
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
-        rpcOrigin: z.ZodString;
+        observedAt: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
+        rpcOrigin: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
@@ -232,8 +232,8 @@ declare const schemaV2: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         phase: z.ZodEnum<{
-            submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
+            submitted_pending: "submitted_pending";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
@@ -278,19 +278,19 @@ declare const schemaV2: z.ZodObject<{
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
         }, z.core.$strict>, z.ZodObject<{
-            observedAt: z.ZodString;
+            blockHash: z.ZodString;
+            transactionHash: z.ZodString;
             status: z.ZodEnum<{
                 success: "success";
                 reverted: "reverted";
             }>;
-            transactionHash: z.ZodString;
-            blockHash: z.ZodString;
             blockNumberAtomic: z.ZodString;
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
-            rpcOrigin: z.ZodString;
+            observedAt: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
+            rpcOrigin: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
@@ -301,8 +301,8 @@ declare const schemaV2: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     phase: z.ZodEnum<{
-        submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        submitted_pending: "submitted_pending";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
@@ -347,19 +347,19 @@ declare const schemaV2: z.ZodObject<{
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
     }, z.core.$strict>, z.ZodObject<{
-        observedAt: z.ZodString;
+        blockHash: z.ZodString;
+        transactionHash: z.ZodString;
         status: z.ZodEnum<{
             success: "success";
             reverted: "reverted";
         }>;
-        transactionHash: z.ZodString;
-        blockHash: z.ZodString;
         blockNumberAtomic: z.ZodString;
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
-        rpcOrigin: z.ZodString;
+        observedAt: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
+        rpcOrigin: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
@@ -402,19 +402,19 @@ declare const schemaV2: z.ZodObject<{
 }, z.core.$strict>;
 declare const schemaV3: z.ZodObject<{
     kind: z.ZodLiteral<"non_evm_source_journal">;
+    transactionHash: z.ZodNullable<z.ZodString>;
+    integrityHash: z.ZodString;
     reason: z.ZodNullable<z.ZodString>;
     profileHash: z.ZodString;
     operationId: z.ZodString;
-    transactionHash: z.ZodNullable<z.ZodString>;
-    nonceAtomic: z.ZodNullable<z.ZodString>;
     createdAt: z.ZodString;
     transitions: z.ZodArray<z.ZodObject<{
         at: z.ZodString;
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         phase: z.ZodEnum<{
-            submitted_pending: "submitted_pending";
             unknown_finality: "unknown_finality";
+            submitted_pending: "submitted_pending";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
@@ -459,19 +459,19 @@ declare const schemaV3: z.ZodObject<{
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
         }, z.core.$strict>, z.ZodObject<{
-            observedAt: z.ZodString;
+            blockHash: z.ZodString;
+            transactionHash: z.ZodString;
             status: z.ZodEnum<{
                 success: "success";
                 reverted: "reverted";
             }>;
-            transactionHash: z.ZodString;
-            blockHash: z.ZodString;
             blockNumberAtomic: z.ZodString;
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
-            rpcOrigin: z.ZodString;
+            observedAt: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
+            rpcOrigin: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
@@ -480,10 +480,9 @@ declare const schemaV3: z.ZodObject<{
         }, z.core.$strict>]>>;
         reason: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;
-    integrityHash: z.ZodString;
     phase: z.ZodEnum<{
-        submitted_pending: "submitted_pending";
         unknown_finality: "unknown_finality";
+        submitted_pending: "submitted_pending";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
@@ -492,6 +491,7 @@ declare const schemaV3: z.ZodObject<{
         source_observed_untrusted: "source_observed_untrusted";
         source_reverted: "source_reverted";
     }>;
+    nonceAtomic: z.ZodNullable<z.ZodString>;
     submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
     route: z.ZodEnum<{
         base_usdc_to_solana_usdc_circle_cctp_v2: "base_usdc_to_solana_usdc_circle_cctp_v2";
@@ -531,19 +531,19 @@ declare const schemaV3: z.ZodObject<{
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
     }, z.core.$strict>, z.ZodObject<{
-        observedAt: z.ZodString;
+        blockHash: z.ZodString;
+        transactionHash: z.ZodString;
         status: z.ZodEnum<{
             success: "success";
             reverted: "reverted";
         }>;
-        transactionHash: z.ZodString;
-        blockHash: z.ZodString;
         blockNumberAtomic: z.ZodString;
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
-        rpcOrigin: z.ZodString;
+        observedAt: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
+        rpcOrigin: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
