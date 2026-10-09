@@ -1,3 +1,4 @@
+import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-resume.js";
 import { cleanup85ConflictExclusion, type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { circleNativeSourceIdentity, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
@@ -50,7 +51,6 @@ import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRela
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
 import { RelayEffectJournalRepository } from "./relay/effect-journal.js";
 import { RelayNativeSourceJournalRepository } from "./relay/native-source.js";
-
 export type StoredMoneyOperation =
   | { readonly kind: "sei_gaszip"; readonly record: SeiFundingRecord }
   | { readonly kind: "circle_route"; readonly record: CircleOperationV1 }
@@ -68,7 +68,6 @@ export type StoredMoneyOperation =
   | { readonly kind: "direct_transfer"; readonly record: OperationRecord }
   | { readonly kind: "x402_fetch"; readonly strategy: "local"; readonly record: X402OperationRecord }
   | { readonly kind: "x402_fetch"; readonly strategy: "provider_atomic"; readonly record: ProviderX402OperationRecord };
-
 export class OperationService {
   constructor(
     private readonly state: StateStore,
@@ -83,7 +82,6 @@ export class OperationService {
     private readonly seiFunding: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new SeiFundingJournal(state.root),
     private readonly megaFunding: Pick<MegaFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new MegaFundingJournal(state.root),
   ) {}
-
   /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
    * locks are acquired together so owner validation and durable write are atomic. */
   async persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation> {
@@ -113,7 +111,6 @@ export class OperationService {
       return operation;
     });
   }
-
   async resolvePrepare(input: {
     readonly kind: StoredMoneyOperation["kind"];
     readonly profileHash: string;
@@ -129,7 +126,6 @@ export class OperationService {
     ) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to different operation inputs.");
     return existing;
   }
-
   /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
   async findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null> {
     const matches = [
@@ -151,7 +147,6 @@ export class OperationService {
     if (matches.length > 1) throw new ApnError("APN_STATE_CORRUPT", "Idempotency identity is duplicated across operation stores.");
     return matches[0] ?? null;
   }
-
   async assertProfileAvailable(profileHash: string): Promise<void> {
     let blocking: StoredMoneyOperation | undefined;
     for (const operation of await this.profileOperations(profileHash)) {
@@ -166,12 +161,10 @@ export class OperationService {
       });
     }
   }
-
   /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
   async assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
   }
-
   async assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void> {
     const sources = verifiedCircleNativeSources(proof, profileHash, account);
     if (exceptOperation !== undefined && (exceptOperation.profileHash !== profileHash || exceptOperation.walletAddress !== account || exceptOperation.chainId !== 42161 || exceptOperation.evm?.asset.kind !== "native" || exceptOperation.evm.circleNativeAdmission === undefined || (await this.state.findOperation(exceptOperation.operationId))?.integrityHash !== exceptOperation.integrityHash)) throw new ApnError("APN_OPERATION_BLOCKED", "Native exclusion requires its exact saved operation.");
@@ -256,6 +249,13 @@ export class OperationService {
     return profileHash === undefined ? repo.listAllOperations() : repo.listOperations(profileHash);
   }
 
+  /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
+  async assertCleanup85PreparationAccountsAvailable(record: CircleOperationV1, now: number): Promise<void> {
+    const native = await cleanup85UnsignedResumeExclusion(this.state, record, now);
+    if (native === null) return this.assertCircleAccountsAvailable(record, true, "cleanup");
+    await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], native, true, undefined, { operationId: record.operationId, integrityHash: record.integrityHash });
+    await this.assertConflictDomainsAvailable(record.destinationProfileHash, () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], record.operationId);
+  }
   /** Both Circle signing accounts are held under their existing profile locks. */
   async assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved = false, effectRole?: CircleRole): Promise<void> {
     if (exceptSaved) {

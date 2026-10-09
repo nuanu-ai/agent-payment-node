@@ -1,3 +1,4 @@
+import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-resume.js";
 import { cleanup85ConflictExclusion } from "./circle-cleanup85-native-conflict.js";
 import { circleNativeSourceIdentity, verifiedCircleNativeSources } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
@@ -230,6 +231,14 @@ export class OperationService {
             return [];
         const repo = new CircleRepository(this.state.root);
         return profileHash === undefined ? repo.listAllOperations() : repo.listOperations(profileHash);
+    }
+    /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
+    async assertCleanup85PreparationAccountsAvailable(record, now) {
+        const native = await cleanup85UnsignedResumeExclusion(this.state, record, now);
+        if (native === null)
+            return this.assertCircleAccountsAvailable(record, true, "cleanup");
+        await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], native, true, undefined, { operationId: record.operationId, integrityHash: record.integrityHash });
+        await this.assertConflictDomainsAvailable(record.destinationProfileHash, () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], record.operationId);
     }
     /** Both Circle signing accounts are held under their existing profile locks. */
     async assertCircleAccountsAvailable(record, exceptSaved = false, effectRole) {

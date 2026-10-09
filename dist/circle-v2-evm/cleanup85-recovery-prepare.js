@@ -28,7 +28,7 @@ export async function prepareCleanup85Recovery(state, source, destination, id, n
             await assertEvmNativeCustody(state, profile, custody);
             await assertExclusiveEvmRawSigner(state, custody.walletAddress, custody.profileHash);
         }
-        await new OperationService(state).assertCircleAccountsAvailable(op, true, "cleanup");
+        await new OperationService(state).assertCleanup85PreparationAccountsAvailable(op, now());
         const existing = await store.load(op, parent), policies = existing?.policies ?? await usage.retirementPolicies(op);
         await usage.confirm(op, policies);
         const windowEndsAt = await usage.authorizationDeadline(op, policies);
