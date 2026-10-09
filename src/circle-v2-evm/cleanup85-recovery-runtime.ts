@@ -40,7 +40,7 @@ export class Cleanup85RecoveryRuntime {
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly env: Readonly<Record<string, string | undefined>>, private readonly now: () => number, private readonly tty: TtyTransferApprovalOptions, private readonly https: Pick<BridgeHttps, "request">, private readonly dependencies?: Cleanup85RecoveryDependencies) {
     this.repo = new CircleRepository(state.root); this.usage = new CircleUsage(state, now); this.custody = new Cleanup86Custody(state, wrapping);
   }
-  private remotes() { const route = circleRoute(1329); return { source: new CircleRpc(this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", 42161, this.https), destination: new CircleRpc(this.env[route.rpcEnvironment] ?? route.rpcDefault, 1329, this.https) }; }
+  private remotes() { const route = circleRoute(1329); return { source: new CircleRpc(this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", 42161, this.https, 256, this.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0"), destination: new CircleRpc(this.env[route.rpcEnvironment] ?? route.rpcDefault, 1329, this.https, 256, this.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0") }; }
   async publicStatus(id: string) {
     const op = await this.repo.load(id); if (op === null || op.operationId !== "4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33") return null;
     const recoveryStore = new Cleanup85RecoveryStore(this.state.root), parent = await new CircleNonceRetirementStore(this.state.root).intent(op);
@@ -78,7 +78,7 @@ export class Cleanup85RecoveryRuntime {
       const envelope = existing?.envelope ?? await source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), "86");
       const intent = existing ?? await store.start(op, recovery, { cancellationProofHash: status.proof!.proofHash, envelope, policies: authority.policies, capturedAt: new Date(this.now()).toISOString(), windowEndsAt: authority.windowEndsAt });
       if (intent.cancellationProofHash !== status.proof!.proofHash) circleBlocked("cleanup86_cancellation_identity_changed");
-      const submission = new CircleRpc("https://arb1.arbitrum.io/rpc", 42161, this.https);
+      const submission = new CircleRpc("https://arb1.arbitrum.io/rpc", 42161, this.https, 256, this.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0");
       const preflight = async (i: Cleanup86Intent, grant?: Cleanup86Grant) => {
         const guard = () => { if (grant !== undefined) assertCleanup86Grant(grant, this.state.root, op, i); };
         return source.guarded(guard, () => destination.guarded(guard, () => submission.guarded(guard, async () => {

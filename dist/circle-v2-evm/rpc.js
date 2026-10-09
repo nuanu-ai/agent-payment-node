@@ -1,5 +1,6 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { archiveReadInterval, circleArchiveReadPacer } from "../circle-archive-read-pacing.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ApnError } from "../errors.js";
 import { BridgeHttps } from "../lifi/https.js";
@@ -27,14 +28,18 @@ export class CircleRpc {
     chainId;
     https;
     maxRequests;
+    archivePacer;
     sequence = 0;
     requests = 0;
     endpoint;
+    archiveInterval;
     scopes = new AsyncLocalStorage();
-    constructor(url, chainId, https = new BridgeHttps(), maxRequests = 256) {
+    constructor(url, chainId, https = new BridgeHttps(), maxRequests = 256, archiveMinimumIntervalMs = process.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS, archivePacer = circleArchiveReadPacer) {
         this.chainId = chainId;
         this.https = https;
         this.maxRequests = maxRequests;
+        this.archivePacer = archivePacer;
+        this.archiveInterval = archiveReadInterval(archiveMinimumIntervalMs);
         const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Circle RPC", 2048);
         if (parsed.search !== "" || parsed.hash !== "")
             circleBlocked("rpc_url");
@@ -65,7 +70,7 @@ export class CircleRpc {
         const id = ++this.sequence, origin = new URL(this.endpoint).origin;
         let response;
         try {
-            response = await this.https.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", gate);
+            response = await this.archivePacer.start(this.endpoint, method, this.archiveInterval, gate, () => this.https.request(this.endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", gate));
         }
         catch (error) {
             if (error instanceof ApnError)

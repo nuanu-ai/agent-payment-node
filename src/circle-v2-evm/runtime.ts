@@ -143,7 +143,7 @@ export class CircleEvmService {
   private preflightAttesters(destination: CircleRpc, digest: string) { return readCircleAttesters(destination, digest); }
   private remotes(chain: CircleDestinationChain) {
     const route = circleRoute(chain), sourceUrl = this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
-    return { source: new CircleRpc(sourceUrl, 42161, this.https), destination: new CircleRpc(destinationUrl, chain, this.https) };
+    return { source: new CircleRpc(sourceUrl, 42161, this.https, 256, this.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0"), destination: new CircleRpc(destinationUrl, chain, this.https, 256, this.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0") };
   }
   private async api(path: string) {
     const response = await this.https.request(`https://iris-api.circle.com${path}`, "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");

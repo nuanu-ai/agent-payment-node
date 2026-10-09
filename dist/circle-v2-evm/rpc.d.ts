@@ -1,4 +1,5 @@
 import { type Address, type Hex } from "viem";
+import { type CircleArchiveReadPacer } from "../circle-archive-read-pacing.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { type CircleDestinationChain } from "./catalog.js";
 import { type CircleAttesterSnapshot, type CircleObservation } from "./protocol.js";
@@ -153,11 +154,13 @@ export declare class CircleRpc {
     readonly chainId: number;
     private readonly https;
     private readonly maxRequests;
+    private readonly archivePacer;
     private sequence;
     private requests;
     private readonly endpoint;
+    private readonly archiveInterval;
     private readonly scopes;
-    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number);
+    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number, archiveMinimumIntervalMs?: string | undefined, archivePacer?: CircleArchiveReadPacer);
     guarded<T>(guard: () => void, action: () => Promise<T>): Promise<T>;
     call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
     private physicalCall;
