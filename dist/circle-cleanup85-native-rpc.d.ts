@@ -1,3 +1,4 @@
+import { type CircleArchiveReadPacer } from "./circle-archive-read-pacing.js";
 import { BridgeHttps } from "./lifi/https.js";
 import { CLEANUP85_RECIPIENT_CODE, CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH } from "./circle-cleanup85-native-codec.js";
 import type { Cleanup85CancellationEnvelope } from "./circle-cleanup85-cancellation-contract.js";
@@ -19,10 +20,12 @@ export declare class Cleanup85NativeRpc {
     private readonly https;
     readonly maximumRequests: number;
     private readonly now;
+    private readonly archivePacer;
+    private readonly archiveInterval;
     private calls;
     private sequence;
     private readonly url;
-    constructor(url: string, https?: Pick<BridgeHttps, "request">, maximumRequests?: number, now?: () => number);
+    constructor(url: string, https?: Pick<BridgeHttps, "request">, maximumRequests?: number, now?: () => number, archiveMinimumIntervalMs?: string | undefined, archivePacer?: CircleArchiveReadPacer);
     get physicalRequestCount(): number;
     get remainingRequests(): number;
     call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;

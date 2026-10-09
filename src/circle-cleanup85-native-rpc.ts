@@ -1,3 +1,4 @@
+import { archiveReadInterval, circleArchiveReadPacer, type CircleArchiveReadPacer } from "./circle-archive-read-pacing.js";
 import { keccak256 } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -24,8 +25,10 @@ export interface Cleanup85NativeSnapshot {
 /** Separate finite transport: all physical requests count, including rejected responses.
  * Reads have no implicit retry; snapshot retries restart the entire anchored observation. */
 export class Cleanup85NativeRpc {
+  private readonly archiveInterval: number;
   private calls = 0; private sequence = 0; private readonly url: string;
-  constructor(url: string, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps(), readonly maximumRequests = 224, private readonly now = Date.now) {
+  constructor(url: string, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps(), readonly maximumRequests = 224, private readonly now = Date.now, archiveMinimumIntervalMs = process.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS, private readonly archivePacer: CircleArchiveReadPacer = circleArchiveReadPacer) {
+    this.archiveInterval = archiveReadInterval(archiveMinimumIntervalMs);
     const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Cleanup85 native RPC", 2048);
     if (parsed.search !== "" || parsed.hash !== "" || !Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 224) cleanup85Blocked("rpc_configuration");
     this.url = parsed.toString();
@@ -36,7 +39,7 @@ export class Cleanup85NativeRpc {
     if ((!READ.has(method) && method !== "eth_sendRawTransaction") || ++this.calls > this.maximumRequests) cleanup85Blocked("rpc_method_or_physical_budget");
     if (method === "eth_sendRawTransaction") assertCleanup85PhysicalGuard(beforeSend, params[0]);
     const id = ++this.sequence;
-    const response = await this.https.request(this.url, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", beforeSend);
+    const response = await this.archivePacer.start(this.url, method, this.archiveInterval, () => { beforeSend?.(); }, () => this.https.request(this.url, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", beforeSend));
     if (response.status !== 200) throw new ApnError("APN_RPC_CONFIG", "Cleanup85 native RPC HTTP failure.", { httpStatus: response.status });
     let body: unknown;
     try { body = JSON.parse(response.body); } catch { cleanup85Blocked("rpc_json"); }

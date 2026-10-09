@@ -1,3 +1,4 @@
+import { archiveReadInterval, circleArchiveReadPacer } from "./circle-archive-read-pacing.js";
 import { keccak256 } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -17,13 +18,17 @@ export class Cleanup85NativeRpc {
     https;
     maximumRequests;
     now;
+    archivePacer;
+    archiveInterval;
     calls = 0;
     sequence = 0;
     url;
-    constructor(url, https = new BridgeHttps(), maximumRequests = 224, now = Date.now) {
+    constructor(url, https = new BridgeHttps(), maximumRequests = 224, now = Date.now, archiveMinimumIntervalMs = process.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS, archivePacer = circleArchiveReadPacer) {
         this.https = https;
         this.maximumRequests = maximumRequests;
         this.now = now;
+        this.archivePacer = archivePacer;
+        this.archiveInterval = archiveReadInterval(archiveMinimumIntervalMs);
         const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Cleanup85 native RPC", 2048);
         if (parsed.search !== "" || parsed.hash !== "" || !Number.isSafeInteger(maximumRequests) || maximumRequests < 1 || maximumRequests > 224)
             cleanup85Blocked("rpc_configuration");
@@ -37,7 +42,7 @@ export class Cleanup85NativeRpc {
         if (method === "eth_sendRawTransaction")
             assertCleanup85PhysicalGuard(beforeSend, params[0]);
         const id = ++this.sequence;
-        const response = await this.https.request(this.url, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", beforeSend);
+        const response = await this.archivePacer.start(this.url, method, this.archiveInterval, () => { beforeSend?.(); }, () => this.https.request(this.url, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", beforeSend));
         if (response.status !== 200)
             throw new ApnError("APN_RPC_CONFIG", "Cleanup85 native RPC HTTP failure.", { httpStatus: response.status });
         let body;

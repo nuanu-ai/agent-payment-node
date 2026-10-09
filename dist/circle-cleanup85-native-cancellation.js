@@ -67,7 +67,7 @@ export class Cleanup85NativeCancellation {
         const source = this.options.sourceArchiveRpcUrl ?? this.environment.APN_ARBITRUM_RPC_URL, native = this.options.nativeRpcUrl ?? this.environment.APN_ARBITRUM_RPC_URL, destination = this.environment.APN_SEI_RPC_URL;
         if (source === undefined || native === undefined || destination === undefined)
             cleanup85Blocked("rpc_configuration");
-        return { source: new CircleRpc(source, 42161, https, 192), destination: new CircleRpc(destination, 1329, https, 192), native: new Cleanup85NativeRpc(native, https, 224, this.now), sourceUrl: native, remainingRequests: () => 448 - requests, remainingSource: () => 192 - (counts.get(new URL(source).href) ?? 0), remainingDestination: () => 192 - (counts.get(new URL(destination).href) ?? 0) };
+        return { source: new CircleRpc(source, 42161, https, 192, this.environment.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0"), destination: new CircleRpc(destination, 1329, https, 192, this.environment.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0"), native: new Cleanup85NativeRpc(native, https, 224, this.now, this.environment.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0"), sourceUrl: native, remainingRequests: () => 448 - requests, remainingSource: () => 192 - (counts.get(new URL(source).href) ?? 0), remainingDestination: () => 192 - (counts.get(new URL(destination).href) ?? 0) };
     }
     async policy(o) {
         const b = o.evm.cleanup85Cancellation, p = activeAssetPolicyFromState(await new AllowlistPolicyStore(this.state.root).readUnderProfileLock(o.profile), new Date(this.now()));
@@ -229,7 +229,7 @@ export class Cleanup85NativeCancellation {
         const lineage = await cleanup85NativeLineage(this.state, r), id = lineage.operationId, url = this.options.nativeRpcUrl ?? this.environment.APN_ARBITRUM_RPC_URL;
         if (url === undefined)
             cleanup85Blocked("rpc_configuration");
-        const read = { native: new Cleanup85NativeRpc(url, this.options.https ?? new BridgeHttps(), 224, this.now) };
+        const read = { native: new Cleanup85NativeRpc(url, this.options.https ?? new BridgeHttps(), 224, this.now, this.environment.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0") };
         return withCleanup85FinancialScope(this.state, r, id, async () => {
             let o = await this.load(r, lineage);
             if (o === null)
