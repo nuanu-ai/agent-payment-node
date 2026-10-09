@@ -17,6 +17,9 @@ export interface Cleanup85NativeReservationBody {
     readonly idempotencyKey: string;
     readonly reservedAtomic: "2000000000000";
     readonly signedMaximumDebitAtomic: string;
+    /** Current authority timing; never replaces immutable preparation timing. */
+    readonly authorizationExpiresAt: string;
+    readonly unsignedContinuation: boolean;
 }
 export interface Cleanup85NativeActualSettlement {
     readonly kind: "circle_cleanup85_native_actual";
@@ -35,6 +38,8 @@ export interface Cleanup85NativeActualSettlement {
     readonly outcomeDigest: string;
 }
 export declare function verifiedCleanup85NativeReservation(token: VerifiedCleanup85NativeReservation, exactRoot: string): Cleanup85NativeReservationBody;
+/** Only a genuinely issued reservation enters the one-use current foreground scope. */
+export declare function withCleanup85NativeReservationAuthorization<T>(token: VerifiedCleanup85NativeReservation, state: StateStore, work: (expiresAt: string, assertCurrent: () => void) => Promise<T>): Promise<T>;
 export declare function verifiedCleanup85NativeSettlement(token: VerifiedCleanup85NativeSettlement, exactRoot: string): {
     operation: OperationRecord;
     settlement: Cleanup85NativeActualSettlement;

@@ -11,14 +11,35 @@ import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js
 import { CLEANUP85_OWNER, cleanup85Blocked, verifyCleanup85Observation } from "./circle-cleanup85-native-codec.js";
 import { verifyCleanup85RecoveryAdmission, verifiedCleanup85RecoveryAdmission } from "./circle-v2-evm/cleanup85-recovery-admission.js";
 import { assertCleanup85Window } from "./circle-v2-evm/cleanup85-recovery-store.js";
+import { AssetUsageLedger } from "./asset-usage-ledger.js";
+import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
 const reservations = new WeakMap();
 const settlements = new WeakMap();
 export function verifiedCleanup85NativeReservation(token, exactRoot) {
     const value = reservations.get(token);
-    if (value === undefined || value.root !== exactRoot)
+    if (value === undefined || !value.active || value.root !== exactRoot)
         cleanup85Blocked("root_owned_reservation_required");
     assertHeldCleanup85Scope(value.scope, value.state, value.body.operation.evm.cleanup85Cancellation.request, value.body.operation.operationId);
+    if (value.body.unsignedContinuation && value.now().toISOString() >= value.body.authorizationExpiresAt)
+        cleanup85Blocked("current_native_authorization_expired");
     return structuredClone(value.body);
+}
+/** Only a genuinely issued reservation enters the one-use current foreground scope. */
+export async function withCleanup85NativeReservationAuthorization(token, state, work) {
+    const v = reservations.get(token);
+    if (v === undefined || v.state !== state || !v.active || v.consumed)
+        cleanup85Blocked("private_current_native_authorization_required");
+    const assertCurrent = () => { verifiedCleanup85NativeReservation(token, state.root); if (v.now().toISOString() >= v.body.authorizationExpiresAt)
+        cleanup85Blocked("current_native_authorization_expired"); };
+    assertCurrent();
+    v.consumed = true;
+    try {
+        return await work(v.body.authorizationExpiresAt, assertCurrent);
+    }
+    finally {
+        v.active = false;
+        reservations.delete(token);
+    }
 }
 export function verifiedCleanup85NativeSettlement(token, exactRoot) {
     const value = settlements.get(token);
@@ -30,12 +51,17 @@ export function verifiedCleanup85NativeSettlement(token, exactRoot) {
  * Fresh full public A admission and the saved unsigned native operation precede reservation. */
 export async function verifyCleanup85NativeReservation(state, id, source, destination, native, now, scope) {
     const o = await state.findOperation(id);
-    if (o === null || o.state !== "awaiting_approval" || o.terminal || now().toISOString() >= o.expiresAt || o.allowlist === undefined)
+    if (o === null || o.state !== "awaiting_approval" || o.terminal || o.allowlist === undefined)
         cleanup85Blocked("reservation_unsigned_operation");
     const e = cleanup85OperationEnvelope(o), b = o.evm.cleanup85Cancellation;
+    const unsignedContinuation = now().toISOString() >= o.expiresAt;
+    if (unsignedContinuation && (b.version !== "apn.circle-cleanup85-native-binding.v2" || o.allowlistLease !== undefined || o.transactionHash !== undefined || o.rawTransactionHash !== undefined || o.providerEffect !== undefined || o.lastSubmissionAt !== undefined))
+        cleanup85Blocked("reservation_expired_unsigned_successor_required");
     assertHeldCleanup85Scope(scope, state, b.request, id);
     await assertCleanup85NativeSlot(state, o);
     await new DirectPublicEffectJournal(state).assertUnstarted(o);
+    if (unsignedContinuation && (await new EvmDirectSubmissionJournal(state.root).exists(o) || await new Cleanup85NativePublicRecords(state.root).load(id, "material") !== null))
+        cleanup85Blocked("continuation_submission_present");
     const lineage = await cleanup85NativeLineage(state, b.request), fresh = lineage.retirementProofHash === null ? null : verifiedCleanup85SuccessorFinancialAdmission(await verifyCleanup85SuccessorFinancialAdmission(state, source, destination, b.request, () => now().getTime(), scope), state, b.request);
     const admission = fresh?.originalAdmission ?? await verifyCleanup85RecoveryAdmission(state, source, destination, b.request), checked = verifiedCleanup85RecoveryAdmission(admission, b.request);
     if (fresh !== null && canonicalJson(fresh.lineage) !== canonicalJson(lineage))
@@ -50,18 +76,34 @@ export async function verifyCleanup85NativeReservation(state, id, source, destin
     if (anchor.hash !== snapshot.blockHash)
         cleanup85Blocked("reservation_archive_native_anchor_agreement");
     await source.identity();
+    if (unsignedContinuation) {
+        if (fresh === null)
+            cleanup85Blocked("continuation_private_successor_admission_required");
+        const finalized = await native.unsignedFinalizedAccount();
+        if ((await source.block(`0x${BigInt(finalized.number).toString(16)}`)).hash !== finalized.hash)
+            cleanup85Blocked("continuation_finalized_archive_agreement");
+    }
     const at = now(), p = activeAssetPolicyFromState(await new AllowlistPolicyStore(state.root).readUnderProfileLock(o.profile), at);
-    if (p === null || p.accounts.evm !== CLEANUP85_OWNER || p.digest !== o.allowlist.policyDigest || p.revision !== o.allowlist.policyRevision || p.activationDigest !== b.activationDigest || at.toISOString() >= o.expiresAt)
+    if (p === null || p.accounts.evm !== CLEANUP85_OWNER || p.digest !== o.allowlist.policyDigest || p.revision !== o.allowlist.policyRevision || p.activationDigest !== b.activationDigest || (!unsignedContinuation && at.toISOString() >= o.expiresAt))
         cleanup85Blocked("reservation_policy");
     if (p.registry.expiresAt !== undefined && o.expiresAt > p.registry.expiresAt)
         cleanup85Blocked("reservation_frozen_native_policy_window");
     evaluateAssetPolicy(p.registry, { chain: "eip155:42161", asset: { kind: "native", identifier: null }, rail: "direct", amountAtomic: b.nativeReserveAtomic, dailyUsageAtomic: "0", asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
     if ((await state.findOperation(id))?.integrityHash !== o.integrityHash)
         cleanup85Blocked("reservation_operation_changed");
-    const body = { operation: o, policy: p, reservationId: b.nativeReservationId, idempotencyKey: `apn.cleanup85-native:${id}`, reservedAtomic: b.nativeReserveAtomic, signedMaximumDebitAtomic: (BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic) + 1n).toString() };
+    if (unsignedContinuation) {
+        await new DirectPublicEffectJournal(state).assertUnstarted(o);
+        if (await new EvmDirectSubmissionJournal(state.root).exists(o) || await new Cleanup85NativePublicRecords(state.root).load(id, "material") !== null || await new AssetUsageLedger(state.root).load({ account: o.walletAddress, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, b.nativeReservationId) !== null)
+            cleanup85Blocked("continuation_effect_or_reservation_present");
+    }
+    const issuedAt = now();
+    const authorizationExpiresAt = unsignedContinuation ? new Date(Math.min(issuedAt.getTime() + 60_000, Date.parse(intent.windowEndsAt ?? o.expiresAt), Date.parse(p.registry.expiresAt ?? o.expiresAt))).toISOString() : o.expiresAt;
+    if (issuedAt.toISOString() >= authorizationExpiresAt)
+        cleanup85Blocked("continuation_current_window_expired");
+    const body = { authorizationExpiresAt, unsignedContinuation, operation: o, policy: p, reservationId: b.nativeReservationId, idempotencyKey: `apn.cleanup85-native:${id}`, reservedAtomic: b.nativeReserveAtomic, signedMaximumDebitAtomic: (BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic) + 1n).toString() };
     assertHeldCleanup85Scope(scope, state, b.request, id);
     const token = Object.freeze({ kind: "verified-cleanup85-native-reservation" });
-    reservations.set(token, { root: state.root, body: structuredClone(body), state, scope });
+    reservations.set(token, { root: state.root, body: structuredClone(body), state, scope, active: true, consumed: false, now });
     return token;
 }
 /** Only a freshly independently verified FINALIZED receipt for this root's durable operation mints settlement.

@@ -34,7 +34,7 @@ import { withCleanup85NativeAuthority } from "./circle-cleanup85-native-authorit
 import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
 import { CLEANUP85_OWNER, CLEANUP85_RECIPIENT, cleanup85Blocked, validateCleanup85Request, verifyCleanup85Raw, verifyCleanup85Observation } from "./circle-cleanup85-native-codec.js";
 import { Cleanup85NativeRpc } from "./circle-cleanup85-native-rpc.js";
-import { assertCleanup85NativeSlot, verifyCleanup85NativeReservation, verifyCleanup85NativeSettlement, verifiedCleanup85NativeSettlement } from "./circle-cleanup85-native-ledger-authority.js";
+import { withCleanup85NativeReservationAuthorization, assertCleanup85NativeSlot, verifyCleanup85NativeReservation, verifyCleanup85NativeSettlement, verifiedCleanup85NativeSettlement } from "./circle-cleanup85-native-ledger-authority.js";
 const FAILURE_CODES = new Set(["APN_OPERATION_BLOCKED", "APN_STATE_SECURITY", "APN_STATE_CORRUPT", "APN_STATE_BUSY", "APN_RPC_CONFIG", "APN_RPC_PROTOCOL", "APN_RPC_AMBIGUOUS", "APN_RPC_RATE_LIMITED", "APN_RPC_BUDGET_EXCEEDED", "APN_ALLOWLIST_REFUSED", "APN_FOREGROUND_APPROVAL_REQUIRED", "APN_PROFILE_DRIFT", "APN_WALLET_MISMATCH", "APN_INSUFFICIENT_GAS", "APN_FEE_BUDGET_EXCEEDED"]);
 /** One fixed recovery request, normal native custody/operation/claims and finite full native accounting.
  * execute is foreground only. inspect contains no custody secret/material loader and never submits. */
@@ -131,14 +131,16 @@ export class Cleanup85NativeCancellation {
             const p = await this.policy(o), e = cleanup85OperationEnvelope(o), custody = o.evm.nativeCustody, binding = o.evm.cleanup85Cancellation;
             const reserve = await verifyCleanup85NativeReservation(this.state, id, read.source, read.destination, read.native, () => new Date(this.now()), scope);
             await this.accounting.reserveCleanup85Native(reserve, new Date(this.now()));
-            return withCleanup85NativeAuthority(o.fingerprint, o.expiresAt, this.now, async () => {
+            return withCleanup85NativeReservationAuthorization(reserve, this.state, async (authorizationExpiresAt, assertCurrent) => withCleanup85NativeAuthority(o.fingerprint, authorizationExpiresAt, this.now, async () => {
+                assertCurrent();
                 if (this.options.approve !== undefined)
                     await this.options.approve(o);
                 else
-                    await exactChainConsent(["Finite Arbitrum cleanup85 native cancellation", `Owner ${CLEANUP85_OWNER}; recipient ${CLEANUP85_RECIPIENT}; value1wei; nonce85; type2; empty calldata and no authorization`, "Full native reservation 2000000000000 wei includes value and fee; maxfee replacement>=45000000 wei/gas; priority>=1", `Operation ${id}; parent ${r.parentOperationId}; fingerprint ${o.fingerprint}; old cleanup retained, never re-sent`], approvalCode("transfer", id, o.fingerprint), o.expiresAt, {});
+                    await exactChainConsent(["Finite Arbitrum cleanup85 native cancellation", `Owner ${CLEANUP85_OWNER}; recipient ${CLEANUP85_RECIPIENT}; value1wei; nonce85; type2; empty calldata and no authorization`, "Full native reservation 2000000000000 wei includes value and fee; maxfee replacement>=45000000 wei/gas; priority>=1", `Historical preparation expires ${o.expiresAt}; current foreground approval expires ${authorizationExpiresAt}`, `Operation ${id}; parent ${r.parentOperationId}; fingerprint ${o.fingerprint}; old cleanup retained, never re-sent`], approvalCode("transfer", id, o.fingerprint), authorizationExpiresAt, {});
             }, async (authority) => {
                 let witnessAt = 0;
                 const check = async (fresh) => {
+                    assertCurrent();
                     const currentLineage = await cleanup85NativeLineage(this.state, r);
                     if (canonicalJson(currentLineage) !== canonicalJson(lineage))
                         cleanup85Blocked("execution_lineage_changed");
@@ -151,14 +153,14 @@ export class Cleanup85NativeCancellation {
                     await assertEvmNativeCustody(this.state, o.profile, custody);
                     await assertEvmNativeCustody(this.state, "default", binding.recipientCustody);
                     const active = await this.policy(o);
-                    authority.assert(o.fingerprint, active.registry.expiresAt ?? o.expiresAt);
+                    authority.assert(o.fingerprint, active.registry.expiresAt ?? authorizationExpiresAt);
                     assertCleanup85Window(intent, this.now());
                     await new OperationService(this.state).assertCleanup85NativeAccountAvailable(admission, r, o);
                     if (fresh) {
                         await Promise.all([assertReadWriteAnchorAfterSnapshot(read.source, read.native, e), reanchorCleanup85Recovery(read.source, read.destination, verified)]);
                         witnessAt = this.now();
                     }
-                    authority.assert(o.fingerprint, active.registry.expiresAt ?? o.expiresAt);
+                    authority.assert(o.fingerprint, active.registry.expiresAt ?? authorizationExpiresAt);
                     return active;
                 };
                 await check(true);
@@ -171,7 +173,7 @@ export class Cleanup85NativeCancellation {
                 await new DirectPublicEffectJournal(this.state).beginSigning(o);
                 let raw, phase = "wallet_load";
                 try {
-                    const wallets = new EncryptedWalletStore(this.state, this.wrapping), w = await wallets.describe(o.profile, () => authority.assertRemaining(o.fingerprint, 20_000), async (identity) => { await check(true); authority.assertRemaining(o.fingerprint, 20_000); await assertEvmNativeCustody(this.state, o.profile, custody, identity); });
+                    const wallets = new EncryptedWalletStore(this.state, this.wrapping), w = await wallets.describe(o.profile, () => { assertCurrent(); authority.assertRemaining(o.fingerprint, 20_000); }, async (identity) => { await check(true); authority.assertRemaining(o.fingerprint, 20_000); await assertEvmNativeCustody(this.state, o.profile, custody, identity); });
                     if (w === null)
                         cleanup85Blocked("custody_unavailable");
                     try {
@@ -183,7 +185,7 @@ export class Cleanup85NativeCancellation {
                         phase = "sign";
                         raw = await account.signTransaction({ type: "eip1559", chainId: 42161, to: CLEANUP85_RECIPIENT, value: 1n, data: "0x", nonce: 85, gas: BigInt(e.gasLimitAtomic), maxFeePerGas: BigInt(e.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGasAtomic), accessList: [] });
                         const hash = await verifyCleanup85Raw(e, raw);
-                        authority.assert(o.fingerprint, p.registry.expiresAt ?? o.expiresAt);
+                        authority.assert(o.fingerprint, p.registry.expiresAt ?? authorizationExpiresAt);
                         const material = { payloadHash: hashObject(directCustodyPayload(o)), transactionHash: hash, rawTransaction: raw, rawTransactionHash: hash };
                         const slot = effectSlot("apn-effect-v1", o.profile, id, o.fingerprint);
                         if (w.secret.directEffects[slot] !== undefined)
@@ -200,7 +202,7 @@ export class Cleanup85NativeCancellation {
                     }
                     phase = "pre_send";
                     await check(true);
-                    const guard = authority.beforeSend(o.fingerprint, raw, o.transactionHash, () => { if (this.now() - witnessAt > 10_000)
+                    const guard = authority.beforeSend(o.fingerprint, raw, o.transactionHash, () => { assertCurrent(); if (this.now() - witnessAt > 10_000)
                         cleanup85Blocked("source_witness_expired"); });
                     await new EvmDirectSubmissionJournal(this.state.root).fence(o, raw);
                     await this.ledger.transition({ ...this.identity(), reservationId: binding.nativeReservationId, policyDigest: p.digest, state: "unknown_finality", now: new Date(this.now()) });
@@ -218,7 +220,7 @@ export class Cleanup85NativeCancellation {
                     // After permanent SIGN, every failure stays observation-only, including no hash/no SEND.
                     return this.status(o, r);
                 }
-            });
+            }));
         });
     }
     async inspect(input) {
