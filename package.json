@@ -50,7 +50,9 @@
     "docs/relay-base-native.md",
     "docs/wbtc-continuation-budget.md",
     "docs/circle-v2-evm-fast.md",
-    "docs/local-release.md"
+    "docs/local-release.md",
+    "docs/x402-merchant-usdm.md",
+    "vendor/x402engine-transfer-proof/**"
   ],
   "scripts": {
     "build:native": "cargo build --offline --release --locked --target aarch64-apple-darwin",

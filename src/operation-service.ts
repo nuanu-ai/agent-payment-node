@@ -2,6 +2,8 @@ import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./li
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { publicCircle, type CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
 import { MegaFundingJournal, publicMegaFunding, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
+import { MerchantRepository } from "./x402-merchant/repository.js";
+import { publicMerchant, validateMerchant, type MerchantOperation } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { Permit2LegacyConflictRepository, type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
@@ -50,6 +52,7 @@ export type StoredMoneyOperation =
   | { readonly kind: "sei_gaszip"; readonly record: SeiFundingRecord }
   | { readonly kind: "circle_route"; readonly record: CircleOperationV1 }
   | { readonly kind: "mega_gaszip"; readonly record: MegaFundingRecord }
+  | { readonly kind: "merchant_x402"; readonly record: MerchantOperation }
   | { readonly kind: "permit2_production"; readonly record: Permit2ProductionRecord }
   | { readonly kind: "permit2_legacy_conflict"; readonly record: Permit2LegacyConflict }
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
@@ -130,6 +133,7 @@ export class OperationService {
       ...(await this.seiFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "sei_gaszip" as const, record })),
       ...(await this.circleOperations()).filter(operation => operation.idempotencyHash === idempotencyHash).map(record => ({ kind: "circle_route" as const, record })),
       ...(await this.megaFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "mega_gaszip" as const, record })),
+      ...(await this.merchantOperations()).filter(o => o.idempotencyHash === idempotencyHash).map(record => ({kind: "merchant_x402" as const, record})),
       ...(await this.relayUnsigned.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "relay_unsigned" as const, record })),
       ...(await this.facilitatorGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "facilitator_gasless_transfer" as const, record })),
       ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
@@ -216,6 +220,7 @@ export class OperationService {
       ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip" as const, record })),
       ...(await this.circleOperations(profileHash)).map(record => ({ kind: "circle_route" as const, record })),
       ...(await this.megaFunding.listOperations(profileHash)).map(record => ({ kind: "mega_gaszip" as const, record })),
+      ...(await this.merchantOperations(profileHash)).map(record => ({kind: "merchant_x402" as const, record})),
       ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production" as const, record })),
       ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict" as const, record })),
       ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned" as const, record })),
@@ -268,11 +273,25 @@ export class OperationService {
     }
   }
 
+  private async merchantOperations(profileHash?: string) {
+    if (this.state.root === undefined) return [];
+    const records = new MerchantRepository(this.state.root);
+    return profileHash === undefined ? records.listAllOperations() : records.listOperations(profileHash);
+  }
+
+  async assertMerchantAccountAvailable(record: MerchantOperation): Promise<void> {
+    validateMerchant(record);
+    const saved = await new MerchantRepository(this.state.root).findOperation(record.operationId);
+    if (saved === null || saved.integrityHash !== record.integrityHash) throw new ApnError("APN_OPERATION_BLOCKED", "Merchant conflict exclusion requires the exact saved operation.");
+    await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(4326, record.custody.walletAddress)], record.operationId);
+  }
+
   async required(operationId: string): Promise<StoredMoneyOperation> {
     const canonicalId = canonicalOperationId(operationId);
     const mega = await this.megaFunding.findOperation(canonicalId);
     const sei = await this.seiFunding.findOperation(canonicalId);
     const circle = (await this.circleOperations()).find(record => record.operationId === canonicalId) ?? null;
+    const merchant = await new MerchantRepository(this.state.root).findOperation(canonicalId);
     const permit2 = await new Permit2ProductionRepository(this.state.root).findOperation(canonicalId);
     const direct = await this.state.findOperation(canonicalId);
     const x402 = await this.state.findX402Operation(canonicalId);
@@ -284,13 +303,14 @@ export class OperationService {
     const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
     const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
     const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
-    if ([mega, sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
+    if ([merchant, mega, sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
       .filter((value) => value !== null).length > 1) {
       throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
     }
     if (mega !== null) return { kind: "mega_gaszip", record: mega };
     if (sei !== null) return { kind: "sei_gaszip", record: sei };
     if (circle !== null) return { kind: "circle_route", record: circle };
+    if (merchant !== null) return { kind: "merchant_x402", record: merchant };
     if (permit2 !== null) return { kind: "permit2_production", record: permit2 };
     if (direct !== null) return { kind: "direct_transfer", record: direct };
     if (x402 !== null) return { kind: "x402_fetch", strategy: "local", record: x402 };
@@ -310,6 +330,7 @@ export class OperationService {
     if (operation.kind === "sei_gaszip") return publicSeiFunding(operation.record);
     if (operation.kind === "circle_route") return publicCircle(operation.record);
     if (operation.kind === "mega_gaszip") return publicMegaFunding(operation.record);
+    if (operation.kind === "merchant_x402") return publicMerchant(operation.record);
     if (operation.kind === "permit2_production") return publicPermit2Production(operation.record);
     if (operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", "Legacy Permit2 execution remains blocked.");
     if (operation.kind === "relay_unsigned") return this.relayStatus(operation.record);

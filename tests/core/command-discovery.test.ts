@@ -33,11 +33,12 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "x402 permit2 approve", "x402 permit2 observe",
   "x402 permit2 preflight",
   "x402 permit2 status",
+  "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant status",
   "relay arbitrum prepare", "relay arbitrum observe", "relay arbitrum approval-check", "relay arbitrum approval-execute", "relay arbitrum deposit-dispatch", "relay base prepare", "relay base observe", "relay prepare", "relay native prepare", "relay preflight", "relay execute", "relay native execute", "relay retire", "relay status", "relay observe",
   "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
   "stargate token prepare", "stargate token execute", "stargate token cleanup", "stargate token observe", "stargate token status", "stargate token receipt",

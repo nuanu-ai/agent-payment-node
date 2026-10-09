@@ -1,5 +1,5 @@
-import { gasZipFundingRuntime } from "./runtime-factory-gaszip.js";
-import { CircleEvmService } from "./circle-v2-evm/runtime.js";
+import { finiteFundingRuntime } from "./runtime-factory-finite-rails.js";
+import { executeMerchantCli } from "./x402-merchant/cli.js";
 import { createSpecialApnCore } from "./runtime-factory-special.js";
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
@@ -223,7 +223,6 @@ export function createApnCore(bound, options = {}) {
         ...(relayExecute === undefined ? {} : { relayExecute, relayExecuteConfirmation: relayExecuteConfirmation }),
         ...(relayNativeExecute === undefined ? {} : { relayNativeExecute }),
         ...(stargateNative === undefined ? {} : { stargateNative }),
-        circleEvm: options.circleEvm ?? new CircleEvmService(state, wrappingSecret, process.env, () => clock.now().getTime()),
         ...(stargateToken === undefined ? {} : { stargateToken }),
         // Read-only portfolio only: pinned keyless defaults apply here and nowhere else; money-moving rails keep owner-named RPC.
         ...(bound.request.command === "relay.prepare" || bound.request.command === "relay.base.prepare" ||
@@ -309,7 +308,7 @@ export function createApnCore(bound, options = {}) {
         ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
             circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
         } : {}),
-        ...gasZipFundingRuntime(bound.request.command, state, wrappingSecret, options, process.env),
+        ...finiteFundingRuntime(bound.request.command, state, wrappingSecret, options, process.env, () => clock.now().getTime()),
         ...(bound.request.command.startsWith("oneclick.source.") || options.oneClickSource !== undefined ? {
             oneClickSource: options.oneClickSource ?? new OneClickSourceService(state, wrappingSecret, process.env),
         } : {}),
@@ -395,6 +394,8 @@ function uniswapTokenRpcBudget(command) {
     return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
 }
 export async function executeBoundCommand(bound, options = {}) {
+    if (bound.request.command.startsWith("x402.merchant."))
+        return executeMerchantCli(bound, options, options.stateRoot ?? effectiveStateRoot());
     if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe")
         return executePermit2ProductionCli(bound, options, options.stateRoot ?? effectiveStateRoot());
     if (bound.request.command === "x402.permit2.preflight") {

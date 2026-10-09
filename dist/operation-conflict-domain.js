@@ -44,6 +44,8 @@ export function storedOperationDomains(operation) {
             return [evmConflictDomain(43114, operation.record.material.wallet.account)];
         if (operation.kind === "permit2_legacy_conflict")
             return [evmConflictDomain(operation.record.chainId, operation.record.account)];
+        if (operation.kind === "merchant_x402")
+            return [evmConflictDomain(4326, operation.record.custody.walletAddress)];
         if (operation.kind === "relay_unsigned")
             return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];
         if (operation.kind === "direct_transfer")
