@@ -22,7 +22,7 @@ export class SeiFundingRpc implements SeiRpcPort {
     if(v.jsonrpc!=="2.0" || v.id!==id || !Object.hasOwn(v,"result") || Object.hasOwn(v,"error"))seiFail("rpc_result");return v.result;
   }
 }
-export async function readSeiFundingPlan(rpc:SeiRpcPort,owner:string,amount:string,maxFee:string):Promise<SeiFundingPlan>{
+export async function readSeiFundingPlan(rpc:SeiRpcPort,owner:string,amount:string,maxFee:string,frozenFeeUpper?:string):Promise<SeiFundingPlan>{
   if(seiQuantity(await rpc.call("eth_chainId",[]))!==8453n)seiFail("source_chain");
   const block=seiObject(await rpc.call("eth_getBlockByNumber",["latest",false]));const blockHash=seiHash(block.hash),number=seiQuantity(block.number);
   const tag={blockHash,requireCanonical:true};const tx={from:owner,to:SEI_FUNDING.target,data:SEI_FUNDING.data,value:hex(BigInt(amount))};
@@ -36,7 +36,7 @@ export async function readSeiFundingPlan(rpc:SeiRpcPort,owner:string,amount:stri
     rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getOperatorFee",args:[gas]})},tag])]);
   const l1Fee=seiQuantity(l1),operator=seiQuantity(op),total=gas*fee+l1Fee+operator;
   if(operator!==0n)seiFail("base_operator_fee_unreviewed");
-  if(total>BigInt(maxFee) || total>SEI_FUNDING.maximumFee || seiQuantity(balance)<BigInt(amount)+total)seiFail("source_balance_or_fee_cap");
+  if(total>BigInt(maxFee) || total>SEI_FUNDING.maximumFee || seiQuantity(balance)<BigInt(amount)+(frozenFeeUpper===undefined || total>BigInt(frozenFeeUpper)?total:BigInt(frozenFeeUpper)))seiFail("source_balance_or_fee_cap");
   const check=seiObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));if(seiHash(check.hash)!==blockHash)seiFail("source_reorg");
   return {blockHash,nonce:seiQuantity(n).toString(),gas:gas.toString(),maxFee:fee.toString(),tip:tip.toString(),l1FeeUpper:l1Fee.toString(),operatorFeeUpper:operator.toString(),feeUpper:total.toString()};
 }

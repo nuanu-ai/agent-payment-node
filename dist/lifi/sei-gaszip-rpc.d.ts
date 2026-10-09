@@ -14,7 +14,7 @@ export declare class SeiFundingRpc implements SeiRpcPort {
     constructor(url: string, https?: Pick<BridgeHttps, "request">);
     call(method: string, params: readonly unknown[]): Promise<unknown>;
 }
-export declare function readSeiFundingPlan(rpc: SeiRpcPort, owner: string, amount: string, maxFee: string): Promise<SeiFundingPlan>;
+export declare function readSeiFundingPlan(rpc: SeiRpcPort, owner: string, amount: string, maxFee: string, frozenFeeUpper?: string): Promise<SeiFundingPlan>;
 export declare function assertSeiFundingFresh(initial: SeiFundingPlan, fresh: SeiFundingPlan): void;
 export interface SeiSafeProof {
     readonly hash: Hex;
