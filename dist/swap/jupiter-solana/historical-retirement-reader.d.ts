@@ -7,7 +7,8 @@ export declare class JupiterHistoricalRetirementReader extends SecureStateStore 
     protected ensureDirectory(): Promise<void>;
     forBucket(identity: AssetUsageIdentity, rows: readonly AssetUsageReservation[]): Promise<readonly HistoricalRetirementRecord[]>;
     protected writeJson(): Promise<void>;
-    private originalRowRawHash;
+    /** Narrow authenticated read for C2's create-only accounting record; never returns row bytes. */
+    originalReservationRawHash(identity: AssetUsageIdentity, id: string): Promise<string>;
 }
 /** Pin local identity at commit and compare it on every later read; never hardcode host inode values. */
 export declare function historicalRetirementRootSnapshot(root: string): Promise<string>;
