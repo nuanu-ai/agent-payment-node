@@ -159,3 +159,19 @@ test("pending Sei funding and Circle Sei mint block each other through destinati
   await assert.rejects(beforeFunding.assertEvmAccountAvailable(PROFILE, 1329, A), blockedOn("circle-mint", "evm:1329", A.toLowerCase()));
   await beforeFunding.assertEvmAccountAvailable(PROFILE, 1329, B);
 });
+
+test("persisted Base claims serialize Mega, Sei, Relay and ordinary Base sends in both directions", async () => {
+  const claims = [
+    { kind: "mega_gaszip", record: open("mega", { owner: { address: A } }) },
+    { kind: "sei_gaszip", record: open("sei", { owner: { address: A } }) },
+    { kind: "relay_unsigned", record: open("relay", { sourceChainId: 8453, sourceAccount: A }) },
+    { kind: "direct_transfer", record: open("direct", { chainId: 8453, walletAddress: A }) },
+  ];
+  for (const claim of claims) {
+    const operations = service({});
+    Object.defineProperty(operations, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [claim] : [] });
+    await assert.rejects(operations.assertEvmAccountAvailable(PROFILE, 8453, A), blockedOn(claim.record.operationId, "evm:8453", A.toLowerCase()));
+    await operations.assertEvmAccountAvailable(PROFILE, 8453, B);
+    await operations.assertEvmAccountAvailable(PROFILE, 4326, A);
+  }
+});
