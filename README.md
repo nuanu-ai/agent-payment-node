@@ -121,7 +121,7 @@ CLI terminal without payment.
 
 Candidate and release artifacts are built twice with Node 24.15.0 and must be
 byte-identical. The workflow emits the npm tarball, a deterministic SPDX 2.3
-SBOM derived from the production lock graph, and a release manifest binding
+SBOM derived from the production lock graph and each vendor slice's emitted package provenance, and a release manifest binding
 their names, sizes and SHA-256 digests to the exact repository commit. GitHub
 artifact attestations bind those bytes to the pinned workflow identity.
 

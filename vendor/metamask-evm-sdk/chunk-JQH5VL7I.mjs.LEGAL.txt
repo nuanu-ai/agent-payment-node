@@ -1,0 +1,4 @@
+Bundled license information:
+
+@scure/bip39/esm/index.js:
+  /*! scure-bip39 - MIT License (c) 2022 Patricio Palladino, Paul Miller (paulmillr.com) */

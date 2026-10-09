@@ -6,10 +6,10 @@ Original package chains pulled in `bigint-buffer`, SPL decoders, old nested Axio
 
 | Directory | Upstream exports | Manifest SHA256 |
 |---|---|---|
-| `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `31863561a74b0fdc5ba37afe70fc827ca9e9f171d83d12b56f2b7221dfdd6c1c` |
+| `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `0d85528a42112636bf1d6e6d7d4b82301dd11011725f61d75c5ee6780ba5f9f2` |
 | `vendor/metamask-smart-account` | Smart Account kit 2.0.0 root/actions/contracts/utils/experimental, permission types 2.0.0, delegation core 3.0.0, MetaMask x402 1.0.0 | `ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece27448ddc3` |
 | `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `cbf69134172a065d967339f8c3f432df347e55b944b83bd64cc02459647228a6` |
-| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `1c697732810415f01663bb774256b662c337c9cb8f0f17fbf0e22cb665e991e2` |
+| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `f57f014e75d831c1bf8496f99b0bf718c2c6573158ff2698b084977f1b6d38fb` |
 
 Before the first entry import, each loader checks its pinned manifest and every declared executable/legal file's size and SHA256. File and bundle-directory symlinks refuse. Verification is cached for that process; concurrent filesystem changes after verification and unrelated installed dependency bytes are outside this check.
 
@@ -29,7 +29,7 @@ node scripts/build-sdk-vendor.mjs --relay-order-id --check
 
 Each check regenerates into a temporary directory and compares every vendor file byte-for-byte. Replace `--check` with `--out-dir <new-directory>` to inspect a regeneration; an existing destination refuses. A bundle update requires input review, a new loader manifest pin, rebuilt dist and repeated packaging/consumer checks.
 
-Provenance records upstream input hashes, package versions, external imports and bundler identity. Original LICENSE, COPYING and NOTICE files and emitted `.LEGAL.txt` files are retained. The four roots contain 494 files. `.gitattributes` preserves their bytes, including original CRLF notices.
+Provenance records all analyzed upstream input hashes separately from `emittedPackages` and positive output-byte contributions. Only packages contributing executable bytes are bundled components in the release SPDX SBOM; their original LICENSE, COPYING and NOTICE files and emitted `.LEGAL.txt` files are retained. `.gitattributes` preserves original notice bytes, including CRLF. EVM and Relay generation prefer official ESM modules; Relay selects the upstream `dist/order/index.js` export rather than the full SDK root. Smart Account and TRON executable bytes retain their previous resolution and hashes.
 
 ## Local proof on 8 October 2026
 
@@ -39,8 +39,10 @@ A fresh npm consumer with no parent overrides installed candidate archive SHA256
 
 Initial failures remain in private evidence: deprecated builtin punycode also failed with the old MCP client, a genuine consumer exposed undeclared delegation-core imports, and a cross-process material fixture needed its default test-emission path. The corrected generator, export slice and owned test-path alias preserve the assertions. No warning suppression or financial-limit change was used.
 
-## Remaining advisories and licenses
+## Advisory and license closure on 9 October 2026
 
-The genuine consumer's production package audit reports zero affected package records. This does not patch or audit every bundled cryptographic function. Existing elliptic advisories remain relevant to upstream code in the EVM/Relay slices. The standalone development graph retains 5 high and 48 low affected records, including original development-only decoder packages. MCP client is pinned to patched 2.3.1; its production server remains 2.0.0 and passed the compatibility checks.
+The original development graph still retains upstream advisory records. `elliptic@6.6.1` appears among analyzed EVM inputs, but contributed no executable bytes before or after this change. Its advisory is not claimed patched. Production npm audit alone cannot inspect vendored code.
 
-Retained license metadata includes GPL-3.0 `@toruslabs/ffjavascript@6.0.0` in the EVM slice and LGPL-3.0-only `rpc-websockets@9.3.9` in the Relay slice. APN's own MIT license does not replace upstream licenses. Notices and provenance are retained; release-license review remains open. This packet proves source and private offline installation. New paid acceptance, npm/Homebrew publication and global installation remain separate.
+The former EVM bundle emitted GPL-3.0 `@toruslabs/ffjavascript@6.0.0`, and the former Relay root emitted LGPL-3.0-only `rpc-websockets@9.3.9`. Official ESM selection and the narrower upstream Relay entry remove their executable contributions without replacing cryptographic functions. All four emitted package graphs now exclude elliptic, ffjavascript and rpc-websockets; generation rejects their reintroduction in every slice. Unused analyzed-input notices are excluded from the runtime inventory. APN's MIT license still does not replace licenses of the components it actually ships.
+
+The release SBOM includes each vendor root's emitted package versions and licenses with `CONTAINS` relationships, alongside the production installation graph. The SBOM namespace incorporates the lock and all four provenance bytes. Local verification, private installation, publication and paid acceptance remain distinct proof layers.

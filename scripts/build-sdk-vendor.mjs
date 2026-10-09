@@ -83,7 +83,7 @@ const entries = smart ? {
       "hashDelegation"
     ]
   ]
-} : tron ? { utils: ["tronweb", ["utils"]] } : relay ? { "order-id": ["@relay-protocol/settlement-sdk", ["getOrderId"]] } : {
+} : tron ? { utils: ["tronweb", ["utils"]] } : relay ? { "order-id": ["@relay-protocol/settlement-sdk/dist/order/index.js", ["getOrderId"]] } : {
   "sdk-root": ["@metamask/agent-sdk", ["NetworkRegistry", "PriceService", "createWalletServiceFromSession", "disableAnalytics"]],
   "sdk-base": ["@metamask/agent-sdk/base", ["SessionManager", "WalletStateManager"]],
   "sdk-evm": ["@metamask/agent-sdk/evm", ["getAgenticEvmChains", "withEvmRpcTarget"]],
@@ -116,6 +116,7 @@ try {
     absWorkingDir: root, entryPoints: Object.fromEntries(Object.keys(entries).map(name => [name, `apn-sdk:${name}`])),
     outdir: output, bundle: true, splitting: true, preserveSymlinks: true,
     outExtension: { ".js": ".mjs" }, format: "esm", platform: "node", target: "node24",
+    ...(!smart && !tron ? { mainFields: ["module", "main"] } : {}),
     nodePaths: [join(root, "node_modules")], metafile: true, write: true, logLevel: "silent", legalComments: "external",
     banner: { js: 'import { createRequire as __apnSdkCreateRequire, isBuiltin as __apnSdkIsBuiltin } from "node:module"; const __apnSdkRequire = __apnSdkCreateRequire(import.meta.url); const require = (name) => { if (typeof name !== "string" || !__apnSdkIsBuiltin(name)) throw new Error("APN SDK refuses non-builtin dynamic require"); return __apnSdkRequire(name); };' },
     plugins: [{ name: "apn-evm-sdk-boundary", setup(builder) {
@@ -142,6 +143,11 @@ try {
   const manifest = { schemaVersion: `apn.${vendorName}.v1`, upstreamVersions: versions,
     bundler: { version: "0.28.2", target: "node24" }, builtinSubstitutions: { punycode: "punycode.js@2.3.1" }, files, entryNames: Object.keys(entries) };
   const packages = {}, inputs = [], licenses = new Map();
+  const emittedInputs = new Map();
+  for (const row of Object.values(result.metafile.outputs)) for (const [name, input] of Object.entries(row.inputs)) {
+    if (input.bytesInOutput > 0) emittedInputs.set(name, (emittedInputs.get(name) ?? 0) + input.bytesInOutput);
+  }
+  const emittedPackages = {}, outputContributions = [];
   for (const name of Object.keys(result.metafile.inputs).sort()) {
     if (name.startsWith("apn-sdk:")) {
       const entry = name.slice(8), bytes = Buffer.from(entrySource(entry));
@@ -158,11 +164,27 @@ try {
       parent = dirname(parent);
     }
     assert(metadata?.name && metadata.version, `missing input provenance: ${name}`);
+    // Some ESM build directories repeat package identity but omit its license.
+    // Resolve that identity to the enclosing package root for accurate paths/notices.
+    let enclosing = dirname(parent);
+    while (enclosing !== dirname(enclosing) && enclosing.startsWith(join(root, "node_modules"))) {
+      try {
+        const found = JSON.parse(await readFile(join(enclosing, "package.json"), "utf8"));
+        if (found.name === metadata.name && found.version === metadata.version) { metadata = found; parent = enclosing; }
+      } catch (error) { if (error.code !== "ENOENT") throw error; }
+      enclosing = dirname(enclosing);
+    }
+    const declaredLicense = metadata.license ?? (metadata.licenses?.length === 1 ? metadata.licenses[0].type : null);
     const identity = `${metadata.name}@${metadata.version}`, bytes = await readFile(path);
-    packages[identity] = { name: metadata.name, version: metadata.version, license: metadata.license ?? null };
+    packages[identity] = { name: metadata.name, version: metadata.version, license: declaredLicense };
+    if (emittedInputs.has(name)) {
+      emittedPackages[identity] = packages[identity];
+      outputContributions.push({ identity, file: path.slice(parent.length + 1), bytesInOutput: emittedInputs.get(name) });
+    }
     inputs.push({ identity, file: path.slice(parent.length + 1), sha256: sha(bytes), bytes: bytes.length });
     for (const license of (await readdir(parent, { withFileTypes: true })).filter(item => item.isFile() && /^(license|licence|copying|notice)(\.|$)/iu.test(item.name)).map(item => item.name)) {
       const key = `${identity.replaceAll("/", "__")}__${license}`;
+      if (!emittedInputs.has(name)) continue;
       const content = await readFile(join(parent, license));
       if (licenses.has(key)) assert(licenses.get(key).equals(content), `conflicting license: ${key}`);
       licenses.set(key, content);
@@ -175,8 +197,10 @@ try {
   await mkdir(join(output, "licenses"));
   for (const [name, bytes] of [...licenses].sort(([a], [b]) => a.localeCompare(b, "en"))) await writeFile(join(output, "licenses", name), bytes);
   inputs.sort((a, b) => a.identity.localeCompare(b.identity, "en") || a.file.localeCompare(b.file, "en"));
+  assert(!Object.values(emittedPackages).some(row =>
+    ["elliptic", "@toruslabs/ffjavascript", "rpc-websockets"].includes(row.name)), "unreviewed crypto/copyleft code emitted");
   await writeFile(join(output, "provenance.json"), json({
-    schemaVersion: `apn.${vendorName}.provenance.v1`, inputFiles: inputs, packages, externalImports: external,
+    schemaVersion: `apn.${vendorName}.provenance.v1`, inputFiles: inputs, packages, emittedPackages, outputContributions, externalImports: external,
     bundler: { version: "0.28.2", binarySha256: binaryHash, target: "node24" },
     ...(relay ? { disabledOptionalPackages: ["encoding"], dynamicPackageRequires: "rejected before parent resolution by bundled builtin-only require" } : {}),
     scope: smart ? "Smart Account exports; original package identities checked; other upstream advisories are not declared patched" : tron ? "Offline TRON utilities only; forbidden decoder inputs absent; other upstream advisories are not declared patched" : relay ? "Relay getOrderId only; forbidden decoder inputs absent; other upstream advisories are not declared patched" : "EVM SDK slice; forbidden decoder inputs absent; other upstream advisories are not declared patched",
