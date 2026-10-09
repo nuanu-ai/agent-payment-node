@@ -1,7 +1,8 @@
 import { ChainAccountStore } from "../../chain-account-store.js";
 import type { WrappingSecretPort } from "../../macos-keychain.js";
 import { StateStore } from "../../state.js";
-import { JupiterV1ExecutionBindingStore } from "./v1-effects.js";
+import { JupiterV1ExecutionBindingStore, type JupiterV1ExecutionBinding, type JupiterV1SendClaim, type JupiterV1SignedMarker } from "./v1-effects.js";
+import type { SwapOperationRecord } from "../model.js";
 import { SavedJupiterV1MaterialStore } from "./v1-material.js";
 export declare function historicalAuthenticationRefused(): never;
 export declare function existingHistoricalRoot(root: string): Promise<void>;
@@ -37,9 +38,28 @@ export declare class HistoricalMaterialReader extends SavedJupiterV1MaterialStor
     protected writeJson(): Promise<void>;
     protected beforeLockAcquire(): Promise<void>;
 }
+export type HistoricalRetainedClaimEvidence = {
+    readonly kind: "retained_send_claim_present";
+    readonly claimHash: string;
+} | {
+    readonly kind: "retained_send_claim_absent";
+    readonly observation: "current_observation";
+    readonly submissionHistory: "unknown";
+    readonly transactionMayHaveBeenSubmitted: true;
+    readonly absenceSnapshotHash: string;
+};
+export interface HistoricalRetainedEvidence {
+    readonly signedMarker: JupiterV1SignedMarker;
+    readonly claim: JupiterV1SendClaim | null;
+    readonly evidence: HistoricalRetainedClaimEvidence;
+}
 export declare class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
     #private;
     constructor(root: string, guard?: HistoricalDirectoryGuard);
+    /** Only exact ea25 may authenticate retained signed material while observing an absent claim. */
+    retainedEvidence(op: SwapOperationRecord, binding: JupiterV1ExecutionBinding): Promise<HistoricalRetainedEvidence>;
+    /** Production issuer only: generated wallets cannot replace this original public file anchor. */
+    assertOriginalAbsentSignedMarker(op: SwapOperationRecord, retained: HistoricalRetainedEvidence): Promise<void>;
     initialize(): Promise<void>;
     protected initializeStorage(): Promise<void>;
     protected ensureDirectory(path: string): Promise<void>;

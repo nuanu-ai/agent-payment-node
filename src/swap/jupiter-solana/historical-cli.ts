@@ -12,7 +12,7 @@ const PUBLIC_FIELDS = ["schemaVersion", "operationId", "operationIntegrityHash",
   "freshMaximumNativeExpenseLamports", "networkFeeLamports", "tokenAccountRentLamports", "genesis", "blockhash",
   "lastValidBlockHeight", "signature", "rawPayloadHash", "messageHash", "freshBlockhash", "freshLastValidBlockHeight",
   "heightBinding", "originalQuoteRpcLifetime", "lifetimeProvenance", "ordinaryRecentBlockhash", "authenticatedAt",
-  "authenticationExpiresAt"] as const satisfies readonly (keyof HistoricalJupiterProjection)[];
+  "authenticationExpiresAt", "retainedClaimEvidence"] as const satisfies readonly (keyof HistoricalJupiterProjection)[];
 
 /** This route is deliberately absent from the command catalog, SDK and MCP projection. */
 export function isHistoricalJupiterCli(argv: readonly string[]): boolean {
@@ -43,6 +43,11 @@ export async function executeHistoricalJupiterCli(argv: readonly string[], state
         contextSlot: lifetime.contextSlot, minimumContextSlot: lifetime.minimumContextSlot,
         blockhash: lifetime.blockhash, lastValidBlockHeight: lifetime.lastValidBlockHeight };
     }
+    const evidence = projection.retainedClaimEvidence;
+    publicProjection.retainedClaimEvidence = evidence.kind === "retained_send_claim_present"
+      ? { kind: evidence.kind, claimHash: evidence.claimHash }
+      : { kind: evidence.kind, observation: evidence.observation, submissionHistory: evidence.submissionHistory,
+          transactionMayHaveBeenSubmitted: evidence.transactionMayHaveBeenSubmitted, absenceSnapshotHash: evidence.absenceSnapshotHash };
     return { ...base, ok: true, proof_class: "historical_material_authentication_only", error: null,
       data: { scope: "Retained material authentication only; no expiry or historical execution verdict, ledger change, or financial permission.",
         projection: publicProjection } };

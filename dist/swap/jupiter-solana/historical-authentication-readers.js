@@ -1,10 +1,13 @@
-import { lstat, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { ChainAccountStore } from "../../chain-account-store.js";
 import { ApnError } from "../../errors.js";
 import { StateStore } from "../../state.js";
-import { validateDirectory } from "../../secure-state-store.js";
+import { isCode, stateIdentifier, validateDirectory } from "../../secure-state-store.js";
 import { JupiterV1ExecutionBindingStore } from "./v1-effects.js";
+import { canonicalJson, hashObject, sha256 } from "../../canonical.js";
+import { HISTORICAL_JUPITER_IDS, HISTORICAL_JUPITER_EA25_SIGNED_MARKER_SHA256 } from "./historical-pins.js";
 import { SavedJupiterV1MaterialStore } from "./v1-material.js";
 export function historicalAuthenticationRefused() {
     throw new ApnError("APN_OPERATION_BLOCKED", "Historical Jupiter material authentication is unavailable.");
@@ -123,6 +126,67 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
     #guard;
     constructor(root, guard = new HistoricalDirectoryGuard(root)) { super(root); if (guard.root !== root)
         historicalAuthenticationRefused(); this.#guard = guard; }
+    /** Only exact ea25 may authenticate retained signed material while observing an absent claim. */
+    async retainedEvidence(op, binding) {
+        const signedMarker = await this.loadSignedMarker(op, binding), claim = await this.loadClaim(op);
+        if (signedMarker === null)
+            historicalAuthenticationRefused();
+        if (claim !== null) {
+            if (claim.signature !== signedMarker.signature || claim.bindingHash !== binding.bindingHash || claim.rawPayloadHash !== signedMarker.rawPayloadHash)
+                historicalAuthenticationRefused();
+            return { signedMarker, claim, evidence: { kind: "retained_send_claim_present", claimHash: claim.claimHash } };
+        }
+        if (op.operationId !== HISTORICAL_JUPITER_IDS[1])
+            historicalAuthenticationRefused();
+        stateIdentifier(op.ownerProfileHash, "Jupiter profile");
+        stateIdentifier(op.operationId, "Jupiter operation");
+        const directory = `jupiter-v1-claims/${op.ownerProfileHash}`, target = resolve(this.root, directory, `${op.operationId}.json`);
+        await this.#guard.check([directory]);
+        const before = await lstat(resolve(this.root, directory), { bigint: true });
+        try {
+            await lstat(target);
+            historicalAuthenticationRefused();
+        }
+        catch (error) {
+            if (!isCode(error, "ENOENT"))
+                throw error;
+        }
+        await this.#guard.check([directory]);
+        const after = await lstat(resolve(this.root, directory), { bigint: true });
+        const facts = (v) => ({ dev: String(v.dev), ino: String(v.ino), uid: String(v.uid), mode: String(v.mode), mtimeNs: String(v.mtimeNs), ctimeNs: String(v.ctimeNs) });
+        if (canonicalJson(facts(before)) !== canonicalJson(facts(after)))
+            historicalAuthenticationRefused();
+        // A replacement or even a create/remove changes this current absence observation.
+        return { signedMarker, claim: null, evidence: { kind: "retained_send_claim_absent", observation: "current_observation", submissionHistory: "unknown", transactionMayHaveBeenSubmitted: true,
+                absenceSnapshotHash: hashObject({ root: this.root, target, directory: facts(after), observation: "ENOENT" }) } };
+    }
+    /** Production issuer only: generated wallets cannot replace this original public file anchor. */
+    async assertOriginalAbsentSignedMarker(op, retained) {
+        if (retained.evidence.kind !== "retained_send_claim_absent")
+            return;
+        if (op.operationId !== HISTORICAL_JUPITER_IDS[1])
+            historicalAuthenticationRefused();
+        stateIdentifier(op.ownerProfileHash, "Jupiter profile");
+        const directory = `jupiter-v1-signatures/${op.ownerProfileHash}`, path = resolve(this.root, directory, `${op.operationId}.json`);
+        await this.#guard.check([directory]);
+        const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+            const opened = await handle.stat({ bigint: true }), before = await lstat(path, { bigint: true });
+            const valid = (v) => v.isFile() && !v.isSymbolicLink() && v.uid === BigInt(process.geteuid?.() ?? -1) && (v.mode & 511n) === 384n && v.nlink === 1n && v.size === 561n;
+            const facts = (v) => ({ dev: String(v.dev), ino: String(v.ino), size: String(v.size), mtimeNs: String(v.mtimeNs), ctimeNs: String(v.ctimeNs) });
+            if (!valid(opened) || !valid(before) || canonicalJson(facts(opened)) !== canonicalJson(facts(before)))
+                historicalAuthenticationRefused();
+            const bytes = await handle.readFile();
+            await this.#guard.check([directory]);
+            const after = await lstat(path, { bigint: true });
+            if (!valid(after) || canonicalJson(facts(opened)) !== canonicalJson(facts(after)) || sha256(bytes) !== HISTORICAL_JUPITER_EA25_SIGNED_MARKER_SHA256 || bytes.toString("utf8") !== `${canonicalJson(retained.signedMarker)}\n`)
+                historicalAuthenticationRefused();
+        }
+        finally {
+            await handle.close();
+        }
+        await this.#guard.check([directory]);
+    }
     async initialize() { await this.#guard.check(BINDING_DIRECTORIES); }
     async initializeStorage() { await this.#guard.check(BINDING_DIRECTORIES); }
     async ensureDirectory(path) { await this.#guard.check([path]); }

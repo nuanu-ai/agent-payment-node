@@ -290,3 +290,11 @@ input plus fee 1006400 lamports and fee 6400 at finalized slot 454604807.
 This read-only diagnostic did not mutate the operation or finalize its usage;
 the normal freshly installed CLI checkpoint is recorded separately in the
 [closure ledger](apn-closure-status-2026-10-08.md).
+
+### Historical signed material authentication
+
+The separate CLI-only historical authentication route accepts the same exact six arguments and fixed three operation IDs. It authenticates retained material with genuine terminal consent and the original expense cap. Its public projection now includes `retainedClaimEvidence`. A validated retained claim reports `kind: "retained_send_claim_present"` and its `claimHash`.
+
+Only operation `ea25d97d0da057bfab9a6b6ade2b5799d8b81333ab99c33c793a75c0a8bde5ee` may authenticate signed material while the exact retained claim file is absent. The private issuer additionally requires the original signed-marker raw file SHA256 `45d36d569a31a454125d328d5f4d3a434a30bb76216a536aa13420244181282e`. Present claims still require all existing strict checks, including signature, binding and authenticated raw payload correspondence. Missing claims for the other two IDs refuse. Directory and marker changes, including a claim appearing after consent, refuse before private issuance or one-use consumption.
+
+The absent projection reports `kind: "retained_send_claim_absent"`, `observation: "current_observation"`, `submissionHistory: "unknown"`, `transactionMayHaveBeenSubmitted: true`, and a hash of the current guarded absence snapshot. It establishes no past absence, transaction expiry, settlement, retirement, accounting release or financial permission. The operation retains its existing submission uncertainty. Generated encrypted TEST fixtures verify the lower reader's cryptographic path; they cannot prove genuine fixed-owner private authority or actual ea25 authentication.

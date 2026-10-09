@@ -1,6 +1,6 @@
 import type { WrappingSecretPort } from "../../macos-keychain.js";
 import { SOLANA_MAINNET_GENESIS } from "./catalog.js";
-import { HistoricalDirectoryGuard } from "./historical-authentication-readers.js";
+import { HistoricalDirectoryGuard, type HistoricalRetainedClaimEvidence } from "./historical-authentication-readers.js";
 export interface HistoricalJupiterProjection {
     readonly schemaVersion: "apn.jupiter-historical-authentication.v1";
     readonly operationId: string;
@@ -31,6 +31,7 @@ export interface HistoricalJupiterProjection {
     readonly heightBinding: "authenticated_material_not_signed_message";
     readonly originalQuoteRpcLifetime: import("./v1-material.js").JupiterV1QuoteRpcLifetime | null;
     readonly lifetimeProvenance: "configured_mainnet_rpc_before_quote_freeze" | "original_provider_build";
+    readonly retainedClaimEvidence: HistoricalRetainedClaimEvidence;
     readonly ordinaryRecentBlockhash: true;
     readonly authenticatedAt: string;
     readonly authenticationExpiresAt: string;

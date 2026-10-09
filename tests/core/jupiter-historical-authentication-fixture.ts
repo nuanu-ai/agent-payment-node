@@ -22,7 +22,7 @@ import { jupiterV1AccountBindingHash } from "../../src/swap/jupiter-solana/v1-ad
 import { JUPITER_V1_OLD_ROUTE as route } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { HISTORICAL_JUPITER_IDS } from "../../src/swap/jupiter-solana/historical-authenticator.js";
-export async function historicalFixture(options: { cap?: string; operationId?: string; mutateSealedEffect?: (effect: import("../../src/direct-rail-ports.js").RailSignedEffect) => import("../../src/direct-rail-ports.js").RailSignedEffect } = {}) {
+export async function historicalFixture(options: { cap?: string; operationId?: string; omitClaim?: boolean; mutateSealedEffect?: (effect: import("../../src/direct-rail-ports.js").RailSignedEffect) => import("../../src/direct-rail-ports.js").RailSignedEffect } = {}) {
   const temp = await temporaryState(), state = new StateStore(temp.root); await state.initialize();
   const seed = Buffer.alloc(32, 21), signer = await createKeyPairSignerFromPrivateKeyBytes(seed), owner = signer.address;
   const old = fixture(), source = await associatedTokenAddress(owner, WRAPPED_SOL_MINT, TOKEN_PROGRAM), dest = await associatedTokenAddress(owner, SOLANA_USDC_MINT, TOKEN_PROGRAM);
@@ -53,7 +53,10 @@ export async function historicalFixture(options: { cap?: string; operationId?: s
   await bindings.bindPrepared(op,admission,prepared);await bindings.save(op,binding,prepared);await bindings.saveFresh(op,material,simulationProof);
   const signed=await signTransaction([signer.keyPair],getTransactionDecoder().decode(Buffer.from(binding.unsignedPayload,"base64"))),rawPayload=getBase64EncodedWireTransaction(signed);
   const effect={operationId:op.operationId,fingerprint:binding.bindingHash,transactionId:getSignatureFromTransaction(signed),rawPayload,rawPayloadHash:sha256(rawPayload)};
-  await bindings.saveSignature(op,binding,effect);await bindings.claim(op,binding,effect,now);await custody.saveEffect(account,options.mutateSealedEffect?.(effect) ?? effect);
+  await bindings.saveSignature(op,binding,effect);
+  if (options.omitClaim === true) await mkdir(join(temp.root,"jupiter-v1-claims",op.ownerProfileHash),{mode:0o700});
+  else await bindings.claim(op,binding,effect,now);
+  await custody.saveEffect(account,options.mutateSealedEffect?.(effect) ?? effect);
   const unknownLease=await ledger.transition({account:owner,chain:quote.sourceAsset.chain,asset:{kind:"native",identifier:null},reservationId:lease.reservationId,policyDigest:registry.policyDigest,state:"unknown_finality",now});
   op=transitionSwapOperation(op,"unknown_finality",{usageLease:unknownLease},now);
   await mkdir(join(temp.root,"swap-operations",op.ownerProfileHash),{recursive:true,mode:0o700});
