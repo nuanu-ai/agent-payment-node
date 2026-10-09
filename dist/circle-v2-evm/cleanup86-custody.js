@@ -7,6 +7,7 @@ import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { circleBlocked } from "./operation-model.js";
 import { Cleanup86Store } from "./cleanup86-store.js";
+import { assertCleanup86CurrentPermission, verifiedCleanup86CurrentPurpose } from "./cleanup86-current-purpose.js";
 import { assertCleanup86Grant, claimCleanup86Custody } from "./cleanup86-controller.js";
 /** First sign only. There is deliberately no private material restore/unseal API for recovery dispatch. */
 export class Cleanup86Custody extends SecureStateStore {
@@ -31,6 +32,8 @@ export class Cleanup86Custody extends SecureStateStore {
         return { transactionHash: h.transactionHash, materialHash: h.materialHash };
     }
     async seal(op, i, grant, beforePrivate) {
+        if (i.version === "apn.circle-cleanup86-intent.v3")
+            circleBlocked("cleanup86_private_current_custody_required");
         const gate = () => assertCleanup86Grant(grant, this.state.root, op, i);
         gate();
         if (!await new Cleanup86Store(this.root).claimed(op, i, "sign"))
@@ -70,6 +73,46 @@ export class Cleanup86Custody extends SecureStateStore {
                 this.wallets.clear(wallet.secret);
             }
         });
+    }
+    /** V3 only: the opaque admission's live financial scope already owns this exact custody lock.
+     * No public lock flag or callback can select this path. Legacy seal keeps its own lock. */
+    async sealCurrent(op, i, grant, recovery, certificate) {
+        const gate = () => {
+            assertCleanup86Grant(grant, this.state.root, op, i);
+            const purpose = verifiedCleanup86CurrentPurpose(certificate, this.state, op, recovery, i.envelope);
+            if (i.version !== "apn.circle-cleanup86-intent.v3" || hashObject(purpose) !== hashObject(i.currentPurpose))
+                circleBlocked("cleanup86_private_current_custody_required");
+        };
+        const permission = async () => { gate(); await assertCleanup86CurrentPermission(certificate, this.state, op, recovery, i.envelope); gate(); };
+        gate();
+        if (!await new Cleanup86Store(this.root).claimed(op, i, "sign"))
+            circleBlocked("cleanup86_sign_claim_required");
+        gate();
+        await this.assertAbsent(op);
+        gate();
+        claimCleanup86Custody(grant, this.state.root, op, i);
+        gate();
+        await permission();
+        const wallet = await this.wallets.describe(op.profile, gate, async (identity) => { await permission(); await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody, identity); gate(); });
+        if (wallet === null)
+            circleBlocked("cleanup86_wallet_missing");
+        try {
+            await permission();
+            const account = privateKeyToAccount(wallet.secret.privateKey);
+            if (account.address !== i.envelope.from)
+                circleBlocked("cleanup86_derived_owner_changed");
+            const e = i.envelope;
+            gate();
+            const rawTransaction = await account.signTransaction({ type: "eip1559", chainId: 42161, to: e.to, data: e.data, value: 0n, nonce: 86, gas: BigInt(e.gasLimitAtomic), maxFeePerGas: BigInt(e.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGasAtomic), accessList: [] });
+            gate();
+            const body = { version: "apn.circle-cleanup86-material.v1", intentHash: i.intentHash, recoveryBinding: i.recoveryBinding, envelopeHash: e.envelopeHash, rawTransaction, transactionHash: keccak256(rawTransaction) }, material = { ...body, materialHash: hashObject(body) };
+            await this.encrypt(op, material, gate);
+            gate();
+            return material;
+        }
+        finally {
+            this.wallets.clear(wallet.secret);
+        }
     }
     async encrypt(op, material, gate) {
         gate();
