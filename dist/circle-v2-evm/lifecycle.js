@@ -173,10 +173,13 @@ export async function observeCircle(input, ports) {
     let freshSource = false, freshDestination = false;
     const burn = op.effects.find(e => e.role === "burn");
     if (burn.transactionHash !== null && ["submitted", "unknown", "confirmed", "submission_started"].includes(burn.phase)) {
-        const source = await ports.observeSource(op, op.source !== null);
+        let source = await ports.observeSource(op, op.source !== null);
+        // A saved INCLUDED burn remains issuer-eligible while its independent finalized head is pending.
+        if (source === null && op.source?.finalityTag === "included")
+            source = await ports.observeSource(op, false);
         if (source !== null) {
             freshSource = true;
-            if (op.source !== null && (source.blockHash !== op.source.blockHash || source.sourceMessageHash !== op.source.sourceMessageHash))
+            if (op.source !== null && (source.transactionHash !== op.source.transactionHash || source.blockHash !== op.source.blockHash || source.receiptHash !== op.source.receiptHash || source.sourceMessageHash !== op.source.sourceMessageHash))
                 circleBlocked("source_reorg_holds_required");
             const allowance = await ports.allowance(op);
             if (allowance !== "0")
