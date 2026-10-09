@@ -30,6 +30,7 @@ export declare class MerchantService {
     private refreshCanonical;
     private canonicalAudit;
     private revalidate;
+    private consentFresh;
     private fresh;
     private at;
     private locks;
