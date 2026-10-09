@@ -17,6 +17,7 @@ export class HistoricalPaidRpc extends CircleExternalRpc {
         if (operationId !== HISTORICAL_LINEA_OPERATION && operationId !== HISTORICAL_MONAD_OPERATION || chain !== 42161 && chain !== (operationId === HISTORICAL_LINEA_OPERATION ? 59144 : 143))
             circleBlocked("historical_paid_rpc_exact_scope");
     }
+    readEndpoint() { return this.exactEndpoint; }
     assertReadDeadline() { this.historicalBudget.assert(); }
     counts() { return Object.freeze({ logical: this.logical, hits: this.hits, physical: this.physical, entries: this.cache.size }); }
     async call(method, params, beforeSend) {

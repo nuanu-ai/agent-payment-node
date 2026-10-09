@@ -8,6 +8,7 @@ export declare class HistoricalPaidRpc extends CircleExternalRpc {
     private hits;
     private physical;
     constructor(exactEndpoint: string, chain: number, historicalBudget: CircleExternalRpcBudget, operationId: string);
+    readEndpoint(): string;
     assertReadDeadline(): void;
     counts(): Readonly<{
         logical: number;

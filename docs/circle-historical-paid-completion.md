@@ -1,4 +1,4 @@
-# Historical Circle paid completion (stage 2 WIP)
+# Historical Circle paid completion 
 
 The existing `circle evm observe` route for Linea operation `23f54a86f0ec0cfaf0a69f419c9a0c9fd19420fc9f2195bfe6c00192ab7b44c6` and existing external-adoption route for Monad operation `df077b005a9723de748d425d9172c4fb1cf5c6e4b2cc5bdd18327f770cd1ad46` verify their own canonical paid history. A later unrelated USDC approval does not substitute for their own burn-block allowance state.
 
@@ -8,4 +8,6 @@ A create-only sidecar retains the original full journal and effect proofs before
 
 Only these two invocations use a fresh bounded canonical-state memoization map. Successful hexadecimal `eth_getCode`, `eth_getStorageAt`, and `eth_call` results at exact nonzero EIP-1898 canonical block hashes may be reused within the invocation. Endpoint, chain, method and complete detached parameters bind every entry. Identity, nonce, transaction, receipt, block and end-reanchor calls remain physical. The original shared 160-request, 128-per-origin, 120-second limits remain unchanged.
 
-Use the existing per-command read overrides `APN_ARBITRUM_RPC_URL=https://arbitrum-one-public.nodies.app` and `APN_LINEA_RPC_URL=https://rpc.linea.build` for qualified historical reads. This source checkpoint is WIP: future-head partial-settlement repair and closed replay tests remain. It does not authorize financial execution or release integration.
+Use the existing per-command read overrides `APN_ARBITRUM_RPC_URL=https://arbitrum-one-public.nodies.app` and `APN_LINEA_RPC_URL=https://rpc.linea.build` for qualified historical reads. Partial-settlement repair and terminal canonical observation freshly revalidate immutable historical evidence and current deployment pins, accept later nonce advancement, and match each frozen ledger outcome before further progress. They preserve frozen proof bytes and never charge a completed row twice. Exact route identity determines accounting classification; a saved external-proof JSON cannot turn the owned Linea mint into an external fulfillment. Complete legacy wallet/profile identity scans remain mandatory for the uncontrolled Monad caller.
+
+The two full original coordinator fixture tests use authentic public RPC bodies and genuine signature/material verification. Future-head adversarial tests are explicitly labeled replay-state oracles: captured real headers are retained while prior state/deployment responses and later wallet state are substituted to exercise repair logic. Their counts are offline transport-request counts, not live HTTP by the author. Independent review and installed-release verification remain separate gates.
