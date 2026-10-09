@@ -1,4 +1,4 @@
-import { isSealedBurnRetirement, assertSealedBurnRetirement } from "./burn-retirement.js";
+import { isConsumedBurnRetirement, assertConsumedBurnIdentity, isSealedBurnRetirement, assertSealedBurnRetirement } from "./burn-retirement.js";
 import { validateCircleNonceRetirementProof, type CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { advanceCircle, circleBlocked, validateCircle, type CircleOperationV1 } from "./operation-model.js";
 import { executeCircleCleanupWithConsent, type CircleLifecyclePorts } from "./lifecycle.js";
@@ -10,7 +10,7 @@ export interface CircleNonceRetirementPorts extends CircleLifecyclePorts {
   retirementProof(op: CircleOperationV1, intent: CircleNonceRetirementIntent): Promise<CircleNonceRetirementProof | null>;
 }
 export function assertCircleNonceRetirementCase(op: CircleOperationV1, now: number): void {
-  if (isSealedBurnRetirement(op)) { assertSealedBurnRetirement(op); if (op.terminal || op.usageFinalized || op.residualAllowanceAtomic !== "40100") circleBlocked("sealed_burn_holds_or_allowance_changed"); return; }
+  if (isSealedBurnRetirement(op)) { if (isConsumedBurnRetirement(op)) assertConsumedBurnIdentity(op); else assertSealedBurnRetirement(op); if (op.terminal || op.usageFinalized || op.residualAllowanceAtomic !== "40100") circleBlocked("sealed_burn_holds_or_allowance_changed"); return; }
   const approval = op.effects[0]!, burn = op.effects[1]!;
   if (op.destinationChain !== 143 || op.destinationProfile !== "default" || op.terminal || now < Date.parse(op.expiresAt) ||
     approval.phase !== "unknown" || approval.transactionHash === null || approval.materialHash === null || approval.proof !== null ||

@@ -5,6 +5,8 @@ export declare const SEALED_BURN_HASH = "0x8d3f33d87653d0413aab7faee5b7884f0fc42
 export declare const SEALED_BURN_MATERIAL = "88158eafdfa699730e0d5e800ab974d7fad9a87db88772ce67591cceca7f165a";
 export declare function isSealedBurnRetirement(op: CircleOperationV1): boolean;
 export declare function assertSealedBurnRetirement(op: CircleOperationV1): void;
+export declare function assertConsumedBurnIdentity(op: CircleOperationV1): void;
+export declare function isConsumedBurnRetirement(op: CircleOperationV1): boolean;
 export declare function sealedBurnBinding(op: CircleOperationV1): string;
 export declare function sealedBurnReplacement(op: CircleOperationV1, quoted: CircleEnvelope, minimumTip: bigint): CircleEnvelope;
 export declare function assertSealedBurnReplacement(op: CircleOperationV1, e: CircleEnvelope): void;

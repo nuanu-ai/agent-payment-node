@@ -1,0 +1,447 @@
+✔ sealed burn full production cleanupNonce cancelled: real prepare, journal and ledger (1913.276709ms)
+✔ sealed burn full production cleanupNonce finalized: real prepare, journal and ledger (2005.389208ms)
+✔ sealed burn full production cleanupNonce pending: real prepare, journal and ledger (1651.098084ms)
+✔ sealed burn full production cleanupNonce included: real prepare, journal and ledger (1553.251792ms)
+✔ sealed burn full production cleanupNonce lost_reply: real prepare, journal and ledger (3220.404ms)
+✔ sealed burn full production cleanupNonce changed_again: real prepare, journal and ledger (1257.730292ms)
+✔ sealed burn full production cleanupNonce burn_race: real prepare, journal and ledger (751.532417ms)
+✔ sealed burn full production cleanupNonce principal_changed: real prepare, journal and ledger (780.020042ms)
+✔ sealed burn full production cleanupNonce fee_cap: real prepare, journal and ledger (832.125292ms)
+✔ sealed burn full production cleanupNonce tty_expired: real prepare, journal and ledger (1015.9065ms)
+✔ sealed burn full production cleanupNonce after_sign_expired: real prepare, journal and ledger (1260.235583ms)
+✔ sealed burn full production cleanupNonce tls_expired: real prepare, journal and ledger (1848.97725ms)
+✔ sealed burn full production cleanupNonce policy_expired: real prepare, journal and ledger (600.497917ms)
+✔ sealed burn full production cleanupNonce missing_native: real prepare, journal and ledger (723.413333ms)
+✔ sealed burn full production cleanupNonce unrelated_conflict: real prepare, journal and ledger (540.324292ms)
+✔ sealed burn full production cleanupNonce approval_reorg: real prepare, journal and ledger (722.53225ms)
+✔ sealed burn full production cleanupNonce cleanup_reorg: real prepare, journal and ledger (1457.309917ms)
+✔ sealed burn full production cleanupNonce final_principal_changed: real prepare, journal and ledger (1440.856666ms)
+✔ sealed burn full production cleanupNonce final_nonce_changed: real prepare, journal and ledger (1316.12625ms)
+✔ sealed burn full production cleanupNonce original_burn_submission_fence: real prepare, journal and ledger (589.332958ms)
+✔ sealed burn full production cleanupNonce original_burn_submitted_once: real prepare, journal and ledger (855.544125ms)
+✔ consumed burn full production cleanupNonce cancelled: real prepare, journal and ledger (1408.660125ms)
+✔ consumed burn full production cleanupNonce finalized: real prepare, journal and ledger (1635.002375ms)
+✔ consumed burn full production cleanupNonce included: real prepare, journal and ledger (2237.552041ms)
+✔ consumed burn full production cleanupNonce lost_reply: real prepare, journal and ledger (1819.46725ms)
+✔ consumed burn full production cleanupNonce changed_again: real prepare, journal and ledger (1422.174208ms)
+✔ consumed burn full production cleanupNonce burn_race: real prepare, journal and ledger (959.889959ms)
+✔ consumed burn full production cleanupNonce principal_changed: real prepare, journal and ledger (1033.751958ms)
+✔ consumed burn full production cleanupNonce fee_cap: real prepare, journal and ledger (1347.703458ms)
+✔ consumed burn full production cleanupNonce tty_expired: real prepare, journal and ledger (1282.970041ms)
+✔ consumed burn full production cleanupNonce after_sign_expired: real prepare, journal and ledger (1443.554542ms)
+✔ consumed burn full production cleanupNonce tls_expired: real prepare, journal and ledger (1608.932333ms)
+✔ consumed burn full production cleanupNonce policy_expired: real prepare, journal and ledger (899.031833ms)
+✔ consumed burn full production cleanupNonce missing_native: real prepare, journal and ledger (986.815708ms)
+✔ consumed burn full production cleanupNonce unrelated_conflict: real prepare, journal and ledger (717.55125ms)
+✔ consumed burn full production cleanupNonce approval_reorg: real prepare, journal and ledger (1034.05625ms)
+✔ consumed burn full production cleanupNonce cleanup_reorg: real prepare, journal and ledger (1784.075792ms)
+✔ consumed burn full production cleanupNonce final_principal_changed: real prepare, journal and ledger (2180.7585ms)
+✔ consumed burn full production cleanupNonce final_nonce_changed: real prepare, journal and ledger (1617.479667ms)
+✔ consumed burn full production cleanupNonce original_burn_submission_fence: real prepare, journal and ledger (898.402625ms)
+✔ consumed burn full production cleanupNonce original_burn_submitted_once: real prepare, journal and ledger (1077.940375ms)
+✔ consumed burn full production cleanupNonce consumer_missing: real prepare, journal and ledger (1272.886583ms)
+✔ consumed burn full production cleanupNonce consumer_included: real prepare, journal and ledger (1226.923541ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_nonce: real prepare, journal and ledger (1219.552458ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_sender: real prepare, journal and ledger (1349.046083ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_chain: real prepare, journal and ledger (1387.45775ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_input: real prepare, journal and ledger (2035.796334ms)
+✔ consumed burn full production cleanupNonce consumer_token_log: real prepare, journal and ledger (2038.263459ms)
+✔ consumed burn full production cleanupNonce consumer_auth: real prepare, journal and ledger (4007.699292ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_membership: real prepare, journal and ledger (3340.988542ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_index: real prepare, journal and ledger (4523.063708ms)
+✔ consumed burn full production cleanupNonce consumer_zero_head: real prepare, journal and ledger (2684.64375ms)
+✔ consumed burn full production cleanupNonce consumer_old_time: real prepare, journal and ledger (1975.055791ms)
+✔ consumed burn full production cleanupNonce consumer_current_zero_head: real prepare, journal and ledger (2662.15325ms)
+✔ consumed burn full production cleanupNonce consumer_reorg: real prepare, journal and ledger (1686.757459ms)
+✔ consumed burn full production cleanupNonce consumer_reanchor: real prepare, journal and ledger (2146.269959ms)
+✔ consumed burn full production cleanupNonce archive_missing: real prepare, journal and ledger (1692.174459ms)
+✔ consumed burn full production cleanupNonce nonce_drift: real prepare, journal and ledger (1283.674166ms)
+✔ expired DNS authority produces zero physical POST requests (7.284917ms)
+✔ expired queue authority produces zero physical POST requests after a slot frees (4.250792ms)
+✔ expired TLS authority writes no POST body; valid TLS authority writes exact bytes once (1.666042ms)
+✔ Circle raw-send RPC requires a private dispatch guard before touching transport (0.456083ms)
+✔ one-millisecond bound policy expiration after DNS or TLS writes zero signed POST bytes (1.313666ms)
+✔ full actual Iris COMPLETE response passes runtime API parsing and real enabled-attester signatures (83.730459ms)
+✔ each mint preflight verifies both chains once and passes its fresh digest to current attesters (34.976917ms)
+✔ explicit nonce cleanup signs/sends one different approve0; finalized proof retires holds without changing original historical material (219.664ms)
+✔ restored valid original journal cannot sign or send another cleanup; permanent original tombstone survives restoration (152.359125ms)
+✔ existing cleanup cannot use zero allowance to cancel an unknown sealed approval (57.752667ms)
+✔ retirement rejects burn_attempt before signature or dispatch (39.048083ms)
+✔ retirement rejects unexpired before signature or dispatch (31.489292ms)
+✔ retirement rejects wrong_chain before signature or dispatch (52.662417ms)
+✔ retirement rejects wrong_nonce before signature or dispatch (46.56825ms)
+✔ retirement rejects wrong_spender before signature or dispatch (37.380625ms)
+✔ retirement rejects full_fee before signature or dispatch (41.168583ms)
+✔ retirement included retains holds and never resends (152.317292ms)
+✔ retirement missing_finalized_nonce_proof retains holds and never resends (155.166791ms)
+✔ retirement forged_nonce_proof retains holds and never resends (173.182166ms)
+✔ retirement old_approval_wins_race retains holds and never resends (114.577125ms)
+✔ retirement policy_change retains holds and never resends (41.30475ms)
+✔ retirement unrelated_conflict retains holds and never resends (37.063625ms)
+✔ retirement tty_expiry retains holds and never resends (80.441625ms)
+✔ retirement postsign_expiry retains holds and never resends (178.122334ms)
+✔ retirement lost_rpc retains holds and never resends (172.217167ms)
+✔ production custody rejects original restored signer and cleanup without durable sign claim before key access (69.887583ms)
+✔ ordinary observation of an intent persisted before cancelled TTY cannot grant financial start (95.805208ms)
+✔ real private retirement guard expiring at TLS after durable SEND claim writes zero POST bytes and never retries (191.260125ms)
+✔ expiration between SIGN claim and custody signing produces zero signatures and no send (139.248333ms)
+✔ fresh current authority is create-only, parent-bound and distinct from historical r33 policies (126.511167ms)
+✔ retirement current policy window refuses expired or backwards-clock grants (79.554917ms)
+✔ restored or replaced authority sidecar cannot refresh permanent claims (188.89025ms)
+✔ full production cleanupNonce cancelled: real prepare, journal and ledger (1480.391792ms)
+✔ full production cleanupNonce finalized: real prepare, journal and ledger (2948.725708ms)
+✔ full production cleanupNonce changed_again: real prepare, journal and ledger (1286.876875ms)
+✔ full production cleanupNonce burn_attempt: real prepare, journal and ledger (731.237166ms)
+✔ policy scope 143: distinct/same profiles deduplicate; reads do not reacquire held locks (294.180667ms)
+✔ policy scope 1329: distinct/same profiles deduplicate; reads do not reacquire held locks (144.027084ms)
+✔ revoked waits for the entire two-owner execution policy scope (262.377ms)
+✔ active waits for the entire two-owner execution policy scope (318.639417ms)
+✔ changed activation before acquisition refuses the frozen grant; absence cannot grant legacy dispatch (290.344ms)
+✔ opposite profile ordering shares canonical locks without deadlock or concurrent scopes (338.51875ms)
+✔ policy expiration while waiting for locks refuses before any financial continuation (296.957958ms)
+✔ async work inherited from an ended scope cannot perform policy reads (167.127166ms)
+✔ held USDC and 75T source capacity are re-admitted without counting the same reservation twice (421.683542ms)
+✔ seller Sei uses the exact destination activation and native policy hold (378.574709ms)
+✔ authorization deadline is the earliest exact locked source/destination policy window (158.364041ms)
+✔ an owner registry without an end has no policy deadline and does not mint authority outside its scope (196.090791ms)
+✔ expired owner policy can release only the existing proven-unspent reservation outcome (427.455958ms)
+✔ fresh compatible current cleanup activation admits historical holds without rebinding the parent (425.043208ms)
+✔ current cleanup authority refuses missing_native with actual policy/ledger state (523.778375ms)
+✔ current cleanup authority refuses wrong_owner with actual policy/ledger state (630.839125ms)
+✔ current cleanup authority refuses closed_hold with actual policy/ledger state (467.366791ms)
+✔ finite 1329: exact source bytes, enabled issuer attestation, canonical mint (16.060458ms)
+✔ finite 59144: exact source bytes, enabled issuer attestation, canonical mint (8.398042ms)
+✔ finite 143: exact source bytes, enabled issuer attestation, canonical mint (7.558208ms)
+✔ source guards reject receipt reorg, foreign transaction, duplicate event and noncanonical log membership (1.740791ms)
+✔ immutable header and burn body fields cannot be normalized (0.567ms)
+✔ enabled issuers, sorted canonical signatures and exact API/hash metadata are required (25.799417ms)
+✔ exact allowance approval/reset receipts and native source budget (2.100666ms)
+✔ fast quote uses rational ceil and refuses unavailable, expired or over-cap fees (0.910125ms)
+✔ deployment verification binds implementation plus proxy and reverse token pairs (0.46475ms)
+✔ fast issuer evidence does not turn source inclusion into finalized bridge closure (2.149041ms)
+✔ actual V2 issuer eventNonce is strict bytes32 and bound to the signed raw nonce (14.012ms)
+✔ lost broadcast holds a durable submission fence and explicit replay observes without signing or sending (9.117542ms)
+✔ crash immediately after signing mark cannot re-enter custody even if no sealed bytes were saved (1.562792ms)
+✔ unknown signing can recover encrypted material only for observation (2.170958ms)
+✔ issuer Fast attestation permits one mint while source finality pending, but cannot complete or finalize usage (22.842333ms)
+✔ source reorg refuses mint and preserves all holds (10.086958ms)
+✔ both Circle account domains are exposed to shared cross-rail conflicts and global idempotency (73.392208ms)
+✔ journal forbids source nonce, fee ceiling, destination payer and terminal-finality forgery (1.072708ms)
+✔ shared profile and operation locks allow exactly one concurrent financial claim (190.936542ms)
+✔ destination safe mint leaves usage held until independently finalized source is observed (20.18975ms)
+✔ only a canonical finalized reverted source effect can enter explicit cleanup (7.926167ms)
+✔ a different Circle route queues after source inclusion; other money rails retain the source hold (49.720584ms)
+✔ unsubmitted explicit cancellation releases reserves only after proving no private material and zero allowance (2.534708ms)
+✔ runtime bytecode has the EIP-170 bound while wire fields retain their narrower bound (0.56ms)
+✔ expired TTY and first preflight fail before any private marker (2.36525ms)
+✔ expiry after signing or submission fences becomes unknown and never signs or sends again (15.567584ms)
+✔ private consent cannot be forged, reused after controller return or applied to another effect (2.885166ms)
+✔ mint and no-effect cancellation have fresh finite TTY authority (8.10575ms)
+✔ bound policy expiry at either preflight prevents dispatch even after all policy confirmations (3.876125ms)
+✔ policy expiry after a submission fence or queued dispatch remains observation-only (8.179167ms)
+✔ later or absent owner policy expiry preserves the finite sixty-second TTY bound (1.282667ms)
+✔ expired or revised policy cannot prevent proven-unsubmitted cancellation or grant a financial exemption (8.465292ms)
+✔ saved included source with pending finality acquires fresh issuer proof without closing holds (7.028ms)
+✔ pending-finality fallback requires exact fresh canonical source and never manufactures issuer proof (7.854875ms)
+✔ saved finalized source cannot use included fallback to mask absent finalized canonical proof (5.751417ms)
+✔ finalized Linea mint scopes conflicts to its destination payer without freeing any source unknown holds (311.159875ms)
+✔ Sei seller is a finite profile/account variant; historical buyer/default selectors remain identical (0.959834ms)
+✔ frozen seller profile and custody bind strict journal/nonce/fee while old absent metadata hashes are unchanged (3.606ms)
+✔ seller account preflight cannot authorize buyer, arbitrary payer, non-Sei or wrong profile (0.212208ms)
+✔ same pinned burn and issuer attestation mint canonical USDC only through the frozen seller variant (14.407125ms)
+✔ normal CLI has the explicit finite seller selector (0.255042ms)
+✔ one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields (2.924791ms)
+✔ root, every group and every leaf have identical prefix/suffix text discovery (5.078708ms)
+✔ status and receipt discovery disclose possible local recovery writes in CLI and MCP (3.748958ms)
+✔ stable observation discovery discloses durable operation and principal writes (2.129083ms)
+✔ group help renders exact subgroup usages and complete leaf synopses (0.236291ms)
+✔ machine discovery emits the exact complete manifest as one raw JSON value (3.416375ms)
+✔ invalid discovery and operational usage return bounded catalog-only guidance without reflecting argv (0.99975ms)
+✔ catalog parser derives requiredness, defaults, duplicate rejection and scalar constraints for every command (18.229542ms)
+✔ catalog-declared x402 policy ceiling is enforced before request binding (0.202667ms)
+✔ HTTPS parser constraints preserve RPC compatibility and match canonical bounded x402 policy (7.327459ms)
+✔ manifest validator and compatibility gate reject every declared structural or semantic drift class (56.732459ms)
+✔ README command block and package/build identity are mechanically identical to the catalog (18.147ms)
+✔ actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile (2264.604709ms)
+✔ actual compiled Stargate status needs no RPC environment and creates no state (1328.034416ms)
+✔ actual compiled discovery is raw and no-effect with empty or unwritable caller HOME (9514.103792ms)
+✔ wallet status for an absent unique profile is read-only before initialization, locks, native or Keychain (56.529291ms)
+✖ official MCP client proves production stdio descriptor, the exact tool set, application failures and clean close (2318.294916ms)
+✖ manifest projection is exact, strict and rejects missing, colliding or unsupported selected metadata (2.756916ms)
+✔ MCP runtime preserves wallet lifecycle, reads, balance and one core execution per valid call (207.670166ms)
+✔ direct MCP approval returns the exact foreground handoff before custody and ignores hostile native injection (911.801458ms)
+✔ MCP policy creation and increases fail closed before write while a pure decrease is allowed (241.56425ms)
+✔ MCP failures classify raw errors without leaking protected material (22.828625ms)
+✔ MCP dependencies are exact and package lockfiles are byte-identical (6.309583ms)
+✔ Circle financial MCP tools return exact foreground CLI handoff before runtime entry (1.835209ms)
+ℹ tests 176
+ℹ suites 0
+ℹ pass 174
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 134211.711125
+
+✖ failing tests:
+
+test at dist-test-consumed/tests/core/mcp.test.js:123:1
+✖ official MCP client proves production stdio descriptor, the exact tool set, application failures and clean close (2318.294916ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'apn_circle_evm_adopt_external_mint',
+      'apn_circle_evm_prepare',
+      'apn_circle_evm_approve_source',
+      'apn_circle_evm_approve_mint',
+      'apn_circle_evm_observe',
+      'apn_circle_evm_refresh_attestation',
+  
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-consumed-nonce-cleanup-20261009/dist-test-consumed/tests/core/mcp.test.js:142:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [
+      'apn_circle_evm_adopt_external_mint',      'apn_circle_evm_prepare',
+      'apn_circle_evm_approve_source',           'apn_circle_evm_approve_mint',
+      'apn_circle_evm_observe',                  'apn_circle_evm_refresh_attestation',
+      'apn_circle_evm_cleanup',                  'apn_circle_evm_cleanup_nonce',
+      'apn_circle_evm_status',                   'apn_swap_ethereum_uniswap_inventory',
+      'apn_swap_ethereum_uniswap_quote',         'apn_swap_ethereum_uniswap_prepare',
+      'apn_swap_ethereum_uniswap_status',        'apn_swap_ethereum_uniswap_approve',
+      'apn_swap_ethereum_uniswap_execute',       'apn_swap_ethereum_uniswap_token_inventory',
+      'apn_swap_ethereum_uniswap_token_quote',   'apn_swap_ethereum_uniswap_token_prepare',
+      'apn_swap_ethereum_uniswap_token_status',  'apn_swap_ethereum_uniswap_token_approve',
+      'apn_swap_ethereum_uniswap_token_execute', 'apn_swap_ethereum_uniswap_token_cleanup',
+      'apn_swap_tron_sunswap_inventory',         'apn_swap_tron_sunswap_quote',
+      'apn_swap_tron_sunswap_prepare',           'apn_swap_tron_sunswap_status',
+      'apn_swap_tron_sunswap_approve',           'apn_swap_tron_sunswap_execute',
+      'apn_swap_solana_jupiter_inventory',       'apn_swap_solana_jupiter_quote',
+      'apn_swap_solana_jupiter_prepare',         'apn_swap_solana_jupiter_status',
+      'apn_swap_solana_jupiter_approve',         'apn_swap_solana_jupiter_execute',
+      'apn_swap_solana_orca_stable_inventory',   'apn_swap_solana_orca_stable_quote',
+      'apn_swap_solana_orca_stable_prepare',     'apn_swap_solana_orca_stable_status',
+      'apn_swap_solana_orca_stable_approve',     'apn_swap_solana_orca_stable_execute',
+      'apn_swap_solana_orca_stable_release',     'apn_swap_solana_orca_stable_recover_no_send',
+      'apn_swap_solana_orca_stable_observe',     'apn_swap_solana_orca_inventory',
+      'apn_swap_solana_orca_quote',              'apn_swap_solana_orca_prepare',
+      'apn_swap_solana_orca_status',             'apn_swap_solana_orca_approve',
+      'apn_swap_solana_orca_execute',            'apn_allowlist_inventory',
+      'apn_allowlist_resolve',                   'apn_allowlist_policy_prepare',
+      'apn_allowlist_policy_stage',              'apn_allowlist_policy_activate',
+      'apn_allowlist_policy_revoke',             'apn_allowlist_policy_status',
+      'apn_version',                             'apn_doctor_keychain',
+      'apn_wallet_ensure',                       'apn_wallet_connect',
+      'apn_wallet_permission_list',              'apn_wallet_permission_sync',
+      'apn_wallet_permission_disable',           'apn_wallet_permission_forget',
+      'apn_wallet_status',                       'apn_wallet_balance',
+      'apn_wallet_balance_asset',                'apn_wallet_portfolio',
+      'apn_wallet_ensure_solana',                'apn_wallet_balance_solana',
+      'apn_wallet_capabilities_solana',          'apn_policy_admit_solana',
+      'apn_pay_transfer_prepare_solana',         'apn_wallet_ensure_tron',
+      'apn_wallet_balance_tron',                 'apn_wallet_capabilities_tron',
+      'apn_policy_admit_tron',                   'apn_pay_transfer_prepare_tron',
+      'apn_wallet_policy_show',                  'apn_wallet_policy_set',
+      'apn_x402_permit2_status',                 'apn_x402_merchant_prepare',
+      'apn_x402_merchant_approve',               'apn_x402_merchant_observe',
+      'apn_x402_merchant_status',                'apn_x402_merchant_retire_unsent',
+      'apn_x402_inspect',                        'apn_x402_fetch_prepare',
+      'apn_x402_fetch_approve',                  'apn_pay_transfer_prepare',
+      'apn_pay_transfer_prepare_asset',          'apn_pay_transfer_approve',
+      'apn_operation_status',                    'apn_operation_repair_deployment',
+      'apn_operation_abandon',                   'apn_operation_resume',
+      'apn_operation_recover_provider_request',  'apn_operation_recover_transaction_settlement',
+      'apn_receipt_get',                         'apn_wallet_policy_show_network',
+      ... 19 more items
+    ],
+    expected: [
+      'apn_circle_evm_prepare',                       'apn_circle_evm_approve_source',
+      'apn_circle_evm_approve_mint',                  'apn_circle_evm_observe',
+      'apn_circle_evm_refresh_attestation',           'apn_circle_evm_cleanup',
+      'apn_circle_evm_cleanup_nonce',                 'apn_circle_evm_status',
+      'apn_swap_ethereum_uniswap_inventory',          'apn_swap_ethereum_uniswap_quote',
+      'apn_swap_ethereum_uniswap_prepare',            'apn_swap_ethereum_uniswap_status',
+      'apn_swap_ethereum_uniswap_approve',            'apn_swap_ethereum_uniswap_execute',
+      'apn_swap_ethereum_uniswap_token_inventory',    'apn_swap_ethereum_uniswap_token_quote',
+      'apn_swap_ethereum_uniswap_token_prepare',      'apn_swap_ethereum_uniswap_token_status',
+      'apn_swap_ethereum_uniswap_token_approve',      'apn_swap_ethereum_uniswap_token_execute',
+      'apn_swap_ethereum_uniswap_token_cleanup',      'apn_swap_tron_sunswap_inventory',
+      'apn_swap_tron_sunswap_quote',                  'apn_swap_tron_sunswap_prepare',
+      'apn_swap_tron_sunswap_status',                 'apn_swap_tron_sunswap_approve',
+      'apn_swap_tron_sunswap_execute',                'apn_swap_solana_jupiter_inventory',
+      'apn_swap_solana_jupiter_quote',                'apn_swap_solana_jupiter_prepare',
+      'apn_swap_solana_jupiter_status',               'apn_swap_solana_jupiter_approve',
+      'apn_swap_solana_jupiter_execute',              'apn_swap_solana_orca_stable_inventory',
+      'apn_swap_solana_orca_stable_quote',            'apn_swap_solana_orca_stable_prepare',
+      'apn_swap_solana_orca_stable_status',           'apn_swap_solana_orca_stable_approve',
+      'apn_swap_solana_orca_stable_execute',          'apn_swap_solana_orca_stable_release',
+      'apn_swap_solana_orca_stable_recover_no_send',  'apn_swap_solana_orca_stable_observe',
+      'apn_swap_solana_orca_inventory',               'apn_swap_solana_orca_quote',
+      'apn_swap_solana_orca_prepare',                 'apn_swap_solana_orca_status',
+      'apn_swap_solana_orca_approve',                 'apn_swap_solana_orca_execute',
+      'apn_allowlist_inventory',                      'apn_allowlist_resolve',
+      'apn_allowlist_policy_prepare',                 'apn_allowlist_policy_stage',
+      'apn_allowlist_policy_activate',                'apn_allowlist_policy_revoke',
+      'apn_allowlist_policy_status',                  'apn_version',
+      'apn_doctor_keychain',                          'apn_wallet_ensure',
+      'apn_wallet_connect',                           'apn_wallet_permission_list',
+      'apn_wallet_permission_sync',                   'apn_wallet_permission_disable',
+      'apn_wallet_permission_forget',                 'apn_wallet_status',
+      'apn_wallet_balance',                           'apn_wallet_balance_asset',
+      'apn_wallet_portfolio',                         'apn_wallet_ensure_solana',
+      'apn_wallet_balance_solana',                    'apn_wallet_capabilities_solana',
+      'apn_policy_admit_solana',                      'apn_pay_transfer_prepare_solana',
+      'apn_wallet_ensure_tron',                       'apn_wallet_balance_tron',
+      'apn_wallet_capabilities_tron',                 'apn_policy_admit_tron',
+      'apn_pay_transfer_prepare_tron',                'apn_wallet_policy_show',
+      'apn_wallet_policy_set',                        'apn_x402_permit2_status',
+      'apn_x402_merchant_prepare',                    'apn_x402_merchant_approve',
+      'apn_x402_merchant_observe',                    'apn_x402_merchant_status',
+      'apn_x402_merchant_retire_unsent',              'apn_x402_inspect',
+      'apn_x402_fetch_prepare',                       'apn_x402_fetch_approve',
+      'apn_pay_transfer_prepare',                     'apn_pay_transfer_prepare_asset',
+      'apn_pay_transfer_approve',                     'apn_operation_status',
+      'apn_operation_repair_deployment',              'apn_operation_abandon',
+      'apn_operation_resume',                         'apn_operation_recover_provider_request',
+      'apn_operation_recover_transaction_settlement', 'apn_receipt_get',
+      'apn_wallet_policy_show_network',               'apn_wallet_policy_set_network',
+      ... 18 more items
+    ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at dist-test-consumed/tests/core/mcp.test.js:332:1
+✖ manifest projection is exact, strict and rejects missing, colliding or unsupported selected metadata (2.756916ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   'apn_circle_evm_adopt_external_mint',
+      'apn_circle_evm_prepare',
+      'apn_circle_evm_approve_source',
+      'apn_circle_evm_approve_mint',
+      'apn_circle_evm_observe',
+      'apn_circle_evm_refresh_attestation',
+  
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-consumed-nonce-cleanup-20261009/dist-test-consumed/tests/core/mcp.test.js:334:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [
+      'apn_circle_evm_adopt_external_mint',      'apn_circle_evm_prepare',
+      'apn_circle_evm_approve_source',           'apn_circle_evm_approve_mint',
+      'apn_circle_evm_observe',                  'apn_circle_evm_refresh_attestation',
+      'apn_circle_evm_cleanup',                  'apn_circle_evm_cleanup_nonce',
+      'apn_circle_evm_status',                   'apn_swap_ethereum_uniswap_inventory',
+      'apn_swap_ethereum_uniswap_quote',         'apn_swap_ethereum_uniswap_prepare',
+      'apn_swap_ethereum_uniswap_status',        'apn_swap_ethereum_uniswap_approve',
+      'apn_swap_ethereum_uniswap_execute',       'apn_swap_ethereum_uniswap_token_inventory',
+      'apn_swap_ethereum_uniswap_token_quote',   'apn_swap_ethereum_uniswap_token_prepare',
+      'apn_swap_ethereum_uniswap_token_status',  'apn_swap_ethereum_uniswap_token_approve',
+      'apn_swap_ethereum_uniswap_token_execute', 'apn_swap_ethereum_uniswap_token_cleanup',
+      'apn_swap_tron_sunswap_inventory',         'apn_swap_tron_sunswap_quote',
+      'apn_swap_tron_sunswap_prepare',           'apn_swap_tron_sunswap_status',
+      'apn_swap_tron_sunswap_approve',           'apn_swap_tron_sunswap_execute',
+      'apn_swap_solana_jupiter_inventory',       'apn_swap_solana_jupiter_quote',
+      'apn_swap_solana_jupiter_prepare',         'apn_swap_solana_jupiter_status',
+      'apn_swap_solana_jupiter_approve',         'apn_swap_solana_jupiter_execute',
+      'apn_swap_solana_orca_stable_inventory',   'apn_swap_solana_orca_stable_quote',
+      'apn_swap_solana_orca_stable_prepare',     'apn_swap_solana_orca_stable_status',
+      'apn_swap_solana_orca_stable_approve',     'apn_swap_solana_orca_stable_execute',
+      'apn_swap_solana_orca_stable_release',     'apn_swap_solana_orca_stable_recover_no_send',
+      'apn_swap_solana_orca_stable_observe',     'apn_swap_solana_orca_inventory',
+      'apn_swap_solana_orca_quote',              'apn_swap_solana_orca_prepare',
+      'apn_swap_solana_orca_status',             'apn_swap_solana_orca_approve',
+      'apn_swap_solana_orca_execute',            'apn_allowlist_inventory',
+      'apn_allowlist_resolve',                   'apn_allowlist_policy_prepare',
+      'apn_allowlist_policy_stage',              'apn_allowlist_policy_activate',
+      'apn_allowlist_policy_revoke',             'apn_allowlist_policy_status',
+      'apn_version',                             'apn_doctor_keychain',
+      'apn_wallet_ensure',                       'apn_wallet_connect',
+      'apn_wallet_permission_list',              'apn_wallet_permission_sync',
+      'apn_wallet_permission_disable',           'apn_wallet_permission_forget',
+      'apn_wallet_status',                       'apn_wallet_balance',
+      'apn_wallet_balance_asset',                'apn_wallet_portfolio',
+      'apn_wallet_ensure_solana',                'apn_wallet_balance_solana',
+      'apn_wallet_capabilities_solana',          'apn_policy_admit_solana',
+      'apn_pay_transfer_prepare_solana',         'apn_wallet_ensure_tron',
+      'apn_wallet_balance_tron',                 'apn_wallet_capabilities_tron',
+      'apn_policy_admit_tron',                   'apn_pay_transfer_prepare_tron',
+      'apn_wallet_policy_show',                  'apn_wallet_policy_set',
+      'apn_x402_permit2_status',                 'apn_x402_merchant_prepare',
+      'apn_x402_merchant_approve',               'apn_x402_merchant_observe',
+      'apn_x402_merchant_status',                'apn_x402_merchant_retire_unsent',
+      'apn_x402_inspect',                        'apn_x402_fetch_prepare',
+      'apn_x402_fetch_approve',                  'apn_pay_transfer_prepare',
+      'apn_pay_transfer_prepare_asset',          'apn_pay_transfer_approve',
+      'apn_operation_status',                    'apn_operation_repair_deployment',
+      'apn_operation_abandon',                   'apn_operation_resume',
+      'apn_operation_recover_provider_request',  'apn_operation_recover_transaction_settlement',
+      'apn_receipt_get',                         'apn_wallet_policy_show_network',
+      ... 19 more items
+    ],
+    expected: [
+      'apn_circle_evm_prepare',                       'apn_circle_evm_approve_source',
+      'apn_circle_evm_approve_mint',                  'apn_circle_evm_observe',
+      'apn_circle_evm_refresh_attestation',           'apn_circle_evm_cleanup',
+      'apn_circle_evm_cleanup_nonce',                 'apn_circle_evm_status',
+      'apn_swap_ethereum_uniswap_inventory',          'apn_swap_ethereum_uniswap_quote',
+      'apn_swap_ethereum_uniswap_prepare',            'apn_swap_ethereum_uniswap_status',
+      'apn_swap_ethereum_uniswap_approve',            'apn_swap_ethereum_uniswap_execute',
+      'apn_swap_ethereum_uniswap_token_inventory',    'apn_swap_ethereum_uniswap_token_quote',
+      'apn_swap_ethereum_uniswap_token_prepare',      'apn_swap_ethereum_uniswap_token_status',
+      'apn_swap_ethereum_uniswap_token_approve',      'apn_swap_ethereum_uniswap_token_execute',
+      'apn_swap_ethereum_uniswap_token_cleanup',      'apn_swap_tron_sunswap_inventory',
+      'apn_swap_tron_sunswap_quote',                  'apn_swap_tron_sunswap_prepare',
+      'apn_swap_tron_sunswap_status',                 'apn_swap_tron_sunswap_approve',
+      'apn_swap_tron_sunswap_execute',                'apn_swap_solana_jupiter_inventory',
+      'apn_swap_solana_jupiter_quote',                'apn_swap_solana_jupiter_prepare',
+      'apn_swap_solana_jupiter_status',               'apn_swap_solana_jupiter_approve',
+      'apn_swap_solana_jupiter_execute',              'apn_swap_solana_orca_stable_inventory',
+      'apn_swap_solana_orca_stable_quote',            'apn_swap_solana_orca_stable_prepare',
+      'apn_swap_solana_orca_stable_status',           'apn_swap_solana_orca_stable_approve',
+      'apn_swap_solana_orca_stable_execute',          'apn_swap_solana_orca_stable_release',
+      'apn_swap_solana_orca_stable_recover_no_send',  'apn_swap_solana_orca_stable_observe',
+      'apn_swap_solana_orca_inventory',               'apn_swap_solana_orca_quote',
+      'apn_swap_solana_orca_prepare',                 'apn_swap_solana_orca_status',
+      'apn_swap_solana_orca_approve',                 'apn_swap_solana_orca_execute',
+      'apn_allowlist_inventory',                      'apn_allowlist_resolve',
+      'apn_allowlist_policy_prepare',                 'apn_allowlist_policy_stage',
+      'apn_allowlist_policy_activate',                'apn_allowlist_policy_revoke',
+      'apn_allowlist_policy_status',                  'apn_version',
+      'apn_doctor_keychain',                          'apn_wallet_ensure',
+      'apn_wallet_connect',                           'apn_wallet_permission_list',
+      'apn_wallet_permission_sync',                   'apn_wallet_permission_disable',
+      'apn_wallet_permission_forget',                 'apn_wallet_status',
+      'apn_wallet_balance',                           'apn_wallet_balance_asset',
+      'apn_wallet_portfolio',                         'apn_wallet_ensure_solana',
+      'apn_wallet_balance_solana',                    'apn_wallet_capabilities_solana',
+      'apn_policy_admit_solana',                      'apn_pay_transfer_prepare_solana',
+      'apn_wallet_ensure_tron',                       'apn_wallet_balance_tron',
+      'apn_wallet_capabilities_tron',                 'apn_policy_admit_tron',
+      'apn_pay_transfer_prepare_tron',                'apn_wallet_policy_show',
+      'apn_wallet_policy_set',                        'apn_x402_permit2_status',
+      'apn_x402_merchant_prepare',                    'apn_x402_merchant_approve',
+      'apn_x402_merchant_observe',                    'apn_x402_merchant_status',
+      'apn_x402_merchant_retire_unsent',              'apn_x402_inspect',
+      'apn_x402_fetch_prepare',                       'apn_x402_fetch_approve',
+      'apn_pay_transfer_prepare',                     'apn_pay_transfer_prepare_asset',
+      'apn_pay_transfer_approve',                     'apn_operation_status',
+      'apn_operation_repair_deployment',              'apn_operation_abandon',
+      'apn_operation_resume',                         'apn_operation_recover_provider_request',
+      'apn_operation_recover_transaction_settlement', 'apn_receipt_get',
+      'apn_wallet_policy_show_network',               'apn_wallet_policy_set_network',
+      ... 18 more items
+    ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

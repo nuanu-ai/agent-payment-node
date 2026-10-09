@@ -1,0 +1,46 @@
+✔ consumed burn full production cleanupNonce cancelled: real prepare, journal and ledger (1255.3855ms)
+✔ consumed burn full production cleanupNonce restored_zero_evidence: real prepare, journal and ledger (1271.5765ms)
+✔ consumed burn full production cleanupNonce finalized: real prepare, journal and ledger (2419.247417ms)
+✔ consumed burn full production cleanupNonce included: real prepare, journal and ledger (3397.049708ms)
+✔ consumed burn full production cleanupNonce lost_reply: real prepare, journal and ledger (3237.587917ms)
+✔ consumed burn full production cleanupNonce changed_again: real prepare, journal and ledger (1743.664833ms)
+✔ consumed burn full production cleanupNonce burn_race: real prepare, journal and ledger (1581.929333ms)
+✔ consumed burn full production cleanupNonce principal_changed: real prepare, journal and ledger (1742.902834ms)
+✔ consumed burn full production cleanupNonce fee_cap: real prepare, journal and ledger (920.892208ms)
+✔ consumed burn full production cleanupNonce tty_expired: real prepare, journal and ledger (1191.445875ms)
+✔ consumed burn full production cleanupNonce after_sign_expired: real prepare, journal and ledger (2487.275917ms)
+✔ consumed burn full production cleanupNonce tls_expired: real prepare, journal and ledger (1516.8735ms)
+✔ consumed burn full production cleanupNonce policy_expired: real prepare, journal and ledger (879.257875ms)
+✔ consumed burn full production cleanupNonce missing_native: real prepare, journal and ledger (1020.035458ms)
+✔ consumed burn full production cleanupNonce unrelated_conflict: real prepare, journal and ledger (1038.104083ms)
+✔ consumed burn full production cleanupNonce approval_reorg: real prepare, journal and ledger (1176.769ms)
+✔ consumed burn full production cleanupNonce cleanup_reorg: real prepare, journal and ledger (1629.818958ms)
+✔ consumed burn full production cleanupNonce final_principal_changed: real prepare, journal and ledger (1893.330917ms)
+✔ consumed burn full production cleanupNonce final_nonce_changed: real prepare, journal and ledger (1842.323125ms)
+✔ consumed burn full production cleanupNonce original_burn_submission_fence: real prepare, journal and ledger (872.309834ms)
+✔ consumed burn full production cleanupNonce original_burn_submitted_once: real prepare, journal and ledger (1151.321458ms)
+✔ consumed burn full production cleanupNonce consumer_missing: real prepare, journal and ledger (1381.192083ms)
+✔ consumed burn full production cleanupNonce consumer_included: real prepare, journal and ledger (1314.162209ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_nonce: real prepare, journal and ledger (1538.810833ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_sender: real prepare, journal and ledger (1535.243291ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_chain: real prepare, journal and ledger (1793.220916ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_input: real prepare, journal and ledger (1262.368ms)
+✔ consumed burn full production cleanupNonce consumer_token_log: real prepare, journal and ledger (1266.979792ms)
+✔ consumed burn full production cleanupNonce consumer_auth: real prepare, journal and ledger (1240.158417ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_membership: real prepare, journal and ledger (1267.027542ms)
+✔ consumed burn full production cleanupNonce consumer_wrong_index: real prepare, journal and ledger (1313.933042ms)
+✔ consumed burn full production cleanupNonce consumer_zero_head: real prepare, journal and ledger (1455.622791ms)
+✔ consumed burn full production cleanupNonce consumer_old_time: real prepare, journal and ledger (1448.777708ms)
+✔ consumed burn full production cleanupNonce consumer_current_zero_head: real prepare, journal and ledger (987.82975ms)
+✔ consumed burn full production cleanupNonce consumer_reorg: real prepare, journal and ledger (1046.190541ms)
+✔ consumed burn full production cleanupNonce consumer_reanchor: real prepare, journal and ledger (951.235417ms)
+✔ consumed burn full production cleanupNonce archive_missing: real prepare, journal and ledger (992.142542ms)
+✔ consumed burn full production cleanupNonce nonce_drift: real prepare, journal and ledger (1266.52025ms)
+ℹ tests 38
+ℹ suites 0
+ℹ pass 38
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 57011.784666

@@ -1,8 +1,10 @@
+import { type ConsumedBurnEvidence } from "./consumed-burn-rpc.js";
 import type { SealedBurnEvidence } from "./burn-retirement-rpc.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { type CircleEnvelope, type CircleOperationV1 } from "./operation-model.js";
 export interface CircleNonceRetirementIntent {
-    readonly version: "apn.circle-nonce-retirement.v1" | "apn.circle-burn-nonce-retirement.v1";
+    readonly version: "apn.circle-nonce-retirement.v1" | "apn.circle-burn-nonce-retirement.v1" | "apn.circle-consumed-burn-retirement.v1";
+    readonly consumedBurn?: ConsumedBurnEvidence;
     readonly sealedBurn?: SealedBurnEvidence;
     readonly operationId: string;
     readonly binding: string;
@@ -15,7 +17,7 @@ export declare function circleRetirementBinding(op: CircleOperationV1): string;
 export declare class CircleNonceRetirementStore extends SecureStateStore {
     private path;
     intent(op: CircleOperationV1): Promise<CircleNonceRetirementIntent | null>;
-    start(op: CircleOperationV1, cleanupEnvelope: CircleEnvelope, sealedBurn?: SealedBurnEvidence): Promise<CircleNonceRetirementIntent>;
+    start(op: CircleOperationV1, cleanupEnvelope: CircleEnvelope, sealedBurn?: SealedBurnEvidence, consumedBurn?: ConsumedBurnEvidence): Promise<CircleNonceRetirementIntent>;
     assertOriginalEffectsAvailable(operationId: string): Promise<void>;
     claim(op: CircleOperationV1, boundary: "sign" | "send"): Promise<void>;
     assertClaim(op: CircleOperationV1, boundary: "sign" | "send"): Promise<void>;

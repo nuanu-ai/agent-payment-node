@@ -1,0 +1,58 @@
+{
+  "capturedAt": "2026-10-09T10:45:09.907458+00:00",
+  "parent": "b909079dbb544bdd0ed8e403fe7da06057c3fccd",
+  "node": "24.15.0",
+  "typescript": "5.9.2",
+  "strictProductionBuild": "PASS",
+  "strictFocusedBuildWithPinnedTypeRoots": "PASS",
+  "skipLibCheckInherited": true,
+  "ownedProductionRuntimeCases": {
+    "tests": 38,
+    "pass": 38,
+    "fail": 0
+  },
+  "oldBranchCircleMcpDiscovery": {
+    "tests": 176,
+    "pass": 174,
+    "fail": 2,
+    "knownInheritedMcpSnapshotFailure": "baseline b909 missing apn_circle_evm_adopt_external_mint expectedtool; root says central e42bd97e9b3cce12f5357f2356c78fc356de9845 fixes it. No snapshot changes here."
+  },
+  "deterministicRepeatEmission": {
+    "files": 2466,
+    "mismatches": [],
+    "byteIdentical": true
+  },
+  "foreignDeclarationNoiseRestoredToParent": [
+    "dist/facilitator-gasless/receipt.d.ts",
+    "dist/facilitator-gasless/schema.d.ts",
+    "dist/facilitator-gasless/service.d.ts",
+    "dist/gasless/catalog.d.ts",
+    "dist/gasless/schema.d.ts",
+    "dist/lifi/non-evm-source-journal.d.ts",
+    "dist/lifi/receipt.d.ts",
+    "dist/lifi/rpc-adapter.d.ts",
+    "dist/lifi/rpc-batch-codec.d.ts",
+    "dist/lifi/schema.d.ts",
+    "dist/lifi/service.d.ts",
+    "dist/metamask-gasless/catalog.d.ts",
+    "dist/metamask-smart-account-vendor.d.ts",
+    "dist/relay/status.d.ts",
+    "dist/x402-network.d.ts"
+  ],
+  "ownedSourceMaxLines": 320,
+  "sourceDigests": {
+    "src/circle-v2-evm/consumed-burn-proof.ts": "6f53567ffb488c22b26d10e7d5929ef0097348807f46e625c781337d8ab5ba2f",
+    "src/circle-v2-evm/consumed-burn-rpc.ts": "03f1efe3466eeff3e1cc40965726e92c5b61c8089c8d037c3188f9c174a626fc",
+    "src/circle-v2-evm/burn-retirement.ts": "04b40c4dfbb30c2cc20f9fe36c381fb9d3b410fd515b23b4e493ed111a8106cf",
+    "src/circle-v2-evm/nonce-retirement-store.ts": "14cc6ed35ca0bbb130e264843b41087ebe5ca370db49d61a15c66c8e33d1fd7f",
+    "src/circle-v2-evm/nonce-retirement-proof.ts": "7ffd4d2f7f3ea5a31b04ef111deefec346a75f157b326296aecc52f22e0ab520",
+    "src/circle-v2-evm/nonce-retirement.ts": "1db7c745d4675a632fab13f78a17c297d0b23519f48216cab939d35a48ec541b",
+    "src/circle-v2-evm/runtime.ts": "14542d9ebb873d8b4bc88698bd2a12bd6fe5a26f721bdcafc7ac0fd951c7e2ca"
+  },
+  "financialEffects": false,
+  "privateProfilesOrPoliciesOrLedgerChanged": false,
+  "originalMaterialsAndSourceClaimsUntouched": true,
+  "headerProofContract": "known canonical RPC hash/number/index4 membership/reanchors/time; no RLP/trie claim",
+  "archiveEndpoint": "https://arbitrum-one-public.nodies.app",
+  "strongHistoricalAllowanceBalanceChecks": "mandatory original approval block and cleanup receipt block; no fallback"
+}

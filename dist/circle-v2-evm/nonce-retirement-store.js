@@ -1,4 +1,6 @@
-import { isSealedBurnRetirement, sealedBurnBinding, assertSealedBurnReplacement } from "./burn-retirement.js";
+import { assertConsumedCleanup } from "./consumed-burn-proof.js";
+import { assertConsumedBurnEvidence } from "./consumed-burn-rpc.js";
+import { isConsumedBurnRetirement, isSealedBurnRetirement, sealedBurnBinding, assertSealedBurnReplacement } from "./burn-retirement.js";
 import { assertSealedBurnEvidence } from "./burn-retirement-proof.js";
 import { CircleRetirementAuthorityStore } from "./nonce-retirement-authority.js";
 import { hashObject, exactKeys, isPlainRecord } from "../canonical.js";
@@ -21,32 +23,40 @@ export class CircleNonceRetirementStore extends SecureStateStore {
         const value = await this.readJson(this.path(op.operationId));
         if (value === null)
             return null;
-        if (!isPlainRecord(value) || !exactKeys(value, ["version", "operationId", "binding", "prefix", "cleanupEnvelope", "intentHash", ...(isSealedBurnRetirement(op) ? ["sealedBurn"] : [])]))
+        if (!isPlainRecord(value) || !exactKeys(value, ["version", "operationId", "binding", "prefix", "cleanupEnvelope", "intentHash", ...(isConsumedBurnRetirement(op) ? ["consumedBurn"] : isSealedBurnRetirement(op) ? ["sealedBurn"] : [])]))
             circleCorrupt("retirement_intent_shape");
         const intent = value, { intentHash, ...body } = intent;
-        if (intent.version !== (isSealedBurnRetirement(op) ? "apn.circle-burn-nonce-retirement.v1" : "apn.circle-nonce-retirement.v1") || intentHash !== hashObject(body) || intent.operationId !== op.operationId || intent.binding !== circleRetirementBinding(op) ||
+        if (intent.version !== (isConsumedBurnRetirement(op) ? "apn.circle-consumed-burn-retirement.v1" : isSealedBurnRetirement(op) ? "apn.circle-burn-nonce-retirement.v1" : "apn.circle-nonce-retirement.v1") || intentHash !== hashObject(body) || intent.operationId !== op.operationId || intent.binding !== circleRetirementBinding(op) ||
             !Array.isArray(intent.prefix) || intent.prefix.length < 5 || intent.prefix.some(x => typeof x !== "string" || !/^[a-f0-9]{64}$/u.test(x)))
             circleCorrupt("retirement_intent_binding");
         validateCircleEnvelope(intent.cleanupEnvelope, "cleanup", op.destinationChain, null, op.destinationProfile);
-        if (intent.cleanupEnvelope.nonceAtomic !== op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic)
+        if (intent.cleanupEnvelope.nonceAtomic !== (isConsumedBurnRetirement(op) ? "85" : op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic))
             circleCorrupt("retirement_nonce_changed");
-        if (isSealedBurnRetirement(op)) {
+        if (isConsumedBurnRetirement(op)) {
+            assertConsumedCleanup(op, intent.cleanupEnvelope);
+            assertConsumedBurnEvidence(intent.consumedBurn, op);
+        }
+        else if (isSealedBurnRetirement(op)) {
             assertSealedBurnReplacement(op, intent.cleanupEnvelope);
             assertSealedBurnEvidence(intent.sealedBurn, op);
         }
         return intent;
     }
-    async start(op, cleanupEnvelope, sealedBurn) {
+    async start(op, cleanupEnvelope, sealedBurn, consumedBurn) {
         const previous = await this.intent(op);
         if (previous !== null)
             return previous;
-        const body = { version: isSealedBurnRetirement(op) ? "apn.circle-burn-nonce-retirement.v1" : "apn.circle-nonce-retirement.v1", ...(sealedBurn === undefined ? {} : { sealedBurn }), operationId: op.operationId, binding: circleRetirementBinding(op),
+        const body = { version: isConsumedBurnRetirement(op) ? "apn.circle-consumed-burn-retirement.v1" : isSealedBurnRetirement(op) ? "apn.circle-burn-nonce-retirement.v1" : "apn.circle-nonce-retirement.v1", ...(sealedBurn === undefined ? {} : { sealedBurn }), ...(consumedBurn === undefined ? {} : { consumedBurn }), operationId: op.operationId, binding: circleRetirementBinding(op),
             prefix: op.transitions.map(x => x.snapshotHash), cleanupEnvelope };
         const intent = { ...body, intentHash: hashObject(body) };
         validateCircleEnvelope(cleanupEnvelope, "cleanup", op.destinationChain, null, op.destinationProfile);
-        if (cleanupEnvelope.nonceAtomic !== op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic)
+        if (cleanupEnvelope.nonceAtomic !== (isConsumedBurnRetirement(op) ? "85" : op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic))
             circleBlocked("retirement_exact_original_nonce_required");
-        if (isSealedBurnRetirement(op)) {
+        if (isConsumedBurnRetirement(op)) {
+            assertConsumedCleanup(op, cleanupEnvelope);
+            assertConsumedBurnEvidence(intent.consumedBurn, op);
+        }
+        else if (isSealedBurnRetirement(op)) {
             assertSealedBurnReplacement(op, cleanupEnvelope);
             assertSealedBurnEvidence(intent.sealedBurn, op);
         }
