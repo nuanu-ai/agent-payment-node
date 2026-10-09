@@ -10,7 +10,7 @@ import { approvalCode } from "./approval-code.js";
 import { ApnError } from "./errors.js";
 import { EncryptedWalletStore, walletCustodyLock, type DirectEffectMaterial } from "./encrypted-wallet-store.js";
 import { assertEvmNativeCustody, evmNativeCustody, validateEvmNativeCustody } from "./evm-native-custody.js";
-import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
+import { assertExclusiveEvmRawSigner, evmAddressLock } from "./evm-address-ownership.js";
 import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
 import { publishDirectPublicEffect } from "./direct-public-attestation.js";
 import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
@@ -84,7 +84,7 @@ export class Cleanup85NativeCancellation implements Cleanup85CancellationPort {
       const savedPrepared=await this.load(r);if(savedPrepared!==null&&savedPrepared.state!=="awaiting_approval")return this.status(savedPrepared,r);
       const admission=await verifyCleanup85RecoveryAdmission(this.state,read.source,read.destination,r),verified=verifiedCleanup85RecoveryAdmission(admission,r);assertCleanup85Window(verified.intent,this.now());
       await new OperationService(this.state).assertCleanup85NativeAccountAvailable(admission,r,savedPrepared??undefined);
-      await assertExclusiveEvmOwner(this.state,CLEANUP85_OWNER,verified.parent.profileHash);await assertExclusiveEvmOwner(this.state,CLEANUP85_RECIPIENT,this.state.profileHash("default"));
+      await assertExclusiveEvmRawSigner(this.state,CLEANUP85_OWNER,verified.parent.profileHash);await assertExclusiveEvmRawSigner(this.state,CLEANUP85_RECIPIENT,this.state.profileHash("default"));
       let o:OperationRecord;if(savedPrepared!==null)o=savedPrepared;else{
       const snapshot=await read.native.snapshot();await assertReadWriteAnchor(read.source,snapshot);const p=activeAssetPolicyFromState(await new AllowlistPolicyStore(this.state.root).readUnderProfileLock("evm-live-buyer"),new Date(this.now()));
       if(p===null||p.accounts.evm!==CLEANUP85_OWNER)cleanup85Blocked("prepare_native_policy");
