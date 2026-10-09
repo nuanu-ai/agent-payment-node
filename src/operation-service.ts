@@ -1,3 +1,4 @@
+import { cleanup85ConflictExclusion, type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { circleNativeSourceIdentity, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
@@ -176,7 +177,9 @@ export class OperationService {
     if (exceptOperation !== undefined && (exceptOperation.profileHash !== profileHash || exceptOperation.walletAddress !== account || exceptOperation.chainId !== 42161 || exceptOperation.evm?.asset.kind !== "native" || exceptOperation.evm.circleNativeAdmission === undefined || (await this.state.findOperation(exceptOperation.operationId))?.integrityHash !== exceptOperation.integrityHash)) throw new ApnError("APN_OPERATION_BLOCKED", "Native exclusion requires its exact saved operation.");
     await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], exceptOperation?.operationId, false, sources);
   }
-
+  async assertCleanup85NativeAccountAvailable(proof: VerifiedCleanup85RecoveryAdmission, request: Cleanup85CancellationRequest, exceptOperation?: OperationRecord): Promise<void> {
+    const v = await cleanup85ConflictExclusion(this.state, proof, request, exceptOperation); await this.assertConflictDomainsAvailable(v.profileHash, () => [evmConflictDomain(42161, v.account)], exceptOperation?.operationId, false, undefined, v.parent);
+  }
   /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
   async assertPermit2AccountAvailable(record: Permit2ProductionRecord): Promise<void> {
     validatePermit2ProductionRecord(record);
@@ -191,7 +194,7 @@ export class OperationService {
     await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
   }
 
-  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>): Promise<void> {
+  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>, cleanup85Parent?: { readonly operationId: string; readonly integrityHash: string }): Promise<void> {
     let wanted: ReadonlySet<string>;
     try { wanted = new Set(domains().map(conflictDomainKey)); } catch { wanted = new Set(); }
     for (const operation of await this.profileOperations(profileHash)) {
@@ -205,6 +208,7 @@ export class OperationService {
       }
       if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
         held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
+      if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash) held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
       // An unreadable network or account on either side blocks the whole profile.
       if (held !== null && wanted.size > 0 && shared === undefined) continue;
