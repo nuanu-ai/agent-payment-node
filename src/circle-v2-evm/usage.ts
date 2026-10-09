@@ -127,7 +127,8 @@ export class CircleUsage {
   }
   /** Only a fully verified versioned recovery chooses the new86 fee; old cleanup85 stays unknown. */
   async closeCleanup85Recovery(op: CircleOperationV1, proof: CircleNonceRetirementProof, authority: VerifiedCleanup85Settlement): Promise<readonly AssetUsageReservation[]> {
-    consumeCleanup85Settlement(authority, this.state, op, proof); validateCleanup85RecoveryProof(proof, op); if (op.usage.length !== 5) circleBlocked("cleanup85_usage_missing");
+    const bound = await consumeCleanup85Settlement(authority, this.state, op, proof);
+    op = bound.operation; proof = bound.proof; validateCleanup85RecoveryProof(proof, op); if (op.usage.length !== 5) circleBlocked("cleanup85_usage_missing");
     const durable = await new Cleanup85RecoveryStore(this.state.root).publicRecord(op, proof.cleanup85Recovery!.mode === "observed_original" ? "observed-original-proof" : "cleanup86-finalized-proof");
     if (durable === null || canonicalJson(durable) !== canonicalJson(proof)) circleBlocked("cleanup85_durable_settlement_proof_required");
     const result: AssetUsageReservation[] = [];

@@ -165,7 +165,9 @@ export class CircleUsage {
     }
     /** Only a fully verified versioned recovery chooses the new86 fee; old cleanup85 stays unknown. */
     async closeCleanup85Recovery(op, proof, authority) {
-        consumeCleanup85Settlement(authority, this.state, op, proof);
+        const bound = await consumeCleanup85Settlement(authority, this.state, op, proof);
+        op = bound.operation;
+        proof = bound.proof;
         validateCleanup85RecoveryProof(proof, op);
         if (op.usage.length !== 5)
             circleBlocked("cleanup85_usage_missing");

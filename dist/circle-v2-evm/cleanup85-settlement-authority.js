@@ -1,3 +1,4 @@
+import { CircleRepository } from "./repository.js";
 import { canonicalJson } from "../canonical.js";
 import { verifyCleanup85HistoricalAcceptance } from "./cleanup85-historical-acceptance.js";
 import { hashObject } from "../canonical.js";
@@ -13,13 +14,35 @@ import { consumedBurnEvidence } from "./consumed-burn-rpc.js";
 import { approvalReceiptIdentity } from "./burn-retirement-rpc.js";
 import { circleHex, circleRecord, circleUint, verifyCircleApproval } from "./protocol.js";
 const verified = new WeakMap();
-export function consumeCleanup85Settlement(token, state, op, proof) {
+export async function consumeCleanup85Settlement(token, state, op, proof) {
+    op = detachedFrozen(op);
+    proof = detachedFrozen(proof);
     const body = verified.get(token);
     verified.delete(token);
-    if (body === undefined || body.root !== state.root || body.operationId !== op.operationId || body.fingerprint !== op.fingerprint || body.proofHash !== proof.proofHash)
+    if (body === undefined || body.root !== state.root || body.operationId !== op.operationId || body.fingerprint !== op.fingerprint || body.proofHash !== proof.proofHash || body.operationDigest !== hashObject(op) || body.proofDigest !== hashObject(proof))
         circleBlocked("private_cleanup85_settlement_required");
+    await assertDurableSettlementOperation(state, op);
+    return Object.freeze({ operation: body.operation, proof: body.proof });
+}
+async function assertDurableSettlementOperation(state, op) {
+    const saved = await new CircleRepository(state.root).load(op.operationId);
+    if (saved === null || canonicalJson(saved) !== canonicalJson(op))
+        circleBlocked("cleanup85_settlement_durable_operation_changed");
+}
+function detachedFrozen(value) {
+    const copy = structuredClone(value);
+    const freeze = (v) => { if (v !== null && typeof v === "object") {
+        for (const child of Object.values(v))
+            freeze(child);
+        Object.freeze(v);
+    } };
+    freeze(copy);
+    return copy;
 }
 export async function verifyCleanup85Settlement(state, op, proof, source, accounting) {
+    op = detachedFrozen(op);
+    proof = detachedFrozen(proof);
+    await assertDurableSettlementOperation(state, op);
     validateCleanup85RecoveryProof(proof, op);
     const p = proof.cleanup85Recovery, old = new CircleNonceRetirementStore(state.root), parent = await old.intent(op), recoveryStore = new Cleanup85RecoveryStore(state.root);
     if (parent === null || parent.intentHash !== p.parentIntentHash || !await old.hasClaim(op, "sign"))
@@ -72,8 +95,9 @@ export async function verifyCleanup85Settlement(state, op, proof, source, accoun
         if (circleHex(head.hash, 32) !== saved.finalityBlockHash || circleUint(head.number).toString() !== saved.finalityBlockNumberAtomic)
             circleBlocked("cleanup85_settlement_frozen_head_changed");
     }
+    await assertDurableSettlementOperation(state, op);
     const token = Object.freeze({ kind: "verified-cleanup85-settlement" });
-    verified.set(token, { root: state.root, operationId: op.operationId, fingerprint: op.fingerprint, proofHash: proof.proofHash });
+    verified.set(token, { root: state.root, operationId: op.operationId, fingerprint: op.fingerprint, proofHash: proof.proofHash, operationDigest: hashObject(op), proofDigest: hashObject(proof), operation: op, proof });
     return token;
 }
 //# sourceMappingURL=cleanup85-settlement-authority.js.map

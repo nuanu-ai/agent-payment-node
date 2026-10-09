@@ -32,7 +32,7 @@ test("valid-shaped durable proof and forged private token cannot release five re
   const usage = new CircleUsage(f.state, () => Date.parse("2026-10-09T12:00:00Z"));
   await assert.rejects(usage.closeCleanup85Recovery(f.op, f.proof, { kind: "verified-cleanup85-settlement" }), /private_cleanup85_settlement_required/);
   for (const row of f.op.usage) assert.deepEqual(await new AssetUsageLedger(f.root).load(row, row.reservationId), row);
-  assert.throws(() => consumeCleanup85Settlement({ kind: "verified-cleanup85-settlement" }, f.state, f.op, f.proof), /private_cleanup85/);
+  await assert.rejects(consumeCleanup85Settlement({ kind: "verified-cleanup85-settlement" }, f.state, f.op, f.proof), /private_cleanup85/);
 });
 test("canonical receipt absence cannot mint opaque settlement even with valid durable JSON", async t => {
   const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true })); let sends = 0;
@@ -65,4 +65,17 @@ test("terminal status is audit-only while finite canonical observe still require
   assert.equal((await service.status(f.op.operationId)).state, "nonce_retired"); assert.deepEqual([rpc, privateCalls, tty], [0, 0, 0]);
   await assert.rejects(service.observe(f.op.operationId), /later account nonce90/); assert.deepEqual([rpc, privateCalls, tty], [1, 0, 0]);
   assert.equal(await readFile(join(f.root, "circle-v2-evm", f.op.operationId + ".json"), "utf8"), canonicalJson(closed));
+});
+
+for (const drift of ["reservation_id", "profile", "policy", "outcome", "custody", "recipient"] as const) test(`settlement issuer rejects caller ${drift} before any public or ledger authority`, async t => {
+  const f = await fixture(); t.after(() => rm(f.root, { recursive: true, force: true })); const supplied = structuredClone(f.op); let requests = 0;
+  if (drift === "reservation_id") Object.assign(supplied.usage[0]!, { reservationId: "f".repeat(64) });
+  if (drift === "profile") Object.assign(supplied, { profile: "foreign-owner-profile" });
+  if (drift === "policy") Object.assign(supplied.policies[0]!, { policyDigest: "f".repeat(64) });
+  if (drift === "outcome") Object.assign(supplied.usage[0]!, { consumedAtomic: "40100", outcomeDigest: "f".repeat(64) });
+  if (drift === "custody") Object.assign(supplied.sourceCustody, { keyReference: "foreign-key" });
+  if (drift === "recipient") Object.assign(supplied.destinationCustody, { walletAddress: "0x1111111111111111111111111111111111111111" });
+  const source = new CircleRpc("https://example.org", 42161, { request: async () => { requests++; throw new Error("no public oracle reached"); } });
+  await assert.rejects(verifyCleanup85Settlement(f.state, supplied, f.proof, source), /durable_operation_changed/); assert.equal(requests, 0);
+  for (const row of f.op.usage) assert.deepEqual(await new AssetUsageLedger(f.root).load(row, row.reservationId), row);
 });
