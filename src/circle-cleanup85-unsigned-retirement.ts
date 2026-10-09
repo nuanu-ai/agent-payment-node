@@ -10,7 +10,7 @@ import { Cleanup85UnsignedRetirementStore, cleanup85UnsignedTerminal, CLEANUP85_
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { CircleNonceRetirementStore } from "./circle-v2-evm/nonce-retirement-store.js";
 import { Cleanup85RecoveryStore, cleanup85CancellationRequest, validateCleanup85RecoveryIntent, assertCleanup85Window, type Cleanup85RecoveryIntent } from "./circle-v2-evm/cleanup85-recovery-store.js";
-import { verifyCleanup85RecoveryAdmission, verifiedCleanup85RecoveryAdmission } from "./circle-v2-evm/cleanup85-recovery-admission.js";
+import { verifyCleanup85RecoveryAdmission, verifiedCleanup85RecoveryAdmission, type VerifiedCleanup85RecoveryAdmission } from "./circle-v2-evm/cleanup85-recovery-admission.js";
 import { CircleUsage } from "./circle-v2-evm/usage.js";
 import type { CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
 import type { CircleRpc } from "./circle-v2-evm/rpc.js";
@@ -21,7 +21,7 @@ export interface Cleanup85NativeLineage {
  readonly retirementProofHash: string | null; readonly readmission: Cleanup85RecoveryIntent | null;
 }
 export interface VerifiedCleanup85SuccessorFinancialAdmission { readonly kind: "verified-cleanup85-successor-financial-admission"; }
-export interface Cleanup85SuccessorFinancialAdmission { readonly lineage: Cleanup85NativeLineage; readonly readmission: Cleanup85RecoveryIntent; }
+export interface Cleanup85SuccessorFinancialAdmission { readonly lineage: Cleanup85NativeLineage; readonly readmission: Cleanup85RecoveryIntent; readonly originalAdmission: VerifiedCleanup85RecoveryAdmission; }
 const lineages=new WeakMap<VerifiedCleanup85NativeLineage,{state:StateStore;requestHash:string;body:Cleanup85NativeLineage}>();
 const admissions=new WeakMap<VerifiedCleanup85SuccessorFinancialAdmission,{state:StateStore;requestHash:string;scope:HeldCleanup85Scope;body:Cleanup85SuccessorFinancialAdmission}>();
 const retirements=new WeakMap<object,{state:StateStore;parentHash:string;proof:Cleanup85UnsignedRetirementProof}>();
@@ -48,10 +48,10 @@ export function verifiedCleanup85NativeLineage(token:VerifiedCleanup85NativeLine
 /** Revalidates the full canonical original public admission and both current policies. No DTO can issue this token. */
 export async function verifyCleanup85SuccessorFinancialAdmission(state:StateStore,source:CircleRpc,destination:CircleRpc,request:Cleanup85CancellationRequest,now:()=>number,scope:HeldCleanup85Scope):Promise<VerifiedCleanup85SuccessorFinancialAdmission>{
  const lineage=verifiedCleanup85NativeLineage(await resolveCleanup85NativeLineage(state,request),state,request);if(lineage.readmission===null)cleanup85Blocked("unsigned_retirement_successor_required");assertHeldCleanup85Scope(scope,state,request,lineage.operationId);
- const publicProof=verifiedCleanup85RecoveryAdmission(await verifyCleanup85RecoveryAdmission(state,source,destination,request),request),usage=new CircleUsage(state,now);
+ const originalAdmission=await verifyCleanup85RecoveryAdmission(state,source,destination,request),publicProof=verifiedCleanup85RecoveryAdmission(originalAdmission,request),usage=new CircleUsage(state,now);
  await usage.withCleanup85HeldPolicyScope(scope,request,lineage.operationId,async()=>{await usage.confirm(publicProof.parent,lineage.readmission!.policies);assertCleanup85Window(lineage.readmission!,now());const deadline=await usage.authorizationDeadline(publicProof.parent,lineage.readmission!.policies);if(deadline!==lineage.readmission!.windowEndsAt)cleanup85Blocked("unsigned_retirement_policy_window_changed");});
  assertHeldCleanup85Scope(scope,state,request,lineage.operationId);if((await new CircleRepository(state.root).load(request.parentOperationId))?.integrityHash!==publicProof.parent.integrityHash)cleanup85Blocked("unsigned_retirement_parent_changed");
- const token=Object.freeze({kind:"verified-cleanup85-successor-financial-admission" as const});admissions.set(token,{state,requestHash:hashObject(request),scope,body:frozen({lineage,readmission:lineage.readmission})});return token;
+ const token=Object.freeze({kind:"verified-cleanup85-successor-financial-admission" as const});admissions.set(token,{state,requestHash:hashObject(request),scope,body:Object.freeze({...frozen({lineage,readmission:lineage.readmission}),originalAdmission})});return token;
 }
 export function verifiedCleanup85SuccessorFinancialAdmission(token:VerifiedCleanup85SuccessorFinancialAdmission,state:StateStore,request:Cleanup85CancellationRequest):Cleanup85SuccessorFinancialAdmission{const v=admissions.get(token);if(v===undefined||v.state!==state||v.requestHash!==hashObject(request))cleanup85Blocked("unsigned_retirement_private_admission_required");assertHeldCleanup85Scope(v.scope,state,request,v.body.lineage.operationId);return v.body;}
 /** A invokes under its complete canonical owner/address/operation and both true policy locks. */

@@ -1,0 +1,21 @@
+✔ actual captured expired4b5 finite retirement retire (1314.285542ms)
+ℹ combined admission physical=80; genuine original cap usable; cloned cap rejected
+✔ actual captured expired4b5 finite retirement crash (1428.478667ms)
+ℹ combined admission physical=80; genuine original cap usable; cloned cap rejected
+✔ actual captured expired4b5 finite retirement sign (308.463958ms)
+✔ actual captured expired4b5 finite retirement signed (302.698833ms)
+✔ actual captured expired4b5 finite retirement send (313.334541ms)
+✔ actual captured expired4b5 finite retirement prepared (322.584041ms)
+✔ actual captured expired4b5 finite retirement bad_slot (277.469208ms)
+✔ actual captured expired4b5 finite retirement wrong_policy (409.9865ms)
+✔ actual captured expired4b5 finite retirement nonce_drift (363.729583ms)
+✔ actual captured expired4b5 finite retirement copied_token (1155.880875ms)
+ℹ combined admission physical=80; genuine original cap usable; cloned cap rejected
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7148.920083

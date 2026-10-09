@@ -56,14 +56,14 @@ export async function verifyCleanup85SuccessorFinancialAdmission(state, source, 
     if (lineage.readmission === null)
         cleanup85Blocked("unsigned_retirement_successor_required");
     assertHeldCleanup85Scope(scope, state, request, lineage.operationId);
-    const publicProof = verifiedCleanup85RecoveryAdmission(await verifyCleanup85RecoveryAdmission(state, source, destination, request), request), usage = new CircleUsage(state, now);
+    const originalAdmission = await verifyCleanup85RecoveryAdmission(state, source, destination, request), publicProof = verifiedCleanup85RecoveryAdmission(originalAdmission, request), usage = new CircleUsage(state, now);
     await usage.withCleanup85HeldPolicyScope(scope, request, lineage.operationId, async () => { await usage.confirm(publicProof.parent, lineage.readmission.policies); assertCleanup85Window(lineage.readmission, now()); const deadline = await usage.authorizationDeadline(publicProof.parent, lineage.readmission.policies); if (deadline !== lineage.readmission.windowEndsAt)
         cleanup85Blocked("unsigned_retirement_policy_window_changed"); });
     assertHeldCleanup85Scope(scope, state, request, lineage.operationId);
     if ((await new CircleRepository(state.root).load(request.parentOperationId))?.integrityHash !== publicProof.parent.integrityHash)
         cleanup85Blocked("unsigned_retirement_parent_changed");
     const token = Object.freeze({ kind: "verified-cleanup85-successor-financial-admission" });
-    admissions.set(token, { state, requestHash: hashObject(request), scope, body: frozen({ lineage, readmission: lineage.readmission }) });
+    admissions.set(token, { state, requestHash: hashObject(request), scope, body: Object.freeze({ ...frozen({ lineage, readmission: lineage.readmission }), originalAdmission }) });
     return token;
 }
 export function verifiedCleanup85SuccessorFinancialAdmission(token, state, request) { const v = admissions.get(token); if (v === undefined || v.state !== state || v.requestHash !== hashObject(request))

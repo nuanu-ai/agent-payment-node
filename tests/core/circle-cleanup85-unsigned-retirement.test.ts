@@ -1,3 +1,5 @@
+import { StateStore } from "../../src/state.js";
+import { verifiedCleanup85RecoveryAdmission } from "../../src/circle-v2-evm/cleanup85-recovery-admission.js";
 import { Cleanup86Store, validateCleanup86Intent } from "../../src/circle-v2-evm/cleanup86-store.js";
 import { verifyCleanup86RecoveryContext, verifiedCleanup86RecoveryContext } from "../../src/circle-v2-evm/cleanup85-effective-context.js";
 import assert from "node:assert/strict";
@@ -12,7 +14,7 @@ import { circleMechanism } from "../../src/circle-v2-evm/usage.js";
 import { circleRoute, CIRCLE_SOURCE_TOKEN } from "../../src/circle-v2-evm/catalog.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { Cleanup85UnsignedRetirementStore, CLEANUP85_UNSIGNED_ORIGINAL } from "../../src/circle-cleanup85-unsigned-retirement-store.js";
-import { resolveCleanup85NativeLineage, verifiedCleanup85NativeLineage, verifyCleanup85SuccessorFinancialAdmission } from "../../src/circle-cleanup85-unsigned-retirement.js";
+import { resolveCleanup85NativeLineage, verifiedCleanup85NativeLineage, verifyCleanup85SuccessorFinancialAdmission, verifiedCleanup85SuccessorFinancialAdmission, type VerifiedCleanup85SuccessorFinancialAdmission } from "../../src/circle-cleanup85-unsigned-retirement.js";
 import { withCleanup85FinancialScope, assertHeldCleanup85Scope } from "../../src/circle-cleanup85-financial-scope.js";
 import { CircleRpc } from "../../src/circle-v2-evm/rpc.js";
 import type { HeldCleanup85Scope } from "../../src/circle-cleanup85-financial-scope.js";
@@ -44,7 +46,20 @@ for(const variant of ["retire","crash","sign","signed","send","prepared","bad_sl
   const intent86=await new Cleanup86Store(tmp.root).start(f.parent,frame,{cancellationProofHash:"f".repeat(64),envelope:{...envelopeBody,envelopeHash:hashObject(envelopeBody)},policies:effective.readmission.policies,capturedAt:new Date(clock).toISOString(),windowEndsAt:effective.readmission.windowEndsAt});
   assert.equal(intent86.version,"apn.circle-cleanup86-intent.v2");assert.equal(intent86.retirementProofHash,lineage.retirementProofHash);assert.equal(intent86.freshReadmissionHash,effective.readmissionHash);assert.equal(intent86.recoveryBinding,frame.recoveryBinding);
   assert.throws(()=>validateCleanup86Intent(intent86,frame));assert.ok(await new Cleanup86Store(tmp.root).intent(f.parent,frame));
-  let held:HeldCleanup85Scope|undefined;await withCleanup85FinancialScope(f.state,request,lineage.operationId,async scope=>{held=scope;assertHeldCleanup85Scope(scope,f.state,request,lineage.operationId);await verifyCleanup85SuccessorFinancialAdmission(f.state,new CircleRpc(env.APN_ARBITRUM_RPC_URL,42161,https),new CircleRpc(env.APN_SEI_RPC_URL,1329,https),request,()=>clock,scope);});assert.throws(()=>assertHeldCleanup85Scope(held!,f.state,request,lineage.operationId));
+  let held:HeldCleanup85Scope|undefined,financial:VerifiedCleanup85SuccessorFinancialAdmission|undefined;await withCleanup85FinancialScope(f.state,request,lineage.operationId,async scope=>{
+   held=scope;assertHeldCleanup85Scope(scope,f.state,request,lineage.operationId);const start=rpc.rows.length;
+   financial=await verifyCleanup85SuccessorFinancialAdmission(f.state,new CircleRpc(env.APN_ARBITRUM_RPC_URL,42161,https),new CircleRpc(env.APN_SEI_RPC_URL,1329,https),request,()=>clock,scope);
+   const body=verifiedCleanup85SuccessorFinancialAdmission(financial,f.state,request),original=verifiedCleanup85RecoveryAdmission(body.originalAdmission,request);
+   assert.equal(original.parent.integrityHash,f.parent.integrityHash);assert.equal(original.intent.recoveryBinding,frame.recoveryBinding);assert.equal(body.readmission.recoveryBinding,lineage.readmission!.recoveryBinding);
+   assert.equal(verifiedCleanup85SuccessorFinancialAdmission(financial,f.state,request).originalAdmission,body.originalAdmission);
+   assert.throws(()=>verifiedCleanup85RecoveryAdmission(structuredClone(body.originalAdmission),request),/private_cleanup85_admission/);
+   assert.throws(()=>verifiedCleanup85SuccessorFinancialAdmission({...financial!},f.state,request),/private_admission/);
+   assert.throws(()=>verifiedCleanup85SuccessorFinancialAdmission(financial!,new StateStore(tmp.root),request),/private_admission/);
+   assert.throws(()=>verifiedCleanup85SuccessorFinancialAdmission(financial!,f.state,{...request,recoveryBinding:"f".repeat(64)}),/private_admission/);
+   assert.ok(Object.isFrozen(body));assert.ok(Object.isFrozen(body.readmission.policies));
+   const rows=rpc.rows.slice(start);assert.equal(rows.filter(x=>x.method==="eth_getTransactionByHash"&&x.params[0]===f.parent.effects[0]!.transactionHash).length,1);
+   t.diagnostic(`combined admission physical=${rows.length}; genuine original cap usable; cloned cap rejected`);
+  });assert.throws(()=>assertHeldCleanup85Scope(held!,f.state,request,lineage.operationId));assert.throws(()=>verifiedCleanup85SuccessorFinancialAdmission(financial!,f.state,request),/held_financial_scope/);
  }else{await assert.rejects(service.prepareCleanup85Recovery(f.parent.operationId));assert.deepEqual(await readFile(statePath),before);assert.equal(await new Cleanup85UnsignedRetirementStore(tmp.root).load(),null);}
  assert.deepEqual(await readFile(parentPath),parentBefore);assert.equal(keys,0);assert.ok(rpc.rows.every(x=>x.method!=="eth_sendRawTransaction"));
 });
