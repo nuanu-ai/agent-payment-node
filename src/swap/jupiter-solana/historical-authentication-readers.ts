@@ -26,6 +26,7 @@ const CUSTODY_DIRECTORIES = Object.freeze([...BASE_DIRECTORIES, "chain-accounts"
 /** Pure existing-directory checks. A shared guard pins identities across all finite readers and locks. */
 export class HistoricalDirectoryGuard {
   readonly #identities = new Map<string, { readonly dev: number; readonly ino: number }>();
+  readonly #signedMarkers = new Map<string, string>();
   constructor(readonly root: string) {}
   async #directory(path: string): Promise<void> {
     const before = await lstat(path); validateDirectory(before, path === this.root);
@@ -35,6 +36,33 @@ export class HistoricalDirectoryGuard {
     const original = this.#identities.get(path);
     if (original !== undefined && (original.dev !== after.dev || original.ino !== after.ino)) historicalAuthenticationRefused();
     this.#identities.set(path, {dev:after.dev, ino:after.ino});
+  }
+  /** Read and retain the finite public marker leaf identity across the entire authentication session. */
+  async signedMarkerSnapshot(op: Pick<SwapOperationRecord, "operationId" | "ownerProfileHash">, marker: JupiterV1SignedMarker): Promise<string> {
+    if (!HISTORICAL_JUPITER_IDS.some(id => id === op.operationId)) historicalAuthenticationRefused();
+    stateIdentifier(op.ownerProfileHash, "Jupiter profile");
+    const directory = `jupiter-v1-signatures/${op.ownerProfileHash}`, path = resolve(this.root, directory, `${op.operationId}.json`);
+    await this.check([directory]);
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let snapshotHash: string;
+    try {
+      const opened = await handle.stat({bigint:true}), before = await lstat(path, {bigint:true});
+      const valid = (v: typeof opened) => v.isFile() && !v.isSymbolicLink() && v.uid === BigInt(process.geteuid?.() ?? -1)
+        && (v.mode & 0o777n) === 0o600n && v.nlink === 1n && v.size > 0n && v.size <= 1024n;
+      const facts = (v: typeof opened) => ({dev:String(v.dev), ino:String(v.ino), uid:String(v.uid), mode:String(v.mode), nlink:String(v.nlink),
+        size:String(v.size), mtimeNs:String(v.mtimeNs), ctimeNs:String(v.ctimeNs)});
+      if (!valid(opened) || !valid(before) || canonicalJson(facts(opened)) !== canonicalJson(facts(before))) historicalAuthenticationRefused();
+      const bytes = await handle.readFile();
+      await this.check([directory]);
+      const after = await lstat(path, {bigint:true}), canonical = canonicalJson(marker), text = bytes.toString("utf8");
+      if (!valid(after) || canonicalJson(facts(opened)) !== canonicalJson(facts(after)) || (text !== canonical && text !== `${canonical}\n`)) historicalAuthenticationRefused();
+      snapshotHash = hashObject({root:this.root, path, leaf:facts(after)});
+      const original = this.#signedMarkers.get(path);
+      if (original !== undefined && original !== snapshotHash) historicalAuthenticationRefused();
+      this.#signedMarkers.set(path, snapshotHash);
+    } finally {await handle.close();}
+    await this.check([directory]);
+    return snapshotHash;
   }
   async check(directories: readonly string[] = []): Promise<void> {
     try {
@@ -86,9 +114,9 @@ export class HistoricalMaterialReader extends SavedJupiterV1MaterialStore {
   protected override async beforeLockAcquire(): Promise<void> { await this.#guard.check(["locks"]); }
 }
 export type HistoricalRetainedClaimEvidence =
-  | { readonly kind: "retained_send_claim_present"; readonly claimHash: string }
+  | { readonly kind: "retained_send_claim_present"; readonly claimHash: string; readonly signedMarkerSnapshotHash: string }
   | { readonly kind: "retained_send_claim_absent"; readonly observation: "current_observation";
-      readonly submissionHistory: "unknown"; readonly transactionMayHaveBeenSubmitted: true; readonly absenceSnapshotHash: string };
+      readonly submissionHistory: "unknown"; readonly transactionMayHaveBeenSubmitted: true; readonly absenceSnapshotHash: string; readonly signedMarkerSnapshotHash: string };
 export interface HistoricalRetainedEvidence {
   readonly signedMarker: JupiterV1SignedMarker;
   readonly claim: JupiterV1SendClaim | null;
@@ -99,11 +127,13 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
   constructor(root: string, guard = new HistoricalDirectoryGuard(root)) { super(root); if (guard.root !== root) historicalAuthenticationRefused(); this.#guard=guard; }
   /** Only exact ea25 may authenticate retained signed material while observing an absent claim. */
   async retainedEvidence(op: SwapOperationRecord, binding: JupiterV1ExecutionBinding): Promise<HistoricalRetainedEvidence> {
-    const signedMarker = await this.loadSignedMarker(op, binding), claim = await this.loadClaim(op);
+    const signedMarker = await this.loadSignedMarker(op, binding);
     if (signedMarker === null) historicalAuthenticationRefused();
+    const signedMarkerSnapshotHash = await this.#guard.signedMarkerSnapshot(op, signedMarker);
+    const claim = await this.loadClaim(op);
     if (claim !== null) {
       if (claim.signature !== signedMarker.signature || claim.bindingHash !== binding.bindingHash || claim.rawPayloadHash !== signedMarker.rawPayloadHash) historicalAuthenticationRefused();
-      return { signedMarker, claim, evidence: { kind: "retained_send_claim_present", claimHash: claim.claimHash } };
+      return { signedMarker, claim, evidence: { kind: "retained_send_claim_present", claimHash: claim.claimHash, signedMarkerSnapshotHash } };
     }
     if (op.operationId !== HISTORICAL_JUPITER_IDS[1]) historicalAuthenticationRefused();
     stateIdentifier(op.ownerProfileHash, "Jupiter profile"); stateIdentifier(op.operationId, "Jupiter operation");
@@ -117,13 +147,14 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
     const facts = (v: typeof before) => ({dev:String(v.dev), ino:String(v.ino), uid:String(v.uid), mode:String(v.mode), mtimeNs:String(v.mtimeNs), ctimeNs:String(v.ctimeNs)});
     if (canonicalJson(facts(before)) !== canonicalJson(facts(after))) historicalAuthenticationRefused();
     // A replacement or even a create/remove changes this current absence observation.
-    return { signedMarker, claim: null, evidence: { kind: "retained_send_claim_absent", observation: "current_observation", submissionHistory: "unknown", transactionMayHaveBeenSubmitted: true,
+    return { signedMarker, claim: null, evidence: { kind: "retained_send_claim_absent", observation: "current_observation", submissionHistory: "unknown", transactionMayHaveBeenSubmitted: true, signedMarkerSnapshotHash,
       absenceSnapshotHash: hashObject({root:this.root, target, directory:facts(after), observation:"ENOENT"}) } };
   }
   /** Production issuer only: generated wallets cannot replace this original public file anchor. */
   async assertOriginalAbsentSignedMarker(op: SwapOperationRecord, retained: HistoricalRetainedEvidence): Promise<void> {
     if (retained.evidence.kind !== "retained_send_claim_absent") return;
     if (op.operationId !== HISTORICAL_JUPITER_IDS[1]) historicalAuthenticationRefused();
+    if (await this.#guard.signedMarkerSnapshot(op, retained.signedMarker) !== retained.evidence.signedMarkerSnapshotHash) historicalAuthenticationRefused();
     stateIdentifier(op.ownerProfileHash,"Jupiter profile");
     const directory=`jupiter-v1-signatures/${op.ownerProfileHash}`, path=resolve(this.root,directory,`${op.operationId}.json`);
     await this.#guard.check([directory]);
@@ -138,6 +169,7 @@ export class HistoricalBindingReader extends JupiterV1ExecutionBindingStore {
       const after=await lstat(path,{bigint:true});
       if(!valid(after)||canonicalJson(facts(opened))!==canonicalJson(facts(after))||sha256(bytes)!==HISTORICAL_JUPITER_EA25_SIGNED_MARKER_SHA256||bytes.toString("utf8")!==`${canonicalJson(retained.signedMarker)}\n`)historicalAuthenticationRefused();
     } finally {await handle.close();}
+    if (await this.#guard.signedMarkerSnapshot(op, retained.signedMarker) !== retained.evidence.signedMarkerSnapshotHash) historicalAuthenticationRefused();
     await this.#guard.check([directory]);
   }
   override async initialize(): Promise<void> { await this.#guard.check(BINDING_DIRECTORIES); }
