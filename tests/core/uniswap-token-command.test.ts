@@ -21,7 +21,7 @@ test("token-input CLI binds a separate exact seven-command family without wideni
   assert.deepEqual(MCP_TOOLS.filter(tool => tool.name.startsWith("apn_swap_ethereum_uniswap_") &&
     !tool.name.startsWith("apn_swap_ethereum_uniswap_token_")).map(tool => tool.name).sort(),
   ["inventory", "quote", "prepare", "status", "approve", "execute"].map(action => `apn_swap_ethereum_uniswap_${action}`).sort());
-  assert.equal(MCP_TOOLS.length, 119);
+  assert.equal(MCP_TOOLS.length, 122);
   const quote = bindArgv(["swap", "ethereum", "uniswap-token", "quote", "--profile", "owner", "--account", ACCOUNT,
     "--to", ACCOUNT, "--source-token", UNISWAP_USDC, "--output-token", ETHEREUM_USDT, "--amount", "1000000",
     "--minimum-output", "999000", "--approval-cap", "1000000", "--deadline", "1800000000",
