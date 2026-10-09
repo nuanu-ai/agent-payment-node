@@ -14,7 +14,7 @@ export declare class RelayNativeObserveService {
     private readonly status;
     private readonly clock;
     private readonly usedInvocations;
-    constructor(state: StateStore, source: RelaySourceFinalityPorts | ((chainId: 56 | 8453) => RelaySourceFinalityPorts), destinationInvocation: (chainId: 137 | 143 | 4326) => RelayBnbProofPorts, status?: RelayKeylessStatusService, clock?: ClockPort);
+    constructor(state: StateStore, source: RelaySourceFinalityPorts | ((chainId: 56 | 8453) => RelaySourceFinalityPorts), destinationInvocation: (chainId: 137 | 143 | 4326, sourceChainId?: 56 | 8453) => RelayBnbProofPorts, status?: RelayKeylessStatusService, clock?: ClockPort);
     private result;
     observe(op: RelayUnsignedOperation): Promise<RelayObserveResult>;
 }

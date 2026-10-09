@@ -34,7 +34,7 @@ export function verifyRelayNativeSourceObservation(op: RelayUnsignedOperation, h
 export class RelayNativeObserveService {
   private readonly usedInvocations = new WeakSet<RelayBnbProofPorts>();
   constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts | ((chainId: 56 | 8453) => RelaySourceFinalityPorts),
-    private readonly destinationInvocation: (chainId: 137 | 143 | 4326) => RelayBnbProofPorts,
+    private readonly destinationInvocation: (chainId: 137 | 143 | 4326, sourceChainId?: 56 | 8453) => RelayBnbProofPorts,
     private readonly status = new RelayKeylessStatusService(state),
     private readonly clock: ClockPort = { now: () => new Date() }) {}
 
@@ -113,7 +113,7 @@ export class RelayNativeObserveService {
       provider.txHashes.length === 0 ? "source_finalized" : "provider_candidate_unproven",
       provider.txHashes.length === 0 ? "provider_candidate_missing" : "multiple_provider_candidates",
       true, provider.status, sourceBound);
-    const destination = this.destinationInvocation(op.destinationChainId as 137 | 143 | 4326);
+    const destination = this.destinationInvocation(op.destinationChainId as 137 | 143 | 4326, op.sourceChainId as 56 | 8453);
     if (this.usedInvocations.has(destination)) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Relay native observe requires a fresh destination RPC budget.");
     this.usedInvocations.add(destination);
     const proof = await proveRelayNativeDestination(op, hash, provider.txHashes, destination);

@@ -86,7 +86,7 @@ export function createSpecialApnCore(bound, options, state) {
         const source = new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc);
         const bnbInvocation = () => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc);
         const nativeSource = (chainId) => new RelayEthereumFinalityRpc(sourceUrl, state, options.relayObserveSourceRpc, undefined, chainId);
-        const native = new RelayNativeObserveService(state, nativeSource, chainId => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, chainId === 4326 ? new EvmDirectRpcGuard(state, 10) : undefined, chainId), new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
+        const native = new RelayNativeObserveService(state, nativeSource, (chainId, sourceChainId) => new RelayBnbReadOnlyRpc(bnbUrl, state, options.relayObserveBnbRpc, sourceChainId === 8453 ? new EvmDirectRpcGuard(state, 10) : undefined, chainId), new RelayKeylessStatusService(state, options.relayStatusFetch), options.clock);
         return new ApnCore({ state, relayObserve: options.relayObserve ??
                 new RelayObserveService(state, source, bnbInvocation, new RelayKeylessStatusService(state, options.relayStatusFetch), native) });
     }
