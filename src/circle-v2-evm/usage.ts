@@ -1,4 +1,7 @@
-import { loadActiveAssetPolicyRegistry, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
+import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, validateAssetUsageReservation, type AssetUsageReservation, type AssetUsageIdentity } from "../asset-usage-ledger.js";
 import { canonicalJson, hashObject } from "../canonical.js";
@@ -17,9 +20,24 @@ function leases(op: CircleOperationV1): readonly Lease[] {
 }
 export class CircleUsage {
   private readonly ledger: AssetUsageLedger;
-  constructor(private readonly state: StateStore, private readonly now: () => number) { this.ledger = new AssetUsageLedger(state.root); }
+  private readonly policiesStore: AllowlistPolicyStore;
+  private readonly policyScope = new AsyncLocalStorage<{ readonly profiles: ReadonlySet<string>; active: boolean }>();
+  constructor(private readonly state: StateStore, private readonly now: () => number) { this.ledger = new AssetUsageLedger(state.root); this.policiesStore = new AllowlistPolicyStore(state.root); }
+  /** Wallet/operation/address locks are outermost; policy locks are held through every effect. */
+  async withPolicyLocks<T>(profiles: readonly string[], action: () => Promise<T>): Promise<T> {
+    if (this.policyScope.getStore() !== undefined) circleBlocked("policy_lock_scope_reentry");
+    const canonical = [...new Set(profiles)].sort(), keys = canonical.map(p => `profile:${allowlistProfileHash(p)}`).sort();
+    return this.state.withLocks(keys, () => {
+      const scope = { profiles: new Set(canonical), active: true };
+      return this.policyScope.run(scope, async () => { try { return await action(); } finally { scope.active = false; } });
+    });
+  }
   private async active(profile: string, account: string): Promise<ActiveAssetPolicy> {
-    const active = await loadActiveAssetPolicyRegistry(this.state.root, profile, new Date(this.now()));
+    const scope = this.policyScope.getStore();
+    if (scope?.active !== true || !scope.profiles.has(profile)) circleBlocked("owner_policy_lock_required");
+    const stored = await this.policiesStore.readUnderProfileLock(profile);
+    if (!scope.active) circleBlocked("owner_policy_lock_required");
+    const active = activeAssetPolicyFromState(stored, new Date(this.now()));
     if (active === null || active.accounts.evm !== account) circleBlocked("active_owner_asset_policy_required"); return active;
   }
   async policies(op: CircleOperationV1): Promise<readonly CirclePolicy[]> {
@@ -29,7 +47,7 @@ export class CircleUsage {
       const admission = evaluateAssetPolicy(active.registry, { chain: lease.identity.chain, asset: lease.identity.asset, rail: "bridge", mechanism: circleMechanism(op.destinationChain), amountAtomic: lease.amount,
         dailyUsageAtomic: current.amountAtomic, asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
       if (!bridgeMechanismAdmitted(admission, circleMechanism(op.destinationChain))) circleBlocked("exact_circle_mechanism_admission_required");
-      const policy = { profile: lease.profile, profileHash: this.state.profileHash(lease.profile), policyDigest: active.digest, revision: active.revision };
+      const policy = { profile: lease.profile, profileHash: this.state.profileHash(lease.profile), policyDigest: active.digest, revision: active.revision, activationDigest: active.activationDigest };
       if (!result.some(row => row.profileHash === policy.profileHash)) result.push(policy);
     }
     return result;
@@ -38,20 +56,26 @@ export class CircleUsage {
     for (const policy of op.policies) {
       const account = policy.profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
       const active = await this.active(policy.profile, account);
-      if (active.digest !== policy.policyDigest || active.revision !== policy.revision) circleBlocked("owner_policy_changed");
+      if (policy.activationDigest === undefined || active.activationDigest !== policy.activationDigest || active.digest !== policy.policyDigest || active.revision !== policy.revision) circleBlocked("owner_policy_changed");
     }
     if (op.usage.length !== 5) circleBlocked("all_asset_usage_reserves_required");
-    for (const row of op.usage) {
+    for (const [index, row] of op.usage.entries()) {
       validateAssetUsageReservation(row); const saved = await this.ledger.load(row, row.reservationId);
       if (saved === null || saved.policyDigest !== row.policyDigest || saved.amountAtomic !== row.amountAtomic || saved.account !== row.account || saved.chain !== row.chain ||
         ["failed_before_effect", "failed_confirmed_revert", "released_unsubmitted", "finalized"].includes(saved.state)) circleBlocked("asset_usage_hold_changed");
+      const lease = leases(op)[index]!, active = await this.active(lease.profile, lease.identity.account), at = new Date(this.now());
+      const current = await this.ledger.usageReadOnly(lease.identity, at), other = BigInt(current.amountAtomic) - BigInt(saved.amountAtomic);
+      if (other < 0n) circleCorrupt("usage_total_below_hold");
+      const admission = evaluateAssetPolicy(active.registry, { chain: lease.identity.chain, asset: lease.identity.asset, rail: "bridge", mechanism: circleMechanism(op.destinationChain),
+        amountAtomic: lease.amount, dailyUsageAtomic: other.toString(), asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
+      if (!bridgeMechanismAdmitted(admission, circleMechanism(op.destinationChain))) circleBlocked("exact_circle_mechanism_admission_required");
     }
   }
   async reserve(op: CircleOperationV1): Promise<readonly AssetUsageReservation[]> {
     const result: AssetUsageReservation[] = [];
     for (const lease of leases(op)) {
       const active = await this.active(lease.profile, lease.identity.account), frozen = op.policies.find(p => p.profile === lease.profile);
-      if (frozen === undefined || active.digest !== frozen.policyDigest || active.revision !== frozen.revision) circleBlocked("reserve_policy_changed");
+      if (frozen === undefined || frozen.activationDigest === undefined || active.activationDigest !== frozen.activationDigest || active.digest !== frozen.policyDigest || active.revision !== frozen.revision) circleBlocked("reserve_policy_changed");
       const reservation = await this.ledger.reserve({ ...lease.identity, registry: active.registry, rail: "bridge", mechanism: circleMechanism(op.destinationChain), amountAtomic: lease.amount,
         idempotencyKey: `circle-v2-evm.v1:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
       if (reservation.state !== "reserved") circleBlocked("reserve_replay_already_exposed"); result.push(reservation);

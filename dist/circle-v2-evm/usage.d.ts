@@ -10,7 +10,11 @@ export declare class CircleUsage {
     private readonly state;
     private readonly now;
     private readonly ledger;
+    private readonly policiesStore;
+    private readonly policyScope;
     constructor(state: StateStore, now: () => number);
+    /** Wallet/operation/address locks are outermost; policy locks are held through every effect. */
+    withPolicyLocks<T>(profiles: readonly string[], action: () => Promise<T>): Promise<T>;
     private active;
     policies(op: CircleOperationV1): Promise<readonly CirclePolicy[]>;
     confirm(op: CircleOperationV1): Promise<void>;

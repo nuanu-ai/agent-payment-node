@@ -50,7 +50,7 @@ export class CircleEvmService {
             circleBlocked("finite_route_owner");
         const operationId = this.state.operationId(profile, input.idempotencyKey), idempotencyHash = this.state.idempotencyHash(input.idempotencyKey), requestHash = hashObject({ ...input, profile, destinationProfile });
         const keys = [`profile:${sourceCustody.profileHash}`, `profile:${destinationCustody.profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(sourceCustody.walletAddress), evmAddressLock(destinationCustody.walletAddress)];
-        return this.state.withLocks(keys, async () => {
+        return this.state.withLocks(keys, async () => this.usage.withPolicyLocks([profile, destinationProfile], async () => {
             const replay = await this.operations.resolvePrepare({ kind: "circle_route", profileHash: sourceCustody.profileHash, operationId, idempotencyHash, requestHash });
             if (replay !== null) {
                 if (replay.kind !== "circle_route")
@@ -95,7 +95,7 @@ export class CircleEvmService {
             const usage = await this.usage.reserve(initial), reserved = advanceCircle(initial, { usage }, "all_assets_reserved", this.now());
             await this.repo.save(reserved);
             return reserved;
-        });
+        }));
     }
     async status(id) { return publicCircle(await this.required(id)); }
     async approveSource(id) { return this.run(id, approveCircleSource); }
@@ -109,14 +109,14 @@ export class CircleEvmService {
         const initial = await this.required(id);
         await this.state.initialize();
         return this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
-            evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => {
+            evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
             let op = await this.required(id);
             if (action !== cleanupCircle && op.usage.length === 0 && op.effects.every(e => e.phase === "prepared")) {
                 op = advanceCircle(op, { usage: await this.usage.reserve(op) }, "interrupted_prepare_reserves_repaired", this.now());
                 await this.repo.save(op);
             }
             return action(op, this.ports(op));
-        });
+        }));
     }
     async assertPriorSourcesCanonical(source, exceptOperationId) {
         for (const old of await this.repo.listAllOperations()) {

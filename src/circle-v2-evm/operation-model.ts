@@ -13,7 +13,7 @@ export interface CircleEnvelope { readonly chainId: number; readonly from: Addre
   readonly maxFeePerGasAtomic: string; readonly maxPriorityFeePerGasAtomic: string; readonly envelopeHash: string; }
 export interface CircleEffect { readonly role: CircleRole; readonly phase: CircleEffectPhase; readonly envelope: CircleEnvelope;
   readonly transactionHash: Hex | null; readonly materialHash: string | null; readonly proof: CircleReceiptProof | null; }
-export interface CirclePolicy { readonly profile: string; readonly profileHash: string; readonly policyDigest: string; readonly revision: number; }
+export interface CirclePolicy { readonly profile: string; readonly profileHash: string; readonly policyDigest: string; readonly revision: number; readonly activationDigest?: string; }
 export interface CircleOperationV1 { readonly schemaVersion: "apn.circle-v2-evm-operation.v1"; readonly operationId: string;
   readonly profile: string; readonly profileHash: string; readonly destinationProfile: string; readonly destinationProfileHash: string;
   readonly idempotencyHash: string; readonly requestHash: string; readonly fingerprint: string; readonly destinationChain: CircleDestinationChain;
@@ -59,7 +59,7 @@ export function validateCircle(value: unknown): CircleOperationV1 {
     !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
     !/^(?:0|40100)$/u.test(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies)) circleCorrupt("intent");
   if (op.policies.length !== new Set([op.profileHash, op.destinationProfileHash]).size || new Set(op.policies.map(p => p.profileHash)).size !== op.policies.length) circleCorrupt("policy_count");
-  for (const p of op.policies) if (!shape(p, ["profile", "profileHash", "policyDigest", "revision"]) || ![op.profile, op.destinationProfile].includes(p.profile) || ![op.profileHash, op.destinationProfileHash].includes(p.profileHash) || !/^[a-f0-9]{64}$/u.test(p.policyDigest) || !Number.isSafeInteger(p.revision) || p.revision < 1) circleCorrupt("policy_binding");
+  for (const p of op.policies) if (!shape(p, ["profile", "profileHash", "policyDigest", "revision", ...(p.activationDigest === undefined ? [] : ["activationDigest"])]) || ![op.profile, op.destinationProfile].includes(p.profile) || ![op.profileHash, op.destinationProfileHash].includes(p.profileHash) || !/^[a-f0-9]{64}$/u.test(p.policyDigest) || !Number.isSafeInteger(p.revision) || p.revision < 1 || p.activationDigest !== undefined && !/^[a-f0-9]{64}$/u.test(p.activationDigest)) circleCorrupt("policy_binding");
   if (op.usage.length > 5 || op.state !== "cancelled_unsubmitted" && ![0, 5].includes(op.usage.length)) circleCorrupt("usage_count");
   for (const u of op.usage) validateAssetUsageReservation(u);
   const expectedUsage = [

@@ -36,7 +36,7 @@ export class CircleEvmService {
     if (sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || destinationCustody.walletAddress !== route.gasPayer) circleBlocked("finite_route_owner");
     const operationId = this.state.operationId(profile, input.idempotencyKey), idempotencyHash = this.state.idempotencyHash(input.idempotencyKey), requestHash = hashObject({ ...input, profile, destinationProfile });
     const keys = [`profile:${sourceCustody.profileHash}`, `profile:${destinationCustody.profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(sourceCustody.walletAddress), evmAddressLock(destinationCustody.walletAddress)];
-    return this.state.withLocks(keys, async () => {
+    return this.state.withLocks(keys, async () => this.usage.withPolicyLocks([profile, destinationProfile], async () => {
       const replay = await this.operations.resolvePrepare({ kind: "circle_route", profileHash: sourceCustody.profileHash, operationId, idempotencyHash, requestHash });
       if (replay !== null) { if (replay.kind !== "circle_route") circleCorrupt("replay_kind"); return replay.record; }
       try { await this.operations.required(operationId); circleBlocked("operation_identity_occupied"); } catch (e) { if (!(e instanceof ApnError) || e.code !== "APN_OPERATION_NOT_FOUND") throw e; }
@@ -63,7 +63,7 @@ export class CircleEvmService {
       op = sealCircle({ ...op, policies: await this.usage.policies(op) });
       const initial = advanceCircle(op, {}, "exact_finite_route_prepared", this.now()); await this.operations.assertCircleAccountsAvailable(initial); await this.repo.save(initial);
       const usage = await this.usage.reserve(initial), reserved = advanceCircle(initial, { usage }, "all_assets_reserved", this.now()); await this.repo.save(reserved); return reserved;
-    });
+    }));
   }
   async status(id: string) { return publicCircle(await this.required(id)); }
   async approveSource(id: string) { return this.run(id, approveCircleSource); }
@@ -75,11 +75,11 @@ export class CircleEvmService {
   private async run(id: string, action: (op: CircleOperationV1, ports: CircleLifecyclePorts) => Promise<CircleOperationV1>) {
     const initial = await this.required(id); await this.state.initialize();
     return this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
-      evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => {
+      evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
       let op = await this.required(id);
       if (action !== cleanupCircle && op.usage.length === 0 && op.effects.every(e => e.phase === "prepared")) { op = advanceCircle(op, { usage: await this.usage.reserve(op) }, "interrupted_prepare_reserves_repaired", this.now()); await this.repo.save(op); }
       return action(op, this.ports(op));
-    });
+    }));
   }
   private async assertPriorSourcesCanonical(source: CircleRpc, exceptOperationId?: string): Promise<void> {
     for (const old of await this.repo.listAllOperations()) {
