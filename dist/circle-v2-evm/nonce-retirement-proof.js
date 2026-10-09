@@ -1,10 +1,15 @@
+import { validateConsumedBurnProof } from "./consumed-burn-proof.js";
 import { validateSealedBurnProof } from "./burn-retirement-proof.js";
-import { isSealedBurnRetirement } from "./burn-retirement.js";
+import { isSealedBurnRetirement, isConsumedBurnRetirement } from "./burn-retirement.js";
 import { exactKeys, isPlainRecord, hashObject } from "../canonical.js";
 import { circleBlocked } from "./operation-model.js";
 export function validateCircleNonceRetirementProof(proof, op) {
-    if (!isPlainRecord(proof) || !exactKeys(proof, ["intentHash", "originalApprovalHash", "originalNonceAtomic", "finalizedNonceAtomic", "finalizedBlockHash", "finalizedBlockNumberAtomic", "cleanupTransactionHash", "actualCleanupFeeAtomic", "proofHash", ...(isSealedBurnRetirement(op) ? ["sealedBurn"] : [])]))
+    if (!isPlainRecord(proof) || !exactKeys(proof, ["intentHash", "originalApprovalHash", "originalNonceAtomic", "finalizedNonceAtomic", "finalizedBlockHash", "finalizedBlockNumberAtomic", "cleanupTransactionHash", "actualCleanupFeeAtomic", "proofHash", ...(isConsumedBurnRetirement(op) ? ["consumedBurn"] : isSealedBurnRetirement(op) ? ["sealedBurn"] : [])]))
         circleBlocked("nonce_retirement_proof_shape");
+    if (isConsumedBurnRetirement(op)) {
+        validateConsumedBurnProof(proof, op);
+        return;
+    }
     if (isSealedBurnRetirement(op)) {
         validateSealedBurnProof(proof, op);
         return;
