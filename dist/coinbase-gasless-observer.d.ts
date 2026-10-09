@@ -24,4 +24,4 @@ export type CoinbaseGaslessObservation = {
     readonly settlement: CoinbaseGaslessSettlement;
 };
 export declare function coinbaseGaslessSnapshot(rpc: RpcPort, sender: Address): Promise<CoinbaseGaslessSnapshot>;
-export declare function observeCoinbaseGasless(rpc: RpcPort, operation: OperationRecord): Promise<CoinbaseGaslessObservation>;
+export declare function observeCoinbaseGasless(rpc: RpcPort, operation: OperationRecord, logsRpc?: RpcPort): Promise<CoinbaseGaslessObservation>;

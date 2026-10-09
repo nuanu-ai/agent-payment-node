@@ -773,7 +773,7 @@ apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <addre
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
 apn operation status --operation <operation-id>
 apn operation abandon --operation <operation-id>
-apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observe-only true] [--observation-rpc-env <APN_ENV_RPC_URL>]
+apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observe-only true] [--coinbase-observation-rpc publicnode-base] [--observation-rpc-env <APN_ENV_RPC_URL>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>

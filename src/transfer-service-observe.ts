@@ -89,12 +89,12 @@ export class TransferServiceObservation {
     return await this.inspectReceipt(operation, rpc);
   }
 
-  async resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true): Promise<unknown> {
+  async resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     const found = await this.requiredOperation(operationId);
     if (observeOnly && found.providerDirect !== undefined) throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
-    if (found.providerDirect !== undefined) return await this.providerDirect.resume(operationId, waitSeconds);
+    if (found.providerDirect !== undefined) return await this.providerDirect.resume(operationId, waitSeconds, coinbaseObservationRpc);
     if (found.chainId === 1 || found.chainId === 56 || found.chainId === 8453 || found.chainId === 42161 || found.chainId === 1329) this.context.requireRpc().armEvmDirectRpcGuard?.();
     if (waitSeconds !== undefined) {
       throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");

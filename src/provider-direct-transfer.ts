@@ -1,3 +1,4 @@
+import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";
 import { hashObject, sha256 } from "./canonical.js";
 import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import type { CommandRequest } from "./commands.js";
@@ -257,10 +258,11 @@ export class ProviderDirectTransferService {
       return await this.applyExecutionResult(operation, binding, result);
     });
   }
-  async resume(operationIdInput: string, waitSeconds?: number): Promise<unknown> {
+  async resume(operationIdInput: string, waitSeconds?: number, observationPreset?: string): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     const found = await this.requiredOperation(operationId);
+    if (observationPreset !== undefined) assertCoinbaseObservationRequest(found, observationPreset, waitSeconds !== undefined);
     return await this.context.state.withLocks([`profile:${found.profileHash}`, `operation:${operationId}`], async () => {
       let operation = await this.requiredOperation(operationId);
       operation = await this.durable.recoverOrphanTerminal(operation);
@@ -273,7 +275,7 @@ export class ProviderDirectTransferService {
         if (binding.coinbaseGasless !== undefined) {
           operation = await this.durable.transition(operation, "ambiguous_effect", false,
             "coinbase_gasless_observation_required", "provider_effect_no_replay");
-          return publicOperation(await this.observeCoinbaseGasless(operation));
+          return publicOperation(await this.observeCoinbaseGasless(operation, observationPreset));
         }
         if (binding.executionMode === "delegated_session_transaction") {
           const adapter = this.requiredAdapter(binding);
@@ -291,7 +293,7 @@ export class ProviderDirectTransferService {
           operation, "ambiguous_effect", false, "provider_result_missing_after_restart", "provider_effect_no_replay",
         );
       }
-      if (requiredBinding(operation).coinbaseGasless !== undefined) return publicOperation(await this.observeCoinbaseGasless(operation));
+      if (requiredBinding(operation).coinbaseGasless !== undefined) return publicOperation(await this.observeCoinbaseGasless(operation, observationPreset));
       if (
         (operation.state === "provider_pending" || operation.state === "ambiguous_effect") &&
         operation.providerEffect !== undefined && operation.transactionHash === undefined
@@ -460,8 +462,8 @@ export class ProviderDirectTransferService {
     );
     return publicOperation(await this.durable.inspectReceipt(acknowledged));
   }
-  private async observeCoinbaseGasless(operation: OperationRecord): Promise<OperationRecord> {
-    return await reobserveCoinbaseGasless(this.context, this.durable, operation);
+  private async observeCoinbaseGasless(operation: OperationRecord, observationPreset?: string): Promise<OperationRecord> {
+    return await reobserveCoinbaseGasless(this.context, this.durable, operation, observationPreset);
   }
   private async handleExecutionFailure(
     operation: OperationRecord,

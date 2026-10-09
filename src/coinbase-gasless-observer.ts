@@ -1,5 +1,6 @@
 import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFunctionData, getAddress, keccak256,
   parseAbi, parseAbiParameters } from "viem";
+import { COINBASE_OBSERVATION_ORIGIN } from "./coinbase-gasless-observation-source.js";
 import { hashObject } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -81,13 +82,19 @@ export async function coinbaseGaslessSnapshot(rpc: RpcPort, sender: Address): Pr
     accountImplementation: implementation, accountImplementationCodeHash: keccak256(implCode) };
 }
 
-export async function observeCoinbaseGasless(rpc: RpcPort, operation: OperationRecord): Promise<CoinbaseGaslessObservation> {
+export async function observeCoinbaseGasless(rpc: RpcPort, operation: OperationRecord, logsRpc?: RpcPort): Promise<CoinbaseGaslessObservation> {
   const binding = operation.providerDirect?.coinbaseGasless;
   if (binding === undefined) fail("coinbase_gasless_binding_missing", "APN_STATE_CORRUPT");
-  const call = requiredCall(rpc), logs = requiredLogs(rpc);
+  const call = requiredCall(rpc), logs = requiredLogs(logsRpc ?? rpc);
   const identity = await rpc.assertBaseChain();
   if (identity.rpcOrigin !== binding.rpcOrigin) return unresolved(operation, "coinbase_gasless_rpc_origin_changed");
   try {
+    const logsCall = logsRpc === undefined ? undefined : requiredCall(logsRpc);
+    if (logsRpc !== undefined) {
+      const identity = await logsRpc.assertBaseChain();
+      if (identity.chainId !== CHAIN_ID || identity.rpcOrigin !== COINBASE_OBSERVATION_ORIGIN) fail("coinbase_gasless_logs_origin_changed");
+      await assertBlock(logsCall!, binding.safeBlock);
+    }
     await verifyFrozenDeployment(call, binding, operation.walletAddress);
     if (operation.coinbaseGaslessCursor?.previousEndBlock !== null && operation.coinbaseGaslessCursor?.previousEndBlock !== undefined) {
       await assertBlock(call, operation.coinbaseGaslessCursor.previousEndBlock);
@@ -98,6 +105,7 @@ export async function observeCoinbaseGasless(rpc: RpcPort, operation: OperationR
     if (BigInt(safe.numberAtomic) < start) return { status: "pending", cursor: cursor(operation, null), reason: "coinbase_gasless_safe_head_before_cursor" };
     const end = minimum(BigInt(safe.numberAtomic), start + SCAN_WINDOW - 1n);
     const endBlock = block(await call("eth_getBlockByNumber", [quantity(end), false]));
+    if (logsCall !== undefined) { await assertBlock(logsCall, safe); await assertBlock(logsCall, endBlock); }
     const candidates = new Set<Hex>();
     const locator = operation.coinbaseGaslessLocator;
     let locatorTransaction: Hex | null = null;
@@ -119,9 +127,15 @@ export async function observeCoinbaseGasless(rpc: RpcPort, operation: OperationR
     const candidate = [...candidates][0];
     if (candidate !== undefined) {
       const inspected = await inspectCandidate(call, operation, binding, candidate, safe);
-      if (inspected !== null) return { status: "safe", cursor: cursor(operation, null), settlement: inspected };
+      if (inspected !== null) {
+        await assertBlock(call, endBlock); await assertBlock(call, safe);
+        if (logsCall !== undefined) { await assertBlock(logsCall, binding.safeBlock); await assertBlock(logsCall, safe); await assertBlock(logsCall, endBlock); }
+        const settlement = logsRpc === undefined ? inspected : withObservationSource(inspected, binding.rpcOrigin);
+        return { status: "safe", cursor: cursor(operation, null), settlement };
+      }
     }
     await assertBlock(call, endBlock); await assertBlock(call, safe);
+    if (logsCall !== undefined) { await assertBlock(logsCall, binding.safeBlock); await assertBlock(logsCall, safe); await assertBlock(logsCall, endBlock); }
     return { status: "not_found", cursor: { nextBlockAtomic: (end + 1n).toString(), previousEndBlock: endBlock },
       reason: "coinbase_gasless_no_positive_match" };
   } catch (error) {
@@ -371,4 +385,12 @@ function minimum(a: bigint, b: bigint): bigint { return a < b ? a : b; }
 class CoinbaseObservationAmbiguity extends Error {}
 function fail(reason: string, code: "APN_RPC_PROTOCOL" | "APN_RPC_CONFIG" | "APN_STATE_CORRUPT" = "APN_RPC_PROTOCOL"): never {
   throw new ApnError(code, reason, { reason });
+}
+
+function withObservationSource(settlement: CoinbaseGaslessSettlement, callRpcOrigin: string): CoinbaseGaslessSettlement {
+  const { evidenceHash: _previous, ...body } = settlement;
+  const observationSource = { policy: "apn.coinbase-gasless.observation-source.v1" as const,
+    callRpcOrigin, logsRpcOrigin: COINBASE_OBSERVATION_ORIGIN, preset: "publicnode-base" as const };
+  const sourced = { ...body, observationSource };
+  return { ...sourced, evidenceHash: hashObject(sourced) };
 }

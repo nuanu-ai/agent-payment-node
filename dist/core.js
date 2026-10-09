@@ -1,3 +1,4 @@
+import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";
 import { readPermit2IntentStatus } from "./x402-permit2/status.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { failureEnvelope, successEnvelope } from "./output.js";
@@ -473,6 +474,8 @@ export class ApnCore {
                 }
                 await this.context.ready();
                 const operation = await this.operations.required(request.operationId);
+                if (request.coinbaseObservationRpc !== undefined)
+                    assertCoinbaseObservationRequest(operation.kind === "direct_transfer" ? operation.record : {}, request.coinbaseObservationRpc, request.observeOnly !== undefined || request.waitSeconds !== undefined || request.observationRpcEnv !== undefined);
                 if (operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict")
                     throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no resume or execution path." : "Permit2 production execution remains unavailable.");
                 if (request.observeOnly && (operation.kind !== "direct_transfer" || operation.record.providerDirect !== undefined)) {
@@ -520,7 +523,7 @@ export class ApnCore {
                         ...(settlementWait === undefined ? {} : { settlementWait }),
                     });
                 }
-                return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly));
+                return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly, request.coinbaseObservationRpc));
             }
             case "operation.repair-deployment": return dataOutcome(await this.bridges.repairDeployment(request.operationId), "local_journal_migration");
             case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));

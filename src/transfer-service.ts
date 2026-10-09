@@ -218,8 +218,8 @@ export class TransferService {
     });
   }
 
-  async resume(operationId: string, waitSeconds?: number, observeOnly?: true): Promise<unknown> {
-    return await this.observation.resume(operationId, waitSeconds, observeOnly);
+  async resume(operationId: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown> {
+    return await this.observation.resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc);
   }
   async recoverProviderRequest(operationId: string, providerRequestId: string): Promise<unknown> {
     return await this.observation.recoverProviderRequest(operationId, providerRequestId);

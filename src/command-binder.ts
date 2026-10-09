@@ -1,3 +1,4 @@
+import { coinbaseObservationPreset } from "./coinbase-gasless-observation-source.js";
 import { isPlainRecord } from "./canonical.js";
 import {
   parseCatalogArgv,
@@ -318,6 +319,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
           operationId: value(options, "--operation"),
           ...(options["--wait-seconds"] === undefined ? {} : { waitSeconds: Number(options["--wait-seconds"]) }),
           ...(observationRpcEnv === undefined ? {} : { observationRpcEnv }),
+          ...(options["--coinbase-observation-rpc"] === undefined ? {} : { coinbaseObservationRpc: coinbaseObservationPreset(options["--coinbase-observation-rpc"]) }),
           ...(options["--observe-only"] === undefined ? {} : { observeOnly: true as const }),
         },
         ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),

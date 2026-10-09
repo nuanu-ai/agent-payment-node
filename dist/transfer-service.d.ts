@@ -14,7 +14,7 @@ export declare class TransferService {
         command: "gasless.transfer.prepare";
     }>): Promise<unknown>;
     approve(operationIdInput: string): Promise<unknown>;
-    resume(operationId: string, waitSeconds?: number, observeOnly?: true): Promise<unknown>;
+    resume(operationId: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
     recoverProviderRequest(operationId: string, providerRequestId: string): Promise<unknown>;
     status(operationId: string): Promise<unknown>;
     receipt(operationId: string): Promise<unknown>;
