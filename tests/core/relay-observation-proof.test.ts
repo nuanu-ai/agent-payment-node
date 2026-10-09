@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { getAddress } from "viem";
+import { getAddress, type Hex } from "viem";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
-import { validateRelayNativeQuote, RELAY_BASE_SOURCE, RELAY_BNB_SOURCE } from "../../src/relay/native-quote.js";
+import { validateRelayNativeQuote, RELAY_BASE_SOURCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT } from "../../src/relay/native-quote.js";
 import { proveRelayNativeDestination, type RelayBnbProofPorts, type RelayBnbRecipientCreditEvidence } from "../../src/relay/destination-proof.js";
 import { RelayDestinationClaimRepository } from "../../src/relay/destination-claim.js";
 import { decodeRelayBaseReceiptFee, verifyRelayBaseReceiptFee } from "../../src/relay/source-fee-proof.js";
@@ -14,18 +14,18 @@ import type { HttpsBaseRpc } from "../../src/rpc.js";
 import type { EvmDirectRpcGuard } from "../../src/evm-direct-rpc-guard.js";
 import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
-import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { RelayNativeSourceJournalRepository } from "../../src/relay/native-source.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
+import { RelayNativeSourceJournalRepository, RelayNativeSourceRuntime } from "../../src/relay/native-source.js";
 import { RelayKeylessStatusService } from "../../src/relay/status.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 const hash = (c: string) => `0x${c.repeat(64)}`;
-async function operation(state: StateStore) {
-  const quote = await validateRelayNativeQuote(JSON.parse(await readFile("tests/core/relay-fixtures/relay-base-polygon-pol-quote-20261009.json", "utf8")),
-    { payer: RELAY_BASE_SOURCE, recipient: RELAY_BNB_SOURCE, amountAtomic: "50000000000000", minimumOutputWei: "700000000000000000", nowSeconds: 1791517419 });
+async function operation(state: StateStore, mega = false) {
+  const quote = await validateRelayNativeQuote(JSON.parse(await readFile(`tests/core/relay-fixtures/relay-base-${mega ? "mega-usdm" : "polygon-pol"}-quote-20261009.json`, "utf8")),
+    { payer: RELAY_BASE_SOURCE, recipient: mega ? RELAY_POLYGON_RECIPIENT : RELAY_BNB_SOURCE, amountAtomic: "50000000000000", minimumOutputWei: mega ? "90000000000000000" : "700000000000000000", nowSeconds: 1791517419 });
   return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned", state: "prepared", terminal: false,
     profileHash: state.profileHash("evm-live-seller"), operationId: "2".repeat(64), idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64),
-    sourceChainId: 8453, destinationChainId: 137, sourceAccount: quote.payer, recipient: quote.recipient,
+    sourceChainId: 8453, destinationChainId: mega ? 4326 : 137, sourceAccount: quote.payer, recipient: quote.recipient,
     quoteDigest: quote.quoteDigest, nativeQuote: quote, statusLocator: quote.statusLocator!, policyDigest: "5".repeat(64), policyRevision: 1,
     depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei, amountAtomic: quote.principalAtomic, minOutputAtomic: quote.minimumOutputWei,
     createdAt: new Date(1791517419000).toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
@@ -144,4 +144,55 @@ test("Base operational acceptance requires canonical source, bound status, full 
   bound = true; const accepted = await service.observe(op); assert.equal(accepted.state, "operational_acceptance"); assert.deepEqual(accepted.sourceActualFee, fee);
   assert.equal((await service.observe(op)).state, "operational_acceptance");
   assert.equal((await readdir(join(tmp.root, "relay-destination-payout-claims"))).length, 1);
+});
+
+async function executeObservationFixture(receiptFees: Record<string, unknown>, status = "0x1", mega = false) {
+  const tmp = await temporaryState(), state = new StateStore(tmp.root), initial = await operation(state, mega), now = new Date(initial.createdAt);
+  const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2", registryVersion: "relay-execute-fee.test.1", publishedAt: initial.createdAt,
+    effectiveDate: initial.createdAt.slice(0, 10), effectiveAt: initial.createdAt, chains: [{ chain: "eip155:8453", family: "evm", name: "Base", assets: [{ kind: "native", identifier: null,
+      symbol: "ETH", decimals: 18, rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
+      railCaps: { bridge: { maximumPerTransferAtomic: initial.amountAtomic, dailyLimitAtomic: initial.amountAtomic } },
+      mechanismPins: { bridge: { provider: "relay", reference: initial.nativeQuote!.routeReference } } }] }] });
+  const { integrityHash: _, ...fields } = initial; const op = freezeRelayUnsignedOperation({ ...fields, policyDigest: registry.policyDigest });
+  await new RelayUnsignedOperationRepository(tmp.root).persistLocked(op);
+  const wallet = { schemaVersion: "apn.state.v1" as const, profile: "evm-live-seller" as const, profileHash: op.profileHash, address: op.sourceAccount as Hex,
+    createdAt: initial.createdAt, bindingHash: hashObject({ profile: "evm-live-seller", address: op.sourceAccount, createdAt: initial.createdAt }) };
+  await state.writeNewWallet({ ...wallet, integrityHash: hashObject(wallet) });
+  const identity = { account: getAddress(op.sourceAccount), chain: "eip155:8453", asset: { kind: "native" as const, identifier: null } };
+  const ledger = new AssetUsageLedger(tmp.root), reservationId = assetUsageReservationId(identity, `relay-native-execute:${op.operationId}`);
+  await ledger.reserve({ ...identity, registry, rail: "bridge", amountAtomic: op.amountAtomic, idempotencyKey: `relay-native-execute:${op.operationId}`, now });
+  const journals = new RelayNativeSourceJournalRepository(tmp.root); let j = await journals.advance(op, null, "pending", null, now);
+  j = await journals.advance(op, j.integrityHash, "signing_started", null, now); j = await journals.advance(op, j.integrityHash, "sealed", hash("a"), now);
+  const before = await journals.advance(op, j.integrityHash, "submitting", null, now);
+  let posts = 0, sends = 0, confirms = 0;
+  const runtime = new RelayNativeSourceRuntime(state, { load: async () => { throw new Error("no secret reads permitted"); }, create: async () => { throw new Error("no custody permitted"); } },
+    { confirm: async () => { confirms++; return false; }, rpc: { submitRawTransaction: async () => { sends++; throw new Error("no resend permitted"); }, batchCall: async () => {
+      posts++;
+      if (posts === 1) return [{ hash: hash("a"), from: op.sourceAccount, to: op.nativeQuote!.deposit.to, input: op.nativeQuote!.deposit.data,
+        value: `0x${BigInt(op.amountAtomic).toString(16)}`, chainId: "0x2105", type: "0x2", blockNumber: "0x64", blockHash: hash("b") },
+        { transactionHash: hash("a"), status, blockNumber: "0x64", blockHash: hash("b"), ...receiptFees }];
+      return [{ number: "0x64", hash: hash("b") }, { number: "0x65", hash: hash("c") }, "0x2105"];
+    } } }, { now: () => now });
+  return { tmp, op, runtime, before, journals, usage: () => ledger.load(identity, reservationId), counts: () => ({ posts, sends, confirms }) };
+}
+const validReceiptFees = { gasUsed: "0x64", effectiveGasPrice: "0xa", l1Fee: "0x14", daFootprintGasScalar: "0x1", operatorFeeScalar: "0x2", operatorFeeConstant: "0x3" };
+test("execute source observer settles only a complete under-cap canonical Base fee", async t => {
+  for (const mega of [false, true]) for (const status of ["0x1", "0x0"]) {
+    const f = await executeObservationFixture(validReceiptFees, status, mega); t.after(f.tmp.cleanup);
+    const result = await f.runtime.execute(f.op.operationId); assert.equal(result.phase, status === "0x1" ? "confirmed" : "failed");
+    assert.equal((await f.usage())?.state, status === "0x1" ? "finalized" : "failed_confirmed_revert");
+    assert.deepEqual(f.counts(), { posts: 3, sends: 0, confirms: 0 });
+  }
+});
+test("execute missing malformed unsupported or over-cap Base fee preserves charged submitting hold without resend", async t => {
+  const changes = [{ l1Fee: undefined }, { effectiveGasPrice: undefined }, { gasUsed: undefined }, { daFootprintGasScalar: undefined },
+    { l1Fee: "0x00" }, { operatorFeeScalar: "0x00000002" }, { operatorFeeConstant: undefined },
+    { l1Fee: "0xe8d4a51001" }, { operatorFeeScalar: "0xffffffff" }, { operatorFee: "0xe8d4a51001" }];
+  for (const mega of [false, true]) for (const change of changes) for (const status of ["0x1", "0x0"]) {
+    const f = await executeObservationFixture({ ...validReceiptFees, ...change }, status, mega); t.after(f.tmp.cleanup);
+    const result = await f.runtime.execute(f.op.operationId); assert.deepEqual(result, f.before);
+    assert.equal((await f.journals.load(f.op))?.phase, "submitting"); assert.equal((await f.usage())?.state, "reserved");
+    assert.equal((await f.usage())?.amountAtomic, "50000000000000");
+    assert.deepEqual(f.counts(), { posts: 3, sends: 0, confirms: 0 });
+  }
 });
