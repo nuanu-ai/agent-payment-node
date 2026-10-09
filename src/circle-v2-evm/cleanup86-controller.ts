@@ -3,6 +3,9 @@ import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { circleBlocked, validateCircleEnvelope, type CircleOperationV1 } from "./operation-model.js";
 import { Cleanup86Store, type Cleanup86Intent, type Cleanup86Effect } from "./cleanup86-store.js";
+import { claimCleanup86CurrentExecution, type VerifiedCleanup86CurrentPurpose } from "./cleanup86-current-purpose.js";
+import type { StateStore } from "../state.js";
+import type { Cleanup85RecoveryIntent } from "./cleanup85-recovery-store.js";
 import type { Cleanup86Material } from "./cleanup86-custody.js";
 export interface Cleanup86Grant { readonly kind: "cleanup86-foreground-grant"; }
 interface GrantBody { readonly root: string; readonly operationId: string; readonly parentFingerprint: string; readonly intentHash: string; readonly intentDigest: string; readonly parentDigest: string; readonly expiresAt: number; readonly now: () => number; active: boolean; custodyClaimed: boolean; }
@@ -24,7 +27,8 @@ export interface Cleanup86Ports {
 }
 /** Only an explicit foreground command invokes this. Claims are permanent even if a restorable
  * effect journal is rolled back; neither controller nor observer loads private material to retry. */
-export async function executeCleanup86(root: string, op: CircleOperationV1, intent: Cleanup86Intent, store: Cleanup86Store, ports: Cleanup86Ports): Promise<Cleanup86Effect> {
+export async function executeCleanup86(root: string, op: CircleOperationV1, intent: Cleanup86Intent, store: Cleanup86Store, ports: Cleanup86Ports, current?: { readonly state: StateStore; readonly recovery: Cleanup85RecoveryIntent; readonly certificate: VerifiedCleanup86CurrentPurpose }): Promise<Cleanup86Effect> {
+  if (intent.version === "apn.circle-cleanup86-intent.v3") { if (current === undefined || current.state.root !== root || hashObject(claimCleanup86CurrentExecution(current.certificate, current.state, op, current.recovery, intent.envelope)) !== hashObject(intent.currentPurpose)) circleBlocked("cleanup86_private_current_purpose_required"); }
   assertFrame(intent); op = frozen(structuredClone(op)); intent = frozen(structuredClone(intent)); const parentDigest = hashObject(op), intentDigest = hashObject(intent);
   if (await store.claimed(op, intent, "sign") || await store.claimed(op, intent, "send")) circleBlocked("cleanup86_claimed_observe_only");
   let effect = await store.effect(op, intent);

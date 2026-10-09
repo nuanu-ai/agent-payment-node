@@ -3,6 +3,7 @@ import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { circleBlocked, validateCircleEnvelope } from "./operation-model.js";
 import { Cleanup86Store } from "./cleanup86-store.js";
+import { claimCleanup86CurrentExecution } from "./cleanup86-current-purpose.js";
 const grants = new WeakMap();
 function frozen(value) { if (value !== null && typeof value === "object") {
     for (const child of Object.values(value))
@@ -27,7 +28,11 @@ export function claimCleanup86Custody(grant, root, op, intent) {
 }
 /** Only an explicit foreground command invokes this. Claims are permanent even if a restorable
  * effect journal is rolled back; neither controller nor observer loads private material to retry. */
-export async function executeCleanup86(root, op, intent, store, ports) {
+export async function executeCleanup86(root, op, intent, store, ports, current) {
+    if (intent.version === "apn.circle-cleanup86-intent.v3") {
+        if (current === undefined || current.state.root !== root || hashObject(claimCleanup86CurrentExecution(current.certificate, current.state, op, current.recovery, intent.envelope)) !== hashObject(intent.currentPurpose))
+            circleBlocked("cleanup86_private_current_purpose_required");
+    }
     assertFrame(intent);
     op = frozen(structuredClone(op));
     intent = frozen(structuredClone(intent));

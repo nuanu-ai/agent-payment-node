@@ -1,5 +1,6 @@
 import { Cleanup85UnsignedRetirementStore } from "../circle-cleanup85-unsigned-retirement-store.js";
 import { StateStore } from "../state.js";
+import { validateCleanup86CurrentPurpose, verifiedCleanup86CurrentPurpose, claimCleanup86CurrentStart, authenticateCleanup86CurrentHistory } from "./cleanup86-current-purpose.js";
 import { verifyCleanup86RecoveryContext, verifiedCleanup86RecoveryContext } from "./cleanup85-effective-context.js";
 import { hashObject, exactKeys, isPlainRecord } from "../canonical.js";
 import { SecureStateStore } from "../secure-state-store.js";
@@ -7,14 +8,15 @@ import { circleBlocked, validateCircleEnvelope } from "./operation-model.js";
 import { assertCleanup85Parent } from "./cleanup85-recovery-store.js";
 import { sanitizedCircleFailure } from "./public-failure-store.js";
 const digest = (x) => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x);
-export function validateCleanup86Intent(value, recovery, context) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["version", "recoveryBinding", "cancellationProofHash", "envelope", "policies", "capturedAt", "windowEndsAt", "intentHash", ...(value.version === "apn.circle-cleanup86-intent.v2" ? ["retirementProofHash", "freshReadmissionHash"] : [])]))
+export function validateCleanup86Intent(value, recovery, context, current) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["version", "recoveryBinding", "cancellationProofHash", "envelope", "policies", "capturedAt", "windowEndsAt", "intentHash", ...(value.version === "apn.circle-cleanup86-intent.v2" ? ["retirementProofHash", "freshReadmissionHash"] : []), ...(value.version === "apn.circle-cleanup86-intent.v3" ? ["currentPurpose"] : [])]))
         circleBlocked("cleanup86_intent_shape");
     const i = value, { intentHash, ...body } = i;
     const successor = context?.retirementProofHash !== null && context?.retirementProofHash !== undefined;
-    const authority = successor ? context.readmission : recovery;
-    if (i.version !== (successor ? "apn.circle-cleanup86-intent.v2" : "apn.circle-cleanup86-intent.v1") || successor && (i.retirementProofHash !== context.retirementProofHash || i.freshReadmissionHash !== context.readmissionHash) || i.recoveryBinding !== recovery.recoveryBinding || !digest(i.cancellationProofHash) || intentHash !== hashObject(body) ||
-        !Array.isArray(i.policies) || i.policies.length !== 2 || hashObject(i.policies) !== hashObject(authority.policies) || i.windowEndsAt !== authority.windowEndsAt || typeof i.capturedAt !== "string" || !Number.isFinite(Date.parse(i.capturedAt)) || new Date(i.capturedAt).toISOString() !== i.capturedAt)
+    const currentPurpose = i.version === "apn.circle-cleanup86-intent.v3" ? (current === undefined ? circleBlocked("cleanup86_current_context_required") : validateCleanup86CurrentPurpose(i.currentPurpose, current.root, current.op, recovery, i.envelope)) : undefined;
+    const authority = currentPurpose ?? (successor ? context.readmission : recovery);
+    if (currentPurpose === undefined && i.version !== (successor ? "apn.circle-cleanup86-intent.v2" : "apn.circle-cleanup86-intent.v1") || currentPurpose === undefined && successor && (i.retirementProofHash !== context.retirementProofHash || i.freshReadmissionHash !== context.readmissionHash) || i.recoveryBinding !== recovery.recoveryBinding || !digest(i.cancellationProofHash) || currentPurpose !== undefined && i.cancellationProofHash !== currentPurpose.cancellationProofHash || intentHash !== hashObject(body) ||
+        !Array.isArray(i.policies) || i.policies.length !== 2 || hashObject(i.policies) !== hashObject(authority.policies) || i.windowEndsAt !== authority.windowEndsAt || currentPurpose !== undefined && i.capturedAt !== currentPurpose.capturedAt || typeof i.capturedAt !== "string" || !Number.isFinite(Date.parse(i.capturedAt)) || new Date(i.capturedAt).toISOString() !== i.capturedAt)
         circleBlocked("cleanup86_intent_binding");
     validateCircleEnvelope(i.envelope, "cleanup", 1329, null, "evm-live-seller");
     if (i.envelope.nonceAtomic !== "86" || BigInt(i.envelope.gasLimitAtomic) * BigInt(i.envelope.maxFeePerGasAtomic) > 15000000000000n)
@@ -34,7 +36,16 @@ export class Cleanup86Store extends SecureStateStore {
     path(op, kind) { assertCleanup85Parent(op); return `circle-cleanup85-recovery/${op.operationId}-cleanup86-${kind}.json`; }
     async context(op, recovery) { if (await new Cleanup85UnsignedRetirementStore(this.root).load() === null)
         return undefined; const state = new StateStore(this.root); return verifiedCleanup86RecoveryContext(await verifyCleanup86RecoveryContext(state, op, recovery), state, op, recovery); }
-    async intent(op, recovery) { const v = await this.readJson(this.path(op, "intent")); return v === null ? null : validateCleanup86Intent(v, recovery, await this.context(op, recovery)); }
+    async intent(op, recovery) {
+        const v = await this.readJson(this.path(op, "intent"));
+        if (v === null)
+            return null;
+        const current = isPlainRecord(v) && v.version === "apn.circle-cleanup86-intent.v3";
+        const intent = validateCleanup86Intent(v, recovery, current ? undefined : await this.context(op, recovery), { root: this.root, op });
+        if (current)
+            await authenticateCleanup86CurrentHistory(this.root, op, intent.currentPurpose);
+        return intent;
+    }
     async start(op, recovery, body) {
         const old = await this.intent(op, recovery);
         if (old !== null)
@@ -45,6 +56,22 @@ export class Cleanup86Store extends SecureStateStore {
         await this.ensureDirectory("circle-cleanup85-recovery");
         await this.writeJson(this.path(op, "intent"), i, true);
         return i;
+    }
+    async startCurrent(state, op, recovery, envelope, certificate) {
+        if (state.root !== this.root)
+            circleBlocked("cleanup86_current_root_changed");
+        const purpose = verifiedCleanup86CurrentPurpose(certificate, state, op, recovery, envelope);
+        for (const kind of ["intent", "effect", "sign", "send", "material", "history-0", "first-failure"])
+            if (await this.readJson(this.path(op, kind)) !== null)
+                circleBlocked("cleanup86_existing_observe_only");
+        const body = { version: "apn.circle-cleanup86-intent.v3", recoveryBinding: recovery.recoveryBinding, cancellationProofHash: purpose.cancellationProofHash, envelope, policies: purpose.policies, capturedAt: purpose.capturedAt, windowEndsAt: purpose.windowEndsAt, currentPurpose: purpose };
+        const intent = validateCleanup86Intent({ ...body, intentHash: hashObject(body) }, recovery, undefined, { root: this.root, op });
+        verifiedCleanup86CurrentPurpose(certificate, state, op, recovery, envelope);
+        claimCleanup86CurrentStart(certificate, state, op, recovery, envelope);
+        await this.initialize();
+        await this.ensureDirectory("circle-cleanup85-recovery");
+        await this.writeJson(this.path(op, "intent"), intent, true);
+        return intent;
     }
     async effect(op, i) { const v = await this.readJson(this.path(op, "effect")); return v === null ? null : validateCleanup86Effect(v, i); }
     async saveEffect(op, i, previous, patch) {
