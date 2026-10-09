@@ -1,3 +1,4 @@
+import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi, type Hex } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
@@ -34,7 +35,7 @@ export async function readSeiFundingPlan(rpc:SeiRpcPort,owner:string,amount:stri
   if(gas>30_000n || fee>100_000_000n)seiFail("source_fee_pair");
   const [l1,op]=await Promise.all([rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getL1FeeUpperBound",args:[BigInt(MAX_DIRECT_TRANSACTION_BYTES)]})},tag]),
     rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getOperatorFee",args:[gas]})},tag])]);
-  const l1Fee=seiQuantity(l1),operator=seiQuantity(op),total=gas*fee+l1Fee+operator;
+  const l1Fee=gaszipOracleUint256(l1,seiFail),operator=gaszipOracleUint256(op,seiFail),total=gas*fee+l1Fee+operator;
   if(operator!==0n)seiFail("base_operator_fee_unreviewed");
   if(total>BigInt(maxFee) || total>SEI_FUNDING.maximumFee || seiQuantity(balance)<BigInt(amount)+(frozenFeeUpper===undefined || total>BigInt(frozenFeeUpper)?total:BigInt(frozenFeeUpper)))seiFail("source_balance_or_fee_cap");
   const check=seiObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));if(seiHash(check.hash)!==blockHash)seiFail("source_reorg");

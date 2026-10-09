@@ -1,3 +1,4 @@
+import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
@@ -56,7 +57,7 @@ export async function readMegaFundingPlan(rpc, owner, amount, maxFee, frozenFeeU
         megaFail("source_fee_pair");
     const [l1, op] = await Promise.all([rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: ABI, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] }) }, tag]),
         rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: ABI, functionName: "getOperatorFee", args: [gas] }) }, tag])]);
-    const l1Fee = megaQuantity(l1), operator = megaQuantity(op), total = gas * fee + l1Fee + operator;
+    const l1Fee = gaszipOracleUint256(l1, megaFail), operator = gaszipOracleUint256(op, megaFail), total = gas * fee + l1Fee + operator;
     if (operator !== 0n)
         megaFail("base_operator_fee_unreviewed");
     if (total > BigInt(maxFee) || total > MEGA_FUNDING.maximumFee || megaQuantity(balance) < BigInt(amount) + (frozenFeeUpper === undefined || total > BigInt(frozenFeeUpper) ? total : BigInt(frozenFeeUpper)))
