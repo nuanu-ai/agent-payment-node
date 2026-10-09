@@ -56,7 +56,7 @@ export declare class CircleEvmService {
         cleanup_retirement_receipt?: import("./nonce-retirement-proof.js").CircleNonceRetirementProof;
         operation_id: string;
         kind: string;
-        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
+        state: "completed" | "cleanup_required" | "cleaned" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
         terminal: boolean;
         source_profile: string;
         destination_profile: string;
@@ -69,8 +69,8 @@ export declare class CircleEvmService {
             transaction_hash: `0x${string}` | null;
             actual_fee_atomic: string | null;
         }[];
-        source_finality: "included" | "safe" | "finalized" | null;
-        destination_finality: "included" | "safe" | "finalized" | null;
+        source_finality: "safe" | "finalized" | "included" | null;
+        destination_finality: "safe" | "finalized" | "included" | null;
         nonce: `0x${string}` | null;
         residual_allowance_atomic: string;
         usage_finalized: boolean;

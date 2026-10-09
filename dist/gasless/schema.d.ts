@@ -526,9 +526,9 @@ export declare const stateSchema: z.ZodEnum<{
 export declare const phaseSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     submitted_pending: "submitted_pending";
+    unsealed: "unsealed";
     signing_started: "signing_started";
     sealed: "sealed";
-    unsealed: "unsealed";
     submitting: "submitting";
     included_success: "included_success";
     included_revert: "included_revert";
@@ -545,9 +545,9 @@ export declare const effectSchema: z.ZodObject<{
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
+        unsealed: "unsealed";
         signing_started: "signing_started";
         sealed: "sealed";
-        unsealed: "unsealed";
         submitting: "submitting";
         included_success: "included_success";
         included_revert: "included_revert";
@@ -629,9 +629,9 @@ export declare const transitionSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
-            unsealed: "unsealed";
             submitting: "submitting";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -666,9 +666,9 @@ export declare const transitionSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
-            unsealed: "unsealed";
             submitting: "submitting";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -1083,9 +1083,9 @@ export declare const operationSchema: z.ZodObject<{
             phase: z.ZodEnum<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
+                unsealed: "unsealed";
                 signing_started: "signing_started";
                 sealed: "sealed";
-                unsealed: "unsealed";
                 submitting: "submitting";
                 included_success: "included_success";
                 included_revert: "included_revert";
@@ -1120,9 +1120,9 @@ export declare const operationSchema: z.ZodObject<{
             phase: z.ZodEnum<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
+                unsealed: "unsealed";
                 signing_started: "signing_started";
                 sealed: "sealed";
-                unsealed: "unsealed";
                 submitting: "submitting";
                 included_success: "included_success";
                 included_revert: "included_revert";
@@ -1419,9 +1419,9 @@ export declare const operationSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
-            unsealed: "unsealed";
             submitting: "submitting";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -1456,9 +1456,9 @@ export declare const operationSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
-            unsealed: "unsealed";
             submitting: "submitting";
             included_success: "included_success";
             included_revert: "included_revert";
