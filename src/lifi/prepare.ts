@@ -49,10 +49,13 @@ export class BridgePreparation {
     const profile = canonicalProfile(input.profile), quoteHash = bridgeHash(input.quote, "APN_INVALID_INPUT"), routeId = bridgeOpaque(input.route, "APN_INVALID_INPUT");
     const key = canonicalIdempotencyKey(input.idempotencyKey), state = this.o.state, profileHash = state.profileHash(profile),
       operationId = state.operationId(profile, key), idempotencyHash = state.idempotencyHash(key), requestHash = hashObject({ profile, quote: quoteHash, route: routeId });
-    const preliminaryQuote = await this.o.quotes.load(profileHash, quoteHash);
-    if (preliminaryQuote === null) bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");
+    // Existing journals are authoritative on replay, even if the original quote is unavailable.
+    const preliminary = await this.o.operations.resolvePrepare({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash });
+    const preliminaryQuote = preliminary === null ? await this.o.quotes.load(profileHash, quoteHash) : null;
+    if (preliminary === null && preliminaryQuote === null) bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");
+    const ownerAddress = preliminary?.kind === "bridge_route" ? preliminary.record.intent.owner.address : preliminaryQuote!.owner.address;
     return await state.withLocks([walletCustodyLock(state, profile)], async () =>
-      await state.withLocks([ `profile:${profileHash}`, `profile:${allowlistProfileHash(profile)}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(preliminaryQuote.owner.address)], async () => {
+      await state.withLocks([ `profile:${profileHash}`, `profile:${allowlistProfileHash(profile)}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(ownerAddress)], async () => {
       const existing = await this.o.operations.resolvePrepare({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "bridge_global_operation_kind");
