@@ -50,3 +50,21 @@ for(const kind of ["original_slot","successor_slot","retirement_proof","orphan_v
  else {const directory=join(temp.root,"operations",state.profileHash("evm-live-buyer"));await mkdir(directory,{recursive:true,mode:0o700});for(let index=0;index<257;index++)await writeFile(join(directory,`${index.toString(16).padStart(64,"0")}.json`),"{}\n",{mode:0o600});}
  const service=new Cleanup85NativeCancellation(state,{load:async()=>{keys++;throw Error("private forbidden");},create:async()=>{throw Error("private forbidden");}},{APN_ARBITRUM_RPC_URL:"https://arb1.arbitrum.io/rpc"},{https:{request:async()=>{rpc++;throw Error("network forbidden");}}});if(kind==="overflow")await assert.rejects(service.inspect(r),/absent_roster_overflow/);else await assert.rejects(service.inspect(r));assert.equal(keys,0);assert.equal(rpc,0);
 });
+
+for(const kind of ["slot_only","operation_only","original_operation_only","malformed_proof","overflow"] as const)test(`generic native denial protects or refuses missing-original-slot ${kind} orphan`,async t=>{
+ const temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root);await state.initialize();const {op,r}=await syntheticSuccessor(state),records=new Cleanup85NativePublicRecords(temp.root);
+ if(kind==="slot_only")await records.publish(r.parentOperationId,"successor-slot",{});
+ else if(kind==="operation_only")await state.writeOperation(op);
+ else if(kind==="original_operation_only")await state.writeOperation((await captured()).operation);
+ else if(kind==="malformed_proof"){await mkdir(join(temp.root,"circle-cleanup85-recovery"),{mode:0o700});await writeFile(join(temp.root,"circle-cleanup85-recovery","4b5fc09e077b6c171083edb6c89ce31b5f8e881e1db4f279a866548aade0aef1-unsigned-retirement.json"),"{}\n",{mode:0o600});}
+ else {const directory=join(temp.root,"operations",state.profileHash("evm-live-buyer"));await mkdir(directory,{recursive:true,mode:0o700});for(let index=0;index<257;index++)await writeFile(join(directory,`${index.toString(16).padStart(64,"0")}.json`),"{}\n",{mode:0o600});}
+ if(kind==="operation_only"||kind==="original_operation_only")assert.equal((await loadCleanup85NativeReservationIdentity(state))!.nativeReservationId,(kind==="operation_only"?op:(await captured()).operation).evm!.cleanup85Cancellation!.nativeReservationId);else await assert.rejects(loadCleanup85NativeReservationIdentity(state));
+});
+test("generic native denial complete family absence is existing-only and returns null",async t=>{
+ const temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(join(temp.root,"uninitialized"));assert.equal(await loadCleanup85NativeReservationIdentity(state),null);await assert.rejects(readFile(join(state.root,"state.json")));
+});
+
+test("orphan denial rejects self-rehashed foreign original namespace instead of losing fixed RID protection",async t=>{
+ const temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root);await state.initialize();const {op}=await syntheticSuccessor(state);const {integrityHash:_,...body}=structuredClone(op),binding=body.evm!.cleanup85Cancellation!,request={...binding.request,recoveryBinding:"b".repeat(64)},namespace=`cleanup85-native-successor:${request.recoveryBinding}:${binding.successor!.retirementProofHash}`,originalOperationId=state.operationId("evm-live-buyer",`cleanup85-native:${request.recoveryBinding}`),lineage={originalOperationId,operationId:state.operationId("evm-live-buyer",namespace),namespace,retirementProofHash:binding.successor!.retirementProofHash,readmission:null};
+ body.operationId=lineage.operationId;body.idempotencyHash=state.idempotencyHash(namespace);body.requestHash=cleanup85NativeRequestHash(request,lineage);body.evm={...body.evm!,cleanup85Cancellation:{...binding,request,successor:{...binding.successor!,originalOperationId},nativeReservationId:assetUsageReservationId({account:CLEANUP85_OWNER,chain:"eip155:42161",asset:{kind:"native",identifier:null}},`apn.cleanup85-native:${body.operationId}`)}};body.fingerprint=evmDirectFingerprint(body);await state.writeOperation(sealOperation(body));await assert.rejects(loadCleanup85NativeReservationIdentity(state),/reservation_orphan_original_identity/);
+});
