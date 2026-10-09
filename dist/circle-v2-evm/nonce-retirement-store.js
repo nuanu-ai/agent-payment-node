@@ -1,3 +1,5 @@
+import { isSealedBurnRetirement, sealedBurnBinding, assertSealedBurnReplacement } from "./burn-retirement.js";
+import { assertSealedBurnEvidence } from "./burn-retirement-proof.js";
 import { CircleRetirementAuthorityStore } from "./nonce-retirement-authority.js";
 import { hashObject, exactKeys, isPlainRecord } from "../canonical.js";
 import { SecureStateStore } from "../secure-state-store.js";
@@ -5,6 +7,8 @@ import { circleBlocked, circleCorrupt, validateCircleEnvelope } from "./operatio
 const ROOT = "circle-v2-nonce-retirements";
 /** Immutable public identity only. No sealed wire, ciphertext or signing key enters this record. */
 export function circleRetirementBinding(op) {
+    if (isSealedBurnRetirement(op))
+        return sealedBurnBinding(op);
     const approval = op.effects[0], burn = op.effects[1];
     return hashObject({ operationId: op.operationId, fingerprint: op.fingerprint, sourceCustody: op.sourceCustody,
         destinationCustody: op.destinationCustody, policies: op.policies, deploymentDigest: op.deploymentDigest,
@@ -17,27 +21,35 @@ export class CircleNonceRetirementStore extends SecureStateStore {
         const value = await this.readJson(this.path(op.operationId));
         if (value === null)
             return null;
-        if (!isPlainRecord(value) || !exactKeys(value, ["version", "operationId", "binding", "prefix", "cleanupEnvelope", "intentHash"]))
+        if (!isPlainRecord(value) || !exactKeys(value, ["version", "operationId", "binding", "prefix", "cleanupEnvelope", "intentHash", ...(isSealedBurnRetirement(op) ? ["sealedBurn"] : [])]))
             circleCorrupt("retirement_intent_shape");
         const intent = value, { intentHash, ...body } = intent;
-        if (intent.version !== "apn.circle-nonce-retirement.v1" || intentHash !== hashObject(body) || intent.operationId !== op.operationId || intent.binding !== circleRetirementBinding(op) ||
+        if (intent.version !== (isSealedBurnRetirement(op) ? "apn.circle-burn-nonce-retirement.v1" : "apn.circle-nonce-retirement.v1") || intentHash !== hashObject(body) || intent.operationId !== op.operationId || intent.binding !== circleRetirementBinding(op) ||
             !Array.isArray(intent.prefix) || intent.prefix.length < 5 || intent.prefix.some(x => typeof x !== "string" || !/^[a-f0-9]{64}$/u.test(x)))
             circleCorrupt("retirement_intent_binding");
         validateCircleEnvelope(intent.cleanupEnvelope, "cleanup", op.destinationChain, null, op.destinationProfile);
-        if (intent.cleanupEnvelope.nonceAtomic !== op.effects[0].envelope.nonceAtomic)
+        if (intent.cleanupEnvelope.nonceAtomic !== op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic)
             circleCorrupt("retirement_nonce_changed");
+        if (isSealedBurnRetirement(op)) {
+            assertSealedBurnReplacement(op, intent.cleanupEnvelope);
+            assertSealedBurnEvidence(intent.sealedBurn, op);
+        }
         return intent;
     }
-    async start(op, cleanupEnvelope) {
+    async start(op, cleanupEnvelope, sealedBurn) {
         const previous = await this.intent(op);
         if (previous !== null)
             return previous;
-        const body = { version: "apn.circle-nonce-retirement.v1", operationId: op.operationId, binding: circleRetirementBinding(op),
+        const body = { version: isSealedBurnRetirement(op) ? "apn.circle-burn-nonce-retirement.v1" : "apn.circle-nonce-retirement.v1", ...(sealedBurn === undefined ? {} : { sealedBurn }), operationId: op.operationId, binding: circleRetirementBinding(op),
             prefix: op.transitions.map(x => x.snapshotHash), cleanupEnvelope };
         const intent = { ...body, intentHash: hashObject(body) };
         validateCircleEnvelope(cleanupEnvelope, "cleanup", op.destinationChain, null, op.destinationProfile);
-        if (cleanupEnvelope.nonceAtomic !== op.effects[0].envelope.nonceAtomic)
+        if (cleanupEnvelope.nonceAtomic !== op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic)
             circleBlocked("retirement_exact_original_nonce_required");
+        if (isSealedBurnRetirement(op)) {
+            assertSealedBurnReplacement(op, cleanupEnvelope);
+            assertSealedBurnEvidence(intent.sealedBurn, op);
+        }
         await this.initialize();
         await this.ensureDirectory(ROOT);
         await this.writeJson(this.path(op.operationId), intent, true);

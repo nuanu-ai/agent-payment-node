@@ -1,7 +1,14 @@
+import { isSealedBurnRetirement, assertSealedBurnRetirement } from "./burn-retirement.js";
 import { validateCircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { advanceCircle, circleBlocked, validateCircle } from "./operation-model.js";
 import { executeCircleCleanupWithConsent } from "./lifecycle.js";
 export function assertCircleNonceRetirementCase(op, now) {
+    if (isSealedBurnRetirement(op)) {
+        assertSealedBurnRetirement(op);
+        if (op.terminal || op.usageFinalized || op.residualAllowanceAtomic !== "40100")
+            circleBlocked("sealed_burn_holds_or_allowance_changed");
+        return;
+    }
     const approval = op.effects[0], burn = op.effects[1];
     if (op.destinationChain !== 143 || op.destinationProfile !== "default" || op.terminal || now < Date.parse(op.expiresAt) ||
         approval.phase !== "unknown" || approval.transactionHash === null || approval.materialHash === null || approval.proof !== null ||

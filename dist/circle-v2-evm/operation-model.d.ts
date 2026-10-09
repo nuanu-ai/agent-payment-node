@@ -95,8 +95,8 @@ export declare function publicCircle(op: CircleOperationV1): {
         transaction_hash: `0x${string}` | null;
         actual_fee_atomic: string | null;
     }[];
-    source_finality: "finalized" | "safe" | "included" | null;
-    destination_finality: "finalized" | "safe" | "included" | null;
+    source_finality: "safe" | "finalized" | "included" | null;
+    destination_finality: "safe" | "finalized" | "included" | null;
     nonce: `0x${string}` | null;
     residual_allowance_atomic: string;
     usage_finalized: boolean;

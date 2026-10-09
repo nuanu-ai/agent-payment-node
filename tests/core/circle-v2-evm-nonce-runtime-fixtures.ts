@@ -6,8 +6,8 @@ import { advanceCircle, circleEnvelope, sealCircle, type CircleOperationV1 } fro
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { encodeCircleApproval, encodeCircleBurn } from "../../src/circle-v2-evm/protocol.js";
 export const at = Date.parse("2026-10-09T01:00:00.000Z"), tx = `0x${"11".repeat(32)}` as Hex, cleanupTx = `0x${"cc".repeat(32)}` as Hex;
-export function initial(root = join(tmpdir(), "circle-fixture"), chain: 143 | 1329 | 59144 = 143): CircleOperationV1 {
-  const selected = circleRoute(chain);
+export function initial(root = join(tmpdir(), "circle-fixture"), chain: 143 | 1329 | 59144 = 143, destinationProfile?: string): CircleOperationV1 {
+  const selected = circleRoute(chain, destinationProfile);
   const state = new StateStore(root), profileHash = state.profileHash("evm-live-buyer"), destinationProfileHash = state.profileHash(selected.gasPayerProfile);
   const custody = (profileHash: string, walletAddress: typeof CIRCLE_SOURCE_OWNER) => ({ schemaVersion: "apn.evm-native-custody.v1" as const, profileHash, walletAddress, walletBindingHash: "a".repeat(64), walletCreatedAt: new Date(at).toISOString(), providerId: "local" as const, providerAccountBindingHash: "a".repeat(64), providerCapabilityHash: "b".repeat(64), providerRevision: 1 });
   const envelope = (role: "approval" | "burn") => circleEnvelope({ chainId: 42161, from: CIRCLE_SOURCE_OWNER, to: role === "approval" ? CIRCLE_SOURCE_TOKEN : CIRCLE_MESSENGER, data: role === "approval" ? encodeCircleApproval() : encodeCircleBurn(chain), valueAtomic: "0", nonceAtomic: role === "approval" ? "1" : "2", gasLimitAtomic: role === "approval" ? "65536" : "500000", maxFeePerGasAtomic: "20000000", maxPriorityFeePerGasAtomic: "0" });
