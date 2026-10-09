@@ -76,6 +76,20 @@ interface RetirementPublicationFrame {
   readonly record: HistoricalRetirementRecord;
 }
 
+type RetirementProjectionNamespace = typeof JOURNAL_NAMESPACE | typeof RECEIPT_NAMESPACE;
+
+interface ProjectionTempCleanup {
+  readonly namespace: RetirementProjectionNamespace;
+  readonly targetPath: string;
+  readonly temporaryPath: string;
+  readonly parentPath: string;
+  readonly parentDev: bigint;
+  readonly tempDev: bigint;
+  readonly tempIno: bigint;
+  readonly targetIno: bigint | null;
+  readonly expectedBytes: Buffer;
+}
+
 /** Create-only, separately namespaced durability after the accounting record commits. */
 class HistoricalRetirementStore extends SecureStateStore {
   constructor(root: string, private readonly guard: HistoricalDirectoryGuard,
@@ -161,6 +175,41 @@ class HistoricalRetirementStore extends SecureStateStore {
     await this.guard.check([HISTORICAL_RETIREMENT_NAMESPACE]);
   }
 
+  /** Recover only the two deterministic projections for a book whose immutable bindings already passed. */
+  async recoverExactProjectionTemps(operationId: string, record: HistoricalRetirementRecord): Promise<void> {
+    if (!HISTORICAL_JUPITER_IDS.some(id => id === operationId) || record.operationId !== operationId) corrupt();
+    const cleanups: ProjectionTempCleanup[] = [];
+    for (const [namespace, expected] of [[JOURNAL_NAMESPACE, journalFor(record)], [RECEIPT_NAMESPACE, receiptFor(record)]] as const) {
+      const cleanup = await this.inspectProjectionTemp(operationId, namespace, expected);
+      if (cleanup !== null) cleanups.push(cleanup);
+    }
+    for (const cleanup of cleanups) {
+      await this.guard.check([cleanup.namespace]);
+      const parent = await lstat(cleanup.parentPath, { bigint: true });
+      if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== BigInt(process.geteuid?.() ?? -1) ||
+          (parent.mode & 0o777n) !== 0o700n || parent.dev !== cleanup.parentDev) corrupt();
+      const temp = await this.readOwnedProjectionFile(cleanup.temporaryPath, cleanup.parentDev,
+        cleanup.targetIno === null ? 1n : 2n, cleanup.expectedBytes);
+      if (temp.dev !== cleanup.tempDev || temp.ino !== cleanup.tempIno) corrupt();
+      if (cleanup.targetIno !== null) {
+        const target = await this.readOwnedProjectionFile(cleanup.targetPath, cleanup.parentDev, 2n, cleanup.expectedBytes);
+        if (target.dev !== temp.dev || target.ino !== temp.ino || target.ino !== cleanup.targetIno ||
+            !target.bytes.equals(temp.bytes)) corrupt();
+      } else if (await lstatOptional(cleanup.targetPath) !== null) {
+        corrupt();
+      }
+      await this.guard.check([cleanup.namespace]);
+      const latestTemp = await lstat(cleanup.temporaryPath, { bigint: true });
+      if (latestTemp.dev !== cleanup.tempDev || latestTemp.ino !== cleanup.tempIno ||
+          latestTemp.nlink !== (cleanup.targetIno === null ? 1n : 2n)) corrupt();
+      await unlink(cleanup.temporaryPath);
+      const directory = await open(cleanup.parentPath, constants.O_RDONLY);
+      try { await directory.sync(); }
+      finally { await directory.close(); }
+      await this.guard.check([cleanup.namespace]);
+    }
+  }
+
   private async readOwnedRetirementFile(path: string, parentDev: bigint, expectedLinks: bigint): Promise<{
     readonly record: HistoricalRetirementRecord; readonly dev: bigint; readonly ino: bigint;
     readonly bytes: Buffer;
@@ -190,6 +239,74 @@ class HistoricalRetirementStore extends SecureStateStore {
       const record = validateHistoricalRetirementRecord(parsed);
       if (text !== `${canonicalJson(record)}\n`) corrupt();
       return { record, dev: before.dev, ino: before.ino, bytes };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async inspectProjectionTemp(operationId: string, namespace: RetirementProjectionNamespace,
+    expected: RetirementJournal | RetirementReceipt): Promise<ProjectionTempCleanup | null> {
+    const entries = await this.entries(namespace);
+    const parentPath = resolve(this.root, namespace), parent = await lstatOptional(parentPath);
+    if (parent === null) {
+      if (entries.length !== 0) corrupt();
+      return null;
+    }
+    if (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== BigInt(process.geteuid?.() ?? -1) ||
+        (parent.mode & 0o777n) !== 0o700n) corrupt();
+    const targetName = `${operationId}.json`, targetPath = resolve(this.root, namespace, targetName);
+    const prefix = `.${sha256(targetPath).slice(0, 12)}.`;
+    const candidates = entries.filter(entry => entry.name.startsWith(prefix));
+    if (candidates.length > 1 || (candidates.length === 1 &&
+        (!/^\.[a-f0-9]{12}\.[a-f0-9]{24}\.tmp$/u.test(candidates[0]!.name) ||
+          !candidates[0]!.isFile() || candidates[0]!.isSymbolicLink()))) corrupt();
+    const targetStat = await lstatOptional(targetPath);
+    if ((targetStat === null) !== !entries.some(entry => entry.name === targetName)) corrupt();
+    const temporaryEntry = candidates[0];
+    for (const entry of entries) {
+      if (HISTORICAL_JUPITER_IDS.some(id => `${id}.json` === entry.name)) {
+        if (!entry.isFile() || entry.isSymbolicLink()) corrupt();
+        const path = resolve(this.root, namespace, entry.name), stats = await lstat(path, { bigint: true });
+        const expectedLinks = entry.name === targetName && temporaryEntry !== undefined ? 2n : 1n;
+        if (!stats.isFile() || stats.isSymbolicLink() || stats.uid !== BigInt(process.geteuid?.() ?? -1) ||
+            (stats.mode & 0o777n) !== 0o600n || stats.dev !== parent.dev || stats.nlink !== expectedLinks ||
+            stats.size <= 0n || stats.size > 1_048_576n) corrupt();
+      } else if (temporaryEntry === undefined || entry.name !== temporaryEntry.name) {
+        // Only this exact operation's writer temp may be ignored. All other entries fail closed.
+        corrupt();
+      }
+    }
+    if (temporaryEntry === undefined) return null;
+    const expectedBytes = Buffer.from(`${canonicalJson(expected)}\n`, "utf8");
+    const temporaryPath = resolve(this.root, namespace, temporaryEntry.name);
+    const expectedLinks = targetStat === null ? 1n : 2n;
+    const temporary = await this.readOwnedProjectionFile(temporaryPath, parent.dev, expectedLinks, expectedBytes);
+    if (targetStat !== null) {
+      const target = await this.readOwnedProjectionFile(targetPath, parent.dev, 2n, expectedBytes);
+      if (targetStat.dev !== target.dev || targetStat.ino !== target.ino || temporary.dev !== target.dev ||
+          temporary.ino !== target.ino || !temporary.bytes.equals(target.bytes)) corrupt();
+    }
+    return { namespace, targetPath, temporaryPath, parentPath, parentDev: parent.dev,
+      tempDev: temporary.dev, tempIno: temporary.ino, targetIno: targetStat?.ino ?? null, expectedBytes };
+  }
+
+  private async readOwnedProjectionFile(path: string, parentDev: bigint, expectedLinks: bigint,
+    expectedBytes: Buffer): Promise<{ readonly dev: bigint; readonly ino: bigint; readonly bytes: Buffer }> {
+    await this.assertNoSymlinkAncestors(path);
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const before = await handle.stat({ bigint: true }), leaf = await lstat(path, { bigint: true });
+      const valid = (value: typeof before): boolean => value.isFile() && !value.isSymbolicLink() &&
+        value.uid === BigInt(process.geteuid?.() ?? -1) && (value.mode & 0o777n) === 0o600n &&
+        value.dev === parentDev && value.nlink === expectedLinks && value.size === BigInt(expectedBytes.byteLength);
+      const facts = (value: typeof before): string => canonicalJson({ dev: String(value.dev), ino: String(value.ino),
+        uid: String(value.uid), mode: String(value.mode), nlink: String(value.nlink), size: String(value.size),
+        mtimeNs: String(value.mtimeNs), ctimeNs: String(value.ctimeNs) });
+      if (!valid(before) || !valid(leaf) || facts(before) !== facts(leaf)) corrupt();
+      const bytes = await handle.readFile(), after = await lstat(path, { bigint: true });
+      await this.assertNoSymlinkAncestors(path);
+      if (!valid(after) || facts(before) !== facts(after) || !bytes.equals(expectedBytes)) corrupt();
+      return { dev: before.dev, ino: before.ino, bytes };
     } finally {
       await handle.close();
     }
@@ -573,6 +690,7 @@ export async function recoverCommittedJupiterHistoricalRetirement(
     const rawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
     const currentOperation = await new SwapOperationRepository(root).loadAny(operationId);
     assertHistoricalRetirementBindings(record, rootSnapshot, currentOperation, row, rawHash);
+    await store.recoverExactProjectionTemps(operationId, record);
     await finishPostCommit(record, store);
     await guard.check();
     return publicResult(record, true);
