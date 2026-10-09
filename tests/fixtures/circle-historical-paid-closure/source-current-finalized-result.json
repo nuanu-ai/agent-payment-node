@@ -1,0 +1,162 @@
+{
+  "origin": "https://arbitrum-one-public.nodies.app",
+  "capturedAt": "2026-10-09T16:22:18.593Z",
+  "operations": {
+    "linea": {
+      "deployment": {
+        "chainId": 42161,
+        "domain": 3,
+        "blockHash": "0x1d2a6675dab20933c2b656cefe6e6998e3ec62fb97f1b90a7668aa2520ff36a1",
+        "blockNumberAtomic": "513246091",
+        "contracts": {
+          "messenger": {
+            "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+            "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+            "implementation": "0x555E272506C06e7E559d57418563742AFE363ec8",
+            "implementationCodeHash": "0x6c864e374854e06fd5d42b3e9de53ef9ad4d863b83a8c5dd1cf6e2a67fd2b535"
+          },
+          "transmitter": {
+            "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+            "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+            "implementation": "0x7B93db2bc72fAf642cEC0ADcAC4F91718831a1F4",
+            "implementationCodeHash": "0xc627ecd30515b8b6ab2b4ee9bffb4a84277f836fa599a556a1f507dc05eea476"
+          },
+          "minter": {
+            "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+            "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+            "implementation": "0x0000000000000000000000000000000000000000",
+            "implementationCodeHash": null
+          },
+          "token": {
+            "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+            "proxyCodeHash": "0xad30d819dbc47814b7e6cb837fd7cc57fcb591479a38596ee93de4fc52e8c435",
+            "implementation": "0x86E721b43d4ECFa71119Dd38c0f938A75Fdb57B3",
+            "implementationCodeHash": "0xda0578bf7fe0d04e320e166ab8f98061328fda8ae0a299882aeb38f1543c6a9d"
+          }
+        },
+        "remoteDomain": 11,
+        "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+        "pairedToken": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+        "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+        "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+        "messageVersion": 1,
+        "messageBodyVersion": 1,
+        "tokenDecimals": 6,
+        "transmitterPaused": false,
+        "minterPaused": false,
+        "tokenPaused": false
+      }
+    },
+    "monad": {
+      "deployment": {
+        "chainId": 42161,
+        "domain": 3,
+        "blockHash": "0x1d2a6675dab20933c2b656cefe6e6998e3ec62fb97f1b90a7668aa2520ff36a1",
+        "blockNumberAtomic": "513246091",
+        "contracts": {
+          "messenger": {
+            "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+            "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+            "implementation": "0x555E272506C06e7E559d57418563742AFE363ec8",
+            "implementationCodeHash": "0x6c864e374854e06fd5d42b3e9de53ef9ad4d863b83a8c5dd1cf6e2a67fd2b535"
+          },
+          "transmitter": {
+            "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+            "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+            "implementation": "0x7B93db2bc72fAf642cEC0ADcAC4F91718831a1F4",
+            "implementationCodeHash": "0xc627ecd30515b8b6ab2b4ee9bffb4a84277f836fa599a556a1f507dc05eea476"
+          },
+          "minter": {
+            "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+            "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+            "implementation": "0x0000000000000000000000000000000000000000",
+            "implementationCodeHash": null
+          },
+          "token": {
+            "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+            "proxyCodeHash": "0xad30d819dbc47814b7e6cb837fd7cc57fcb591479a38596ee93de4fc52e8c435",
+            "implementation": "0x86E721b43d4ECFa71119Dd38c0f938A75Fdb57B3",
+            "implementationCodeHash": "0xda0578bf7fe0d04e320e166ab8f98061328fda8ae0a299882aeb38f1543c6a9d"
+          }
+        },
+        "remoteDomain": 15,
+        "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+        "pairedToken": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+        "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+        "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+        "messageVersion": 1,
+        "messageBodyVersion": 1,
+        "tokenDecimals": 6,
+        "transmitterPaused": false,
+        "minterPaused": false,
+        "tokenPaused": false
+      }
+    }
+  },
+  "finalizedHead": {
+    "baseFeePerGas": "0x1335f80",
+    "difficulty": "0x1",
+    "extraData": "0x4f446550a8fb23e237a9ccec6cbdb63e9a4f77d4d0543e638ad579deb6c1e33b",
+    "gasLimit": "0x4000000000000",
+    "gasUsed": "0x46811",
+    "hash": "0x1d2a6675dab20933c2b656cefe6e6998e3ec62fb97f1b90a7668aa2520ff36a1",
+    "l1BlockNumber": "0x18f1b94",
+    "logsBloom": "0x2000000000200000000000000100000010000000000000800000000000000000000000000000000000000000000000000000000100000104000000002000020000001000000000000000000800000100000000400000000000008000000000000000000000000000000000000000000000800020000000000000001000000000000000000000040000000020000000000000000020020000000000000000200000000000002000400000000000010000000000840000000000000000000000000000a002000000041000000000000000000000000000000004000000000000000000040000000000000000000000200010000010000000000000100000000000",
+    "miner": "0xa4b000000000000000000073657175656e636572",
+    "mixHash": "0x0000000000028ba900000000018f1b94000000000000003d0001000000000000",
+    "nonce": "0x00000000002781f7",
+    "number": "0x1e97838b",
+    "parentHash": "0x5be13b92813a857b38d97edfc9039ddfdcdaefaeedf6e5f9fea4c70c92cdcde7",
+    "receiptsRoot": "0x85a2d5d8f10004f0619d3e8c7c824e78898089a4f1b6ce18a8d6cb0ac44e8181",
+    "sendCount": "0x28ba9",
+    "sendRoot": "0x4f446550a8fb23e237a9ccec6cbdb63e9a4f77d4d0543e638ad579deb6c1e33b",
+    "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+    "size": "0x607",
+    "stateRoot": "0xad4bbd286127ff256de82eead56a5f980ea26bfdb7ab789d93c75c0fd581e94b",
+    "timestamp": "0x6ac91044",
+    "transactions": [
+      "0xd73367c687c4d2b64e6aeba0bb6278eb07a5b30bdff6c36065b539cf6aabe7d1",
+      "0x51f24e797673159e68d0a021eb5dac387f8b0915fa28a9fbe0eadcb7e5e55406",
+      "0x94b1b0ff4764971beb0f3d85d92370cc9a43f2dd247d11d4183b6ab0d1e5daa9",
+      "0x9d8a850d0675187c23b5c0ec01192085b6c6b6b3b86ae4b4541ac2186472292a"
+    ],
+    "transactionsRoot": "0xc5cde1cd6f337ce057d44001ae3326cfdc637cdefe649756301a08943b8f648b",
+    "uncles": []
+  },
+  "reanchoredFinalizedHead": {
+    "baseFeePerGas": "0x1335f80",
+    "difficulty": "0x1",
+    "extraData": "0x4f446550a8fb23e237a9ccec6cbdb63e9a4f77d4d0543e638ad579deb6c1e33b",
+    "gasLimit": "0x4000000000000",
+    "gasUsed": "0x46811",
+    "hash": "0x1d2a6675dab20933c2b656cefe6e6998e3ec62fb97f1b90a7668aa2520ff36a1",
+    "l1BlockNumber": "0x18f1b94",
+    "logsBloom": "0x2000000000200000000000000100000010000000000000800000000000000000000000000000000000000000000000000000000100000104000000002000020000001000000000000000000800000100000000400000000000008000000000000000000000000000000000000000000000800020000000000000001000000000000000000000040000000020000000000000000020020000000000000000200000000000002000400000000000010000000000840000000000000000000000000000a002000000041000000000000000000000000000000004000000000000000000040000000000000000000000200010000010000000000000100000000000",
+    "miner": "0xa4b000000000000000000073657175656e636572",
+    "mixHash": "0x0000000000028ba900000000018f1b94000000000000003d0001000000000000",
+    "nonce": "0x00000000002781f7",
+    "number": "0x1e97838b",
+    "parentHash": "0x5be13b92813a857b38d97edfc9039ddfdcdaefaeedf6e5f9fea4c70c92cdcde7",
+    "receiptsRoot": "0x85a2d5d8f10004f0619d3e8c7c824e78898089a4f1b6ce18a8d6cb0ac44e8181",
+    "sendCount": "0x28ba9",
+    "sendRoot": "0x4f446550a8fb23e237a9ccec6cbdb63e9a4f77d4d0543e638ad579deb6c1e33b",
+    "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+    "size": "0x607",
+    "stateRoot": "0xad4bbd286127ff256de82eead56a5f980ea26bfdb7ab789d93c75c0fd581e94b",
+    "timestamp": "0x6ac91044",
+    "transactions": [
+      "0xd73367c687c4d2b64e6aeba0bb6278eb07a5b30bdff6c36065b539cf6aabe7d1",
+      "0x51f24e797673159e68d0a021eb5dac387f8b0915fa28a9fbe0eadcb7e5e55406",
+      "0x94b1b0ff4764971beb0f3d85d92370cc9a43f2dd247d11d4183b6ab0d1e5daa9",
+      "0x9d8a850d0675187c23b5c0ec01192085b6c6b6b3b86ae4b4541ac2186472292a"
+    ],
+    "transactionsRoot": "0xc5cde1cd6f337ce057d44001ae3326cfdc637cdefe649756301a08943b8f648b",
+    "uncles": []
+  },
+  "outcome": "PASS",
+  "physicalRequests": 31,
+  "logicalRequests": 52,
+  "elapsedSeconds": 8.292
+}

@@ -1,0 +1,81 @@
+{
+  "sourceArtifact": "cleanup85-native/public-metadata/metadata.json",
+  "sourceSha256": "61db358710cd6ee9b013ac7d28d25f609cac828adf8800ce4562fbc531e12587",
+  "wallets": {
+    "evm-live-buyer": {
+      "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "bindingHash": "b2d3fe6610803801f3e61393850ebb85f630130965d6aee3fa130fe135717d73",
+      "createdAt": "2026-09-16T16:50:10.691Z",
+      "integrityHash": "84203b825e8f5753ef3ef32e3e8fc6bb86fdf6a506ba669e9954e602efbaa907",
+      "profile": "evm-live-buyer",
+      "profileHash": "8692e4b95d088a0e95bcab3edf8a641f8d04f54ed4b1d26af61f7a9e344f58bd",
+      "schemaVersion": "apn.state.v1"
+    },
+    "default": {
+      "address": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+      "bindingHash": "863b5c350c54279e49e1148ddb0534055581d1a8e246094c8fb253f367b9532e",
+      "createdAt": "2026-08-28T04:11:29.865Z",
+      "integrityHash": "d00313defd9b5cdcbe7cc4140459c51037ef2e5bca1c01c866f578fe9bcad0b1",
+      "profile": "default",
+      "profileHash": "83b4334060b67d5ebcaef400955cb8aca68e709fd8edb340e08061200bd0c06c",
+      "schemaVersion": "apn.state.v1"
+    }
+  },
+  "providers": {
+    "evm-live-buyer": {
+      "account_binding_hash": "b2d3fe6610803801f3e61393850ebb85f630130965d6aee3fa130fe135717d73",
+      "capability_hash": "e7c2d4415d43a7f1af5afcbf2ab859a95271b4ef95f24758b9d1e04bf3cc4d58",
+      "capability_snapshot": {
+        "asset": {
+          "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "decimals": 6,
+          "symbol": "USDC"
+        },
+        "direct": {
+          "available": true,
+          "execution_owner": "apn",
+          "mode": "local_raw_transaction_apn_submit",
+          "retry_owner": "apn_operation_state"
+        },
+        "evidence": {
+          "available": true,
+          "owner": "apn"
+        },
+        "lifecycle": {
+          "connect": false,
+          "logout": false,
+          "status": true
+        },
+        "network": {
+          "caip2": "eip155:8453",
+          "chain": "base"
+        },
+        "read": {
+          "address": true,
+          "balance": true,
+          "funding_guidance": true
+        },
+        "schema_version": "apn.provider-capability.v1",
+        "x402": {
+          "available": true,
+          "execution_owner": "apn",
+          "mode": "local_detached_eip3009_apn_paid_retry",
+          "retry_owner": "apn_state_machine"
+        }
+      },
+      "drift": {
+        "reason": "none",
+        "state": "bound"
+      },
+      "observed_at": "2026-09-16T16:50:10.691Z",
+      "profile": "evm-live-buyer",
+      "profile_hash": "8692e4b95d088a0e95bcab3edf8a641f8d04f54ed4b1d26af61f7a9e344f58bd",
+      "provider_id": "local",
+      "public_address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "revision": 1,
+      "schema_version": "apn.provider-profile.v1",
+      "trust_class": "local_software_wallet"
+    },
+    "default": null
+  }
+}

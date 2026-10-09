@@ -21,9 +21,9 @@ export class CircleEffectStore extends SecureStateStore {
   constructor(root: string, private readonly wrapping: WrappingSecretPort) { super(root); }
   private path(op: CircleOperationV1, role: CircleRole) { validateCircle(op); return `circle-v2-evm-effects/${op.operationId}-${role}.json`; }
   /** Public historical verification only: returns headers, never ciphertext, tag or plaintext. */
-  async historicalPaidHeaders(op: CircleOperationV1): Promise<readonly { readonly schemaVersion: string; readonly operationId: string; readonly role: CircleRole; readonly fingerprint: string; readonly envelopeHash: string; readonly salt: string; readonly nonce: string }[]> {
+  async historicalPaidHeaders(op: CircleOperationV1, includeMint = false): Promise<readonly { readonly schemaVersion: string; readonly operationId: string; readonly role: CircleRole; readonly fingerprint: string; readonly envelopeHash: string; readonly salt: string; readonly nonce: string }[]> {
     validateCircle(op); const result = [];
-    for (const effect of op.effects.filter(e => e.role !== "mint")) {
+    for (const effect of op.effects.filter(e => includeMint || e.role !== "mint")) {
       const value = await this.readJson(this.path(op, effect.role));
       if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) || value.schemaVersion !== VERSION || value.operationId !== op.operationId || value.role !== effect.role || value.fingerprint !== op.fingerprint || value.envelopeHash !== effect.envelope.envelopeHash || typeof value.ciphertext !== "string" || value.ciphertext.length === 0 || typeof value.salt !== "string" || typeof value.nonce !== "string" || typeof value.tag !== "string") circleBlocked("historical_paid_material_header_required");
       const salt = base64(value.salt, 32), nonce = base64(value.nonce, 12), tag = base64(value.tag, 16); salt.fill(0); nonce.fill(0); tag.fill(0);

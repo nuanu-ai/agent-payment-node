@@ -1,3 +1,4 @@
+import { consumeHistoricalPaidClosure } from "./historical-paid-closure.js";
 import { consumeCleanup85Settlement } from "./cleanup85-settlement-authority.js";
 import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
 import { Cleanup85RecoveryStore } from "./cleanup85-recovery-store.js";
@@ -137,6 +138,38 @@ export class CircleUsage {
             if (reservation.state !== "reserved")
                 circleBlocked("reserve_replay_already_exposed");
             result.push(reservation);
+        }
+        return result;
+    }
+    /** Finite historical completion consumes fresh private source+destination provenance before ledger access. */
+    async closeHistoricalPaid(op, authority) {
+        const bound = await consumeHistoricalPaidClosure(authority, this.state, op), frame = bound.closure;
+        const rows = [];
+        for (const planned of frame.outcomes) {
+            const row = planned.reservation, current = await this.ledger.load(row, row.reservationId);
+            if (current === null)
+                circleBlocked("historical_paid_ledger_missing");
+            for (const key of ["schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "rail", "amountAtomic", "account", "chain", "reservedAt"])
+                if (current[key] !== row[key])
+                    circleBlocked("historical_paid_ledger_binding");
+            if (canonicalJson(current.asset) !== canonicalJson(row.asset))
+                circleBlocked("historical_paid_ledger_binding");
+            if (current.state === planned.state) {
+                if (current.outcomeDigest !== planned.outcomeDigest || (current.consumedAtomic ?? null) !== planned.consumedAtomic)
+                    circleBlocked("historical_paid_ledger_outcome");
+            }
+            else if (bound.operation.terminal || !["reserved", "submitted", "unknown_finality"].includes(current.state))
+                circleBlocked("historical_paid_ledger_state");
+            rows.push(current);
+        }
+        const result = [];
+        for (const [index, planned] of frame.outcomes.entries()) {
+            if (rows[index].state === planned.state) {
+                result.push(rows[index]);
+                continue;
+            }
+            const row = planned.reservation;
+            result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state: planned.state, now: new Date(this.now()), outcomeDigest: planned.outcomeDigest, ...(planned.consumedAtomic === null ? {} : { consumedAtomic: planned.consumedAtomic }), expectedCurrentStates: ["reserved", "submitted", "unknown_finality"] }));
         }
         return result;
     }

@@ -18,10 +18,10 @@ export class CircleEffectStore extends SecureStateStore {
     }
     path(op, role) { validateCircle(op); return `circle-v2-evm-effects/${op.operationId}-${role}.json`; }
     /** Public historical verification only: returns headers, never ciphertext, tag or plaintext. */
-    async historicalPaidHeaders(op) {
+    async historicalPaidHeaders(op, includeMint = false) {
         validateCircle(op);
         const result = [];
-        for (const effect of op.effects.filter(e => e.role !== "mint")) {
+        for (const effect of op.effects.filter(e => includeMint || e.role !== "mint")) {
             const value = await this.readJson(this.path(op, effect.role));
             if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) || value.schemaVersion !== VERSION || value.operationId !== op.operationId || value.role !== effect.role || value.fingerprint !== op.fingerprint || value.envelopeHash !== effect.envelope.envelopeHash || typeof value.ciphertext !== "string" || value.ciphertext.length === 0 || typeof value.salt !== "string" || typeof value.nonce !== "string" || typeof value.tag !== "string")
                 circleBlocked("historical_paid_material_header_required");
