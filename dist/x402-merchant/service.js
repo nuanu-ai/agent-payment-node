@@ -74,14 +74,17 @@ export class MerchantService {
             await claims.assertUnused(o);
             await this.revalidate(o, owner);
             await this.ports.approve(o);
+            const approvalEndsAt = new Date(this.ports.now().getTime() + 60000).toISOString(); // Capture immediately; asynchronous work cannot renew foreground consent.
             await this.revalidate(o, owner);
+            this.consentFresh(o, approvalEndsAt);
             await claims.assertUnused(o);
             await owner.reserve(o);
+            this.consentFresh(o, approvalEndsAt);
             o = merchantMove(o, "signing_started", this.at(), { signingAttempts: 1 });
             await this.records.persist(o);
             await owner.follow(o, "unknown_finality");
             await claims.claim(o, "sign");
-            const holds = await owner.held(o), grant = issueMerchantAuthority(this, o, holds.token, holds.native, this.ports.now());
+            const holds = await owner.held(o), grant = issueMerchantAuthority(this, o, holds.token, holds.native, approvalEndsAt);
             // No path after this durable fence may invoke custody again, including a crash before the signature returns.
             try {
                 assertMerchantAuthority(grant, this, o, this.ports.now());
@@ -221,6 +224,8 @@ export class MerchantService {
             refuse("merchant_challenge_changed");
         this.fresh(o);
     }
+    consentFresh(o, approvalEndsAt) { this.fresh(o); if (o.effectBinding === undefined || this.at() >= approvalEndsAt || this.at() >= o.effectBinding.policyEndsAt)
+        refuse("merchant_foreground_authority_required_or_expired"); }
     fresh(o) {
         if (this.at() >= o.expiresAt || this.at().slice(0, 10) !== o.createdAt.slice(0, 10))
             refuse("merchant_local_deadline_expired");
