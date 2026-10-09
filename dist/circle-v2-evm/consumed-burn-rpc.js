@@ -49,7 +49,7 @@ export function assertConsumedBurnEvidence(value, op) {
 export async function consumedBurnEvidence(source, op, afterCleanup = false) {
     assertConsumedBurnIdentity(op);
     await source.identity();
-    const original = await sealedBurnEvidence(source, op, async (tag) => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag)));
+    const original = await sealedBurnEvidence(source, op, async (tag) => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag)), "consumed_nonce85");
     const { approvalProof } = original;
     if (original.usdcBalanceAtomic !== "97924")
         circleBlocked("consumed_original_principal_changed");

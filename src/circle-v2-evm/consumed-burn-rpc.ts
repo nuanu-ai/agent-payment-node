@@ -43,7 +43,7 @@ export function assertConsumedBurnEvidence(value: ConsumedBurnEvidence, op: Circ
 /** Historical allowance and principal at the exact approval block remain mandatory. An archive transport is required. */
 export async function consumedBurnEvidence(source: CircleRpc, op: CircleOperationV1, afterCleanup = false): Promise<ConsumedBurnEvidence> {
   assertConsumedBurnIdentity(op); await source.identity();
-  const original = await sealedBurnEvidence(source, op, async tag => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag)));
+  const original = await sealedBurnEvidence(source, op, async tag => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag)), "consumed_nonce85");
   const { approvalProof } = original; if (original.usdcBalanceAtomic !== "97924") circleBlocked("consumed_original_principal_changed");
   const consumer = await source.observation(CONSUMER_HASH, "finalized"); if (consumer === null) circleBlocked("consumed_nonce84_not_finalized"); const consumerProof = verifyConsumedNonce(consumer);
   if (getAddress(await recoverTransactionAddress({ serializedTransaction: consumerWire(circleRecord(consumer.transaction)) })) !== CIRCLE_SOURCE_OWNER) circleBlocked("consumer_signature_owner_changed");
