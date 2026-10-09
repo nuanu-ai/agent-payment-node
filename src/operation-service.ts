@@ -1,6 +1,7 @@
+import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
-import { publicCircle, type CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
+import { publicCircle, type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
 import { MegaFundingJournal, publicMegaFunding, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant, type MerchantOperation } from "./x402-merchant/model.js";
@@ -243,13 +244,18 @@ export class OperationService {
   }
 
   /** Both Circle signing accounts are held under their existing profile locks. */
-  async assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved = false): Promise<void> {
+  async assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved = false, effectRole?: CircleRole): Promise<void> {
     if (exceptSaved) {
       const saved = await new CircleRepository(this.state.root).load(record.operationId);
       if (saved === null || saved.integrityHash !== record.integrityHash) throw new ApnError("APN_OPERATION_BLOCKED", "Circle exclusion requires the exact durable journal.");
     }
     const except = exceptSaved ? record.operationId : undefined;
-    await this.assertConflictDomainsAvailable(record.profileHash,
+    const settledSourceMint = exceptSaved && effectRole === "mint" && record.source?.finalityTag === "finalized" &&
+      record.attestation !== null && record.residualAllowanceAtomic === "0" && record.effects.find(e => e.role === "burn")?.phase === "confirmed" &&
+      record.effects.filter(e => e.role !== "mint").every(e => e.phase === "confirmed");
+    // Finalized source settlement is read-only during mint. Its signer remains occupied for all other financial roles.
+    if (settledSourceMint) assertCircleAttestation(record.source!, record.attestation!);
+    else await this.assertConflictDomainsAvailable(record.profileHash,
       () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], except, true);
     await this.assertConflictDomainsAvailable(record.destinationProfileHash,
       () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], except);

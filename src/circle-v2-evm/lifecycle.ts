@@ -6,7 +6,7 @@ import { assertCircleAttestation, type CircleAttestation, type CircleSourceProof
 export interface CircleLifecyclePorts {
   readonly now: () => number;
   save(op: CircleOperationV1): Promise<void>;
-  assertOwnerPolicyAndConflicts(op: CircleOperationV1): Promise<void>;
+  assertOwnerPolicyAndConflicts(op: CircleOperationV1, effectRole?: CircleRole): Promise<void>;
   authorizationDeadline(op: CircleOperationV1): Promise<string | null>;
   approve(op: CircleOperationV1, role: "source" | "mint" | "cleanup" | "cancel", deadline: string): Promise<void>;
   preflight(op: CircleOperationV1, effect: CircleEffect): Promise<void>;
@@ -79,7 +79,7 @@ export async function executeCircleEffect(input: CircleOperationV1, role: Circle
   authority.claimed.add(role); authority.active = role;
   const guard = () => { checkConsent(token, op, ports, effect); };
   try {
-    guard(); await ports.assertOwnerPolicyAndConflicts(op); guard(); await ports.preflight(op, effect); guard();
+    guard(); await ports.assertOwnerPolicyAndConflicts(op, role); guard(); await ports.preflight(op, effect); guard();
     if (effect.phase === "prepared") {
       guard(); op = await persist(op, { effects: updateEffect(op, role, { phase: "signing_started" }), state: role === "mint" ? "mint_unknown" : role === "cleanup" ? "cleanup_required" : "source_unknown" }, `${role}_signing_fence`, ports);
       effect = op.effects.find(e => e.role === role)!; guard();
@@ -88,7 +88,7 @@ export async function executeCircleEffect(input: CircleOperationV1, role: Circle
     }
     effect = op.effects.find(e => e.role === role)!; guard();
     const material = await ports.loadMaterial(op, effect); guard(); if (material === null) circleCorrupt("sealed_material_missing");
-    await ports.assertOwnerPolicyAndConflicts(op); guard(); await ports.preflight(op, effect); guard();
+    await ports.assertOwnerPolicyAndConflicts(op, role); guard(); await ports.preflight(op, effect); guard();
     const usage = await ports.usage(op, "unknown_finality"); guard();
     op = await persist(op, { usage, effects: updateEffect(op, role, { phase: "submission_started" }) }, `${role}_submission_fence`, ports);
     effect = op.effects.find(e => e.role === role)!; guard();
@@ -105,12 +105,12 @@ export async function approveCircleMint(input: CircleOperationV1, ports: CircleL
   const existing = op.effects.find(e => e.role === "mint"); if (existing !== undefined && existing.phase !== "prepared" && existing.phase !== "sealed") return op;
   if (op.source === null || op.attestation === null || op.residualAllowanceAtomic !== "0") circleBlocked("verified_source_attestation_and_zero_allowance_required");
   assertCircleAttestation(op.source, op.attestation);
-  await ports.assertOwnerPolicyAndConflicts(op);
+  await ports.assertOwnerPolicyAndConflicts(op, "mint");
   if (existing === undefined) {
     const envelope = await ports.mintEnvelope(op);
     op = await persist(op, { effects: [...op.effects, { role: "mint", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "mint_envelope_frozen", ports);
   }
-  const token = await consent(op, "mint", ports); await ports.assertOwnerPolicyAndConflicts(op); checkConsent(token, op, ports);
+  const token = await consent(op, "mint", ports); await ports.assertOwnerPolicyAndConflicts(op, "mint"); checkConsent(token, op, ports);
   op = await executeCircleEffect(op, "mint", ports, token); return observeCircle(op, ports);
 }
 export async function observeCircle(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {

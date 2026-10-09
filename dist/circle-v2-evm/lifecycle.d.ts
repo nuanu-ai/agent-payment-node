@@ -5,7 +5,7 @@ import { type CircleAttestation, type CircleSourceProof, type CircleReceiptProof
 export interface CircleLifecyclePorts {
     readonly now: () => number;
     save(op: CircleOperationV1): Promise<void>;
-    assertOwnerPolicyAndConflicts(op: CircleOperationV1): Promise<void>;
+    assertOwnerPolicyAndConflicts(op: CircleOperationV1, effectRole?: CircleRole): Promise<void>;
     authorizationDeadline(op: CircleOperationV1): Promise<string | null>;
     approve(op: CircleOperationV1, role: "source" | "mint" | "cleanup" | "cancel", deadline: string): Promise<void>;
     preflight(op: CircleOperationV1, effect: CircleEffect): Promise<void>;

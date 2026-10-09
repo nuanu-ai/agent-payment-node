@@ -82,7 +82,7 @@ export async function executeCircleEffect(input, role, ports, token) {
     const guard = () => { checkConsent(token, op, ports, effect); };
     try {
         guard();
-        await ports.assertOwnerPolicyAndConflicts(op);
+        await ports.assertOwnerPolicyAndConflicts(op, role);
         guard();
         await ports.preflight(op, effect);
         guard();
@@ -101,7 +101,7 @@ export async function executeCircleEffect(input, role, ports, token) {
         guard();
         if (material === null)
             circleCorrupt("sealed_material_missing");
-        await ports.assertOwnerPolicyAndConflicts(op);
+        await ports.assertOwnerPolicyAndConflicts(op, role);
         guard();
         await ports.preflight(op, effect);
         guard();
@@ -135,13 +135,13 @@ export async function approveCircleMint(input, ports) {
     if (op.source === null || op.attestation === null || op.residualAllowanceAtomic !== "0")
         circleBlocked("verified_source_attestation_and_zero_allowance_required");
     assertCircleAttestation(op.source, op.attestation);
-    await ports.assertOwnerPolicyAndConflicts(op);
+    await ports.assertOwnerPolicyAndConflicts(op, "mint");
     if (existing === undefined) {
         const envelope = await ports.mintEnvelope(op);
         op = await persist(op, { effects: [...op.effects, { role: "mint", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "mint_envelope_frozen", ports);
     }
     const token = await consent(op, "mint", ports);
-    await ports.assertOwnerPolicyAndConflicts(op);
+    await ports.assertOwnerPolicyAndConflicts(op, "mint");
     checkConsent(token, op, ports);
     op = await executeCircleEffect(op, "mint", ports, token);
     return observeCircle(op, ports);
