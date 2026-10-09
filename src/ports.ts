@@ -205,7 +205,7 @@ export interface RpcPort {
     startBlockNumberAtomic: string,
   ): Promise<Hex | null>;
   /** Bounded read-only Base RPC used by the Coinbase gasless observer. */
-  coinbaseGaslessCall?(method: "eth_getBlockByNumber" | "eth_getBalance" | "eth_getCode" |
+  coinbaseGaslessCall?(method: "eth_chainId" | "eth_getTransactionCount" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getCode" |
     "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" | "eth_getTransactionReceipt",
     params: readonly unknown[]): Promise<unknown>;
   coinbaseGaslessLogs?(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]>;

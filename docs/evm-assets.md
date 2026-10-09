@@ -353,3 +353,7 @@ Local tests, the D4-D9 source/live result and a local installation are not
 publication or Homebrew acceptance. Required merchant/x402 paid rows remain
 held until separately bounded wallet/recipient/asset/network/amount/fee
 authority is supplied.
+
+Arbitrum native transfers to the built-in `default` local wallet may use a distinct finalized Circle source admission. It applies only when exactly one unresolved Circle source belongs to the sending profile and public custody identity, both approval and burn are currently canonical `FINALIZED`, the issuer attestation matches, every non-mint effect is confirmed, and the finalized token allowance is zero. Other recipients, assets, chains, unknown operations and unfinished cleanup keep the existing conservative conflict rule. The recipient address is resolved from validated public wallet/provider metadata, then remains bound to the normal request, transaction and approval fingerprint; no user address or source profile alias is embedded in this admission.
+
+New intents freeze the default custody identity and immutable saved source identity. Preparation uses fourteen bounded read-only RPC POSTs to verify the two transactions and allowances. After foreground approval, Native repeats those fourteen reads and one pending nonce read before signing, rejects changed custody/proof/allowance/nonce, and checks all remaining conflict domains. The old Circle journal and usage holds remain unchanged. Existing intents without this optional admission retain their original hashes and behavior.

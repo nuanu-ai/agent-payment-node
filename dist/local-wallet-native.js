@@ -1,4 +1,6 @@
 var _a;
+import { recheckCircleNativeAdmission } from "./circle-native-admission.js";
+import { OperationService } from "./operation-service.js";
 import { assertFreshDirectEffect, publishDirectPublicEffect } from "./direct-public-attestation.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
@@ -424,6 +426,9 @@ export class LocalWalletNative {
                 throw protocol("Fresh direct operation changed before signing.");
             const binding = await journal.prepared(latest);
             await assertEvmNativeCustody(this.state, intent.profile, binding.custody, identity);
+            const admission = await recheckCircleNativeAdmission(this.state, latest);
+            if (admission !== null)
+                await new OperationService(this.state).assertFinalizedCircleNativeAccountAvailable(latest.profileHash, latest.walletAddress, admission, latest);
             const account = privateKeyToAccount(secret.privateKey);
             const rawTransaction = await account.signTransaction({
                 type: "eip1559",

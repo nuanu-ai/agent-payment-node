@@ -1,3 +1,5 @@
+import { recheckCircleNativeAdmission } from "./circle-native-admission.js";
+import { OperationService } from "./operation-service.js";
 import { assertFreshDirectEffect, publishDirectPublicEffect } from "./direct-public-attestation.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
@@ -39,10 +41,8 @@ import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { NativePort, NativeRequest } from "./ports.js";
 import type { StateStore } from "./state.js";
 import { TtyTransferApproval, type TransferApprovalPort } from "./tty-approval.js";
-
 import { publicDirectEffect, publicWalletIdentity as publicIdentity, publicX402Effect } from "./local-wallet-native-public.js";
 import { uniswapTokenNonceOwned } from "./swap/uniswap-v3/token-nonce-ownership.js";
-
 
 export class LocalWalletNative implements NativePort {
   static readonly #permit2Instances = new WeakMap<NativePort, Permit2LocalCapability>();
@@ -109,7 +109,6 @@ export class LocalWalletNative implements NativePort {
     e.phase = stage === "construct" ? "constructed" : "ended";
   }
   private readonly wallets: EncryptedWalletStore;
-
   constructor(
     private readonly state: StateStore,
     wrappingSecret: WrappingSecretPort,
@@ -119,7 +118,6 @@ export class LocalWalletNative implements NativePort {
     const capability = Object.freeze({ kind: "permit2-local-native-capability" as const });
     LocalWalletNative.#permit2Instances.set(this, capability); LocalWalletNative.#permit2Capabilities.set(capability, { native: this, state, root: state.root, wallets: this.wallets });
   }
-
   /** Direct chosen-native entry only: no JSON request, caller plan, callback or transport permission. */
   async signPermit2Production(journal: Permit2ProductionJournal, fence: Permit2ProductionSigningFence,
     operationId: string, continuation: Permit2SigningContinuation) {
@@ -369,6 +367,8 @@ export class LocalWalletNative implements NativePort {
       if (latest === null || latest.state !== "started" || hashObject(directCustodyPayload(latest)) !== hashObject(payload)) throw protocol("Fresh direct operation changed before signing.");
       const binding = await journal.prepared(latest);
       await assertEvmNativeCustody(this.state, intent.profile, binding.custody, identity);
+      const admission = await recheckCircleNativeAdmission(this.state, latest);
+      if (admission !== null) await new OperationService(this.state).assertFinalizedCircleNativeAccountAvailable(latest.profileHash, latest.walletAddress, admission, latest);
       const account = privateKeyToAccount(secret.privateKey);
       const rawTransaction = await account.signTransaction({
         type: "eip1559",
