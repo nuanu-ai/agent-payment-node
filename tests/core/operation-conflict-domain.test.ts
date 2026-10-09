@@ -25,7 +25,7 @@ function service(stores: Stores): OperationService {
   const state = { listOperations: owned(stores.direct), listX402Operations: owned(stores.x402) } as never;
   return new OperationService(state, repository(stores.providerX402), repository(stores.rails), repository(stores.bridges),
     repository(stores.gasless), repository(stores.metaMask), repository(stores.smartAccount), repository(stores.facilitator),
-    { listOperations: owned(stores.relayUnsigned) } as never);
+    { listOperations: owned(stores.relayUnsigned) } as never, repository());
 }
 const open = (operationId: string, fields: Readonly<Record<string, unknown>>): Stored =>
   ({ operationId, state: "unknown_finality", terminal: false, ...fields });

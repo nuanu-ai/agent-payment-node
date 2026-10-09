@@ -1,3 +1,4 @@
+import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { Permit2LegacyConflictRepository, type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
@@ -43,6 +44,7 @@ import { RelayEffectJournalRepository } from "./relay/effect-journal.js";
 import { RelayNativeSourceJournalRepository } from "./relay/native-source.js";
 
 export type StoredMoneyOperation =
+  | { readonly kind: "sei_gaszip"; readonly record: SeiFundingRecord }
   | { readonly kind: "permit2_production"; readonly record: Permit2ProductionRecord }
   | { readonly kind: "permit2_legacy_conflict"; readonly record: Permit2LegacyConflict }
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
@@ -67,6 +69,7 @@ export class OperationService {
     private readonly smartAccountGasless: SmartAccountGaslessRepositoryPort = new SmartAccountGaslessOperationRepository(state.root),
     private readonly facilitatorGasless: FacilitatorGaslessRepositoryPort = new FacilitatorGaslessOperationRepository(state.root),
     private readonly relayUnsigned = new RelayUnsignedOperationRepository(state.root),
+    private readonly seiFunding: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new SeiFundingJournal(state.root),
   ) {}
 
   /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
@@ -118,6 +121,7 @@ export class OperationService {
   /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
   async findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null> {
     const matches = [
+      ...(await this.seiFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "sei_gaszip" as const, record })),
       ...(await this.relayUnsigned.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "relay_unsigned" as const, record })),
       ...(await this.facilitatorGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "facilitator_gasless_transfer" as const, record })),
       ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
@@ -196,6 +200,7 @@ export class OperationService {
   }
   private async profileOperations(profileHash: string): Promise<readonly StoredMoneyOperation[]> {
     return [
+      ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip" as const, record })),
       ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production" as const, record })),
       ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict" as const, record })),
       ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned" as const, record })),
@@ -231,6 +236,7 @@ export class OperationService {
 
   async required(operationId: string): Promise<StoredMoneyOperation> {
     const canonicalId = canonicalOperationId(operationId);
+    const sei = await this.seiFunding.findOperation(canonicalId);
     const permit2 = await new Permit2ProductionRepository(this.state.root).findOperation(canonicalId);
     const direct = await this.state.findOperation(canonicalId);
     const x402 = await this.state.findX402Operation(canonicalId);
@@ -242,10 +248,11 @@ export class OperationService {
     const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
     const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
     const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
-    if ([permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
+    if ([sei, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
       .filter((value) => value !== null).length > 1) {
       throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
     }
+    if (sei !== null) return { kind: "sei_gaszip", record: sei };
     if (permit2 !== null) return { kind: "permit2_production", record: permit2 };
     if (direct !== null) return { kind: "direct_transfer", record: direct };
     if (x402 !== null) return { kind: "x402_fetch", strategy: "local", record: x402 };
@@ -262,6 +269,7 @@ export class OperationService {
 
   async status(operationId: string): Promise<unknown> {
     const operation = await this.required(operationId);
+    if (operation.kind === "sei_gaszip") return publicSeiFunding(operation.record);
     if (operation.kind === "permit2_production") return publicPermit2Production(operation.record);
     if (operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", "Legacy Permit2 execution remains blocked.");
     if (operation.kind === "relay_unsigned") return this.relayStatus(operation.record);

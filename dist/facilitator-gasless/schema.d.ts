@@ -110,9 +110,9 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
             transactionHash: z.ZodNullable<z.ZodString>;
             outcome: z.ZodEnum<{
                 unknown: "unknown";
-                accepted: "accepted";
                 pending: "pending";
                 rejected: "rejected";
+                accepted: "accepted";
             }>;
         }, z.core.$strict>>;
         settle: z.ZodNullable<z.ZodObject<{
@@ -121,9 +121,9 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
             transactionHash: z.ZodNullable<z.ZodString>;
             outcome: z.ZodEnum<{
                 unknown: "unknown";
-                accepted: "accepted";
                 pending: "pending";
                 rejected: "rejected";
+                accepted: "accepted";
             }>;
         }, z.core.$strict>>;
         observation: z.ZodNullable<z.ZodObject<{
@@ -199,9 +199,9 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         transactionHash: z.ZodNullable<z.ZodString>;
         outcome: z.ZodEnum<{
             unknown: "unknown";
-            accepted: "accepted";
             pending: "pending";
             rejected: "rejected";
+            accepted: "accepted";
         }>;
     }, z.core.$strict>>;
     settle: z.ZodNullable<z.ZodObject<{
@@ -210,9 +210,9 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         transactionHash: z.ZodNullable<z.ZodString>;
         outcome: z.ZodEnum<{
             unknown: "unknown";
-            accepted: "accepted";
             pending: "pending";
             rejected: "rejected";
+            accepted: "accepted";
         }>;
     }, z.core.$strict>>;
     observation: z.ZodNullable<z.ZodObject<{

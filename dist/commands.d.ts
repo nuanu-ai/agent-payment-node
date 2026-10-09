@@ -6,6 +6,17 @@ import type { ChainProvider } from "./direct-rail-ports.js";
 import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
+    readonly command: "sei.funding.prepare";
+    readonly profile: string;
+    readonly expectedPayer: string;
+    readonly amountAtomic: string;
+    readonly minimumOutputAtomic: string;
+    readonly maximumFeeAtomic: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "sei.funding.approve" | "sei.funding.status";
+    readonly operationId: string;
+} | {
     readonly command: "x402.permit2.approve";
     readonly profile: string;
     readonly url: string;

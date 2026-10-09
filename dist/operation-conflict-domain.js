@@ -32,6 +32,8 @@ export function conflictDomainKey(domain) {
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
 export function storedOperationDomains(operation) {
     try {
+        if (operation.kind === "sei_gaszip")
+            return [evmConflictDomain(8453, operation.record.owner.address)];
         if (operation.kind === "permit2_production")
             return [evmConflictDomain(43114, operation.record.material.wallet.account)];
         if (operation.kind === "permit2_legacy_conflict")
