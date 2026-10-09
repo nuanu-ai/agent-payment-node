@@ -5511,9 +5511,9 @@ var require_sha3 = __commonJS({
   }
 });
 
-// ../../reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/mcp-client-advisory-1238/candidate/node_modules/punycode/punycode.js
+// node_modules/punycode/punycode.js
 var require_punycode = __commonJS({
-  "../../reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/mcp-client-advisory-1238/candidate/node_modules/punycode/punycode.js"(exports, module) {
+  "node_modules/punycode/punycode.js"(exports, module) {
     "use strict";
     var maxInt = 2147483647;
     var base = 36;
