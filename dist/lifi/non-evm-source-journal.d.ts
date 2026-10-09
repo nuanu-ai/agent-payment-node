@@ -40,8 +40,8 @@ declare const rpcObservedNearSafe: z.ZodObject<{
     }>;
     observedAt: z.ZodString;
     transactionHash: z.ZodString;
-    blockNumberAtomic: z.ZodString;
     blockHash: z.ZodString;
+    blockNumberAtomic: z.ZodString;
     rpcOrigin: z.ZodString;
     safeBlockNumberAtomic: z.ZodString;
     safeBlockHash: z.ZodString;
@@ -111,8 +111,8 @@ declare const schemaV1: z.ZodObject<{
             }>;
             observedAt: z.ZodString;
             transactionHash: z.ZodString;
-            blockNumberAtomic: z.ZodString;
             blockHash: z.ZodString;
+            blockNumberAtomic: z.ZodString;
             rpcOrigin: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
@@ -180,8 +180,8 @@ declare const schemaV1: z.ZodObject<{
         }>;
         observedAt: z.ZodString;
         transactionHash: z.ZodString;
-        blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
+        blockNumberAtomic: z.ZodString;
         rpcOrigin: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
@@ -284,8 +284,8 @@ declare const schemaV2: z.ZodObject<{
             }>;
             observedAt: z.ZodString;
             transactionHash: z.ZodString;
-            blockNumberAtomic: z.ZodString;
             blockHash: z.ZodString;
+            blockNumberAtomic: z.ZodString;
             rpcOrigin: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
@@ -353,8 +353,8 @@ declare const schemaV2: z.ZodObject<{
         }>;
         observedAt: z.ZodString;
         transactionHash: z.ZodString;
-        blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
+        blockNumberAtomic: z.ZodString;
         rpcOrigin: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
@@ -406,8 +406,7 @@ declare const schemaV3: z.ZodObject<{
     integrityHash: z.ZodString;
     profileHash: z.ZodString;
     operationId: z.ZodString;
-    transactionHash: z.ZodNullable<z.ZodString>;
-    nonceAtomic: z.ZodNullable<z.ZodString>;
+    createdAt: z.ZodString;
     transitions: z.ZodArray<z.ZodObject<{
         at: z.ZodString;
         previousHash: z.ZodString;
@@ -465,8 +464,8 @@ declare const schemaV3: z.ZodObject<{
             }>;
             observedAt: z.ZodString;
             transactionHash: z.ZodString;
-            blockNumberAtomic: z.ZodString;
             blockHash: z.ZodString;
+            blockNumberAtomic: z.ZodString;
             rpcOrigin: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
@@ -480,7 +479,6 @@ declare const schemaV3: z.ZodObject<{
         }, z.core.$strict>]>>;
         reason: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;
-    createdAt: z.ZodString;
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
@@ -492,6 +490,8 @@ declare const schemaV3: z.ZodObject<{
         source_observed_untrusted: "source_observed_untrusted";
         source_reverted: "source_reverted";
     }>;
+    transactionHash: z.ZodNullable<z.ZodString>;
+    nonceAtomic: z.ZodNullable<z.ZodString>;
     submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
     route: z.ZodEnum<{
         base_usdc_to_solana_usdc_circle_cctp_v2: "base_usdc_to_solana_usdc_circle_cctp_v2";
@@ -537,8 +537,8 @@ declare const schemaV3: z.ZodObject<{
         }>;
         observedAt: z.ZodString;
         transactionHash: z.ZodString;
-        blockNumberAtomic: z.ZodString;
         blockHash: z.ZodString;
+        blockNumberAtomic: z.ZodString;
         rpcOrigin: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
