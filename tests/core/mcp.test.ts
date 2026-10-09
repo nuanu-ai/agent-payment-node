@@ -20,6 +20,7 @@ import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./
 import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 
 const TOOL_NAMES = [
+  "apn_circle_evm_adopt_external_mint",
   "apn_circle_evm_prepare", "apn_circle_evm_approve_source", "apn_circle_evm_approve_mint", "apn_circle_evm_observe", "apn_circle_evm_refresh_attestation", "apn_circle_evm_cleanup", "apn_circle_evm_cleanup_nonce", "apn_circle_evm_status",
   "apn_swap_ethereum_uniswap_inventory",
   "apn_swap_ethereum_uniswap_quote",
@@ -164,6 +165,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
           .map(([field, schema]) => [field, schema.default])),
       };
     }), [
+      { name: "apn_circle_evm_adopt_external_mint", properties: ["operation", "transaction_hash"], required: ["operation", "transaction_hash"], defaults: {} },
       { name: "apn_circle_evm_prepare", properties: ["profile", "destination_profile", "destination_chain", "idempotency_key"], required: ["profile", "destination_profile", "destination_chain", "idempotency_key"], defaults: {} },
       { name: "apn_circle_evm_approve_source", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_approve_mint", properties: ["operation"], required: ["operation"], defaults: {} },
