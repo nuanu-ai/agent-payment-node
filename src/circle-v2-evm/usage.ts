@@ -52,6 +52,19 @@ export class CircleUsage {
     }
     return result;
   }
+  /** Readonly authority window from both exact owner activations while their locks remain held. */
+  async authorizationDeadline(op: CircleOperationV1): Promise<string | null> {
+    let end = Infinity;
+    for (const profile of new Set([op.profile, op.destinationProfile])) {
+      const frozen = op.policies.find(p => p.profile === profile), account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
+      const active = await this.active(profile, account), at = this.now();
+      if (frozen?.activationDigest === undefined || active.activationDigest !== frozen.activationDigest || active.digest !== frozen.policyDigest || active.revision !== frozen.revision) circleBlocked("owner_policy_changed");
+      if (new Date(at).toISOString().slice(0, 10) < active.registry.effectiveDate || active.registry.effectiveAt !== undefined && at < Date.parse(active.registry.effectiveAt)) circleBlocked("owner_policy_not_effective");
+      if (active.registry.expiresAt !== undefined) end = Math.min(end, Date.parse(active.registry.expiresAt));
+    }
+    if (this.now() >= end) circleBlocked("owner_policy_window_expired");
+    return end === Infinity ? null : new Date(end).toISOString();
+  }
   async confirm(op: CircleOperationV1): Promise<void> {
     for (const policy of op.policies) {
       const account = policy.profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;

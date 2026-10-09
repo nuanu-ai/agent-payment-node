@@ -42,3 +42,13 @@ test("Circle raw-send RPC requires a private dispatch guard before touching tran
   let requests = 0; const rpc = new CircleRpc(endpoint, 42161, { request: async () => { requests++; throw new Error("unexpected"); } });
   await assert.rejects(rpc.call("eth_sendRawTransaction", ["sealed-fixture"]), /financial_rpc_consent/); assert.equal(requests, 0);
 });
+
+test("one-millisecond bound policy expiration after DNS or TLS writes zero signed POST bytes", async t => {
+  const entries = wire(t); let now = 1000, release!: () => void;
+  const guard = () => { if (now >= 1001) throw new ApnError("APN_OPERATION_BLOCKED", "bound_policy_window_expired"); };
+  const dns = new BridgeHttps(async () => { await new Promise<void>(r => { release = r; }); return resolver(); });
+  const queued = dns.request(endpoint, "POST", body, 64, "APN_RPC_CONFIG", guard), dnsRejected = assert.rejects(queued, /bound_policy_window_expired/);
+  await nextTurn(); now++; release(); await dnsRejected; assert.equal(entries.length, 0);
+  now = 1000; const tls = new BridgeHttps(resolver), pending = tls.request(endpoint, "POST", body, 64, "APN_RPC_CONFIG", guard), tlsRejected = assert.rejects(pending, /bound_policy_window_expired/);
+  await nextTurn(); assert.equal(entries[0]!.bodies.length, 0); now++; entries[0]!.socket.emit("secureConnect"); await tlsRejected; assert.equal(entries[0]!.bodies.length, 0);
+});

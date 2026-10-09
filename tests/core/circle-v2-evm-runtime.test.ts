@@ -39,7 +39,7 @@ function usage(op: CircleOperationV1, target: "reserved" | "unknown_finality" | 
 function ports(start: CircleOperationV1, overrides: Partial<CircleLifecyclePorts> = {}) {
   let current = start, signs = 0, sends = 0;
   const saved: CircleOperationV1[] = [];
-  const p: CircleLifecyclePorts = { now: () => at + 1, save: async next => { validateCircleAdvance(current, next); current = next; saved.push(next); }, assertOwnerPolicyAndConflicts: async () => {}, approve: async () => {}, preflight: async () => {},
+  const p: CircleLifecyclePorts = { now: () => at + 1, save: async next => { validateCircleAdvance(current, next); current = next; saved.push(next); }, assertOwnerPolicyAndConflicts: async () => {}, authorizationDeadline: async () => null, approve: async () => {}, preflight: async () => {},
     seal: async (op, effect) => { signs++; return { schemaVersion: "apn.circle-v2-evm-effect.v1", operationId: op.operationId, role: effect.role, fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash, rawTransaction: "0x02", transactionHash: tx, materialHash: "9".repeat(64) }; },
     loadMaterial: async (op, effect) => ({ schemaVersion: "apn.circle-v2-evm-effect.v1", operationId: op.operationId, role: effect.role, fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash, rawTransaction: "0x02", transactionHash: tx, materialHash: "9".repeat(64) }), broadcast: async () => { sends++; return tx; },
     observeEffect: async () => null, observeSource: async () => null, observeDestination: async () => null, allowance: async () => "0", attestation: async () => null,
@@ -183,4 +183,40 @@ test("mint and no-effect cancellation have fresh finite TTY authority", async ()
   await assert.rejects(approveCircleMint(mint, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
   let cancelled = initial(); cancelled = advanceCircle(cancelled, { usage: usage(cancelled) }, "reserved", at); now = at + 1;
   p = ports(cancelled, { now: () => now, loadMaterial: async () => null, approve: async () => { now += 60000; } }); await assert.rejects(cleanupCircle(cancelled, p.p), /consent/); assert.equal(p.current().terminal, false);
+});
+test("bound policy expiry at either preflight prevents dispatch even after all policy confirmations", async () => {
+  for (const second of [false, true]) {
+    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); let preflights = 0, confirms = 0;
+    const p = ports(op, { now: () => now, authorizationDeadline: async () => new Date(at + 2).toISOString(), assertOwnerPolicyAndConflicts: async () => { confirms++; }, preflight: async () => { preflights++; if (preflights === (second ? 2 : 1)) now += 1; } });
+    if (second) { op = await approveCircleSource(op, p.p); assert.equal(op.effects[0]!.phase, "unknown"); assert.equal(p.signs(), 1); assert.equal(confirms, 4); }
+    else { await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.current().effects[0]!.phase, "prepared"); }
+    assert.equal(p.sends(), 0); const signs = p.signs(); if (second) { await approveCircleSource(op, p.p); assert.equal(p.signs(), signs); assert.equal(p.sends(), 0); }
+  }
+});
+test("policy expiry after a submission fence or queued dispatch remains observation-only", async () => {
+  for (const delayed of ["fence", "dispatch"] as const) {
+    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at);
+    const p = ports(op, { now: () => now, authorizationDeadline: async () => new Date(at + 2).toISOString() }), save = p.p.save, broadcast = p.p.broadcast;
+    p.p.save = async next => { await save(next); if (delayed === "fence" && next.transitions.at(-1)!.reason === "approval_submission_fence") now++; };
+    p.p.broadcast = async (effect, raw, guard) => { if (delayed === "dispatch") now++; guard(); return broadcast(effect, raw, guard); };
+    op = await approveCircleSource(op, p.p); assert.equal(op.effects[0]!.phase, "unknown"); assert.equal(p.sends(), 0); const signs = p.signs(); await approveCircleSource(op, p.p); assert.equal(p.signs(), signs); assert.equal(p.sends(), 0);
+  }
+});
+test("later or absent owner policy expiry preserves the finite sixty-second TTY bound", async () => {
+  for (const expiry of [null, new Date(at + 7200000).toISOString()]) {
+    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at);
+    const p = ports(op, { now: () => now, authorizationDeadline: async () => expiry, approve: async (_op, _role, deadline) => { assert.equal(deadline, new Date(at + 60001).toISOString()); now += 60000; } });
+    await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+  }
+});
+test("expired or revised policy cannot prevent proven-unsubmitted cancellation or grant a financial exemption", async () => {
+  let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); let released = 0, policyReads = 0;
+  const closed = usage(op).map(u => { const { reservationDigest: _digest, ...body } = u; return sealUsage({ ...body, state: "failed_before_effect", outcomeDigest: "f".repeat(64) }); });
+  const p = ports(op, { loadMaterial: async () => null, authorizationDeadline: async () => { policyReads++; throw new Error("expired_or_revised_active_policy"); }, approve: async (_op, role) => { assert.equal(role, "cancel"); }, usage: async (_op, target) => { assert.equal(target, "failed_before_effect"); released++; return closed; } });
+  const cancelled = await cleanupCircle(op, p.p); assert.equal(cancelled.state, "cancelled_unsubmitted"); assert.equal(policyReads, 0); assert.equal(released, 1); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+  let financial = await sourceReady(); financial = advanceCircle(financial, { source: null, attestation: null, state: "cleanup_required", residualAllowanceAtomic: "40100", effects: financial.effects.map(e => e.role === "burn" ? { ...e, phase: "prepared", transactionHash: null, materialHash: null, proof: null } : e) }, "burn_not_attempted", at);
+  const cleanup = ports(financial, { authorizationDeadline: async () => { throw new Error("expired_or_revised_active_policy"); }, cleanupEnvelope: async () => circleEnvelope({ chainId: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_SOURCE_TOKEN, data: encodeCircleApproval(true), valueAtomic: "0", nonceAtomic: "3", gasLimitAtomic: "50000", maxFeePerGasAtomic: "20000000", maxPriorityFeePerGasAtomic: "0" }) });
+  await assert.rejects(cleanupCircle(financial, cleanup.p), /expired_or_revised/); assert.equal(cleanup.signs(), 0); assert.equal(cleanup.sends(), 0);
+  const unknown = advanceCircle(op, { state: "source_unknown", effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "unknown", transactionHash: tx, materialHash: "9".repeat(64) } : e) }, "unknown_signing", at);
+  const held = ports(unknown, { usage: async () => { throw new Error("must_not_release"); }, authorizationDeadline: async () => null }); await assert.rejects(cleanupCircle(unknown, held.p), /cleanup_requires/); assert.equal(held.signs(), 0); assert.equal(held.sends(), 0);
 });

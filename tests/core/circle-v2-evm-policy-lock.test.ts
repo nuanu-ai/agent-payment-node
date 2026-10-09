@@ -5,6 +5,7 @@ import { hashObject } from "../../src/canonical.js";
 import { StateStore } from "../../src/state.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { CircleUsage, circleMechanism } from "../../src/circle-v2-evm/usage.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, circleRoute, type CircleDestinationChain } from "../../src/circle-v2-evm/catalog.js";
 import type { CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
@@ -14,7 +15,7 @@ import { join } from "node:path";
 async function temporaryState() { const root = await realpath(await mkdtemp(join(tmpdir(), "circle-policy-lock-"))); return { root, cleanup: () => rm(root, { recursive: true, force: true }) }; }
 const now = new Date("2026-10-09T01:00:00.000Z");
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
-async function fixture(root: string, chain: CircleDestinationChain, expiresAt?: string, destinationProfile?: string) {
+async function fixture(root: string, chain: CircleDestinationChain, expiresAt?: string | Readonly<Record<string, string>>, destinationProfile?: string) {
   const state = new StateStore(root), store = new AllowlistPolicyStore(root), route = circleRoute(chain, destinationProfile); await state.initialize();
   const op = { profile: "evm-live-buyer", profileHash: state.profileHash("evm-live-buyer"), destinationProfile: route.gasPayerProfile,
     destinationProfileHash: state.profileHash(route.gasPayerProfile), destinationChain: chain,
@@ -25,7 +26,8 @@ async function fixture(root: string, chain: CircleDestinationChain, expiresAt?: 
     const admissions = [{ chain: "eip155:42161", kind: "token" as const, identifier: CIRCLE_SOURCE_TOKEN, rail: "bridge" as const, maximumPerTransferAtomic: "100000", dailyLimitAtomic: "1000000", mechanism: circleMechanism(chain) },
       { chain: "eip155:42161", kind: "native" as const, rail: "bridge" as const, maximumPerTransferAtomic: "75000000000000", dailyLimitAtomic: "1000000000000000", mechanism: circleMechanism(chain) },
       { chain: `eip155:${chain}`, kind: "native" as const, rail: "bridge" as const, maximumPerTransferAtomic: route.destinationNativeCap, dailyLimitAtomic: (BigInt(route.destinationNativeCap) * 10n).toString(), mechanism: circleMechanism(chain) }];
-    const record = await store.stage({ profile, now, policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "circle-lock-fixture.1", accounts: { evm: account }, effectiveAt: new Date(now.getTime() - 1000).toISOString(), ...(expiresAt === undefined ? {} : { expiresAt }), admissions } });
+    const expiry = typeof expiresAt === "string" ? expiresAt : expiresAt?.[profile];
+    const record = await store.stage({ profile, now, policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "circle-lock-fixture.1", accounts: { evm: account }, effectiveAt: new Date(now.getTime() - 1000).toISOString(), ...(expiry === undefined ? {} : { expiresAt: expiry }), admissions } });
     const head = await store.appendDecision(profile, null, { status: "active", revision: record.revision, stagedRecordDigest: record.recordDigest,
       policyDigest: record.registry.policyDigest, registry: record.registry, approvalFingerprint: hashObject(profile), decidedAt: now.toISOString() }); heads.set(profile, head);
   }
@@ -92,4 +94,33 @@ test("held USDC and 75T source capacity are re-admitted without counting the sam
 test("seller Sei uses the exact destination activation and native policy hold", { timeout: 10000 }, async t => {
  const temporary=await temporaryState();t.after(temporary.cleanup);const f=await fixture(temporary.root,1329,undefined,"evm-live-seller");
  await f.usage.withPolicyLocks([f.op.profile,f.op.destinationProfile],async()=>{const policies=await f.usage.policies(f.op); assert.equal(policies.length,2);assert.ok(policies.some(p=>p.profile==="evm-live-seller"));const prepared={...f.op,operationId:"b".repeat(64),policies};const usage=await f.usage.reserve(prepared);assert.equal(usage[4]!.account,circleRoute(1329,"evm-live-seller").gasPayer);await f.usage.confirm({...prepared,usage});});
+});
+
+test("authorization deadline is the earliest exact locked source/destination policy window", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const sourceEnd = new Date(now.getTime() + 2000).toISOString(), destinationEnd = new Date(now.getTime() + 1).toISOString();
+  const f = await fixture(temporary.root, 143, { "evm-live-buyer": sourceEnd, default: destinationEnd });
+  await f.usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => {
+    const op = { ...f.op, policies: await f.usage.policies(f.op) }; assert.equal(await f.usage.authorizationDeadline(op), destinationEnd);
+    await assert.rejects(f.usage.authorizationDeadline({ ...op, policies: op.policies.map(({ activationDigest: _digest, ...p }) => p) }), /owner_policy_changed/);
+  });
+  await assert.rejects(f.usage.authorizationDeadline(f.op), /owner_policy_lock_required/);
+});
+test("an owner registry without an end has no policy deadline and does not mint authority outside its scope", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143);
+  await f.usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => { const op = { ...f.op, policies: await f.usage.policies(f.op) }; assert.equal(await f.usage.authorizationDeadline(op), null); });
+});
+
+test("expired owner policy can release only the existing proven-unspent reservation outcome", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const expires = now.getTime() + 1, f = await fixture(temporary.root, 143, new Date(expires).toISOString());
+  const held = await f.usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => {
+    const prepared = { ...f.op, operationId: "c".repeat(64), effects: [], source: null, destination: null, policies: await f.usage.policies(f.op) }; return { ...prepared, usage: await f.usage.reserve(prepared) };
+  });
+  const expired = new CircleUsage(f.state, () => expires);
+  await expired.withPolicyLocks([held.profile, held.destinationProfile], async () => {
+    await assert.rejects(expired.authorizationDeadline(held), /active allowlist policy has expired/);
+    const released = await expired.follow(held, "failed_before_effect");
+    assert.equal(released.length, 5); for (const row of released) { assert.equal(row.state, "failed_before_effect"); assert.equal(row.consumedAtomic, undefined); assert.equal((await new AssetUsageLedger(temporary.root).usageReadOnly(row, new Date(expires))).amountAtomic, "0"); }
+  });
 });

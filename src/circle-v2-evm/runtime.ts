@@ -107,13 +107,18 @@ export class CircleEvmService {
     const allowance = async (tag = "latest") => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag));
     const deployments = () => currentCircleDeployments(source, destination, initial.destinationChain);
     return {
-      now: this.now, save: op => this.repo.save(op),
+      now: this.now, save: op => this.repo.save(op), authorizationDeadline: op => this.usage.authorizationDeadline(op),
       assertOwnerPolicyAndConflicts: async op => {
         await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody); await assertEvmNativeCustody(this.state, op.destinationProfile, op.destinationCustody);
         await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash);
         await this.operations.assertCircleAccountsAvailable(op, true); await this.usage.confirm(op);
       },
-      approve: async (op, role, deadline) => exactChainConsent([
+      approve: async (op, role, deadline) => role === "cancel" ? exactChainConsent([
+        "Agent Payment Node Circle unsubmitted cancellation", `Operation: ${op.operationId}`,
+        `Owners: ${op.profile}/${op.sourceCustody.walletAddress}; ${op.destinationProfile}/${op.destinationCustody.walletAddress}`,
+        "Release only verified unspent reservations after zero allowance and absence of private material or transaction markers.",
+        `Reservations: ${canonicalJson(op.usage.map(row => ({ reservationId: row.reservationId, account: row.account, chain: row.chain, amountAtomic: row.amountAtomic })))}`,
+      ], approvalCode("bridge", op.operationId, op.integrityHash, "cancel"), deadline, this.ttyOptions) : exactChainConsent([
         `Agent Payment Node Circle CCTP V2 Fast ${role} approval`, `Operation: ${op.operationId}`, `Source: ${op.profile} / ${op.sourceCustody.walletAddress} / eip155:42161`,
         `Destination gas owner: ${op.destinationProfile} / ${op.destinationCustody.walletAddress} / eip155:${op.destinationChain}`, `Recipient: 0xf41170df51aab52aaa04fbc3ff325cf051644aca`,
         "Exact burn: 40100 atomic USDC; issuer maximum fee: 100; minimum mint: 40000; minFinalityThreshold: 1000 (FAST)", "Source approval and burn each cost at most 30000000000000 wei ETH; cleanup only if needed costs at most 15000000000000 wei ETH. Total route source capacity: 75000000000000 wei ETH.",
