@@ -138,7 +138,9 @@ async function send(endpoint, method, body, addresses, maximumBytes, remaining, 
         else
             request.on("socket", socket => socket.once("secureConnect", async () => {
                 try {
-                    await beforeSend();
+                    const checked = beforeSend();
+                    if (checked !== undefined)
+                        await checked;
                     if (!settled && !request.destroyed)
                         request.end(body ?? undefined);
                 }

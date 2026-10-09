@@ -108,7 +108,7 @@ async function send(endpoint: URL, method: "GET" | "POST", body: string | null, 
     request.on("error", () => finish(failure(code, "request_interrupted")));
     if (beforeSend === undefined) request.end(body ?? undefined);
     else request.on("socket", socket => socket.once("secureConnect", async () => {
-      try { await beforeSend(); if (!settled && !request.destroyed) request.end(body ?? undefined); }
+      try { const checked = beforeSend(); if (checked !== undefined) await checked; if (!settled && !request.destroyed) request.end(body ?? undefined); }
       catch (error) { request.destroy(); finish(error); }
     }));
   });
