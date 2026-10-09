@@ -6,6 +6,7 @@ export declare const CIRCLE_AMOUNT = 40100n;
 export declare const CIRCLE_MAX_FEE = 100n;
 export declare const CIRCLE_MIN_MINT = 40000n;
 export declare const CIRCLE_SOURCE_OWNER: `0x${string}`;
+export declare const CIRCLE_SEI_SELLER: `0x${string}`;
 export declare const CIRCLE_SOURCE_TOKEN: `0x${string}`;
 export declare const CIRCLE_RECIPIENT: `0x${string}`;
 export declare const CIRCLE_MESSENGER: `0x${string}`;
@@ -18,12 +19,13 @@ export interface CircleRoute {
     readonly domain: 16 | 11 | 15;
     readonly token: Address;
     readonly gasPayer: Address;
-    readonly gasPayerProfile: "evm-live-buyer" | "default";
+    readonly gasPayerProfile: "evm-live-buyer" | "evm-live-seller" | "default";
     readonly destinationNativeCap: string;
     readonly rpcEnvironment: string;
     readonly rpcDefault: string;
 }
-export declare function circleRoute(chain: CircleDestinationChain): CircleRoute;
+/** An omitted selector retains the historical buyer route. Only Sei has a second finite owner. */
+export declare function circleRoute(chain: CircleDestinationChain, destinationProfile?: string): CircleRoute;
 export declare const CIRCLE_DEPLOYMENT_PINS: {
     readonly "42161": {
         readonly messenger: {

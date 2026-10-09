@@ -36,9 +36,9 @@ export function advanceCircle(op: CircleOperationV1, patch: Partial<CircleOperat
   return sealCircle({ ...body, transitions: [...transitions, entry] });
 }
 export function circleEnvelope(input: Omit<CircleEnvelope, "envelopeHash">): CircleEnvelope { return { ...input, envelopeHash: hashObject(input) }; }
-export function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null): void {
+export function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, destinationProfile?: string): void {
   if (!isPlainRecord(e) || !exactKeys(e, ["chainId", "from", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash"])) circleCorrupt("envelope_shape");
-  const { envelopeHash, ...body } = e, route = circleRoute(chain), destination = role === "mint";
+  const { envelopeHash, ...body } = e, route = circleRoute(chain, destinationProfile), destination = role === "mint";
   const data = destination ? attestation === null ? null : encodeCircleMint(attestation) : role === "burn" ? encodeCircleBurn(chain) : encodeCircleApproval(role === "cleanup");
   if (envelopeHash !== hashObject(body) || e.chainId !== (destination ? chain : 42161) || e.from !== (destination ? route.gasPayer : CIRCLE_SOURCE_OWNER) ||
     e.to !== (destination ? CIRCLE_TRANSMITTER : role === "burn" ? CIRCLE_MESSENGER : CIRCLE_SOURCE_TOKEN) || e.data !== data || e.valueAtomic !== "0") circleCorrupt("envelope_binding");
@@ -51,7 +51,7 @@ export function validateCircle(value: unknown): CircleOperationV1 {
   if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "profile", "profileHash", "destinationProfile", "destinationProfileHash", "idempotencyHash", "requestHash", "fingerprint", "destinationChain", "sourceCustody", "destinationCustody", "policies", "preparedAt", "expiresAt", "deploymentDigest", "feeQuoteAtomic", "state", "terminal", "effects", "source", "attestation", "destination", "residualAllowanceAtomic", "usage", "usageFinalized", "transitions", "integrityHash"])) circleCorrupt("shape");
   const op = value as unknown as CircleOperationV1, { integrityHash, ...body } = op;
   if (op.schemaVersion !== "apn.circle-v2-evm-operation.v1" || hashObject(body) !== integrityHash || ![op.operationId, op.profileHash, op.destinationProfileHash, op.idempotencyHash, op.requestHash, op.fingerprint, op.deploymentDigest].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x))) circleCorrupt("integrity");
-  const route = circleRoute(op.destinationChain);
+  const route = circleRoute(op.destinationChain, op.destinationProfile);
   validateEvmNativeCustody(op.sourceCustody); validateEvmNativeCustody(op.destinationCustody);
   if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||
     op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > 100n ||
@@ -78,7 +78,7 @@ export function validateCircle(value: unknown): CircleOperationV1 {
   for (const inputEffect of op.effects) {
     const e = inputEffect as CircleEffect;
     if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted"].includes(e.phase)) circleCorrupt("effect_shape");
-    validateCircleEnvelope(e.envelope, e.role, op.destinationChain, op.attestation);
+    validateCircleEnvelope(e.envelope, e.role, op.destinationChain, op.attestation, op.destinationProfile);
     if ((e.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(e.transactionHash)) || (e.materialHash !== null && !/^[a-f0-9]{64}$/u.test(e.materialHash)) ||
       (["sealed", "submission_started", "submitted", "confirmed", "reverted"].includes(e.phase) && (e.materialHash === null || e.transactionHash === null)) ||
       (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash))) circleCorrupt("effect_material");

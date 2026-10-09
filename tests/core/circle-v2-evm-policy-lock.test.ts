@@ -14,8 +14,8 @@ import { join } from "node:path";
 async function temporaryState() { const root = await realpath(await mkdtemp(join(tmpdir(), "circle-policy-lock-"))); return { root, cleanup: () => rm(root, { recursive: true, force: true }) }; }
 const now = new Date("2026-10-09T01:00:00.000Z");
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
-async function fixture(root: string, chain: CircleDestinationChain, expiresAt?: string) {
-  const state = new StateStore(root), store = new AllowlistPolicyStore(root), route = circleRoute(chain); await state.initialize();
+async function fixture(root: string, chain: CircleDestinationChain, expiresAt?: string, destinationProfile?: string) {
+  const state = new StateStore(root), store = new AllowlistPolicyStore(root), route = circleRoute(chain, destinationProfile); await state.initialize();
   const op = { profile: "evm-live-buyer", profileHash: state.profileHash("evm-live-buyer"), destinationProfile: route.gasPayerProfile,
     destinationProfileHash: state.profileHash(route.gasPayerProfile), destinationChain: chain,
     sourceCustody: { walletAddress: CIRCLE_SOURCE_OWNER }, destinationCustody: { walletAddress: route.gasPayer }, policies: [], usage: [] } as unknown as CircleOperationV1;
@@ -87,4 +87,9 @@ test("held USDC and 75T source capacity are re-admitted without counting the sam
     assert.equal(usage.slice(1, 4).reduce((sum, row) => sum + BigInt(row.amountAtomic), 0n), 75000000000000n);
     await f.usage.confirm(held);
   });
+});
+
+test("seller Sei uses the exact destination activation and native policy hold", { timeout: 10000 }, async t => {
+ const temporary=await temporaryState();t.after(temporary.cleanup);const f=await fixture(temporary.root,1329,undefined,"evm-live-seller");
+ await f.usage.withPolicyLocks([f.op.profile,f.op.destinationProfile],async()=>{const policies=await f.usage.policies(f.op); assert.equal(policies.length,2);assert.ok(policies.some(p=>p.profile==="evm-live-seller"));const prepared={...f.op,operationId:"b".repeat(64),policies};const usage=await f.usage.reserve(prepared);assert.equal(usage[4]!.account,circleRoute(1329,"evm-live-seller").gasPayer);await f.usage.confirm({...prepared,usage});});
 });

@@ -68,8 +68,8 @@ export function verifyCircleSourceAccount(account) {
     circleUint(account.latestNonceAtomic);
     return { approvalRequired: allowance === 0n, nonceAtomic: account.latestNonceAtomic };
 }
-export function verifyCircleDestinationAccount(account, chain) {
-    const route = circleRoute(chain);
+export function verifyCircleDestinationAccount(account, chain, destinationProfile) {
+    const route = circleRoute(chain, destinationProfile);
     if (account.chainId !== chain || account.address !== route.gasPayer ||
         circleUint(account.nativeBalanceAtomic) < BigInt(route.destinationNativeCap) || account.latestNonceAtomic !== account.pendingNonceAtomic)
         circleFail("destination_account");
