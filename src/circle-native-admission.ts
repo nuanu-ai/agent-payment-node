@@ -19,7 +19,7 @@ export interface CircleNativeAdmission {
   readonly sources: readonly { readonly operationId: string; readonly sourceIdentityHash: string }[];
 }
 export interface VerifiedCircleNativeAdmission { readonly kind: "verified-circle-native-source" }
-const verified = new WeakMap<VerifiedCircleNativeAdmission, { binding: CircleNativeAdmission; profileHash: string; account: string }>();
+const verified = new WeakMap<VerifiedCircleNativeAdmission, { readonly binding: CircleNativeAdmission; readonly profileHash: string; readonly account: string }>();
 export function verifiedCircleNativeSources(token: VerifiedCircleNativeAdmission, profileHash: string, account: string): ReadonlyMap<string, string> {
   const binding = verified.get(token); if (binding === undefined || binding.profileHash !== profileHash || binding.account !== account) blocked();
   return new Map(binding.binding.sources.map(source => [source.operationId, source.sourceIdentityHash]));
@@ -88,7 +88,12 @@ export async function verifyCircleNativeAdmission(state: StateStore, port: RpcPo
   const source = decodeCircleSource(b, op.destinationChain); sameReceipt(burn.proof!, source); verifyCircleClosureFinality(op.source!, source);
   const binding: CircleNativeAdmission = { schemaVersion: "apn.circle-finalized-native-admission.v1", recipientCustody,
     sources: [{ operationId: op.operationId, sourceIdentityHash: circleNativeSourceIdentity(op) }] };
-  const token = Object.freeze({ kind: "verified-circle-native-source" as const }); verified.set(token, { binding, profileHash, account }); return { binding, token };
+  // The public journal projection must never alias the private verified authority snapshot.
+  const snapshot: CircleNativeAdmission = Object.freeze({ schemaVersion: binding.schemaVersion,
+    recipientCustody: Object.freeze({ ...binding.recipientCustody }),
+    sources: Object.freeze(binding.sources.map(source => Object.freeze({ ...source }))) });
+  const token = Object.freeze({ kind: "verified-circle-native-source" as const });
+  verified.set(token, Object.freeze({ binding: snapshot, profileHash, account })); return { binding, token };
 }
 /** Native calls this after foreground approval, before the actual signature; one additional pending nonce read. */
 export async function recheckCircleNativeAdmission(state: StateStore, operation: OperationRecord, port?: RpcPort): Promise<VerifiedCircleNativeAdmission | null> {

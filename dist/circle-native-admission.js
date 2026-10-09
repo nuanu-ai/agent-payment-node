@@ -106,8 +106,12 @@ export async function verifyCircleNativeAdmission(state, port, profile, account,
     verifyCircleClosureFinality(op.source, source);
     const binding = { schemaVersion: "apn.circle-finalized-native-admission.v1", recipientCustody,
         sources: [{ operationId: op.operationId, sourceIdentityHash: circleNativeSourceIdentity(op) }] };
+    // The public journal projection must never alias the private verified authority snapshot.
+    const snapshot = Object.freeze({ schemaVersion: binding.schemaVersion,
+        recipientCustody: Object.freeze({ ...binding.recipientCustody }),
+        sources: Object.freeze(binding.sources.map(source => Object.freeze({ ...source }))) });
     const token = Object.freeze({ kind: "verified-circle-native-source" });
-    verified.set(token, { binding, profileHash, account });
+    verified.set(token, Object.freeze({ binding: snapshot, profileHash, account }));
     return { binding, token };
 }
 /** Native calls this after foreground approval, before the actual signature; one additional pending nonce read. */
