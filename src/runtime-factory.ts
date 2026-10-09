@@ -1,4 +1,4 @@
-import { SeiFundingService } from "./lifi/sei-gaszip-service.js";
+import { gasZipFundingRuntime } from "./runtime-factory-gaszip.js";
 import { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import { createSpecialApnCore } from "./runtime-factory-special.js";
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
@@ -370,7 +370,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits,
         () => options.clock?.now().getTime() ?? Date.now()),
     } : {}),
-    ...(bound.request.command.startsWith("sei.funding.") || options.seiFunding !== undefined ? { seiFunding: options.seiFunding ?? new SeiFundingService(state, wrappingSecret, process.env) } : {}),
+    ...gasZipFundingRuntime(bound.request.command, state, wrappingSecret, options, process.env),
     ...(bound.request.command.startsWith("oneclick.source.") || options.oneClickSource !== undefined ? {
       oneClickSource: options.oneClickSource ?? new OneClickSourceService(state, wrappingSecret, process.env),
     } : {}),

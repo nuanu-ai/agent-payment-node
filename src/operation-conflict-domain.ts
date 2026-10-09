@@ -46,6 +46,7 @@ export function storedOperationDomains(operation: StoredMoneyOperation): readonl
       evmConflictDomain(1329, operation.record.owner.address)];
     if (operation.kind === "circle_route") return [evmConflictDomain(42161, operation.record.sourceCustody.walletAddress),
       evmConflictDomain(operation.record.destinationChain, operation.record.destinationCustody.walletAddress)];
+    if (operation.kind === "mega_gaszip") return [evmConflictDomain(8453, operation.record.owner.address)];
     if (operation.kind === "permit2_production") return [evmConflictDomain(43114, operation.record.material.wallet.account)];
     if (operation.kind === "permit2_legacy_conflict") return [evmConflictDomain(operation.record.chainId, operation.record.account)];
     if (operation.kind === "relay_unsigned") return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];

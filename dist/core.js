@@ -316,6 +316,14 @@ export class ApnCore {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Sei funding runtime unavailable.");
                 return dataOutcome(request.command === "sei.funding.prepare" ? await service.prepare(request) : request.command === "sei.funding.approve" ? await service.approve(request.operationId) : await service.status(request.operationId), "sei_gaszip_durable_operation");
             }
+            case "mega.funding.prepare":
+            case "mega.funding.approve":
+            case "mega.funding.status": {
+                const service = this.context.megaFunding;
+                if (service === undefined)
+                    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Mega funding runtime unavailable.");
+                return dataOutcome(request.command === "mega.funding.prepare" ? await service.prepare(request) : request.command === "mega.funding.approve" ? await service.approve(request.operationId) : await service.status(request.operationId), "mega_gaszip_durable_operation");
+            }
             case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
             case "gasless.balance": {
                 const provider = await gaslessProvider(this.context, request.profile);
