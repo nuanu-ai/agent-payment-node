@@ -1,5 +1,6 @@
 import { isSealedBurnRetirement, sealedBurnReplacement, assertSealedBurnReplacement, SEALED_BURN_HASH, SEALED_BURN_MATERIAL } from "./burn-retirement.js";
 import { sealedBurnEvidence, assertBurnReplacementAccount } from "./burn-retirement-rpc.js";
+import { readCircleMintFeeRecipient } from "./mint-fee-recipient.js";
 import { CircleRetirementAuthorityStore, assertCircleRetirementWindow, type CircleRetirementAuthority } from "./nonce-retirement-authority.js";
 import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { assertCircleNonceRetirementCase, retireCircleNonce, type CircleNonceRetirementPorts } from "./nonce-retirement.js";
@@ -222,7 +223,7 @@ export class CircleEvmService {
         if (effect.role === "approval" || effect.role === "cleanup") return verifyCircleApproval(observation, effect.role === "cleanup", await allowance(String(circleRecord(observation.receipt).blockNumber)));
         if (effect.role === "burn") return decodeCircleSource(observation, op.destinationChain);
         if (op.source === null || op.attestation === null) circleCorrupt("mint_proof_without_source");
-        return decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))), op.destinationProfile);
+        return decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))), op.destinationProfile, BigInt(op.attestation.feeExecutedAtomic) === 0n ? undefined : await readCircleMintFeeRecipient(destination, observation));
       },
       observeSource: async (op, finalized) => {
         const hash = op.effects.find(e => e.role === "burn")!.transactionHash; if (hash === null) return null;
@@ -235,7 +236,7 @@ export class CircleEvmService {
         if (hash === null || hash === undefined || op.source === null || op.attestation === null) return null;
         const observation = await destination.observation(hash, "safe"); if (observation === null) return null;
         assertObservedEnvelope(op.effects.find(e => e.role === "mint")!, observation.transaction);
-        const proof = decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))), op.destinationProfile);
+        const proof = decodeCircleDestination(op.source, op.attestation, observation, String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(circleRecord(observation.receipt).blockNumber))), op.destinationProfile, BigInt(op.attestation.feeExecutedAtomic) === 0n ? undefined : await readCircleMintFeeRecipient(destination, observation));
         if (op.destination !== null && (proof.blockHash !== op.destination.blockHash || proof.receiptHash !== op.destination.receiptHash || proof.transactionHash !== op.destination.transactionHash)) circleBlocked("destination_reorg_holds_required");
         return op.destination ?? proof;
       }, allowance: async () => allowance(),

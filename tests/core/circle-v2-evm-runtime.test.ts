@@ -1,3 +1,4 @@
+const issuerFeeRecipient = getAddress(`0x${"44".repeat(20)}`);
 import { circleRuntimeBytecode } from "../../src/circle-v2-evm/rpc.js";
 import { verifyCircleFinalizedRevert } from "../../src/circle-v2-evm/revert-proof.js";
 import assert from "node:assert/strict";
@@ -111,9 +112,10 @@ test("shared profile and operation locks allow exactly one concurrent financial 
 test("destination safe mint leaves usage held until independently finalized source is observed", async () => {
   let op = await sourceReady(); const p = ports(op); op = await approveCircleMint(op, p.p);
   const attested = op.attestation!, logs = [event("Transfer", route.token, { from: getAddress(`0x${"0".repeat(40)}`), to: CIRCLE_RECIPIENT, value: 40094n }, 0),
-    event("MintAndWithdraw", CIRCLE_MESSENGER, { mintRecipient: CIRCLE_RECIPIENT, amount: 40094n, mintToken: route.token }, 1),
-    event("MessageReceived", CIRCLE_TRANSMITTER, { caller: route.gasPayer, sourceDomain: 3, nonce: attested.nonce, sender: circleWord(CIRCLE_MESSENGER), finalityThresholdExecuted: 1000, messageBody: attested.body }, 2)];
-  const minted = decodeCircleDestination(op.source!, attested, observation(143, route.gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(attested), logs), "1");
+    event("Transfer", route.token, { from: getAddress(`0x${"0".repeat(40)}`), to: issuerFeeRecipient, value: 6n }, 1),
+    event("MintAndWithdraw", CIRCLE_MESSENGER, { mintRecipient: CIRCLE_RECIPIENT, amount: 40094n, mintToken: route.token, feeCollected: 6n }, 2),
+    event("MessageReceived", CIRCLE_TRANSMITTER, { caller: route.gasPayer, sourceDomain: 3, nonce: attested.nonce, sender: circleWord(CIRCLE_MESSENGER), finalityThresholdExecuted: 1000, messageBody: attested.body }, 3)];
+  const minted = decodeCircleDestination(op.source!, attested, observation(143, route.gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(attested), logs), "1", undefined, issuerFeeRecipient);
   p.p.observeDestination = async () => minted; op = await observeCircle(op, p.p); assert.equal(op.state, "awaiting_finality"); assert.equal(op.terminal, false); assert.ok(op.usage.every(u => u.state === "unknown_finality"));
   const raw = source(143), finalized = decodeCircleSource({ ...raw, finalityTag: "finalized" }, 143); p.p.observeSource = async () => finalized;
   p.p.observeDestination = async () => null; op = await observeCircle(op, p.p); assert.equal(op.terminal, false);

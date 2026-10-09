@@ -141,6 +141,9 @@ export declare const CIRCLE_ABI: readonly [{
         readonly type: "address";
         readonly name: "mintToken";
         readonly indexed: true;
+    }, {
+        readonly type: "uint256";
+        readonly name: "feeCollected";
     }];
 }, {
     readonly name: "Transfer";
@@ -258,7 +261,7 @@ export declare function verifyCircleAttestationSigners(message: CircleMessage, a
 export declare function bindCircleAttestation(source: CircleSourceProof, response: unknown, snapshot: CircleAttesterSnapshot): Promise<CircleAttestation>;
 export declare function assertCircleAttestation(source: CircleSourceProof, attested: CircleAttestation): void;
 export declare function encodeCircleMint(attested: CircleAttestation): Hex;
-export declare function decodeCircleDestination(source: CircleSourceProof, attested: CircleAttestation, input: CircleObservation, usedNonceAtomic: string, destinationProfile?: string): {
+export declare function decodeCircleDestination(source: CircleSourceProof, attested: CircleAttestation, input: CircleObservation, usedNonceAtomic: string, destinationProfile?: string, feeRecipient?: Address): {
     sourceTransactionHash: `0x${string}`;
     attestedMessageHash: `0x${string}`;
     nonce: `0x${string}`;
