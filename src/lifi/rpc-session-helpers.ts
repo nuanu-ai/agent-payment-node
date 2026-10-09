@@ -1,5 +1,6 @@
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { WBTC_ACROSS_CONTINUATION_POST_LIMIT, type BridgeRpcPhysicalPolicy } from "./rpc-execution-budget.js";
 import type { RpcReadTelemetry } from "./rpc-session.js";
 
 export type RpcDecoder<T = unknown> = (value: unknown) => T;
@@ -12,8 +13,9 @@ export class BridgeRpcPhysicalBudget {
   private lastStart = Number.NEGATIVE_INFINITY;
   private tail: Promise<void> = Promise.resolve();
   constructor(private readonly now: () => number = Date.now,
-    private readonly wait: (milliseconds: number) => Promise<void> = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms))) {}
-  remaining(): number { return BRIDGE_INVOCATION_RPC_POST_LIMIT - this.posts; }
+    private readonly wait: (milliseconds: number) => Promise<void> = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
+    private readonly policy: BridgeRpcPhysicalPolicy = "default") {}
+  remaining(): number { return (this.policy === "canonical_wbtc_across_approval_continuation" ? WBTC_ACROSS_CONTINUATION_POST_LIMIT : BRIDGE_INVOCATION_RPC_POST_LIMIT) - this.posts; }
   require(posts: number, method: string): void {
     if (this.remaining() < posts) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC invocation POST budget exhausted.",
       { reason: "physical_post_limit", rpcMethod: method, physicalPosts: this.posts.toString(), remainingPhysicalPosts: this.remaining().toString() });

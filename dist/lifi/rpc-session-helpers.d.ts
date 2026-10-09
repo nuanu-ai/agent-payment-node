@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { type BridgeRpcPhysicalPolicy } from "./rpc-execution-budget.js";
 import type { RpcReadTelemetry } from "./rpc-session.js";
 export type RpcDecoder<T = unknown> = (value: unknown) => T;
 export declare const MAX_READ_ATTEMPTS = 2;
@@ -7,10 +8,11 @@ export declare const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
 export declare class BridgeRpcPhysicalBudget {
     private readonly now;
     private readonly wait;
+    private readonly policy;
     private posts;
     private lastStart;
     private tail;
-    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>);
+    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>, policy?: BridgeRpcPhysicalPolicy);
     remaining(): number;
     require(posts: number, method: string): void;
     beforePost(method: string): Promise<void>;
