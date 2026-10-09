@@ -728,6 +728,7 @@ apn x402 permit2 status --profile <profile> --operation <operation-id>
 apn x402 merchant prepare --profile <profile> --max-native-fee-wei <wei> --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
+apn x402 merchant retire-unsent --operation <operation-id>
 apn x402 merchant status --operation <operation-id>
 apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
 apn relay arbitrum observe --operation <operation-id> --rpc-url <arbitrum-rpc>
