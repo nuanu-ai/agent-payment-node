@@ -24,7 +24,7 @@ import { verifyCircleApproval } from "../../src/circle-v2-evm/protocol.js";
 import { SEALED_BURN_OPERATION, SEALED_BURN_HASH, SEALED_BURN_MATERIAL, sealedBurnReplacement, assertSealedBurnRetirement, assertSealedBurnReplacement } from "../../src/circle-v2-evm/burn-retirement.js";
 import { initial, at } from "./circle-v2-evm-nonce-runtime-fixtures.js";
 const raw = "0x02" as Hex, cleanupHash = keccak256(raw), oldHash = "0x26c833d2146ab758511354ff773fa7f0aece6de36bf433a022cc2ef6c74ae39a" as Hex;
-for (const variant of ["cancelled", "finalized", "pending", "included", "lost_reply", "changed_again", "burn_race", "principal_changed", "fee_cap", "tty_expired", "after_sign_expired", "tls_expired", "policy_expired", "missing_native", "unrelated_conflict", "approval_reorg", "cleanup_reorg", "final_principal_changed", "final_nonce_changed"] as const) test(`sealed burn full production cleanupNonce ${variant}: real prepare, journal and ledger`, async t => {
+for (const variant of ["cancelled", "finalized", "pending", "included", "lost_reply", "changed_again", "burn_race", "principal_changed", "fee_cap", "tty_expired", "after_sign_expired", "tls_expired", "policy_expired", "missing_native", "unrelated_conflict", "approval_reorg", "cleanup_reorg", "final_principal_changed", "final_nonce_changed", "original_burn_submission_fence", "original_burn_submitted_once"] as const) test(`sealed burn full production cleanupNonce ${variant}: real prepare, journal and ledger`, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "circle-runtime-retirement-"))); t.after(() => rm(root, { recursive: true, force: true }));
   const state = new StateStore(root), policyStore = new AllowlistPolicyStore(root), repo = new CircleRepository(root); let clock = at;
   const usage = new CircleUsage(state, () => clock), route = circleRoute(1329, "evm-live-seller"); let op = initial(root, 1329, "evm-live-seller");
@@ -51,6 +51,10 @@ for (const variant of ["cancelled", "finalized", "pending", "included", "lost_re
   op = advanceCircle(op, { effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "confirmed", proof: approvalProof } : e), residualAllowanceAtomic: "40100" }, "approval_canonical_receipt", at); await repo.save(op);
   op = advanceCircle(op, { effects: op.effects.map(e => e.role === "burn" ? { ...e, phase: "signing_started" } : e) }, "burn_signing_fence", at); await repo.save(op);
   op = advanceCircle(op, { effects: op.effects.map(e => e.role === "burn" ? { ...e, phase: "sealed", transactionHash: SEALED_BURN_HASH as Hex, materialHash: SEALED_BURN_MATERIAL } : e) }, "burn_material_sealed", at); await repo.save(op);
+  if (variant === "original_burn_submission_fence" || variant === "original_burn_submitted_once") {
+    op = advanceCircle(op, { effects: op.effects.map(e => e.role === "burn" ? { ...e, phase: "submission_started" } : e) }, "burn_submission_fence", at); await repo.save(op);
+    if (variant === "original_burn_submitted_once") { op = advanceCircle(op, { effects: op.effects.map(e => e.role === "burn" ? { ...e, phase: "submitted" } : e) }, "burn_submitted_once", at); await repo.save(op); }
+  }
   op = advanceCircle(op, { effects: op.effects.map(e => e.role === "burn" ? { ...e, phase: "unknown" } : e) }, "burn_fenced_unknown_observe_only", at); await repo.save(op);
   if (variant === "cancelled") {
     for (const patch of [{ destinationChain: 143 as const }, { destinationProfile: "default" }, { effects: op.effects.map(e => e.role === "burn" ? { ...e, materialHash: "a".repeat(64) } : e) }, { effects: op.effects.map(e => e.role === "burn" ? { ...e, phase: "sealed" as const } : e) }]) assert.throws(() => assertSealedBurnRetirement(advanceCircle(op, patch, "negative", at)), /exact_sealed/);
@@ -81,7 +85,7 @@ for (const variant of ["cancelled", "finalized", "pending", "included", "lost_re
   const originalPorts = internal.ports.bind(internal); t.mock.method(internal, "ports", (...args: [CircleOperationV1, boolean?]) => { const ports = originalPorts(...args); ports.approve = async () => { tty++; if (["cancelled", "changed_again"].includes(variant)) throw Error("CANCELLED_TTY"); if (variant === "tty_expired") clock += 60001; }; return ports; });
   const { envelopeHash: _oldEnvelopeHash, ...originalEnvelope } = op.effects[0]!.envelope;
   const quoted = circleEnvelope({ ...originalEnvelope, nonceAtomic: "84", data: encodeCircleApproval(true) });
-  const cleanup = sealedBurnReplacement(op, quoted, 1n);
+  const cleanup = variant === "original_burn_submission_fence" || variant === "original_burn_submitted_once" ? circleEnvelope({ ...originalEnvelope, nonceAtomic: "84", data: encodeCircleApproval(true), maxFeePerGasAtomic: "50000000", maxPriorityFeePerGasAtomic: "1" }) : sealedBurnReplacement(op, quoted, 1n);
   t.mock.method(internal, "preflightDeployments", async () => ({ digest: op.deploymentDigest }));
   t.mock.method(CircleRpc.prototype, "identity", async () => {});
   t.mock.method(CircleRpc.prototype, "account", async () => ({ latestNonceAtomic: "84", pendingNonceAtomic: variant === "pending" ? "85" : "84", allowanceAtomic: "40100", nativeBalanceAtomic: "99999999999999" } as never));
@@ -103,7 +107,12 @@ for (const variant of ["cancelled", "finalized", "pending", "included", "lost_re
   let cleanupReads = 0;
   t.mock.method(CircleRpc.prototype, "observation", async (hash: string, tag: string) => { assert.equal(tag, "finalized"); if (hash === oldHash) return { ...approvalObservation, finalityTag: "finalized", receipt: variant === "approval_reorg" ? { ...(approvalObservation.receipt as object), effectiveGasPrice: "0x1ff2cf1" } : approvalObservation.receipt }; if (variant === "cleanup_reorg" && ++cleanupReads > 1) return { ...canonical, receipt: { ...(canonical.receipt as object), effectiveGasPrice: "0x1312d01" } }; return ["included", "lost_reply", "after_sign_expired", "tls_expired"].includes(variant) ? null : canonical; });
   t.mock.method(CircleRpc.prototype, "block", async (tag: string) => ({ number: tag === "0xa" ? "0xa" : "0xb", hash: (canonical.finalityHead as Record<string, unknown>).hash, baseFeePerGas: "0x1312d00" }));
-  if (["burn_race", "principal_changed", "fee_cap", "policy_expired", "missing_native", "unrelated_conflict", "approval_reorg"].includes(variant)) {
+  if (variant === "original_burn_submission_fence" || variant === "original_burn_submitted_once") {
+    await assert.rejects(service.cleanupNonce(op.operationId), /exact_sealed_sei_burn_retirement_required/); assert.equal(tty, 0); assert.equal(signs, 0); assert.equal(sends, 0);
+    assert.equal((await repo.load(op.operationId))!.integrityHash, parent.integrityHash); assert.equal(await new CircleRetirementAuthorityStore(root).load(op), null);
+    const store = new CircleNonceRetirementStore(root); assert.equal(await store.intent(op), null); assert.equal(await store.hasClaim(op, "sign"), false); assert.equal(await store.hasClaim(op, "send"), false);
+    for (const row of rows) assert.equal((await new AssetUsageLedger(root).load(row, row.reservationId))!.reservationDigest, row.reservationDigest);
+  } else if (["burn_race", "principal_changed", "fee_cap", "policy_expired", "missing_native", "unrelated_conflict", "approval_reorg"].includes(variant)) {
     await assert.rejects(service.cleanupNonce(op.operationId), /retirement_original_burn_receipt_present|retirement_source_principal_changed|envelope_fee_cap|active_owner_asset_policy_required|exact_circle_mechanism_admission_required|Another|conflict|retirement_original_approval_reorg|policy has expired|asset is not listed/); assert.equal(tty, 0);
   } else if (["finalized", "pending"].includes(variant)) {
     const done = await service.cleanupNonce(op.operationId); assert.equal(done.state, "nonce_retired"); validateCircle(done);
@@ -127,5 +136,5 @@ for (const variant of ["cancelled", "finalized", "pending", "included", "lost_re
     for (const row of rows) assert.equal((await new AssetUsageLedger(root).load(row, row.reservationId))!.reservationDigest, row.reservationDigest);
   }
   assert.equal(canonicalJson(parent), parentBytes); if (!["finalized", "pending", "included", "lost_reply", "after_sign_expired", "tls_expired", "cleanup_reorg", "final_principal_changed", "final_nonce_changed"].includes(variant)) { assert.equal(signs, 0); assert.equal(sends, 0); }
-  if (!["burn_race", "principal_changed", "fee_cap", "policy_expired", "missing_native", "unrelated_conflict", "approval_reorg"].includes(variant)) await assert.rejects(new CircleNonceRetirementStore(root).assertOriginalEffectsAvailable(op.operationId), /permanently_retired/);
+  if (!["burn_race", "principal_changed", "fee_cap", "policy_expired", "missing_native", "unrelated_conflict", "approval_reorg", "original_burn_submission_fence", "original_burn_submitted_once"].includes(variant)) await assert.rejects(new CircleNonceRetirementStore(root).assertOriginalEffectsAvailable(op.operationId), /permanently_retired/);
 });
