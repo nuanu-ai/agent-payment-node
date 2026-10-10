@@ -1170,3 +1170,5 @@ Protocol references: [GasZip direct forwarder](https://dev.gas.zip/gas/code-exam
 [quote API](https://dev.gas.zip/gas/api/quote) and
 [deposit API](https://dev.gas.zip/gas/api/deposit). Fresh unsigned RPC and quote
 reads are separate from synthetic tests and actual funding acceptance.
+
+Historical native-fill before/after balances use the explicitly configured archive reader when pinned to a nonzero EIP-1898 block hash with `requireCanonical: true`. The frozen primary RPC origin remains the operation identity, and primary canonical receipt/header witnesses remain required. Numeric or moving balance snapshots keep their existing primary route. Archive chain validation, shared pacing and command/session request limits still apply.
