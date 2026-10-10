@@ -30,3 +30,32 @@ test("shared original epoch refuses exhausted and nonfinite clocks without minti
  const utcExpiresAt=new Date(Date.now()+3000).toISOString();
  for(const monotonicDeadlineMs of [0,NaN,Infinity,-Infinity])assert.throws(()=>nativeDeadlineRemaining(Object.freeze({utcExpiresAt,monotonicDeadlineMs})));
 });
+
+
+test("fractional original monotonic resolver deadlines cannot report expiration before that epoch",async()=>{
+ const {performance}=await import("node:perf_hooks");
+ for(let attempt=0;attempt<12;attempt++){
+  let launches=0;
+  const runner=new NodeMetaMaskProcessRunner(async()=>{await new Promise(resolve=>setTimeout(resolve,40));return "/TEST-no-sdk";},()=>{launches++;throw new Error("must not launch");});
+  const deadline=Object.freeze({utcExpiresAt:new Date(Date.now()+1000).toISOString(),monotonicDeadlineMs:performance.now()+12.75});
+  let failure:unknown;try{await runner.runJson(["auth","status","--json"],30000,deadline);}catch(error){failure=error;}
+  assert.ok(failure);assert.equal(launches,0);assert.ok(performance.now()>=deadline.monotonicDeadlineMs);
+  const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(failure);assert.equal(diagnostic?.stage,"sdk_resolver");assert.equal(diagnostic?.code,"deadline");assert.equal(diagnostic?.remainingMs,0);
+ }
+});
+
+test("provider resolver rejection before the original epoch remains refused without launching a child",async()=>{
+ const {ApnError}=await import("../../src/errors.js");let launches=0;
+ const rejection=new ApnError("APN_PROVIDER_UNAVAILABLE","TEST resolver unavailable.",{retryable:true});
+ const runner=new NodeMetaMaskProcessRunner(async()=>{await new Promise(resolve=>setTimeout(resolve,5));throw rejection;},()=>{launches++;throw new Error("must not launch");});
+ let failure:unknown;try{await runner.runJson(["auth","status","--json"],30000,new Date(Date.now()+1000).toISOString());}catch(error){failure=error;}
+ assert.equal(failure,rejection);assert.equal(launches,0);const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(failure);assert.equal(diagnostic?.code,"refused");assert.ok(diagnostic);assert.ok(diagnostic.remainingMs>0);
+});
+
+test("caller-equivalent deadline message and code cannot forge the private timer expiration cause",async()=>{
+ const {ApnError}=await import("../../src/errors.js");let launches=0;
+ const forgery=new ApnError("APN_PROVIDER_UNAVAILABLE","Native SDK resolver deadline reached.",{retryable:true});
+ const runner=new NodeMetaMaskProcessRunner(async()=>{throw forgery;},()=>{launches++;throw new Error("must not launch");});
+ let failure:unknown;try{await runner.runJson(["auth","status","--json"],30000,new Date(Date.now()+1000).toISOString());}catch(error){failure=error;}
+ assert.equal(failure,forgery);assert.equal(launches,0);const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(failure);assert.equal(diagnostic?.stage,"sdk_resolver");assert.equal(diagnostic?.code,"refused");assert.ok(diagnostic);assert.ok(diagnostic.remainingMs>0);assert.equal(takeMetaMaskNativeProcessFailureDiagnostic(failure),undefined);
+});
