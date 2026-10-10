@@ -34,7 +34,12 @@ export async function refreshJupiterV1QuoteBuild(rpc, material, response, useRpc
     const fee = rpcRecord(await rpc.call("getFeeForMessage", [compiled.messageBase64, { commitment: "confirmed" }]));
     const height = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "confirmed" }])).toString();
     if (quoteRpcLifetime !== undefined && (BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height) < 100n || BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height) > 151n))
-        throw new ApnError("APN_REPREPARE_REQUIRED", "Jupiter's pre-freeze RPC blockhash has an insufficient or excessive lifetime.");
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Jupiter's pre-freeze RPC blockhash has an insufficient or excessive lifetime.", {
+            remainingBlocks: (BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height)).toString(),
+            observedBlockHeight: height, lastValidBlockHeight: quoteRpcLifetime.lastValidBlockHeight,
+            blockhashContextSlot: quoteRpcLifetime.contextSlot, requiredMinimumContextSlot: quoteRpcLifetime.minimumContextSlot,
+            minimumRemainingBlocks: 100, maximumRemainingBlocks: 151, commitment: "confirmed",
+        });
     const { materialDigest: _digest, ...original } = prior;
     const body = { ...original, rawBuildResponse: build, rawBuildResponseHash: jupiterV1ResponseHash(build),
         lifetime: quoteRpcLifetime === undefined ? jupiterV1Lifetime(build) : { blockhash: quoteRpcLifetime.blockhash, lastValidBlockHeight: quoteRpcLifetime.lastValidBlockHeight },

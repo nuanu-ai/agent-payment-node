@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { ApnError } from "../../src/errors.js";
+import { failureEnvelope } from "../../src/output.js";
 import test from "node:test";
 import { canonicalJson } from "../../src/canonical.js";
 import type { SolanaRpcPort } from "../../src/solana/rpc.js";
@@ -87,10 +89,23 @@ test("RPC lifetime is fixed before quote freeze while the complete official resp
 for(const remaining of [100,151])test(`pre-freeze configured RPC lifetime accepts the bounded ${remaining} block edge`,async()=>{
  const material=fixture(),reader=rpcLifetimeReader(material,remaining);const result=await refreshJupiterV1QuoteBuild(reader.rpc,material,material.rawBuildResponse,true);
  assert.equal(BigInt(result.lifetime.lastValidBlockHeight)-BigInt(result.currentBlockHeight),BigInt(remaining));
+ assert.deepEqual(reader.calls,["getLatestBlockhash","getFeeForMessage","getBlockHeight"]);
 });
 for(const remaining of [99,152,-1])test(`pre-freeze configured RPC lifetime refuses ${remaining} remaining blocks`,async()=>{
  const material=fixture(),reader=rpcLifetimeReader(material,remaining);
- await assert.rejects(refreshJupiterV1QuoteBuild(reader.rpc,material,material.rawBuildResponse,true),{code:"APN_REPREPARE_REQUIRED"});
+ await assert.rejects(refreshJupiterV1QuoteBuild(reader.rpc,material,material.rawBuildResponse,true),error=>{
+  assert(error instanceof ApnError);assert.equal(error.code,"APN_REPREPARE_REQUIRED");
+  assert.equal(error.message,"Jupiter's pre-freeze RPC blockhash has an insufficient or excessive lifetime.");
+  const details={remainingBlocks:String(remaining),observedBlockHeight:material.currentBlockHeight,
+   lastValidBlockHeight:(BigInt(material.currentBlockHeight)+BigInt(remaining)).toString(),
+   blockhashContextSlot:String(reader.slot+1),requiredMinimumContextSlot:String(reader.slot),
+   minimumRemainingBlocks:100,maximumRemainingBlocks:151,commitment:"confirmed"};
+  assert.deepEqual(error.details,details);
+  const output=JSON.parse(JSON.stringify(failureEnvelope("swap.quote","lifetime-diagnostic-test",error)));
+  assert.deepEqual(output.error,{code:error.code,message:error.message,details});
+  assert.equal(output.operation,null);assert.equal(output.receipt,null);return true;
+ });
+ assert.deepEqual(reader.calls,["getLatestBlockhash","getFeeForMessage","getBlockHeight"]);
 });
 test("a pre-freeze RPC blockhash from a bank older than the completed public reads refuses before fee or private entry",async()=>{
  const material=fixture(),reader=rpcLifetimeReader(material),rpc={...reader.rpc,async call(method:string,params:readonly unknown[]){if(method==="getLatestBlockhash")return {context:{slot:reader.slot-1},value:{blockhash:reader.blockhash,lastValidBlockHeight:BigInt(material.currentBlockHeight)+150n}};return await reader.rpc.call(method as never,params);}};
