@@ -1,6 +1,7 @@
 import { type MetaMaskNativeDeadline, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { type AssetUsageReservation } from "./asset-usage-ledger.js";
 import { type MetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
+import { type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
 export declare const METAMASK_NATIVE_OWNER_PROFILE: "metamask-live-v042";
 export declare const METAMASK_NATIVE_OWNER_ADDRESS: "0xf41170df51aab52aaa04fbc3ff325cf051644aca";
 declare const VENDOR_HASH = "e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a";
@@ -53,6 +54,7 @@ export declare function runFixedMetaMaskNativeTransfer(stateRoot: string, chainI
     proof_class: string;
 }>;
 export declare function readFixedMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean): Promise<{
+    read_observation?: MetaMaskNativeReadObservation;
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;

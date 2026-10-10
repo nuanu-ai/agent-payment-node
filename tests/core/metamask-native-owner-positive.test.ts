@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-for(const scenario of ["positive","unknown","expired","custody","project","pending","policy","wrongcustody","fees","balance","reverted","op","native-crosschain","alias-samechain","alias-otherchain","sameprofile","newpolicy","newpolicy-op","mismatch-old","mismatch-new","newpolicy-pre-drift","newpolicy-drift"]) test(`TEST ${scenario} pseudoTTY follows normal private owner issuer, one claim, replay refusal and authentic full fee settlement`,{timeout:60000},async()=>{
+for(const scenario of ["positive","no-rid","unknown","expired","custody","project","pending","policy","wrongcustody","fees","balance","reverted","op","native-crosschain","alias-samechain","alias-otherchain","sameprofile","newpolicy","newpolicy-op","mismatch-old","mismatch-new","newpolicy-pre-drift","newpolicy-drift"]) test(`TEST ${scenario} pseudoTTY follows normal private owner issuer, one claim, replay refusal and authentic full fee settlement`,{timeout:60000},async()=>{
   const fixture=fileURLToPath(new URL("../fixtures/metamask-native-owner/driver.mjs",import.meta.url));
   const source=fileURLToPath(new URL("../../src/",import.meta.url));
   const ptyProgram=`import os, pty, select, signal, sys

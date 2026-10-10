@@ -73,14 +73,18 @@ async function project(runner: NodeMetaMaskProcessRunner, deadline?: MetaMaskNat
     return sha256(data.summary.projectId);
   } finally {result.stdout.fill(0);}
 }
-async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: MetaMaskNativeDeadlineInput): Promise<FixedMetaMaskNativePolicy> {
+async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: MetaMaskNativeDeadlineInput, observation?: MutableReadObservation): Promise<FixedMetaMaskNativePolicy> {
+  if (observation !== undefined) observation.guard_step = "project_before";
   const vendorProjectHash = await project(runner, deadline);
+  if (observation !== undefined) observation.guard_step = "address_before";
   await address(runner, deadline);
+  if (observation !== undefined) observation.guard_step = "trading_mode";
   const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
   try {
     const data = success(mode);
     if (data.mode !== "guard" || typeof data.address !== "string" || data.address.toLowerCase() !== PAYER) refuse();
   } finally {mode.stdout.fill(0);}
+  if (observation !== undefined) observation.guard_step = "vendor_policy";
   const result = await runner.runJson(["wallet", "policy", "get", "--json"], remaining(deadline), deadline);
   let variant: (
     | {readonly vendorPolicyHash: typeof POLICY_HASH; readonly policyBytes: 866}
@@ -93,7 +97,9 @@ async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: MetaMask
     else if (bytes === 945 && hash === OP_POLICY_HASH) variant = {vendorPolicyHash: OP_POLICY_HASH, policyBytes: 945};
     else refuse();
   } finally {result.stdout.fill(0);}
+  if (observation !== undefined) observation.guard_step = "address_after";
   await address(runner, deadline);
+  if (observation !== undefined) observation.guard_step = "project_after";
   if (await project(runner, deadline) !== vendorProjectHash) refuse();
   return Object.freeze({selectedAddress: PAYER, ...variant, vendorProjectHash, tradingMode: "guard", observedAt: new Date().toISOString()});
 }
@@ -164,34 +170,81 @@ export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
   return {...hint, ...(result.nativeDiagnostic === undefined ? {} : {diagnostic:result.nativeDiagnostic})};
 }
 
-export type MetaMaskNativeRequestObservation =
+/** Transient read evidence only. No field grants financial authority or changes a held journal. */
+export interface MetaMaskNativeReadObservation {
+  readonly stage: "not_requested" | "input" | "before_guard" | "watch" | "after_guard" | "complete";
+  readonly guard_step: "project_before" | "address_before" | "trading_mode" | "vendor_policy" | "address_after" | "project_after" | null;
+  readonly request_id: string | null;
+  readonly watch_returned: boolean;
+  readonly before_guard_verified: boolean;
+  readonly after_guard_verified: boolean;
+  readonly request_identity_verified: boolean;
+  readonly provider_status: "EVALUATING" | "AWAITING_MFA" | "SIGNING" | "BROADCASTING" | "CONFIRMED" | "FAILED" | "EXPIRED" | "DENIED" | "APPROVED" | "SIGNED" | "CANCELLED" | "unrecognized" | null;
+  readonly transaction_hash: Hex | null;
+  readonly chain_id: MetaMaskNativeFeeChainId | null;
+  readonly response_hash: string | null;
+  readonly reason: string | null;
+  readonly error_code: "APN_OPERATION_BLOCKED" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_UNAVAILABLE" | "APN_STATE_CORRUPT" | "unavailable" | null;
+  readonly diagnostic: MetaMaskNativeDiagnostic | null;
+}
+function readDiagnostic(value: unknown): MetaMaskNativeDiagnostic | null {
+  try {return validateMetaMaskNativeDiagnostic(value);} catch {return null;}
+}
+type MutableReadObservation = {-readonly [K in keyof MetaMaskNativeReadObservation]: MetaMaskNativeReadObservation[K]};
+type RequestHint =
   | {readonly disposition: "acknowledged"; readonly requestId: string; readonly transactionHash: Hex; readonly chainId?: MetaMaskNativeFeeChainId}
   | {readonly disposition: "pending"; readonly requestId: string; readonly chainId?: MetaMaskNativeFeeChainId; readonly transactionHash?: never}
   | {readonly disposition: "unknown"; readonly reason: string; readonly requestId?: string; readonly transactionHash?: Hex; readonly chainId?: MetaMaskNativeFeeChainId};
+export type MetaMaskNativeRequestObservation = RequestHint & {readonly readObservation?: MetaMaskNativeReadObservation};
 
 /** Normal status READ only. Owner supplies RID/project hash from its authentic journal; a service hint is not chain evidence. */
 export async function readFixedMetaMaskNativeRequest(requestId: string, vendorProjectHash: string): Promise<MetaMaskNativeRequestObservation> {
+  const observation: MutableReadObservation = {stage:"input",guard_step:null,request_id:null,watch_returned:false,
+    before_guard_verified:false,after_guard_verified:false,request_identity_verified:false,provider_status:null,
+    transaction_hash:null,chain_id:null,response_hash:null,reason:null,error_code:null,diagnostic:null};
+  const observed = (hint: RequestHint): MetaMaskNativeRequestObservation => {
+    observation.transaction_hash = "transactionHash" in hint ? hint.transactionHash ?? null : null;
+    observation.chain_id = hint.chainId ?? null;
+    observation.reason = hint.disposition === "unknown" ? hint.reason : null;
+    return {...hint,readObservation:Object.freeze({...observation})};
+  };
   if (!/^[A-Za-z0-9._:-]{1,256}$/u.test(requestId) || !/^[a-f0-9]{64}$/u.test(vendorProjectHash))
-    return {disposition: "unknown", reason: "provider_request_binding_invalid"};
+    return observed({disposition: "unknown", reason: "provider_request_binding_invalid"});
+  observation.request_id = requestId;
   const runner = new NodeMetaMaskProcessRunner();
-  let hint: MetaMaskNativeRequestObservation = {disposition: "unknown", reason: "provider_request_read_unavailable", requestId};
+  let hint: RequestHint = {disposition: "unknown", reason: "provider_request_read_unavailable", requestId};
   try {
-    const before = await readPolicy(runner);
+    observation.stage = "before_guard";
+    const before = await readPolicy(runner, undefined, observation);
     if (before.vendorProjectHash !== vendorProjectHash) refuse();
+    observation.before_guard_verified = true;
+    observation.stage = "watch"; observation.guard_step = null;
     const result = await runner.runJson(["wallet", "requests", "watch", requestId, "--wallet-timeout", "1", "--json"], 6_000);
-    try {hint = requestHint(result, requestId);} finally {result.stdout.fill(0);}
-    const after = await readPolicy(runner);
+    observation.watch_returned = true;
+    try {
+      observation.response_hash = sha256(result.stdout);
+      observation.diagnostic = result.nativeDiagnostic === undefined ? null : readDiagnostic(result.nativeDiagnostic);
+      hint = requestHint(result, requestId, observation);
+    } finally {result.stdout.fill(0);}
+    observation.stage = "after_guard";
+    const after = await readPolicy(runner, undefined, observation);
     if (after.vendorProjectHash !== vendorProjectHash || after.vendorPolicyHash !== before.vendorPolicyHash) refuse();
     if (hint.chainId !== undefined) policyAllowsChain(after, hint.chainId);
-    return hint;
-  } catch {
-    return {disposition: "unknown", reason: "provider_request_read_guard_changed_or_unavailable", requestId,
+    observation.after_guard_verified = true;
+    observation.stage = "complete"; observation.guard_step = null;
+    return observed(hint);
+  } catch (error) {
+    observation.error_code = error instanceof ApnError && ["APN_OPERATION_BLOCKED","APN_PROVIDER_PROTOCOL","APN_PROVIDER_UNAVAILABLE","APN_STATE_CORRUPT"].includes(error.code)
+      ? error.code as Exclude<MetaMaskNativeReadObservation["error_code"], "unavailable" | null> : "unavailable";
+    const diagnostic = error instanceof NativeReadRefusal ? error.nativeDiagnostic : takeMetaMaskNativeProcessFailureDiagnostic(error);
+    observation.diagnostic = diagnostic === undefined ? observation.diagnostic : readDiagnostic(diagnostic);
+    return observed({disposition: "unknown", reason: "provider_request_read_guard_changed_or_unavailable", requestId,
       ...("transactionHash" in hint && hint.transactionHash !== undefined ? {transactionHash: hint.transactionHash} : {}),
-      ...(hint.chainId === undefined ? {} : {chainId: hint.chainId})};
+      ...(hint.chainId === undefined ? {} : {chainId: hint.chainId})});
   }
 }
 
-function requestHint(result: MetaMaskProcessResult, requestId: string): MetaMaskNativeRequestObservation {
+function requestHint(result: MetaMaskProcessResult, requestId: string, observation: MutableReadObservation): RequestHint {
   const parsed = parseMetaMaskProcessOutput(result.stdout);
   const unknown = (reason: string): MetaMaskNativeRequestObservation => ({disposition: "unknown", reason, requestId});
   if (parsed === null) return unknown("provider_response_malformed");
@@ -213,6 +266,10 @@ function requestHint(result: MetaMaskProcessResult, requestId: string): MetaMask
       (status.txHash !== undefined && status.txHash !== null && statusHash === undefined)) return unknown("provider_transaction_identity_invalid");
   if (requestHash !== undefined && statusHash !== undefined && requestHash !== statusHash) return unknown("provider_transaction_identity_conflict");
   const transactionHash = statusHash ?? requestHash;
+  observation.request_identity_verified = true;
+  const states = ["EVALUATING","AWAITING_MFA","SIGNING","BROADCASTING","CONFIRMED","FAILED","EXPIRED","DENIED","APPROVED","SIGNED","CANCELLED"] as const;
+  observation.provider_status = typeof status.status === "string" && (states as readonly string[]).includes(status.status)
+    ? status.status as typeof states[number] : typeof status.status === "string" ? "unrecognized" : null;
   if (result.exitCode !== 0 || parsed.envelope?.ok !== true)
     return {disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint,
       ...(transactionHash === undefined ? {} : {transactionHash})};

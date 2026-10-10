@@ -22,7 +22,7 @@ import { exactChainConsent } from "./tty-approval.js";
 import { approvalCode } from "./approval-code.js";
 import { validateMetaMaskNativeFeeQuote, validateMetaMaskNativeFeeReceipt,
   type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeChainId, type MetaMaskNativeFeeReceiptEvidence } from "./metamask-native-fee-evidence.js";
-import { readFixedMetaMaskNativePolicy, readFixedMetaMaskNativeRequest, submitOwnedMetaMaskNative } from "./metamask-native-transfer-adapter.js";
+import { readFixedMetaMaskNativePolicy, readFixedMetaMaskNativeRequest, submitOwnedMetaMaskNative, type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
 import { prepareFixedMetaMaskNativeQuote, readFixedMetaMaskNativeBalances, readFixedMetaMaskNativeNonce, observeFixedMetaMaskNativeTransfer } from "./metamask-native-transfer-rpc.js";
 
 export const METAMASK_NATIVE_OWNER_PROFILE = "metamask-live-v042" as const;
@@ -338,8 +338,13 @@ export async function readFixedMetaMaskNativeTransfer(stateRoot:string,idInput:s
   if(await journal.read(id)===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
   return journal.withLocks([`operation:${id}`],async()=>{
     let op=await journal.read(id); if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
+    let readObservation: MetaMaskNativeReadObservation | undefined = observe ? Object.freeze({stage:"not_requested",guard_step:null,
+      request_id:op.providerRequestId,watch_returned:false,before_guard_verified:false,after_guard_verified:false,
+      request_identity_verified:false,provider_status:null,transaction_hash:op.transactionHash,chain_id:op.context.quote.chainId,
+      response_hash:null,reason:op.providerRequestId===null?"no_stored_request_id":"stored_transaction_or_confirmed",error_code:null,diagnostic:null}) : undefined;
     if(observe && op.transactionHash===null && op.providerRequestId!==null && op.effectAttempts===1) {
       const hint=await readFixedMetaMaskNativeRequest(op.providerRequestId,op.context.vendorProjectHash);
+      readObservation = hint.readObservation;
       if(hint.requestId!==undefined&&hint.requestId!==op.providerRequestId||hint.chainId!==undefined&&hint.chainId!==op.context.quote.chainId)blocked("Native transfer stored provider request identity or chain changed.");
       const hash="transactionHash" in hint ? hint.transactionHash : undefined;
       if(hash!==undefined)op=await journal.persist(patch(op,{state:"unknown",transactionHash:hash}));
@@ -353,7 +358,7 @@ export async function readFixedMetaMaskNativeTransfer(stateRoot:string,idInput:s
       }
     }
     if(op.state==="confirmed") await new AssetUsageLedger(stateRoot).settleMetaMaskNativeActual(op.operationId,new Date());
-    return publicOperation(op);
+    return {...publicOperation(op),...(readObservation===undefined?{}:{read_observation:readObservation})};
   });
 }
 /** Durable, read-only proof extraction for the common ledger; accepts no DTO as permission. */
