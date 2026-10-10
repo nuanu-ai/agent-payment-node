@@ -33,7 +33,7 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "x402 permit2 approve", "x402 permit2 observe",
   "x402 permit2 preflight",
@@ -55,6 +55,9 @@ const EXPECTED_COMMANDS = [
   "wallet permission sync",
   "wallet permission disable",
   "wallet permission forget",
+  "wallet metamask native-transfer",
+  "wallet metamask native-transfer-status",
+  "wallet metamask native-transfer-observe",
   "wallet status",
   "wallet balance",
   "wallet policy show",
@@ -186,6 +189,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "",
     "Subgroups:",
     "  apn wallet permission <command> [options] — Inspect and manage bounded provider permission state.",
+    "  apn wallet metamask <command> [options] — Finite fixed MetaMask native-paid transfer.",
     "  apn wallet policy <command> [options] — Inspect or change owner-approved wallet policy.",
     "",
     "Commands:",
