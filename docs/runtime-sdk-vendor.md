@@ -6,7 +6,7 @@ Original package chains pulled in `bigint-buffer`, SPL decoders, old nested Axio
 
 | Directory | Upstream exports | Manifest SHA256 |
 |---|---|---|
-| `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `0d85528a42112636bf1d6e6d7d4b82301dd11011725f61d75c5ee6780ba5f9f2` |
+| `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `5b6e8667e4a0adb277c1c6803d87168eb7b9cd72f0ba9fc3d349ec8162fdfd25` |
 | `vendor/metamask-smart-account` | Smart Account kit 2.0.0 root/actions/contracts/utils/experimental, permission types 2.0.0, delegation core 3.0.0, MetaMask x402 1.0.0 | `ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece27448ddc3` |
 | `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `cbf69134172a065d967339f8c3f432df347e55b944b83bd64cc02459647228a6` |
 | `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `f57f014e75d831c1bf8496f99b0bf718c2c6573158ff2698b084977f1b6d38fb` |
