@@ -75,7 +75,8 @@ export class BridgeExecution {
                 fingerprint: op.fingerprint, approvedAt: new Date(approvedAt).toISOString(), expiresAt: op.intent.expiresAt }, usageLease });
     }
     async resume(op, approval) {
-        if (!guardedWbtc(op) || op.effects.every(e => e.submissionAttempts === 1) || op.terminal)
+        if (!guardedWbtc(op) || op.effects.every(e => e.submissionAttempts === 1) || op.terminal ||
+            Date.parse(op.intent.expiresAt) <= this.now())
             return await this.run(op);
         const unattempted = op.effects.findIndex(e => e.submissionAttempts === 0);
         if (op.intent.allowlist?.activationDigest === undefined || op.failure?.reason.startsWith("unsent_") ||
@@ -114,8 +115,19 @@ export class BridgeExecution {
             if (effect.role === "bridge" && op.effects[0].role === "approval" &&
                 !["included_success", "safe_success"].includes(op.effects[0].phase))
                 return op;
-            if (guardedWbtc(op) && authority === undefined)
+            if (guardedWbtc(op) && authority === undefined) {
+                if (effect.role === "bridge" && effect.phase === "unsealed" && op.effects[0]?.role === "approval" &&
+                    op.effects[0].phase === "safe_success" && Date.parse(op.intent.expiresAt) <= this.now()) {
+                    await new BridgeEffectClaims(this.state.root).assertUnsignedBridge(op);
+                    try {
+                        assertBridgeRemaining(op, this.now());
+                    }
+                    catch (error) {
+                        return await this.haltUnsent(op, error);
+                    }
+                }
                 return op;
+            }
             if (effect.phase === "unsealed") {
                 try {
                     await this.guard(op, effect.role);
@@ -247,6 +259,9 @@ export class BridgeExecution {
             return await this.save(op, { state: "unknown_finality", observationTelemetry: residual.observationTelemetry,
                 failure: { reason: failureReason, residualAllowance: null,
                     ...(diagnostic === null ? {} : { residualAllowanceStatus: "unavailable", preSignRpc: diagnostic }) } });
+        if (state === "failed_after_approval" && guardedWbtc(op) && op.effects.at(-1)?.phase === "unsealed" &&
+            Date.parse(op.intent.expiresAt) <= this.now())
+            await new BridgeEffectClaims(this.state.root).assertUnsignedBridge(op);
         return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason, residualAllowance: residual.value,
                 ...(diagnostic === null ? {} : { residualAllowanceStatus: "observed", preSignRpc: diagnostic }) } });
     }

@@ -1,8 +1,8 @@
-import { newBridgeOperation } from "../../src/lifi/transitions.js";
+import { newBridgeOperation, transitionBridge } from "../../src/lifi/transitions.js";
 import { newBridgeEffect } from "../../src/lifi/operation-model.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, writeFile, rm } from "node:fs/promises";
+import { readFile, writeFile, rm, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { BridgeAllowlistGate, validateBridgeAllowlistBinding } from "../../src/lifi/allowlist.js";
 import { BridgeEffectClaims, assertBridgePhysicalGrant, withBridgeEffectAuthority } from "../../src/lifi/effect-authority.js";
@@ -158,4 +158,208 @@ test("true policy lock defers concurrent revocation until WBTC effects finish", 
   assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal(f.source.submissions.length, 2);
   await revocation; assert.equal(completed, true);
   assert.equal((await new AllowlistPolicyStore(temp.root).read(f.profile)).entries.at(-1)!.status, "revoked");
+});
+
+
+import { createApnCore } from "../../src/runtime-factory.js";
+import { bindArgv } from "../../src/command-binder.js";
+import { ApnCore } from "../../src/core.js";
+import { TtyBridgeApproval } from "../../src/lifi/tty.js";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+function normalResumeApproval(root: string, operationId: string) {
+  return createApnCore(bindArgv(["operation", "resume", "--operation", operationId, "--rpc-url", "https://example.com"]),
+    { stateRoot: root }).context.bridge!.approval;
+}
+test("normal factory installs bridge TTY only for approval-capable resume, never status or observe-only", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const id = "a".repeat(64);
+  assert(normalResumeApproval(temp.root, id) instanceof TtyBridgeApproval);
+  for (const args of [["operation", "resume", "--operation", id, "--rpc-url", "https://example.com", "--observe-only", "true"],
+    ["operation", "status", "--operation", id]]) {
+    assert.equal(createApnCore(bindArgv(args), { stateRoot: temp.root }).context.bridge!.approval, undefined);
+  }
+});
+async function partialWbtc(root: string) {
+  const result = await preparedWbtc(root, new Date());
+  result.f.source.failObserve = true;
+  assert((await result.f.core.execute({ command: "bridge.approve", operationId: result.op.operationId })).ok);
+  result.f.source.failObserve = false; result.f.source.safeApproval = false;
+  assert((await result.f.core.execute({ command: "operation.resume", operationId: result.op.operationId })).ok);
+  const current = (await result.f.core.bridges.records.findOperation(result.op.operationId))!;
+  assert.equal(result.f.source.submissions.length, 1); assert.equal(current.effects[1]!.phase, "unsealed");
+  assert.equal(current.effects[0]!.phase, "included_success");
+  return result;
+}
+test("normal non-TTY WBTC continuation refuses before remaining SIGN or SEND", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
+  const approval = normalResumeApproval(temp.root, op.operationId); assert(approval);
+  const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: { ...f.dependencies, approval } });
+  const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
+  assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_NATIVE_REJECTED");
+  assert.equal(result.error?.details?.nativeCode, "APN_TTY_UNAVAILABLE");
+  assert.equal(f.source.submissions.length, 1);
+  assert.equal((await core.bridges.records.findOperation(op.operationId))!.effects[1]!.phase, "unsealed");
+});
+test("normal genuine TTY WBTC second resume prompts fresh consent; attempted effects remain observer-only", async t => {
+  const title = "normal genuine TTY WBTC second resume prompts fresh consent; attempted effects remain observer-only";
+  if (process.env.APN_WBTC_RESUME_TEST_PTY_CHILD !== "1") { await runResumePty(title); return; }
+  assert.equal(process.stdin.isTTY, true); assert.equal(process.stderr.isTTY, true);
+  process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
+  const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
+  const approval = normalResumeApproval(temp.root, op.operationId); assert(approval);
+  const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: { ...f.dependencies, approval } });
+  const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
+  assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal(f.source.submissions.length, 2);
+  const current = (await core.bridges.records.findOperation(op.operationId))!;
+  assert.deepEqual(current.effects.map(e => e.submissionAttempts), [1, 1]);
+  const before = f.wrapping.loads;
+  f.now.setTime(Date.parse(current.intent.expiresAt) + 1);
+  approval.confirm = async () => { throw Error("Attempted effects must not prompt or authorize again"); };
+  const observed = await core.execute({ command: "operation.resume", operationId: op.operationId });
+  assert.equal(observed.ok, true, JSON.stringify(observed.error)); assert.equal(f.source.submissions.length, 2);
+  assert.equal(f.wrapping.loads, before);
+});
+async function runResumePty(title: string): Promise<void> {
+  const python = String.raw`import os,pty,select,subprocess,sys,re,time
+master,slave=pty.openpty()
+def session():
+ os.setsid()
+ import fcntl,termios
+ fcntl.ioctl(slave,termios.TIOCSCTTY,0)
+env=dict(os.environ);env.pop('NODE_TEST_CONTEXT',None);env['APN_WBTC_RESUME_TEST_PTY_CHILD']='1'
+child=subprocess.Popen([sys.argv[1],'--test','--test-isolation=none','--test-concurrency=1','--test-name-pattern','^'+sys.argv[3]+'$',sys.argv[2]],stdin=slave,stdout=slave,stderr=slave,env=env,preexec_fn=session)
+os.close(slave);output=b'';pending=b'';prompts=0;deadline=time.time()+90
+while time.time()<deadline:
+ ready,_,_=select.select([master],[],[],.1)
+ if ready:
+  try:chunk=os.read(master,65536)
+  except OSError:break
+  if not chunk:break
+  output+=chunk;pending+=chunk
+  while True:
+   match=re.search(rb'Type ([^\r\n]+) and press Enter to confirm\.',pending)
+   if not match:break
+   prompts+=1;os.write(master,match.group(1)+b'\n');pending=pending[match.end():]
+ if child.poll() is not None and not ready:break
+else:child.kill()
+os.close(master);child.wait();sys.stdout.buffer.write(output);sys.exit(child.returncode if child.returncode else (0 if prompts==1 else 1))
+`;
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("python3", ["-c", python, process.execPath, fileURLToPath(import.meta.url), title], { stdio: ["ignore", "pipe", "pipe"] });
+    let output = ""; child.stdout.on("data", b => { output += String(b); }); child.stderr.on("data", b => { output += String(b); });
+    child.on("error", reject); child.on("exit", code => {
+      if (code === 0 && output.includes(`PTY_CASE_ENTERED:${title}`)) { process.stdout.write("Verified one genuine WBTC continuation TEST-key TTY consent\n"); resolve(); }
+      else reject(new Error(`Genuine WBTC resume PTY failed (${code}): ${output}`));
+    });
+  });
+}
+
+for (const phase of ["safe", "included", "signing_started"] as const)
+test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or observer path`, async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
+  f.source.safeApproval = phase !== "included";
+  if (phase === "signing_started") {
+    const current = (await f.core.bridges.records.findOperation(op.operationId))!;
+    await f.core.bridges.records.persist(transitionBridge(current, { effects: current.effects.map(e =>
+      e.role === "bridge" ? { ...e, phase: "signing_started" as const } : e) }, f.now.toISOString()));
+  }
+  f.now.setTime(Date.parse(op.intent.expiresAt) + 1);
+  const { approval, ...withoutApproval } = f.dependencies;
+  const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
+  const before = f.wrapping.loads;
+  const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
+  assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal(f.source.submissions.length, 1);
+  assert.equal(f.wrapping.loads, before);
+  const current = (await core.bridges.records.findOperation(op.operationId))!;
+  assert.equal(current.intent.expiresAt, op.intent.expiresAt);
+  assert.equal(current.effects[1]!.submissionAttempts, 0);
+  if (phase === "safe") {
+    assert.equal(current.state, "failed_after_approval"); assert.equal(current.terminal, true);
+    assert.equal(current.effects[0]!.phase, "safe_success"); assert.equal(current.effects[1]!.phase, "unsealed");
+    assert.match(current.failure!.reason, /^unsent_apn_reprepare_required$/u);
+    assert.equal(current.failure!.residualAllowance!.amountAtomic, "1000");
+    assert(BigInt(current.effects[0]!.safeProof!.actualTotalFeeWei) > 0n);
+    const lease = current.usageLease!;
+    const settled = await new AssetUsageLedger(temp.root).load(lease, lease.reservationId);
+    assert.equal(settled!.state, "failed_confirmed_revert");
+    assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "0");
+  } else {
+    assert.equal(current.terminal, false);
+    assert.equal(current.effects[1]!.phase, phase === "signing_started" ? "signing_started" : "unsealed");
+    const lease = current.usageLease!;
+    assert.notEqual((await new AssetUsageLedger(temp.root).load(lease, lease.reservationId))!.state, "failed_confirmed_revert");
+  }
+});
+
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+
+import { privateKeyToAccount } from "viem/accounts";
+import { keccak256 } from "viem";
+import { LIFI_SYNTHETIC_KEY } from "./lifi-helpers.js";
+import { verifyBridgeSigned } from "../../src/lifi/transaction.js";
+for (const boundary of ["sign", "send", "malformed", "lateSign"] as const)
+test(`expired valid UNSEALED journal with permanent bridge ${boundary} claim keeps held usage`, async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
+  const current = (await f.core.bridges.records.findOperation(op.operationId))!, claims = new BridgeEffectClaims(temp.root);
+  if (boundary === "send") {
+    const e = current.effects[1]!.envelope, economic = e.economics;
+    const rawTransaction = await privateKeyToAccount(LIFI_SYNTHETIC_KEY).signTransaction({ type: "eip1559", chainId: e.chainId,
+      nonce: Number(economic.nonceAtomic), gas: BigInt(economic.gasLimitAtomic), maxFeePerGas: BigInt(economic.maxFeePerGasAtomic),
+      maxPriorityFeePerGas: BigInt(economic.maxPriorityFeePerGasAtomic), to: e.to, value: BigInt(e.valueAtomic), data: e.data });
+    const transactionHash = keccak256(rawTransaction); await verifyBridgeSigned(rawTransaction, transactionHash, e);
+    const body = { schemaVersion: "apn.bridge-effect.v1" as const, profileHash: current.profileHash, operationId: current.operationId,
+      role: "bridge" as const, fingerprint: current.fingerprint, envelopeHash: e.envelopeHash, rawTransaction, transactionHash };
+    await claims.claim(current, "bridge", "send", { ...body, materialHash: hashObject(body) });
+  } else if (boundary === "lateSign") {
+    const account = f.source.account.bind(f.source);
+    f.source.account = async (...args) => {
+      const result = await account(...args); await claims.claim(current, "bridge", "sign"); return result;
+    };
+  } else {
+    await claims.claim(current, "bridge", "sign");
+    if (boundary === "malformed") await writeFile(join(temp.root, "bridge-effect-claims", current.profileHash,
+      `${current.operationId}-bridge-sign.json`), "null\n", { mode: 0o600 });
+  }
+  f.source.safeApproval = true; f.now.setTime(Date.parse(op.intent.expiresAt) + 1);
+  const { approval, ...withoutApproval } = f.dependencies;
+  const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
+  const before = f.wrapping.loads, lease = current.usageLease!;
+  const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
+  assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(result.error?.details?.reason, "bridge_expired_effect_claim_present");
+  const latest = (await core.bridges.records.findOperation(op.operationId))!;
+  assert.equal(latest.terminal, false); assert.equal(latest.effects[1]!.phase, "unsealed");
+  assert.equal(f.source.submissions.length, 1); assert.equal(f.wrapping.loads, before);
+  assert.notEqual((await new AssetUsageLedger(temp.root).load(lease, lease.reservationId))!.state, "failed_confirmed_revert");
+  assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "1000");
+});
+
+test("expired SAFE approval with unavailable residual allowance remains held UNKNOWN", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
+  f.source.safeApproval = true; f.source.failAccount = true; f.now.setTime(Date.parse(op.intent.expiresAt) + 1);
+  const { approval, ...withoutApproval } = f.dependencies;
+  const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
+  const before = f.wrapping.loads, result = await core.execute({ command: "operation.resume", operationId: op.operationId });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  const current = (await core.bridges.records.findOperation(op.operationId))!;
+  assert.equal(current.state, "unknown_finality"); assert.equal(current.terminal, false);
+  assert.equal(current.failure!.residualAllowance, null); assert.equal(current.effects[1]!.phase, "unsealed");
+  const lease = current.usageLease!;
+  assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "1000");
+  assert.equal(f.source.submissions.length, 1); assert.equal(f.wrapping.loads, before);
+});
+
+test("expired partial release rejects an unsafe permanent claim directory", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
+  const current = (await f.core.bridges.records.findOperation(op.operationId))!;
+  await new BridgeEffectClaims(temp.root).claim(current, "bridge", "sign");
+  await chmod(join(temp.root, "bridge-effect-claims", current.profileHash), 0o755);
+  f.source.safeApproval = true; f.now.setTime(Date.parse(op.intent.expiresAt) + 1);
+  const { approval, ...withoutApproval } = f.dependencies;
+  const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
+  const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
+  assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_STATE_SECURITY");
+  assert.equal((await core.bridges.records.findOperation(op.operationId))!.terminal, false);
+  assert.equal((await new AssetUsageLedger(temp.root).usage(current.usageLease!, new Date(f.now))).amountAtomic, "1000");
+  assert.equal(f.source.submissions.length, 1);
 });

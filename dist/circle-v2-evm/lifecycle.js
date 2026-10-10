@@ -189,7 +189,7 @@ export async function observeCircle(input, ports) {
             if (allowance !== "0")
                 circleBlocked("burn_residual_allowance");
             if (!circleSame(op.source, source) || op.residualAllowanceAtomic !== "0")
-                op = await persist(op, { source, residualAllowanceAtomic: "0", effects: updateEffect(op, "burn", { phase: "confirmed", proof: source }), state: "awaiting_mint" }, "source_message_verified", ports);
+                op = await persist(op, { source, residualAllowanceAtomic: "0", effects: updateEffect(op, "burn", { phase: "confirmed", proof: source }), state: op.destination === null ? "awaiting_mint" : "awaiting_finality" }, "source_message_verified", ports);
             if (op.attestation === null) {
                 const attestation = await ports.attestation(op);
                 if (attestation !== null)

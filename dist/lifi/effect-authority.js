@@ -1,7 +1,7 @@
 import { keccak256 } from "viem";
 import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { SecureStateStore } from "../secure-state-store.js";
+import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 const signGrants = new WeakMap();
 const physicalGrants = new WeakMap();
 const fail = () => { throw new ApnError("APN_OPERATION_BLOCKED", "Fresh bridge effect authority is unavailable or expired."); };
@@ -90,6 +90,15 @@ export async function withBridgeEffectAuthority(op, now, foregroundConfirm, reje
 }
 /** Permanent create-only barriers live outside rollbackable operation/usage journals. A lost result never permits another effect. */
 export class BridgeEffectClaims extends SecureStateStore {
+    async assertUnsignedBridge(op) {
+        stateIdentifier(op.profileHash, "bridge claim profile");
+        stateIdentifier(op.operationId, "bridge claim operation");
+        const entries = await this.readDirectory(`bridge-effect-claims/${op.profileHash}`);
+        // Any scoped claim entry blocks release, even malformed JSON, an unsafe file, or an unknown boundary name.
+        if (entries.some(entry => entry.name.startsWith(`${op.operationId}-bridge-`))) {
+            throw new ApnError("APN_OPERATION_BLOCKED", "The expired bridge remainder has a permanent effect claim.", { reason: "bridge_expired_effect_claim_present" });
+        }
+    }
     async claim(op, role, boundary, material) {
         await this.initialize();
         const directory = `bridge-effect-claims/${op.profileHash}`;
