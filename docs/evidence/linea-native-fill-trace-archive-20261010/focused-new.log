@@ -1,0 +1,50 @@
+✖ Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing (36.463417ms)
+✔ Linea archive native observation rejects chain (4.175334ms)
+✔ Linea archive native observation rejects error (3.485625ms)
+✔ Linea archive native observation rejects missing (3.234541ms)
+✔ Linea archive native observation rejects malformed (5.445166ms)
+✔ Linea archive native observation rejects large (3.98175ms)
+✔ Linea archive native observation rejects trace (2.834458ms)
+✔ Linea archive native observation rejects receipt (0.267417ms)
+✔ Linea archive native observation rejects canonical (0.345083ms)
+✔ Linea archive native observation rejects reanchor (3.291667ms)
+✔ Linea archive trace preserves exact native amount binding (3.326209ms)
+✔ Linea archive trace cannot escape command read limits or original deadline (0.429125ms)
+✔ Linea archive trace cannot escape command read limits or original deadline (0.335584ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 12
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 884.358
+
+✖ failing tests:
+
+test at dist-test/tests/core/lifi-linea-native-trace-archive.test.js:62:1
+✖ Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing (36.463417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      {
+        at: 1789923977563,
+        methods: [
+  +       'eth_chainId',
+          'debug_traceTransaction'
+        ],
+        role: 'archive'
+      }
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/tests/core/lifi-linea-native-trace-archive.test.js:68:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { role: 'archive', methods: [Array], at: 1789923977563 } ],
+    expected: [ { role: 'archive', methods: [Array], at: 1789923977563 } ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

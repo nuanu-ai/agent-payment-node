@@ -1,0 +1,8 @@
+{
+  "newEmittedTestAssets": 1,
+  "existingCwdFixtureUnchanged": true,
+  "hashes": {
+    "tests/core/lifi-fixtures/linea-native-fill-rpc-20260920.json": "ecc7d70307afd5d529965c5f37139df5380958408b28524b9e089917b1900b04",
+    "dist-test/tests/core/lifi-linea-native-trace-archive.test.js": "ccf0b54be2606231a9402d468f37316577f8238449fec5b4911822ed6bd315fb"
+  }
+}

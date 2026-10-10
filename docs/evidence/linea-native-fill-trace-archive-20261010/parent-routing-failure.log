@@ -1,0 +1,26 @@
+✖ Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing (34.575708ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 739.40375
+
+✖ failing tests:
+
+test at dist-test/tests/core/lifi-linea-native-trace-archive.test.js:62:1
+✖ Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing (34.575708ms)
+  Error [ApnError]: Bridge validation failed: bridge_RPC_response.
+      at withEndpointRole (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/src/lifi/rpc-support.js:74:15)
+      at async BridgeRpc.call (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/src/lifi/rpc-transport.js:206:16)
+      at async Promise.all (index 2)
+      at async BridgeRpc.observeCanonical (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/src/lifi/rpc-adapter.js:497:58)
+      at async BridgeRpc.observeDestination (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/src/lifi/rpc-adapter.js:457:16)
+      at async TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/tests/core/lifi-linea-native-trace-archive.test.js:63:36)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'APN_RPC_PROTOCOL',
+    details: { reason: 'bridge_RPC_response', rpcMethod: 'debug_traceTransaction', endpointRole: 'primary' }
+  }

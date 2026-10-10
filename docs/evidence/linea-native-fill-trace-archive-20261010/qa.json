@@ -1,0 +1,26 @@
+{
+  "parent": "c2809878170c0129c005635f836646883a25d2ad",
+  "formalTests": 206,
+  "leafTests": 206,
+  "suites": 0,
+  "pass": 206,
+  "fail": 0,
+  "newTests": 14,
+  "productionCompile": true,
+  "testCompile": true,
+  "scannerSourceFiles": 885,
+  "adapterLines": 490,
+  "shippingRepeatIdenticalFiles": 2655,
+  "newEmittedTestAssets": 1,
+  "coldFreshProcessOrders": 6,
+  "initialFailures": [
+    "baseline-compile.log (optional method typing)",
+    "baseline-failure.log (vendor setup)",
+    "focused-new.log (archive chain assertion)",
+    "focused-accepted.log (synchronous fake clock pacing assertion)"
+  ],
+  "trueParentFailure": "parent-routing-failure.log",
+  "actualKernel": false,
+  "all7": false,
+  "liveRpc": false
+}

@@ -1,0 +1,22 @@
+✔ Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing (18.011041ms)
+✔ Linea archive native observation rejects chain (4.194959ms)
+✔ Linea archive native observation rejects error (3.838292ms)
+✔ Linea archive native observation rejects missing (3.694334ms)
+✔ Linea archive native observation rejects malformed (3.704334ms)
+✔ Linea archive native observation rejects large (4.5105ms)
+✔ Linea archive native observation rejects trace (3.659708ms)
+✔ Linea archive native observation rejects receipt (0.617209ms)
+✔ Linea archive native observation rejects canonical (0.7565ms)
+✔ Linea archive native observation rejects reanchor (4.219333ms)
+✔ Linea archive trace preserves exact native amount binding (3.921042ms)
+✔ Linea archive trace cannot escape command read limits or original deadline (0.478292ms)
+✔ Linea archive trace cannot escape command read limits or original deadline (0.344792ms)
+✔ Linea observation still refuses proof with a changed frozen primary RPC origin (1354.724041ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2167.906875
