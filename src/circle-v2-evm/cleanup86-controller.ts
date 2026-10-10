@@ -48,7 +48,7 @@ export async function executeCleanup86(root: string, op: CircleOperationV1, inte
   return executeCleanup86Body(root,op,intent,store,ports,current);
 }
 async function executeCleanup86Body(root: string, op: CircleOperationV1, intent: Cleanup86Intent, store: Cleanup86Store, ports: Cleanup86Ports, current?: CurrentExecution, receipt?: InitialPreflightReceipt): Promise<Cleanup86Effect> {
-  if (["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4"].includes(intent.version)) { if (current === undefined || current.state.root !== root || hashObject(claimCleanup86CurrentExecution(current.certificate, current.state, op, current.recovery, intent.envelope)) !== hashObject(intent.currentPurpose)) circleBlocked("cleanup86_private_current_purpose_required"); }
+  if (["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(intent.version)) { if (current === undefined || current.state.root !== root || hashObject(claimCleanup86CurrentExecution(current.certificate, current.state, op, current.recovery, intent.envelope)) !== hashObject(intent.currentPurpose)) circleBlocked("cleanup86_private_current_purpose_required"); }
   assertFrame(intent); op = frozen(structuredClone(op)); intent = frozen(structuredClone(intent)); const parentDigest = hashObject(op), intentDigest = hashObject(intent);
   if (await store.claimed(op, intent, "sign") || await store.claimed(op, intent, "send")) circleBlocked("cleanup86_claimed_observe_only");
   let effect = await store.effect(op, intent);
@@ -57,7 +57,7 @@ async function executeCleanup86Body(root: string, op: CircleOperationV1, intent:
     const p = preflights.get(receipt); preflights.delete(receipt);
     if (p === undefined || p.root !== root || p.parentHash !== parentDigest || ports.now() >= p.expiresAt || p.intentHash !== intentDigest || p.envelopeHash !== hashObject(intent.envelope)) circleBlocked("cleanup86_private_initial_preflight_required");
   } else {
-    if (intent.version === "apn.circle-cleanup86-intent.v4") circleBlocked("cleanup86_private_initial_preflight_required");
+    if (["apn.circle-cleanup86-intent.v4","apn.circle-cleanup86-intent.v5"].includes(intent.version)) circleBlocked("cleanup86_private_initial_preflight_required");
     await ports.preflight(intent);
   }
   await store.assertGeneration(op, intent);

@@ -6,13 +6,19 @@ import { type CircleEnvelope, type CirclePolicy, type CircleOperationV1 } from "
 import { type Cleanup85RecoveryIntent } from "./cleanup85-recovery-store.js";
 import { type Cleanup86FileIdentity, type Cleanup86Snapshot } from "./cleanup86-snapshot.js";
 export interface Cleanup86Intent {
-    readonly version: "apn.circle-cleanup86-intent.v1" | "apn.circle-cleanup86-intent.v2" | "apn.circle-cleanup86-intent.v3" | "apn.circle-cleanup86-intent.v4";
+    readonly version: "apn.circle-cleanup86-intent.v1" | "apn.circle-cleanup86-intent.v2" | "apn.circle-cleanup86-intent.v3" | "apn.circle-cleanup86-intent.v4" | "apn.circle-cleanup86-intent.v5";
     readonly currentPurpose?: Cleanup86CurrentPurpose;
     readonly unsignedPredecessor?: {
         readonly intentHash: string;
         readonly file: Cleanup86FileIdentity;
         readonly rootIdentity: string;
         readonly directoryIdentity: string;
+    };
+    readonly unsignedPreparedPredecessor?: {
+        readonly intentHash: string;
+        readonly intent: Cleanup86FileIdentity;
+        readonly effect: Cleanup86FileIdentity;
+        readonly history0: Cleanup86FileIdentity;
     };
     readonly retirementProofHash?: string;
     readonly freshReadmissionHash?: string;
@@ -43,13 +49,20 @@ export declare class Cleanup86Store extends SecureStateStore {
     private path;
     private context;
     private generationPath;
+    private effectKind;
+    private selectedPath;
     private legacy;
     intent(op: CircleOperationV1, recovery: Cleanup85RecoveryIntent): Promise<Cleanup86Intent | null>;
     /** A v3 orphan is eligible only with positive stable absence of every financial artifact.
      * This is inspection evidence, never signing authority; the normal command mints a new purpose. */
     unsignedOrphan(op: CircleOperationV1, recovery: Cleanup85RecoveryIntent): Promise<Cleanup86Snapshot>;
+    /** A late unsigned attempt has precisely one prepared head/history0, no financial claims.
+     * Raw bytes and identities of every predecessor survive publication and every boundary. */
+    private preparedDescriptor;
+    unsignedPrepared(op: CircleOperationV1, recovery: Cleanup85RecoveryIntent): Promise<Cleanup86Snapshot>;
     assertGeneration(op: CircleOperationV1, i: Cleanup86Intent): Promise<void>;
     startReprepared(state: StateStore, op: CircleOperationV1, recovery: Cleanup85RecoveryIntent, envelope: CircleEnvelope, certificate: VerifiedCleanup86CurrentPurpose, snapshot: Cleanup86Snapshot): Promise<Cleanup86Intent>;
+    startLateReprepared(state: StateStore, op: CircleOperationV1, recovery: Cleanup85RecoveryIntent, envelope: CircleEnvelope, certificate: VerifiedCleanup86CurrentPurpose, snapshot: Cleanup86Snapshot): Promise<Cleanup86Intent>;
     private pendingPublication;
     private ownedSnapshot;
     protected beforeCreateOnlyPublication(relativePath: string, _value: unknown): Promise<void>;

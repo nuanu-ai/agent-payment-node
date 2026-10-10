@@ -50,7 +50,7 @@ export async function executeCleanup86(root, op, intent, store, ports, current) 
     return executeCleanup86Body(root, op, intent, store, ports, current);
 }
 async function executeCleanup86Body(root, op, intent, store, ports, current, receipt) {
-    if (["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4"].includes(intent.version)) {
+    if (["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(intent.version)) {
         if (current === undefined || current.state.root !== root || hashObject(claimCleanup86CurrentExecution(current.certificate, current.state, op, current.recovery, intent.envelope)) !== hashObject(intent.currentPurpose))
             circleBlocked("cleanup86_private_current_purpose_required");
     }
@@ -70,7 +70,7 @@ async function executeCleanup86Body(root, op, intent, store, ports, current, rec
             circleBlocked("cleanup86_private_initial_preflight_required");
     }
     else {
-        if (intent.version === "apn.circle-cleanup86-intent.v4")
+        if (["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(intent.version))
             circleBlocked("cleanup86_private_initial_preflight_required");
         await ports.preflight(intent);
     }

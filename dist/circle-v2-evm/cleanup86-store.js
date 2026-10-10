@@ -10,15 +10,23 @@ import { Cleanup86SnapshotStore } from "./cleanup86-snapshot.js";
 import { sanitizedCircleFailure } from "./public-failure-store.js";
 const digest = (x) => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x);
 export function validateCleanup86Intent(value, recovery, context, current) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["version", "recoveryBinding", "cancellationProofHash", "envelope", "policies", "capturedAt", "windowEndsAt", "intentHash", ...(value.version === "apn.circle-cleanup86-intent.v2" ? ["retirementProofHash", "freshReadmissionHash"] : []), ...(["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4"].includes(String(value.version)) ? ["currentPurpose"] : []), ...(value.version === "apn.circle-cleanup86-intent.v4" ? ["unsignedPredecessor"] : [])]))
+    if (!isPlainRecord(value) || !exactKeys(value, ["version", "recoveryBinding", "cancellationProofHash", "envelope", "policies", "capturedAt", "windowEndsAt", "intentHash", ...(value.version === "apn.circle-cleanup86-intent.v2" ? ["retirementProofHash", "freshReadmissionHash"] : []), ...(["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(String(value.version)) ? ["currentPurpose"] : []), ...(["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(String(value.version)) ? ["unsignedPredecessor"] : []), ...(value.version === "apn.circle-cleanup86-intent.v5" ? ["unsignedPreparedPredecessor"] : [])]))
         circleBlocked("cleanup86_intent_shape");
     const i = value, { intentHash, ...body } = i;
     const successor = context?.retirementProofHash !== null && context?.retirementProofHash !== undefined;
-    const currentPurpose = ["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4"].includes(i.version) ? (current === undefined ? circleBlocked("cleanup86_current_context_required") : validateCleanup86CurrentPurpose(i.currentPurpose, current.root, current.op, recovery, i.envelope)) : undefined;
-    if (i.version === "apn.circle-cleanup86-intent.v4") {
+    const currentPurpose = ["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(i.version) ? (current === undefined ? circleBlocked("cleanup86_current_context_required") : validateCleanup86CurrentPurpose(i.currentPurpose, current.root, current.op, recovery, i.envelope)) : undefined;
+    if (["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(i.version)) {
         const p = i.unsignedPredecessor;
         if (!isPlainRecord(p) || !exactKeys(p, ["intentHash", "file", "rootIdentity", "directoryIdentity"]) || !digest(p.intentHash) || !digest(p.rootIdentity) || !digest(p.directoryIdentity) || !isPlainRecord(p.file) || !exactKeys(p.file, ["sha256", "dev", "ino", "uid", "mode", "nlink", "size", "mtimeMs", "ctimeMs"]) || !digest(p.file.sha256) || Object.entries(p.file).some(([k, v]) => k !== "sha256" && (typeof v !== "number" || !Number.isFinite(v) || v < 0)))
             circleBlocked("cleanup86_unsigned_predecessor_shape");
+    }
+    if (i.version === "apn.circle-cleanup86-intent.v5") {
+        const p = i.unsignedPreparedPredecessor;
+        if (!isPlainRecord(p) || !exactKeys(p, ["intentHash", "intent", "effect", "history0"]) || !digest(p.intentHash))
+            circleBlocked("cleanup86_prepared_predecessor_shape");
+        for (const file of [p.intent, p.effect, p.history0])
+            if (!isPlainRecord(file) || !exactKeys(file, ["sha256", "dev", "ino", "uid", "mode", "nlink", "size", "mtimeMs", "ctimeMs"]) || !digest(file.sha256) || file.nlink !== 1 || Object.entries(file).some(([k, v]) => k !== "sha256" && (typeof v !== "number" || !Number.isFinite(v) || v < 0)))
+                circleBlocked("cleanup86_prepared_predecessor_shape");
     }
     const authority = currentPurpose ?? (successor ? context.readmission : recovery);
     if (currentPurpose === undefined && i.version !== (successor ? "apn.circle-cleanup86-intent.v2" : "apn.circle-cleanup86-intent.v1") || currentPurpose === undefined && successor && (i.retirementProofHash !== context.retirementProofHash || i.freshReadmissionHash !== context.readmissionHash) || i.recoveryBinding !== recovery.recoveryBinding || !digest(i.cancellationProofHash) || currentPurpose !== undefined && i.cancellationProofHash !== currentPurpose.cancellationProofHash || intentHash !== hashObject(body) ||
@@ -42,34 +50,44 @@ export class Cleanup86Store extends SecureStateStore {
     path(op, kind) { assertCleanup85Parent(op); return `circle-cleanup85-recovery/${op.operationId}-cleanup86-${kind}.json`; }
     async context(op, recovery) { if (await new Cleanup85UnsignedRetirementStore(this.root).load() === null)
         return undefined; const state = new StateStore(this.root); return verifiedCleanup86RecoveryContext(await verifyCleanup86RecoveryContext(state, op, recovery), state, op, recovery); }
-    generationPath(op) { return this.path(op, "generation-1-intent"); }
+    generationPath(op, generation = 1) { return this.path(op, `generation-${generation}-intent`); }
+    effectKind(i, kind) { return i.version === "apn.circle-cleanup86-intent.v5" ? `generation-2-${kind}` : kind; }
+    selectedPath(op, i) { return i.version === "apn.circle-cleanup86-intent.v5" ? this.generationPath(op, 2) : i.version === "apn.circle-cleanup86-intent.v4" ? this.generationPath(op) : this.path(op, "intent"); }
     async legacy(op, recovery) {
         const v = await this.readJson(this.path(op, "intent"));
         if (v === null)
             return null;
         const current = isPlainRecord(v) && v.version === "apn.circle-cleanup86-intent.v3";
         const intent = validateCleanup86Intent(v, recovery, current ? undefined : await this.context(op, recovery), { root: this.root, op });
-        if (intent.version === "apn.circle-cleanup86-intent.v4")
+        if (["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(intent.version))
             circleBlocked("cleanup86_legacy_path_version_changed");
         if (current)
             await authenticateCleanup86CurrentHistory(this.root, op, intent.currentPurpose);
         return intent;
     }
     async intent(op, recovery) {
-        const legacy = await this.legacy(op, recovery), generation = await this.readJson(this.generationPath(op));
+        const legacy = await this.legacy(op, recovery), generation = await this.readJson(this.generationPath(op)), late = await this.readJson(this.generationPath(op, 2));
         for (const entry of await this.readDirectory("circle-cleanup85-recovery"))
-            if (entry.name.startsWith(`${op.operationId}-cleanup86-generation-`) && entry.name !== `${op.operationId}-cleanup86-generation-1-intent.json`)
+            if (entry.name.startsWith(`${op.operationId}-cleanup86-generation-`) && ![`${op.operationId}-cleanup86-generation-1-intent.json`, `${op.operationId}-cleanup86-generation-2-intent.json`].includes(entry.name) && !(late !== null && new RegExp(`^${op.operationId}-cleanup86-generation-2-(?:effect|history-(?:0|[1-9][0-9]*))\\.json$`, "u").test(entry.name)))
                 circleBlocked("cleanup86_ambiguous_generation");
-        if (generation === null)
+        if (generation === null) {
+            if (late !== null)
+                circleBlocked("cleanup86_prepared_predecessor_required");
             return legacy;
+        }
         if (legacy?.version !== "apn.circle-cleanup86-intent.v3")
             circleBlocked("cleanup86_unsigned_predecessor_required");
-        const intent = validateCleanup86Intent(generation, recovery, undefined, { root: this.root, op });
-        if (intent.version !== "apn.circle-cleanup86-intent.v4" || intent.unsignedPredecessor?.intentHash !== legacy.intentHash)
+        const first = validateCleanup86Intent(generation, recovery, undefined, { root: this.root, op });
+        if (first.version !== "apn.circle-cleanup86-intent.v4" || first.unsignedPredecessor?.intentHash !== legacy.intentHash)
             circleBlocked("cleanup86_unsigned_predecessor_changed");
-        await authenticateCleanup86CurrentHistory(this.root, op, intent.currentPurpose);
-        await this.assertGeneration(op, intent);
-        return intent;
+        await authenticateCleanup86CurrentHistory(this.root, op, first.currentPurpose);
+        const selected = late === null ? first : validateCleanup86Intent(late, recovery, undefined, { root: this.root, op });
+        if (late !== null && (selected.version !== "apn.circle-cleanup86-intent.v5" || selected.unsignedPreparedPredecessor?.intentHash !== first.intentHash || hashObject(selected.unsignedPredecessor) !== hashObject(first.unsignedPredecessor)))
+            circleBlocked("cleanup86_prepared_predecessor_changed");
+        if (late !== null)
+            await authenticateCleanup86CurrentHistory(this.root, op, selected.currentPurpose);
+        await this.assertGeneration(op, selected);
+        return selected;
     }
     /** A v3 orphan is eligible only with positive stable absence of every financial artifact.
      * This is inspection evidence, never signing authority; the normal command mints a new purpose. */
@@ -82,14 +100,55 @@ export class Cleanup86Store extends SecureStateStore {
             circleBlocked("cleanup86_existing_observe_only");
         return snapshot;
     }
+    /** A late unsigned attempt has precisely one prepared head/history0, no financial claims.
+     * Raw bytes and identities of every predecessor survive publication and every boundary. */
+    preparedDescriptor(s, op, expectedHash) {
+        const prefix = `${op.operationId}-cleanup86-`, first = s.entries[`${prefix}generation-1-intent.json`], effect = s.entries[`${prefix}effect.json`], history = s.entries[`${prefix}history-0.json`];
+        if (first === undefined || effect === undefined || history === undefined || !isPlainRecord(first.value) || first.value.version !== "apn.circle-cleanup86-intent.v4" || !digest(first.value.intentHash) || expectedHash !== undefined && first.value.intentHash !== expectedHash)
+            circleBlocked("cleanup86_prepared_predecessor_required");
+        const i = first.value, e = validateCleanup86Effect(effect.value, i), h = validateCleanup86Effect(history.value, i);
+        if (e.phase !== "prepared" || e.sequence !== 0 || e.previousHash !== null || e.transactionHash !== null || e.materialHash !== null || hashObject(e) !== hashObject(h))
+            circleBlocked("cleanup86_signed_or_unknown_observe_only");
+        for (const name of Object.keys(s.entries))
+            if (name.startsWith(`${prefix}history-`) && name !== `${prefix}history-0.json`)
+                circleBlocked("cleanup86_prepared_history_changed");
+        return { intentHash: i.intentHash, intent: first.identity, effect: effect.identity, history0: history.identity };
+    }
+    async unsignedPrepared(op, recovery) {
+        const i = await this.intent(op, recovery);
+        if (i?.version !== "apn.circle-cleanup86-intent.v4")
+            circleBlocked("cleanup86_existing_observe_only");
+        const snapshot = await new Cleanup86SnapshotStore(this.root).capture(op.operationId), prefix = `${op.operationId}-cleanup86-`;
+        const names = Object.keys(snapshot.entries).sort(), expected = ["intent", "generation-1-intent", "effect", "history-0"].map(k => `${prefix}${k}.json`).sort();
+        if (hashObject(names) !== hashObject(expected))
+            circleBlocked("cleanup86_existing_observe_only");
+        this.preparedDescriptor(snapshot, op, i.intentHash);
+        return snapshot;
+    }
     async assertGeneration(op, i) {
-        if (i.version !== "apn.circle-cleanup86-intent.v4")
+        if (!["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(i.version))
             return;
-        const s = await new Cleanup86SnapshotStore(this.root).capture(op.operationId), p = i.unsignedPredecessor, prefix = `${op.operationId}-cleanup86-`, legacy = s.entries[`${prefix}intent.json`], selected = s.entries[`${prefix}generation-1-intent.json`];
+        const s = await new Cleanup86SnapshotStore(this.root).capture(op.operationId), p = i.unsignedPredecessor, prefix = `${op.operationId}-cleanup86-`, legacy = s.entries[`${prefix}intent.json`], selected = s.entries[`${prefix}generation-${i.version === "apn.circle-cleanup86-intent.v5" ? 2 : 1}-intent.json`];
         if (s.rootIdentity !== p.rootIdentity || s.directoryIdentity !== p.directoryIdentity || legacy === undefined || hashObject(legacy.identity) !== hashObject(p.file) || !isPlainRecord(legacy.value) || legacy.value.intentHash !== p.intentHash || selected === undefined || hashObject(selected.value) !== hashObject(i))
             circleBlocked("cleanup86_unsigned_predecessor_changed");
+        if (i.version === "apn.circle-cleanup86-intent.v5") {
+            const previous = this.preparedDescriptor(s, op, i.unsignedPreparedPredecessor.intentHash);
+            if (hashObject(previous) !== hashObject(i.unsignedPreparedPredecessor))
+                circleBlocked("cleanup86_prepared_predecessor_changed");
+        }
         for (const [name, entry] of Object.entries(s.entries)) {
-            const kind = name.slice(prefix.length);
+            let kind = name.slice(prefix.length);
+            if (i.version === "apn.circle-cleanup86-intent.v5") {
+                if (["effect.json", "history-0.json"].includes(kind))
+                    continue;
+                if (kind === "generation-2-intent.json")
+                    continue;
+                if (kind.startsWith("generation-2-")) {
+                    if (!/^generation-2-(?:effect|history-(?:0|[1-9][0-9]*))\.json$/u.test(kind))
+                        circleBlocked("cleanup86_unknown_artifact_observe_only");
+                    kind = kind.slice("generation-2-".length);
+                }
+            }
             if (["intent.json", "generation-1-intent.json"].includes(kind))
                 continue;
             if (kind === "effect.json" || /^history-(0|[1-9][0-9]*)\.json$/u.test(kind)) {
@@ -116,8 +175,8 @@ export class Cleanup86Store extends SecureStateStore {
                 continue; // Independently verified by the settlement observer.
             circleBlocked("cleanup86_unknown_artifact_observe_only");
         }
-        const head = s.entries[`${prefix}effect.json`];
-        const histories = Object.entries(s.entries).filter(([name]) => name.startsWith(`${prefix}history-`)).map(([, entry]) => validateCleanup86Effect(entry.value, i)).sort((a, b) => a.sequence - b.sequence);
+        const activePrefix = `${prefix}${i.version === "apn.circle-cleanup86-intent.v5" ? "generation-2-" : ""}`, head = s.entries[`${activePrefix}effect.json`];
+        const histories = Object.entries(s.entries).filter(([name]) => name.startsWith(`${activePrefix}history-`)).map(([, entry]) => validateCleanup86Effect(entry.value, i)).sort((a, b) => a.sequence - b.sequence);
         if ((head === undefined) !== (histories.length === 0) || histories.some((e, index) => e.sequence !== index || e.previousHash !== (index === 0 ? null : histories[index - 1].effectHash)) || head !== undefined && hashObject(head.value) !== hashObject(histories.at(-1)))
             circleBlocked("cleanup86_history_changed");
         if (this.ownedSnapshot !== undefined && hashObject(this.ownedSnapshot) !== hashObject(s))
@@ -144,6 +203,24 @@ export class Cleanup86Store extends SecureStateStore {
         this.ownedSnapshot = await new Cleanup86SnapshotStore(this.root).capture(op.operationId);
         return intent;
     }
+    async startLateReprepared(state, op, recovery, envelope, certificate, snapshot) {
+        if (state.root !== this.root || hashObject(await this.unsignedPrepared(op, recovery)) !== hashObject(snapshot))
+            circleBlocked("cleanup86_snapshot_drift");
+        const purpose = verifiedCleanup86CurrentPurpose(certificate, state, op, recovery, envelope), first = snapshot.entries[`${op.operationId}-cleanup86-generation-1-intent.json`].value;
+        const body = { version: "apn.circle-cleanup86-intent.v5", recoveryBinding: recovery.recoveryBinding, cancellationProofHash: purpose.cancellationProofHash, envelope, policies: purpose.policies, capturedAt: purpose.capturedAt, windowEndsAt: purpose.windowEndsAt, currentPurpose: purpose, unsignedPredecessor: first.unsignedPredecessor, unsignedPreparedPredecessor: this.preparedDescriptor(snapshot, op, first.intentHash) };
+        const i = validateCleanup86Intent({ ...body, intentHash: hashObject(body) }, recovery, undefined, { root: this.root, op });
+        claimCleanup86CurrentStart(certificate, state, op, recovery, envelope);
+        this.pendingPublication = { op, recovery, snapshot, generation: 2 };
+        try {
+            await this.writeJson(this.generationPath(op, 2), i, true);
+        }
+        finally {
+            this.pendingPublication = undefined;
+        }
+        await this.assertGeneration(op, i);
+        this.ownedSnapshot = await new Cleanup86SnapshotStore(this.root).capture(op.operationId);
+        return i;
+    }
     pendingPublication;
     ownedSnapshot;
     async beforeCreateOnlyPublication(relativePath, _value) {
@@ -154,11 +231,11 @@ export class Cleanup86Store extends SecureStateStore {
             if (hashObject(current) !== hashObject(this.ownedSnapshot))
                 circleBlocked("cleanup86_snapshot_drift");
         }
-        if (p !== undefined && relativePath === this.generationPath(p.op) && hashObject(await this.unsignedOrphan(p.op, p.recovery)) !== hashObject(p.snapshot))
+        if (p !== undefined && relativePath === this.generationPath(p.op, p.generation ?? 1) && hashObject(await (p.generation === 2 ? this.unsignedPrepared(p.op, p.recovery) : this.unsignedOrphan(p.op, p.recovery))) !== hashObject(p.snapshot))
             circleBlocked("cleanup86_snapshot_drift");
     }
     async rememberOwn(op, i, patches) {
-        if (i.version !== "apn.circle-cleanup86-intent.v4" || this.ownedSnapshot === undefined)
+        if (!["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(i.version) || this.ownedSnapshot === undefined)
             return;
         const next = await new Cleanup86SnapshotStore(this.root).capture(op.operationId), entries = { ...this.ownedSnapshot.entries };
         for (const [kind, value] of Object.entries(patches)) {
@@ -172,7 +249,7 @@ export class Cleanup86Store extends SecureStateStore {
         this.ownedSnapshot = next;
     }
     async acceptSealedMaterial(op, i, material) {
-        if (i.version !== "apn.circle-cleanup86-intent.v4")
+        if (!["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(i.version))
             return;
         const header = await this.readJson(this.path(op, "material"));
         if (!isPlainRecord(header) || header.intentHash !== material.intentHash || header.envelopeHash !== material.envelopeHash || header.materialHash !== material.materialHash || header.transactionHash !== material.transactionHash)
@@ -212,17 +289,17 @@ export class Cleanup86Store extends SecureStateStore {
         await this.writeJson(this.path(op, "intent"), intent, true);
         return intent;
     }
-    async effect(op, i) { const v = await this.readJson(this.path(op, "effect")); return v === null ? null : validateCleanup86Effect(v, i); }
+    async effect(op, i) { const v = await this.readJson(this.path(op, this.effectKind(i, "effect"))); return v === null ? null : validateCleanup86Effect(v, i); }
     async saveEffect(op, i, previous, patch) {
         await this.assertGeneration(op, i);
         const current = await this.effect(op, i);
         if (hashObject(current) !== hashObject(previous))
             circleBlocked("cleanup86_effect_concurrent_change");
         const body = { version: "apn.circle-cleanup86-effect.v1", intentHash: i.intentHash, phase: patch.phase, transactionHash: patch.transactionHash, materialHash: patch.materialHash, sequence: (previous?.sequence ?? -1) + 1, previousHash: previous?.effectHash ?? null }, e = validateCleanup86Effect({ ...body, effectHash: hashObject(body) }, i);
-        await this.writeJson(this.path(op, `history-${e.sequence}`), e, true);
-        await this.rememberOwn(op, i, { [`history-${e.sequence}`]: e });
-        await this.writeJson(this.path(op, "effect"), e, previous === null);
-        await this.rememberOwn(op, i, { effect: e });
+        await this.writeJson(this.path(op, this.effectKind(i, `history-${e.sequence}`)), e, true);
+        await this.rememberOwn(op, i, { [this.effectKind(i, `history-${e.sequence}`)]: e });
+        await this.writeJson(this.path(op, this.effectKind(i, "effect")), e, previous === null);
+        await this.rememberOwn(op, i, { [this.effectKind(i, "effect")]: e });
         return e;
     }
     async claimed(op, i, boundary) {
@@ -242,7 +319,7 @@ export class Cleanup86Store extends SecureStateStore {
         await this.assertGeneration(op, i);
         const { intentHash: _hash, ...body } = i;
         validateCircleEnvelope(i.envelope, "cleanup", 1329, null, "evm-live-seller");
-        if (i.intentHash !== hashObject(body) || i.envelope.nonceAtomic !== "86" || BigInt(i.envelope.gasLimitAtomic) * BigInt(i.envelope.maxFeePerGasAtomic) > 15000000000000n || hashObject(await this.readJson(i.version === "apn.circle-cleanup86-intent.v4" ? this.generationPath(op) : this.path(op, "intent"))) !== hashObject(i))
+        if (i.intentHash !== hashObject(body) || i.envelope.nonceAtomic !== "86" || BigInt(i.envelope.gasLimitAtomic) * BigInt(i.envelope.maxFeePerGasAtomic) > 15000000000000n || hashObject(await this.readJson(this.selectedPath(op, i))) !== hashObject(i))
             circleBlocked("cleanup86_claim_immutable_intent_changed");
         if (await this.claimed(op, i, boundary))
             circleBlocked("cleanup86_already_claimed_observe_only");
