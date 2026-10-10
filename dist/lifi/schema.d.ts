@@ -433,11 +433,11 @@ export declare const failureSchema: z.ZodObject<{
             eth_chainId: "eth_chainId";
             eth_getBalance: "eth_getBalance";
             eth_getCode: "eth_getCode";
-            eth_getStorageAt: "eth_getStorageAt";
-            eth_estimateGas: "eth_estimateGas";
-            eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
-            debug_traceTransaction: "debug_traceTransaction";
             eth_getTransactionCount: "eth_getTransactionCount";
+            eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+            eth_estimateGas: "eth_estimateGas";
+            eth_getStorageAt: "eth_getStorageAt";
+            debug_traceTransaction: "debug_traceTransaction";
         }>>;
     }, z.core.$strict>>;
     observationRpc: z.ZodOptional<z.ZodObject<{
@@ -471,6 +471,11 @@ export declare const failureSchema: z.ZodObject<{
         }>;
         code: z.ZodNullable<z.ZodString>;
         reason: z.ZodOptional<z.ZodEnum<{
+            request_deadline: "request_deadline";
+            DNS_deadline: "DNS_deadline";
+            request_interrupted: "request_interrupted";
+            response_aborted: "response_aborted";
+            response_interrupted: "response_interrupted";
             bridge_RPC_HTTP_status: "bridge_RPC_HTTP_status";
             bridge_RPC_response: "bridge_RPC_response";
             receipt_transaction_membership: "receipt_transaction_membership";
@@ -514,31 +519,26 @@ export declare const failureSchema: z.ZodObject<{
             unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
             operator_fee_formula: "operator_fee_formula";
             operator_receipt_parameters: "operator_receipt_parameters";
-            request_deadline: "request_deadline";
-            DNS_deadline: "DNS_deadline";
-            request_interrupted: "request_interrupted";
-            response_aborted: "response_aborted";
-            response_interrupted: "response_interrupted";
         }>>;
         rpcMethod: z.ZodOptional<z.ZodEnum<{
             eth_getBlockByNumber: "eth_getBlockByNumber";
             eth_call: "eth_call";
             eth_chainId: "eth_chainId";
-            eth_getTransactionByHash: "eth_getTransactionByHash";
-            eth_getTransactionReceipt: "eth_getTransactionReceipt";
-            eth_getLogs: "eth_getLogs";
             eth_getBalance: "eth_getBalance";
             eth_getCode: "eth_getCode";
-            eth_getStorageAt: "eth_getStorageAt";
-            eth_estimateGas: "eth_estimateGas";
+            eth_getTransactionByHash: "eth_getTransactionByHash";
+            eth_getTransactionReceipt: "eth_getTransactionReceipt";
             eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+            eth_estimateGas: "eth_estimateGas";
+            eth_getStorageAt: "eth_getStorageAt";
             debug_traceTransaction: "debug_traceTransaction";
+            eth_getLogs: "eth_getLogs";
         }>>;
         httpStatus: z.ZodOptional<z.ZodNumber>;
         attempts: z.ZodOptional<z.ZodNumber>;
         endpointRole: z.ZodOptional<z.ZodEnum<{
-            primary: "primary";
             receipt: "receipt";
+            primary: "primary";
             archive: "archive";
         }>>;
     }, z.core.$strict>>;
@@ -564,10 +564,10 @@ export declare const stateSchema: z.ZodEnum<{
 export declare const phaseSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     submitted_pending: "submitted_pending";
-    unsealed: "unsealed";
     signing_started: "signing_started";
     sealed: "sealed";
     submitting: "submitting";
+    unsealed: "unsealed";
     included_success: "included_success";
     included_revert: "included_revert";
     safe_success: "safe_success";
@@ -620,10 +620,10 @@ export declare const effectSchema: z.ZodObject<{
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
-        unsealed: "unsealed";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
+        unsealed: "unsealed";
         included_success: "included_success";
         included_revert: "included_revert";
         safe_success: "safe_success";
@@ -748,10 +748,10 @@ export declare const transitionSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
-            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
+            unsealed: "unsealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -1062,11 +1062,11 @@ export declare const transitionSchema: z.ZodObject<{
                 eth_chainId: "eth_chainId";
                 eth_getBalance: "eth_getBalance";
                 eth_getCode: "eth_getCode";
-                eth_getStorageAt: "eth_getStorageAt";
-                eth_estimateGas: "eth_estimateGas";
-                eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
-                debug_traceTransaction: "debug_traceTransaction";
                 eth_getTransactionCount: "eth_getTransactionCount";
+                eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                eth_estimateGas: "eth_estimateGas";
+                eth_getStorageAt: "eth_getStorageAt";
+                debug_traceTransaction: "debug_traceTransaction";
             }>>;
         }, z.core.$strict>>;
         observationRpc: z.ZodOptional<z.ZodObject<{
@@ -1100,6 +1100,11 @@ export declare const transitionSchema: z.ZodObject<{
             }>;
             code: z.ZodNullable<z.ZodString>;
             reason: z.ZodOptional<z.ZodEnum<{
+                request_deadline: "request_deadline";
+                DNS_deadline: "DNS_deadline";
+                request_interrupted: "request_interrupted";
+                response_aborted: "response_aborted";
+                response_interrupted: "response_interrupted";
                 bridge_RPC_HTTP_status: "bridge_RPC_HTTP_status";
                 bridge_RPC_response: "bridge_RPC_response";
                 receipt_transaction_membership: "receipt_transaction_membership";
@@ -1143,31 +1148,26 @@ export declare const transitionSchema: z.ZodObject<{
                 unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
                 operator_fee_formula: "operator_fee_formula";
                 operator_receipt_parameters: "operator_receipt_parameters";
-                request_deadline: "request_deadline";
-                DNS_deadline: "DNS_deadline";
-                request_interrupted: "request_interrupted";
-                response_aborted: "response_aborted";
-                response_interrupted: "response_interrupted";
             }>>;
             rpcMethod: z.ZodOptional<z.ZodEnum<{
                 eth_getBlockByNumber: "eth_getBlockByNumber";
                 eth_call: "eth_call";
                 eth_chainId: "eth_chainId";
-                eth_getTransactionByHash: "eth_getTransactionByHash";
-                eth_getTransactionReceipt: "eth_getTransactionReceipt";
-                eth_getLogs: "eth_getLogs";
                 eth_getBalance: "eth_getBalance";
                 eth_getCode: "eth_getCode";
-                eth_getStorageAt: "eth_getStorageAt";
-                eth_estimateGas: "eth_estimateGas";
+                eth_getTransactionByHash: "eth_getTransactionByHash";
+                eth_getTransactionReceipt: "eth_getTransactionReceipt";
                 eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                eth_estimateGas: "eth_estimateGas";
+                eth_getStorageAt: "eth_getStorageAt";
                 debug_traceTransaction: "debug_traceTransaction";
+                eth_getLogs: "eth_getLogs";
             }>>;
             httpStatus: z.ZodOptional<z.ZodNumber>;
             attempts: z.ZodOptional<z.ZodNumber>;
             endpointRole: z.ZodOptional<z.ZodEnum<{
-                primary: "primary";
                 receipt: "receipt";
+                primary: "primary";
                 archive: "archive";
             }>>;
         }, z.core.$strict>>;
@@ -1271,10 +1271,10 @@ export declare const operationSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
-            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
+            unsealed: "unsealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -1526,10 +1526,10 @@ export declare const operationSchema: z.ZodObject<{
             phase: z.ZodEnum<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
-                unsealed: "unsealed";
                 signing_started: "signing_started";
                 sealed: "sealed";
                 submitting: "submitting";
+                unsealed: "unsealed";
                 included_success: "included_success";
                 included_revert: "included_revert";
                 safe_success: "safe_success";
@@ -1840,11 +1840,11 @@ export declare const operationSchema: z.ZodObject<{
                     eth_chainId: "eth_chainId";
                     eth_getBalance: "eth_getBalance";
                     eth_getCode: "eth_getCode";
-                    eth_getStorageAt: "eth_getStorageAt";
-                    eth_estimateGas: "eth_estimateGas";
-                    eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
-                    debug_traceTransaction: "debug_traceTransaction";
                     eth_getTransactionCount: "eth_getTransactionCount";
+                    eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                    eth_estimateGas: "eth_estimateGas";
+                    eth_getStorageAt: "eth_getStorageAt";
+                    debug_traceTransaction: "debug_traceTransaction";
                 }>>;
             }, z.core.$strict>>;
             observationRpc: z.ZodOptional<z.ZodObject<{
@@ -1878,6 +1878,11 @@ export declare const operationSchema: z.ZodObject<{
                 }>;
                 code: z.ZodNullable<z.ZodString>;
                 reason: z.ZodOptional<z.ZodEnum<{
+                    request_deadline: "request_deadline";
+                    DNS_deadline: "DNS_deadline";
+                    request_interrupted: "request_interrupted";
+                    response_aborted: "response_aborted";
+                    response_interrupted: "response_interrupted";
                     bridge_RPC_HTTP_status: "bridge_RPC_HTTP_status";
                     bridge_RPC_response: "bridge_RPC_response";
                     receipt_transaction_membership: "receipt_transaction_membership";
@@ -1921,31 +1926,26 @@ export declare const operationSchema: z.ZodObject<{
                     unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
                     operator_fee_formula: "operator_fee_formula";
                     operator_receipt_parameters: "operator_receipt_parameters";
-                    request_deadline: "request_deadline";
-                    DNS_deadline: "DNS_deadline";
-                    request_interrupted: "request_interrupted";
-                    response_aborted: "response_aborted";
-                    response_interrupted: "response_interrupted";
                 }>>;
                 rpcMethod: z.ZodOptional<z.ZodEnum<{
                     eth_getBlockByNumber: "eth_getBlockByNumber";
                     eth_call: "eth_call";
                     eth_chainId: "eth_chainId";
-                    eth_getTransactionByHash: "eth_getTransactionByHash";
-                    eth_getTransactionReceipt: "eth_getTransactionReceipt";
-                    eth_getLogs: "eth_getLogs";
                     eth_getBalance: "eth_getBalance";
                     eth_getCode: "eth_getCode";
-                    eth_getStorageAt: "eth_getStorageAt";
-                    eth_estimateGas: "eth_estimateGas";
+                    eth_getTransactionByHash: "eth_getTransactionByHash";
+                    eth_getTransactionReceipt: "eth_getTransactionReceipt";
                     eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                    eth_estimateGas: "eth_estimateGas";
+                    eth_getStorageAt: "eth_getStorageAt";
                     debug_traceTransaction: "debug_traceTransaction";
+                    eth_getLogs: "eth_getLogs";
                 }>>;
                 httpStatus: z.ZodOptional<z.ZodNumber>;
                 attempts: z.ZodOptional<z.ZodNumber>;
                 endpointRole: z.ZodOptional<z.ZodEnum<{
-                    primary: "primary";
                     receipt: "receipt";
+                    primary: "primary";
                     archive: "archive";
                 }>>;
             }, z.core.$strict>>;
@@ -2185,11 +2185,11 @@ export declare const operationSchema: z.ZodObject<{
                 eth_chainId: "eth_chainId";
                 eth_getBalance: "eth_getBalance";
                 eth_getCode: "eth_getCode";
-                eth_getStorageAt: "eth_getStorageAt";
-                eth_estimateGas: "eth_estimateGas";
-                eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
-                debug_traceTransaction: "debug_traceTransaction";
                 eth_getTransactionCount: "eth_getTransactionCount";
+                eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                eth_estimateGas: "eth_estimateGas";
+                eth_getStorageAt: "eth_getStorageAt";
+                debug_traceTransaction: "debug_traceTransaction";
             }>>;
         }, z.core.$strict>>;
         observationRpc: z.ZodOptional<z.ZodObject<{
@@ -2223,6 +2223,11 @@ export declare const operationSchema: z.ZodObject<{
             }>;
             code: z.ZodNullable<z.ZodString>;
             reason: z.ZodOptional<z.ZodEnum<{
+                request_deadline: "request_deadline";
+                DNS_deadline: "DNS_deadline";
+                request_interrupted: "request_interrupted";
+                response_aborted: "response_aborted";
+                response_interrupted: "response_interrupted";
                 bridge_RPC_HTTP_status: "bridge_RPC_HTTP_status";
                 bridge_RPC_response: "bridge_RPC_response";
                 receipt_transaction_membership: "receipt_transaction_membership";
@@ -2266,31 +2271,26 @@ export declare const operationSchema: z.ZodObject<{
                 unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
                 operator_fee_formula: "operator_fee_formula";
                 operator_receipt_parameters: "operator_receipt_parameters";
-                request_deadline: "request_deadline";
-                DNS_deadline: "DNS_deadline";
-                request_interrupted: "request_interrupted";
-                response_aborted: "response_aborted";
-                response_interrupted: "response_interrupted";
             }>>;
             rpcMethod: z.ZodOptional<z.ZodEnum<{
                 eth_getBlockByNumber: "eth_getBlockByNumber";
                 eth_call: "eth_call";
                 eth_chainId: "eth_chainId";
-                eth_getTransactionByHash: "eth_getTransactionByHash";
-                eth_getTransactionReceipt: "eth_getTransactionReceipt";
-                eth_getLogs: "eth_getLogs";
                 eth_getBalance: "eth_getBalance";
                 eth_getCode: "eth_getCode";
-                eth_getStorageAt: "eth_getStorageAt";
-                eth_estimateGas: "eth_estimateGas";
+                eth_getTransactionByHash: "eth_getTransactionByHash";
+                eth_getTransactionReceipt: "eth_getTransactionReceipt";
                 eth_maxPriorityFeePerGas: "eth_maxPriorityFeePerGas";
+                eth_estimateGas: "eth_estimateGas";
+                eth_getStorageAt: "eth_getStorageAt";
                 debug_traceTransaction: "debug_traceTransaction";
+                eth_getLogs: "eth_getLogs";
             }>>;
             httpStatus: z.ZodOptional<z.ZodNumber>;
             attempts: z.ZodOptional<z.ZodNumber>;
             endpointRole: z.ZodOptional<z.ZodEnum<{
-                primary: "primary";
                 receipt: "receipt";
+                primary: "primary";
                 archive: "archive";
             }>>;
         }, z.core.$strict>>;

@@ -43,11 +43,11 @@ declare const rpcObservedNearSafe: z.ZodObject<{
     blockHash: z.ZodString;
     safeBlockNumberAtomic: z.ZodString;
     safeBlockHash: z.ZodString;
+    executionAdmitted: z.ZodLiteral<false>;
     blockNumberAtomic: z.ZodString;
     rpcOrigin: z.ZodString;
     logsHash: z.ZodString;
     receiptHash: z.ZodString;
-    executionAdmitted: z.ZodLiteral<false>;
     bridgeCompletion: z.ZodLiteral<false>;
     protocolInputDigest: z.ZodString;
     protocolProofHash: z.ZodNullable<z.ZodString>;
@@ -61,10 +61,10 @@ declare const schemaV1: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            source_confirmed: "source_confirmed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
-            source_confirmed: "source_confirmed";
             staged_untrusted: "staged_untrusted";
             source_observed_untrusted: "source_observed_untrusted";
             source_reverted: "source_reverted";
@@ -114,11 +114,11 @@ declare const schemaV1: z.ZodObject<{
             blockHash: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
+            executionAdmitted: z.ZodLiteral<false>;
             blockNumberAtomic: z.ZodString;
             rpcOrigin: z.ZodString;
             logsHash: z.ZodString;
             receiptHash: z.ZodString;
-            executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
             protocolProofHash: z.ZodNullable<z.ZodString>;
@@ -130,10 +130,10 @@ declare const schemaV1: z.ZodObject<{
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
+        source_confirmed: "source_confirmed";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
-        source_confirmed: "source_confirmed";
         staged_untrusted: "staged_untrusted";
         source_observed_untrusted: "source_observed_untrusted";
         source_reverted: "source_reverted";
@@ -183,11 +183,11 @@ declare const schemaV1: z.ZodObject<{
         blockHash: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
+        executionAdmitted: z.ZodLiteral<false>;
         blockNumberAtomic: z.ZodString;
         rpcOrigin: z.ZodString;
         logsHash: z.ZodString;
         receiptHash: z.ZodString;
-        executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
         protocolProofHash: z.ZodNullable<z.ZodString>;
@@ -234,10 +234,10 @@ declare const schemaV2: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            source_confirmed: "source_confirmed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
-            source_confirmed: "source_confirmed";
             staged_untrusted: "staged_untrusted";
             source_observed_untrusted: "source_observed_untrusted";
             source_reverted: "source_reverted";
@@ -287,11 +287,11 @@ declare const schemaV2: z.ZodObject<{
             blockHash: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
+            executionAdmitted: z.ZodLiteral<false>;
             blockNumberAtomic: z.ZodString;
             rpcOrigin: z.ZodString;
             logsHash: z.ZodString;
             receiptHash: z.ZodString;
-            executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
             protocolProofHash: z.ZodNullable<z.ZodString>;
@@ -303,10 +303,10 @@ declare const schemaV2: z.ZodObject<{
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
+        source_confirmed: "source_confirmed";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
-        source_confirmed: "source_confirmed";
         staged_untrusted: "staged_untrusted";
         source_observed_untrusted: "source_observed_untrusted";
         source_reverted: "source_reverted";
@@ -356,11 +356,11 @@ declare const schemaV2: z.ZodObject<{
         blockHash: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
+        executionAdmitted: z.ZodLiteral<false>;
         blockNumberAtomic: z.ZodString;
         rpcOrigin: z.ZodString;
         logsHash: z.ZodString;
         receiptHash: z.ZodString;
-        executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
         protocolProofHash: z.ZodNullable<z.ZodString>;
@@ -414,10 +414,10 @@ declare const schemaV3: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
+            source_confirmed: "source_confirmed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
-            source_confirmed: "source_confirmed";
             staged_untrusted: "staged_untrusted";
             source_observed_untrusted: "source_observed_untrusted";
             source_reverted: "source_reverted";
@@ -467,11 +467,11 @@ declare const schemaV3: z.ZodObject<{
             blockHash: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
+            executionAdmitted: z.ZodLiteral<false>;
             blockNumberAtomic: z.ZodString;
             rpcOrigin: z.ZodString;
             logsHash: z.ZodString;
             receiptHash: z.ZodString;
-            executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
             protocolProofHash: z.ZodNullable<z.ZodString>;
@@ -482,22 +482,22 @@ declare const schemaV3: z.ZodObject<{
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
+        source_confirmed: "source_confirmed";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
-        source_confirmed: "source_confirmed";
         staged_untrusted: "staged_untrusted";
         source_observed_untrusted: "source_observed_untrusted";
         source_reverted: "source_reverted";
     }>;
     transactionHash: z.ZodNullable<z.ZodString>;
     nonceAtomic: z.ZodNullable<z.ZodString>;
-    submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
     route: z.ZodEnum<{
         base_usdc_to_solana_usdc_circle_cctp_v2: "base_usdc_to_solana_usdc_circle_cctp_v2";
         base_usdc_to_tron_usdt_lifi_near_intents: "base_usdc_to_tron_usdt_lifi_near_intents";
     }>;
     draftIntegrityHash: z.ZodString;
+    submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
     signedTransaction: z.ZodNullable<z.ZodString>;
     safeSourceProof: z.ZodNullable<z.ZodUnion<readonly [z.ZodObject<{
         provenance: z.ZodLiteral<"synthetic_untrusted">;
@@ -540,11 +540,11 @@ declare const schemaV3: z.ZodObject<{
         blockHash: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
+        executionAdmitted: z.ZodLiteral<false>;
         blockNumberAtomic: z.ZodString;
         rpcOrigin: z.ZodString;
         logsHash: z.ZodString;
         receiptHash: z.ZodString;
-        executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
         protocolProofHash: z.ZodNullable<z.ZodString>;

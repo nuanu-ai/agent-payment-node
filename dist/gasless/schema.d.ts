@@ -526,10 +526,10 @@ export declare const stateSchema: z.ZodEnum<{
 export declare const phaseSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     submitted_pending: "submitted_pending";
-    unsealed: "unsealed";
     signing_started: "signing_started";
     sealed: "sealed";
     submitting: "submitting";
+    unsealed: "unsealed";
     included_success: "included_success";
     included_revert: "included_revert";
     safe_success: "safe_success";
@@ -545,10 +545,10 @@ export declare const effectSchema: z.ZodObject<{
     phase: z.ZodEnum<{
         unknown_finality: "unknown_finality";
         submitted_pending: "submitted_pending";
-        unsealed: "unsealed";
         signing_started: "signing_started";
         sealed: "sealed";
         submitting: "submitting";
+        unsealed: "unsealed";
         included_success: "included_success";
         included_revert: "included_revert";
         safe_success: "safe_success";
@@ -629,10 +629,10 @@ export declare const transitionSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
-            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
+            unsealed: "unsealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -666,10 +666,10 @@ export declare const transitionSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
-            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
+            unsealed: "unsealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -1083,10 +1083,10 @@ export declare const operationSchema: z.ZodObject<{
             phase: z.ZodEnum<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
-                unsealed: "unsealed";
                 signing_started: "signing_started";
                 sealed: "sealed";
                 submitting: "submitting";
+                unsealed: "unsealed";
                 included_success: "included_success";
                 included_revert: "included_revert";
                 safe_success: "safe_success";
@@ -1120,10 +1120,10 @@ export declare const operationSchema: z.ZodObject<{
             phase: z.ZodEnum<{
                 unknown_finality: "unknown_finality";
                 submitted_pending: "submitted_pending";
-                unsealed: "unsealed";
                 signing_started: "signing_started";
                 sealed: "sealed";
                 submitting: "submitting";
+                unsealed: "unsealed";
                 included_success: "included_success";
                 included_revert: "included_revert";
                 safe_success: "safe_success";
@@ -1419,10 +1419,10 @@ export declare const operationSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
-            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
+            unsealed: "unsealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -1456,10 +1456,10 @@ export declare const operationSchema: z.ZodObject<{
         phase: z.ZodEnum<{
             unknown_finality: "unknown_finality";
             submitted_pending: "submitted_pending";
-            unsealed: "unsealed";
             signing_started: "signing_started";
             sealed: "sealed";
             submitting: "submitting";
+            unsealed: "unsealed";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";

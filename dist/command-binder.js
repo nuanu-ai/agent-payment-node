@@ -270,6 +270,9 @@ function bindParsedCatalog(parsed) {
                 expectedRevision: Number(value(options, "--expected-revision")),
             },
         };
+        case "wallet metamask native-transfer": return { request: { command: "wallet.metamask.native-transfer", chainId: Number(value(options, "--chain-id")), idempotencyKey: value(options, "--idempotency-key") } };
+        case "wallet metamask native-transfer-status": return { request: { command: "wallet.metamask.native-transfer-status", operationId: value(options, "--operation") } };
+        case "wallet metamask native-transfer-observe": return { request: { command: "wallet.metamask.native-transfer-observe", operationId: value(options, "--operation") } };
         case "wallet status": return { request: { command: "wallet.status", profile: value(options, "--profile") } };
         case "wallet balance": return {
             request: { command: "wallet.balance", profile: value(options, "--profile") },

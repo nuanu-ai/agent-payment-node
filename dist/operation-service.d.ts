@@ -1,3 +1,4 @@
+import { type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
 import { type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
@@ -104,6 +105,8 @@ export declare class OperationService {
     assertProfileAvailable(profileHash: string): Promise<void>;
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** Only the real current foreground owner may exclude its exact own native journal claim. */
+    assertMetaMaskNativeOwnedAccountAvailable(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
     assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void>;
     assertCleanup85NativeAccountAvailable(proof: VerifiedCleanup85RecoveryAdmission, request: Cleanup85CancellationRequest, exceptOperation?: OperationRecord): Promise<void>;
     /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */

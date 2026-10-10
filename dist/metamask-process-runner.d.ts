@@ -1,3 +1,13 @@
+import type { Hex } from "./model.js";
+interface NativeFailureIdentifiers {
+    readonly requestId?: string;
+    readonly transactionHash?: Hex;
+    readonly sender?: string;
+    readonly chainId?: number;
+    readonly vendorProjectHash?: string;
+}
+/** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
+export declare function takeMetaMaskNativeProcessFailureIdentifiers(error: unknown): NativeFailureIdentifiers | undefined;
 interface CapturedStream {
     on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
     removeListener(event: "data", listener: (chunk: Buffer | string) => void): unknown;
