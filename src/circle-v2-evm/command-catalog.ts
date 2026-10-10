@@ -19,7 +19,7 @@ export const CIRCLE_EVM_COMMANDS: readonly CommandDefinition[] = [
   command("cleanup-nonce", [operation], "Foreground-confirm one exact approve-zero for an expired unknown Monad approval or the retained Sei sealed burn nonce; finalized canonical retirement proof closes unused holds.", "payment_submit"),
   command("cleanup85-prepare", [operation], "Prepare the finite retained cleanup85 recovery frame without signing or sending.", "payment_prepare"),
   command("cleanup85-cancel", [operation], "Foreground-confirm one distinct native1wei cancellation85; the verified native backend is required.", "payment_submit"),
-  command("cleanup86-approve", [operation], "After canonical FINALIZED cancellation85, foreground-confirm distinct zero approval86 once.", "payment_submit"),
+  command("cleanup86-approve", [operation], "After canonical FINALIZED cancellation85, foreground-confirm one zero approval86; only strictly unsigned v3 orphan or prepared generation1 may capture the finite next generation.", "payment_submit"),
   command("status", [operation], "Read the checked durable local Circle operation with both signing profiles.", "local_read"),
 ];
 function command(action: string, options: readonly CommandOption[], summary: string, effect: CommandDefinition["effect"]["class"]): CommandDefinition {
