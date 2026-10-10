@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "apn.jupiter-v1.readonly-simulation-capture.v1",
+  "capturedAt": "2026-10-07T18:42:54.606Z",
+  "source": "https://api.mainnet-beta.solana.com",
+  "pool": "83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d",
+  "snapshotSlot": "454306430",
+  "simulationSlot": "454306483",
+  "sha256": "31de10a8e2df46d8a080a209a697a15d5dd9b45da05f0b6d9f92c9f07f8ce71f",
+  "signed": false,
+  "broadcast": false,
+  "proofLimit": "Unmodified public unsigned mainnet simulation response and the earlier public resolved material. Replay does not prove a paid swap."
+}

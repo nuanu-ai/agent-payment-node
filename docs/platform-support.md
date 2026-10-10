@@ -24,6 +24,8 @@ covered by `tests/packaging/platform-support.test.mjs`. That test is a
 deterministic source invariant only. It does not prove signing, publication,
 installation, or live use.
 
+The supported Formula also has a [local release preparation and verification lane](local-release.md) with explicit unsigned provenance; it does not claim GitHub Actions attestation.
+
 ## Required work before a Linux or Windows support claim
 
 Each target requires all of the following before it can be added to the

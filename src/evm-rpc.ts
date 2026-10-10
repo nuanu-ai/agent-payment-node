@@ -377,6 +377,14 @@ export class EvmRpc implements EvmRpcPort {
     };
   }
 
+  /** Bounded read-only transport for the native fee observer. */
+  async nativeFeeRead(method: "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getBlockByNumber" | "eth_call", params: readonly unknown[]): Promise<unknown> {
+    if (!["eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getBlockByNumber", "eth_call"].includes(method)) {
+      throw new ApnError("APN_INVALID_INPUT", "Native fee reads cannot invoke a write RPC method.");
+    }
+    return await this.call(method, params);
+  }
+
   async evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence> {
     await this.assertChain(operation.chainId);
     const evidence = await observeEvmTransfer(this.call, operation, receipt);

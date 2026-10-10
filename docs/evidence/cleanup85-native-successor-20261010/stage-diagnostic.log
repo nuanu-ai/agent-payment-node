@@ -1,0 +1,16 @@
+successor fixture stage: before A prepare
+✖ whole normal controller retires exact unsigned original and prepares only one distinct successor full2T (30015.647792ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 0
+ℹ cancelled 1
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30770.354666
+
+✖ failing tests:
+
+test at dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:21:1
+✖ whole normal controller retires exact unsigned original and prepares only one distinct successor full2T (30015.647792ms)
+  'test timed out after 30000ms'

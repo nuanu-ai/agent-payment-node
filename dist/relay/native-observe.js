@@ -4,6 +4,8 @@ import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger
 import { evmAddressLock, assertExclusiveEvmOwner } from "../evm-address-ownership.js";
 import { ApnError } from "../errors.js";
 import { proveRelayNativeDestination } from "./destination-proof.js";
+import { RelayDestinationClaimRepository } from "./destination-claim.js";
+import { verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayNativeSourceJournalRepository } from "./native-source.js";
 import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
 import { RelayKeylessStatusService } from "./status.js";
@@ -12,12 +14,14 @@ function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay na
 /** Source inclusion is required to match the signed, saved native deposit envelope. */
 export function verifyRelayNativeSourceObservation(op, hash, observation) {
     const tx = observation.transaction, receipt = observation.receipt, deposit = op.nativeQuote.deposit;
-    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== 56 ||
+    if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== op.sourceChainId ||
         !same(tx.from, op.sourceAccount) || !same(tx.to ?? "", deposit.to) ||
         !same(tx.input, deposit.data) || tx.value !== BigInt(deposit.value) ||
         !same(receipt.blockHash, observation.canonicalBlockHash) || receipt.blockNumber < 0n ||
         !/^0x[0-9a-fA-F]{64}$/u.test(receipt.blockHash))
         blocked("source_transaction_binding");
+    if (op.sourceChainId === 8453)
+        verifyRelayBaseReceiptFee(receipt.actualFee, op.depositNetworkFeeCeilingWei);
     return receipt.status === "success" ? "confirmed" : "failed";
 }
 export class RelayNativeObserveService {
@@ -72,7 +76,7 @@ export class RelayNativeObserveService {
         const hash = journal.transactionHash;
         let source;
         try {
-            source = await this.source.finalizedDeposit(hash);
+            source = await (typeof this.source === "function" ? this.source(op.sourceChainId) : this.source).finalizedDeposit(hash);
         }
         catch {
             return this.result(op.operationId, "source_unproven", "source_rpc_unavailable");
@@ -89,7 +93,7 @@ export class RelayNativeObserveService {
         if (journal.phase !== "submitting" && journal.phase !== outcome)
             blocked("source_journal_receipt_conflict");
         const usage = new AssetUsageLedger(this.state.root);
-        const identity = { account: getAddress(op.sourceAccount), chain: "eip155:56",
+        const identity = { account: getAddress(op.sourceAccount), chain: `eip155:${op.sourceChainId}`,
             asset: { kind: "native", identifier: null } };
         const reservationId = assetUsageReservationId(identity, `relay-native-execute:${op.operationId}`);
         await this.state.withLocks([`relay-native-source:${op.operationId}`, evmAddressLock(op.sourceAccount)], async () => {
@@ -133,7 +137,7 @@ export class RelayNativeObserveService {
             same(provider.inTxHashes[0], hash);
         if (provider.txHashes.length !== 1)
             return this.result(op.operationId, provider.txHashes.length === 0 ? "source_finalized" : "provider_candidate_unproven", provider.txHashes.length === 0 ? "provider_candidate_missing" : "multiple_provider_candidates", true, provider.status, sourceBound);
-        const destination = this.destinationInvocation(op.destinationChainId);
+        const destination = this.destinationInvocation(op.destinationChainId, op.sourceChainId);
         if (this.usedInvocations.has(destination))
             throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Relay native observe requires a fresh destination RPC budget.");
         this.usedInvocations.add(destination);
@@ -142,6 +146,16 @@ export class RelayNativeObserveService {
             return this.result(op.operationId, "provider_candidate_unproven", proof.reason, true, provider.status, sourceBound, proof);
         if (provider.status !== "success" || !sourceBound)
             return this.result(op.operationId, "recipient_credit_observed", "provider_success_or_source_binding_unproven", true, provider.status, sourceBound, proof);
+        if (op.sourceChainId === 8453) {
+            try {
+                await new RelayDestinationClaimRepository(this.state.root).claim(op, hash, proof.proof);
+            }
+            catch {
+                return this.result(op.operationId, "provider_candidate_unproven", "destination_payout_claim_conflict", true, provider.status, true, proof);
+            }
+            return { ...this.result(op.operationId, "operational_acceptance", "source_safe_provider_success_and_canonical_recipient_credit", true, provider.status, true, proof),
+                sourceActualFee: source.receipt.actualFee };
+        }
         return this.result(op.operationId, "operational_acceptance", "source_finalized_provider_success_and_safe_recipient_credit", true, provider.status, true, proof);
     }
 }

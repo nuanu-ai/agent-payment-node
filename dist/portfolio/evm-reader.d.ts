@@ -62,7 +62,8 @@ export declare const MULTICALL3_ABI: readonly [{
     }];
 }];
 /**
- * One HTTP request per EVM network. With a pinned Multicall3 it carries `eth_getCode` (runtime-code hash check)
+ * One HTTP request per EVM network, except Arbitrum which pins and rechecks an RPC L2 header.
+ * With a pinned Multicall3 it carries `eth_getCode` (runtime-code hash check)
  * and one `aggregate3` `eth_call` that also returns chainId and block number; otherwise one plain JSON-RPC batch array.
  */
 export declare class EvmPortfolioPort implements FamilyBalanceBatchPort {

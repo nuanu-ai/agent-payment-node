@@ -1,0 +1,16 @@
+Finite external USDm merchant transfer-proof payment and delivery.
+
+Usage:
+  apn x402 merchant <command> [options]
+
+Subgroups:
+  (none)
+
+Commands:
+  apn x402 merchant prepare --profile <profile> --max-native-fee-wei <wei> --idempotency-key <key> — Freeze the exact x402engine Bitcoin-price USDm transfer-proof request on MegaETH.
+  apn x402 merchant approve --operation <operation-id> — Foreground-confirm, sign and submit the frozen USDm transfer once, then deliver its proof after finalized receipt.
+  apn x402 merchant observe --operation <operation-id> [--deliver] — Observe an attempted USDm payment; explicitly deliver or retry the same proof with --deliver.
+  apn x402 merchant status --operation <operation-id> — Read local merchant payment and delivery evidence separately.
+
+Machine contract: apn help --json
+Detailed help: apn help x402 merchant <child>

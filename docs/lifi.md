@@ -33,6 +33,66 @@ chain, asset, tool, allowlist, signer, sender and observer paths. Source and
 destination contract proofs, observer and recovery behavior, and active owner
 policy are still required before any execution design or funding attempt.
 
+## Finite GasZip direct funding for Sei
+
+`sei funding` adds one separate local-wallet funding route: native Base ETH
+(chain 8453) to the same owner's native Sei SEI (chain 1329). The source sends
+at most 10000000000000 wei ETH to the official GasZip V2 direct deposit address
+`0x391E7C679d29bD940d63be94AD22A25d25b5A604` with exactly `0x0100f6`.
+APN requires that target to have empty code. The calldata selects the source
+sender as recipient and GasZip short chain ID 246. No approval is involved.
+The LI.FI Sei inspection described above keeps its existing execution block.
+
+The active Base native bridge admission must name exactly
+`{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`.
+Preparation refuses an output floor below 250000000000000000 wei SEI or a total
+source fee ceiling above 1000000000000 wei ETH. Base fee quotes include L2 gas,
+the OP GasPriceOracle L1 data fee upper bound for 512 signed bytes, and the
+operator fee. This version admits only the observed zero operator fee. The
+signed EIP-1559 gas price limits the L2 component; the Base total is a quoted
+ceiling, not an on-chain total fee cap. The destination floor is an acceptance
+requirement and is not enforced by the source transaction.
+
+Set `APN_BASE_RPC_URL` and `APN_SEI_RPC_URL` to public HTTPS RPC endpoints. Each
+RPC must return its exact chain ID, hash-pinned state and safe blocks. The API
+origin is fixed to `https://backend.gas.zip`. Integer JSON lexemes are preserved
+as exact decimal strings before any native output comparison.
+
+```text
+apn sei funding prepare --profile evm-live-buyer --expected-payer <owner-address> --amount-atomic 10000000000000 --minimum-output-atomic 250000000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key <new-key>
+apn sei funding approve --operation <saved-operation-id>
+apn sei funding status --operation <saved-operation-id>
+```
+
+Preparation saves the quote expiry, exact owner and provider binding, active
+policy digest, source nonce and fee plan. Approval needs a foreground terminal
+and fresh source checks. Create-only signing and sending claims precede their
+respective effects. The operation joins the shared EVM conflict and idempotency
+registry, so its unresolved Base spend blocks another operation for that owner
+on Base. Status never signs or resends. An expired unsigned preparation becomes
+`failed_before_effect`; a signing interruption retains its hold.
+
+Completion requires a successful canonical source transaction and receipt at
+or below Base's safe head, including the exact sender, nonce, calldata, value
+and signed fee pair. The provider's `/v2/deposit/<source-hash>` response must map
+that source to exactly one successful, unrefunded Sei transaction. Sei RPC then
+independently verifies the mapped transaction's sender, recipient, nonce, native
+value, receipt, safe inclusion and exact recipient balance delta across its
+inclusion block. A destination hash has one create-only operation claim. The
+source receipt and the provider's status alone cannot complete this operation.
+Missing, ambiguous, refunded or changed provider data retain the hold. Only an
+independently safe source revert releases the principal as
+`failed_confirmed_revert`; consumed source network fees remain separate.
+
+Primary protocol contracts:
+[direct deposit format](https://dev.gas.zip/gas/code-examples/evm-deposit/direct-forwarder),
+[quote and expiry](https://dev.gas.zip/gas/api/quote),
+[deposit correlation](https://dev.gas.zip/gas/api/deposit) and
+[outbound correlation](https://dev.gas.zip/gas/api/outbound).
+Local synthetic tests verify these guards and recovery states. Real funding,
+installed consumer proof and the subsequent Sei direct receipt require their
+own evidence.
+
 This APN 0.5.26 package includes local-wallet route selection and execution for
 the admitted assets between Ethereum, Base, Arbitrum One and the finite native
 destinations below. It implements
@@ -476,7 +536,14 @@ approval reset. Every fee row is the native coin itself (`asset: "native"`);
 LI.FI's fixed fee must equal the forwarded amount. The captured Ethereum to
 Base native Stargate Taxi calldata decodes with asset ID 13:
 transaction value equals the source principal plus the separate LayerZero native
-fee. An offline destination decoder conditionally accepts the canonical
+fee. Source observation requires `OFTSent.amountSentLD` to equal the bridge
+amount rounded down to shared precision using the pinned native registry's
+18 local decimals and 6 shared decimals (a 10^12 wei quantum). The frozen
+calldata amount and source proof keep the raw value; the source correlation
+stores the actual normalized sent value. Stored-correlation validation applies
+the same exact calculation. This rule applies only to the admitted Ethereum
+to Base native Taxi lane; other Stargate and Across amounts retain exact equality.
+An offline destination decoder conditionally accepts the canonical
 `OFTReceived` from the official Base native pool when a frozen code and
 configuration pin matches historical deployment evidence at the receipt block.
 The event must bind the source GUID, source EID, recipient and amount; the
@@ -968,3 +1035,140 @@ the proven credits reach the saved minimum output. Source RPCs come only from
 Base lane keeps its original status output, operation IDs and nonce reservation
 path; v1 and v2 records remain readable as that lane, and v3 records carry the
 lane. Ethereum nonce reservations are scoped under `eip155-1`.
+
+## Stargate fee refusal and funding checkpoint, 2026-10-08
+
+A correctly reconciled Stargate LayerZero fee above `maxNativeDebitWei` is now
+classified as `APN_FEE_BUDGET_EXCEEDED` (`stargate_native_fee_exceeds_cap`). ABI,
+Taxi semantics, refund identity and declared fee rows must validate first;
+malformed bindings remain `APN_PROVIDER_PROTOCOL`. Equality at this decode
+stage does not cover approval and bridge gas: preparation still checks the
+aggregate native debit independently. No cap or execution admission changed.
+Source/test compilation and 48 focused tests passed; 744 production JS matched
+test emission after removing only the terminal TypeScript source-map comment.
+
+A fresh normal Arbitrum→Ethereum canonical USDC preparation (100000 atomic
+input, owner minimum 99000, native cap 680000000000000 wei) refused before
+operation creation: aggregate native debit 825421587693206 wei, available
+699562158869357 wei. No approval or bridge was signed or submitted. This lane
+remains open pending bounded funding and its own correlated SAFE receipt.
+
+Separate normal Across funding completed at 08:02:27 UTC: operation
+`bec13b5a51d755eca9b6d7f93c9bf55e9ca50962f4d370d2e4ae749bdc990394`,
+Ethereum source `0x38dbcf06888fdf9427406ef7686d2496e24f8d38fc3f4d73bec3f78e9ca2abb3`,
+Arbitrum destination `0x608d8737634f4301f81970b79d6f9f3c8cc4b98c27c72d35b8d1721cfd1647de`.
+Principal 400000000000000 wei, exact delivery 394497813408405 wei, actual
+source gas 17239614285600 wei. Both chain proofs are SAFE; residual allowance
+is zero and submission attempts remain one. A failed residual observation
+was retried through normal `operation resume`, without resending.
+
+
+## Fresh account reads within a bridge invocation, 2026-10-08
+
+`BridgeRpc.account()` now reacquires the moving latest block and priority-fee
+suggestion on every call. Approval inclusion or foreground consent can change
+confirmed nonce, allowance, balance and fees within one invocation. Exact
+block-pinned reads retain caching; financial caps, executable pins, send fences
+and RPC budgets remain unchanged. A retained red control returned the previous
+block after modeled approval inclusion. Both builds and 287 tests in 16 LI.FI
+files passed, with all 1140 inputs unchanged and all 744 production JS matching
+test emission. This latent cache defect does not establish the cause of an
+earlier live RPC refusal whose precise transport failure was not retained.
+
+A second Across native funding operation
+`0d640f8a9a5dbb35eed4caaa36be8f143c1c2bf3c2021f1fd06c911b4221bda3`
+completed through normal installed observation at 08:32:33 UTC. Principal
+200000000000000 wei, exact Arbitrum delivery 195027287246397 wei, source gas
+18817999880121 wei; source and destination proofs are SAFE, allowance zero,
+submission attempts one and usage finalized. Native funding does not prove a
+USDC bridge. Explicit Arbitrum receipt configuration uses the official
+`https://arb1.arbitrum.io/rpc` reader after a retained PublicNode HTTP 403;
+the frozen primary RPC origin remains unchanged.
+
+## Base native Across observation budget, 2026-10-08
+
+The canonical source transaction and complete Base fee proof consume ten POSTs.
+The subsequent exact historical deployment proof previously exhausted the fixed
+14-request source budget. Base native Across now uses the existing reviewed
+Multicall path, while retaining every code/configuration check, exact historical
+block binding, reviewed Multicall bytecode and `allowFailure: false`. Other
+Across assets and chains retain their previous path. No executable identity,
+financial cap, custody/sign/send rule or RPC budget changed.
+
+A live read-only production-adapter observation and historical deployment proof
+passed in 13 POSTs with unchanged frozen hashes and journal bytes. This is not
+the normal installed terminal receipt. The retained pre-fix control fails the
+14-request limit; configuration and Multicall-code mutations still refuse.
+Both builds and 290 tests in 17 LI.FI files passed, with all 1142 inputs unchanged,
+all 744 production JS matching test emission and the 500-line source check passing.
+Cold Ethereum-to-Base native preparation now uses 16 rather than 19 POSTs;
+archive chunks remain at most three items, and the shared physical cap remains 24.
+
+Separately, normal installed Arbitrum-to-Ethereum canonical USDC operation
+`7e509318bdc0933075eaff099e906cbf46c148250224ba0a56c5282d7ab8602c`
+completed at 09:25:11 UTC with correlated SAFE source and destination proofs:
+100000 atomic input, 99683 exact output, zero residual allowance, one bridge
+submission and finalized usage. Existing SAFE approval was reused. The earlier
+approval-only failure retains its own receipt and was never resent.
+
+Normal CLI from the fresh d606b71f installation completed the existing Base-to-
+Ethereum Across funding operation at 10:39:50 UTC: both proofs SAFE, exact
+delivery 177003711461142 wei, actual source fee 899986077215 wei, zero residual
+allowance, one send and finalized usage. The first fixed observation retained
+both proofs before the unchanged shared POST cap stopped residual observation;
+a subsequent normal resume completed the same operation without resending.
+
+Ethereum-to-Base canonical USDC operation
+`1a22ff7f91898188f3aaec67f1783d6c2e8292b04f3881585eff51dafe784add`
+completed at 10:47:20 UTC with correlated SAFE proofs: 100000 input, 99689 exact
+output, owner floor 99000, residual allowance zero and one bridge submission.
+Source gas 85529811980376 wei plus messaging value 191812223813721 wei totals
+277342035794097 wei, below the frozen 590000000000000-wei native cap. Existing
+SAFE allowance was reused without another approval. Canonical-USDC delivery
+across the three required directions is now evidenced; WBTC remains separate.
+
+## Finite Base to Mega native funding
+
+`apn mega funding prepare`, `approve` and `status` use an independent GasZip
+journal and mechanism pin. They preserve existing Sei operation hashes and do
+not enable LI.FI GasZip execution. Only profile `default`, owner and SELF
+recipient `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`, Base source chain 8453 and
+Mega destination chain 4326 are admitted. The direct target is the official
+EOA `0x391E7C679d29bD940d63be94AD22A25d25b5A604`, whose code must be empty;
+calldata is exactly `0x010202` (short 514). Input is exactly 10000000000000 wei.
+The full Base network fee ceiling is 1000000000000 wei, including L1 and operator
+fees. A fresh balance must cover the frozen signed envelope's full fee upper
+bound even when a later estimate is lower.
+
+The active Base native bridge policy must admit
+`{ "provider": "gaszip", "reference": "v2-direct-base-mega-self-010202.1" }`.
+`APN_BASE_RPC_URL` and `APN_MEGA_RPC_URL` must be public HTTPS RPC URLs. Production
+Mega mainnet RPC is `https://mainnet.megaeth.com/rpc`; chain identity and safe
+receipt inclusion are independently checked. Minimum delivered Mega ETH is at
+least 8000000000000 wei. This floor is checked during acceptance; the source
+calldata cannot enforce it. Quote expiry, owner binding, custody, usage and
+shared Base owner conflicts are checked before the single signature/send attempt.
+
+```sh
+apn mega funding prepare --profile default --expected-payer 0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14 --amount-atomic 10000000000000 --minimum-output-atomic 8000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key mega-self-funding-01
+apn mega funding approve --operation <operation-id>
+apn mega funding status --operation <operation-id>
+```
+
+Schema `apn.mega-gaszip-operation.v1` and create-only signing/send claims are
+separate from Sei. Status never resends. Unknown source or provider delivery
+outcomes keep the principal hold. Completion requires the exact source
+transaction and safe receipt, a provider deposit mapping bound to that source
+hash/block/value/owner/short 514, and one confirmed non-refund Mega outbound.
+The outbound is independently checked for native value, sender/nonce, recipient,
+canonical safe receipt, empty recipient code and exact native credit; its hash
+can be claimed by only one Mega funding operation. Missing or changed provider
+correlation fails closed. Funding evidence does not establish USDm acquisition,
+a merchant payment or HTTP delivery.
+
+Protocol references: [GasZip direct forwarder](https://dev.gas.zip/gas/code-examples/evm-deposit/direct-forwarder),
+[quote API](https://dev.gas.zip/gas/api/quote) and
+[deposit API](https://dev.gas.zip/gas/api/deposit). Fresh unsigned RPC and quote
+reads are separate from synthetic tests and actual funding acceptance.
+
+Historical native-fill before/after balances use the explicitly configured archive reader when pinned to a nonzero EIP-1898 block hash with `requireCanonical: true`. The frozen primary RPC origin remains the operation identity, and primary canonical receipt/header witnesses remain required. Numeric or moving balance snapshots keep their existing primary route. Archive chain validation, shared pacing and command/session request limits still apply.

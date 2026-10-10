@@ -1,14 +1,14 @@
 import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { Hex } from "../model.js";
-import { validateUsdtBoundOperation, type UsdtBoundOperation } from "./bound-operation.js";
+import { validateUsdtAnyBoundOperation as validateUsdtBoundOperation, type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import { UsdtExecutionJournal, usdtExecutionIntent, type UsdtExecutionRecord } from "./execution-journal.js";
 import { verifySignedUsdtOperation, type SignedUsdtUserOperation, type UsdtSigningIdentity } from "./local-signing.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtUserOperation } from "./userop.js";
 
 export interface UsdtSendSigner {
-  sign(bound: UsdtBoundOperation, identity: UsdtSigningIdentity): Promise<SignedUsdtUserOperation>;
+  sign(bound: UsdtBoundOperation, identity: UsdtSigningIdentity, permit?: import("./sponsor-permit.js").UsdtSponsorPermit): Promise<SignedUsdtUserOperation>;
 }
 export interface UsdtSendTransport {
   send(op: UsdtUserOperation): Promise<Hex>;
@@ -36,7 +36,13 @@ export class GuardedUsdtSendService {
       try {
         const reserved = await this.journal.reserve(bound, usdtExecutionIntent(bound), this.port);
         if (reserved.state !== "reserved") throw new ApnError("APN_OPERATION_BLOCKED", "Gasless USDT send was already attempted.", { rail: "gasless_usdt" });
-        const signed = await this.signer.sign(bound, identity);
+        let permit: import("./sponsor-permit.js").UsdtSponsorPermit | undefined;
+        if (bound.schemaVersion === "apn.gasless-usdt-bound-operation.v2") {
+          if (this.port.sponsorPermit === undefined) throw new ApnError("APN_PROVIDER_PROTOCOL", "Gasless USDT sponsor auth is unavailable.", { reason: "gasless_usdt_sponsor_auth_unavailable" });
+          permit = await this.port.sponsorPermit(bound, identity, this.journal.reservedSnapshot(bound));
+          await this.journal.beforeCustodyPolicyFence(bound, this.port);
+        }
+        const signed = await this.signer.sign(bound, identity, permit);
         const { materialHash: _materialHash, ...material } = signed;
         if (signed.operationId !== bound.operationId || signed.profileHash !== bound.profileHash ||
           signed.bindingHash !== bound.binding.bindingHash || signed.materialHash !== hashObject(material) ||

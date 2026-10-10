@@ -82,12 +82,15 @@ export const GASLESS_COMMANDS: readonly CommandDefinition[] = [
     approval: readApproval, output, states: done, recovery: [],
     examples: ["apn gasless transfer quote --profile default --chain 1 --owner <owner> --to <recipient> --amount 0.005 --max-fee 0.004 --min-received 0.001 --rpc-url https://ethereum-rpc.example"] },
   { path: ["gasless", "transfer", "prepare"],
-    synopsis: "apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>",
-    summary: "Freeze one same-chain USDC transfer and its exact provider fee, including externally sponsored zero-fee transfers.",
+    synopsis: "apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>",
+    summary: "Prepare one same-chain USDC transfer. MetaMask server wallets also support an exact fixed net with explicit gross and fee ceilings.",
     options: [profile, chain, option("--to", "address", ["nonzero_distinct_recipient"]),
-      option("--amount", "string", ["positive_gross_USDC_at_most_six_decimal_places"]),
-      option("--max-fee", "string", ["nonnegative_USDC_at_most_six_decimal_places"]),
-      option("--min-received", "string", ["positive_USDC_recipient_floor_at_most_six_decimal_places"]),
+      option("--amount", "string", ["positive_gross_USDC_at_most_six_decimal_places", "exclusive_with_fixed_net_mode"], false),
+      option("--max-fee", "string", ["nonnegative_USDC_at_most_six_decimal_places"], false),
+      option("--min-received", "string", ["positive_USDC_recipient_floor_at_most_six_decimal_places"], false),
+      option("--net-amount-atomic", "string", ["positive_exact_recipient_atoms_MetaMask_server_only"], false),
+      option("--max-gross-atomic", "string", ["positive_maximum_sender_debit_atoms_fixed_net_only"], false),
+      option("--max-fee-atomic", "string", ["nonnegative_maximum_USDC_fee_atoms_fixed_net_only"], false),
       option("--idempotency-key", "idempotency_key", ["global_across_all_money_families"])],
     effect: { class: "payment_prepare", summary: "Checks the existing bound wallet, provider-specific deployment and USDC fee contract; freezes gross, net, fee and an unsigned intent." },
     approval: readApproval, output, states, recovery: [{ command_path: ["gasless", "transfer", "approve"], when: "Review the frozen recipient amount, fee and provider-specific permission before expiry." }],
@@ -99,6 +102,12 @@ export const GASLESS_COMMANDS: readonly CommandDefinition[] = [
     recovery: [{ command_path: ["operation", "resume"], when: "Continue an approved unattempted phase or observe the original operation; omit --wait-seconds." },
       { command_path: ["receipt", "get"], when: "Read saved delivery, fees and remaining permissions." }],
     examples: ["apn gasless transfer approve --operation <operation-id>"] },
+  { path: ["gasless", "transfer", "approve-sealed"], synopsis: "apn gasless transfer approve-sealed --operation <operation-id>",
+    summary: "Approve the first submission of an expired, already sealed local Circle USDC operation.",
+    options: [operation], effect: { class: "payment_submit", summary: "Rechecks the unchanged owner policy, charged lease, original signed bytes and current chain state. Fresh foreground consent permits one first send within 120 seconds; never signs or repeats an estimate or attempted send." },
+    approval: { class: "foreground_tty", when: "Every sealed first-send attempt; MCP returns the exact foreground CLI handoff." }, output, states,
+    recovery: [{ command_path: ["operation", "resume"], when: "Observe the original hash after its permanent first-send fence; never resubmit." }],
+    examples: ["apn gasless transfer approve-sealed --operation <operation-id>"] },
 ];
 export function includeGaslessRecovery(commands: readonly CommandDefinition[]): readonly CommandDefinition[] {
   return commands.map((c) => !["operation resume", "operation status", "receipt get"].includes(c.path.join(" ")) ? c : {
@@ -133,6 +142,7 @@ export function bindGaslessCommand(path: string, o: Readonly<Record<string, stri
     return { command: `gasless.usdt.${path.split(" ").at(-1)!}` as "gasless.usdt.status" | "gasless.usdt.resume" | "gasless.usdt.execute" | "gasless.usdt.execution-status" | "gasless.usdt.observe", profileHash,
       operationId: o["--operation"]! };
   }
+  if (path === "gasless transfer approve-sealed") return { command: "gasless.transfer.approve-sealed", operationId: o["--operation"]! };
   if (path === "gasless transfer approve") return { command: "gasless.transfer.approve", operationId: o["--operation"]! };
   if (!/^[1-9][0-9]{0,5}$/u.test(o["--chain"] ?? "")) gaslessFailure("APN_INVALID_INPUT", "gasless_chain_identity");
   const chainId = gaslessCommandChain(Number(o["--chain"]));
@@ -151,6 +161,18 @@ export function bindGaslessCommand(path: string, o: Readonly<Record<string, stri
       grossAtomic: gaslessDecimal(o["--amount"], decimals, true), maxFeeAtomic: gaslessDecimal(o["--max-fee"], decimals),
       minReceivedAtomic: gaslessDecimal(o["--min-received"], decimals, true) }) };
   }
+  const netFlags = ["--net-amount-atomic", "--max-gross-atomic", "--max-fee-atomic"];
+  const grossFlags = ["--amount", "--max-fee", "--min-received"];
+  if (netFlags.some(flag => o[flag] !== undefined)) {
+    if (!netFlags.every(flag => o[flag] !== undefined) || grossFlags.some(flag => o[flag] !== undefined))
+      gaslessFailure("APN_INVALID_INPUT", "gasless_amount_mode");
+    const netAtomic = o["--net-amount-atomic"]!, maxGrossAtomic = o["--max-gross-atomic"]!;
+    return { command: "gasless.transfer.prepare", profile: o["--profile"]!, idempotencyKey: o["--idempotency-key"]!,
+      request: gaslessCommandRequest({ chainId, recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"),
+        grossAtomic: maxGrossAtomic, maxFeeAtomic: o["--max-fee-atomic"]!, minReceivedAtomic: netAtomic,
+        fixedNet: { netAtomic, maxGrossAtomic } }) };
+  }
+  if (!grossFlags.every(flag => o[flag] !== undefined)) gaslessFailure("APN_INVALID_INPUT", "gasless_amount_mode");
   return { command: "gasless.transfer.prepare", profile: o["--profile"]!, idempotencyKey: o["--idempotency-key"]!,
     request: gaslessCommandRequest({ chainId, recipient: gaslessAddress(o["--to"], "APN_INVALID_INPUT"),
       grossAtomic: gaslessDecimal(o["--amount"], decimals, true), maxFeeAtomic: gaslessDecimal(o["--max-fee"], decimals),

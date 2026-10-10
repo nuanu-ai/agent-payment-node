@@ -51,7 +51,7 @@ export interface UsdtSettlement {
  * exactly one USDT debit to the recipient of N, exactly one USDT debit to the treasury of A <= F, and no other USDT
  * leaving the sender in that transaction. Anything else is ambiguous and never closes the operation.
  */
-export function verifyUsdtReceipt(plan: UsdtTransferPlan, userOpHash: Hex, receipt: UsdtChainReceipt): UsdtSettlement {
+export function verifyUsdtReceipt(plan: Pick<UsdtTransferPlan, "request" | "feeCapAtomic" | "netAtomic">, userOpHash: Hex, receipt: UsdtChainReceipt): UsdtSettlement {
   if (receipt.status !== "success") usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_outer_reverted");
   const sender = plan.request.sender;
   const events = receipt.logs.filter((log) => same(log.address, USDT_GASLESS.entryPoint) && log.topics[0] === USER_OPERATION_EVENT);

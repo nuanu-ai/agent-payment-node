@@ -1,0 +1,3 @@
+import type { ApprovalClass, CommandDefinition, CommandOption, EffectClass, ScalarType } from "./command-catalog-types.js";
+export declare function command(path: readonly string[], synopsis: string, summary: string, options: readonly CommandOption[], effectClass: EffectClass, effectSummary: string, approvalClass: ApprovalClass, approvalWhen: string, states: CommandDefinition["states"], recovery: CommandDefinition["recovery"], examples: readonly string[], outputContract?: CommandDefinition["output"]["contract"]): CommandDefinition;
+export declare function option(name: `--${string}`, type: ScalarType, required: boolean, defaultValue: CommandOption["default"], constraints: readonly string[], sensitivity: CommandOption["sensitivity"]): CommandOption;

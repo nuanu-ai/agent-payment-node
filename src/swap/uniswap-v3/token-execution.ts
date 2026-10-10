@@ -22,6 +22,7 @@ export interface UniswapTokenExecutionPorts {
   followUsage(operation: UniswapTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert"): Promise<TokenUsageBinding>;
   seal(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect>;
   probeSealed(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null>;
+  recoverSealed?(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null>;
   send(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<"accepted" | "ambiguous">;
   observe(operation: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: string): Promise<TokenEffectObservation | null>;
 }
@@ -42,8 +43,7 @@ export class UniswapTokenExecution {
   }
   async execute(id: string): Promise<UniswapTokenOperation> {
     let op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id))); if (["observed", "cleaned", "cleanup_required"].includes(op.phase)) return op;
-    if (expired(op, this.ports.now()) && !swapActive(op.phase) && !cleanupActive(op.phase)) {
-      if (approvalActive(op.phase) && op.approvalAttempt?.transactionHash != null) return await this.observeApproval(op);
+    if (expired(op, this.ports.now()) && !approvalActive(op.phase) && !swapActive(op.phase) && !cleanupActive(op.phase)) {
       if (op.phase === "approval_observed" && op.approvalAttempt?.transactionHash != null) return await this.retireExpiredApproval(op);
       return await this.cleanupRequired(op, "deadline_expired");
     }
@@ -60,11 +60,11 @@ export class UniswapTokenExecution {
     return allowance === op.route.amountIn ? await this.persist(transitionUniswapToken(op, "approval_observed", {}, this.ports.now())) : await this.start(op, "approval"); }
   async status(id: string): Promise<UniswapTokenOperation> {
     const op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id)));
-    if (approvalActive(op.phase)) return await this.observeApproval(op);
+    if (approvalActive(op.phase)) return await this.observeApproval(await this.continueStart(op, "approval"));
     if (op.phase === "approval_observed" && expired(op, this.ports.now()) && op.approvalAttempt?.transactionHash != null)
       return await this.retireExpiredApproval(op);
-    if (swapActive(op.phase)) return await this.observeSwap(op);
-    if (cleanupActive(op.phase)) return await this.observeCleanup(op);
+    if (swapActive(op.phase)) return await this.observeSwap(await this.continueStart(op, "swap"));
+    if (cleanupActive(op.phase)) return await this.observeCleanup(await this.continueStart(op, "cleanup"));
     return op;
   }
   async cleanup(id: string): Promise<UniswapTokenOperation> {
@@ -81,10 +81,17 @@ export class UniswapTokenExecution {
       op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
       return await this.finishStart(op, kind); });
   }
-  private async continueStart(op: UniswapTokenOperation, kind: TokenEffectKind) { if (attemptOf(op, kind).transactionHash !== null) return op;
-    return await this.ports.withAccountLock(op, async () => { const attempt = attemptOf(op, kind), nonce = await this.ports.allocateNonce(op, kind);
-      if (nonce !== attempt.nonce) { await this.ports.releaseNonce(op, kind, nonce); return await this.cleanupRequired(op, `${kind}_nonce_reservation_lost`); }
-      return await this.finishStart(op, kind); }); }
+  private async continueStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
+    const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null) return op;
+    const recovered = await this.ports.recoverSealed?.(op, kind, attempt.nonce) ?? null;
+    if (recovered === null) blocked("Started token effect has no public transaction evidence.", "uniswap_token_public_effect_missing");
+    // A sealed transaction may or may not have reached the provider. Recovery observes it only.
+    const usage = kind === "swap" ? await this.ports.followUsage(op, "unknown_finality") : null;
+    return await this.persist(transitionUniswapToken(op, unknown(kind), {
+      [`${kind}Attempt`]: { ...attempt, transactionHash: recovered.transactionHash },
+      ...(usage === null ? {} : usagePatch(usage)),
+    }, this.ports.now()));
+  }
   private async finishStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null || op.phase !== started(kind)) return op;
     const recovered = await this.ports.probeSealed(op, kind, attempt.nonce);
@@ -192,8 +199,11 @@ export class UniswapTokenExecution {
     return op; }
   private async assertNoEffect(op: UniswapTokenOperation) { if (effectHash(op)) blocked("A durable token effect forbids no-effect cleanup.", "uniswap_cleanup_effect_exists");
     for (const [kind, attempt] of [["approval", op.approvalAttempt], ["swap", op.swapAttempt], ["cleanup", op.cleanupAttempt]] as const)
-      if (attempt !== null && await this.ports.probeSealed(op, kind, attempt.nonce) !== null)
-        blocked("A durable token effect forbids no-effect cleanup.", "uniswap_cleanup_effect_exists"); }
+      if (attempt !== null) {
+        const effect = await this.ports.recoverSealed?.(op, kind, attempt.nonce) ?? null;
+        if (effect !== null) blocked("A durable token effect forbids no-effect cleanup.", "uniswap_cleanup_effect_exists");
+        blocked("A started token effect cannot prove no-effect cleanup.", "uniswap_token_public_effect_missing");
+      } }
   private async required(id: string) { const op = await this.journal.load(id); if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Uniswap token operation was not found."); return op; }
   private async persist(op: UniswapTokenOperation) { return await this.journal.save(validateUniswapTokenOperation(op)); }
 }

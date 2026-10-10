@@ -39,13 +39,55 @@ export async function installedPackage() {
   assert.equal(install.code, 0, install.stderr);
   await stat(join(packageRoot, "dist/metamask-gasless/client/helper-entry.js"));
   await stat(join(packageRoot, "dist/metamask-gasless/client/helper-bootstrap.js"));
-  const identities = {};
-  for (const [name, version] of Object.entries({ "@metamask/agent-sdk": "6.1.4", "@metamask/fox-sdk": "2.7.0",
-    "@toruslabs/ethereum-controllers": "9.12.0" })) {
-    const info = JSON.parse(await readFile(join(packageRoot, "node_modules", name, "package.json"), "utf8"));
-    assert.equal(info.version, version); identities[name] = version;
+  const vendor = join(packageRoot, "vendor/metamask-evm-sdk");
+  const manifestBytes = await readFile(join(vendor, "manifest.json"));
+  assert.equal(hash(manifestBytes), "5b6e8667e4a0adb277c1c6803d87168eb7b9cd72f0ba9fc3d349ec8162fdfd25");
+  const manifest = JSON.parse(manifestBytes);
+  assert.equal(manifest.schemaVersion, "apn.metamask-evm-sdk.v1");
+  assert.deepEqual(manifest.upstreamVersions, { agentSdk: "6.1.4", ethereumControllers: "9.12.0", foxSdk: "2.7.0" });
+  for (const [name, expected] of Object.entries(manifest.files)) {
+    const bytes = await readFile(join(vendor, name));
+    assert.equal(bytes.length, expected.bytes); assert.equal(hash(bytes), expected.sha256);
   }
+  const identities = { "@metamask/agent-sdk": manifest.upstreamVersions.agentSdk,
+    "@metamask/fox-sdk": manifest.upstreamVersions.foxSdk,
+    "@toruslabs/ethereum-controllers": manifest.upstreamVersions.ethereumControllers };
+  // Check the actual installed loader before running any scenario. Imports are
+  // confined to the consumer; network, native bindings and process/Keychain calls
+  // are denied, with a temporary HOME rather than the operator's wallet state.
+  const importHome = await mkdtemp(join(root, "sdk-import-home-"));
+  const imports = await run(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import http from "node:http"; import https from "node:https"; import net from "node:net";
+    import cp from "node:child_process";
+    import { registerHooks, syncBuiltinESMExports } from "node:module";
+    const imported = [], root = ${JSON.stringify(pathToFileURL(packageRoot + "/").href)};
+    registerHooks({ resolve(specifier, context, next) {
+      const result = next(specifier, context);
+      if (!result.url.startsWith("node:")) { assert.ok(result.url.startsWith(root), result.url); imported.push(result.url); }
+      return result;
+    } });
+    let effects = 0;
+    const deny = () => { effects++; throw Error("installed SDK import effect denied"); };
+    process.dlopen = deny; globalThis.fetch = deny;
+    http.request = http.get = https.request = https.get = deny;
+    net.connect = net.createConnection = net.Socket.prototype.connect = deny;
+    for (const name of ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"]) cp[name] = deny;
+    syncBuiltinESMExports();
+    const sdk = await import(${JSON.stringify(pathToFileURL(join(packageRoot, "dist/metamask-gasless/client/sdk-vendor.js")).href)});
+    for (const [name, fields] of Object.entries({
+      agentSdk: ["NetworkRegistry", "PriceService", "createWalletServiceFromSession", "disableAnalytics"],
+      agentBase: ["SessionManager", "WalletStateManager"], agentEvm: ["getAgenticEvmChains", "withEvmRpcTarget"],
+      foxEvm: ["prepareDelegation", "executionsToWire", "unsignedDelegationToWire", "EvmServerAdapter", "evmServerAdapter", "SIGN_REQUEST_KIND"],
+      foxKeyring: ["createKeyringController", "KEYRING_KIND"], ethereumControllers: ["getDelegationHashOffchain"]
+    })) { const api = await sdk[name](); for (const field of fields) assert.ok(field in api, field); }
+    assert.equal(effects, 0);
+    console.log(JSON.stringify({ imported: [...new Set(imported)], effects, home: process.env.HOME }));
+  `], { env: { PATH: process.env.PATH, HOME: importHome, LANG: "C", TZ: "UTC" }, timeoutMs: 30000 });
+  await writeFile(join(root, "sdk-import-proof.json"), imports.stdout);
+  assert.equal(imports.code, 0, imports.stderr); assert.equal(imports.stderr, "");
   const identity = { archive, archiveSha256: hash(await readFile(archive)), packageRoot, dependencies: identities,
+    sdkVendorManifestSha256: hash(manifestBytes), sdkVendorEntries: manifest.entryNames,
     runtimeFixtureSha256: hash(await readFile(runtimePath)) };
   assert.equal(identity.runtimeFixtureSha256, "f37646220871b16931912855b8e5eb0a6627318378e7c132dabd165815364682");
   await writeFile(join(root, "archive-identity.json"), JSON.stringify(identity, null, 2) + "\n");

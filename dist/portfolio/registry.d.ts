@@ -13,7 +13,7 @@ export interface PortfolioNetworkRpc {
     readonly evmChainId: number | null;
     readonly multicall3CodeHash: Hex | null;
 }
-/** Read-only portfolio endpoints. Money-moving rails never consult this registry and keep owner-named RPC only. */
+/** Read-only portfolio endpoints. Money-moving rails do not consult this registry; Solana shares its anonymous default constant. */
 export declare const PORTFOLIO_NETWORK_RPC: readonly PortfolioNetworkRpc[];
 export type PortfolioEndpoint = {
     readonly source: "default_public";

@@ -63,8 +63,16 @@ for (const file of files) {
       file === join(sourceRoot, "metamask-smart-account-consent.ts")) continue;
     if (["--chain-id", "--token"].includes(needle) && file === join(sourceRoot, "metamask-direct-adapter.ts")) continue;
     if (needle === "--chain-id" && file === join(sourceRoot, "metamask-x402-adapter.ts")) continue;
+    // Exact private vendor handoff only: the claimed owner scope binds the finite validated quote chain.
+    // Public named-chain discovery/binding does not expose this SDK argument. All other needles remain forbidden.
+    if (needle === "--chain-id" && file === join(sourceRoot, "metamask-native-transfer-adapter.ts")) continue;
     if (needle === "--scheme" && file === join(sourceRoot, "awal-x402-adapter.ts")) continue;
-    if (needle === "signTypedData" && ["local-wallet-native.ts", "gasless/custody.ts", "facilitator-gasless/custody.ts"].some((name) => file === join(sourceRoot, name))) continue;
+    // Audited frozen-operation custody only: USDT validates saved owner/operation/expiry before local signing.
+    // This exact path does not authorize adjacent or generic typed-data signers.
+    if (needle === "signTypedData" && ["local-wallet-native.ts", "gasless/custody.ts", "facilitator-gasless/custody.ts",
+      "gasless-usdt/local-signing.ts"].some((name) => file === join(sourceRoot, name))) continue;
+    // Audited hash-only attestation for one saved direct operation; no generic personal signing port.
+    if (needle === "signMessage" && file === join(sourceRoot, "direct-public-attestation.ts")) continue;
     // The Avalanche facilitator route's single approved exposure: one verify and one settle per human-approved operation.
     if (["facilitator.verify", "facilitator.settle"].includes(needle) && file === join(sourceRoot, "facilitator-gasless/execution.ts")) continue;
     if (text.includes(needle)) violations.push(`${file.slice(productRoot.length + 1)}: ${needle}`);

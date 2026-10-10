@@ -7,4 +7,6 @@ export declare function resolveDirectPolicyAsset(input: {
     readonly kind: "native" | "token";
     readonly identifier?: string;
     readonly rail: string;
+    readonly mechanism?: unknown;
+    readonly mechanisms?: unknown;
 }, inventory: AllowlistInventory): CandidateAsset;

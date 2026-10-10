@@ -1,0 +1,38 @@
+✖ whole normal controller retires exact unsigned original and prepares only one distinct successor full2T (1475.200417ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2636.314459
+
+✖ failing tests:
+
+test at dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:21:1
+✖ whole normal controller retires exact unsigned original and prepares only one distinct successor full2T (1475.200417ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /stop_at_successor_foreground/. Input:
+  
+  'ApnError: Circle EVM operation blocked: rpc_method_or_budget.'
+  
+      at async TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:43:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: ApnError: Circle EVM operation blocked: rpc_method_or_budget.
+        at circleBlocked (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/operation-model.js:10:47)
+        at CircleRpc.physicalCall (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/rpc.js:62:13)
+        at CircleRpc.call (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/rpc.js:48:35)
+        at CircleRpc.identity (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/rpc.js:90:50)
+        at CircleRpc.anchoredObservation (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/rpc.js:113:20)
+        at file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/rpc.js:101:117
+        at AsyncLocalStorage.run (node:internal/async_local_storage/async_context_frame:63:14)
+        at CircleRpc.observation (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/rpc.js:101:42)
+        at sealedBurnEvidence (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/burn-retirement-rpc.js:20:36)
+        at consumedBurnEvidence (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-v2-evm/consumed-burn-rpc.js:52:28),
+    expected: /stop_at_successor_foreground/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

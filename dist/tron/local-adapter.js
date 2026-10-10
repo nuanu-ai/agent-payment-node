@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { utils } from "tronweb";
+import { utils } from "./utils.js";
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
 import { atomic, chainAsset } from "../chain-policy.js";
 import { ApnError } from "../errors.js";

@@ -165,7 +165,9 @@ test("interrupted Base approval and deposit markers resume without a second sign
   assert.deepEqual({ signs, sends }, { signs: 0, sends: 0 });
 });
 
-test("Base foreground prompt names Base and redacts the saved request ID", async () => {
+test("Base foreground prompt names Base and redacts the saved request ID", async t => {
+  // Keep the foreground wall clock aligned with this signed historical fixture.
+  t.mock.method(Date, "now", () => now.getTime());
   const op = await savedBaseOperation();
   let prompt = "";
   const terminal = { fd: 0, write: async (value: string) => { prompt += value; },

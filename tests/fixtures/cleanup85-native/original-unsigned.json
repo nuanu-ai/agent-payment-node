@@ -1,0 +1,151 @@
+{
+  "provenance": {
+    "sourcePath": "/Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/paid-cleanup85-v19-attempt6/post-block-state-delta.json",
+    "sourceSha256": "3b60fe87e94f69f33e768364c1058a83d3576570857c17f532a5c3c03a606e42",
+    "class": "Actual read-existing public unsigned native operation/slot/prepared, no private material"
+  },
+  "operation": {
+    "allowlist": {
+      "policyDigest": "55861a79f1326b20e4b4dcc3e95967209a982d1a05ff2bde4bceb825fae10cf2",
+      "policyRevision": 38,
+      "schemaVersion": "apn.direct-allowlist.v1"
+    },
+    "amountAtomic": "1",
+    "amountDecimal": "0.000000000000000001",
+    "chainId": 42161,
+    "economics": {
+      "gasLimitAtomic": "26281",
+      "maxFeePerGasAtomic": "45000000",
+      "maxPriorityFeePerGasAtomic": "1",
+      "maximumGasCostAtomic": "1182645000000",
+      "nonceAtomic": "85"
+    },
+    "evm": {
+      "asset": {
+        "address": "0x0000000000000000000000000000000000000000",
+        "chainId": 42161,
+        "decimals": 18,
+        "decimalsSource": "native",
+        "kind": "native",
+        "schemaVersion": "apn.evm-asset.v1"
+      },
+      "cleanup85Cancellation": {
+        "activationDigest": "657ab726953c7cad3d421e6decf3b19786487c907da3dba3be1147aadafbc4cb",
+        "nativeReservationId": "20edd3a4535a178a651ce6a812c21d45682bc7e17f6174e9842685ab7815a0e2",
+        "nativeReserveAtomic": "2000000000000",
+        "recipientCode": "0xef0100e6cae83bde06e4c305530e199d7217f42808555b",
+        "recipientCustody": {
+          "profileHash": "83b4334060b67d5ebcaef400955cb8aca68e709fd8edb340e08061200bd0c06c",
+          "providerAccountBindingHash": "863b5c350c54279e49e1148ddb0534055581d1a8e246094c8fb253f367b9532e",
+          "providerCapabilityHash": "e7c2d4415d43a7f1af5afcbf2ab859a95271b4ef95f24758b9d1e04bf3cc4d58",
+          "providerId": "local",
+          "providerRevision": 1,
+          "schemaVersion": "apn.evm-native-custody.v1",
+          "walletAddress": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+          "walletBindingHash": "863b5c350c54279e49e1148ddb0534055581d1a8e246094c8fb253f367b9532e",
+          "walletCreatedAt": "2026-08-28T04:11:29.865Z"
+        },
+        "recipientDelegateCodeHash": "0xcc7b633aef4b2543cb8f37522adf1a401f910f0f6b2430c1eecc11f401ccfcf3",
+        "request": {
+          "oldCleanupEnvelopeHash": "62e62f220a1afbf65889ab0edfbc090c3b67bc4d5f9b161ec8e33dc8137a3583",
+          "oldCleanupMaterialHash": "737b794790d7867a18e90d15033f72c1177cc5204a7b2cff699687cb4aa03468",
+          "oldCleanupTransactionHash": "0x24cb1b6244a30ca2a829b4f561c907565d49aad806735137e3160ae0f7f03b95",
+          "parentIntentHash": "dc77acc586ab0aa4a4913f7cad473369e8531ded21586341a54cde0a1827f988",
+          "parentOperationId": "4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33",
+          "recoveryBinding": "35e5943d4264460588a998de02f014fe156f90680bcbb5b564cd5c3a974199db"
+        },
+        "senderCode": "0x",
+        "version": "apn.circle-cleanup85-native-binding.v1"
+      },
+      "feeQuote": {
+        "blockHash": "0xe8354b1c31e3cce3a7cc89f2c387a3edfd11ccf1cd51738e3b83acc717bd28c9",
+        "blockNumberAtomic": "513281464",
+        "chainId": 42161,
+        "feeModel": "arbitrum-inclusive",
+        "l1DataFeeUpperWei": "0",
+        "maximumExecutionFeeWei": "1182645000000",
+        "observedAt": "2026-10-09T18:37:56.586Z",
+        "operatorFeeUpperWei": "0",
+        "rpcOrigin": "https://arb1.arbitrum.io",
+        "totalFeeEnforcedOnchain": false,
+        "totalQuoteWei": "1182645000000"
+      },
+      "maxFeeWei": "2000000000000",
+      "nativeCustody": {
+        "profileHash": "8692e4b95d088a0e95bcab3edf8a641f8d04f54ed4b1d26af61f7a9e344f58bd",
+        "providerAccountBindingHash": "b2d3fe6610803801f3e61393850ebb85f630130965d6aee3fa130fe135717d73",
+        "providerCapabilityHash": "e7c2d4415d43a7f1af5afcbf2ab859a95271b4ef95f24758b9d1e04bf3cc4d58",
+        "providerId": "local",
+        "providerRevision": 1,
+        "schemaVersion": "apn.evm-native-custody.v1",
+        "walletAddress": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "walletBindingHash": "b2d3fe6610803801f3e61393850ebb85f630130965d6aee3fa130fe135717d73",
+        "walletCreatedAt": "2026-09-16T16:50:10.691Z"
+      },
+      "schemaVersion": "apn.evm-direct.v1",
+      "transactionTo": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+      "valueAtomic": "1"
+    },
+    "expiresAt": "2026-10-09T18:47:56.000Z",
+    "fingerprint": "9fc2d56c8a231489251178dade7a47f4d6807f3ddd454080d1b2e9119b81bcf5",
+    "idempotencyHash": "c6c90ad6c9a4e573aafd5bb2f10f59db6b6808f5d68180b9f9a45715645b96d8",
+    "integrityHash": "4ef03d808f8a7ad75289c12c254e968fea717e73db05cf865ccc096493b9dd90",
+    "operationId": "4b5fc09e077b6c171083edb6c89ce31b5f8e881e1db4f279a866548aade0aef1",
+    "preparedAt": "2026-10-09T18:37:56.000Z",
+    "preparedBlockNumberAtomic": "513281464",
+    "profile": "evm-live-buyer",
+    "profileHash": "8692e4b95d088a0e95bcab3edf8a641f8d04f54ed4b1d26af61f7a9e344f58bd",
+    "proofClass": "durable_pre_effect",
+    "reason": "prepared_and_frozen",
+    "recipient": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+    "requestHash": "8ad209695287392fafd322f32245ef5a4e4da2af1a17011d27c38ab7b9543ecd",
+    "schemaVersion": "apn.state.v1",
+    "state": "awaiting_approval",
+    "terminal": false,
+    "token": "0x0000000000000000000000000000000000000000",
+    "transactionData": "0x",
+    "transitions": [
+      {
+        "at": "2026-10-09T18:37:56.000Z",
+        "hash": "05a45bf5913ed75a3f439b77f9383f536918dea075c2c95bbef2fa461ae9d6a4",
+        "previousHash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "proofClass": "durable_pre_effect",
+        "reason": "prepared_and_frozen",
+        "sequence": "1",
+        "state": "awaiting_approval",
+        "terminal": false
+      }
+    ],
+    "walletAddress": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7"
+  },
+  "slot": {
+    "fingerprint": "9fc2d56c8a231489251178dade7a47f4d6807f3ddd454080d1b2e9119b81bcf5",
+    "oldCleanupMaterialHash": "737b794790d7867a18e90d15033f72c1177cc5204a7b2cff699687cb4aa03468",
+    "operationId": "4b5fc09e077b6c171083edb6c89ce31b5f8e881e1db4f279a866548aade0aef1",
+    "parentOperationId": "4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33",
+    "requestBinding": "d8cd3bb93d54037dad45a233b2079788d8e22307f0c1516656d2fa38c6ef1852",
+    "version": "apn.cleanup85-single-cancellation.v1"
+  },
+  "prepared": {
+    "binding": {
+      "custody": {
+        "profileHash": "8692e4b95d088a0e95bcab3edf8a641f8d04f54ed4b1d26af61f7a9e344f58bd",
+        "providerAccountBindingHash": "b2d3fe6610803801f3e61393850ebb85f630130965d6aee3fa130fe135717d73",
+        "providerCapabilityHash": "e7c2d4415d43a7f1af5afcbf2ab859a95271b4ef95f24758b9d1e04bf3cc4d58",
+        "providerId": "local",
+        "providerRevision": 1,
+        "schemaVersion": "apn.evm-native-custody.v1",
+        "walletAddress": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "walletBindingHash": "b2d3fe6610803801f3e61393850ebb85f630130965d6aee3fa130fe135717d73",
+        "walletCreatedAt": "2026-09-16T16:50:10.691Z"
+      },
+      "fingerprint": "9fc2d56c8a231489251178dade7a47f4d6807f3ddd454080d1b2e9119b81bcf5",
+      "operationId": "4b5fc09e077b6c171083edb6c89ce31b5f8e881e1db4f279a866548aade0aef1",
+      "payloadHash": "3645245e0dea4d8100fd33667cce87d11967fb74e684df730506d48058d74c94",
+      "profile": "evm-live-buyer",
+      "profileHash": "8692e4b95d088a0e95bcab3edf8a641f8d04f54ed4b1d26af61f7a9e344f58bd"
+    },
+    "integrityHash": "7ab05e211622dfd0c53ead13ce0723f919ffd7b8646fae48120bac3a72d9ff6e",
+    "schemaVersion": "apn.direct-public-prepared.v1"
+  }
+}

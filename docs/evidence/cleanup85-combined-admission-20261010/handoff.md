@@ -1,0 +1,7 @@
+This is an A API implementation milestone. Combined B source review, installation and live execution remain pending.
+
+The successor financial issuer already performs the full original public admission verifier, followed by current readmission policy/window checks and durable-parent/active-lock-scope checks. Its private return body now also carries `originalAdmission: VerifiedCleanup85RecoveryAdmission`, preserving the genuine capability object returned by that verifier. Only the public lineage/readmission snapshots are cloned and frozen. The capability is retained by identity and the private getter still requires the exact StateStore object, request and active held scope.
+
+B's successor execute and reservation stages can each call this combined issuer once and pass its genuine originalAdmission to the existing original private getter and account-availability checks. The original v1 path remains unchanged. Each independent stage still verifies all public evidence and current financial admission afresh. No RPC limit, deadline or authority guard is raised or reset.
+
+The 10 targeted cases passed. The three positive cases additionally checked genuine capability usability and identity, cloned-capability refusal, copied-token refusal, wrong same-root StateStore refusal, request mismatch and scope disposal. Each combined issuer made 80 offline fixture transport requests and read the original approval transaction once. These are deterministic replay counts, not live HTTP measurements or financial proof.

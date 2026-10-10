@@ -306,11 +306,11 @@ test("archive block mismatch fails before historical state use", async (t) => {
 
 test("pool quote counts exact anchor and each failed candidate without exceeding the reviewed cap", async (t) => {
   for (const failures of [0, 1, 2]) {
-    const temp = await temporaryState(); t.after(temp.cleanup); let physical = 0;
+    const temp = await temporaryState(); t.after(temp.cleanup); let physical = 0, pacingNow = 0;
     const environment = { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify([
       "https://one.example", "https://two.example", "https://three.example"]), APN_ETHEREUM_ARCHIVE_RPC_URL: "https://archive.example" };
     const rpc = createTokenRpc({ environment, state: new StateStore(temp.root), now: Date.now, maxHttpRequests: 10, deadlineMs: 10_000,
-      wait: async () => {}, pacingNow: () => physical * 1_000,
+      wait: async milliseconds => { pacingNow += milliseconds; }, pacingNow: () => pacingNow,
       transport: { request: async (url, _method, body) => { physical += 1; const origin = new URL(url).origin;
         if (origin !== "https://archive.example" && Number(origin.slice(8, 11) === "one" ? 0 : origin.slice(8, 11) === "two" ? 1 : 2) < failures)
           throw new ApnError("APN_RPC_AMBIGUOUS", "timeout", { transportReason: "request_deadline" });

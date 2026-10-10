@@ -92,7 +92,8 @@ export class GaslessTestRpc implements GaslessRpcPort {
     this.calls.push("estimate"); this.estimateFees.push(fees); if (this.estimateFails) throw new Error("canary_provider_secret");
     return this.fixtureEstimate(intent, "estimate");
   }
-  async send(_intent: GaslessIntent, material: Parameters<GaslessRpcPort["send"]>[1]) {
+  async send(_intent: GaslessIntent, material: Parameters<GaslessRpcPort["send"]>[1], beforeSend?: () => void) {
+    beforeSend?.();
     this.calls.push("send"); this.sends.push(structuredClone(material));
     if (this.timeout) throw new Error("canary_send_secret");
     return material.userOperationHash;

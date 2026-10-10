@@ -410,6 +410,13 @@ export class EvmRpc {
             logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin,
         };
     }
+    /** Bounded read-only transport for the native fee observer. */
+    async nativeFeeRead(method, params) {
+        if (!["eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getBlockByNumber", "eth_call"].includes(method)) {
+            throw new ApnError("APN_INVALID_INPUT", "Native fee reads cannot invoke a write RPC method.");
+        }
+        return await this.call(method, params);
+    }
     async evidence(operation, receipt) {
         await this.assertChain(operation.chainId);
         const evidence = await observeEvmTransfer(this.call, operation, receipt);

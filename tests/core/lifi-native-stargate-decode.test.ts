@@ -18,6 +18,7 @@ const SOURCE = 200000000000000n;
 const FIXED_FEE = 500000000000n;
 const LZ_FEE = 191951159457037n;
 const BRIDGED = SOURCE - FIXED_FEE;
+const NORMALIZED_BRIDGED = 199000000000000n;
 const VALUE = SOURCE + LZ_FEE;
 const NATIVE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 const BASE_NATIVE_POOL = getAddress("0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7");
@@ -74,12 +75,17 @@ test("captured native Stargate ABI shape decodes principal and separate LayerZer
   assert.equal(bridgeAssetTool(bridgeAssetRow(1, BRIDGE_ZERO_ADDRESS), "stargateV2")?.assetId, 13);
 });
 
-test("native Stargate fails closed on debit cap, asset ID and both fee bindings", () => {
+test("native Stargate distinguishes the owner fee cap from invalid protocol bindings", () => {
+  assert.throws(() => decodeBridgeCall(fixture({ cap: LZ_FEE - 1n })), {
+    code: "APN_FEE_BUDGET_EXCEEDED", details: { reason: "stargate_native_fee_exceeds_cap",
+      offendingPredicate: "nativeFeeWei > maxNativeDebitWei", nativeFeeWei: LZ_FEE.toString(), maxNativeDebitWei: (LZ_FEE - 1n).toString() },
+  });
+  assert.doesNotThrow(() => decodeBridgeCall(fixture({ cap: LZ_FEE })));
   for (const bad of [
-    fixture({ cap: LZ_FEE - 1n }), fixture({ value: SOURCE }), fixture({ value: VALUE + 1n }),
+    fixture({ value: SOURCE }), fixture({ value: VALUE + 1n }),
     fixture({ assetId: 1 }), fixture({ nativeFee: LZ_FEE + 1n }),
     fixture({ forwardedFee: FIXED_FEE + 1n }), fixture({ feeRow: LZ_FEE + 1n }),
-    fixture({ destination: 42161 }),
+    fixture({ destination: 42161 }), fixture({ cap: LZ_FEE - 1n, nativeFee: LZ_FEE + 1n }),
   ]) assert.throws(() => decodeBridgeCall(bad), { code: "APN_PROVIDER_PROTOCOL" });
   assert.throws(() => validateRouteEconomics(fixture({ feeRow: LZ_FEE + 1n })), { code: "APN_PROVIDER_PROTOCOL" });
 });
@@ -95,7 +101,7 @@ function sourceReceipt(m: BridgeMaterialization): BridgeProtocolReceipt {
       eventLog(FEE_FORWARDER, "FeesForwarded", { token: BRIDGE_ZERO_ADDRESS,
         distributions: [{ recipient: FEE_RECIPIENT, amount: FIXED_FEE }] }),
       eventLog(NATIVE_POOL, "OFTSent", { guid: GUID, dstEid: 30184, fromAddress: BRIDGE_DIAMOND,
-        amountSentLD: BRIDGED, amountReceivedLD: 197010000000000n }),
+        amountSentLD: NORMALIZED_BRIDGED, amountReceivedLD: 197010000000000n }),
     ] };
 }
 
@@ -120,7 +126,7 @@ test("native Stargate source rejects wrong pool, GUID, EID, amount, sender, and 
     [{ ...sent, address: getAddress("0xc026395860Db2d07ee33e05fE50ed7bD583189C7") }],
     [mutateEvent(sent, "OFTSent", { guid: `0x${"00".repeat(32)}` })],
     [mutateEvent(sent, "OFTSent", { dstEid: 30110 })],
-    [mutateEvent(sent, "OFTSent", { amountSentLD: BRIDGED - 1n })],
+    [mutateEvent(sent, "OFTSent", { amountSentLD: NORMALIZED_BRIDGED - 1n })],
     [mutateEvent(sent, "OFTSent", { amountReceivedLD: 197009999999999n })],
     [mutateEvent(sent, "OFTSent", { fromAddress: OWNER })],
     [sent, sent],

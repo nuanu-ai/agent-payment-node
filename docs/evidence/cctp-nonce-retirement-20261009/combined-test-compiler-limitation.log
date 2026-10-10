@@ -1,0 +1,2 @@
+src/metamask-smart-account-consent.ts(56,33): error TS2379: Argument of type 'ServerResponse<IncomingMessage> & { req: IncomingMessage; }' is not assignable to parameter of type 'ServerResponse<IncomingMessage>' with 'exactOptionalPropertyTypes: true'. Consider adding 'undefined' to the types of the target's properties.
+  Property 'setHeaders' is missing in type 'ServerResponse<IncomingMessage> & { req: IncomingMessage; }' but required in type 'ServerResponse<IncomingMessage>'.

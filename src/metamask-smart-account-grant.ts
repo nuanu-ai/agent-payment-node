@@ -1,6 +1,6 @@
-import { makePermissionDecoderConfigs, type EnforcerAddressesByName } from "@metamask/7715-permission-types";
-import { getSmartAccountsEnvironment, ROOT_AUTHORITY } from "@metamask/smart-accounts-kit";
-import { decodeDelegations } from "@metamask/smart-accounts-kit/utils";
+import { makePermissionDecoderConfigs, type EnforcerAddressesByName } from "./metamask-smart-account-vendor.js";
+import { getSmartAccountsEnvironment, ROOT_AUTHORITY } from "./metamask-smart-account-vendor.js";
+import { decodeDelegations } from "./metamask-smart-account-vendor.js";
 import { getAddress, isAddress, isHex } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";

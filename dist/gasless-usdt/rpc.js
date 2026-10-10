@@ -137,6 +137,8 @@ export async function usdtSafeSnapshot(transport, rpcUrl, sender) {
     const entryPointNonce = rpcWord(values[10]);
     const eoaNonce = rpcQuantity(values[11]);
     return { chainId, blockNumber, blockHash,
+        pins: { token: keccak256(rpcHex(values[0])), entryPoint: keccak256(rpcHex(values[1])),
+            delegate: keccak256(rpcHex(values[2])), paymaster: keccak256(rpcHex(values[3])), paymasterEntryPoint: rpcAddress(`0x${rpcHex(values[7]).slice(26)}`) },
         account: { usdtBalanceAtomic, entryPointNonce, eoaNonce, delegation: code === "0x" ? "empty" : "expected" } };
 }
 function rpcExchangeFailure(error, rpcPhase) {

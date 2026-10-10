@@ -124,8 +124,8 @@ async function nativeEthBase(now: Date): Promise<LifiTestProvider> {
 
 for (const flow of [
   { pair: "eth-base" as const, tool: "across" as const, archiveSizes: {
-    "eth-archive.example": [3, 3, 3, 3, 3, 2], "base-archive.example": [3, 3, 3, 3, 3, 3, 3, 3, 1],
-  }, requests: 19, native: true },
+    "eth-archive.example": [3, 3, 3, 3, 3, 2], "base-archive.example": [3, 3, 3, 3, 3, 2],
+  }, requests: 16, native: true },
   { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: {
     "base-archive.example": [3, 3, 3, 3, 3, 3, 2], "arb-archive.example": [3, 3, 3, 3, 3],
   }, requests: 16, native: false },

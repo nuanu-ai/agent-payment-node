@@ -7,6 +7,7 @@ import { localGaslessMechanism } from "../../src/gasless/asset-policy.js";
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { gaslessFixture, GASLESS_TEST_RECIPIENT } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { gaslessFailure } from "../../src/gasless/validation.js";
 
 const now = new Date("2026-09-18T02:00:00.000Z");
 const chain = "eip155:1" as const;
@@ -160,4 +161,78 @@ test("Ethereum unknown finality keeps gross reserved and never sends twice", asy
   op = await s.record(id);
   assert.equal(op.state, "unknown_finality"); assert.equal(s.rpc.sends.length, 1);
   assert.equal((await usage.usage(identity, now)).amountAtomic, s.request.grossAtomic);
+});
+
+async function finalGuardStopped(root: string) {
+  const s = await gaslessFixture(root, 1, { now: new Date(now), activatePolicy: false });
+  await activate(root, s.profile, s.account.address, { daily: s.request.grossAtomic });
+  const { id } = await s.prepare("eth-sealed-final-guard-failure");
+  const snapshot = s.rpc.snapshot.bind(s.rpc);
+  s.rpc.snapshot = async (...args) => {
+    if ((await s.record(id)).userOperation.phase === "sealed")
+      gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
+    return await snapshot(...args);
+  };
+  assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  s.rpc.snapshot = snapshot;
+  const before = await s.record(id), usage = new AssetUsageLedger(root);
+  const identity = { account: s.account.address, chain, asset: { kind: "token" as const, identifier: token } };
+  assert.equal(before.state, "unknown_finality");
+  assert.equal(before.failure, "gasless_rpc_request_budget");
+  assert.equal(before.bootstrap.disclosureAttempts, 1);
+  assert.equal(before.userOperation.phase, "sealed");
+  assert.equal(before.userOperation.submissionAttempts, 0);
+  assert.equal((await usage.load(identity, before.intent.allowlist!.reservationId))?.state, "unknown_finality");
+  assert.equal((await usage.usage(identity, s.now)).amountAtomic, s.request.grossAtomic);
+  return { s, id, before, usage, identity };
+}
+
+test("Ethereum resumes the same sealed first send against its charged unknown lease at the exact daily cap", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { s, id, before, usage, identity } = await finalGuardStopped(temporary.root);
+  s.custody.seal = async () => { throw new Error("recovery must not invoke a signer"); };
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  const after = await s.record(id);
+  assert.equal(after.userOperation.submissionAttempts, 1); assert.equal(s.rpc.sends.length, 1);
+  assert.equal(after.bootstrap.signingAttempts, 1); assert.equal(after.bootstrap.disclosureAttempts, 1);
+  assert.equal(after.userOperation.signingAttempts, 1);
+  assert.equal(after.userOperation.materialHash, before.userOperation.materialHash);
+  assert.equal(after.userOperation.userOperationHash, before.userOperation.userOperationHash);
+  assert.equal((await usage.usage(identity, s.now)).amountAtomic, s.request.grossAtomic);
+  await assert.rejects(s.core.gasless.policy.assert(after, true), /gasless_usage_reservation_missing/u);
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  assert.equal((await s.record(id)).state, "completed"); assert.equal(s.rpc.sends.length, 1);
+  await assert.rejects(s.core.gasless.policy.assert(before, true), /gasless_usage_reservation_missing/u);
+});
+
+test("charged unknown lease cannot authorize another operation, another effect phase, or an attempted send", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { s, before } = await finalGuardStopped(temporary.root);
+  await s.core.gasless.policy.assert(before, true);
+  for (const changed of [
+    { ...before, operationId: hashObject("different-operation") },
+    { ...before, state: "abandoned_unknown" as const },
+    { ...before, bootstrap: { ...before.bootstrap, disclosureAttempts: 0 as const } },
+    { ...before, userOperation: { ...before.userOperation, phase: "unsealed" as const } },
+    { ...before, userOperation: { ...before.userOperation, submissionAttempts: 1 as const } },
+    { ...before, intent: { ...before.intent, request: { ...before.intent.request, grossAtomic: "9999999" } } },
+  ]) await assert.rejects(s.core.gasless.policy.assert(changed, true));
+  await activate(temporary.root, s.profile, s.account.address);
+  await assert.rejects(s.core.gasless.policy.assert(before, true), /gasless_allowlist_changed/u);
+  assert.equal(s.rpc.sends.length, 0);
+});
+
+test("expired sealed first send observes without signing, dispatching, releasing, or declaring no effect", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { s, id, before, usage, identity } = await finalGuardStopped(temporary.root);
+  s.now.setTime(Date.parse(before.intent.expiresAt) + 1);
+  const loads = s.wrapping.loads;
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+  const after = await s.record(id);
+  assert.equal(after.state, "unknown_finality"); assert.equal(after.terminal, false);
+  assert.equal(after.userOperation.submissionAttempts, 0); assert.equal(s.rpc.sends.length, 0);
+  assert.equal(s.wrapping.loads, loads);
+  assert.equal((await usage.load(identity, before.intent.allowlist!.reservationId))?.state, "unknown_finality");
+  assert.equal((await usage.usage(identity, s.now)).amountAtomic, s.request.grossAtomic);
+  assert.ok(s.rpc.calls.includes("observe"));
 });

@@ -36,6 +36,7 @@ export interface RelayDepositObservation {
         status: "success" | "reverted";
         blockNumber: bigint;
         blockHash: string;
+        actualFee?: import("./source-fee-proof.js").RelayBaseReceiptFee;
     }>;
     readonly canonicalBlockHash: string;
 }

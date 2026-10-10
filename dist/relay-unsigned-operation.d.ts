@@ -12,8 +12,8 @@ declare const body: z.ZodObject<{
     operationId: z.ZodString;
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
-    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<42161>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<8453>]>;
+    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<4326>, z.ZodLiteral<8453>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -26,6 +26,7 @@ declare const body: z.ZodObject<{
     arbitrumDraft: z.ZodOptional<z.ZodCustom<RelayArbitrumSourceDraft, RelayArbitrumSourceDraft>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
+    policyActivationDigest: z.ZodOptional<z.ZodString>;
     approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     depositNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     amountAtomic: z.ZodString;
@@ -42,8 +43,8 @@ declare const schema: z.ZodObject<{
     operationId: z.ZodString;
     idempotencyHash: z.ZodString;
     requestHash: z.ZodString;
-    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<42161>]>;
-    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<8453>]>;
+    sourceChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<8453>, z.ZodLiteral<42161>]>;
+    destinationChainId: z.ZodUnion<readonly [z.ZodLiteral<1>, z.ZodLiteral<56>, z.ZodLiteral<137>, z.ZodLiteral<143>, z.ZodLiteral<4326>, z.ZodLiteral<8453>]>;
     sourceAccount: z.ZodString;
     recipient: z.ZodString;
     quoteDigest: z.ZodString;
@@ -56,6 +57,7 @@ declare const schema: z.ZodObject<{
     arbitrumDraft: z.ZodOptional<z.ZodCustom<RelayArbitrumSourceDraft, RelayArbitrumSourceDraft>>;
     policyDigest: z.ZodOptional<z.ZodString>;
     policyRevision: z.ZodOptional<z.ZodNumber>;
+    policyActivationDigest: z.ZodOptional<z.ZodString>;
     approvalNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     depositNetworkFeeCeilingWei: z.ZodOptional<z.ZodString>;
     amountAtomic: z.ZodString;

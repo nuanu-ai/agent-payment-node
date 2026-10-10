@@ -5,13 +5,18 @@ import { chmod, link, lstat, mkdir, readFile, symlink, unlink, writeFile } from 
 import { dirname, join } from "node:path";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { AdvisoryLockPort } from "../../src/macos-advisory-lock.js";
+import { EncryptedWalletStore, walletEnvelopeIdentity } from "../../src/encrypted-wallet-store.js";
+import { LocalWalletNative } from "../../src/local-wallet-native.js";
+import { EvmWrappingSecret } from "./evm-helpers.js";
 import { StateStore } from "../../src/state.js";
-import { RECIPIENT, TestNative, TestRpc, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
+import { WALLET, RECIPIENT, TestNative, TestRpc, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
 
 test("state root rejects wrong mode and symlinked ancestors", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await mkdir(temporary.root, { mode: 0o755 });
+  await chmod(temporary.root, 0o755);
+  assert.equal((await lstat(temporary.root)).mode & 0o777, 0o755);
   await assert.rejects(new StateStore(temporary.root).initialize(), /mode 0700/);
 
   const second = await temporaryState();
@@ -66,10 +71,23 @@ test("state reads reject mode changes, symlink targets, and hard links", async (
 });
 
 test("operation and receipt tampering fail closed after restart", async (t) => {
+  async function initializeTamperWallet(base: string, store: StateStore): Promise<void> {
+    const keyFile = join(base, "disposable-state-test-key.env");
+    await writeFile(keyFile, `APN_STATE_TEST_KEY=0x${"01".repeat(32)}\n`, { mode: 0o600 });
+    const wrapping = new EvmWrappingSecret(), native = new LocalWalletNative(store, wrapping);
+    await makeCore({ root: store.root, native }).wallet.importNew("default", keyFile, "APN_STATE_TEST_KEY", WALLET);
+    const wallet = (await store.loadWallet(store.profileHash("default")))!;
+    const envelope = (await store.loadEncryptedWalletEnvelope("default"))!;
+    assert.equal(wallet.address, WALLET);
+    assert.equal(walletEnvelopeIdentity(envelope, "default").bindingHash, wallet.bindingHash);
+    const custody = new EncryptedWalletStore(store, wrapping), loaded = (await custody.describe("default"))!;
+    try { assert.equal(loaded.identity.address, WALLET); assert.equal(loaded.identity.bindingHash, wallet.bindingHash); }
+    finally { custody.clear(loaded.secret); }
+  }
   const operationCase = await temporaryState();
   t.after(operationCase.cleanup);
   const store = new StateStore(operationCase.root);
-  await ensureWallet(makeCore({ root: operationCase.root, native: new TestNative() }));
+  await initializeTamperWallet(operationCase.base, store);
   const operationId = await prepareTransfer(makeCore({ root: operationCase.root, rpc: new TestRpc() }), "tamper-op-001");
   const profileHash = store.profileHash("default");
   const operationPath = join(operationCase.root, "operations", profileHash, `${operationId}.json`);
@@ -86,7 +104,7 @@ test("operation and receipt tampering fail closed after restart", async (t) => {
   const receiptCase = await temporaryState();
   t.after(receiptCase.cleanup);
   const receiptStore = new StateStore(receiptCase.root);
-  await ensureWallet(makeCore({ root: receiptCase.root, native: new TestNative() }));
+  await initializeTamperWallet(receiptCase.base, receiptStore);
   const receiptOperation = await prepareTransfer(makeCore({ root: receiptCase.root, rpc: new TestRpc() }), "tamper-receipt-001");
   const receiptProfile = receiptStore.profileHash("default");
   const receiptPath = join(receiptCase.root, "receipts", receiptProfile, `${receiptOperation}.json`);
@@ -221,7 +239,11 @@ test("lock files reject symlinks, hard links, wrong modes, and path replacement"
       await writeFile(path, "", { mode: 0o600 });
       await link(path, join(temporary.base, "lock-hardlink"));
     }
-    if (kind === "mode") await writeFile(path, "", { mode: 0o644 });
+    if (kind === "mode") {
+      await writeFile(path, "", { mode: 0o644 });
+      await chmod(path, 0o644);
+      assert.equal((await lstat(path)).mode & 0o777, 0o644);
+    }
 
     await assert.rejects(store.withLocks([key], async () => undefined), (error: unknown) => {
       assert.equal((error as { readonly code?: unknown }).code, "APN_STATE_SECURITY");

@@ -1,0 +1,31 @@
+✔ fresh sealed approval sends identical existing bytes once, preserving original frame/history and cap (1112.627541ms)
+✔ ordinary expired resume cannot use stored valid fresh approval metadata as dispatch authority (740.679917ms)
+✔ private fresh proof rejects forgery, other root/controller instance and reuse; metadata is append-only (644.095916ms)
+✔ preflight nonce drift refuses the first sealed send (752.086167ms)
+✔ preflight delegation drift refuses the first sealed send (678.599833ms)
+✔ preflight fee drift refuses the first sealed send (682.683166ms)
+✔ preflight policy drift refuses the first sealed send (735.457916ms)
+✔ preflight reorg drift refuses the first sealed send (694.072458ms)
+✔ after_consent nonce drift refuses the first sealed send (750.3095ms)
+✔ after_consent delegation drift refuses the first sealed send (749.318416ms)
+✔ after_consent fee drift refuses the first sealed send (808.664792ms)
+✔ after_consent policy drift refuses the first sealed send (729.214833ms)
+✔ after_consent reorg drift refuses the first sealed send (752.540416ms)
+✔ authority expiry during tty never permits a send (813.022542ms)
+✔ authority expiry during post_guard never permits a send (805.857958ms)
+✔ authority expiry during queued_send never permits a send (903.656125ms)
+✔ lost send response preserves permanent fence and only observes the original hash (936.894833ms)
+✔ fresh local action cannot use a different material, reserve, or unavailable approval (637.536708ms)
+✔ production sealed first-send uses bounded POSTs; queued expiry false (878.33725ms)
+ℹ sealed recovery physical POSTs: 9
+✔ production sealed first-send uses bounded POSTs; queued expiry true (868.591042ms)
+ℹ sealed recovery physical POSTs: 8
+✔ fresh TTY displays original expiry, exact atomic amounts and hash, and accepts only its eight-hex challenge (627.172292ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17124.8375

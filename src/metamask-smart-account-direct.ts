@@ -2,13 +2,13 @@ import {
   ExecutionMode,
   createExecution,
   type PermissionContext,
-} from "@metamask/smart-accounts-kit";
+} from "./metamask-smart-account-vendor.js";
 import {
   getErc20PeriodTransferEnforcerAvailableAmount,
   redelegatePermissionContextAction,
-} from "@metamask/smart-accounts-kit/actions";
-import { DelegationManager } from "@metamask/smart-accounts-kit/contracts";
-import { decodeDelegations, encodeDelegations } from "@metamask/smart-accounts-kit/utils";
+} from "./metamask-smart-account-vendor.js";
+import { DelegationManager } from "./metamask-smart-account-vendor.js";
+import { decodeDelegations, encodeDelegations } from "./metamask-smart-account-vendor.js";
 import {
   createPublicClient,
   createWalletClient,

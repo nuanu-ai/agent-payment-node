@@ -1,9 +1,10 @@
 import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { Hex } from "../model.js";
-import { validateUsdtBoundOperation, type UsdtBoundOperation } from "./bound-operation.js";
+import { validateUsdtAnyBoundOperation as validateUsdtBoundOperation, type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import { UsdtExecutionJournal, type UsdtExecutionRecord } from "./execution-journal.js";
 import { USDT_GASLESS, USDT_GASLESS_GAS, type UsdtTransferPlan } from "./model.js";
+import { restoreUsdtPlan } from "./restored-plan.js";
 import { verifyUsdtReceipt, verifyUsdtRevert, type UsdtChainReceipt } from "./receipt.js";
 
 /** Untrusted bundler locator. The chain receipt and its EntryPoint event remain the outcome authority. */
@@ -21,17 +22,6 @@ export interface UsdtRecoveryPort {
   canonicalFinalizedReceipt(transactionHash: Hex): Promise<UsdtChainReceipt | null>;
 }
 
-function plan(bound: UsdtBoundOperation): UsdtTransferPlan {
-  const p = bound.binding.plan;
-  return { ...p, request: { ...p.request, grossAtomic: BigInt(p.request.grossAtomic),
-    maxFeeAtomic: BigInt(p.request.maxFeeAtomic), minReceivedAtomic: BigInt(p.request.minReceivedAtomic) },
-    feeCapAtomic: BigInt(p.feeCapAtomic), netAtomic: BigInt(p.netAtomic), quotedFeeAtomic: BigInt(p.quotedFeeAtomic),
-    quote: { ...p.quote, postOpGas: BigInt(p.quote.postOpGas), exchangeRate: BigInt(p.quote.exchangeRate),
-      exchangeRateNativeToUsd: BigInt(p.quote.exchangeRateNativeToUsd) },
-    price: { ...p.price, maxFeePerGas: BigInt(p.price.maxFeePerGas), maxPriorityFeePerGas: BigInt(p.price.maxPriorityFeePerGas) },
-    gas: USDT_GASLESS_GAS,
-  };
-}
 
 /** One bounded observation pass. It never signs, sends or retries a provider read. */
 export class UsdtRecoveryService {
@@ -60,7 +50,7 @@ export class UsdtRecoveryService {
         const receipt = await this.port.canonicalFinalizedReceipt(locator.transactionHash);
         if (receipt !== null && receipt.transactionHash.toLowerCase() === locator.transactionHash.toLowerCase()) {
           if (locator.success) {
-            const settlement = verifyUsdtReceipt(plan(bound), hash, receipt);
+            const settlement = verifyUsdtReceipt(restoreUsdtPlan(bound), hash, receipt);
             outcome = { state: "finalized", settlement,
               digest: hashObject({ operationId: bound.operationId, result: "finalized", settlement }) };
           } else {

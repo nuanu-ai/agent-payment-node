@@ -151,9 +151,24 @@ export class UniswapTokenCustody {
       return accepted ? "accepted" : "ambiguous";
     } finally { this.wallets.clear(wallet.secret); }
   }
-  async bindEffectProvider(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<void> {
+  /** Recovery reads only the public signed-effect journal; it never opens custody. */
+  async probeJournaled(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null> {
+    const effect = await this.effects.load(op, kind);
+    if (effect === null) return null;
+    const envelopeHash = domainHash("apn.uniswap-token-envelope.v1", canonicalJson(envelopeOf(op, kind, nonce))),
+      attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
+    if (attempt === null || attempt.nonce !== nonce || effect.envelopeHash !== envelopeHash ||
+      attempt.transactionHash !== null && attempt.transactionHash !== effect.transactionHash)
+      corrupt("Uniswap token public effect binding changed.");
+    await this.bindProvider(effect.primaryProviderId, undefined);
+    return { transactionHash: effect.transactionHash, envelopeHash };
+  }
+  async bindEffectProvider(op: UniswapTokenOperation, kind: TokenEffectKind, hash: string): Promise<void> {
     const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
-    if (attempt === null || await this.probeSealed(op, kind, attempt.nonce) === null) corrupt("Uniswap token signed effect is missing.");
+    if (attempt === null || attempt.transactionHash !== hash) corrupt("Uniswap token observation hash changed.");
+    const effect = await this.probeJournaled(op, kind, attempt.nonce);
+    if (effect === null) blocked("Public signed token effect evidence is unavailable.", "uniswap_token_public_effect_missing");
+    if (effect.transactionHash !== hash) corrupt("Uniswap token public effect hash changed.");
   }
   private async bindProvider(journalProvider: string | null | undefined, walletProvider: string | null | undefined) {
     if (journalProvider !== undefined && walletProvider !== undefined && journalProvider !== walletProvider) corrupt("Uniswap token provider binding changed.");

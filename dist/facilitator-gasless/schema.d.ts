@@ -71,12 +71,12 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         state: z.ZodEnum<{
-            failed_before_effect: "failed_before_effect";
             awaiting_approval: "awaiting_approval";
             completed: "completed";
+            failed_before_effect: "failed_before_effect";
             abandoned_unknown: "abandoned_unknown";
-            expired_unused: "expired_unused";
             approved: "approved";
+            expired_unused: "expired_unused";
             verify_started: "verify_started";
             settle_started: "settle_started";
             settle_submitted: "settle_submitted";
@@ -110,8 +110,8 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
             transactionHash: z.ZodNullable<z.ZodString>;
             outcome: z.ZodEnum<{
                 unknown: "unknown";
-                accepted: "accepted";
                 pending: "pending";
+                accepted: "accepted";
                 rejected: "rejected";
             }>;
         }, z.core.$strict>>;
@@ -121,8 +121,8 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
             transactionHash: z.ZodNullable<z.ZodString>;
             outcome: z.ZodEnum<{
                 unknown: "unknown";
-                accepted: "accepted";
                 pending: "pending";
+                accepted: "accepted";
                 rejected: "rejected";
             }>;
         }, z.core.$strict>>;
@@ -160,12 +160,12 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
-        failed_before_effect: "failed_before_effect";
         awaiting_approval: "awaiting_approval";
         completed: "completed";
+        failed_before_effect: "failed_before_effect";
         abandoned_unknown: "abandoned_unknown";
-        expired_unused: "expired_unused";
         approved: "approved";
+        expired_unused: "expired_unused";
         verify_started: "verify_started";
         settle_started: "settle_started";
         settle_submitted: "settle_submitted";
@@ -199,8 +199,8 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         transactionHash: z.ZodNullable<z.ZodString>;
         outcome: z.ZodEnum<{
             unknown: "unknown";
-            accepted: "accepted";
             pending: "pending";
+            accepted: "accepted";
             rejected: "rejected";
         }>;
     }, z.core.$strict>>;
@@ -210,8 +210,8 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         transactionHash: z.ZodNullable<z.ZodString>;
         outcome: z.ZodEnum<{
             unknown: "unknown";
-            accepted: "accepted";
             pending: "pending";
+            accepted: "accepted";
             rejected: "rejected";
         }>;
     }, z.core.$strict>>;

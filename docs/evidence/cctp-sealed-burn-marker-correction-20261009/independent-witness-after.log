@@ -1,0 +1,24 @@
+✖ sealed burn full production cleanupNonce finalized: real prepare, journal and ledger (381.034084ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 383.519916
+
+✖ failing tests:
+
+test at ../../reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/paid-cctp-v4/sealed-burn-independent/submission-marker-witness.mjs:26:5
+✖ sealed burn full production cleanupNonce finalized: real prepare, journal and ledger (381.034084ms)
+  ApnError: Circle EVM operation blocked: exact_sealed_sei_burn_retirement_required.
+      at circleBlocked (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-sealed-burn-retirement-20261009/dist-test-retirement/src/circle-v2-evm/operation-model.js:9:47)
+      at assertSealedBurnRetirement (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-sealed-burn-retirement-20261009/dist-test-retirement/src/circle-v2-evm/burn-retirement.js:16:9)
+      at sealedBurnReplacement (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-sealed-burn-retirement-20261009/dist-test-retirement/src/circle-v2-evm/burn-retirement.js:25:5)
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/paid-cctp-v4/sealed-burn-independent/submission-marker-witness.mjs:111:25)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'APN_OPERATION_BLOCKED',
+    details: { reason: 'exact_sealed_sei_burn_retirement_required' }
+  }

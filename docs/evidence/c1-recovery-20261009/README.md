@@ -1,0 +1,19 @@
+# C1 sealed first-send recovery evidence
+
+Operation: `a93be9d41d3fd045c19ef5480136ab876616a212a305f367fc53e500565bca28`.
+Saved UserOperation hash: `0x364d57bfe9e3c5dee7e7147882257639707241e50741473ce354f348f6ecdfad`.
+Baseline: `0bf2c917a1bebba6a1175f2f353e20df1e4abcf5`.
+
+The existing public transcript records a checked bootstrap estimate with one disclosure, a once-signed sealed UserOperation, and zero final submission attempts. Its approval stopped with `gasless_rpc_request_budget`; first normal resume stopped with `gasless_usage_reservation_missing`. The bootstrap estimate exposed the permit signature; neither the final signature nor an attempted send is recorded as exposed.
+
+The 24-POST limit is per invocation, including failed transport attempts. The production fixture consumes exactly 24 POSTs for normal approval (five distinct guards, mirror estimate, bootstrap estimate, and one send). Its extra-read regression exhausts at 24 before the send marker. The historical C1 transcript has no physical POST trace, so the exact extra request or retry that exhausted this invocation cannot be identified. No budget increase, stage reset, logging, or historical operation rewrite was made.
+
+The source defect is exact: reconciliation correctly charges the same reservation as `unknown_finality` after disclosed-bootstrap uncertainty, but the next final guard demanded only `reserved`. The fix permits that charged lease only for the same operation in `unknown_finality`, checked disclosed bootstrap, and a sealed once-signed UserOperation with zero disclosure/submission attempts and no settlement. Existing binding, active policy revision/digest, account/chain/token/mechanism, gross amount, UTC window, caps, and guard checks remain. A reserved lease remains valid. Every other lease state remains refused by this effect gate.
+
+The real operation's immutable action deadline was `2026-10-09T03:23:34.176Z`. Existing execution routes this expired sealed, unsubmitted final effect directly to read-only observation before any custody or policy effect guard. This patch cannot authorize dispatch after expiry. Wire permit deadline is `MAX_UINT256`; the typed UserOperation carries no expiry field. Local expiry therefore does not invalidate the disclosed bootstrap authority on chain.
+
+`public-safe-state.json` was collected at 03:26:40.845Z through public Ethereum RPC only; `public-locator-state.json` at 03:26:42.631Z through the configured public Pimlico endpoint. Chain ID is 1; safe/pending EOA nonce is 54; expected designation is present; safe permit and EntryPoint nonces are 1; safe USDC balance is 1,250,488 atomic. Both bundler receipt and by-hash results are null. The safe anchor is block **26152097**, before C1's initial block **26152111**. This does not prove canonical absence after C1, invalidation, no financial effect, or permission release.
+
+Protocol recovery remains normal bounded observation against the same operation/hash. Closure requires either the verified canonical settlement receipt/accounting, or the existing final permission-invalidation proof: completed safe canonical scan, allowance zero, advanced permit and EntryPoint nonces against the immutable initial snapshot, and applicable EOA nonce condition at safe and head anchors. Permission invalidation is separate from proof of payment outcome. No resend, replacement, re-sign, deadline extension, nonce mutation, or manual release was performed or authorized by this change.
+
+Validation: TypeScript build regenerates the tracked distribution; four relevant suites cover Ethereum/Base asset policy, final invalidation, and production RPC budget. `tests.log` retains the final result. New cases cover same-seal/hash recovery at the exact daily cap, wrong operation/amount/phase/attempt and changed activation refusals, and expiry preserving uncertainty without custody or dispatch. All network calls in tests are fixtures.

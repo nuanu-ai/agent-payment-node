@@ -1,0 +1,119 @@
+{
+  "shipping": [
+    {
+      "path": "dist/circle-cleanup85-native-binding.js",
+      "sha256": "2183f5c9ec75745da7d2619da407c1e06e0ed4aead4e7eb12f641d35a8f04480",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-binding.js.map",
+      "sha256": "728af45bc267058a7e9fe330faa21c8f790794251408f0c951b4079e10b7e871",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-binding.d.ts",
+      "sha256": "79e6c7fac89fccd5f397d98005fa43db63afa156d7f462b4f8106d45b96bcdd5",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-cancellation.js",
+      "sha256": "45c45e62862977e3ea7e88eb236c9cfed8c98902eda5d4f58d18cdef58b4fe3a",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-cancellation.js.map",
+      "sha256": "e91eedc9c49e76ca48fb9242579f9806deeb29a8d4faaa8b2355fc35c2685988",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-cancellation.d.ts",
+      "sha256": "db6f0676c607fe168cfec8142f66cd4da9844b2e2e55d2450df86de717500519",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-ledger-authority.js",
+      "sha256": "9981f368b42ba0ff692f92b1f579dcefb991ae6543b04136c27f9335fad6ae6a",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-ledger-authority.js.map",
+      "sha256": "1165b7f86f5fb2848270238ec1e25db88f10604681a224459a2a1f335f301a02",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-ledger-authority.d.ts",
+      "sha256": "27f68420bbb0205c6209ad7bcc5fdcc0f35ca3823399f6a4595179a1bad92133",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-records.js",
+      "sha256": "0daea5cb7c273b06bb9b484d1e566448954e233c498581868e3d94927d37f616",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-records.js.map",
+      "sha256": "3d16014632e4a4187c32866c883143420ae3c4a5e00a6cb7c68ec7a1b2318e05",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-records.d.ts",
+      "sha256": "b17f9a4040729544d9d1431dbc14eb2ca9a48a3d97e8230c4f12cec48508ced9",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-lineage.js",
+      "sha256": "b7db356a4949b1e7974d718b10fcb30defe68bbc4f96574a5c1733d16e091ea8",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-lineage.js.map",
+      "sha256": "844217e6dd2a0e8228ff43c1e907f06516dab0d8ac8da4c1281002efcacda713",
+      "repeatIdentical": true
+    },
+    {
+      "path": "dist/circle-cleanup85-native-lineage.d.ts",
+      "sha256": "1509e370a05954f5c0af392b4d3c06838b311ea244b14215e89c188c054a8b14",
+      "repeatIdentical": true
+    }
+  ],
+  "coldImports": 5,
+  "maxModuleLines": 202,
+  "timestampUtc": "2026-10-09 19:52:57 UTC",
+  "parent": "44e099a85481ffce03d75e8be6033888abc5b49b",
+  "productionStrict": true,
+  "testStrict": true,
+  "tests": 157,
+  "passed": 157,
+  "failed": 0,
+  "actualHome": 0,
+  "liveRpc": 0,
+  "keys": 0,
+  "financialActions": 0,
+  "independentExploitHarness": {
+    "copiedUnchanged": true,
+    "testHarnessFailures": 2,
+    "actualGuard": "APN_OPERATION_BLOCKED marker missing; opaque canonical settlement required",
+    "acceptedRowWrites": 0
+  },
+  "unchangedFinancialPaths": true,
+  "offlineBudgets": {
+    "BForeground": 202,
+    "BPostSignBrokerRefusal": 262,
+    "sourceLimit": 192,
+    "outerLimit": 448
+  },
+  "inputs": [
+    {
+      "path": "src/circle-cleanup85-native-records.ts",
+      "sha256": "2c3c25490de0a8b626af96e5621e1a52a1727c8c0b333ecc8cbd5858d7a8521d"
+    },
+    {
+      "path": "tests/core/cleanup85-native-lineage.test.ts",
+      "sha256": "d693a407f2eceb5a9572c3acbeaa816aa931872d7f7ee8a1890e709a5e62b0e3"
+    },
+    {
+      "path": "tests/core/cleanup85-native-successor-production.test.ts",
+      "sha256": "93712af1421d1bbda199484a8c04fed4f795f7757a4ae9768fb4d962878a88fc"
+    }
+  ]
+}

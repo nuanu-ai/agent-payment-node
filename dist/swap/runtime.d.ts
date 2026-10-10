@@ -1,9 +1,9 @@
-import type { AssetPolicyRegistry } from "../asset-policy-registry.js";
+import { type AssetPolicyRegistry } from "../asset-policy-registry.js";
 import type { AssetUsageLedger } from "../asset-usage-ledger.js";
 import type { ClockPort } from "../ports.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { type SwapOperationRecord } from "./model.js";
-import type { SwapProtocolRegistry } from "./protocol-registry.js";
+import { type SwapProtocolRegistry } from "./protocol-registry.js";
 import { type SwapQuoteInput, type SwapQuoteSnapshot } from "./quote.js";
 import { SwapOperationRepository } from "./repository.js";
 import { GuardedSwapService } from "./service.js";
@@ -122,6 +122,7 @@ export declare class GuardedSwapRuntime<Request> {
     private observe;
     private now;
     private activePolicy;
+    private assertCurrentPolicy;
     private required;
     private material;
 }

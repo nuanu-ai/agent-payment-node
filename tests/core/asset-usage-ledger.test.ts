@@ -257,3 +257,43 @@ test("policy rebinding, asset confusion, altered state and invalid terminal clai
   await writeFile(path, `${JSON.stringify(stored)}\n`, { mode: 0o600 });
   await assert.rejects(ledger.load(identity, record.reservationId), { code: "APN_STATE_CORRUPT" });
 });
+
+
+test("direct no-private retirement holds its exact bucket through durable outcome and release", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const held = await reserve(ledger, "direct-retirement-lock", "20", "direct");
+  let enter!: () => void, finish!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  const retirement = ledger.releaseDirectReservedAfter(held, async () => {
+    enter(); await finished;
+    return { value: "durable-outcome", now: new Date("2026-09-17T10:01:00.000Z"), outcomeDigest: "d".repeat(64) };
+  });
+  await entered;
+  let competingFinished = false;
+  const competing = new AssetUsageLedger(temporary.root).transition({ ...identity, reservationId: held.reservationId,
+    policyDigest: held.policyDigest, state: "submitted", now: new Date("2026-09-17T10:02:00.000Z") })
+    .then(value => { competingFinished = true; return value; }, error => { competingFinished = true; throw error; });
+  const refusal = assert.rejects(competing, { code: "APN_OPERATION_BLOCKED" });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(competingFinished, false);
+  finish();
+  assert.equal(await retirement, "durable-outcome");
+  await refusal;
+  assert.equal((await ledger.load(identity, held.reservationId))!.state, "failed_before_effect");
+});
+
+test("direct no-private retirement refuses a changed reserve before any outcome write", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ledger = new AssetUsageLedger(temporary.root);
+  const held = await reserve(ledger, "direct-retirement-conflict", "20", "direct");
+  await ledger.transition({ ...identity, reservationId: held.reservationId, policyDigest: held.policyDigest,
+    state: "submitted", now: new Date("2026-09-17T10:01:00.000Z") });
+  let writes = 0;
+  await assert.rejects(ledger.releaseDirectReservedAfter(held, async () => {
+    writes++; return { value: null, now: new Date("2026-09-17T10:02:00.000Z"), outcomeDigest: "d".repeat(64) };
+  }), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(writes, 0);
+  assert.equal((await ledger.load(identity, held.reservationId))!.state, "submitted");
+});

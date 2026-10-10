@@ -8,6 +8,7 @@ import { mcpFieldName } from "./command-binder.js";
 import { ApnError } from "./errors.js";
 
 const SELECTED_PATHS = [
+  "circle evm adopt-external-mint", "circle evm prepare", "circle evm approve-source", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm cleanup-nonce", "circle evm cleanup85-prepare", "circle evm cleanup85-cancel", "circle evm cleanup86-approve", "circle evm status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare",
   "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
   "swap ethereum uniswap-token inventory", "swap ethereum uniswap-token quote", "swap ethereum uniswap-token prepare",
@@ -51,6 +52,7 @@ const SELECTED_PATHS = [
   "wallet policy show",
   "wallet policy set",
   "x402 permit2 status",
+  "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant status", "x402 merchant retire-unsent",
   "x402 inspect",
   "x402 fetch prepare",
   "x402 fetch approve",
@@ -70,7 +72,7 @@ const SELECTED_PATHS = [
   "x402 fetch prepare-network",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
   "gasless usdt prepare", "gasless usdt status", "gasless usdt resume",
-  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve",
+  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed",
   "oneclick source submit", "oneclick source status",
 ] as const;
 
@@ -82,6 +84,7 @@ export interface ProjectedMcpTool {
     readonly properties: Record<string, JsonValue>;
     readonly required: string[];
     readonly additionalProperties: false;
+    readonly oneOf?: JsonValue[];
   };
   readonly command: CommandDefinition;
 }
@@ -144,7 +147,11 @@ function inputSchema(command: CommandDefinition): ProjectedMcpTool["inputSchema"
     properties[field] = optionSchema(option);
     if (option.required) required.push(field);
   }
-  return { type: "object", properties, required, additionalProperties: false };
+  return { type: "object", properties, required, additionalProperties: false,
+    ...(command.path.join(" ") === "gasless transfer prepare" ? { oneOf: [
+      { required: ["amount", "max_fee", "min_received"], not: { anyOf: ["net_amount_atomic", "max_gross_atomic", "max_fee_atomic"].map(field => ({ required: [field] })) } },
+      { required: ["net_amount_atomic", "max_gross_atomic", "max_fee_atomic"], not: { anyOf: ["amount", "max_fee", "min_received"].map(field => ({ required: [field] })) } },
+    ] } : {}) };
 }
 
 function optionSchema(option: CommandOption): { [key: string]: JsonValue } {
@@ -153,14 +160,15 @@ function optionSchema(option: CommandOption): { [key: string]: JsonValue } {
   }
   const pattern = scalarPattern(option);
   return {
-    type: "string",
+    type: option.type === "boolean" ? "boolean" : "string",
     description: `Catalog type ${option.type}; constraints ${option.constraints.join(", ") || "none"}; sensitivity ${option.sensitivity}.`,
     ...(pattern === undefined ? {} : { pattern }),
-    ...(option.default.kind === "literal" ? { default: option.default.value } : {}),
+    ...(option.default.kind === "literal" ? { default: option.type === "boolean" ? option.default.value === "true" : option.default.value } : {}),
   };
 }
 
 function scalarPattern(option: CommandOption): string | undefined {
+  if (option.type === "boolean") return undefined;
   if (option.type === "string" && option.constraints.includes("64_lowercase_hex_characters")) {
     return "^[a-f0-9]{64}$";
   }

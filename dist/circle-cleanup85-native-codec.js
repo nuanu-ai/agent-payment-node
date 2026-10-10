@@ -1,0 +1,118 @@
+import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction } from "viem";
+import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
+import { ApnError } from "./errors.js";
+import { evmRpcAddress as address, evmRpcHex as hex, evmRpcQuantity as quantity, evmRpcRecord as record } from "./evm-rpc-codec.js";
+export const CLEANUP85_OWNER = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
+export const CLEANUP85_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
+export const CLEANUP85_RECIPIENT_DELEGATE = "0xe6cae83bde06e4c305530e199d7217f42808555b";
+export const CLEANUP85_RECIPIENT_CODE = "0xef0100e6cae83bde06e4c305530e199d7217f42808555b";
+export const CLEANUP85_RECIPIENT_DELEGATE_CODE_HASH = "0xcc7b633aef4b2543cb8f37522adf1a401f910f0f6b2430c1eecc11f401ccfcf3";
+export const CLEANUP85_FEE_CAP = 2000000000000n;
+export const CLEANUP85_REQUEST = Object.freeze({
+    parentOperationId: "4ee24e4501478193bd84aa89463eb673d539db23cbb7cdbf56f8fe197d792a33",
+    oldCleanupTransactionHash: "0x24cb1b6244a30ca2a829b4f561c907565d49aad806735137e3160ae0f7f03b95",
+    oldCleanupMaterialHash: "737b794790d7867a18e90d15033f72c1177cc5204a7b2cff699687cb4aa03468",
+    oldCleanupEnvelopeHash: "62e62f220a1afbf65889ab0edfbc090c3b67bc4d5f9b161ec8e33dc8137a3583",
+});
+export function cleanup85Blocked(reason) {
+    throw new ApnError("APN_OPERATION_BLOCKED", `Finite cleanup85 cancellation refused: ${reason}.`, { reason: `cleanup85_${reason}` });
+}
+export function validateCleanup85Request(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, [...Object.keys(CLEANUP85_REQUEST), "recoveryBinding", "parentIntentHash"]) ||
+        Object.entries(CLEANUP85_REQUEST).some(([key, expected]) => value[key] !== expected) ||
+        ![value.recoveryBinding, value.parentIntentHash].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)))
+        cleanup85Blocked("request_binding");
+    return Object.freeze({ ...value });
+}
+const atomic = (value) => {
+    if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,77})$/u.test(value))
+        cleanup85Blocked("envelope_quantity");
+    return BigInt(value);
+};
+const bump = (n) => (n * 9n + 7n) / 8n;
+export function cleanup85Envelope(gas, currentMaxFee, currentPriority) {
+    const maximum = [45000000n, atomic(currentMaxFee)].reduce((a, b) => a > b ? a : b);
+    const priority = [1n, bump(0n), atomic(currentPriority)].reduce((a, b) => a > b ? a : b);
+    const body = { chainId: 42161, from: CLEANUP85_OWNER, to: CLEANUP85_RECIPIENT, nonceAtomic: "85",
+        valueAtomic: "1", data: "0x", gasLimitAtomic: gas, maxFeePerGasAtomic: maximum.toString(),
+        maxPriorityFeePerGasAtomic: priority.toString() };
+    return validateCleanup85Envelope({ ...body, envelopeHash: hashObject(body) });
+}
+export function validateCleanup85Envelope(value) {
+    if (!isPlainRecord(value) || !exactKeys(value, ["chainId", "from", "to", "nonceAtomic", "valueAtomic", "data", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash"]))
+        cleanup85Blocked("envelope_shape");
+    const e = value, { envelopeHash, ...body } = e;
+    if (e.chainId !== 42161 || e.from !== CLEANUP85_OWNER || e.to !== CLEANUP85_RECIPIENT || e.nonceAtomic !== "85" || e.valueAtomic !== "1" || e.data !== "0x" ||
+        envelopeHash !== hashObject(body) || atomic(e.gasLimitAtomic) < 21000n || atomic(e.maxFeePerGasAtomic) < bump(40000000n) ||
+        atomic(e.maxPriorityFeePerGasAtomic) < 1n || atomic(e.maxPriorityFeePerGasAtomic) > atomic(e.maxFeePerGasAtomic) ||
+        atomic(e.gasLimitAtomic) * atomic(e.maxFeePerGasAtomic) + 1n > CLEANUP85_FEE_CAP)
+        cleanup85Blocked("envelope_binding_or_cap");
+    return e;
+}
+/** Strict actual native wire codec. A Circle value-zero codec cannot prove this value-one transfer. */
+export async function verifyCleanup85Raw(e, raw) {
+    validateCleanup85Envelope(e);
+    return verifyNativeCancellationRawFields(e, raw);
+}
+/** Pure cryptographic comparator; it grants no policy, custody, nonce or dispatch authority.
+ * The finite production wrapper above always validates the immutable actual-owner pins first. */
+export async function verifyNativeCancellationRawFields(e, raw) {
+    if (!/^0x02[0-9a-f]+$/u.test(raw) || raw.length > 2050 || raw.length % 2 !== 0)
+        cleanup85Blocked("wire_shape");
+    const t = parseTransaction(raw), priority = t.maxPriorityFeePerGas === undefined ? 0n : t.maxPriorityFeePerGas;
+    const access = t.accessList === undefined ? [] : t.accessList;
+    if (t.type !== "eip1559" || t.chainId !== e.chainId || (t.to === undefined || t.to === null || getAddress(t.to) !== getAddress(e.to)) || t.nonce !== Number(atomic(e.nonceAtomic)) || t.value !== atomic(e.valueAtomic) ||
+        (t.data === undefined ? "0x" : t.data) !== e.data || t.gas !== atomic(e.gasLimitAtomic) || t.maxFeePerGas !== atomic(e.maxFeePerGasAtomic) ||
+        priority !== atomic(e.maxPriorityFeePerGasAtomic) || !Array.isArray(access) || access.length !== 0 ||
+        getAddress(await recoverTransactionAddress({ serializedTransaction: raw })) !== getAddress(e.from))
+        cleanup85Blocked("signed_wire_binding");
+    if (t.r === undefined || t.s === undefined || BigInt(t.s) < 1n || BigInt(t.s) > 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n || (t.yParity !== 0 && t.yParity !== 1) || serializeTransaction(t, { r: t.r, s: t.s, yParity: t.yParity }) !== raw)
+        cleanup85Blocked("canonical_signature_wire");
+    return keccak256(raw);
+}
+function transactionWire(t) {
+    if (quantity(t.type) !== 2n || !Array.isArray(t.accessList) || t.accessList.length !== 0 ||
+        t.authorizationList !== undefined && (!Array.isArray(t.authorizationList) || t.authorizationList.length !== 0))
+        cleanup85Blocked("wire_type_or_authorization");
+    const parity = quantity(t.yParity ?? t.v);
+    if (parity > 1n)
+        cleanup85Blocked("wire_parity");
+    return serializeTransaction({ type: "eip1559", chainId: Number(quantity(t.chainId)), nonce: Number(quantity(t.nonce)), to: address(t.to),
+        data: hex(t.input), value: quantity(t.value), gas: quantity(t.gas), maxFeePerGas: quantity(t.maxFeePerGas), maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGas), accessList: [] }, { r: evmRpcSignatureScalar(t.r), s: evmRpcSignatureScalar(t.s), yParity: Number(parity) });
+}
+/** RPC transaction signature values are QUANTITYs. Accept fixed-width DATA only for providers retaining the legacy word form. */
+export function evmRpcSignatureScalar(value) {
+    if (typeof value === "string" && /^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/u.test(value))
+        return `0x${value.slice(2).padStart(64, "0")}`;
+    try {
+        return hex(value, 32);
+    }
+    catch {
+        cleanup85Blocked("signature_scalar");
+    }
+}
+/** Finalized evidence must contain the exact signed transaction once, at its exact receipt index. */
+export async function verifyCleanup85Observation(e, expectedHash, input) {
+    validateCleanup85Envelope(e);
+    const t = record(input.transaction), r = record(input.receipt), b = record(input.canonicalBlock), again = record(input.recheckedBlock), head = record(input.finalityHead);
+    const hash = hex(t.hash, 32), blockHash = hex(b.hash, 32), number = quantity(b.number), index = quantity(t.transactionIndex);
+    const gasUsed = quantity(r.gasUsed), price = quantity(r.effectiveGasPrice), fee = gasUsed * price;
+    if (input.chainId !== 42161 || input.finalityTag !== "finalized" || hash !== expectedHash || hash === CLEANUP85_REQUEST.oldCleanupTransactionHash ||
+        blockHash === `0x${"0".repeat(64)}` || number <= 513145262n || quantity(b.timestamp) < 1791535099n ||
+        hex(t.blockHash, 32) !== blockHash || quantity(t.blockNumber) !== number || address(t.from) !== CLEANUP85_OWNER ||
+        hex(r.transactionHash, 32) !== hash || quantity(r.type) !== 2n || quantity(r.status) !== 1n || hex(r.blockHash, 32) !== blockHash || quantity(r.blockNumber) !== number ||
+        address(r.from) !== CLEANUP85_OWNER || address(r.to) !== CLEANUP85_RECIPIENT || quantity(r.transactionIndex) !== index ||
+        !Array.isArray(r.logs) || r.logs.length !== 0 || gasUsed === 0n || gasUsed > atomic(e.gasLimitAtomic) || price > atomic(e.maxFeePerGasAtomic) || fee + 1n > CLEANUP85_FEE_CAP ||
+        !Array.isArray(b.transactions) || index > BigInt(Number.MAX_SAFE_INTEGER) || b.transactions[Number(index)] !== hash || b.transactions.filter(x => x === hash).length !== 1 ||
+        hex(again.hash, 32) !== blockHash || quantity(again.number) !== number || quantity(again.timestamp) !== quantity(b.timestamp) ||
+        quantity(head.number) < number || quantity(head.timestamp) < quantity(b.timestamp) || hex(head.hash, 32) === `0x${"0".repeat(64)}` ||
+        quantity(head.number) === number && hex(head.hash, 32) !== blockHash)
+        cleanup85Blocked("finalized_receipt_binding");
+    for (const field of ["l1Fee", "operatorFee", "blobGasUsed", "blobGasPrice"])
+        if (r[field] !== undefined && quantity(r[field]) !== 0n)
+            cleanup85Blocked("unmodeled_fee");
+    if (await verifyCleanup85Raw(e, transactionWire(t)) !== hash)
+        cleanup85Blocked("canonical_wire_hash");
+    return { transactionHash: hash, blockHash, blockNumberAtomic: number.toString(), receiptHash: hashObject(r), actualFeeAtomic: fee.toString(), nativeConsumedAtomic: (fee + 1n).toString() };
+}
+//# sourceMappingURL=circle-cleanup85-native-codec.js.map

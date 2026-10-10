@@ -1,3 +1,4 @@
+import { assertLateFirstSend, validateFirstSendApprovals } from "./first-send-authority.js";
 import { assertGaslessEstimate } from "./economics.js";
 import type { GaslessEffect, GaslessMutable, GaslessOperationRecord } from "./operation-model.js";
 import { assertGaslessPermissionClosure } from "./permission-invalidation.js";
@@ -9,13 +10,17 @@ const corrupt = (): never => gaslessFailure("APN_STATE_CORRUPT", "gasless_effect
 export function validateGaslessMutable(op: GaslessOperationRecord, s: GaslessMutable, at: string): void {
   if (s.bootstrap.role !== "bootstrap" || s.userOperation.role !== "user_operation") corrupt();
   for (const effect of [s.bootstrap, s.userOperation]) validateEffect(effect, at);
+  validateFirstSendApprovals(op, s, at);
   const consent = s.approval;
   if (consent !== null && (consent.fingerprint !== op.fingerprint || consent.expiresAt !== op.intent.expiresAt ||
     consent.approvedAt < op.createdAt || consent.approvedAt > at || consent.approvedAt >= consent.expiresAt)) corrupt();
   for (const e of [s.bootstrap, s.userOperation]) {
     if (e.signingAttempts === 1 && (consent === null || e.signingStartedAt! < consent.approvedAt || e.signingStartedAt! >= op.intent.expiresAt)) corrupt();
     if (e.disclosedAt !== null && e.disclosedAt >= op.intent.expiresAt) corrupt();
-    if (e.submittedAt !== null && e.submittedAt >= op.intent.expiresAt) corrupt();
+    if (e.submittedAt !== null && e.submittedAt >= op.intent.expiresAt) {
+      if (e.role !== "user_operation") corrupt();
+      assertLateFirstSend(op, s, e.submittedAt);
+    }
   }
   if (s.state === "awaiting_approval" && (consent !== null || s.bootstrap.signingAttempts !== 0)) corrupt();
   if (s.state !== "awaiting_approval" && s.state !== "failed_before_effect" && consent === null) corrupt();

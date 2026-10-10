@@ -4,9 +4,11 @@ import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore } from "../secure-state-store.js";
-import { validateUsdtBoundOperation } from "./bound-operation.js";
+import { validateUsdtAnyBoundOperation as validateUsdtBoundOperation } from "./bound-operation.js";
 import { USDT_GASLESS } from "./model.js";
 import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-data.js";
+import { restoreUsdtPlan } from "./restored-plan.js";
+import { signedUsdtV2 } from "./economics-v2.js";
 import { usdtEffectiveFeeCap } from "./quote.js";
 export const USDT_EXECUTION_SCHEMA = "apn.gasless-usdt-execution.v1";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -83,6 +85,13 @@ export function validateUsdtExecutionRecord(value) {
 /** Separate v1 effect journal. It cannot sign or send; each phase is fsynced before returning. */
 export class UsdtExecutionJournal extends SecureStateStore {
     usage;
+    exposureSnapshots = new Map();
+    reservedSnapshot(bound) {
+        const snapshot = this.exposureSnapshots.get(bound.operationId);
+        if (snapshot === undefined)
+            fail("sponsor_snapshot_missing");
+        return snapshot;
+    }
     constructor(root) { super(root); this.usage = new AssetUsageLedger(root); }
     path(operationId) {
         if (!HASH.test(operationId))
@@ -184,15 +193,11 @@ export class UsdtExecutionJournal extends SecureStateStore {
         if (BigInt(Math.floor(at.getTime() / 1000)) + 60n > payload.validUntil || payload.validAfter > BigInt(Math.floor(at.getTime() / 1000)))
             fail("paymaster_expired");
         // Reconstruct the quoted maximum from the signed payload; the fee cap remains the owner's exact bound.
-        const plan = { ...b.plan, request: { ...b.plan.request, grossAtomic: BigInt(b.plan.request.grossAtomic),
-                maxFeeAtomic: BigInt(b.plan.request.maxFeeAtomic), minReceivedAtomic: BigInt(b.plan.request.minReceivedAtomic) },
-            quote: { ...b.plan.quote, postOpGas: BigInt(b.plan.quote.postOpGas), exchangeRate: BigInt(b.plan.quote.exchangeRate),
-                exchangeRateNativeToUsd: BigInt(b.plan.quote.exchangeRateNativeToUsd) },
-            price: { ...b.plan.price, maxFeePerGas: BigInt(b.plan.price.maxFeePerGas),
-                maxPriorityFeePerGas: BigInt(b.plan.price.maxPriorityFeePerGas) },
-            gas: Object.fromEntries(Object.entries(b.plan.gas).map(([key, value]) => [key, BigInt(value)])),
-            feeCapAtomic: BigInt(b.plan.feeCapAtomic), netAtomic: BigInt(b.plan.netAtomic), quotedFeeAtomic: BigInt(b.plan.quotedFeeAtomic) };
-        validateUsdtPaymasterData({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, plan, BigInt(Math.floor(at.getTime() / 1000)));
+        const plan = restoreUsdtPlan(bound);
+        if (bound.schemaVersion === "apn.gasless-usdt-bound-operation.v2")
+            signedUsdtV2({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, plan, BigInt(Math.floor(at.getTime() / 1000)));
+        else
+            validateUsdtPaymasterData({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, plan, BigInt(Math.floor(at.getTime() / 1000)));
         if (plan.feeCapAtomic !== usdtEffectiveFeeCap(plan.request) ||
             plan.quotedFeeAtomic > plan.feeCapAtomic)
             fail("fee_bound_changed");
@@ -207,6 +212,11 @@ export class UsdtExecutionJournal extends SecureStateStore {
             snapshot.account.eoaNonce.toString() !== b.account.eoaNonce || snapshot.account.delegation !== b.account.delegation ||
             snapshot.account.usdtBalanceAtomic.toString() !== b.account.usdtBalanceAtomic)
             fail("safe_snapshot_changed");
+        if (bound.schemaVersion === "apn.gasless-usdt-bound-operation.v2") {
+            if (snapshot.pins === undefined)
+                fail("sponsor_snapshot_missing");
+            this.exposureSnapshots.set(bound.operationId, { ...snapshot, pins: snapshot.pins });
+        }
         const usage = await this.otherUsage(bound, at);
         const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(b.plan.request.sender).asset,
             rail: "gasless", amountAtomic: b.plan.request.grossAtomic, dailyUsageAtomic: usage.amountAtomic,
@@ -215,6 +225,9 @@ export class UsdtExecutionJournal extends SecureStateStore {
             canonicalJson(admission.asset.mechanismPins.gasless) !== canonicalJson(USDT_GASLESS.mechanism))
             fail("policy_mechanism_changed");
         return { now: at, registry: active.registry };
+    }
+    async beforeCustodyPolicyFence(bound, port) {
+        await this.submissionFence(bound, port);
     }
     /** Last read fence immediately before the submitting marker. Dispatch must perform its own fresh guard. */
     async submissionFence(bound, port) {

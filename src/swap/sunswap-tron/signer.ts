@@ -1,4 +1,4 @@
-import { utils } from "tronweb";
+import { utils } from "../../tron/utils.js";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import { validateChainAccount } from "../../chain-account-store.js";
 import type { ChainAccount, ChainWalletStoragePort, RailSignedEffect } from "../../direct-rail-ports.js";

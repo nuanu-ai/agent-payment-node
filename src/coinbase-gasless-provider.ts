@@ -1,3 +1,5 @@
+import { HttpsBaseRpc } from "./rpc.js";
+import { COINBASE_OBSERVATION_ORIGIN, coinbaseObservationPreset } from "./coinbase-gasless-observation-source.js";
 import { hashObject, sha256 } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
@@ -105,9 +107,10 @@ export async function coinbaseGaslessPreconditionsMatch(context: RuntimeContext,
 }
 
 export async function reobserveCoinbaseGasless(
-  context: RuntimeContext, durable: ProviderDirectState, operation: OperationRecord,
+  context: RuntimeContext, durable: ProviderDirectState, operation: OperationRecord, observationPreset?: string,
 ): Promise<OperationRecord> {
-  const observed = await observeCoinbaseGasless(context.requireCoinbaseRpc(), operation);
+  const logsRpc = observationPreset === undefined ? undefined : (coinbaseObservationPreset(observationPreset), new HttpsBaseRpc(COINBASE_OBSERVATION_ORIGIN));
+  const observed = await observeCoinbaseGasless(context.requireCoinbaseRpc(), operation, logsRpc);
   if (observed.status === "safe") return await durable.transition(operation, "completed", true,
     "confirmed_coinbase_gasless_transfer", "canonical_safe_coinbase_gasless_settlement",
     { transactionHash: observed.settlement.transactionHash, coinbaseGaslessCursor: observed.cursor,

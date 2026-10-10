@@ -4,6 +4,7 @@ export declare function stateSecurity(message: string): never;
 export declare function stateCorrupt(message: string): never;
 export declare function stateIdentifier(value: string, label: string): void;
 export declare function validateDirectory(stats: Stats, root: boolean): void;
+export declare function validateFile(stats: Stats): void;
 export declare function isCode(error: unknown, code: string): boolean;
 export declare class SecureStateStore {
     readonly root: string;
@@ -28,6 +29,8 @@ export declare class SecureStateStore {
     private directorySnapshot;
     private assertSameDirectorySnapshot;
     protected readJson(relativePath: string): Promise<unknown | null>;
+    /** Optional internal assertion seam for specialized create-only stores. */
+    protected beforeCreateOnlyPublication(_relativePath: string, _value: unknown): Promise<void>;
     protected writeJson(relativePath: string, value: unknown, createOnly?: boolean): Promise<void>;
     protected removeFile(relativePath: string): Promise<boolean>;
     private acquireLock;

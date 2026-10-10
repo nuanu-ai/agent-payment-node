@@ -1,3 +1,4 @@
+import { type BridgeEffectAuthority } from "./effect-authority.js";
 import type { StateStore } from "../state.js";
 import { type BridgeSave } from "./observation.js";
 import { type BridgeOperationRecord } from "./operation-model.js";
@@ -18,8 +19,12 @@ export declare class BridgeExecution {
         residual: () => BridgeRpcPort;
     }>, physicalBudget?: BridgeRpcPhysicalBudget | undefined);
     approve(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<BridgeOperationRecord>;
-    run(op: BridgeOperationRecord): Promise<BridgeOperationRecord>;
+    private confirmForeground;
+    private approved;
+    resume(op: BridgeOperationRecord, approval?: BridgeApprovalPort): Promise<BridgeOperationRecord>;
+    run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord>;
     private guard;
+    private authorityPolicy;
     private allowlist;
     private haltUnsent;
     private terminalFailure;

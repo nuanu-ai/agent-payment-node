@@ -54,6 +54,8 @@ export interface MetaMaskGaslessPublicOperation {
         readonly sender: Address;
         readonly recipient: Address;
         readonly fee_recipient: Address;
+        readonly requested_fixed_net_atomic?: string;
+        readonly maximum_gross_atomic?: string;
         readonly gross_atomic: string;
         readonly user_max_fee_atomic: string;
         readonly minimum_received_atomic: string;

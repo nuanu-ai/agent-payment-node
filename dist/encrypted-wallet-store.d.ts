@@ -36,7 +36,7 @@ export declare class EncryptedWalletStore {
     private readonly state;
     private readonly wrappingSecret;
     constructor(state: StateStore, wrappingSecret: WrappingSecretPort);
-    describe(profileInput: string): Promise<{
+    describe(profileInput: string, beforeDecrypt?: () => void, beforeKeyLoad?: (identity: WalletIdentity) => Promise<void>): Promise<{
         readonly identity: WalletIdentity;
         readonly secret: WalletSecretState;
     } | null>;

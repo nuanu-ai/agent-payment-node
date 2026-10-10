@@ -8,4 +8,4 @@ export declare function prepareCoinbaseGasless(context: RuntimeContext, operatio
     command: "gasless.transfer.prepare";
 }>): Promise<unknown>;
 export declare function coinbaseGaslessPreconditionsMatch(context: RuntimeContext, operation: OperationRecord): Promise<boolean>;
-export declare function reobserveCoinbaseGasless(context: RuntimeContext, durable: ProviderDirectState, operation: OperationRecord): Promise<OperationRecord>;
+export declare function reobserveCoinbaseGasless(context: RuntimeContext, durable: ProviderDirectState, operation: OperationRecord, observationPreset?: string): Promise<OperationRecord>;

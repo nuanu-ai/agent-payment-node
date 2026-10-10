@@ -26,9 +26,10 @@ export class ChainAccountStore extends SecureStateStore implements ChainWalletSt
     super(root, options);
   }
 
+  protected async initializeStorage(): Promise<void> { await super.initialize(); }
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {
-      await super.initialize();
+      await this.initializeStorage();
       for (const name of ["chain-accounts", "chain-wallets"]) await this.ensureDirectory(name);
     })();
     await this.initialized;

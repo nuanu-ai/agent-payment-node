@@ -1,5 +1,5 @@
-/** Finite Relay v2 BNB native quotes to pinned Polygon or Monad recipients; no signing or submission. */
-import { getOrderId } from "@relay-protocol/settlement-sdk";
+/** Finite Relay native-source quotes to fixed BNB and Base funding recipients; no signing or submission. */
+import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Hex } from "viem";
 import { hashObject } from "../canonical.js";
@@ -13,7 +13,7 @@ export const RELAY_BNB_SOURCE = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
 export const RELAY_POLYGON_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 export const RELAY_BNB_DEFAULT_SOURCE = RELAY_POLYGON_RECIPIENT;
 const DEPOSIT_NATIVE = parseAbi(["function depositNative(address depositor, bytes32 id) payable"]);
-const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm", polygon: "ethereum-vm", monad: "ethereum-vm" } as const;
+const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm", polygon: "ethereum-vm", megaeth: "ethereum-vm", monad: "ethereum-vm" } as const;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u, UINT = /^(0|[1-9][0-9]*)$/u;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/u, HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
@@ -46,7 +46,7 @@ export interface RelayNativeQuoteIntent {
   readonly payer: string; readonly recipient: string; readonly amountAtomic: string;
   readonly minimumOutputWei: string; readonly nowSeconds: number;
 }
-export function relayNativeRoute(payer: string, recipient: string) {
+function legacyRelayNativeRoute(payer: string, recipient: string) {
   address(payer, "payer"); address(recipient, "recipient");
   if (same(payer, RELAY_BNB_SOURCE) && same(recipient, RELAY_POLYGON_RECIPIENT)) return {
     reference: RELAY_BNB_POLYGON_ROUTE_REFERENCE as typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE,
@@ -65,25 +65,50 @@ export function relayNativeRoute(payer: string, recipient: string) {
     recipient: RELAY_BNB_DEFAULT_SOURCE, refundCurrency: BNB_NATIVE };
   return fail("lane intent");
 }
+export const RELAY_BASE_SOURCE = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
+export const RELAY_MEGA_USDM = "0xfafddbb3fc7688494971a79cc65dca3ef82079e7";
+export const RELAY_BASE_MEGA_REFERENCE = "base-native-mega-usdm-default-v1";
+export const RELAY_BASE_POLYGON_REFERENCE = "base-native-polygon-native-buyer-v1";
+export const RELAY_BASE_PRINCIPAL = 50_000_000_000_000n;
+export const RELAY_BASE_FULL_FEE = 1_000_000_000_000n;
+export function relayNativeRoute(payer: string, recipient: string) {
+  address(payer, "payer"); address(recipient, "recipient");
+  if (same(payer, RELAY_BASE_SOURCE)) {
+    const common = { sourceChainId: 8453 as const, sourceChain: "base" as const,
+      payer: RELAY_BASE_SOURCE, profile: "evm-live-seller" as const };
+    if (same(recipient, RELAY_POLYGON_RECIPIENT)) return { ...common,
+      reference: RELAY_BASE_MEGA_REFERENCE as typeof RELAY_BASE_MEGA_REFERENCE, chainId: 4326 as const, chain: "megaeth" as const,
+      recipient: RELAY_POLYGON_RECIPIENT, currency: RELAY_MEGA_USDM, refundCurrency: RELAY_MEGA_USDM,
+      floor: 90_000_000_000_000_000n };
+    if (same(recipient, RELAY_BNB_SOURCE)) return { ...common,
+      reference: RELAY_BASE_POLYGON_REFERENCE as typeof RELAY_BASE_POLYGON_REFERENCE, chainId: 137 as const, chain: "polygon" as const,
+      recipient: RELAY_BNB_SOURCE, currency: BNB_NATIVE, refundCurrency: POLYGON_USDC,
+      floor: 700_000_000_000_000_000n };
+    return fail("lane intent");
+  }
+  return { ...legacyRelayNativeRoute(payer, recipient), sourceChainId: 56 as const,
+    sourceChain: "bnb" as const, currency: BNB_NATIVE, floor: 1n };
+}
 export function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<string, unknown> {
   const route = relayNativeRoute(intent.payer, intent.recipient);
   if (!same(intent.payer, route.payer) || amount(intent.amountAtomic, "amount") <= 0n ||
-    amount(intent.minimumOutputWei, "minimum output") <= 0n) fail("lane intent");
-  return { user: intent.payer, originChainId: 56, destinationChainId: route.chainId,
-    originCurrency: BNB_NATIVE, destinationCurrency: BNB_NATIVE,
+    amount(intent.minimumOutputWei, "minimum output") < route.floor ||
+    (route.sourceChainId === 8453 && amount(intent.amountAtomic, "amount") !== RELAY_BASE_PRINCIPAL)) fail("lane intent");
+  return { user: intent.payer, originChainId: route.sourceChainId, destinationChainId: route.chainId,
+    originCurrency: BNB_NATIVE, destinationCurrency: route.currency,
     amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: intent.recipient,
     refundTo: intent.payer, includeProtocolData: true, usePermit: false, useDepositAddress: false };
 }
 export interface ValidatedRelayNativeQuote {
   readonly schemaVersion: "apn.relay-native-quote.v1";
-  readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE;
+  readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE | typeof RELAY_BASE_MEGA_REFERENCE | typeof RELAY_BASE_POLYGON_REFERENCE;
   readonly quoteDigest: string; readonly statusLocator?: RelayStatusLocator;
   readonly orderId: string; readonly orderSignature: string; readonly solver: string;
   readonly payer: string; readonly recipient: string; readonly principalAtomic: string;
   readonly orderData: Readonly<Record<string, unknown>>;
-  readonly paymentDetails: Readonly<{ chainId: "bnb"; depository: string; currency: string; amount: string }>;
+  readonly paymentDetails: Readonly<{ chainId: "bnb" | "base"; depository: string; currency: string; amount: string }>;
   readonly minimumOutputWei: string; readonly deadline: number;
-  readonly deposit: Readonly<{ from: string; to: string; data: string; value: string; chainId: 56;
+  readonly deposit: Readonly<{ from: string; to: string; data: string; value: string; chainId: 56 | 8453;
     gas: string; maxFeePerGas: string; maxPriorityFeePerGas: string; maximumNetworkFeeWei: string }>;
 }
 
@@ -123,9 +148,9 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
   const payee = one(output.payments, "output payments");
   keys(payee, ["recipient", "currency", "minimumAmount", "expectedAmount"], "payee extension");
   if (order.version !== "v1" || order.solverChainId !== "base" || !same(address(order.solver, "solver"), RELAY_SOLVER) ||
-    payment.chainId !== "bnb" || !same(address(payment.currency, "input currency"), BNB_NATIVE) ||
+    payment.chainId !== route.sourceChain || !same(address(payment.currency, "input currency"), BNB_NATIVE) ||
     amount(payment.amount, "input amount") !== amount(intent.amountAtomic, "amount") || payment.weight !== "1" ||
-    output.chainId !== route.chain || !same(address(payee.currency, "output currency"), BNB_NATIVE) ||
+    output.chainId !== route.chain || !same(address(payee.currency, "output currency"), route.currency) ||
     !same(address(payee.recipient, "payee"), intent.recipient) || refunds.length !== 2 ||
     list(output.calls, "calls").length !== 0 || list(order.fees, "fees").length !== 0) fail("order identity");
   const minimum = amount(payee.minimumAmount, "minimum output");
@@ -133,7 +158,7 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
   const deadline = output.deadline as number;
   if (typeof deadline !== "number" || !Number.isSafeInteger(deadline) || deadline <= intent.nowSeconds + 60 ||
     deadline > intent.nowSeconds + 7 * 86400) fail("deadline");
-  const expectedRefunds = [{ chainId: "bnb", recipient: intent.payer, currency: BNB_NATIVE },
+  const expectedRefunds = [{ chainId: route.sourceChain, recipient: intent.payer, currency: BNB_NATIVE },
     { chainId: route.chain, recipient: intent.recipient, currency: route.refundCurrency }];
   const projectedRefunds = refunds.map((value, index) => {
     const refund = record(value, "refund"), expected = expectedRefunds[index]!;
@@ -146,10 +171,10 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
       extraData: bytes32(refund.extraData, "refund extra data") };
   });
   const orderData = { version: "v1", solverChainId: "base", solver: address(order.solver, "solver").toLowerCase(),
-    salt: bytes32(order.salt, "salt"), inputs: [{ payment: { chainId: "bnb", currency: BNB_NATIVE,
+    salt: bytes32(order.salt, "salt"), inputs: [{ payment: { chainId: route.sourceChain, currency: BNB_NATIVE,
       amount: amount(payment.amount, "input amount").toString(), weight: "1" }, refunds: projectedRefunds }],
     output: { chainId: route.chain, payments: [{ recipient: address(payee.recipient, "payee").toLowerCase(),
-      currency: BNB_NATIVE, minimumAmount: minimum.toString(), expectedAmount: amount(payee.expectedAmount, "expected output").toString() }],
+      currency: route.currency, minimumAmount: minimum.toString(), expectedAmount: amount(payee.expectedAmount, "expected output").toString() }],
       calls: [], deadline, extraData: bytes32(output.extraData, "output extra data") }, fees: [] };
   let orderId: string;
   try { orderId = getOrderId(orderData as unknown as Parameters<typeof getOrderId>[0], CHAINS); }
@@ -162,26 +187,26 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
   catch { return fail("order signature"); }
   if (!same(signer, RELAY_SOLVER)) fail("order signer");
   const details = record(protocol.paymentDetails, "payment details");
-  if (details.chainId !== "bnb" || !same(address(details.depository, "depository"), ETHEREUM_DEPOSITORY) ||
+  if (details.chainId !== route.sourceChain || !same(address(details.depository, "depository"), ETHEREUM_DEPOSITORY) ||
     !same(address(details.currency, "payment currency"), BNB_NATIVE) ||
     amount(details.amount, "payment amount") !== amount(intent.amountAtomic, "amount")) fail("payment details");
   const quotedDetails = record(quote.details, "details"), inCurrency = record(record(quotedDetails.currencyIn, "currency in").currency, "input token"),
     out = record(quotedDetails.currencyOut, "currency out"), outCurrency = record(out.currency, "output token");
   if (!same(address(quotedDetails.sender, "sender"), intent.payer) || !same(address(quotedDetails.recipient, "recipient"), intent.recipient) ||
-    inCurrency.chainId !== 56 || !same(address(inCurrency.address, "input token"), BNB_NATIVE) ||
-    outCurrency.chainId !== route.chainId || !same(address(outCurrency.address, "output token"), BNB_NATIVE) ||
+    inCurrency.chainId !== route.sourceChainId || !same(address(inCurrency.address, "input token"), BNB_NATIVE) ||
+    outCurrency.chainId !== route.chainId || !same(address(outCurrency.address, "output token"), route.currency) ||
     amount(record(quotedDetails.currencyIn, "currency in").amount, "details input") !== amount(intent.amountAtomic, "amount") ||
     amount(out.minimumAmount, "details minimum") !== minimum) fail("quote details");
   const tx = record(item.data, "transaction");
   keys(tx, ["from", "to", "data", "value", "chainId", "gas", "maxFeePerGas", "maxPriorityFeePerGas"], "transaction extension");
-  if (!same(address(tx.from, "transaction from"), intent.payer) || tx.chainId !== 56 ||
+  if (!same(address(tx.from, "transaction from"), intent.payer) || tx.chainId !== route.sourceChainId ||
     !same(address(tx.to, "transaction to"), ETHEREUM_DEPOSITORY) ||
     amount(tx.value, "transaction value") !== amount(intent.amountAtomic, "amount") ||
     !HEX.test(string(tx.data, "transaction data"))) fail("transaction envelope");
   const gas = amount(tx.gas, "gas"), maxFeePerGas = amount(tx.maxFeePerGas, "max fee"),
     priority = amount(tx.maxPriorityFeePerGas, "priority fee");
   if (gas === 0n || gas > 500_000n || maxFeePerGas === 0n || maxFeePerGas > 100_000_000_000n ||
-    priority === 0n || priority > 10_000_000_000n || priority > maxFeePerGas) fail("gas limits");
+    priority === 0n || priority > 10_000_000_000n || priority > maxFeePerGas || (route.sourceChainId === 8453 && gas * maxFeePerGas > RELAY_BASE_FULL_FEE)) fail("gas limits");
   try {
     const decoded = decodeFunctionData({ abi: DEPOSIT_NATIVE, data: string(tx.data, "transaction data") as Hex });
     if (decoded.functionName !== "depositNative" || !same(decoded.args[0], intent.payer) || !same(decoded.args[1], orderId) ||
@@ -192,13 +217,13 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
     ...(statusLocator === undefined ? {} : { statusLocator }), orderId: orderId.toLowerCase(),
     orderSignature: signature.toLowerCase(), solver: RELAY_SOLVER, payer: intent.payer.toLowerCase(),
     recipient: intent.recipient.toLowerCase(), principalAtomic: amount(intent.amountAtomic, "amount").toString(), orderData,
-    paymentDetails: { chainId: "bnb" as const, depository: ETHEREUM_DEPOSITORY,
+    paymentDetails: { chainId: route.sourceChain, depository: ETHEREUM_DEPOSITORY,
       currency: BNB_NATIVE, amount: amount(details.amount, "payment amount").toString() },
     minimumOutputWei: minimum.toString(), deadline,
     deposit: { from: address(tx.from, "transaction from").toLowerCase(), to: ETHEREUM_DEPOSITORY,
       data: string(tx.data, "transaction data").toLowerCase(), value: amount(tx.value, "transaction value").toString(),
-      chainId: 56 as const, gas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(),
-      maxPriorityFeePerGas: priority.toString(), maximumNetworkFeeWei: (gas * maxFeePerGas).toString() } };
+      chainId: route.sourceChainId, gas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(),
+      maxPriorityFeePerGas: priority.toString(), maximumNetworkFeeWei: (route.sourceChainId === 8453 ? RELAY_BASE_FULL_FEE : gas * maxFeePerGas).toString() } };
   return freeze({ ...projection, quoteDigest: hashObject(projection) });
 }
 
@@ -211,18 +236,18 @@ export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuo
     payment = record(input.payment, "saved payment"), output = record(order.output, "saved output"),
     payee = one(output.payments, "saved output payments"), refunds = list(input.refunds, "saved refunds");
   if (order.version !== "v1" || order.solverChainId !== "base" || !same(address(order.solver, "saved solver"), RELAY_SOLVER) ||
-    payment.chainId !== "bnb" || !same(address(payment.currency, "saved input currency"), BNB_NATIVE) ||
+    payment.chainId !== route.sourceChain || !same(address(payment.currency, "saved input currency"), BNB_NATIVE) ||
     amount(payment.amount, "saved input amount") !== amount(quote.principalAtomic, "saved principal") || payment.weight !== "1" ||
     output.chainId !== route.chain || !same(address(payee.recipient, "saved payee"), route.recipient) ||
-    !same(address(payee.currency, "saved output currency"), BNB_NATIVE) ||
+    !same(address(payee.currency, "saved output currency"), route.currency) ||
     amount(payee.minimumAmount, "saved minimum") !== amount(quote.minimumOutputWei, "saved minimum") ||
     list(output.calls, "saved calls").length !== 0 || list(order.fees, "saved fees").length !== 0 ||
     refunds.length !== 2 || quote.deadline !== output.deadline ||
     !same(address(quote.payer, "saved payer"), route.payer) ||
-    quote.paymentDetails.chainId !== "bnb" || !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) ||
+    quote.paymentDetails.chainId !== route.sourceChain || !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) ||
     !same(quote.paymentDetails.currency, BNB_NATIVE) || quote.paymentDetails.amount !== quote.principalAtomic ||
-    quote.deposit.chainId !== 56 || !same(quote.deposit.from, quote.payer)) fail("saved route");
-  for (const [index, expected] of [{ chain: "bnb", recipient: quote.payer, currency: BNB_NATIVE },
+    quote.deposit.chainId !== route.sourceChainId || !same(quote.deposit.from, quote.payer)) fail("saved route");
+  for (const [index, expected] of [{ chain: route.sourceChain, recipient: quote.payer, currency: BNB_NATIVE },
     { chain: route.chain, recipient: route.recipient, currency: route.refundCurrency }].entries()) {
     const refund = record(refunds[index], "saved refund");
     if (refund.chainId !== expected.chain || !same(address(refund.recipient, "saved refund recipient"), expected.recipient) ||
@@ -234,6 +259,9 @@ export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuo
     orderId = getOrderId(quote.orderData as Parameters<typeof getOrderId>[0], CHAINS);
     signer = await recoverMessageAddress({ message: { raw: orderId as Hex }, signature: quote.orderSignature as Hex });
   } catch { return fail("saved order authority"); }
+  if (route.sourceChainId === 8453 && (BigInt(quote.principalAtomic) !== RELAY_BASE_PRINCIPAL ||
+    BigInt(quote.minimumOutputWei) < route.floor || quote.deposit.maximumNetworkFeeWei !== RELAY_BASE_FULL_FEE.toString() ||
+    BigInt(quote.deposit.gas) * BigInt(quote.deposit.maxFeePerGas) > RELAY_BASE_FULL_FEE)) fail("saved finite economics");
   if (!same(orderId, quote.orderId) || !same(signer, RELAY_SOLVER) || !same(quote.solver, RELAY_SOLVER)) fail("saved order authority");
   try {
     const decoded = decodeFunctionData({ abi: DEPOSIT_NATIVE, data: quote.deposit.data as Hex });

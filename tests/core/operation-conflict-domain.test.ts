@@ -25,7 +25,7 @@ function service(stores: Stores): OperationService {
   const state = { listOperations: owned(stores.direct), listX402Operations: owned(stores.x402) } as never;
   return new OperationService(state, repository(stores.providerX402), repository(stores.rails), repository(stores.bridges),
     repository(stores.gasless), repository(stores.metaMask), repository(stores.smartAccount), repository(stores.facilitator),
-    { listOperations: owned(stores.relayUnsigned) } as never);
+    { listOperations: owned(stores.relayUnsigned) } as never, repository(), repository());
 }
 const open = (operationId: string, fields: Readonly<Record<string, unknown>>): Stored =>
   ({ operationId, state: "unknown_finality", terminal: false, ...fields });
@@ -142,4 +142,38 @@ test("every stored money family maps to its network and sending account", () => 
   assert.deepEqual(domains({ kind: "metamask_gasless_transfer", record: open("m", { intent: { request: { chainId: 8453 }, binding: { address: B } } }) }), evm("8453", B));
   assert.deepEqual(domains({ kind: "smart_account_gasless_transfer", record: open("s", { intent: { request: { chainId: 8453 }, binding: { ownerAddress: A } } }) }), evm("8453", A));
   assert.equal(domains({ kind: "gasless_transfer", record: open("g", { intent: { request: {}, owner: { address: A } } }) }), null);
+});
+
+// Persisted cross-rail claims must survive releasing the transient address lock.
+test("pending Sei funding and Circle Sei mint block each other through destination domains", async () => {
+  const sourceProfile = "9".repeat(64);
+  const sei = { kind: "sei_gaszip", record: { ...open("sei-funding", { owner: { address: A } }), profileHash: PROFILE } } as never;
+  const circle = { kind: "circle_route", record: { ...open("circle-mint", {}), profileHash: sourceProfile, destinationProfileHash: PROFILE,
+    sourceCustody: { walletAddress: B }, destinationCustody: { walletAddress: A }, destinationChain: 1329,
+    source: null, attestation: null, effects: [], residualAllowanceAtomic: "0" } } as never;
+  const beforeMint = service({});
+  Object.defineProperty(beforeMint, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [sei] : [] });
+  await assert.rejects(beforeMint.assertCircleAccountsAvailable((circle as any).record), blockedOn("sei-funding", "evm:1329", A.toLowerCase()));
+  const beforeFunding = service({});
+  Object.defineProperty(beforeFunding, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [circle] : [] });
+  await beforeFunding.assertEvmAccountAvailable(PROFILE, 8453, A);
+  await assert.rejects(beforeFunding.assertEvmAccountAvailable(PROFILE, 1329, A), blockedOn("circle-mint", "evm:1329", A.toLowerCase()));
+  await beforeFunding.assertEvmAccountAvailable(PROFILE, 1329, B);
+});
+
+test("persisted Base claims serialize Mega, Sei, Relay and ordinary Base sends in both directions", async () => {
+  const claims = [
+    { kind: "mega_gaszip", record: open("mega", { owner: { address: A } }) },
+    { kind: "sei_gaszip", record: open("sei", { owner: { address: A } }) },
+    { kind: "relay_unsigned", record: open("relay", { sourceChainId: 8453, sourceAccount: A }) },
+    { kind: "direct_transfer", record: open("direct", { chainId: 8453, walletAddress: A }) },
+  ];
+  for (const claim of claims) {
+    const operations = service({});
+    Object.defineProperty(operations, "profileOperations", { value: async (hash: string) => hash === PROFILE ? [claim] : [] });
+    Object.defineProperty(operations, "relayLifecycle", { value: async () => "active" });
+    await assert.rejects(operations.assertEvmAccountAvailable(PROFILE, 8453, A), blockedOn(claim.record.operationId, "evm:8453", A.toLowerCase()));
+    await operations.assertEvmAccountAvailable(PROFILE, 8453, B);
+    await operations.assertEvmAccountAvailable(PROFILE, 4326, A);
+  }
 });

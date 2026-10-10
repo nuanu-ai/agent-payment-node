@@ -1,0 +1,6 @@
+{
+  "nodeVersion": "24.15.0",
+  "exitCode": 0,
+  "configuration": "tsconfig.test.json strict options inherited unchanged; focused merchant-x402.test.ts and merchant-x402-fixtures.ts roots with full imported source closure",
+  "noRelaxedCompilerOptions": true
+}

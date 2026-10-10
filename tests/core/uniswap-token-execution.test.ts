@@ -178,15 +178,16 @@ test("restart never signs an attempt whose reusable nonce was reassigned", async
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root), usage = { reservationId: "d".repeat(64), state: "reserved" as const };
   const approved = await f.journal.save(transitionUniswapToken(f.operation, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, NOW));
   let op = await f.journal.save(transitionUniswapToken(approved, "approval_submission_started", { approvalAttempt: tokenAttempt(approved, "approval", "7", NOW) }, NOW));
-  const released: string[] = [];
+  const released: string[] = []; let allocations = 0, signs = 0, sends = 0;
   const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
     foregroundCleanup: async () => undefined, withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(),
-    allocateNonce: async () => "8", releaseNonce: async (_op, kind, nonce) => { released.push(`${kind}:${nonce}`); }, commitNonce: async () => undefined,
+    allocateNonce: async () => { allocations++; return "8"; }, releaseNonce: async (_op, kind, nonce) => { released.push(`${kind}:${nonce}`); }, commitNonce: async () => undefined,
     currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined, reserveUsage: async () => usage,
-    currentUsage: async () => usage, followUsage: async () => usage, seal: async () => { throw new Error("must not sign"); }, probeSealed: async () => null,
-    send: async () => { throw new Error("must not send"); }, observe: async () => null });
-  op = await restarted.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_nonce_reservation_lost");
-  assert.deepEqual(released, ["approval:8"]);
+    currentUsage: async () => usage, followUsage: async () => usage, seal: async () => { signs++; throw new Error("must not sign"); }, probeSealed: async () => null,
+    send: async () => { sends++; throw new Error("must not send"); }, observe: async () => null });
+  await assert.rejects(restarted.execute(op.operationId), (e: any) => e.code === "APN_OPERATION_BLOCKED" && e.details?.reason === "uniswap_token_public_effect_missing");
+  assert.equal((await f.journal.load(op.operationId))?.integrityHash, op.integrityHash);
+  assert.deepEqual(released, []); assert.deepEqual([allocations, signs, sends], [0, 0, 0]);
 });
 test("mismatched allowance refuses and reverted swap requires explicit cleanup", async (t) => { const temp = await temporaryState(); t.after(temp.cleanup);
   await assert.rejects(fixture(temp.root, "2"), { code: "APN_STATE_CORRUPT" });
@@ -226,14 +227,12 @@ test("post-approval revalidation drift durably requires explicit cleanup and nev
   assert.deepEqual(f.sends, ["approval"]); assert.equal((await f.journal.load(op.operationId))?.phase, "cleanup_required");
   op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.deepEqual(f.sends, ["approval", "cleanup"]);
 });
-test("zero allowance cleanup records no-effect evidence, releases usage, and sends nothing", async (t) => {
+test("zero allowance cannot release a hashless marked attempt without public evidence", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard();
-  let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.approvalAttempt?.transactionHash, null);
-  op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleaned"); assert.equal(op.cleanupReason, "zero_allowance_no_effect");
-  assert.deepEqual(op.cleanupEvidence, { schemaVersion: "apn.uniswap-token-cleanup-evidence.v1", kind: "zero_allowance_no_effect",
-    source: "current_allowance", observedAllowanceAtomic: "0", observedAt: NOW.toISOString() });
-  assert.equal(op.cleanupAttempt, null); assert.equal(op.usageState, "failed_before_effect"); assert.equal(op.accumulatedNativeDebitWei, "0");
-  assert.deepEqual(f.sends, []);
+  const op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.approvalAttempt?.transactionHash, null);
+  await assert.rejects(f.runtime.cleanup(op.operationId), (e: any) => e.details?.reason === "uniswap_token_public_effect_missing");
+  const saved = await f.journal.load(op.operationId); assert.equal(saved?.integrityHash, op.integrityHash);
+  assert.equal(saved?.cleanupEvidence, null); assert.equal(saved?.usageState, "reserved"); assert.deepEqual(f.sends, []);
 });
 test("zero allowance cannot claim no-effect cleanup after an approval hash exists", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); let op = await f.runtime.approve(f.operation.operationId);
@@ -244,12 +243,12 @@ test("zero allowance cannot claim no-effect cleanup after an approval hash exist
   const persisted = await f.journal.load(op.operationId); assert.equal(persisted?.cleanupEvidence, null); assert.equal(persisted?.usageState, "reserved");
   assert.deepEqual(f.sends, ["approval"]);
 });
-test("status repairs the live ledger-terminal split brain without allowance reads, signing, or sending", async (t) => {
+test("legacy terminal usage cannot prove no effect for a hashless marked attempt", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard();
-  let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "cleanup_required"); f.usageState("failed_before_effect"); f.allowance("999999");
-  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleaned"); assert.equal(op.usageState, "failed_before_effect");
-  assert.equal(op.cleanupEvidence?.source, "legacy_usage_reconciliation"); assert.equal(op.cleanupAttempt, null); assert.deepEqual(f.sends, []);
-  assert.equal((await f.runtime.cleanup(op.operationId)).integrityHash, op.integrityHash);
+  const op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "cleanup_required"); f.usageState("failed_before_effect"); f.allowance("999999");
+  await assert.rejects(f.runtime.status(op.operationId), (e: any) => e.details?.reason === "uniswap_token_public_effect_missing");
+  const saved = await f.journal.load(op.operationId); assert.equal(saved?.phase, "cleanup_required"); assert.equal(saved?.usageState, "failed_before_effect");
+  assert.equal(saved?.cleanupEvidence, null); assert.equal(saved?.cleanupAttempt, null); assert.deepEqual(f.sends, []);
 });
 test("pre-sign diagnostics retain only classified fields for provider and guard failures", async (t) => {
   const rows = [

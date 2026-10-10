@@ -1,15 +1,14 @@
-import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
+import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
+import { assertEvmNativeCustody } from "./evm-native-custody.js";
+import { TransferServiceObservation, requiredLocal, type LocalOperationRecord } from "./transfer-service-observe.js";
+import { hashObject } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
 import { prepareEvmTransfer } from "./evm-transfer-prepare.js";
-import { requireEvmRpc } from "./evm-direct.js";
-import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
-import { checkEvmTransferFunding, evmCustodyPayload } from "./evm-transfer-approval.js";
 import { checkTransferApproval } from "./transfer-approval-check.js";
-import { parseAtomic, parseDecimal } from "./money.js";
-import type { Economics, Hex, OperationRecord, ReceiptRecord } from "./model.js";
+import { parseDecimal } from "./money.js";
+import type { Hex, OperationRecord, ReceiptRecord } from "./model.js";
 import { conflictDomainKey, evmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { OperationService } from "./operation-service.js";
 import type { RpcPort, RpcReceipt } from "./ports.js";
@@ -22,7 +21,6 @@ import {
   hasExactTransfer,
   parseEffect,
   publicOperation,
-  publicReceipt,
   requireFunding,
   transferData,
   validateBalance,
@@ -31,8 +29,6 @@ import {
 } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
-import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
-import { ProviderDirectState } from "./provider-direct-state.js";
 import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
 import { evmAllowlistSubject, evmUsageTarget } from "./evm-direct-allowlist.js";
@@ -41,14 +37,21 @@ import { walletCustodyLock } from "./encrypted-wallet-store.js";
 export class TransferService {
   private readonly operations: OperationService;
   private readonly providerDirect: ProviderDirectTransferService;
-  private readonly providerDirectRecovery: ProviderDirectRequestRecoveryService;
+  private readonly observation: TransferServiceObservation;
   private readonly allowlist: DirectAllowlistGate;
 
   constructor(private readonly context: RuntimeContext) {
     this.operations = new OperationService(context.state);
     this.allowlist = new DirectAllowlistGate(context);
     this.providerDirect = new ProviderDirectTransferService(context);
-    this.providerDirectRecovery = new ProviderDirectRequestRecoveryService(context);
+    this.observation = new TransferServiceObservation(context, this.providerDirect, {
+      followUsage: operation => this.followUsage(operation),
+      transition: (operation, state, terminal, reason, proofClass, extra, rpcReceipt) =>
+        this.transition(operation, state, terminal, reason, proofClass, extra, rpcReceipt),
+      persistNoPrivateEntry: operation => this.transition(operation, "failed_before_effect", true,
+        "native_approval_returned_before_private_entry", "durable_native_no_private_entry", {}, undefined, false),
+      failBeforeEffect: (operation, reason) => this.failBeforeEffect(operation, reason),
+    });
   }
 
   async prepare(request: Extract<CommandRequest, { command: "transfer.prepare" }>): Promise<unknown> {
@@ -154,6 +157,7 @@ export class TransferService {
         transitions: appendTransition([], initial),
       });
       await this.persist(operation);
+      await new DirectPublicEffectJournal(state).prepare(operation);
       return publicOperation(operation);
     });
   }
@@ -168,63 +172,38 @@ export class TransferService {
     const found = await this.requiredOperation(operationId);
     if (found.providerDirect !== undefined) return await this.providerDirect.approve(operationId);
     const localFound = requiredLocal(found);
+    if (localFound.evm?.cleanup85Cancellation !== undefined) throw new ApnError("APN_OPERATION_BLOCKED", "Finite cleanup85 cancellation requires its dedicated foreground controller; observation cannot grant signing.");
     const { profile, profileHash } = localFound;
-    return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
+    return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, ...(localFound.evm?.circleNativeAdmission === undefined ? [] : [`profile:${localFound.evm.circleNativeAdmission.recipientCustody.profileHash}`])], async () => {
       let operation = requiredLocal(await this.requiredOperation(operationId));
       if (operation.terminal) return publicOperation(await this.followUsage(operation));
       if (operation.state !== "awaiting_approval") {
         throw new ApnError("APN_OPERATION_BLOCKED", "Operation is already signed; use operation resume.");
       }
+      if (operation.evm !== undefined && operation.evm.nativeCustody === undefined) {
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Prepare a new generic transfer with a frozen native custody binding.");
+      }
+      await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
       if (this.context.clock.now().getTime() >= Date.parse(operation.expiresAt)) {
         await this.failBeforeEffect(operation, "approval_window_expired");
       }
       const rpc = this.context.requireRpc();
       if (operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329) rpc.armEvmDirectRpcGuard?.();
-      const check = async () => await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
-      if (operation.evm === undefined) await check();
+      const check = async () => {
+        if (operation.evm?.nativeCustody !== undefined) await assertEvmNativeCustody(this.context.state, profile, operation.evm.nativeCustody);
+        await checkTransferApproval(rpc, operation, (reason) => this.failBeforeEffect(operation, reason), this.context.state.root);
+      };
+      if (operation.evm === undefined) { await new DirectPublicEffectJournal(this.context.state).prepared(operation); await check(); }
       else await this.context.state.withLocks([walletCustodyLock(this.context.state, profile)], check);
       if (operation.evm !== undefined) {
         // The native signer approves and signs in one call, so the reservation is durable in both stores before it.
         const allowlistLease = await this.reserveUsage(operation);
         operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
       }
-      const custodyPayload = operation.evm === undefined ? {
-        profile,
-        operationId: operation.operationId,
-        fingerprint: operation.fingerprint,
-        walletAddress: operation.walletAddress,
-        chainId: CHAIN_ID,
-        transaction: {
-          type: "eip1559",
-          to: BASE_USDC,
-          valueAtomic: "0",
-          data: operation.transactionData,
-          nonceAtomic: operation.economics.nonceAtomic,
-          gasLimitAtomic: operation.economics.gasLimitAtomic,
-          maxFeePerGasAtomic: operation.economics.maxFeePerGasAtomic,
-          maxPriorityFeePerGasAtomic: operation.economics.maxPriorityFeePerGasAtomic,
-          accessList: [],
-        },
-        approval: {
-          recipient: operation.recipient,
-          amountAtomic: operation.amountAtomic,
-          amountDecimal: operation.amountDecimal,
-          expiresAt: operation.expiresAt,
-        },
-      } : evmCustodyPayload(operation);
-      let effectValue: unknown;
-      try { effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload)); }
-      catch (error) {
-        if (operation.evm !== undefined && error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED") {
-          const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
-            profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(custodyPayload),
-          }));
-          if (isPlainRecord(stored) && exactKeys(stored, ["found"]) && stored.found === false) {
-            await this.transition(operation, "failed_before_effect", true, "native_signer_reprepare_required", "durable_pre_effect_failure");
-          }
-        }
-        throw error;
-      }
+      if (operation.evm === undefined) operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect");
+      const custodyPayload = directCustodyPayload(operation);
+      // A failed native call may have lost its response after signing. Classification cannot decrypt custody here.
+      const effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
       const effect = parseEffect(effectValue);
       await verifyEffect(effect, operation);
       operation = await this.transition(
@@ -240,199 +219,25 @@ export class TransferService {
     });
   }
 
-  async resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true): Promise<unknown> {
-    const operationId = canonicalOperationId(operationIdInput);
-    await this.context.ready();
-    const found = await this.requiredOperation(operationId);
-    if (observeOnly && found.providerDirect !== undefined) throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
-    if (found.providerDirect !== undefined) return await this.providerDirect.resume(operationId, waitSeconds);
-    if (found.chainId === 1 || found.chainId === 56 || found.chainId === 8453 || found.chainId === 42161 || found.chainId === 1329) this.context.requireRpc().armEvmDirectRpcGuard?.();
-    if (waitSeconds !== undefined) {
-      throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
-    }
-    const localFound = requiredLocal(found);
-    const { profile, profileHash } = localFound;
-    return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
-      let operation = requiredLocal(await this.requiredOperation(operationId));
-      if (observeOnly && operation.state !== "submitted_pending" && operation.state !== "unknown_finality" &&
-        !(operation.terminal && operation.transactionHash !== undefined)) {
-        throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires an already submitted local direct transfer.");
-      }
-      if (operation.terminal) return publicOperation(await this.followUsage(operation));
-      if (operation.state === "unknown_finality") {
-        return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
-      }
-      if (observeOnly) return publicOperation(await this.inspectReceipt(operation, this.context.requireRpc()));
-      if (operation.evm !== undefined) {
-        await this.followUsage(operation);
-        await requireEvmRpc(this.context.requireRpc()).assertChain(operation.chainId);
-        if (operation.state === "started") {
-          const stored = await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
-            profile, operationId, fingerprint: operation.fingerprint, expectedPayloadHash: hashObject(evmCustodyPayload(operation)),
-          }));
-          if (isPlainRecord(stored) && exactKeys(stored, ["found"]) && stored.found === false) await this.failBeforeEffect(operation, "no_durable_signature_created");
-          const recovered = parseEffect(stored);
-          await verifyEffect(recovered, operation);
-          operation = await this.transition(operation, "signed_not_submitted", false, "same_signature_recovered", "native_transaction_hash", {
-            transactionHash: recovered.transactionHash, rawTransactionHash: recovered.rawTransactionHash,
-          });
-        }
-        if (operation.state !== "awaiting_approval") await verifyEffect(await this.effectFor(operation), operation);
-      }
-      if (operation.state === "awaiting_approval") {
-        throw new ApnError("APN_OPERATION_BLOCKED", "Operation still requires transfer approve.");
-      }
-      if (operation.transactionHash === undefined || operation.rawTransactionHash === undefined) {
-        throw new ApnError("APN_STATE_CORRUPT", "Signed operation is missing its public effect binding.");
-      }
-      operation = await this.inspectReceipt(operation, this.context.requireRpc());
-      if (operation.terminal) return publicOperation(operation);
-      const superseding = await this.proveSuperseding(operation, this.context.requireRpc());
-      if (superseding !== null) return publicOperation(superseding);
-      const effect = await this.effectFor(operation);
-      await verifyEffect(effect, operation);
-      if (effect.transactionHash !== operation.transactionHash || effect.rawTransactionHash !== operation.rawTransactionHash) {
-        throw new ApnError("APN_NATIVE_PROTOCOL", "Recovered effect material differs from the durable binding.");
-      }
-      operation = await this.submitAndInspect(operation, effect.rawTransaction);
-      return publicOperation(operation);
-    });
+  async resume(operationId: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown> {
+    const saved = await this.context.state.findOperation(canonicalOperationId(operationId));
+    if (saved?.evm?.cleanup85Cancellation !== undefined) throw new ApnError("APN_OPERATION_BLOCKED", "Finite cleanup85 cancellation requires its finalized public observer; generic safe settlement cannot close it.");
+    return await this.observation.resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc);
   }
-
-  async recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown> {
-    const operationId = canonicalOperationId(operationIdInput);
-    await this.context.ready();
-    const found = await this.requiredOperation(operationId);
-    if (found.providerDirect === undefined) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not a provider-atomic direct transfer.");
-    }
-    return await this.providerDirectRecovery.recover(operationId, providerRequestId);
+  async recoverProviderRequest(operationId: string, providerRequestId: string): Promise<unknown> {
+    return await this.observation.recoverProviderRequest(operationId, providerRequestId);
   }
-
-  async status(operationIdInput: string): Promise<unknown> {
-    const operationId = canonicalOperationId(operationIdInput);
-    await this.context.ready();
-    const found = await this.requiredOperation(operationId);
-    if (found.providerDirect === undefined) return publicOperation(found);
-    return await this.context.state.withLocks([
-      `profile:${found.profileHash}`,
-      `operation:${operationId}`,
-    ], async () => publicOperation(await new ProviderDirectState(this.context)
-      .recoverOrphanTerminal(await this.requiredOperation(operationId))));
-  }
-
-  async receipt(operationIdInput: string): Promise<unknown> {
-    await this.context.ready();
-    const operationId = canonicalOperationId(operationIdInput);
-    const operation = await this.requiredOperation(operationId);
-    if (operation.providerDirect !== undefined) return await this.providerDirect.receipt(operationId);
-    const receipt = await this.context.state.loadReceipt(operation.profileHash, operationId);
-    if (receipt === null) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
-    if (receipt.operationIntegrityHash !== operation.integrityHash) {
-      throw new ApnError("APN_STATE_CORRUPT", "Receipt is not linked to the current operation transition.");
-    }
-    return publicReceipt(receipt);
-  }
-
-  private async submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord> {
-    let operation = operationInput;
-    const rpc = this.context.requireRpc();
-    if (operation.evm !== undefined) await checkEvmTransferFunding(rpc, operation, false);
-    try {
-      const returnedHash = await rpc.submitRawTransaction(rawTransaction);
-      if (returnedHash.toLowerCase() !== operation.transactionHash?.toLowerCase()) {
-        return await this.transition(operation, "unknown_finality", false, "rpc_returned_different_hash", "ambiguous_submission");
-      }
-      operation = await this.transition(
-        operation, "submitted_pending", false, "submission_accepted_hash_only", "transaction_hash_only",
-        { lastSubmissionAt: this.context.clock.now().toISOString() },
-      );
-    } catch {
-      return await this.transition(
-        operation, "unknown_finality", false, "submission_outcome_ambiguous", "ambiguous_submission",
-        { lastSubmissionAt: this.context.clock.now().toISOString() },
-      );
-    }
-    // A successful Ethereum send is durable at this point. Receipt inspection belongs to
-    // explicit observation, preserving this invocation's bounded pre-send RPC budget.
-    if (operation.evm?.asset.chainId === 1 && (operation.evm.asset.kind === "native" ||
-      operation.evm.asset.address.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" ||
-      operation.evm.asset.address.toLowerCase() === "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2")) return operation;
-    if (operation.evm?.asset.chainId === 8453 && operation.evm.asset.kind === "erc20" &&
-      ["0x4200000000000000000000000000000000000006", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"].includes(operation.evm.asset.address.toLowerCase())) return operation;
-    if (operation.evm?.asset.chainId === 42161 && operation.evm.asset.kind === "erc20" &&
-      ["0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "0xaf88d065e77c8cc2239327c5edb3a432268e5831"].includes(operation.evm.asset.address.toLowerCase())) return operation;
-    return await this.inspectReceipt(operation, rpc);
-  }
-
+  async status(operationId: string): Promise<unknown> { return await this.observation.status(operationId); }
+  async receipt(operationId: string): Promise<unknown> { return await this.observation.receipt(operationId); }
   private async inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord> {
-    if (operation.transactionHash === undefined) return operation;
-    let receipt: RpcReceipt | null;
-    try {
-      receipt = operation.evm === undefined ? await rpc.getReceipt(operation.transactionHash) :
-        await requireEvmRpc(rpc).receipt(operation.chainId, operation.transactionHash);
-    } catch {
-      return operation;
-    }
-    if (receipt === null) return operation;
-    if (receipt.transactionHash.toLowerCase() !== operation.transactionHash.toLowerCase()) {
-      return await this.transition(operation, "unknown_finality", false, "receipt_hash_mismatch", "invalid_receipt");
-    }
-    if (operation.evm !== undefined) {
-      try {
-        receipt = { ...receipt, evmEvidence: await requireEvmRpc(rpc).evidence(operation, receipt) };
-        if (directEvmRequiresSafeHead(operation.chainId) && !hasSafeEvmInclusion(receipt.evmEvidence, receipt.blockNumberAtomic)) {
-          throw new ApnError("APN_RPC_PROTOCOL", "The receipt lacks selected RPC safe inclusion evidence.");
-        }
-      }
-      catch (error) { return await this.transition(operation, "unknown_finality", false, evmEffectFailureReason(error), "inclusion_effect_unproven"); }
-      if (receipt.evmEvidence?.transactionVerified !== true) return await this.transition(operation, "unknown_finality", false, "evm_transaction_mismatch", "invalid_receipt");
-    }
-    if (receipt.status === "reverted") {
-      return await this.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", {}, receipt);
-    }
-    const native = operation.evm?.asset.kind === "native";
-    if (!native && (!hasExactTransfer(receipt, operation) || (operation.evm !== undefined && receipt.evmEvidence?.tokenBalanceDeltasVerified !== true))) {
-      return await this.transition(operation, "unknown_finality", false, "successful_receipt_missing_exact_transfer", "invalid_receipt", {}, receipt);
-    }
-    return await this.transition(
-      operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer",
-      operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_transfer_event_and_block_balance_deltas", {}, receipt,
-    );
+    return await this.observation.inspectReceipt(operation, rpc);
   }
-
-  private async proveSuperseding(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord | null> {
-    const latest = parseAtomic(operation.evm === undefined ? await rpc.getLatestConfirmedNonce(operation.walletAddress) :
-      await requireEvmRpc(rpc).nonce(operation.chainId, operation.walletAddress, "latest"));
-    if (latest <= parseAtomic(operation.economics.nonceAtomic)) return null;
-    const hash = operation.evm === undefined ? await rpc.getConfirmedTransactionAtNonce(
-      operation.walletAddress,
-      operation.economics.nonceAtomic,
-      operation.preparedBlockNumberAtomic,
-    ) : await requireEvmRpc(rpc).confirmedAtNonce(operation.chainId, operation.walletAddress, operation.economics.nonceAtomic, operation.preparedBlockNumberAtomic);
-    if (hash !== null && hash.toLowerCase() !== operation.transactionHash?.toLowerCase()) {
-      return await this.transition(operation, "failed_proven_superseded", true, "confirmed_different_transaction_at_nonce", "confirmed_superseding_nonce");
-    }
-    return await this.transition(
-      operation,
-      "unknown_finality",
-      false,
-      hash === null ? "confirmed_nonce_advanced_unresolved" : "own_transaction_confirmed_receipt_unavailable",
-      "manual_finality_resolution_required",
-    );
-  }
-
   private async requiredOperation(operationId: string): Promise<OperationRecord> {
-    const operation = await this.context.state.findOperation(operationId);
-    if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
-    return operation;
+    return await this.observation.requiredOperation(operationId);
   }
 
-  private async effectFor(operation: OperationRecord) {
-    return parseEffect(await this.context.requireNative().request(this.context.nativeRequest("effectMaterial.get", {
-      profile: operation.profile, operationId: operation.operationId, fingerprint: operation.fingerprint,
-      expectedTransactionHash: operation.transactionHash, expectedRawTransactionHash: operation.rawTransactionHash,
-    })));
+  private async submitAndInspect(operation: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord> {
+    return await this.observation.submitAndInspect(operation, rawTransaction);
   }
 
   /** After every approval pre-check and before the native approve-and-sign call; refusals end the operation before effect. */
@@ -479,11 +284,13 @@ export class TransferService {
         throw new ApnError("APN_OPERATION_BLOCKED", "Expired direct transfer has durable effect or reservation evidence.",
           { blockingOperationId: operation.operationId, blockingState: operation.state });
       }
+      await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
       await this.transition(operation, "failed_before_effect", true, "approval_window_expired", "durable_pre_effect_failure");
     }
   }
 
   private async failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never> {
+    await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
     await this.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
     throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.");
   }
@@ -496,13 +303,14 @@ export class TransferService {
     proofClass: string,
     extra: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease">> = {},
     rpcReceipt?: RpcReceipt,
+    followUsage = true,
   ): Promise<LocalOperationRecord> {
     const at = this.context.clock.now().toISOString();
     const transitions = appendTransition(operation.transitions, { at, state, terminal, reason, proofClass });
     const { integrityHash: _previousIntegrityHash, ...base } = operation;
     const updated = sealOperation({ ...base, ...extra, state, terminal, reason, proofClass, transitions }) as LocalOperationRecord;
     await this.persist(updated, rpcReceipt);
-    return await this.followUsage(updated);
+    return followUsage ? await this.followUsage(updated) : updated;
   }
 
   private async persist(operation: OperationRecord, rpcReceipt?: RpcReceipt): Promise<void> {
@@ -527,30 +335,4 @@ export class TransferService {
     await this.context.state.writeReceipt(operation.profileHash, sealReceipt(receiptBase));
     if (operation.evm !== undefined) await this.context.state.writeOperation(operation);
   }
-}
-
-function evmEffectFailureReason(error: unknown): string {
-  if (!(error instanceof ApnError)) return "evm_effect_evidence_unavailable";
-  if (error.details?.httpStatus === 403) return "evm_effect_rpc_forbidden";
-  if (error.code === "APN_RPC_RATE_LIMITED" || error.details?.httpStatus === 429) return "evm_effect_rpc_rate_limited";
-  if (error.code === "APN_RPC_BUDGET_EXCEEDED") return "evm_effect_rpc_budget_exceeded";
-  if (error.code === "APN_RPC_AMBIGUOUS" && error.details?.reason === "request_deadline") return "evm_effect_rpc_deadline";
-  if (error.code === "APN_RPC_PROTOCOL" && error.details?.reason === "evm_safe_head_lag") return "evm_effect_safe_head_lag";
-  if (error.code === "APN_RPC_PROTOCOL" && error.details?.reason === "evm_block_identity_changed") return "evm_effect_block_changed";
-  return "evm_effect_evidence_unavailable";
-}
-
-type LocalOperationRecord = OperationRecord & {
-  readonly providerDirect?: never;
-  readonly transactionData: Hex;
-  readonly economics: Economics;
-  readonly preparedBlockNumberAtomic: string;
-};
-
-function requiredLocal(operation: OperationRecord): LocalOperationRecord {
-  if (
-    operation.providerDirect !== undefined || operation.transactionData === undefined ||
-    operation.economics === undefined || operation.preparedBlockNumberAtomic === undefined
-  ) throw new ApnError("APN_STATE_CORRUPT", "Local direct operation is missing its transaction economics.");
-  return operation as LocalOperationRecord;
 }

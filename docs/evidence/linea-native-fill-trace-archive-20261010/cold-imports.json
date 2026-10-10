@@ -1,0 +1,56 @@
+[
+  {
+    "order": [
+      "./dist/lifi/rpc-adapter.js",
+      "./dist/lifi/rpc-transport.js",
+      "./dist/lifi/observation.js"
+    ],
+    "exit": 0,
+    "stderr": ""
+  },
+  {
+    "order": [
+      "./dist/lifi/rpc-adapter.js",
+      "./dist/lifi/observation.js",
+      "./dist/lifi/rpc-transport.js"
+    ],
+    "exit": 0,
+    "stderr": ""
+  },
+  {
+    "order": [
+      "./dist/lifi/rpc-transport.js",
+      "./dist/lifi/rpc-adapter.js",
+      "./dist/lifi/observation.js"
+    ],
+    "exit": 0,
+    "stderr": ""
+  },
+  {
+    "order": [
+      "./dist/lifi/rpc-transport.js",
+      "./dist/lifi/observation.js",
+      "./dist/lifi/rpc-adapter.js"
+    ],
+    "exit": 0,
+    "stderr": ""
+  },
+  {
+    "order": [
+      "./dist/lifi/observation.js",
+      "./dist/lifi/rpc-adapter.js",
+      "./dist/lifi/rpc-transport.js"
+    ],
+    "exit": 0,
+    "stderr": ""
+  },
+  {
+    "order": [
+      "./dist/lifi/observation.js",
+      "./dist/lifi/rpc-transport.js",
+      "./dist/lifi/rpc-adapter.js"
+    ],
+    "exit": 0,
+    "stderr": ""
+  }
+]

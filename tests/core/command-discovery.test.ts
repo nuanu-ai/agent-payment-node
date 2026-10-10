@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, readdir, readlink, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -33,10 +33,12 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet policy", "x402", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
+  "x402 permit2 approve", "x402 permit2 observe",
   "x402 permit2 preflight",
   "x402 permit2 status",
+  "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant retire-unsent", "x402 merchant status",
   "relay arbitrum prepare", "relay arbitrum observe", "relay arbitrum approval-check", "relay arbitrum approval-execute", "relay arbitrum deposit-dispatch", "relay base prepare", "relay base observe", "relay prepare", "relay native prepare", "relay preflight", "relay execute", "relay native execute", "relay retire", "relay status", "relay observe",
   "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
   "stargate token prepare", "stargate token execute", "stargate token cleanup", "stargate token observe", "stargate token status", "stargate token receipt",
@@ -53,6 +55,9 @@ const EXPECTED_COMMANDS = [
   "wallet permission sync",
   "wallet permission disable",
   "wallet permission forget",
+  "wallet metamask native-transfer",
+  "wallet metamask native-transfer-status",
+  "wallet metamask native-transfer-observe",
   "wallet status",
   "wallet balance",
   "wallet policy show",
@@ -86,9 +91,12 @@ const EXPECTED_COMMANDS = [
   "operation repair-deployment",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
   "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
+  "sei funding prepare", "sei funding approve", "sei funding status",
+  "circle evm prepare", "circle evm approve-source", "circle evm adopt-external-mint", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm cleanup-nonce", "circle evm cleanup85-prepare", "circle evm cleanup85-cancel", "circle evm cleanup86-approve", "circle evm status",
+  "mega funding prepare", "mega funding approve", "mega funding status",
   "oneclick source submit", "oneclick source status",
   "gasless usdt prepare", "gasless usdt status", "gasless usdt resume", "gasless usdt execute", "gasless usdt execution-status", "gasless usdt observe",
-  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve",
+  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed",
   "allowlist inventory", "allowlist resolve", "allowlist policy prepare", "allowlist policy stage", "allowlist policy activate",
   "allowlist policy revoke", "allowlist policy status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare", "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
@@ -181,6 +189,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "",
     "Subgroups:",
     "  apn wallet permission <command> [options] — Inspect and manage bounded provider permission state.",
+    "  apn wallet metamask <command> [options] — Finite fixed MetaMask native-paid transfer.",
     "  apn wallet policy <command> [options] — Inspect or change owner-approved wallet policy.",
     "",
     "Commands:",
@@ -196,7 +205,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet ensure-tron --profile <profile> --provider local --accept-risk true — Ensure a separate encrypted local secp256k1 TRON wallet without funding or activation.",
     "  apn wallet balance-tron --profile <profile> --asset <trx-or-usdt> — Read solidified TRX or canonical USDT and the separate TRX fee balance through APN_TRON_RPC_URL.",
     "  apn wallet capabilities-tron [--profile <profile>] — Inspect all four provider capabilities and unavailable TRON x402, sponsorship and bridge execution.",
-    "  apn wallet portfolio [--profile <profile>] — Read every native coin and list token on all frozen-list networks in one batched, read-only pass.",
+    "  apn wallet portfolio [--profile <profile>] [--refresh] — Read every native coin and list token on all frozen-list networks in one batched, read-only pass.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet <child>",
@@ -479,7 +488,7 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
   const entrypoint = resolve("bin/apn.js");
   const profile = `no-effect-${randomBytes(16).toString("hex")}`;
   const effectiveRoot = resolve(userInfo().homedir, ".apn");
-  const before = await treeDigest(effectiveRoot);
+  const before = await treeMetadataDigest(effectiveRoot);
   const result = spawnSync(entrypoint, ["wallet", "status", "--profile", profile], {
     encoding: "utf8",
     cwd: temporary.base,
@@ -495,13 +504,13 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
     proof_class: "encrypted_apn_home_status",
     next_actions: ["apn wallet ensure"],
   });
-  assert.equal(await treeDigest(effectiveRoot), before, "HOME is ignored by design; the effective-user ~/.apn tree must remain unchanged");
+  assert.equal(await treeMetadataDigest(effectiveRoot), before, "HOME is ignored by design; the effective-user ~/.apn tree metadata must remain unchanged");
   await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
 });
 
 test("actual compiled Stargate status needs no RPC environment and creates no state", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const effectiveRoot = resolve(userInfo().homedir, ".apn");
-  const before = await treeDigest(effectiveRoot), environment = { ...process.env };
+  const before = await treeMetadataDigest(effectiveRoot), environment = { ...process.env };
   delete environment.APN_ETHEREUM_RPC_URL; delete environment.APN_UNICHAIN_RPC_URL;
   const result = spawnSync(resolve("bin/apn.js"), ["stargate", "native", "status", "--operation", "d".repeat(64)], {
     encoding: "utf8", cwd: temporary.base, env: environment,
@@ -509,7 +518,7 @@ test("actual compiled Stargate status needs no RPC environment and creates no st
   assert.equal(result.status, 1, result.stderr ?? result.error?.message); assert.equal(result.stderr, "");
   const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly error: { readonly code: string } };
   assert.equal(envelope.ok, false); assert.equal(envelope.error.code, "APN_OPERATION_NOT_FOUND");
-  assert.equal(await treeDigest(effectiveRoot), before); await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
+  assert.equal(await treeMetadataDigest(effectiveRoot), before); await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
 });
 
 test("actual compiled discovery is raw and no-effect with empty or unwritable caller HOME", async (t) => {
@@ -517,7 +526,7 @@ test("actual compiled discovery is raw and no-effect with empty or unwritable ca
   t.after(temporary.cleanup);
   const entrypoint = resolve("bin/apn.js");
   const effectiveRoot = resolve(userInfo().homedir, ".apn");
-  const before = await treeDigest(effectiveRoot);
+  const before = await treeMetadataDigest(effectiveRoot);
   const unwritableHome = join(temporary.base, "unwritable-home");
   await mkdir(unwritableHome, { mode: 0o700 });
   await chmod(unwritableHome, 0o000);
@@ -563,7 +572,7 @@ test("actual compiled discovery is raw and no-effect with empty or unwritable ca
   }
 
   await chmod(unwritableHome, 0o700);
-  assert.equal(await treeDigest(effectiveRoot), before, "discovery must not alter the effective-user ~/.apn tree");
+  assert.equal(await treeMetadataDigest(effectiveRoot), before, "discovery must not alter effective-user ~/.apn tree metadata");
   await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
   await assert.rejects(stat(join(unwritableHome, ".apn")), { code: "ENOENT" });
 });
@@ -596,6 +605,7 @@ test("wallet status for an absent unique profile is read-only before initializat
 
   const unsafeRoot = join(temporary.base, "unsafe-state");
   await mkdir(unsafeRoot, { mode: 0o755 });
+  await chmod(unsafeRoot, 0o755);
   const unsafe = await runCli(["wallet", "status", "--profile", "unsafe-root-agent"], {}, { stateRoot: unsafeRoot, native });
   assert.equal(unsafe.ok, false);
   assert.equal(unsafe.error?.code, "APN_STATE_SECURITY");
@@ -612,6 +622,7 @@ function validArgv(command: CommandDefinition, includeOptional: boolean): string
 
 function validValue(type: ScalarType): string {
   switch (type) {
+    case "boolean": return "true";
     case "base64": return "e30=";
     case "string": return "value";
     case "profile": return "agent_1";
@@ -659,7 +670,7 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-async function treeDigest(root: string): Promise<string> {
+async function treeMetadataDigest(root: string): Promise<string> {
   const rows: unknown[] = [];
   const visit = async (path: string, relativePath: string): Promise<void> => {
     let stats;
@@ -672,22 +683,24 @@ async function treeDigest(root: string): Promise<string> {
       }
       throw error;
     }
-    const mode = stats.mode & 0o7777;
-    if (stats.isSymbolicLink()) {
-      rows.push({ path: relativePath || ".", type: "symlink", mode, target: await readlink(path) });
-      return;
-    }
+    const metadata = {
+      path: relativePath || ".",
+      dev: stats.dev,
+      ino: stats.ino,
+      ctimeMs: stats.ctimeMs,
+      mtimeMs: stats.mtimeMs,
+      mode: stats.mode & 0o7777,
+      size: stats.size,
+    };
     if (stats.isDirectory()) {
-      rows.push({ path: relativePath || ".", type: "directory", mode });
-      for (const name of (await readdir(path)).sort()) await visit(join(path, name), relativePath === "" ? name : join(relativePath, name));
+      const entries = (await readdir(path)).sort();
+      rows.push({ ...metadata, type: "directory", entries });
+      for (const name of entries) await visit(join(path, name), relativePath === "" ? name : join(relativePath, name));
       return;
     }
-    if (stats.isFile()) {
-      const bytes = await readFile(path);
-      rows.push({ path: relativePath, type: "file", mode, size: bytes.byteLength, sha256: createHash("sha256").update(bytes).digest("hex") });
-      return;
-    }
-    rows.push({ path: relativePath, type: "other", mode, size: stats.size });
+    if (stats.isSymbolicLink()) rows.push({ ...metadata, type: "symlink" });
+    else if (stats.isFile()) rows.push({ ...metadata, type: "file" });
+    else rows.push({ ...metadata, type: "other" });
   };
   await visit(root, "");
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");

@@ -1,0 +1,642 @@
+{
+  "schemaVersion": "apn.circle-v2-evm-read-plan.v1",
+  "checkedAt": "2026-10-09T04:15:10.992Z",
+  "readOnly": true,
+  "noUnsignedOperationCreated": true,
+  "envOverridesPresent": [],
+  "sourceOwner": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+  "recipient": "0xf41170dF51aAB52AAA04fBc3ff325cF051644aCa",
+  "profiles": [
+    {
+      "profile": "evm-live-buyer",
+      "revision": 32,
+      "policyDigest": "f70477f377ee3766bc931f49ab4500102e8c0128c66fdda54627464b88d22c9e",
+      "accounts": {
+        "evm": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7"
+      },
+      "expiresAt": "2026-10-15T12:00:00.000Z"
+    },
+    {
+      "profile": "default",
+      "revision": 14,
+      "policyDigest": "f223c407000b0a22a00498e73d71705f421f57c219b7847151c16abc0c5ecc73",
+      "accounts": {
+        "evm": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"
+      },
+      "expiresAt": "2026-10-09T06:04:38.990Z"
+    }
+  ],
+  "routes": [
+    {
+      "chain": 59144,
+      "domain": 11,
+      "payerProfile": "evm-live-buyer",
+      "payer": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "token": "0x176211869cA2b568f2A7D4EE941E073a821EE1ff",
+      "endpoints": {
+        "source": "https://arb1.arbitrum.io/rpc",
+        "destination": "https://rpc.linea.build"
+      },
+      "nativeCapAtomic": "100000000000000",
+      "deployments": {
+        "source": {
+          "chainId": 42161,
+          "domain": 3,
+          "blockHash": "0x6b8ced0b1f750b46d685bd9477f7aca9ec8a9ca23f8727d32deeec637600c052",
+          "blockNumberAtomic": "513087211",
+          "contracts": {
+            "messenger": {
+              "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x555E272506C06e7E559d57418563742AFE363ec8",
+              "implementationCodeHash": "0x6c864e374854e06fd5d42b3e9de53ef9ad4d863b83a8c5dd1cf6e2a67fd2b535"
+            },
+            "transmitter": {
+              "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x7B93db2bc72fAf642cEC0ADcAC4F91718831a1F4",
+              "implementationCodeHash": "0xc627ecd30515b8b6ab2b4ee9bffb4a84277f836fa599a556a1f507dc05eea476"
+            },
+            "minter": {
+              "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+              "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+              "implementation": "0x0000000000000000000000000000000000000000",
+              "implementationCodeHash": null
+            },
+            "token": {
+              "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+              "proxyCodeHash": "0xad30d819dbc47814b7e6cb837fd7cc57fcb591479a38596ee93de4fc52e8c435",
+              "implementation": "0x86E721b43d4ECFa71119Dd38c0f938A75Fdb57B3",
+              "implementationCodeHash": "0xda0578bf7fe0d04e320e166ab8f98061328fda8ae0a299882aeb38f1543c6a9d"
+            }
+          },
+          "remoteDomain": 11,
+          "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+          "pairedToken": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+          "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+          "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+          "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "messageVersion": 1,
+          "messageBodyVersion": 1,
+          "tokenDecimals": 6,
+          "transmitterPaused": false,
+          "minterPaused": false,
+          "tokenPaused": false
+        },
+        "destination": {
+          "chainId": 59144,
+          "domain": 11,
+          "blockHash": "0x5617e754e0051476b9b77a8a7c3efae0a756b1cc4e0732a3f4e1b5eea2b262d3",
+          "blockNumberAtomic": "32269626",
+          "contracts": {
+            "messenger": {
+              "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x555E272506C06e7E559d57418563742AFE363ec8",
+              "implementationCodeHash": "0x6c864e374854e06fd5d42b3e9de53ef9ad4d863b83a8c5dd1cf6e2a67fd2b535"
+            },
+            "transmitter": {
+              "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0xcEC4e8C3BD65cF40821cb2C63DEb0aABbCD9eF1B",
+              "implementationCodeHash": "0x5e92eb4385a5a405b929800f49f5a1ed3b565e2bfcf62c833a4bce819cc8dbc0"
+            },
+            "minter": {
+              "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+              "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+              "implementation": "0x0000000000000000000000000000000000000000",
+              "implementationCodeHash": null
+            },
+            "token": {
+              "address": "0x176211869cA2b568f2A7D4EE941E073a821EE1ff",
+              "proxyCodeHash": "0x469a90ba4c77663d6a9512da10e00f54cae91fda8007c53ad1ba2789457ea5fb",
+              "implementation": "0xab838fe7d492C621a5B1b23952Af99Cc37a2E0d3",
+              "implementationCodeHash": "0x19eb6091deb13c10e3b2ef54f19471ae3e6757e350bfe4e423b5e5208c6459e1"
+            }
+          },
+          "remoteDomain": 3,
+          "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+          "pairedToken": "0x176211869cA2b568f2A7D4EE941E073a821EE1ff",
+          "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+          "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+          "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "messageVersion": 1,
+          "messageBodyVersion": 1,
+          "tokenDecimals": 6,
+          "transmitterPaused": false,
+          "minterPaused": false,
+          "tokenPaused": false
+        },
+        "digest": "553cebdbd5fc3aff301fe4e85afd10e3445c8a23bbc14dabfc5add24583a3809"
+      },
+      "feeApi": {
+        "url": "https://iris-api.circle.com/v2/burn/USDC/fees/3/11",
+        "status": 200,
+        "body": [
+          {
+            "finalityThreshold": 1000,
+            "minimumFee": 1.4
+          },
+          {
+            "finalityThreshold": 2000,
+            "minimumFee": 0
+          }
+        ]
+      },
+      "feeQuote": {
+        "schemaVersion": "apn.circle-fast-fee.v1",
+        "sourceDomain": 3,
+        "destinationDomain": 11,
+        "minimumFeeBps": "1.4",
+        "quotedFeeAtomic": "6",
+        "amountAtomic": "40100",
+        "maxFeeAtomic": "100",
+        "minMintAtomic": "40000",
+        "fetchedAtMs": 1791519323588,
+        "expiresAtMs": 1791519353588,
+        "responseHash": "f66fad9426f7d4a9027e3243a7d6add176050aa778c0c526f81bfaffcaa02862",
+        "integrityHash": "bdca0a8d8116daa597958196e4e052c304b166e8e86beb404b0f246a585ef3c7"
+      },
+      "sourceAccount": {
+        "chainId": 42161,
+        "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "nativeBalanceAtomic": "257513986755826",
+        "usdcBalanceAtomic": "178124",
+        "allowanceAtomic": "0",
+        "latestNonceAtomic": "78",
+        "pendingNonceAtomic": "78"
+      },
+      "destinationAccount": {
+        "chainId": 59144,
+        "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "nativeBalanceAtomic": "187151412489551",
+        "usdcBalanceAtomic": "0",
+        "allowanceAtomic": "0",
+        "latestNonceAtomic": "1",
+        "pendingNonceAtomic": "1"
+      },
+      "attesters": {
+        "threshold": 2,
+        "enabledAttesters": [
+          "0x725b06F73ff761eF5390e39315e2BfbF60d33F96",
+          "0x52Ed4cBff8DcE6A19748043F3240ec03c834bCeF"
+        ],
+        "chainId": 59144,
+        "transmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+        "blockHash": "0x5617e754e0051476b9b77a8a7c3efae0a756b1cc4e0732a3f4e1b5eea2b262d3",
+        "blockNumberAtomic": "32269626",
+        "deploymentDigest": "553cebdbd5fc3aff301fe4e85afd10e3445c8a23bbc14dabfc5add24583a3809",
+        "configurationHash": "6cacf48ecaae482598e5b13ed00bb1aa33be6830debd60e1f3164f57576db6ce"
+      },
+      "approvalEnvelope": {
+        "chainId": 42161,
+        "from": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "to": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "data": "0x095ea7b300000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d0000000000000000000000000000000000000000000000000000000000009ca4",
+        "valueAtomic": "0",
+        "nonceAtomic": "78",
+        "gasLimitAtomic": "68153",
+        "maxFeePerGasAtomic": "40000000",
+        "maxPriorityFeePerGasAtomic": "0",
+        "envelopeHash": "b56da3f0105bdc088b86266e2ca3f0f12f231f4ed89ec1e1feb4522029650b8b"
+      },
+      "burnEnvelopeConservative": {
+        "chainId": 42161,
+        "from": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "to": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+        "data": "0x8e0250ee0000000000000000000000000000000000000000000000000000000000009ca4000000000000000000000000000000000000000000000000000000000000000b000000000000000000000000f41170df51aab52aaa04fbc3ff325cf051644aca000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e58310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006400000000000000000000000000000000000000000000000000000000000003e8",
+        "valueAtomic": "0",
+        "nonceAtomic": "79",
+        "gasLimitAtomic": "600000",
+        "maxFeePerGasAtomic": "40092000",
+        "maxPriorityFeePerGasAtomic": "0",
+        "envelopeHash": "989c400a34fed5c10b7be914aa77f530e8f68551e4d6d3c7d4a6f3b9fa6d9d17"
+      },
+      "sourceAllowanceZero": true,
+      "sourceRequiredUsdcAtomic": "120300",
+      "sourceWorstNativeReserveAtomic": "225000000000000",
+      "destinationHasFullNativeCap": true,
+      "sourceCurrentNativeUsage": {
+        "windowPolicy": "utc-calendar-day",
+        "windowStart": "2026-10-09T00:00:00.000Z",
+        "windowEnd": "2026-10-10T00:00:00.000Z",
+        "amountAtomic": "0"
+      },
+      "destinationCurrentNativeUsage": {
+        "windowPolicy": "utc-calendar-day",
+        "windowStart": "2026-10-09T00:00:00.000Z",
+        "windowEnd": "2026-10-10T00:00:00.000Z",
+        "amountAtomic": "0"
+      },
+      "mintGasNote": "Cannot simulate receiveMessage before issuer-signed source burn exists. Fresh normal mint preparation must estimate and simulate; hard cap600000. Burn estimate requires actual approval, so600000 is a conservative unsigned envelope, not measured gas."
+    },
+    {
+      "chain": 143,
+      "domain": 15,
+      "payerProfile": "default",
+      "payer": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+      "token": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+      "endpoints": {
+        "source": "https://arb1.arbitrum.io/rpc",
+        "destination": "https://rpc.monad.xyz"
+      },
+      "nativeCapAtomic": "100000000000000000",
+      "deployments": {
+        "source": {
+          "chainId": 42161,
+          "domain": 3,
+          "blockHash": "0x6b8ced0b1f750b46d685bd9477f7aca9ec8a9ca23f8727d32deeec637600c052",
+          "blockNumberAtomic": "513087211",
+          "contracts": {
+            "messenger": {
+              "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x555E272506C06e7E559d57418563742AFE363ec8",
+              "implementationCodeHash": "0x6c864e374854e06fd5d42b3e9de53ef9ad4d863b83a8c5dd1cf6e2a67fd2b535"
+            },
+            "transmitter": {
+              "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x7B93db2bc72fAf642cEC0ADcAC4F91718831a1F4",
+              "implementationCodeHash": "0xc627ecd30515b8b6ab2b4ee9bffb4a84277f836fa599a556a1f507dc05eea476"
+            },
+            "minter": {
+              "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+              "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+              "implementation": "0x0000000000000000000000000000000000000000",
+              "implementationCodeHash": null
+            },
+            "token": {
+              "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+              "proxyCodeHash": "0xad30d819dbc47814b7e6cb837fd7cc57fcb591479a38596ee93de4fc52e8c435",
+              "implementation": "0x86E721b43d4ECFa71119Dd38c0f938A75Fdb57B3",
+              "implementationCodeHash": "0xda0578bf7fe0d04e320e166ab8f98061328fda8ae0a299882aeb38f1543c6a9d"
+            }
+          },
+          "remoteDomain": 15,
+          "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+          "pairedToken": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+          "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+          "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+          "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "messageVersion": 1,
+          "messageBodyVersion": 1,
+          "tokenDecimals": 6,
+          "transmitterPaused": false,
+          "minterPaused": false,
+          "tokenPaused": false
+        },
+        "destination": {
+          "chainId": 143,
+          "domain": 15,
+          "blockHash": "0xb8dfca6e6ea1b81b592a911a0702423b219b1950921ea39419b56919d5601a62",
+          "blockNumberAtomic": "111798231",
+          "contracts": {
+            "messenger": {
+              "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x1CcaFdffBC1b7B5C499c97322F961B7d929a41b4",
+              "implementationCodeHash": "0x09a9af29d53ac3e54c73284527cf86215cd377486855a33ac3de899a2a77c314"
+            },
+            "transmitter": {
+              "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0xaDf351fD4c26fd97fAB86b60Bf09cA795b22DE26",
+              "implementationCodeHash": "0x4a51dfaaa487d4b3627752116d3a58f24b03db7d270106cd3167bd0ec33c15b5"
+            },
+            "minter": {
+              "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+              "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+              "implementation": "0x0000000000000000000000000000000000000000",
+              "implementationCodeHash": null
+            },
+            "token": {
+              "address": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+              "proxyCodeHash": "0xbb3557cf62a26950fb58073e6ce8e130af371e5aa13e5584856a1ce2ca47dc89",
+              "implementation": "0xbd520ea8CbB4F81b62aFF3c3FfE7AfFD69800b6d",
+              "implementationCodeHash": "0xe96489833045c42bacced6259e6a6372290706ed665e79457aa2fe4d46bc3559"
+            }
+          },
+          "remoteDomain": 3,
+          "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+          "pairedToken": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+          "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+          "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+          "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "messageVersion": 1,
+          "messageBodyVersion": 1,
+          "tokenDecimals": 6,
+          "transmitterPaused": false,
+          "minterPaused": false,
+          "tokenPaused": false
+        },
+        "digest": "3b46fb74d94b3c8babf43c54eb1cbe22f7d0b00d03ab25f9d891c48aa0a9d601"
+      },
+      "feeApi": {
+        "url": "https://iris-api.circle.com/v2/burn/USDC/fees/3/15",
+        "status": 200,
+        "body": [
+          {
+            "finalityThreshold": 1000,
+            "minimumFee": 1.4
+          },
+          {
+            "finalityThreshold": 2000,
+            "minimumFee": 0
+          }
+        ]
+      },
+      "feeQuote": {
+        "schemaVersion": "apn.circle-fast-fee.v1",
+        "sourceDomain": 3,
+        "destinationDomain": 15,
+        "minimumFeeBps": "1.4",
+        "quotedFeeAtomic": "6",
+        "amountAtomic": "40100",
+        "maxFeeAtomic": "100",
+        "minMintAtomic": "40000",
+        "fetchedAtMs": 1791519338032,
+        "expiresAtMs": 1791519368032,
+        "responseHash": "f66fad9426f7d4a9027e3243a7d6add176050aa778c0c526f81bfaffcaa02862",
+        "integrityHash": "3c7404231c63fc5aca8c4201ba61e1d7a025921911b2c919a2413276fd6ea6d1"
+      },
+      "sourceAccount": {
+        "chainId": 42161,
+        "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "nativeBalanceAtomic": "257513986755826",
+        "usdcBalanceAtomic": "178124",
+        "allowanceAtomic": "0",
+        "latestNonceAtomic": "78",
+        "pendingNonceAtomic": "78"
+      },
+      "destinationAccount": {
+        "chainId": 143,
+        "address": "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14",
+        "nativeBalanceAtomic": "33840811192226693011",
+        "usdcBalanceAtomic": "0",
+        "allowanceAtomic": "0",
+        "latestNonceAtomic": "2",
+        "pendingNonceAtomic": "2"
+      },
+      "attesters": {
+        "threshold": 2,
+        "enabledAttesters": [
+          "0x725b06F73ff761eF5390e39315e2BfbF60d33F96",
+          "0x52Ed4cBff8DcE6A19748043F3240ec03c834bCeF"
+        ],
+        "chainId": 143,
+        "transmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+        "blockHash": "0xd216bb51b114b4c6fad94558f9cc39c4ab8482a967a09ba7bf12ab70e7f2648c",
+        "blockNumberAtomic": "111798266",
+        "deploymentDigest": "3b46fb74d94b3c8babf43c54eb1cbe22f7d0b00d03ab25f9d891c48aa0a9d601",
+        "configurationHash": "ceef1df961e7c6b86b58be60fdba83a12335ca4d7fa824530b3c93f99709150f"
+      },
+      "approvalEnvelope": {
+        "chainId": 42161,
+        "from": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "to": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "data": "0x095ea7b300000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d0000000000000000000000000000000000000000000000000000000000009ca4",
+        "valueAtomic": "0",
+        "nonceAtomic": "78",
+        "gasLimitAtomic": "68153",
+        "maxFeePerGasAtomic": "40108000",
+        "maxPriorityFeePerGasAtomic": "0",
+        "envelopeHash": "49026eb2595e67cff05da6e815369551b165006a07dd1ed67f8bcfd611722c8e"
+      },
+      "burnEnvelopeConservative": {
+        "chainId": 42161,
+        "from": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "to": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+        "data": "0x8e0250ee0000000000000000000000000000000000000000000000000000000000009ca4000000000000000000000000000000000000000000000000000000000000000f000000000000000000000000f41170df51aab52aaa04fbc3ff325cf051644aca000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e58310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006400000000000000000000000000000000000000000000000000000000000003e8",
+        "valueAtomic": "0",
+        "nonceAtomic": "79",
+        "gasLimitAtomic": "600000",
+        "maxFeePerGasAtomic": "40000000",
+        "maxPriorityFeePerGasAtomic": "0",
+        "envelopeHash": "c0e515172640fadbcef87aab51d41ceecd21595833343d6da9fed446d90e42ce"
+      },
+      "sourceAllowanceZero": true,
+      "sourceRequiredUsdcAtomic": "120300",
+      "sourceWorstNativeReserveAtomic": "225000000000000",
+      "destinationHasFullNativeCap": true,
+      "sourceCurrentNativeUsage": {
+        "windowPolicy": "utc-calendar-day",
+        "windowStart": "2026-10-09T00:00:00.000Z",
+        "windowEnd": "2026-10-10T00:00:00.000Z",
+        "amountAtomic": "0"
+      },
+      "destinationCurrentNativeUsage": {
+        "windowPolicy": "utc-calendar-day",
+        "windowStart": "2026-10-09T00:00:00.000Z",
+        "windowEnd": "2026-10-10T00:00:00.000Z",
+        "amountAtomic": "0"
+      },
+      "mintGasNote": "Cannot simulate receiveMessage before issuer-signed source burn exists. Fresh normal mint preparation must estimate and simulate; hard cap600000. Burn estimate requires actual approval, so600000 is a conservative unsigned envelope, not measured gas."
+    },
+    {
+      "chain": 1329,
+      "domain": 16,
+      "payerProfile": "evm-live-buyer",
+      "payer": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "token": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+      "endpoints": {
+        "source": "https://arb1.arbitrum.io/rpc",
+        "destination": "https://evm-rpc.sei-apis.com"
+      },
+      "nativeCapAtomic": "50000000000000000",
+      "deployments": {
+        "source": {
+          "chainId": 42161,
+          "domain": 3,
+          "blockHash": "0x6b8ced0b1f750b46d685bd9477f7aca9ec8a9ca23f8727d32deeec637600c052",
+          "blockNumberAtomic": "513087211",
+          "contracts": {
+            "messenger": {
+              "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x555E272506C06e7E559d57418563742AFE363ec8",
+              "implementationCodeHash": "0x6c864e374854e06fd5d42b3e9de53ef9ad4d863b83a8c5dd1cf6e2a67fd2b535"
+            },
+            "transmitter": {
+              "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x7B93db2bc72fAf642cEC0ADcAC4F91718831a1F4",
+              "implementationCodeHash": "0xc627ecd30515b8b6ab2b4ee9bffb4a84277f836fa599a556a1f507dc05eea476"
+            },
+            "minter": {
+              "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+              "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+              "implementation": "0x0000000000000000000000000000000000000000",
+              "implementationCodeHash": null
+            },
+            "token": {
+              "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+              "proxyCodeHash": "0xad30d819dbc47814b7e6cb837fd7cc57fcb591479a38596ee93de4fc52e8c435",
+              "implementation": "0x86E721b43d4ECFa71119Dd38c0f938A75Fdb57B3",
+              "implementationCodeHash": "0xda0578bf7fe0d04e320e166ab8f98061328fda8ae0a299882aeb38f1543c6a9d"
+            }
+          },
+          "remoteDomain": 16,
+          "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+          "pairedToken": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+          "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+          "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+          "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "messageVersion": 1,
+          "messageBodyVersion": 1,
+          "tokenDecimals": 6,
+          "transmitterPaused": false,
+          "minterPaused": false,
+          "tokenPaused": false
+        },
+        "destination": {
+          "chainId": 1329,
+          "domain": 16,
+          "blockHash": "0x5d1439f32b3b33f56bf3ccbd4d7dc9f5c7a02e76c1e8a569ff8c9f44cdace51a",
+          "blockNumberAtomic": "236540758",
+          "contracts": {
+            "messenger": {
+              "address": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x1CcaFdffBC1b7B5C499c97322F961B7d929a41b4",
+              "implementationCodeHash": "0x09a9af29d53ac3e54c73284527cf86215cd377486855a33ac3de899a2a77c314"
+            },
+            "transmitter": {
+              "address": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+              "proxyCodeHash": "0xd2c8d48075d832fb7d07f6db5545a1bee37fdf886325c441a8dd1cef4c9dae99",
+              "implementation": "0x2c6c1C5901B9C3a2caD7A6AE4F7C7e291340d286",
+              "implementationCodeHash": "0x3ea22c6f70852d9fa3964c13be60e02b15ed276131c1c362bcb56bde7ed354e1"
+            },
+            "minter": {
+              "address": "0xfd78EE919681417d192449715b2594ab58f5D002",
+              "proxyCodeHash": "0xfc330d52b7656b971ef47bbb8cd44877181fbc9ac0fe76cb4cb5bb364a992eff",
+              "implementation": "0x0000000000000000000000000000000000000000",
+              "implementationCodeHash": null
+            },
+            "token": {
+              "address": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+              "proxyCodeHash": "0xe43587ffe1bcce27e2c8d97957762667ac603083224e5028ccf00990de9b8071",
+              "implementation": "0xcaFdC392214661c8C6C7165E491890AD84Bed171",
+              "implementationCodeHash": "0x9efaef237ba96760e6b2de3cb24bda8b987e9b54352c3fd2100396363526f2e0"
+            }
+          },
+          "remoteDomain": 3,
+          "remoteMessenger": "0x00000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d",
+          "pairedToken": "0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392",
+          "localMinter": "0xfd78EE919681417d192449715b2594ab58f5D002",
+          "localMessageTransmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+          "localTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "messageVersion": 1,
+          "messageBodyVersion": 1,
+          "tokenDecimals": 6,
+          "transmitterPaused": false,
+          "minterPaused": false,
+          "tokenPaused": false
+        },
+        "digest": "eab6b42541ab747acb46f6adf20500290cfae9bc3c214ba58719002f49da4c9c"
+      },
+      "feeApi": {
+        "url": "https://iris-api.circle.com/v2/burn/USDC/fees/3/16",
+        "status": 200,
+        "body": [
+          {
+            "finalityThreshold": 1000,
+            "minimumFee": 1.4
+          },
+          {
+            "finalityThreshold": 2000,
+            "minimumFee": 0
+          }
+        ]
+      },
+      "feeQuote": {
+        "schemaVersion": "apn.circle-fast-fee.v1",
+        "sourceDomain": 3,
+        "destinationDomain": 16,
+        "minimumFeeBps": "1.4",
+        "quotedFeeAtomic": "6",
+        "amountAtomic": "40100",
+        "maxFeeAtomic": "100",
+        "minMintAtomic": "40000",
+        "fetchedAtMs": 1791519352471,
+        "expiresAtMs": 1791519382471,
+        "responseHash": "f66fad9426f7d4a9027e3243a7d6add176050aa778c0c526f81bfaffcaa02862",
+        "integrityHash": "ef608aa73fdd408afafa89a7695c222e519c08bfd241ed1212be77572d77da56"
+      },
+      "sourceAccount": {
+        "chainId": 42161,
+        "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "nativeBalanceAtomic": "257513986755826",
+        "usdcBalanceAtomic": "178124",
+        "allowanceAtomic": "0",
+        "latestNonceAtomic": "78",
+        "pendingNonceAtomic": "78"
+      },
+      "destinationAccount": {
+        "chainId": 1329,
+        "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "nativeBalanceAtomic": "0",
+        "usdcBalanceAtomic": "0",
+        "allowanceAtomic": "0",
+        "latestNonceAtomic": "0",
+        "pendingNonceAtomic": "0"
+      },
+      "attesters": {
+        "threshold": 2,
+        "enabledAttesters": [
+          "0x725b06F73ff761eF5390e39315e2BfbF60d33F96",
+          "0x52Ed4cBff8DcE6A19748043F3240ec03c834bCeF"
+        ],
+        "chainId": 1329,
+        "transmitter": "0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",
+        "blockHash": "0xb708b99b536b5f5653486a9ad80fd374d84af39267cce2ad8f4e5829e8a42a32",
+        "blockNumberAtomic": "236540780",
+        "deploymentDigest": "eab6b42541ab747acb46f6adf20500290cfae9bc3c214ba58719002f49da4c9c",
+        "configurationHash": "d07fd3254f310b1e35aad73bc844e72d49c1d1d882a81b8d37839428d52c0562"
+      },
+      "approvalEnvelope": {
+        "chainId": 42161,
+        "from": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "to": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+        "data": "0x095ea7b300000000000000000000000028b5a0e9c621a5badaa536219b3a228c8168cf5d0000000000000000000000000000000000000000000000000000000000009ca4",
+        "valueAtomic": "0",
+        "nonceAtomic": "78",
+        "gasLimitAtomic": "68153",
+        "maxFeePerGasAtomic": "40464000",
+        "maxPriorityFeePerGasAtomic": "0",
+        "envelopeHash": "3079d551d6478dba57df9d3766799cfe25b25532073759652a2f9b03c0f1bddd"
+      },
+      "burnEnvelopeConservative": {
+        "chainId": 42161,
+        "from": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "to": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+        "data": "0x8e0250ee0000000000000000000000000000000000000000000000000000000000009ca40000000000000000000000000000000000000000000000000000000000000010000000000000000000000000f41170df51aab52aaa04fbc3ff325cf051644aca000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e58310000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006400000000000000000000000000000000000000000000000000000000000003e8",
+        "valueAtomic": "0",
+        "nonceAtomic": "79",
+        "gasLimitAtomic": "600000",
+        "maxFeePerGasAtomic": "40064000",
+        "maxPriorityFeePerGasAtomic": "0",
+        "envelopeHash": "7b7e5281ec03940ca9c5ef803c263f5f0775c94e558b36a1461b6c5934fb8e3b"
+      },
+      "sourceAllowanceZero": true,
+      "sourceRequiredUsdcAtomic": "120300",
+      "sourceWorstNativeReserveAtomic": "225000000000000",
+      "destinationHasFullNativeCap": false,
+      "sourceCurrentNativeUsage": {
+        "windowPolicy": "utc-calendar-day",
+        "windowStart": "2026-10-09T00:00:00.000Z",
+        "windowEnd": "2026-10-10T00:00:00.000Z",
+        "amountAtomic": "0"
+      },
+      "destinationCurrentNativeUsage": {
+        "windowPolicy": "utc-calendar-day",
+        "windowStart": "2026-10-09T00:00:00.000Z",
+        "windowEnd": "2026-10-10T00:00:00.000Z",
+        "amountAtomic": "0"
+      },
+      "mintGasNote": "Cannot simulate receiveMessage before issuer-signed source burn exists. Fresh normal mint preparation must estimate and simulate; hard cap600000. Burn estimate requires actual approval, so600000 is a conservative unsigned envelope, not measured gas."
+    }
+  ],
+  "seipayerNote": "This preflight observed buyer Sei before root changed payer to evm-live-seller. Deployment/domain/code proof remains applicable; buyer Sei gas0 is superseded and must not authorize seller execution. Fresh seller balance/profile/nonce proof required after GasZip canonical funding.",
+  "feeFreshnessNote": "Quotes have30second TTL and are observation evidence only; normal prepare refreshes. No unsigned operation was created."
+}

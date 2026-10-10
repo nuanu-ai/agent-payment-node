@@ -1,0 +1,16 @@
+{
+  "proxy": {
+    "source": "original committed initcode constructor result; ad2658ac57bbf24d33192cb0f5dac5cf423f00a8",
+    "bytes": 2913,
+    "keccak256": "0xce6429c0bb49284660683287c0a8fe548a88379072327d026626909d202048b9",
+    "limitation": "Original metadata CID/source-build identity unproved; executable handler correspondence accepted separately."
+  },
+  "permit2": {
+    "source": "Native read-only chainId+eth_getCode batch 2026-10-05; latest, no finality claim",
+    "address": "0x000000000022D473030F116dDEE9F6B43aC78BA3",
+    "chainId": 43114,
+    "bytes": 9152,
+    "keccak256": "0x081beff14e75c5a5c1e60740445f58d54ba0fef228148a11d3e4287dc3551cbb",
+    "sha256": "4a4b1b451b4dc250a1ea77b4c3a2e78e3b64f6a5f4cbfb485ee5ad331b2ef6eb"
+  }
+}

@@ -1,0 +1,34 @@
+node:fs:1702
+  const stats = binding.lstat(
+                        ^
+
+Error: ENOENT: no such file or directory, lstat '/Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/vendor/tron-utils'
+    at lstatSync (node:fs:1702:25)
+    at verify (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/src/tron/utils.js:20:18)
+    at load (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/src/tron/utils.js:43:5)
+    at file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/src/tron/utils.js:46:29
+    at ModuleJob.run (node:internal/modules/esm/module_job:437:25)
+    at async node:internal/modules/esm/loader:639:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  errno: -2,
+  code: 'ENOENT',
+  syscall: 'lstat',
+  path: '/Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/vendor/tron-utils'
+}
+
+Node.js v24.15.0
+✖ dist-test/tests/core/lifi-linea-native-trace-archive.test.js (564.052125ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 570.238708
+
+✖ failing tests:
+
+test at dist-test/tests/core/lifi-linea-native-trace-archive.test.js:1:1
+✖ dist-test/tests/core/lifi-linea-native-trace-archive.test.js (564.052125ms)
+  'test failed'

@@ -1,0 +1,40 @@
+✔ actual challenge shape preserves full frozen resource/accepted and canonical v2 tx proof (6.69775ms)
+✔ finite challenge refuses drift/ambiguity (0.383333ms)
+✔ finite challenge refuses drift/ambiguity (0.163333ms)
+✔ finite challenge refuses drift/ambiguity (0.097208ms)
+✔ finite challenge refuses drift/ambiguity (0.171209ms)
+✔ finite challenge refuses drift/ambiguity (0.101541ms)
+✔ finite challenge refuses drift/ambiguity (0.078917ms)
+✔ only exact new x402 pin resolves the supplement (0.158ms)
+✔ one sign/send, finalized exact Transfer, HTTP 200 price and saved headers prove delivery (558.617ms)
+✔ lost send response is held; observer proves payment without resending (557.95325ms)
+✔ delivery loss stays paid/delivery_unknown; explicit observer retries identical header only (432.905ms)
+✔ changed nonce during confirmation refuses with zero custody/effects (240.109042ms)
+✔ changed code during confirmation refuses with zero custody/effects (173.418625ms)
+✔ changed policy during confirmation refuses with zero custody/effects (183.634292ms)
+✔ changed expired during confirmation refuses with zero custody/effects (160.638458ms)
+✔ queued dispatch expiry leaves permanent marker and zero actual broadcast (401.027ms)
+✔ unfinalized receipt cannot disclose proof or claim merchant delivery (924.71725ms)
+✔ wrong transfer and reorg remain unknown; no manufactured settlement (857.951ms)
+✔ global conflict/idempotency and append journal cannot lose charged unknown or reuse operation (266.897833ms)
+✔ generic unrelated signed transaction cannot be used by finite custody (330.936792ms)
+✔ CLI and MCP discovery identify finite merchant with explicit same-proof delivery observer (5.083875ms)
+✔ challenge drift during consent refuses before custody (658.280541ms)
+✔ owner alias collision refuses before any signature (362.315083ms)
+✔ policy activation during paced dispatch blocks the actual POST after the permanent fence (799.854417ms)
+✔ HTTP 200 invalid price schema remains paid with failure evidence (939.871583ms)
+✔ confirmed revert has no merchant disclosure and reconciles proven zero token effect (487.2015ms)
+✔ crash after durable delivery start can only retry the same original proof (472.505875ms)
+✔ explicit false delivery flag stays observation-only in CLI and MCP (0.90775ms)
+✔ saved genuine merchant 402 selects the exact second USDm requirement (3.134209ms)
+✔ receipt fee above the frozen envelope cannot authorize merchant disclosure (367.101458ms)
+✔ challenge drift after sealing prevents the first broadcast and holds the single signature (314.535125ms)
+✔ trusted wire deadline gate runs after DNS and blocks transport before physical send (4.844625ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10474.239834

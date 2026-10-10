@@ -1,0 +1,38 @@
+✖ whole normal successor marker_loss preserves original and full2T (6488.084333ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7383.39075
+
+✖ failing tests:
+
+test at dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:23:5
+✖ whole normal successor marker_loss preserves original and full2T (6488.084333ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /opaque canonical settlement required/. Input:
+  
+  'ApnError: State remained busy for 5000 milliseconds; retry the operation.'
+  
+      at async TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/tests/core/cleanup85-native-successor-production.test.js:78:13)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: ApnError: State remained busy for 5000 milliseconds; retry the operation.
+        at busy (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/secure-state-store.js:458:12)
+        at AssetUsageLedger.acquireLock (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/secure-state-store.js:434:15)
+        at async AssetUsageLedger.withLocks (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/secure-state-store.js:116:27)
+        at async AssetUsageLedger.load (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger.js:343:16)
+        at async Cleanup85UnsignedRetirementStore.assertAbsence (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-cleanup85-unsigned-retirement-store.js:39:32)
+        at async Cleanup85UnsignedRetirementStore.verifyRetained (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-cleanup85-unsigned-retirement-store.js:49:9)
+        at async resolveCleanup85NativeLineage (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-cleanup85-unsigned-retirement.js:43:9)
+        at async cleanup85NativeLineage (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-cleanup85-native-lineage.js:8:43)
+        at async loadCleanup85NativeReservationIdentity (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/circle-cleanup85-native-records.js:63:21)
+        at async assertCleanup85GenericCapacityRelease (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-cleanup85-native.js:40:17),
+    expected: /opaque canonical settlement required/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

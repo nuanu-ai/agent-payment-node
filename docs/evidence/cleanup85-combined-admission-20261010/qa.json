@@ -1,0 +1,31 @@
+{
+  "parent": "6e3e0e4dad6651782f06fe09c83aa5a8a3a91850",
+  "kind": "A_combined_admission_API_milestone",
+  "productionStrict": "PASS pinned Node24.15.0",
+  "focusedStrict": "PASS pinned Node24.15.0",
+  "targetedTests": {
+    "passed": 10,
+    "failed": 0
+  },
+  "positiveCombinedIssuerOfflineRequests": 80,
+  "originalApprovalTransactionReadsPerIssuer": 1,
+  "opaqueCapability": "genuine original identity preserved; clone refused",
+  "guards": "same StateStore object, request, active held scope retained",
+  "ownedRepeatEmissions": {
+    "count": 3,
+    "drift": 0,
+    "sha256": {
+      "dist/circle-cleanup85-unsigned-retirement.js": "83e9362c5627117c17b4ef57e1dae07567666e76a94387d26684b3e25b60e3c1",
+      "dist/circle-cleanup85-unsigned-retirement.js.map": "803c592c037dcddc302719a1257965486f365f8e330748c33f14798da9b6d54a",
+      "dist/circle-cleanup85-unsigned-retirement.d.ts": "621ba50b0be8c018646ff7a1c35f2928c0dbb810537e56086bca5a131ddfa0df"
+    }
+  },
+  "sourceSHA256": "d546784e35db44d31d6f70f24cb5fe1282f379f530961ec19293c194ffbca461",
+  "testSHA256": "7846837222a9f728f3bd1e28da781f31817161cbb41f9679453255db0f2a65f5",
+  "pending": [
+    "B adaptation",
+    "combined independent source gate",
+    "fresh installation",
+    "live execution"
+  ]
+}

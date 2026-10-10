@@ -13,7 +13,41 @@ export interface RelayNativeQuoteIntent {
     readonly minimumOutputWei: string;
     readonly nowSeconds: number;
 }
+export declare const RELAY_BASE_SOURCE = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
+export declare const RELAY_MEGA_USDM = "0xfafddbb3fc7688494971a79cc65dca3ef82079e7";
+export declare const RELAY_BASE_MEGA_REFERENCE = "base-native-mega-usdm-default-v1";
+export declare const RELAY_BASE_POLYGON_REFERENCE = "base-native-polygon-native-buyer-v1";
+export declare const RELAY_BASE_PRINCIPAL = 50000000000000n;
+export declare const RELAY_BASE_FULL_FEE = 1000000000000n;
 export declare function relayNativeRoute(payer: string, recipient: string): {
+    reference: typeof RELAY_BASE_MEGA_REFERENCE;
+    chainId: 4326;
+    chain: "megaeth";
+    recipient: string;
+    currency: string;
+    refundCurrency: string;
+    floor: bigint;
+    sourceChainId: 8453;
+    sourceChain: "base";
+    payer: string;
+    profile: "evm-live-seller";
+} | {
+    reference: typeof RELAY_BASE_POLYGON_REFERENCE;
+    chainId: 137;
+    chain: "polygon";
+    recipient: string;
+    currency: string;
+    refundCurrency: string;
+    floor: bigint;
+    sourceChainId: 8453;
+    sourceChain: "base";
+    payer: string;
+    profile: "evm-live-seller";
+} | {
+    sourceChainId: 56;
+    sourceChain: "bnb";
+    currency: string;
+    floor: bigint;
     reference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE;
     chainId: 137;
     chain: "polygon";
@@ -22,6 +56,10 @@ export declare function relayNativeRoute(payer: string, recipient: string): {
     recipient: string;
     refundCurrency: string;
 } | {
+    sourceChainId: 56;
+    sourceChain: "bnb";
+    currency: string;
+    floor: bigint;
     reference: typeof RELAY_BNB_MONAD_ROUTE_REFERENCE;
     chainId: 143;
     chain: "monad";
@@ -30,6 +68,10 @@ export declare function relayNativeRoute(payer: string, recipient: string): {
     recipient: string;
     refundCurrency: string;
 } | {
+    sourceChainId: 56;
+    sourceChain: "bnb";
+    currency: string;
+    floor: bigint;
     reference: typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE;
     chainId: 143;
     chain: "monad";
@@ -41,7 +83,7 @@ export declare function relayNativeRoute(payer: string, recipient: string): {
 export declare function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<string, unknown>;
 export interface ValidatedRelayNativeQuote {
     readonly schemaVersion: "apn.relay-native-quote.v1";
-    readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE;
+    readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE | typeof RELAY_BASE_MEGA_REFERENCE | typeof RELAY_BASE_POLYGON_REFERENCE;
     readonly quoteDigest: string;
     readonly statusLocator?: RelayStatusLocator;
     readonly orderId: string;
@@ -52,7 +94,7 @@ export interface ValidatedRelayNativeQuote {
     readonly principalAtomic: string;
     readonly orderData: Readonly<Record<string, unknown>>;
     readonly paymentDetails: Readonly<{
-        chainId: "bnb";
+        chainId: "bnb" | "base";
         depository: string;
         currency: string;
         amount: string;
@@ -64,7 +106,7 @@ export interface ValidatedRelayNativeQuote {
         to: string;
         data: string;
         value: string;
-        chainId: 56;
+        chainId: 56 | 8453;
         gas: string;
         maxFeePerGas: string;
         maxPriorityFeePerGas: string;

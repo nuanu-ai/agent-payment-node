@@ -1,0 +1,26 @@
+{
+  "mechanism": {
+    "schemaVersion": "apn.swap-mechanism-pin.v1",
+    "protocolFamily": "uniswap_ethereum",
+    "networkFamily": "evm",
+    "chain": "eip155:1",
+    "protocolVersion": "2.2.0",
+    "constructorKind": "sdk",
+    "constructorIdentity": "apn.uniswap-v3.quoter-v2.local-encoder",
+    "constructorVersion": "1.1.0",
+    "routerProgramIdentity": "0x0542093271A31f6FC1DADB232bd59eeb27de780F",
+    "auxiliaryContractProgramIdentities": [
+      "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+      "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+      "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+      "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD"
+    ],
+    "quoteSchemaVersion": "quoter-v2.quote-exact-input-single.1",
+    "transactionSchemaVersion": "universal-router-2.2.0.wrap-eth-v3-exact-in.1",
+    "validationPolicyIdentity": "apn.uniswap.ethereum-native-wbtc-v3-keyless",
+    "validationPolicyVersion": "1.0.0"
+  },
+  "mechanismDigest": "b5524ff02dee36f5aacfdffd2e7281287e21764c6bdc79bc9f77d1a369fd7131",
+  "protocolRegistryDigest": "289a57a37bee8550d293b83ec772d53dd46c2e45e770e3baa5a612389f2d134e"
+}

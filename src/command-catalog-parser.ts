@@ -35,9 +35,12 @@ export function parseCatalogArgv(argv: readonly string[]): ParsedCatalogCommand 
   if (definition === undefined) throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported APN command.");
   const values: Record<string, unknown> = {};
   const tail = argv.slice(definition.path.length);
-  for (let index = 0; index < tail.length; index += 2) {
+  for (let index = 0; index < tail.length; index += 1) {
     const token = tail[index];
-    const value = tail[index + 1];
+    const boolean = definition.options.find((option) => option.name === token)?.type === "boolean";
+    const next = tail[index + 1];
+    const value = boolean && (next === undefined || next.startsWith("--")) ? "true" : next;
+    if (!(boolean && (next === undefined || next.startsWith("--")))) index += 1;
     if (token === undefined || value === undefined || !token.startsWith("--") || value.startsWith("--")) {
       throw new ApnError("APN_INVALID_INPUT", "Options must use complete `--name value` pairs.");
     }
@@ -55,6 +58,7 @@ export function parseCatalogInput(
   for (const [name, rawValue] of Object.entries(input)) {
     const optionDefinition = definition.options.find((candidate) => candidate.name === name);
     if (optionDefinition === undefined) throw new ApnError("APN_INVALID_INPUT", "Command contains an unknown or duplicate option.");
+    if (optionDefinition.type === "boolean" && typeof rawValue === "boolean") { values[name] = String(rawValue); continue; }
     if (typeof rawValue !== "string") throw new ApnError("APN_INVALID_INPUT", `${optionDefinition.name} must be a string.`);
     validateOptionValue(optionDefinition, rawValue);
     values[name] = rawValue;
@@ -131,6 +135,7 @@ function validateOptionValue(definition: CommandOption, value: string): void {
   const invalid = (): never => { throw new ApnError("APN_INVALID_INPUT", `${definition.name} does not satisfy its declared ${definition.type} contract.`); };
   if (containsRawControlCharacters(value)) invalid();
   switch (definition.type) {
+    case "boolean": if (value !== "true" && value !== "false") invalid(); return;
     case "base64": decodeX402RequestBody(value); return;
     case "string": if (value.length === 0) invalid(); return;
     case "profile": if (!/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value)) invalid(); return;

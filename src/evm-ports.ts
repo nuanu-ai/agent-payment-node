@@ -72,7 +72,7 @@ export interface EvmRpcPort {
   confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
 }
 
-export type EvmRpcCall = (method: string, params: readonly unknown[]) => Promise<unknown>;
+export type EvmRpcCall = (method: string, params: readonly unknown[], beforeSend?: () => Promise<void>) => Promise<unknown>;
 export type EvmRpcBatchCall = (calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]) => Promise<readonly unknown[]>;
 export interface EvmNativePrepareReads {
   balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;

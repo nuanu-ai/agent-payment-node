@@ -7,6 +7,20 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 
 export type CommandRequest =
+  | {readonly command:"wallet.metamask.native-transfer";readonly chainId:number;readonly idempotencyKey:string}
+  | {readonly command:"wallet.metamask.native-transfer-status"|"wallet.metamask.native-transfer-observe";readonly operationId:string}
+  | { readonly command: "sei.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
+  | { readonly command: "mega.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
+  | { readonly command: "sei.funding.approve" | "sei.funding.status"; readonly operationId: string }
+  | { readonly command: "circle.evm.adopt-external-mint"; readonly operationId: string; readonly transactionHash: `0x${string}` }
+  | { readonly command: "circle.evm.prepare"; readonly profile: string; readonly destinationProfile: string; readonly destinationChain: 1329 | 59144 | 143; readonly idempotencyKey: string }
+  | { readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.cleanup85-prepare" | "circle.evm.cleanup85-cancel" | "circle.evm.cleanup86-approve" | "circle.evm.status"; readonly operationId: string }
+  | { readonly command: "mega.funding.approve" | "mega.funding.status"; readonly operationId: string }
+  | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly maximumNativeFee: string; readonly nativeFeeReserveWei?: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.merchant.approve" | "x402.merchant.status" | "x402.merchant.retire-unsent"; readonly operationId: string }
+  | { readonly command: "x402.merchant.observe"; readonly operationId: string; readonly deliver: boolean }
+  | { readonly command: "x402.permit2.approve"; readonly profile: string; readonly url: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.permit2.observe"; readonly operationId: string; readonly profile?: string; readonly transaction?: string; readonly expiredUnused: boolean }
   | { readonly command: "x402.permit2.preflight"; readonly profile: string; readonly paymentRequired: string;
       readonly expectedChallengeHash: string; readonly expectedIndex: string; readonly expectedTerms: string }
   | { readonly command: "x402.permit2.status"; readonly profile: string; readonly operationId: string }
@@ -99,7 +113,7 @@ export type CommandRequest =
   | { readonly command: "gasless.balance"; readonly profile: string; readonly chainId: GaslessCommandChainId }
   | { readonly command: "gasless.transfer.quote"; readonly profile: string; readonly owner: Address; readonly request: GaslessCommandRequest; readonly rpcMaxBatchItems?: number }
   | { readonly command: "gasless.transfer.prepare"; readonly profile: string; readonly request: GaslessCommandRequest; readonly idempotencyKey: string }
-  | { readonly command: "gasless.transfer.approve"; readonly operationId: string }
+  | { readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed"; readonly operationId: string }
   | { readonly command: "gasless.usdt.status" | "gasless.usdt.resume"; readonly profileHash: string; readonly operationId: string }
   | { readonly command: "gasless.usdt.execute" | "gasless.usdt.execution-status" | "gasless.usdt.observe"; readonly profileHash: string; readonly operationId: string }
   | { readonly command: "gasless.usdt.prepare"; readonly profile: string; readonly recipient: Address;
@@ -139,7 +153,7 @@ export type CommandRequest =
   | { readonly command: "wallet.permission.forget"; readonly profile: string; readonly expectedRevision: number }
   | { readonly command: "wallet.status"; readonly profile: string }
   | { readonly command: "wallet.balance"; readonly profile: string; readonly asset?: EvmAssetSelection }
-  | { readonly command: "wallet.portfolio"; readonly profile: string }
+  | { readonly command: "wallet.portfolio"; readonly profile: string; readonly refresh?: boolean }
   | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: EvmChainId }
   | {
     readonly command: "wallet.policy.set";
@@ -175,7 +189,7 @@ export type CommandRequest =
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number;
-      readonly observationRpcEnv?: string; readonly observeOnly?: true }
+      readonly observationRpcEnv?: string; readonly coinbaseObservationRpc?: string; readonly observeOnly?: true }
   | { readonly command: "operation.abandon"; readonly operationId: string }
   | {
     readonly command: "operation.recover-provider-request";

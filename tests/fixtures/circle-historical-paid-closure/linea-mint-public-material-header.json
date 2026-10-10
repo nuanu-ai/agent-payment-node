@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "apn.circle-v2-evm-effect-envelope.v1",
+  "operationId": "23f54a86f0ec0cfaf0a69f419c9a0c9fd19420fc9f2195bfe6c00192ab7b44c6",
+  "role": "mint",
+  "fingerprint": "78da82edaea70a93e30e53f13edcaf0237c1d9e50931b3c57c0392c69b3286ee",
+  "envelopeHash": "a9f14feb0e4d62d4f9c5bedfe714dcf8ef906a052c2446d52216d18371e0a456",
+  "salt": "4qO0XX8F7hPi8geN9qq7zSjHdu4LXl/c500UF+WzE0E=",
+  "nonce": "VIh7uANqiZgziOF3",
+  "encryptedBodyPresent": true,
+  "tagPresent": true
+}

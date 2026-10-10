@@ -1,3 +1,4 @@
+import { MERCHANT_CHAIN, MERCHANT_TOKEN, MERCHANT_MECHANISM } from "./x402-merchant/pins.js";
 import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
@@ -156,7 +157,7 @@ function validateChain(value, schema) {
     }
     const identities = new Set();
     for (const asset of value.assets) {
-        validateAsset(value.family, asset, schema);
+        validateAsset(value.family, asset, schema, String(value.chain));
         if (asset.gaslessRecipient !== undefined && value.chain !== "eip155:1" && value.chain !== "eip155:8453") {
             invalid("A gasless recipient pin requires Ethereum or Base.");
         }
@@ -170,14 +171,14 @@ function validateChain(value, schema) {
         identities.add(identity);
     }
 }
-function validateAsset(family, value, schema) {
+function validateAsset(family, value, schema, chain) {
     const perRail = schema === ASSET_POLICY_REGISTRY_SCHEMA_V2;
     if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", perRail ? "railCaps" : "caps",
         ...(value.mechanismPins === undefined ? [] : ["mechanismPins"]),
         ...(value.mechanismOptions === undefined ? [] : ["mechanismOptions"]),
         ...(value.gaslessRecipient === undefined ? [] : ["gaslessRecipient"])]) ||
         (value.kind !== "native" && value.kind !== "token") ||
-        typeof value.symbol !== "string" || !/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) ||
+        typeof value.symbol !== "string" || (!/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) && !(value.symbol === "USDm" && family === "evm" && chain === MERCHANT_CHAIN && value.kind === "token" && value.identifier === MERCHANT_TOKEN && isPlainRecord(value.mechanismPins) && canonicalJson(value.mechanismPins.x402 ?? null) === canonicalJson(MERCHANT_MECHANISM))) ||
         typeof value.decimals !== "number" || !Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
         invalid("An asset policy asset row is invalid.");
     }

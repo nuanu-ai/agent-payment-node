@@ -1,0 +1,42 @@
+✖ whole normal successor missing_successor_slot preserves original and full2T (1656.474542ms)
+✖ whole normal successor missing_successor_slot preserves original and full2T (1673.980416ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2642.0645
+
+✖ failing tests:
+
+test at dist-test-successor/tests/core/review-all-lineage-artifacts-absent.test.js:25:5
+✖ whole normal successor missing_successor_slot preserves original and full2T (1656.474542ms)
+  Error [ApnError]: Cleanup85 native hold marker is missing; opaque canonical settlement required.
+      at blocked (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-record.js:241:43)
+      at assertCleanup85GenericCapacityRelease (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-cleanup85-native.js:42:15)
+      at async file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger.js:170:17
+      at async AssetUsageLedger.withLocks (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/secure-state-store.js:118:20)
+      at async AssetUsageLedger.transition (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger.js:153:16)
+      at async TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/tests/core/review-all-lineage-artifacts-absent.test.js:92:28)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'APN_OPERATION_BLOCKED',
+    details: undefined
+  }
+
+test at dist-test-successor/tests/core/review-missing-original-slot-capture.test.js:25:5
+✖ whole normal successor missing_successor_slot preserves original and full2T (1673.980416ms)
+  Error [ApnError]: Cleanup85 native hold marker is missing; opaque canonical settlement required.
+      at blocked (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-record.js:241:43)
+      at assertCleanup85GenericCapacityRelease (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger-cleanup85-native.js:42:15)
+      at async file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger.js:170:17
+      at async AssetUsageLedger.withLocks (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/secure-state-store.js:118:20)
+      at async AssetUsageLedger.transition (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/asset-usage-ledger.js:153:16)
+      at async TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/tests/core/review-missing-original-slot-capture.test.js:92:28)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    code: 'APN_OPERATION_BLOCKED',
+    details: undefined
+  }

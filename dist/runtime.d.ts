@@ -1,3 +1,6 @@
+import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
+import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
+import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
@@ -79,6 +82,7 @@ export interface CoreDependencies {
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
     readonly stargateNative?: StargateNativeService;
+    readonly circleEvm?: CircleEvmService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
@@ -102,6 +106,9 @@ export interface CoreDependencies {
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
+    readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.jupiter.quote";
+    }>>;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -113,6 +120,8 @@ export interface CoreDependencies {
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;
     readonly oneClickSource?: OneClickSourceService;
+    readonly seiFunding?: SeiFundingService;
+    readonly megaFunding?: MegaFundingService;
     readonly directRails?: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;
@@ -155,6 +164,7 @@ export declare class RuntimeContext {
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
     readonly stargateNative?: StargateNativeService;
+    readonly circleEvm?: CircleEvmService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
@@ -178,6 +188,9 @@ export declare class RuntimeContext {
     readonly uniswap?: UniswapGuardedSwapBuilder;
     readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
     readonly jupiter?: JupiterReadOnlyQuoteBuilder;
+    readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
+        readonly command: "swap.jupiter.quote";
+    }>>;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;
@@ -189,6 +202,8 @@ export declare class RuntimeContext {
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;
     readonly oneClickSource?: OneClickSourceService;
+    readonly seiFunding?: SeiFundingService;
+    readonly megaFunding?: MegaFundingService;
     readonly directRails: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;

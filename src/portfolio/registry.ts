@@ -1,3 +1,4 @@
+import { SOLANA_PUBLIC_RPC_URL } from "../constants.js";
 import { ApnError } from "../errors.js";
 import type { Hex } from "../model.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
@@ -29,7 +30,7 @@ export interface PortfolioNetworkRpc {
 const evm = (chainId: number, env: string, defaultEndpoint: string, multicall3CodeHash: Hex | null): PortfolioNetworkRpc =>
   ({ chain: `eip155:${chainId}`, family: "evm", env, defaultEndpoint, evmChainId: chainId, multicall3CodeHash });
 
-/** Read-only portfolio endpoints. Money-moving rails never consult this registry and keep owner-named RPC only. */
+/** Read-only portfolio endpoints. Money-moving rails do not consult this registry; Solana shares its anonymous default constant. */
 export const PORTFOLIO_NETWORK_RPC: readonly PortfolioNetworkRpc[] = Object.freeze(([
   evm(1, "APN_ETHEREUM_RPC_URL", "https://ethereum-rpc.publicnode.com", MULTICALL3_CODE),
   evm(8453, "APN_BASE_RPC_URL", "https://mainnet.base.org", MULTICALL3_CODE),
@@ -45,7 +46,7 @@ export const PORTFOLIO_NETWORK_RPC: readonly PortfolioNetworkRpc[] = Object.free
   { chain: "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc", family: "tron", env: "APN_TRON_RPC_URL",
     defaultEndpoint: "https://api.trongrid.io", evmChainId: null, multicall3CodeHash: null },
   { chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d", family: "solana", env: "APN_SOLANA_RPC_URL",
-    defaultEndpoint: "https://api.mainnet-beta.solana.com", evmChainId: null, multicall3CodeHash: null },
+    defaultEndpoint: SOLANA_PUBLIC_RPC_URL, evmChainId: null, multicall3CodeHash: null },
 ] satisfies PortfolioNetworkRpc[]).map((row) => Object.freeze(row)));
 
 export type PortfolioEndpoint =

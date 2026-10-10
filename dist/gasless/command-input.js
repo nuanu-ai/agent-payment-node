@@ -16,6 +16,11 @@ export function gaslessCommandRequest(request) {
     gaslessUint(request.maxFeeAtomic, false, "APN_INVALID_INPUT");
     if (gross <= 0n || minimum <= 0n || minimum > gross)
         gaslessFailure("APN_INVALID_INPUT", "gasless_amount_bounds");
+    if (request.fixedNet) {
+        if (gaslessUint(request.fixedNet.netAtomic, true, "APN_INVALID_INPUT") !== minimum ||
+            gaslessUint(request.fixedNet.maxGrossAtomic, true, "APN_INVALID_INPUT") !== gross)
+            gaslessFailure("APN_INVALID_INPUT", "gasless_fixed_net_bounds");
+    }
     return request;
 }
 //# sourceMappingURL=command-input.js.map

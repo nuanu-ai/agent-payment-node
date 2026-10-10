@@ -1,0 +1,5 @@
+tests/core/lifi-linea-native-trace-archive.test.ts(59,40): error TS2722: Cannot invoke an object which is possibly 'undefined'.
+tests/core/lifi-linea-native-trace-archive.test.ts(59,40): error TS18048: 'r.rpc.observeDestination' is possibly 'undefined'.
+tests/core/lifi-linea-native-trace-archive.test.ts(76,26): error TS2722: Cannot invoke an object which is possibly 'undefined'.
+tests/core/lifi-linea-native-trace-archive.test.ts(84,24): error TS2722: Cannot invoke an object which is possibly 'undefined'.
+tests/core/lifi-linea-native-trace-archive.test.ts(90,24): error TS2722: Cannot invoke an object which is possibly 'undefined'.

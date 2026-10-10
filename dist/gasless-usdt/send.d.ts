@@ -1,11 +1,11 @@
 import type { Hex } from "../model.js";
-import { type UsdtBoundOperation } from "./bound-operation.js";
+import { type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import { UsdtExecutionJournal, type UsdtExecutionRecord } from "./execution-journal.js";
 import { type SignedUsdtUserOperation, type UsdtSigningIdentity } from "./local-signing.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtUserOperation } from "./userop.js";
 export interface UsdtSendSigner {
-    sign(bound: UsdtBoundOperation, identity: UsdtSigningIdentity): Promise<SignedUsdtUserOperation>;
+    sign(bound: UsdtBoundOperation, identity: UsdtSigningIdentity, permit?: import("./sponsor-permit.js").UsdtSponsorPermit): Promise<SignedUsdtUserOperation>;
 }
 export interface UsdtSendTransport {
     send(op: UsdtUserOperation): Promise<Hex>;

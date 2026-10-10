@@ -1,4 +1,6 @@
-import { readPermit2IntentStatus } from "./x402-permit2/status.js";
+import { runFixedMetaMaskNativeTransfer, readFixedMetaMaskNativeTransfer } from "./metamask-native-transfer-owner.js";
+import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";import { readPermit2IntentStatus } from "./x402-permit2/status.js";
+import { publicCircle } from "./circle-v2-evm/operation-model.js";
 import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { failureEnvelope, successEnvelope } from "./output.js";
 import { dataOutcome, operationOutcome, receiptOutcome } from "./core-outcome.js";
 import { RuntimeContext, type CoreDependencies } from "./runtime.js";
@@ -21,9 +23,7 @@ import { solanaCapabilities } from "./chain-policy-service.js";
 import { tronCapabilities } from "./tron/catalog.js";
 import { bridgeCapabilities } from "./lifi/catalog.js";
 import { BridgeService } from "./lifi/service.js";
-import { bridgeOwner } from "./lifi/owner.js";
-import { publicCircleApproval } from "./lifi/circle-v2-approval-executor.js";
-import { confirmCircleApproval } from "./lifi/circle-v2-approval-tty.js";
+import { executeCircleCommand } from "./circle-command-service.js";
 import { GaslessService } from "./gasless/service.js";
 import { gaslessCapabilities } from "./gasless/catalog.js";
 import { gaslessChain } from "./gasless/validation.js";
@@ -31,7 +31,7 @@ import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
-import { canonicalProfile } from "./wallet-policy.js";
+import { gaslessProvider } from "./core-gasless-provider.js";
 import { publicRelayNativeSourceJournal } from "./relay/native-source.js";
 import { OperationAbandonService } from "./operation-abandon-service.js";
 import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
@@ -42,81 +42,7 @@ import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";import { executeSunSwapCommand } from "./swap/sunswap-tron/command-service.js";import { executeJupiterCommand } from "./swap/jupiter-solana/command-service.js";import { executeOrcaCommand } from "./swap/orca-solana/command-service.js";
-export type { CommandRequest, OutputEnvelope } from "./commands.js";export type { CoreDependencies } from "./runtime.js";
-export {
-  ASSET_POLICY_REGISTRY_SCHEMA,
-  ASSET_POLICY_REGISTRY_SCHEMA_V2,
-  assetPolicyDigest,
-  evaluateAssetPolicy,
-  sealAssetPolicyRegistry,
-  validateAssetPolicyRegistry,
-} from "./asset-policy-registry.js";
-export {
-  ALLOWLIST_DATASET_PATH,
-  ALLOWLIST_DATASET_SCHEMA,
-  ALLOWLIST_DATASET_SHA256,
-  ALLOWLIST_DATASET_VERSION,
-  ALLOWLIST_INVENTORY_SCHEMA,
-  assertAllowlistExecutionConfigured,
-  compileAllowlistInventory,
-  loadAllowlistInventory,
-  resolveAllowlistAsset,
-} from "./allowlist-inventory.js";
-export type {
-  AllowlistInventory,
-  CandidateAsset,
-  CandidateDeployment,
-  CandidateFamily,
-  CandidateKind,
-  CandidateNetwork,
-  CandidateRail,
-  CandidateRails,
-} from "./allowlist-inventory.js";
-export * from "./allowlist-policy.js";
-export type {
-  AssetAtomicCaps,
-  AssetPolicyAdmission,
-  AssetPolicyChain,
-  AssetPolicyChainFamily,
-  AssetPolicyEvaluationInput,
-  AssetPolicyRail,
-  AssetPolicyRegistry,
-  AssetPolicyRegistrySchema,
-  AssetPolicyRow,
-  AssetRailAdmission,
-  UnsignedAssetPolicyRegistry,
-} from "./asset-policy-registry.js";
-export {
-  ASSET_USAGE_RESERVATION_SCHEMA,
-  ASSET_USAGE_WINDOW,
-  AssetUsageLedger,
-  validateAssetUsageReservation,
-} from "./asset-usage-ledger.js";
-export type {
-  AssetUsageIdentity,
-  AssetUsageReservation,
-  AssetUsageReserveInput,
-  AssetUsageSnapshot,
-  AssetUsageState,
-  AssetUsageTransitionInput,
-} from "./asset-usage-ledger.js";
-export { AssetPortfolioReader } from "./asset-portfolio-reader.js";
-export type {
-  AssetPortfolio, AssetPortfolioInput, BatchBalanceAsset, BatchBalanceAvailable, BatchBalanceMode, BatchBalanceRequest,
-  BatchBalanceResult, BatchBalanceRow, BatchBalanceUnavailable, FamilyBalanceBatchPort, PortfolioAccount,
-  PortfolioNetworkResult, PortfolioRow, PortfolioRowStatus, PortfolioUnavailableReason,
-} from "./asset-portfolio-reader.js";
-export {
-  DIRECT_ASSET_USAGE_LEASE_SCHEMA,
-  DirectAssetUsageAdapter,
-  validateDirectAssetUsageLease,
-} from "./direct-asset-usage.js";
-export type {
-  DirectAssetUsageInput,
-  DirectAssetUsageLease,
-} from "./direct-asset-usage.js";
-export * from "./swap/index.js";
-export * from "./stargate-v2/index.js";
+export * from "./core-exports.js";
 export class ApnCore {
   readonly context: RuntimeContext;
   readonly wallet: WalletService;
@@ -163,8 +89,8 @@ export class ApnCore {
   }
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
-      case "x402.permit2.preflight":
-        throw new ApnError("APN_UNSUPPORTED_COMMAND", "Permit2 preflight is available only through the CLI read path.");
+      case "x402.merchant.prepare": case "x402.merchant.approve": case "x402.merchant.observe": case "x402.merchant.status": case "x402.merchant.retire-unsent": case "x402.permit2.preflight": case "x402.permit2.approve": case "x402.permit2.observe":
+        throw new ApnError("APN_UNSUPPORTED_COMMAND", "This provider command requires its dedicated bounded CLI path.");
       case "x402.permit2.status":
         return dataOutcome(await readPermit2IntentStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_blocked_intent");
       case "relay.prepare": {
@@ -251,6 +177,9 @@ export class ApnCore {
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
         return operationOutcome(await service.prepare(request));
       }
+      case "circle.evm.prepare": case "circle.evm.approve-source": case "circle.evm.approve-mint": case "circle.evm.observe":
+      case "circle.evm.adopt-external-mint": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.cleanup-nonce": case "circle.evm.cleanup85-prepare": case "circle.evm.cleanup85-cancel": case "circle.evm.cleanup86-approve": case "circle.evm.status": case "circle.approval.prepare":
+      case "circle.approval.execute": case "circle.approval.status": case "circle.source.submit": return await executeCircleCommand(request, this.context);
       case "stargate.native.execute": case "stargate.native.observe": case "stargate.native.status": case "stargate.native.receipt": {
         const service = this.context.stargateNative;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stargate native runtime is unavailable.");
@@ -286,24 +215,6 @@ export class ApnCore {
       }, "exact_candidate_identity");
       case "allowlist.policy.status": case "allowlist.policy.prepare": case "allowlist.policy.stage":
       case "allowlist.policy.activate": case "allowlist.policy.revoke": return await executeAllowlistPolicyCommand(request, this.context);
-      case "circle.approval.prepare": {
-        await this.context.ready();
-        const owner = (await bridgeOwner(this.context.state, request.profile)).owner;
-        const executor = this.context.circleApproval;
-        if (executor === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle approval executor is unavailable.");
-        return dataOutcome(publicCircleApproval(await executor.prepare({ profile: owner.profile, payer: owner.address,
-          walletBindingHash: owner.walletBindingHash, walletCreatedAt: owner.walletCreatedAt,
-          approvalCapAtomic: request.approvalCapAtomic })), "circle_approval_prepared_unsigned");
-      }
-      case "circle.approval.execute":
-      case "circle.approval.status": {
-        const executor = this.context.circleApproval;
-        if (executor === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle approval executor is unavailable.");
-        const record = request.command === "circle.approval.execute"
-          ? await executor.execute(request.operationId, confirmCircleApproval)
-          : await executor.status(request.operationId);
-        return dataOutcome(publicCircleApproval(record), record.phase === "completed" ? "circle_approval_safe_receipt_and_allowance" : "circle_approval_journal_state");
-      }
       case "oneclick.source.submit": {
         const service = this.context.oneClickSource;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "1Click source runtime is unavailable.");
@@ -314,14 +225,11 @@ export class ApnCore {
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "1Click source runtime is unavailable.");
         return dataOutcome(await service.status(request.operationId), "oneclick_source_and_provider_observation_untrusted");
       }
-      case "circle.source.submit": {
-        const service = this.context.circleSource;
-        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle source runtime is unavailable.");
-        return dataOutcome(await service.submit(request), "circle_base_source_submission_only");
-      }
+case "sei.funding.prepare": case "sei.funding.approve": case "sei.funding.status": {         const service = this.context.seiFunding; if(service===undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Sei funding runtime unavailable.");         return dataOutcome(request.command === "sei.funding.prepare" ? await service.prepare(request) : request.command === "sei.funding.approve" ? await service.approve(request.operationId) : await service.status(request.operationId), "sei_gaszip_durable_operation");       }
+case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.status": {         const service = this.context.megaFunding; if(service===undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Mega funding runtime unavailable.");         return dataOutcome(request.command === "mega.funding.prepare" ? await service.prepare(request) : request.command === "mega.funding.approve" ? await service.approve(request.operationId) : await service.status(request.operationId), "mega_gaszip_durable_operation");       }
       case "gasless.capabilities": return dataOutcome(gaslessCapabilities(request.profile), "static_gasless_capabilities");
       case "gasless.balance": {
-        const provider = await this.gaslessProvider(request.profile);
+        const provider = await gaslessProvider(this.context, request.profile);
         return dataOutcome(provider === "coinbase-agentic-wallet"
           ? request.chainId !== 8453 ? mmFail("mm_gasless_capability_unavailable") : await this.providerWallet.balance(request.profile)
           : provider === "metamask-smart-account"
@@ -357,6 +265,7 @@ export class ApnCore {
           }
         }
         return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash)[request.command.endsWith("status") ? "status" : "resume"](request.operationId));
+      case "gasless.transfer.approve-sealed": return operationOutcome(await this.gasless.approveSealed(request.operationId));
       case "gasless.transfer.approve": {
         const stored = await this.operations.required(request.operationId), { kind } = stored;
         if (kind === "direct_transfer" && stored.record.providerDirect?.coinbaseGasless !== undefined) {
@@ -401,6 +310,9 @@ export class ApnCore {
       case "wallet.permission.disable":
       case "wallet.permission.forget":
         return dataOutcome(await this.providerPermissions.execute(request), "provider_permission_binding");
+      case "wallet.metamask.native-transfer": return dataOutcome(await runFixedMetaMaskNativeTransfer(this.context.state.root,request.chainId,request.idempotencyKey),"durable_public_state");
+      case "wallet.metamask.native-transfer-status":
+      case "wallet.metamask.native-transfer-observe": return dataOutcome(await readFixedMetaMaskNativeTransfer(this.context.state.root,request.operationId,request.command==="wallet.metamask.native-transfer-observe"),"durable_public_state");
       case "wallet.status": {
         const providerStatus = await this.providerWallet.status(request.profile);
         return providerStatus === null
@@ -412,7 +324,7 @@ export class ApnCore {
           await evmWalletBalance(this.context, request.profile, request.asset),
         "chain_verified_public_read",
       );
-      case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile), "chain_verified_public_read");
+      case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile, request.refresh), "chain_verified_public_read");
       case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId), "encrypted_profile_policy_status");
       case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
       case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId, request.payer), "seller_challenge_static");
@@ -435,7 +347,8 @@ export class ApnCore {
       }
       case "transfer.approve": {
         const operation = await this.operations.required(request.operationId);
-        if (operation.kind === "relay_unsigned") throw new ApnError("APN_OPERATION_BLOCKED", "Unsigned Relay operation has no approval or execution path.");
+        if (operation.kind === "circle_route") throw new ApnError("APN_OPERATION_BLOCKED", "Use the separate Circle EVM approval, observation or cleanup command.");
+        if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no approval or execution path." : operation.kind === "merchant_x402" ? "Use x402 merchant approve for this frozen USDm operation." : "Permit2 production execution remains unavailable.");
         if (operation.kind === "gasless_transfer" || operation.kind === "metamask_gasless_transfer" || operation.kind === "smart_account_gasless_transfer" ||
           operation.kind === "facilitator_gasless_transfer") throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use the gasless approval command for this USDC transfer.", {
           ...(operation.kind === "metamask_gasless_transfer" ? { reason: "mm_gasless_approval" } : {}),
@@ -457,7 +370,9 @@ export class ApnCore {
         }
         await this.context.ready();
         const operation = await this.operations.required(request.operationId);
-        if (operation.kind === "relay_unsigned") throw new ApnError("APN_OPERATION_BLOCKED", "Unsigned Relay operation has no resume or execution path.");
+        if (request.coinbaseObservationRpc !== undefined) assertCoinbaseObservationRequest(operation.kind === "direct_transfer" ? operation.record : {} as never, request.coinbaseObservationRpc, request.observeOnly !== undefined || request.waitSeconds !== undefined || request.observationRpcEnv !== undefined);
+        if (operation.kind === "circle_route") throw new ApnError("APN_OPERATION_BLOCKED", "Use the separate Circle EVM approval, observation or cleanup command.");
+        if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no resume or execution path." : operation.kind === "merchant_x402" ? "Use x402 merchant observe for this USDm operation; it never pays again." : "Permit2 production execution remains unavailable.");
         if (request.observeOnly && (operation.kind !== "direct_transfer" || operation.record.providerDirect !== undefined)) {
           throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
         }
@@ -498,7 +413,7 @@ export class ApnCore {
             ...(settlementWait === undefined ? {} : { settlementWait }),
           });
         }
-        return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly));
+        return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly, request.coinbaseObservationRpc));
       }
       case "operation.repair-deployment": return dataOutcome(await this.bridges.repairDeployment(request.operationId), "local_journal_migration");
       case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
@@ -520,7 +435,8 @@ export class ApnCore {
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
-        if (operation.kind === "relay_unsigned") return operationOutcome(await this.operations.status(request.operationId));
+        if (operation.kind === "circle_route") return operationOutcome(await this.operations.status(request.operationId));
+        if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") return operationOutcome(await this.operations.status(request.operationId));
         if (operation.kind === "smart_account_gasless_transfer") return operationOutcome(await this.smartAccountGasless.status(request.operationId));
         if (operation.kind === "facilitator_gasless_transfer") return operationOutcome(await this.facilitatorGasless.status(request.operationId));
         if (operation.kind === "bridge_route") return operationOutcome(await this.bridges.status(request.operationId));
@@ -539,7 +455,11 @@ export class ApnCore {
         await this.context.ready();
         await this.x402.recoverRead(request.operationId);
         const operation = await this.operations.required(request.operationId);
-        if (operation.kind === "relay_unsigned") throw new ApnError("APN_RECEIPT_NOT_FOUND", "Unsigned Relay operation has no receipt.");
+        if (operation.kind === "circle_route") {
+          if (!operation.record.terminal) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.");
+          return receiptOutcome(publicCircle(operation.record));
+        }
+        if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_RECEIPT_NOT_FOUND", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no receipt." : operation.kind === "merchant_x402" ? "Use x402 merchant status for its payment and delivery evidence." : "Permit2 production has no paid receipt.");
         if (operation.kind === "smart_account_gasless_transfer") return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));
         if (operation.kind === "facilitator_gasless_transfer") return receiptOutcome(await this.facilitatorGasless.receipt(request.operationId));
         if (operation.kind === "bridge_route") return receiptOutcome(await this.bridges.receipt(request.operationId));
@@ -553,6 +473,8 @@ export class ApnCore {
     }
   }
   private async prepareGasless(request: Extract<CommandRequest, { command: "gasless.transfer.prepare" }>) {
+    if (request.request.fixedNet && await gaslessProvider(this.context, request.profile) !== "metamask-agent-wallet")
+      throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Fixed-net gasless transfers require a MetaMask server wallet.");
     const key = canonicalIdempotencyKey(request.idempotencyKey);
     const existing = await this.operations.findIdempotency(this.context.state.idempotencyHash(key));
     if (existing?.kind === "direct_transfer" && existing.record.providerDirect?.coinbaseGasless !== undefined)
@@ -560,7 +482,7 @@ export class ApnCore {
     if (existing?.kind === "smart_account_gasless_transfer")
       return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
     if (existing?.kind === "facilitator_gasless_transfer") return await this.facilitatorGasless.prepare(request);
-    const provider = await this.gaslessProvider(request.profile);
+    const provider = await gaslessProvider(this.context, request.profile);
     if (provider === "metamask-smart-account") return await this.smartAccountGasless.prepare({ ...request, request: saRequest(request.request) });
     if (provider === "coinbase-agentic-wallet") return await this.transfer.prepareCoinbaseGasless(request);
     if (provider === "metamask-agent-wallet") return await this.metaMaskGasless.prepare({ ...request, request: { ...request.request,
@@ -569,14 +491,5 @@ export class ApnCore {
     if (request.request.chainId === 43114 && existing?.kind !== "gasless_transfer") return await this.facilitatorGasless.prepare(request);
     return await this.gasless.prepare({ ...request, request: { ...request.request,
       chainId: gaslessChain(request.request.chainId, "APN_PROVIDER_CAPABILITY_UNAVAILABLE") } });
-  }
-  private async gaslessProvider(input: string): Promise<"local" | "metamask-agent-wallet" | "metamask-smart-account" | "coinbase-agentic-wallet"> {
-    const profile = canonicalProfile(input);
-    const stored = await this.context.state.loadProviderProfile(this.context.state.profileHash(profile));
-    if (stored === null || stored.provider_id === "local") return "local";
-    if (stored.provider_id === "metamask-agent-wallet") return "metamask-agent-wallet";
-    if (stored.provider_id === "metamask-smart-account") return "metamask-smart-account";
-    if (stored.provider_id === "coinbase-agentic-wallet") return "coinbase-agentic-wallet";
-    return mmFail("mm_gasless_capability_unavailable");
   }
 }

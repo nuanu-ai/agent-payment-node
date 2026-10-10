@@ -1,3 +1,6 @@
+import { evmAddressLock, assertExclusiveEvmRawSigner } from "../evm-address-ownership.js";
+import { walletCustodyLock } from "../encrypted-wallet-store.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { hashObject } from "../canonical.js";
 import { OperationService } from "../operation-service.js";
 import type { StateStore } from "../state.js";
@@ -46,7 +49,13 @@ export class BridgePreparation {
     const profile = canonicalProfile(input.profile), quoteHash = bridgeHash(input.quote, "APN_INVALID_INPUT"), routeId = bridgeOpaque(input.route, "APN_INVALID_INPUT");
     const key = canonicalIdempotencyKey(input.idempotencyKey), state = this.o.state, profileHash = state.profileHash(profile),
       operationId = state.operationId(profile, key), idempotencyHash = state.idempotencyHash(key), requestHash = hashObject({ profile, quote: quoteHash, route: routeId });
-    return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
+    // Existing journals are authoritative on replay, even if the original quote is unavailable.
+    const preliminary = await this.o.operations.resolvePrepare({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash });
+    const preliminaryQuote = preliminary === null ? await this.o.quotes.load(profileHash, quoteHash) : null;
+    if (preliminary === null && preliminaryQuote === null) bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");
+    const ownerAddress = preliminary?.kind === "bridge_route" ? preliminary.record.intent.owner.address : preliminaryQuote!.owner.address;
+    return await state.withLocks([walletCustodyLock(state, profile)], async () =>
+      await state.withLocks([ `profile:${profileHash}`, `profile:${allowlistProfileHash(profile)}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(ownerAddress)], async () => {
       const existing = await this.o.operations.resolvePrepare({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "bridge_global_operation_kind");
@@ -57,11 +66,12 @@ export class BridgePreparation {
       if (quote === null) bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");
       await this.o.operations.assertEvmAccountAvailable(profileHash, quote.request.fromChainId, quote.owner.address);
       await assertBridgeOwner(state, quote);
+      await assertExclusiveEvmRawSigner(state, quote.owner.address, profileHash);
       const selected = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).find((r) => r.choice.routeId === routeId);
       if (selected === undefined) bridgeFailure("APN_INVALID_INPUT", "route_not_in_snapshot");
       if (!bridgeExecutionDestination(quote.request.toChainId)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "destination_execution_unreviewed");
       if (!selected.choice.preparable) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
-      const allowlist = await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } })
+      const allowlist = await new BridgeAllowlistGate({ state, clock: { now: () => new Date(this.o.now()) } }, true)
         .admit(profile, quote.owner.address, quote.request, selected.choice.tool);
       // One command-scoped read cache covers both sides of materialization. It is intentionally discarded before
       // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary. Only the
@@ -96,6 +106,6 @@ export class BridgePreparation {
           implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic, allowlist },
         effects: envelopes.map(newBridgeEffect) });
       await this.o.records.persist(operation); return operation;
-    });
+    }));
   }
 }

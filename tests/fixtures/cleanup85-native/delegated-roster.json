@@ -1,0 +1,318 @@
+{
+  "provenance": {
+    "source": "/Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-profile-binding-captured-roster/public-roster.json",
+    "capturedAt": "2026-10-09T17:52:09.622Z",
+    "sourceCommit": "513f73fe4371569e22dced353b1fc7358b1652f2",
+    "description": "Exact public metadata captured read-only; no private wallet/session data."
+  },
+  "matches": [
+    {
+      "targetRole": "sender",
+      "guardSequence": 0,
+      "profileHash": "250d806181522c1787ee05a1f461a16da580aa54308909155596f046d91f99a6",
+      "profileName": "smart-v050-live",
+      "providerKind": "metamask-smart-account",
+      "trustClass": "external_owner_delegated_local_session",
+      "ownershipMode": "external owner delegated local session",
+      "namespace": "profiles",
+      "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "sameProfile": false,
+      "establishedRawSignerExemption": true,
+      "sourcePath": "profiles/250d806181522c1787ee05a1f461a16da580aa54308909155596f046d91f99a6/profile.json",
+      "sourceSha256": "979399c5a13713466a4beb4215aa0c3b55f819d5d2edbeee0dba2c897020ec36",
+      "rawPublicProviderMetadata": {
+        "account_binding_hash": "30a916fcb0ab338a44ba9df7a54aa6668798717fb1ab8e9d7e30e8cb80af32da",
+        "capability_hash": "97d41ddc381cc11314bd78752f36b6ac7f070fbd5749700c826d4117a473f751",
+        "capability_snapshot": {
+          "asset": {
+            "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "direct": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_session_transaction",
+            "retry_owner": "apn_operation_state"
+          },
+          "evidence": {
+            "available": true,
+            "owner": "apn"
+          },
+          "lifecycle": {
+            "connect": true,
+            "logout": true,
+            "status": true
+          },
+          "network": {
+            "caip2": "eip155:8453",
+            "chain": "base"
+          },
+          "permission": {
+            "available": true,
+            "consent": "foreground_browser",
+            "owner_custody": "external_metamask",
+            "protocol": "erc7715",
+            "provider_revoke": "unavailable_unproved",
+            "session_custody": "encrypted_local_apn"
+          },
+          "read": {
+            "address": true,
+            "balance": true,
+            "funding_guidance": true
+          },
+          "schema_version": "apn.provider-capability.v1",
+          "x402": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_erc7710_apn_paid_retry",
+            "retry_owner": "apn_state_machine"
+          }
+        },
+        "drift": {
+          "reason": "none",
+          "state": "bound"
+        },
+        "observed_at": "2026-09-03T15:52:36.296Z",
+        "profile": "smart-v050-live",
+        "profile_hash": "250d806181522c1787ee05a1f461a16da580aa54308909155596f046d91f99a6",
+        "provider_id": "metamask-smart-account",
+        "public_address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "revision": 2,
+        "schema_version": "apn.provider-profile.v1",
+        "trust_class": "external_owner_delegated_local_session"
+      }
+    },
+    {
+      "targetRole": "sender",
+      "guardSequence": 1,
+      "profileHash": "2796137b6fab72378f6446cb278484d5cd95457d964408cb982aae36ba29fda4",
+      "profileName": "smart-v051-live",
+      "providerKind": "metamask-smart-account",
+      "trustClass": "external_owner_delegated_local_session",
+      "ownershipMode": "external owner delegated local session",
+      "namespace": "profiles",
+      "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "sameProfile": false,
+      "establishedRawSignerExemption": true,
+      "sourcePath": "profiles/2796137b6fab72378f6446cb278484d5cd95457d964408cb982aae36ba29fda4/profile.json",
+      "sourceSha256": "c34f380bd25e2ee708934b47438d85598fc15b07ef2f80fa127284fa64c42565",
+      "rawPublicProviderMetadata": {
+        "account_binding_hash": "30a916fcb0ab338a44ba9df7a54aa6668798717fb1ab8e9d7e30e8cb80af32da",
+        "capability_hash": "97d41ddc381cc11314bd78752f36b6ac7f070fbd5749700c826d4117a473f751",
+        "capability_snapshot": {
+          "asset": {
+            "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "direct": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_session_transaction",
+            "retry_owner": "apn_operation_state"
+          },
+          "evidence": {
+            "available": true,
+            "owner": "apn"
+          },
+          "lifecycle": {
+            "connect": true,
+            "logout": true,
+            "status": true
+          },
+          "network": {
+            "caip2": "eip155:8453",
+            "chain": "base"
+          },
+          "permission": {
+            "available": true,
+            "consent": "foreground_browser",
+            "owner_custody": "external_metamask",
+            "protocol": "erc7715",
+            "provider_revoke": "unavailable_unproved",
+            "session_custody": "encrypted_local_apn"
+          },
+          "read": {
+            "address": true,
+            "balance": true,
+            "funding_guidance": true
+          },
+          "schema_version": "apn.provider-capability.v1",
+          "x402": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_erc7710_apn_paid_retry",
+            "retry_owner": "apn_state_machine"
+          }
+        },
+        "drift": {
+          "reason": "none",
+          "state": "bound"
+        },
+        "observed_at": "2026-09-04T03:48:55.600Z",
+        "profile": "smart-v051-live",
+        "profile_hash": "2796137b6fab72378f6446cb278484d5cd95457d964408cb982aae36ba29fda4",
+        "provider_id": "metamask-smart-account",
+        "public_address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "revision": 2,
+        "schema_version": "apn.provider-profile.v1",
+        "trust_class": "external_owner_delegated_local_session"
+      }
+    },
+    {
+      "targetRole": "sender",
+      "guardSequence": 2,
+      "profileHash": "36ef6b054c8f1ed33fe55b7fb3be4a4335a984100eb3a1e135c38c16424e41c6",
+      "profileName": "smart-v054-live",
+      "providerKind": "metamask-smart-account",
+      "trustClass": "external_owner_delegated_local_session",
+      "ownershipMode": "external owner delegated local session",
+      "namespace": "profiles",
+      "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "sameProfile": false,
+      "establishedRawSignerExemption": true,
+      "sourcePath": "profiles/36ef6b054c8f1ed33fe55b7fb3be4a4335a984100eb3a1e135c38c16424e41c6/profile.json",
+      "sourceSha256": "0bcfb8a581f39727119265f4616b01dfe225b9ae13fdb64592f2df7398286e28",
+      "rawPublicProviderMetadata": {
+        "account_binding_hash": "30a916fcb0ab338a44ba9df7a54aa6668798717fb1ab8e9d7e30e8cb80af32da",
+        "capability_hash": "97d41ddc381cc11314bd78752f36b6ac7f070fbd5749700c826d4117a473f751",
+        "capability_snapshot": {
+          "asset": {
+            "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "direct": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_session_transaction",
+            "retry_owner": "apn_operation_state"
+          },
+          "evidence": {
+            "available": true,
+            "owner": "apn"
+          },
+          "lifecycle": {
+            "connect": true,
+            "logout": true,
+            "status": true
+          },
+          "network": {
+            "caip2": "eip155:8453",
+            "chain": "base"
+          },
+          "permission": {
+            "available": true,
+            "consent": "foreground_browser",
+            "owner_custody": "external_metamask",
+            "protocol": "erc7715",
+            "provider_revoke": "unavailable_unproved",
+            "session_custody": "encrypted_local_apn"
+          },
+          "read": {
+            "address": true,
+            "balance": true,
+            "funding_guidance": true
+          },
+          "schema_version": "apn.provider-capability.v1",
+          "x402": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_erc7710_apn_paid_retry",
+            "retry_owner": "apn_state_machine"
+          }
+        },
+        "drift": {
+          "reason": "none",
+          "state": "bound"
+        },
+        "observed_at": "2026-09-07T04:28:43.994Z",
+        "profile": "smart-v054-live",
+        "profile_hash": "36ef6b054c8f1ed33fe55b7fb3be4a4335a984100eb3a1e135c38c16424e41c6",
+        "provider_id": "metamask-smart-account",
+        "public_address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "revision": 2,
+        "schema_version": "apn.provider-profile.v1",
+        "trust_class": "external_owner_delegated_local_session"
+      }
+    },
+    {
+      "targetRole": "sender",
+      "guardSequence": 6,
+      "profileHash": "96270ab838a38337a4f5a4f789c423b0020b850545f4c401948dd43d0c8173af",
+      "profileName": "smart-gasless-20260912",
+      "providerKind": "metamask-smart-account",
+      "trustClass": "external_owner_delegated_local_session",
+      "ownershipMode": "external owner delegated local session",
+      "namespace": "profiles",
+      "address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+      "sameProfile": false,
+      "establishedRawSignerExemption": true,
+      "sourcePath": "profiles/96270ab838a38337a4f5a4f789c423b0020b850545f4c401948dd43d0c8173af/profile.json",
+      "sourceSha256": "9bd7a089c870754c9127c5d71bd1eebb3a190c0fdf3598323b1c4f9db11aedc8",
+      "rawPublicProviderMetadata": {
+        "account_binding_hash": "30a916fcb0ab338a44ba9df7a54aa6668798717fb1ab8e9d7e30e8cb80af32da",
+        "capability_hash": "97d41ddc381cc11314bd78752f36b6ac7f070fbd5749700c826d4117a473f751",
+        "capability_snapshot": {
+          "asset": {
+            "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "direct": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_session_transaction",
+            "retry_owner": "apn_operation_state"
+          },
+          "evidence": {
+            "available": true,
+            "owner": "apn"
+          },
+          "lifecycle": {
+            "connect": true,
+            "logout": true,
+            "status": true
+          },
+          "network": {
+            "caip2": "eip155:8453",
+            "chain": "base"
+          },
+          "permission": {
+            "available": true,
+            "consent": "foreground_browser",
+            "owner_custody": "external_metamask",
+            "protocol": "erc7715",
+            "provider_revoke": "unavailable_unproved",
+            "session_custody": "encrypted_local_apn"
+          },
+          "read": {
+            "address": true,
+            "balance": true,
+            "funding_guidance": true
+          },
+          "schema_version": "apn.provider-capability.v1",
+          "x402": {
+            "available": true,
+            "execution_owner": "apn",
+            "mode": "delegated_erc7710_apn_paid_retry",
+            "retry_owner": "apn_state_machine"
+          }
+        },
+        "drift": {
+          "reason": "none",
+          "state": "bound"
+        },
+        "observed_at": "2026-09-12T12:27:01.099Z",
+        "profile": "smart-gasless-20260912",
+        "profile_hash": "96270ab838a38337a4f5a4f789c423b0020b850545f4c401948dd43d0c8173af",
+        "provider_id": "metamask-smart-account",
+        "public_address": "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
+        "revision": 1,
+        "schema_version": "apn.provider-profile.v1",
+        "trust_class": "external_owner_delegated_local_session"
+      }
+    }
+  ]
+}

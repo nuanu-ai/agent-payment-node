@@ -9,6 +9,7 @@ import { COMMAND_MANIFEST, type CommandDefinition, type CommandOption } from "..
 import type { OutputEnvelope } from "../../src/commands.js";
 import { runCli } from "../../src/cli.js";
 import { PRODUCT_VERSION } from "../../src/constants.js";
+import { StateStore } from "../../src/state.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { MCP_LAUNCH_DESCRIPTOR_JSON } from "../../src/mcp-config.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
@@ -16,8 +17,11 @@ import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js
 import type { NativePort, NativeRequest } from "../../src/ports.js";
 import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "../../src/policy-approval.js";
 import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./helpers.js";
+import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 
 const TOOL_NAMES = [
+  "apn_circle_evm_adopt_external_mint",
+  "apn_circle_evm_prepare", "apn_circle_evm_approve_source", "apn_circle_evm_approve_mint", "apn_circle_evm_observe", "apn_circle_evm_refresh_attestation", "apn_circle_evm_cleanup", "apn_circle_evm_cleanup_nonce", "apn_circle_evm_cleanup85_prepare", "apn_circle_evm_cleanup85_cancel", "apn_circle_evm_cleanup86_approve", "apn_circle_evm_status",
   "apn_swap_ethereum_uniswap_inventory",
   "apn_swap_ethereum_uniswap_quote",
   "apn_swap_ethereum_uniswap_prepare",
@@ -90,6 +94,7 @@ const TOOL_NAMES = [
   "apn_wallet_policy_show",
   "apn_wallet_policy_set",
   "apn_x402_permit2_status",
+  "apn_x402_merchant_prepare", "apn_x402_merchant_approve", "apn_x402_merchant_observe", "apn_x402_merchant_status", "apn_x402_merchant_retire_unsent",
   "apn_x402_inspect",
   "apn_x402_fetch_prepare",
   "apn_x402_fetch_approve",
@@ -109,7 +114,7 @@ const TOOL_NAMES = [
   "apn_x402_fetch_prepare_network",
   "apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve",
   "apn_gasless_usdt_prepare", "apn_gasless_usdt_status", "apn_gasless_usdt_resume",
-  "apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_quote", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve",
+  "apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_quote", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve", "apn_gasless_transfer_approve_sealed",
   "apn_oneclick_source_submit", "apn_oneclick_source_status",
 ] as const;
 const MASTER = Buffer.from("55".repeat(32), "hex");
@@ -160,6 +165,18 @@ test("official MCP client proves production stdio descriptor, the exact tool set
           .map(([field, schema]) => [field, schema.default])),
       };
     }), [
+      { name: "apn_circle_evm_adopt_external_mint", properties: ["operation", "transaction_hash"], required: ["operation", "transaction_hash"], defaults: {} },
+      { name: "apn_circle_evm_prepare", properties: ["profile", "destination_profile", "destination_chain", "idempotency_key"], required: ["profile", "destination_profile", "destination_chain", "idempotency_key"], defaults: {} },
+      { name: "apn_circle_evm_approve_source", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_approve_mint", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_observe", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_refresh_attestation", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup_nonce", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup85_prepare", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup85_cancel", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_cleanup86_approve", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_circle_evm_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_inventory", properties: [], required: [], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_quote", properties: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], required: ["profile", "account", "to", "output_token", "amount", "slippage_bps", "owner_slippage_cap_bps", "deadline", "max_gas_limit", "max_fee_per_gas", "max_priority_fee_per_gas"], defaults: {} },
       { name: "apn_swap_ethereum_uniswap_prepare", properties: ["profile", "quote", "idempotency_key"], required: ["profile", "quote", "idempotency_key"], defaults: {} },
@@ -223,7 +240,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_wallet_status", properties: ["profile"], required: [], defaults: { profile: "default" } },
       { name: "apn_wallet_balance", properties: ["profile", "rpc_url"], required: ["rpc_url"], defaults: { profile: "default" } },
       { name: "apn_wallet_balance_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url"], required: ["profile", "chain", "asset", "rpc_url"], defaults: {} },
-      { name: "apn_wallet_portfolio", properties: ["profile"], required: [], defaults: { profile: "default" } },
+      { name: "apn_wallet_portfolio", properties: ["profile", "refresh"], required: [], defaults: { profile: "default", refresh: false } },
       { name: "apn_wallet_ensure_solana", properties: ["profile", "provider", "accept_risk"], required: ["profile", "provider"], defaults: {} },
       { name: "apn_wallet_balance_solana", properties: ["profile", "asset"], required: ["profile", "asset"], defaults: {} },
       { name: "apn_wallet_capabilities_solana", properties: ["profile"], required: [], defaults: {} },
@@ -242,6 +259,11 @@ test("official MCP client proves production stdio descriptor, the exact tool set
         defaults: {},
       },
       { name: "apn_x402_permit2_status", properties: ["profile", "operation"], required: ["profile", "operation"], defaults: {} },
+      { name: "apn_x402_merchant_prepare", properties: ["profile", "max_native_fee_wei", "native_fee_reserve_wei", "idempotency_key"], required: ["profile", "max_native_fee_wei", "idempotency_key"], defaults: {} },
+      { name: "apn_x402_merchant_approve", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_x402_merchant_observe", properties: ["operation", "deliver"], required: ["operation"], defaults: {} },
+      { name: "apn_x402_merchant_status", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_x402_merchant_retire_unsent", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_x402_inspect", properties: ["method", "headers_json", "body_base64", "payer", "url"], required: ["url"], defaults: {} },
       { name: "apn_x402_fetch_prepare", properties: ["profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
@@ -251,7 +273,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_repair_deployment", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_abandon", properties: ["operation"], required: ["operation"], defaults: {} },
-      { name: "apn_operation_resume", properties: ["operation", "rpc_url", "wait_seconds", "observe_only", "observation_rpc_env"], required: ["operation"], defaults: {} },
+      { name: "apn_operation_resume", properties: ["operation", "rpc_url", "coinbase_observation_rpc", "wait_seconds", "observe_only", "observation_rpc_env"], required: ["operation"], defaults: {} },
       {
         name: "apn_operation_recover_provider_request",
         properties: ["operation", "provider_request_id"],
@@ -280,8 +302,9 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_gasless_capabilities", properties: ["profile"], required: [], defaults: {} },
       { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], defaults: {} },
       { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url", "rpc_max_batch_items"], required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], defaults: {} },
-      { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], defaults: {} },
+      { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"], required: ["profile", "chain", "to", "idempotency_key"], defaults: {} },
       { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_gasless_transfer_approve_sealed", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_oneclick_source_submit", properties: ["lane", "profile", "expected_payer", "recipient", "amount_atomic", "min_output_atomic", "max_quoted_loss_atomic", "max_gas_limit_atomic", "max_fee_per_gas_wei", "max_priority_fee_per_gas_wei", "max_native_debit_wei", "idempotency_key"], required: ["lane", "profile", "expected_payer", "recipient", "amount_atomic", "min_output_atomic", "max_quoted_loss_atomic", "max_gas_limit_atomic", "max_fee_per_gas_wei", "max_priority_fee_per_gas_wei", "max_native_debit_wei", "idempotency_key"], defaults: {} },
       { name: "apn_oneclick_source_status", properties: ["operation"], required: ["operation"], defaults: {} },
     ]);
@@ -330,8 +353,9 @@ test("manifest projection is exact, strict and rejects missing, colliding or uns
   assert.deepEqual(projected.map((tool) => tool.name), TOOL_NAMES);
   assert.equal(projected.every((tool) => tool.inputSchema.type === "object"), true);
   assert.equal(projected.every((tool) => tool.inputSchema.additionalProperties === false), true);
-  assert.equal(projected.every((tool) => Object.values(tool.inputSchema.properties).every((schema) => (
-    typeof schema === "object" && schema !== null && !Array.isArray(schema) && schema.type === "string"
+  assert.equal(projected.every((tool) => Object.entries(tool.inputSchema.properties).every(([field, schema]) => (
+    typeof schema === "object" && schema !== null && !Array.isArray(schema) &&
+    schema.type === ((tool.name === "apn_wallet_portfolio" && field === "refresh") || (tool.name === "apn_x402_merchant_observe" && field === "deliver") ? "boolean" : "string")
   ))), true);
   assert.equal(projected.some((tool) => tool.name.includes("mcp")), false);
   assert.equal(projected.some((tool) => tool.name.includes("mcp") || tool.name.includes("control")), false);
@@ -434,7 +458,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const rpc = new TestRpc();
-  const setupNative = new TestNative();
+  const setupNative = new CanonicalDirectTestNative(temporary.root);
   assert.equal((await runCli(["wallet", "ensure"], {}, {
     stateRoot: temporary.root, native: setupNative,
   })).ok, true);
@@ -460,6 +484,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
       amount_usdc: "1.25", rpc_url: "https://rpc.example/",
     },
   }));
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
   const operation = prepared.operation as {
     readonly operation_id?: unknown; readonly state?: unknown; readonly fingerprint?: unknown;
   };
@@ -467,6 +492,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   assert.equal(typeof operation.operation_id, "string");
   assert.equal(operation.fingerprint, undefined);
   const operationId = operation.operation_id as string;
+  const savedBeforeHandoff = await new StateStore(temporary.root).findOperation(operationId);
   assert.equal(hostileNativeCalls, 0);
   assert.equal(hostileApprovalCalls, 0);
   assert.equal(wrappingLoads, 0);
@@ -489,6 +515,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
     ],
   });
   assert.deepEqual(rejected.next_actions, [handoff]);
+  assert.deepEqual(await new StateStore(temporary.root).findOperation(operationId), savedBeforeHandoff);
   assert.equal(hostileNativeCalls, 0);
   assert.equal(hostileApprovalCalls, 0);
   assert.equal(wrappingLoads, 0);
@@ -510,6 +537,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   ]);
   assert.equal(hostileDetails?.cli_handoff, hostileHandoff);
   assert.deepEqual(hostileRejected.next_actions, [hostileHandoff]);
+  assert.deepEqual(await new StateStore(temporary.root).findOperation(operationId), savedBeforeHandoff);
   assert.equal(hostileNativeCalls, 0);
   assert.equal(hostileApprovalCalls, 0);
   assert.equal(wrappingLoads, 0);
@@ -568,11 +596,12 @@ test("direct MCP approval returns the exact foreground handoff before custody an
     name: "apn_operation_status", arguments: { operation: operationId },
   }));
   assert.equal((status.operation as { readonly state: string }).state, "awaiting_approval");
+  assert.deepEqual(await new StateStore(temporary.root).findOperation(operationId), savedBeforeHandoff);
   assert.equal(JSON.stringify(status).includes("fingerprint"), false);
   rpc.receipt = exactReceipt();
   const completed = await runCli([
     "pay", "transfer", "approve", "--operation", operationId, "--rpc-url", "https://rpc.example/",
-  ], {}, { stateRoot: temporary.root, native: new TestNative(), rpc });
+  ], {}, { stateRoot: temporary.root, native: new CanonicalDirectTestNative(temporary.root), rpc });
   assert.equal(completed.ok, true, JSON.stringify(completed));
   const receipt = decodeResult(await connection.client.callTool({
     name: "apn_receipt_get", arguments: { operation: operationId },
@@ -704,14 +733,14 @@ test("MCP dependencies are exact and package lockfiles are byte-identical", asyn
     devDependencies: Record<string, string>;
   };
   assert.equal(packageJson.dependencies["@modelcontextprotocol/server"], "2.0.0");
-  assert.equal(packageJson.devDependencies["@modelcontextprotocol/client"], "2.0.0");
+  assert.equal(packageJson.devDependencies["@modelcontextprotocol/client"], "2.3.1");
   assert.equal(packageJson.dependencies.zod, "4.4.3");
   const packageLock = await readFile(resolve("package-lock.json"));
   const shrinkwrap = await readFile(resolve("npm-shrinkwrap.json"));
   assert.deepEqual(packageLock, shrinkwrap);
   const lock = JSON.parse(packageLock.toString("utf8")) as { packages: Record<string, { version?: string }> };
   assert.equal(lock.packages["node_modules/@modelcontextprotocol/server"]?.version, "2.0.0");
-  assert.equal(lock.packages["node_modules/@modelcontextprotocol/client"]?.version, "2.0.0");
+  assert.equal(lock.packages["node_modules/@modelcontextprotocol/client"]?.version, "2.3.1");
   assert.equal(lock.packages["node_modules/zod"]?.version, "4.4.3");
 });
 
@@ -758,3 +787,11 @@ function cloneManifest(): {
 } {
   return structuredClone(COMMAND_MANIFEST) as never;
 }
+test("Circle financial MCP tools return exact foreground CLI handoff before runtime entry", async t => {
+  let entries = 0; const connection = await connectMcp({ circleEvm: { approveSource: async () => { entries++; }, approveMint: async () => { entries++; }, cleanup: async () => { entries++; }, cleanupNonce: async () => { entries++; } } as never }); t.after(connection.close);
+  for (const action of ["approve_source", "approve_mint", "cleanup", "cleanup_nonce"]) {
+    const envelope = decodeResult(await connection.client.callTool({ name: `apn_circle_evm_${action}`, arguments: { operation: "a".repeat(64) } }));
+    assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.match(JSON.stringify(envelope.error?.details), new RegExp(`circle.*evm.*${action.replaceAll("_", "-")}`));
+  }
+  assert.equal(entries, 0);
+});

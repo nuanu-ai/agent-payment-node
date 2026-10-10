@@ -1,0 +1,41 @@
+✖ Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing (18.244625ms)
+✔ Linea archive native observation rejects chain (3.5455ms)
+✔ Linea archive native observation rejects error (3.057375ms)
+✔ Linea archive native observation rejects missing (3.401583ms)
+✔ Linea archive native observation rejects malformed (3.320292ms)
+✔ Linea archive native observation rejects large (4.06725ms)
+✔ Linea archive native observation rejects trace (3.169042ms)
+✔ Linea archive native observation rejects receipt (0.366542ms)
+✔ Linea archive native observation rejects canonical (0.365208ms)
+✔ Linea archive native observation rejects reanchor (3.515958ms)
+✔ Linea archive trace preserves exact native amount binding (3.482292ms)
+✔ Linea archive trace cannot escape command read limits or original deadline (0.432042ms)
+✔ Linea archive trace cannot escape command read limits or original deadline (0.636459ms)
+✔ Linea observation still refuses proof with a changed frozen primary RPC origin (1240.132458ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 13
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2047.893041
+
+✖ failing tests:
+
+test at dist-test/tests/core/lifi-linea-native-trace-archive.test.js:64:1
+✖ Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing (18.244625ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert(r.posts[index].at - r.posts[index - 1].at >= 500)
+  
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/linea-native-fill-trace-archive-source-attempt14-20261010/dist-test/tests/core/lifi-linea-native-trace-archive.test.js:76:9)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

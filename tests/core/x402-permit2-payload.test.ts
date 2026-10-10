@@ -8,6 +8,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { assemblePermit2PaymentPayload } from "../../src/x402-permit2/payload.js";
+import { encodePermit2PaymentSignatureHeader, decodePermit2PaymentSignatureHeader,
+  encodePaymentSignatureHeader, decodePaymentSignatureHeader as decodeGenericPaymentSignatureHeader } from "../../src/x402-codec.js";
 import { hashChallenge, preparePermit2Payment, type Permit2PrepareInput } from "../../src/x402-permit2/prepare.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
@@ -84,6 +86,47 @@ test("includes exact EIP-2612 info only when the plan requires it", async () => 
     { ...input.prepared.plan.eip2612!.info, signature: input.eip2612Signature });
   const { eip2612Signature: _omitted, ...withoutPermitSignature } = input;
   await assert.rejects(assemblePermit2PaymentPayload(withoutPermitSignature), rejected);
+});
+
+test("dedicated Permit2 codec roundtrips official vectors without admitting them through the generic codec", async () => {
+  for (const sponsored of [false, true]) {
+    const result = await assemblePermit2PaymentPayload(await signed(sponsored));
+    assert.deepEqual(decodePermit2PaymentSignatureHeader(result.paymentSignatureHeader), result.payload);
+    assert.equal(encodePermit2PaymentSignatureHeader(result.payload), result.paymentSignatureHeader);
+    assert.throws(() => encodePaymentSignatureHeader(result.payload), rejected);
+    assert.throws(() => decodeGenericPaymentSignatureHeader(result.paymentSignatureHeader), rejected);
+  }
+});
+
+test("dedicated Permit2 codec refuses malformed or mismatched accepted terms, authorization and sponsoring info", async () => {
+  const result = await assemblePermit2PaymentPayload(await signed(true));
+  const mutations: readonly (readonly [readonly string[], unknown])[] = [
+    [["x402Version"], 1], [["accepted", "network"], "eip155:1"], [["accepted", "amount"], "10001"],
+    [["accepted", "extra", "assetTransferMethod"], "eip3009"], [["payload", "unknown"], true],
+    [["resource", "unknown"], true], [["resource", "mimeType"], 3],
+    [["payload", "signature"], `0x${"0".repeat(130)}`], [["payload", "permit2Authorization", "nonce"], "07"],
+    [["payload", "permit2Authorization", "nonce"], (1n << 256n).toString()],
+    [["payload", "permit2Authorization", "spender"], PERMIT2_ADDRESS],
+    [["payload", "permit2Authorization", "witness", "validAfter"], "1"],
+    [["payload", "permit2Authorization", "witness", "to"], account.address],
+    [["payload", "permit2Authorization", "permitted", "amount"], "10001"],
+    [["extensions", "eip2612GasSponsoring", "info", "amount"], "10001"],
+    [["extensions", "eip2612GasSponsoring", "info", "version"], "2"],
+    [["extensions", "eip2612GasSponsoring", "info", "spender"], X402_EXACT_PERMIT2_PROXY],
+    [["extensions", "eip2612GasSponsoring", "info", "signature"], `0x${"0".repeat(130)}`],
+    [["extensions", "unknown"], {}],
+  ];
+  for (const [path, value] of mutations) {
+    const wire = structuredClone(result.payload) as unknown as Record<string, unknown>;
+    let target = wire;
+    for (const segment of path.slice(0, -1)) target = target[segment] as Record<string, unknown>;
+    target[path.at(-1)!] = value;
+    assert.throws(() => encodePermit2PaymentSignatureHeader(wire), rejected, path.join("."));
+    const header = Buffer.from(canonicalJson(wire)).toString("base64");
+    assert.throws(() => decodePermit2PaymentSignatureHeader(header), rejected, path.join("."));
+  }
+  const duplicate = Buffer.from('{"x402Version":2,"x402Version":2}').toString("base64");
+  assert.throws(() => decodePermit2PaymentSignatureHeader(duplicate), rejected);
 });
 
 test("refuses changed intent, merchant, typed data, signatures and expired deadline", async () => {

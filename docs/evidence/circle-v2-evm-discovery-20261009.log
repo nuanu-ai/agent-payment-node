@@ -1,0 +1,83 @@
+✔ one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields (2.605791ms)
+✔ root, every group and every leaf have identical prefix/suffix text discovery (4.706875ms)
+✔ status and receipt discovery disclose possible local recovery writes in CLI and MCP (2.876917ms)
+✔ stable observation discovery discloses durable operation and principal writes (1.280458ms)
+✔ group help renders exact subgroup usages and complete leaf synopses (0.164375ms)
+✔ machine discovery emits the exact complete manifest as one raw JSON value (3.133792ms)
+✔ invalid discovery and operational usage return bounded catalog-only guidance without reflecting argv (1.021667ms)
+✔ catalog parser derives requiredness, defaults, duplicate rejection and scalar constraints for every command (21.073125ms)
+✔ catalog-declared x402 policy ceiling is enforced before request binding (0.202459ms)
+✔ HTTPS parser constraints preserve RPC compatibility and match canonical bounded x402 policy (6.464792ms)
+✔ manifest validator and compatibility gate reject every declared structural or semantic drift class (51.681667ms)
+✔ README command block and package/build identity are mechanically identical to the catalog (16.984625ms)
+✖ actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile (1555.514125ms)
+✖ actual compiled Stargate status needs no RPC environment and creates no state (1178.805458ms)
+✖ actual compiled discovery is raw and no-effect with empty or unwritable caller HOME (8127.982417ms)
+✔ wallet status for an absent unique profile is read-only before initialization, locks, native or Keychain (52.639333ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 13
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12303.708625
+
+✖ failing tests:
+
+test at dist-test/tests/core/command-discovery.test.js:431:1
+✖ actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile (1555.514125ms)
+  AssertionError [ERR_ASSERTION]: HOME is ignored by design; the effective-user ~/.apn tree metadata must remain unchanged
+  + actual - expected
+
+  + '02e4921276a221658fb062abe228abcc1695a92618ac221abf14ec8def57b8ef'
+  - 'becfbd4be98fa4acfbea70528f2b97da47d64185c0270684884e2e83044035b6'
+
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-runtime-20261009/dist-test/tests/core/command-discovery.test.js:453:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '02e4921276a221658fb062abe228abcc1695a92618ac221abf14ec8def57b8ef',
+    expected: 'becfbd4be98fa4acfbea70528f2b97da47d64185c0270684884e2e83044035b6',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at dist-test/tests/core/command-discovery.test.js:456:1
+✖ actual compiled Stargate status needs no RPC environment and creates no state (1178.805458ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1da8665091a432d02fe323e60b7aa323971341916a6c28e63da8c69f95ea829e'
+  - '749e001a3447a414574dc724788788f8571d757ce795da3b3cdd8f2a818aaf09'
+
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-runtime-20261009/dist-test/tests/core/command-discovery.test.js:471:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1da8665091a432d02fe323e60b7aa323971341916a6c28e63da8c69f95ea829e',
+    expected: '749e001a3447a414574dc724788788f8571d757ce795da3b3cdd8f2a818aaf09',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at dist-test/tests/core/command-discovery.test.js:474:1
+✖ actual compiled discovery is raw and no-effect with empty or unwritable caller HOME (8127.982417ms)
+  AssertionError [ERR_ASSERTION]: discovery must not alter effective-user ~/.apn tree metadata
+  + actual - expected
+
+  + 'd628a75f9a12b82d3e174dc2f16bd667c56dee58a3c1c54a1e6dd98c73b0a3f2'
+  - '1da8665091a432d02fe323e60b7aa323971341916a6c28e63da8c69f95ea829e'
+
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-runtime-20261009/dist-test/tests/core/command-discovery.test.js:517:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'd628a75f9a12b82d3e174dc2f16bd667c56dee58a3c1c54a1e6dd98c73b0a3f2',
+    expected: '1da8665091a432d02fe323e60b7aa323971341916a6c28e63da8c69f95ea829e',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

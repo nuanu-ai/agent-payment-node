@@ -1,0 +1,12 @@
+{
+  "node": "24.15.0",
+  "distFiles": 2409,
+  "changedOnRepeat": [],
+  "maximumSourceLines": 500,
+  "over500": {},
+  "productionStrictBuild": true,
+  "focusedStrictCompile": true,
+  "circleMcpTestsPassed": 102,
+  "circleMcpTestsFailed": 0,
+  "independentCurrentPolicyCasesPassed": 4
+}

@@ -1,0 +1,21 @@
+{
+  "parent": "c4957383802949a690f1e25722b2ec899ea1a48e",
+  "node": "24.15.0",
+  "typescript": "5.9.2",
+  "productionCompile": "PASS",
+  "focusedStrictCompile": "PASS with existing inherited skipLibCheck and pinned typeRoots",
+  "circleMcpDiscovery": {
+    "passed": 139,
+    "failed": 0
+  },
+  "fullProductionSealedBurnCases": 21,
+  "independentWitnessBefore": "scope gap reproduced",
+  "independentWitnessAfter": "refuses before TTY at exact_sealed_sei_burn_retirement_required; exit1 expected for old positive witness",
+  "liveEffects": false,
+  "repeatEmission": {
+    "files": 2439,
+    "mismatches": 0,
+    "nonOwnedGeneratedDeclarationsPreservedAtParent": 15
+  },
+  "moduleLineMaximum": 302
+}

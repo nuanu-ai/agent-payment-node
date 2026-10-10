@@ -1,5 +1,5 @@
 import type { Hex } from "../model.js";
-import type { X402PaymentRequired, X402PaymentPayload } from "../x402-codec.js";
+import { type X402PaymentRequired, type X402PaymentPayload } from "../x402-codec.js";
 import { type Permit2ExecutionIntent } from "./execution-intent.js";
 import { type Permit2PreparedMaterial } from "./prepare.js";
 export interface Permit2PayloadInput {

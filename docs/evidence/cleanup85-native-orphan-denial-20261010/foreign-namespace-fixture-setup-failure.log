@@ -1,0 +1,204 @@
+✔ real viem signing roundtrip through pure production cryptographic comparator; fixed owner wrapper still refuses (8.831084ms)
+✔ actual signed wire value mismatch refused (0.843417ms)
+✔ actual signed wire priority mismatch refused (0.83375ms)
+✔ actual signed wire gas mismatch refused (3.048875ms)
+✔ actual signed wire fee mismatch refused (0.7345ms)
+✔ actual signed wire nonce mismatch refused (0.689667ms)
+✔ actual signed wire chain mismatch refused (0.592209ms)
+✔ actual signed wire data mismatch refused (0.563875ms)
+✔ actual signed wire to mismatch refused (0.732959ms)
+✔ actual signed wire accessList mismatch refused (0.92625ms)
+✔ finite unsigned binding nonce refused (0.120625ms)
+✔ finite unsigned binding value refused (0.060083ms)
+✔ finite unsigned binding fee refused (0.071667ms)
+✔ finite unsigned binding priority refused (0.047209ms)
+✔ finite unsigned binding cap refused (0.041666ms)
+✔ finite unsigned binding sender refused (0.034917ms)
+✔ finite unsigned binding data refused (0.03375ms)
+✔ finite unsigned binding extra refused (0.034125ms)
+✔ caller clone cannot mint preSIGN or canonical settlement authority (0.097ms)
+✔ fixed request rejects caller nonce or changed retained material (0.52825ms)
+✔ foreground absolute sixty-second TTL includes prompt, not a reset at successful consent (0.939708ms)
+✔ physical guard exact bytes, policy expiry, disposal and one-send fence (0.256125ms)
+✔ native financial RPC refuses unbranded callback without any physical request (2.516ms)
+✔ read-only transport bounded budget counts all rejected physical requests (2.079917ms)
+✔ production transport CONFIG network deadline permits only one whole snapshot restart (0.310167ms)
+✔ arbitrary CONFIG protocol error cannot obtain a snapshot retry (0.092791ms)
+✔ fresh raw gas21805 fits immutable signed gas (159.197125ms)
+✔ fresh raw gas26165 fits immutable signed gas (4.137666ms)
+✔ fresh raw gas26166 exceeds immutable signed gas (3.758667ms)
+✔ public finalized consumed-account replay accepts nonce86 without reading present token balances (0.249167ms)
+✔ public finalized consumed-account replay accepts nonce87 without reading present token balances (0.094375ms)
+✔ public finalized consumed-account replay accepts nonce90 without reading present token balances (0.085834ms)
+✔ public consumed-account replay rejects unconsumed nonce85 (0.093542ms)
+✔ permanent cancellation slot is create-only across clone, new policy and concurrent publication (126.438125ms)
+✔ public inspect absent operation needs neither active policy nor custody/key or physical RPC (117.36525ms)
+✔ production execute forged recovery request refuses before RPC, private custody or SIGN (117.78325ms)
+✔ entire normal cleanup85 controller unsigned publication resume (2336.384333ms)
+✔ entire normal cleanup85 controller unsigned publication expired (1131.013333ms)
+✔ entire normal cleanup85 controller unsigned publication sign (1188.152084ms)
+✔ entire normal cleanup85 controller unsigned publication signed (1117.11075ms)
+✔ entire normal cleanup85 controller unsigned publication send (1084.685167ms)
+✔ entire normal cleanup85 controller unsigned publication prepared (981.452083ms)
+✔ entire normal cleanup85 controller unsigned publication slot (1067.775083ms)
+✔ entire normal cleanup85 controller unsigned publication custody (840.776792ms)
+✔ entire normal cleanup85 controller unsigned publication foreign (857.089541ms)
+✔ actual captured expired4b5 finite retirement retire (2496.474958ms)
+ℹ combined admission physical=80; genuine original cap usable; cloned cap rejected
+✔ actual captured expired4b5 finite retirement crash (1906.738666ms)
+ℹ combined admission physical=80; genuine original cap usable; cloned cap rejected
+✔ actual captured expired4b5 finite retirement sign (445.517083ms)
+✔ actual captured expired4b5 finite retirement signed (460.930209ms)
+✔ actual captured expired4b5 finite retirement send (442.904167ms)
+✔ actual captured expired4b5 finite retirement prepared (392.858958ms)
+✔ actual captured expired4b5 finite retirement bad_slot (408.895458ms)
+✔ actual captured expired4b5 finite retirement wrong_policy (512.51575ms)
+✔ actual captured expired4b5 finite retirement nonce_drift (518.975625ms)
+✔ actual captured expired4b5 finite retirement copied_token (1335.707125ms)
+ℹ combined admission physical=80; genuine original cap usable; cloned cap rejected
+✔ normal default finite factory cleanup85 preparation/admission current_compatible (1170.205542ms)
+✔ normal finite factory retains an explicit trusted cleanup85 backend without constructor I/O (178.203583ms)
+✔ cleanup85 public record validates fee plus value1 conservation without issuing settlement authority (274.524708ms)
+✔ cleanup85 reserve/submitted/unknown keep the entire finite2T hold (278.6985ms)
+✔ cleanup85 stored projection rejects wrongOp (111.189208ms)
+✔ cleanup85 stored projection rejects wrongHold (92.495375ms)
+✔ cleanup85 stored projection rejects wrongPolicy (132.684625ms)
+✔ cleanup85 stored projection rejects wrongConsume (78.702541ms)
+✔ cleanup85 stored projection rejects overCap (38.244833ms)
+✔ cleanup85 stored projection rejects invalidBlock (41.868208ms)
+✔ cleanup85 stored projection rejects wrongKind (52.614584ms)
+✔ cleanup85 stored projection rejects invalidReceipt (39.040333ms)
+✔ cleanup85 exact native reservation rejects token (34.238916ms)
+✔ cleanup85 exact native reservation rejects owner (45.112042ms)
+✔ cleanup85 exact native reservation rejects chain (49.560292ms)
+✔ cleanup85 exact native reservation rejects rail (42.55875ms)
+✔ cleanup85 exact native reservation rejects state (57.820458ms)
+✔ cleanup85 exact native reservation rejects reserved (57.833666ms)
+✔ cleanup85 opaque entry points reject fabricated/serialized authorities before any ledger write (113.38275ms)
+✔ cleanup85 restored stored projection counts actual debit once; conflicting projection is refused (121.082625ms)
+✔ ordinary direct records retain full finalization and absence hash compatibility (90.766708ms)
+✔ cleanup85 immutable marker parser rejects operation one-field tamper (48.943208ms)
+✔ cleanup85 immutable marker parser rejects fingerprint one-field tamper (68.1135ms)
+✔ cleanup85 immutable marker parser rejects parent one-field tamper (41.271917ms)
+✔ cleanup85 immutable marker parser rejects envelope one-field tamper (41.91125ms)
+✔ cleanup85 immutable marker parser rejects policy one-field tamper (27.338708ms)
+✔ cleanup85 immutable marker parser rejects activation one-field tamper (33.379ms)
+✔ cleanup85 immutable marker parser rejects maximum one-field tamper (28.0625ms)
+✔ cleanup85 immutable marker parser rejects extra one-field tamper (45.484833ms)
+✔ cleanup85 malformed public terminal projection without its frozen marker is rejected (28.192542ms)
+✔ cleanup85 marker restore carries full unknown hold and prevents generic finalization or key replay (73.530375ms)
+✔ cleanup85 reserved generic released_unsubmitted refuses ordinary and forged contexts without releasing capacity (76.631167ms)
+✔ cleanup85 reserved generic failed_before_effect refuses ordinary and forged contexts without releasing capacity (105.540792ms)
+✔ cleanup85 reserved generic failed_confirmed_revert refuses ordinary and forged contexts without releasing capacity (103.856417ms)
+✔ cleanup85 reserved generic finalized refuses ordinary and forged contexts without releasing capacity (93.642583ms)
+✔ cleanup85 unknown_finality generic released_unsubmitted refuses ordinary and forged contexts without releasing capacity (121.519708ms)
+✔ cleanup85 unknown_finality generic failed_before_effect refuses ordinary and forged contexts without releasing capacity (104.444542ms)
+✔ cleanup85 unknown_finality generic failed_confirmed_revert refuses ordinary and forged contexts without releasing capacity (110.232666ms)
+✔ cleanup85 unknown_finality generic finalized refuses ordinary and forged contexts without releasing capacity (99.886333ms)
+✔ cleanup85 reserved callback release refuses before any callback or ledger mutation (66.797875ms)
+✔ cleanup85 unknown_finality callback release refuses before any callback or ledger mutation (51.269167ms)
+✔ cleanup85 restored marker-only released_unsubmitted is not a valid stored capacity release (83.141ms)
+✔ cleanup85 restored marker-only failed_before_effect is not a valid stored capacity release (80.920167ms)
+✔ cleanup85 restored marker-only failed_confirmed_revert is not a valid stored capacity release (66.921791ms)
+✔ cleanup85 internal reserve cannot treat a private-method plain body as authority (52.314542ms)
+✔ generic reserve cannot create the finite cleanup85 namespace without authority (10.51075ms)
+✔ actual durable native operation blocks generic release after reserved marker removal (148.000125ms)
+✔ actual durable native operation blocks generic release after unknown_finality marker removal (202.72625ms)
+✔ actual original unsigned metadata retains original binding and C denial lookup identity (290.6625ms)
+✔ versioned successor comparator preserves public request/wire and requires separate identity/slot (15.549292ms)
+✔ pure successor operationId mutation cannot retain lineage binding (10.001959ms)
+✔ pure successor idempotencyHash mutation cannot retain lineage binding (9.60575ms)
+✔ pure successor requestHash mutation cannot retain lineage binding (5.423792ms)
+✔ pure successor originalOperationId mutation cannot retain lineage binding (9.654083ms)
+✔ pure successor retirementProofHash mutation cannot retain lineage binding (14.762625ms)
+✔ pure successor nativeReservationId mutation cannot retain lineage binding (15.306375ms)
+✔ pure successor version mutation cannot retain lineage binding (9.730333ms)
+✔ v1 absence bytes remain compatible and v1 cannot smuggle successor fields (0.647125ms)
+✔ plain or cloned source lineage/admission DTOs grant no private capability (11.255333ms)
+✔ successor cannot present legacy v1 to bypass its private lineage (10.664958ms)
+✔ readonly absent audit refuses original_slot without private or network effects (173.000416ms)
+✔ readonly absent audit refuses successor_slot without private or network effects (103.189833ms)
+✔ readonly absent audit refuses retirement_proof without private or network effects (59.288583ms)
+✔ readonly absent audit refuses orphan_v2 without private or network effects (107.846792ms)
+✔ readonly absent audit refuses overflow without private or network effects (343.687042ms)
+✔ generic native denial protects or refuses missing-original-slot slot_only orphan (45.668958ms)
+✔ generic native denial protects or refuses missing-original-slot operation_only orphan (42.385084ms)
+✔ generic native denial protects or refuses missing-original-slot original_operation_only orphan (46.64ms)
+✔ generic native denial protects or refuses missing-original-slot malformed_proof orphan (33.805ms)
+✔ generic native denial protects or refuses missing-original-slot overflow orphan (560.431667ms)
+✔ generic native denial complete family absence is existing-only and returns null (6.507791ms)
+✖ orphan denial rejects self-rehashed foreign original namespace instead of losing fixed RID protection (2.233625ms)
+✔ whole normal production prepare uses authentic parent and opaque preSIGN authority for real full2T ledger hold (1492.471875ms)
+ℹ production preSIGN prepare/reserve physical=202; operation=0999a1bdf444d77b14bc9422751f77a8d64966fe34f790cf5aa72bb55ffcbf9b; signedMaximum=1167885000001
+✔ real production irreversible SIGN fence survives broker failure and concurrent execute never loads a key twice (1172.374667ms)
+ℹ whole production at durableSTARTED before permanentSIGN physical=232; futureworst197; shared448-actual=216; to refused wrapping-broker physical=262; no actual walletkey/privatecrypto SIGN; permanentclaim1/noSEND
+✔ whole production invalid current_nonce has zero SIGN/private broker/send and retains original parent (430.234ms)
+✔ whole production invalid native_balance has zero SIGN/private broker/send and retains original parent (397.089292ms)
+✔ whole production invalid token_code has zero SIGN/private broker/send and retains original parent (404.830208ms)
+✔ whole production invalid sender_code has zero SIGN/private broker/send and retains original parent (314.757041ms)
+✔ whole production invalid recipient_delegation has zero SIGN/private broker/send and retains original parent (306.569625ms)
+✔ whole production invalid recipient_delegate_hash has zero SIGN/private broker/send and retains original parent (360.066416ms)
+✔ whole production invalid zero_finality_head has zero SIGN/private broker/send and retains original parent (334.550917ms)
+✔ whole production invalid approval_header has zero SIGN/private broker/send and retains original parent (340.075375ms)
+✔ known insufficient remaining foreground time refuses BEFORE permanent SIGN and retries fresh consent with identical unsigned intent (908.256125ms)
+✔ expiry during fake wrapping broker prevents private decryption, retains independent SIGN and full unknown hold (823.886791ms)
+✔ true allowlist policy revocation cannot interleave foreground custody or permanent SIGN (706.615208ms)
+✔ restoring normal unsigned native journal cannot erase its independent permanent SIGN claim (693.672667ms)
+✔ whole normal successor foreground preserves original and full2T (2817.690625ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":38,"B_execute https://arbitrum-one-public.nodies.app/":112,"B_execute https://evm-rpc.sei-apis.com/":52}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ whole normal successor broker_failure preserves original and full2T (2309.235042ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":76,"B_execute https://arbitrum-one-public.nodies.app/":128,"B_execute https://evm-rpc.sei-apis.com/":58}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=422; no live HTTP/private key/crypto sign/send
+✔ whole normal successor marker_loss preserves original and full2T (1636.244458ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":38,"B_execute https://arbitrum-one-public.nodies.app/":112,"B_execute https://evm-rpc.sei-apis.com/":52}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ whole normal successor missing_successor_slot preserves original and full2T (1704.871958ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":38,"B_execute https://arbitrum-one-public.nodies.app/":112,"B_execute https://evm-rpc.sei-apis.com/":52}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ whole normal successor missing_original_slot preserves original and full2T (1524.398583ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":38,"B_execute https://arbitrum-one-public.nodies.app/":112,"B_execute https://evm-rpc.sei-apis.com/":52}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ whole normal successor retirement_only preserves original and full2T (1368.419667ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":38,"B_execute https://arbitrum-one-public.nodies.app/":112,"B_execute https://evm-rpc.sei-apis.com/":52}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ whole normal successor successor_only preserves original and full2T (1408.902209ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":38,"B_execute https://arbitrum-one-public.nodies.app/":112,"B_execute https://evm-rpc.sei-apis.com/":52}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ whole normal successor unrelated_direct preserves original and full2T (1351.383541ms)
+ℹ OFFLINE phase/origin counts={"A_cancel_outer https://arbitrum-one-public.nodies.app/":54,"A_cancel_outer https://evm-rpc.sei-apis.com/":26,"A_initial_prepare https://arbitrum-one-public.nodies.app/":54,"A_initial_prepare https://evm-rpc.sei-apis.com/":26,"B_execute https://arb1.arbitrum.io/rpc":38,"B_execute https://arbitrum-one-public.nodies.app/":112,"B_execute https://evm-rpc.sei-apis.com/":52}
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ captured four delegated Buyer aliases reach normal native prepare/reserve/foreground without changing finite wire (1280.901333ms)
+✔ normal native sender_raw_wallet refuses before reservation/foreground/private entry (492.834792ms)
+✔ normal native recipient_raw_wallet refuses before reservation/foreground/private entry (424.897792ms)
+✔ normal native sender_raw_provider refuses before reservation/foreground/private entry (523.803375ms)
+✔ normal native recipient_raw_provider refuses before reservation/foreground/private entry (568.947292ms)
+✔ normal native wrong_trust_class refuses before reservation/foreground/private entry (414.283042ms)
+✔ normal native wrong_provider_kind refuses before reservation/foreground/private entry (350.499084ms)
+✔ normal native unknown_trust_class refuses before reservation/foreground/private entry (313.066833ms)
+ℹ tests 157
+ℹ suites 0
+ℹ pass 156
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15162.556542
+
+✖ failing tests:
+
+test at dist-test-successor/tests/core/cleanup85-native-lineage.test.js:148:1
+✖ orphan denial rejects self-rehashed foreign original namespace instead of losing fixed RID protection (2.233625ms)
+  Error: ENOENT: no such file or directory, mkdir '/private/var/folders/jk/7l86_s0n3xz7csjbz0g4jkbr0000gn/T/apn-core-ddJDGa/state/operations'
+      at async mkdir (node:internal/fs/promises:859:10)
+      at async StateStore.ensureDirectory (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/secure-state-store.js:136:13)
+      at async StateStore.ensureDirectory (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/secure-state-store.js:132:17)
+      at async StateStore.writeOperation (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/src/state.js:181:9)
+      at async TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/cleanup85-unsigned-successor-native-source/dist-test-successor/tests/core/cleanup85-native-lineage.test.js:158:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    errno: -2,
+    code: 'ENOENT',
+    syscall: 'mkdir',
+    path: '/private/var/folders/jk/7l86_s0n3xz7csjbz0g4jkbr0000gn/T/apn-core-ddJDGa/state/operations'
+  }

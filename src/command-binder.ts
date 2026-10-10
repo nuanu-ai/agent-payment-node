@@ -1,3 +1,7 @@
+import { coinbaseObservationPreset } from "./coinbase-gasless-observation-source.js";
+import { bindSeiFundingCommand } from "./lifi/sei-gaszip-command-catalog.js";
+import { bindCircleEvmCommand } from "./circle-v2-evm/command-catalog.js";
+import { bindMegaFundingCommand } from "./lifi/mega-gaszip-command-catalog.js";
 import { isPlainRecord } from "./canonical.js";
 import {
   parseCatalogArgv,
@@ -52,6 +56,7 @@ export function bindMcpInput(command: CommandDefinition, input: unknown): BoundC
   for (const [field, value] of Object.entries(input)) {
     const option = byField.get(field);
     if (option === undefined) throw new ApnError("APN_INVALID_INPUT", "Tool input contains an unknown field.");
+    if (option.type === "boolean" && typeof value !== "boolean") throw new ApnError("APN_INVALID_INPUT", "Tool boolean input must be a boolean.");
     catalogInput[option.name] = value;
   }
   return bindParsedCatalog(parseCatalogInput(command, catalogInput));
@@ -67,12 +72,26 @@ export function mcpFieldName(optionName: `--${string}`): string {
 
 function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   const options = parsed.values;
+  if (parsed.command.path.join(" ") === "x402 permit2 approve") return { request: { command: "x402.permit2.approve",
+    profile: value(options, "--profile"), url: value(options, "--url"), idempotencyKey: value(options, "--idempotency-key") }, rpcUrl: value(options, "--rpc-url") };
+  if (parsed.command.path.join(" ") === "x402 permit2 observe") {
+    if (options["--transaction"] !== undefined && options["--expired-unused"] === "true") throw new ApnError("APN_INVALID_INPUT", "Permit2 observation modes are mutually exclusive.");
+    if (options["--transaction"] !== undefined && /^0x0{64}$/u.test(value(options, "--transaction"))) throw new ApnError("APN_INVALID_INPUT", "Permit2 transaction locator must be nonzero.");
+    return { request: { command: "x402.permit2.observe", operationId: value(options, "--operation"),
+      ...(options["--profile"] === undefined ? {} : { profile: value(options, "--profile") }),
+      ...(options["--transaction"] === undefined ? {} : { transaction: value(options, "--transaction") }), expiredUnused: options["--expired-unused"] === "true" }, rpcUrl: value(options, "--rpc-url") };
+  }
   if (parsed.command.path.join(" ") === "x402 permit2 preflight") return { request: {
     command: "x402.permit2.preflight", profile: value(options, "--profile"),
     paymentRequired: value(options, "--payment-required"),
     expectedChallengeHash: value(options, "--expected-challenge-hash"),
     expectedIndex: value(options, "--expected-index"), expectedTerms: value(options, "--expected-terms") },
     rpcUrl: value(options, "--rpc-url") };
+  if (parsed.command.path.join(" ") === "x402 merchant prepare") return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"]===undefined?{}:{nativeFeeReserveWei:value(options,"--native-fee-reserve-wei")}), idempotencyKey: value(options, "--idempotency-key") } };
+  if (parsed.command.path.join(" ") === "x402 merchant approve") return { request: { command: "x402.merchant.approve", operationId: value(options, "--operation") } };
+  if (parsed.command.path.join(" ") === "x402 merchant observe") return { request: { command: "x402.merchant.observe", operationId: value(options, "--operation"), deliver: options["--deliver"] === "true" } };
+  if (parsed.command.path.join(" ") === "x402 merchant retire-unsent") return { request: { command:"x402.merchant.retire-unsent",operationId:value(options,"--operation") } };
+  if (parsed.command.path.join(" ") === "x402 merchant status") return { request: { command: "x402.merchant.status", operationId: value(options, "--operation") } };
   if (parsed.command.path.join(" ") === "x402 permit2 status") return { request: { command: "x402.permit2.status", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
   if (parsed.command.path.join(" ") === "relay prepare") return { request: { command: "relay.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
   if (parsed.command.path.join(" ") === "relay base prepare") return { request: { command: "relay.base.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
@@ -126,6 +145,9 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     ...(parsed.command.path.join(" ") === "gasless transfer quote" ? { rpcUrl: value(options, "--rpc-url") } : {}) };
   if (parsed.command.path[0] === "bridge") return { request: bindBridgeCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "oneclick") return { request: bindOneClickCommand(parsed.command.path.join(" "), options) };
+  if (parsed.command.path[0] === "sei") return { request: bindSeiFundingCommand(parsed.command.path.join(" "), options) };
+  if (parsed.command.path.slice(0, 2).join(" ") === "circle evm") return { request: bindCircleEvmCommand(parsed.command.path.join(" "), options) };
+  if (parsed.command.path[0] === "mega") return { request: bindMegaFundingCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path[0] === "circle") return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
   switch (parsed.command.path.join(" ")) {
     case "--version": return { request: { command: "version" } };
@@ -214,12 +236,15 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
         expectedRevision: Number(value(options, "--expected-revision")),
       },
     };
+    case "wallet metamask native-transfer": return {request:{command:"wallet.metamask.native-transfer",chainId:fixedMetaMaskNativeChain(value(options,"--chain")),idempotencyKey:value(options,"--idempotency-key")}};
+    case "wallet metamask native-transfer-status": return {request:{command:"wallet.metamask.native-transfer-status",operationId:value(options,"--operation")}};
+    case "wallet metamask native-transfer-observe": return {request:{command:"wallet.metamask.native-transfer-observe",operationId:value(options,"--operation")}};
     case "wallet status": return { request: { command: "wallet.status", profile: value(options, "--profile") } };
     case "wallet balance": return {
       request: { command: "wallet.balance", profile: value(options, "--profile") },
       rpcUrl: value(options, "--rpc-url"),
     };
-    case "wallet portfolio": return { request: { command: "wallet.portfolio", profile: value(options, "--profile") } };
+    case "wallet portfolio": return { request: { command: "wallet.portfolio", profile: value(options, "--profile"), ...(value(options, "--refresh") === "true" ? { refresh: true } : {}) } };
     case "wallet balance-asset": return {
       request: { command: "wallet.balance", profile: value(options, "--profile"), asset: bindAsset(options) },
       rpcUrl: value(options, "--rpc-url"),
@@ -308,6 +333,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
           operationId: value(options, "--operation"),
           ...(options["--wait-seconds"] === undefined ? {} : { waitSeconds: Number(options["--wait-seconds"]) }),
           ...(observationRpcEnv === undefined ? {} : { observationRpcEnv }),
+          ...(options["--coinbase-observation-rpc"] === undefined ? {} : { coinbaseObservationRpc: coinbaseObservationPreset(options["--coinbase-observation-rpc"]) }),
           ...(options["--observe-only"] === undefined ? {} : { observeOnly: true as const }),
         },
         ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
@@ -377,4 +403,16 @@ function value(options: Readonly<Record<string, string>>, name: string): string 
 function nativeBatchMode(value: string): true {
   if (value !== "batch") throw new ApnError("APN_INVALID_INPUT", "RPC read mode must be batch when supplied.");
   return true;
+}
+
+/** Public names map only to the five fixed owner chains; journals and quotes retain numeric IDs. */
+function fixedMetaMaskNativeChain(name: string): 1 | 10 | 143 | 59144 | 1329 {
+  switch (name) {
+    case "ethereum": return 1;
+    case "optimism": return 10;
+    case "monad": return 143;
+    case "linea": return 59144;
+    case "sei": return 1329;
+    default: throw new ApnError("APN_INVALID_INPUT", "Only the fixed MetaMask native transfer chains are admitted.");
+  }
 }

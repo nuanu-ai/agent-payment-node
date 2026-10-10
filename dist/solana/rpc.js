@@ -37,12 +37,21 @@ export class SolanaRpcBudget {
         try {
             if (this.physical >= this.maxPhysicalRequests)
                 throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "The Solana operation exhausted its physical RPC request budget.", { logicalCalls: this.logical, physicalRequests: this.physical, maxPhysicalRequests: this.maxPhysicalRequests });
-            const delay = Math.max(0, this.nextStart - this.now());
+            const before = this.now(), delay = Math.max(0, this.nextStart - before);
             if (delay > 0) {
                 if (this.wait === undefined)
                     throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC pacing window is not yet open.", { retryAfterMs: delay, logicalCalls: this.logical, physicalRequests: this.physical });
                 await this.wait(delay);
-                const remaining = this.nextStart - this.now();
+                let current = this.now();
+                // Node timers can wake early. Wait once for the remainder only when
+                // the clock advanced; never admit an early POST or spin on a stuck clock.
+                if (current > before && current < this.nextStart) {
+                    await this.wait(this.nextStart - current);
+                    const rechecked = this.now();
+                    if (rechecked > current)
+                        current = rechecked;
+                }
+                const remaining = this.nextStart - current;
                 if (remaining > 0)
                     throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC pacing window is not yet open.", { retryAfterMs: remaining, logicalCalls: this.logical, physicalRequests: this.physical });
             }
@@ -92,6 +101,9 @@ export class SolanaRpc {
         this.budget = budget;
     }
     get hasPersistentPacer() { return this.pacer !== undefined; }
+    get maximumAccountsPerRead() {
+        return this.endpoint === "https://solana-rpc.publicnode.com" || this.endpoint === "https://solana-rpc.publicnode.com/" ? 8 : 16;
+    }
     async call(method, params) {
         const id = randomUUID();
         const value = await this.request({ jsonrpc: "2.0", id, method, params }, 1, method === "sendTransaction");
@@ -105,6 +117,8 @@ export class SolanaRpc {
         const id = randomUUID();
         const value = await this.request({ jsonrpc: "2.0", id, method: "sendTransaction", params }, 1, true, beforePost);
         const record = rpcRecord(value);
+        if (exactKeys(record, ["jsonrpc", "id", "error"]) && record.jsonrpc === "2.0" && record.id === id)
+            sendRejection(record.error);
         if (!exactKeys(record, ["jsonrpc", "id", "result"]) || record.jsonrpc !== "2.0" || record.id !== id)
             protocolFailure();
         return record.result;
@@ -113,6 +127,17 @@ export class SolanaRpc {
     async batch(reads) {
         if (reads.length < 1 || reads.length > 8 || reads.some(read => !READ_METHODS.has(read.method)))
             protocolFailure();
+        // Public mainnet refuses account methods in JSON-RPC arrays; PublicNode
+        // allows only one getMultipleAccounts per array. Single account reads work.
+        // Choose compatibility before dispatch; never retry a failed HTTP request.
+        if (["https://api.mainnet-beta.solana.com", "https://api.mainnet-beta.solana.com/",
+            "https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"].includes(this.endpoint ?? "") &&
+            reads.some(read => read.method === "getMultipleAccounts" || read.method === "getAccountInfo")) {
+            const results = [];
+            for (const read of reads)
+                results.push(await this.call(read.method, read.params));
+            return results;
+        }
         const requests = reads.map(read => ({ jsonrpc: "2.0", id: randomUUID(), method: read.method, params: read.params }));
         const value = await this.request(requests, requests.length, false);
         if (!Array.isArray(value) || value.length !== requests.length)
@@ -172,12 +197,16 @@ export class SolanaRpc {
         deadline.unref();
         let reader;
         try {
-            beforePost?.();
+            await beforePost?.();
+            if (controller.signal.aborted)
+                protocolFailure();
             const response = await this.fetcher(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" },
                 body: payload, redirect: "error", credentials: "omit", signal: controller.signal });
             if (response.status === 429)
                 throw new ApnError("APN_RPC_RATE_LIMITED", "The Solana RPC provider requested a cooldown.", retryAfterDetails(response.headers.get("retry-after")));
-            if (!response.ok || response.body === null || !(response.headers.get("content-type") ?? "").includes("application/json"))
+            if (!response.ok)
+                throw new ApnError("APN_RPC_PROTOCOL", "The Solana RPC returned an unsuccessful HTTP status.", { httpStatus: response.status });
+            if (response.body === null || !(response.headers.get("content-type") ?? "").includes("application/json"))
                 protocolFailure();
             reader = response.body.getReader();
             const chunks = [];
@@ -203,6 +232,20 @@ export class SolanaRpc {
             await reader?.cancel().catch(() => { });
         }
     }
+}
+/** Only correlated numeric codes and a fixed reason vocabulary leave the untrusted send response. */
+function sendRejection(value) {
+    if (!isPlainRecord(value) || !(exactKeys(value, ["code", "message"]) || exactKeys(value, ["code", "message", "data"])) || typeof value.message !== "string" ||
+        (typeof value.code !== "number" && typeof value.code !== "bigint"))
+        protocolFailure();
+    const code = Number(value.code);
+    if (!Number.isSafeInteger(code) || code < -2147483648 || code > 2147483647)
+        protocolFailure();
+    const err = isPlainRecord(value.data) ? value.data.err : undefined;
+    const reason = err === "BlockhashNotFound" ? "blockhash_not_found" : err === "InsufficientFundsForFee" ? "insufficient_funds_for_fee" :
+        err === "AccountNotFound" ? "account_not_found" : err === "AlreadyProcessed" ? "already_processed" :
+            isPlainRecord(err) && Array.isArray(err.InstructionError) ? "instruction_error" : "unclassified";
+    throw new ApnError("APN_RPC_PROTOCOL", "The correlated Solana send RPC returned an error.", { rpcErrorCode: code, rpcErrorReason: reason });
 }
 function retryAfterDetails(value) {
     if (value === null)

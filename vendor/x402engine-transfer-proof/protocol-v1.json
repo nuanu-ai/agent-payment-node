@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "apn.finite-merchant-protocol.v1",
+  "providerId": "x402engine-erc20-transfer-proof",
+  "reference": "megaeth-usdm-crypto-price-v1",
+  "source": "https://x402engine.app/docs/",
+  "snapshotDate": "2026-10-09",
+  "upstreamPackage": null,
+  "implementation": "APN finite adapter from the published merchant MegaethScheme contract",
+  "x402Version": 2,
+  "url": "https://x402engine.app/api/crypto/price?ids=bitcoin",
+  "network": "eip155:4326",
+  "assetTransferMethod": "erc20-transfer-proof",
+  "paymentHeader": "PAYMENT-SIGNATURE",
+  "payload": { "txHash": "original successful finalized ERC20 transfer transaction" },
+  "resource": "exact original challenge resource",
+  "accepted": "exact original selected USDm requirement",
+  "resend": false,
+  "merchantDelivery": "HTTP 200 application/json Bitcoin-price schema",
+  "eip3009": false,
+  "gasless": false
+}

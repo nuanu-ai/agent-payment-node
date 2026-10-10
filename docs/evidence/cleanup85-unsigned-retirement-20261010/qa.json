@@ -1,0 +1,60 @@
+{
+  "parent": "5c1c24c9e851e843e5f9a53f689d527fd061ec0d",
+  "kind": "A_implementation_milestone_not_source_acceptance",
+  "productionStrict": "PASS pinned24.15.0",
+  "focusedStrict": "PASS pinned24.15.0",
+  "ownedActualExpiryTests": "10/10 PASS",
+  "combinedFirst": "70/71 PASS; unchanged module-mock case missing required Node flag",
+  "unchangedFrozenRepairProperFlag": "1/1 PASS",
+  "repeatEmissions": {
+    "count": 27,
+    "drift": 0
+  },
+  "sourceHashes": {
+    "src/circle-cleanup85-unsigned-resume.ts": "f3323ac44790c90863282d566af22c7e707cca632e2c7ff4859ffc1cb5460ef0",
+    "src/circle-cleanup85-unsigned-retirement.ts": "7413298f605ef43bca45f671629745d1709d5eb8a378a8e7b2ab7f94d9837c0f",
+    "src/circle-cleanup85-unsigned-retirement-store.ts": "d07a93038627c5027dc7a7b7e02d0746771cf8d2105ab5a52f038635a5fce875",
+    "src/circle-cleanup85-financial-scope.ts": "f87151c28dd084c8cddf934d9c196105faf35c4af50d01e9f6878f8dfc6f24d1",
+    "src/circle-v2-evm/cleanup85-effective-context.ts": "66f60c77db74a6aaf4f4815e6e16d6dca0001d7786988d4a198f8db1e5d13c18",
+    "src/circle-v2-evm/cleanup85-recovery-prepare.ts": "8115a5572ff2f2f76f4d8a7930a46e1895c4ec22944a77306276e9f6868a06a1",
+    "src/circle-v2-evm/cleanup85-recovery-runtime.ts": "5e8ef738f3f4ff0dd5749cf40ba174f4318e25b8bfb1cf7e847583a80e23da14",
+    "src/circle-v2-evm/cleanup86-store.ts": "5b039c5263d16530f83f7d62f7ba7a10a6a26b3508ba44148e9564c76a5c3f20",
+    "src/circle-v2-evm/usage.ts": "610ec1dc501ecad276a9123cb662c4cd7d59eaf90496f5b0a20e0e444d0bc67d"
+  },
+  "emissionHashes": {
+    "dist/circle-cleanup85-unsigned-resume.js": "db1588b364e17ecb22356a5f54cc4586b2d1fb41a2c2503ce5f5930e5a2413d9",
+    "dist/circle-cleanup85-unsigned-resume.js.map": "d25d7fbd0f2efec7c0f6068d27bc38191d1497bf1108fcbaa879dcf03039d2d7",
+    "dist/circle-cleanup85-unsigned-resume.d.ts": "26fa322ad03273ede438b2d256e6fb128a792a0fdff4f8add577f579b5fecaaa",
+    "dist/circle-cleanup85-unsigned-retirement.js": "0af321326242101202e68cd7a75be8bc414a219ac73918a716ceab1679d20ca2",
+    "dist/circle-cleanup85-unsigned-retirement.js.map": "e2e0636cc2027531312072b7b1635dac7a7e9cba72113d2e6d8447aae3a4db93",
+    "dist/circle-cleanup85-unsigned-retirement.d.ts": "c327ab88d1b5f7d356dbbc420acbae8a3410e82bff204f9e6330ad3679e86d7c",
+    "dist/circle-cleanup85-unsigned-retirement-store.js": "f865767ce8ac84aa9a2288411926fe794e393082de6dc05515d079616ef173ef",
+    "dist/circle-cleanup85-unsigned-retirement-store.js.map": "d4d57290f60c51ceb9b194a5971fe332901d4a3fd0e53945d8f1c65359bd7e83",
+    "dist/circle-cleanup85-unsigned-retirement-store.d.ts": "9e02d780e091c17415c5eb4c9a459449698a15f785970067c3babda49f885954",
+    "dist/circle-cleanup85-financial-scope.js": "194b78a9c18dc9258abdc7f3092372ddfa8290d4f323536cdb3897b5124d6346",
+    "dist/circle-cleanup85-financial-scope.js.map": "b39f5f482726dc7d2fe99c76c38d559d46053d60c4d4336ab62ca63c7a27c668",
+    "dist/circle-cleanup85-financial-scope.d.ts": "b0a1492108da227745e062adab62ac44820fb34185b34132f848e735b03e4fd3",
+    "dist/circle-v2-evm/cleanup85-effective-context.js": "ed7523bdba203985316a00259bf787eeb99c983f04fe303ee7a29ab0afd2e1b4",
+    "dist/circle-v2-evm/cleanup85-effective-context.js.map": "f6c1cf3938f0fff5dc33b84243d773d3ff03e39c512bb540a8647c3c3a08f2a1",
+    "dist/circle-v2-evm/cleanup85-effective-context.d.ts": "9bd85ebd09a17e95f22d21aaf4611d89c413872f0d6bf127e8bf20115dd78880",
+    "dist/circle-v2-evm/cleanup85-recovery-prepare.js": "e7d1ca85fc02a1cb7273aa15273f43cef89c21031c9df053bb09b8c0082a7e70",
+    "dist/circle-v2-evm/cleanup85-recovery-prepare.js.map": "f200e8021618df7bf8e47a1b0ed14275d7ad01b6a1059dd3c3c13f9cded21c7c",
+    "dist/circle-v2-evm/cleanup85-recovery-prepare.d.ts": "b025e6e3c2d976b6de21eb88739d483bb67215b48ce0a9ef0486193319d64688",
+    "dist/circle-v2-evm/cleanup85-recovery-runtime.js": "6d73f4bbe54689ee2f248cd40892ae58c7aee3022335560b9ec42f54ce6ad044",
+    "dist/circle-v2-evm/cleanup85-recovery-runtime.js.map": "65a3d944bd48f11dee54e9ddcc781474a3e105d0cb4e9a90e3c84046da784071",
+    "dist/circle-v2-evm/cleanup85-recovery-runtime.d.ts": "0b0312cb4ce012b5d36edb67751bfd616aba1720b30efd647d650369f81fe21b",
+    "dist/circle-v2-evm/cleanup86-store.js": "0fd5a626ce096be31926898b3cb41641e07247791168abf6a2565cc3026785f3",
+    "dist/circle-v2-evm/cleanup86-store.js.map": "0db1e21c1c01a2803603ec459547b783a997c535dc5b413d4d455d15adf8fd7e",
+    "dist/circle-v2-evm/cleanup86-store.d.ts": "1d06fc47d02db27c05b7007f84093c67555c5ad25f3f09c9634d22435c89376f",
+    "dist/circle-v2-evm/usage.js": "a939a10df246b8ff0e0ae8af7fd260570239185f6c6f28a6dc1bd83cb2ca2422",
+    "dist/circle-v2-evm/usage.js.map": "824a5472ef36ea0ad3634c8d02de57da1fb3fe22303634bad409b3ecf18d18e4",
+    "dist/circle-v2-evm/usage.d.ts": "63f35647d700468d7afee7c6cbf8513190e0baf53cc8b10d364937fdf262e91a"
+  },
+  "maxOwnedSourceLines": 205,
+  "pending": [
+    "B successor/native ledger resolver adoption",
+    "combined F85 -> A zero86/F87 controller gate",
+    "independent exact-SHA review",
+    "fresh installed runtime and live actions"
+  ]
+}

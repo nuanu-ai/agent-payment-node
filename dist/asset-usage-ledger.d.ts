@@ -1,74 +1,9 @@
-import { type AssetPolicyRail } from "./asset-policy-registry.js";
+import { type VerifiedCleanup85NativeReservation, type VerifiedCleanup85NativeSettlement } from "./circle-cleanup85-native-ledger-authority.js";
+import type { MerchantOperation, MerchantReceipt } from "./x402-merchant/model.js";
 import { SecureStateStore } from "./secure-state-store.js";
-export declare const ASSET_USAGE_RESERVATION_SCHEMA: "apn.asset-usage-reservation.v1";
-/** Existing chain-policy convention: [00:00:00.000Z, next 00:00:00.000Z). */
-export declare const ASSET_USAGE_WINDOW: "utc-calendar-day";
-export type AssetUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect"
-/** Payment was never submitted and a terminal proof closes any earlier authorization exposure. */
- | "released_unsubmitted"
-/** A sent effect that is proven reverted at a finalized block releases its principal. */
- | "failed_confirmed_revert";
-export interface AssetUsageIdentity {
-    /** Stable canonical identity for the paying account; aliases must be resolved by the caller. */
-    readonly account: string;
-    readonly chain: string;
-    readonly asset: Readonly<{
-        kind: "native";
-        identifier: null;
-    } | {
-        kind: "token";
-        identifier: string;
-    }>;
-}
-export interface AssetUsageReservation extends AssetUsageIdentity {
-    readonly schemaVersion: typeof ASSET_USAGE_RESERVATION_SCHEMA;
-    readonly reservationId: string;
-    readonly idempotencyHash: string;
-    readonly policyDigest: string;
-    readonly registryVersion: string;
-    readonly rail: AssetPolicyRail;
-    readonly amountAtomic: string;
-    /** Proven asset consumption on a confirmed revert; absent on historical zero-consumption records. */
-    readonly consumedAtomic?: string;
-    readonly state: AssetUsageState;
-    readonly reservedAt: string;
-    readonly updatedAt: string;
-    /** Set when a finalized effect or proven reverted consumption is charged to a UTC day. */
-    readonly effectAt: string | null;
-    /** Required terminal proof binding; the proof itself remains in the owning rail. */
-    readonly outcomeDigest: string | null;
-    readonly reservationDigest: string;
-}
-export interface AssetUsageReserveInput extends AssetUsageIdentity {
-    readonly registry: unknown;
-    readonly rail: AssetPolicyRail;
-    readonly mechanism?: Readonly<{
-        provider: string;
-        reference: string;
-    }>;
-    readonly amountAtomic: string;
-    readonly idempotencyKey: string;
-    readonly now: Date;
-    /** Relay-only recovery: caller has proved no journal, signing marker, custody bytes, or send risk. */
-    readonly retryFailedBeforeEffect?: boolean;
-}
-export interface AssetUsageTransitionInput extends AssetUsageIdentity {
-    readonly reservationId: string;
-    readonly policyDigest: string;
-    readonly state: Exclude<AssetUsageState, "reserved">;
-    readonly now: Date;
-    readonly outcomeDigest?: string;
-    /** Exact asset consumed on a confirmed revert, such as a gasless USDC fee. */
-    readonly consumedAtomic?: string;
-    /** Optional compare-and-transition guard, checked atomically while the bucket lock is held. */
-    readonly expectedCurrentStates?: readonly AssetUsageState[];
-}
-export interface AssetUsageSnapshot {
-    readonly windowPolicy: typeof ASSET_USAGE_WINDOW;
-    readonly windowStart: string;
-    readonly windowEnd: string;
-    readonly amountAtomic: string;
-}
+export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, assetUsageReservationId, validateAssetUsageReservation } from "./asset-usage-ledger-record.js";
+import type { AssetUsageIdentity, AssetUsageReservation, AssetUsageReserveInput, AssetUsageTransitionInput, CancelUnsubmittedReservationInput, AssetUsageSnapshot } from "./asset-usage-ledger-types.js";
+export type { AssetUsageState, AssetUsageIdentity, AssetUsageReservation, AssetUsageReserveInput, AssetUsageTransitionInput, CancelUnsubmittedReservationInput, AssetUsageSnapshot } from "./asset-usage-ledger-types.js";
 /**
  * Durable common usage ledger for all admitted rails. Money-rail owners reserve here while holding
  * no other state lock, then persist their own operation under their existing lock discipline.
@@ -77,9 +12,27 @@ export declare class AssetUsageLedger extends SecureStateStore {
     private initialized;
     /** Relay and this ledger hash idempotency keys in separate domains. Hold the
      * exact source asset bucket lock through the caller's retirement write. */
-    withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, sourceChainId?: 1 | 56, allowFailedBeforeEffectReservationId?: string): Promise<T>;
+    withNoMatchingRelayReservation<T>(account: string, policyDigest: string | undefined, amountAtomic: string, action: () => Promise<T>, sourceChainId?: 1 | 56 | 8453, allowFailedBeforeEffectReservationId?: string): Promise<T>;
     reserve(input: AssetUsageReserveInput): Promise<AssetUsageReservation>;
+    reserveMetaMaskNative(operationId: string, kind: "native" | "token", now: Date): Promise<AssetUsageReservation>;
+    reserveCleanup85Native(authority: VerifiedCleanup85NativeReservation, now: Date): Promise<AssetUsageReservation>;
+    private reserveBound;
+    /** Direct pre-private recovery: hold the exact reservation through its durable outcome and release.
+     * The callback must not acquire this bucket lock. Its owning profile/operation/custody locks remain held. */
+    releaseDirectReservedAfter<T>(expectedValue: AssetUsageReservation, persistOutcome: () => Promise<{
+        value: T;
+        now: Date;
+        outcomeDigest: string;
+    }>): Promise<T>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
+    /** Exact root-owned cleanup85 cancellation only; public projections are never authority. */
+    settleCleanup85Native(authority: VerifiedCleanup85NativeSettlement, now: Date): Promise<AssetUsageReservation>;
+    /** Finite Mega merchant headroom only: metadata cannot mint this canonical receipt authority. */
+    settleMerchantNativeActualFee(o: MerchantOperation, receipt: MerchantReceipt, now: Date): Promise<AssetUsageReservation>;
+    /** Static normal-owner canonical proof; public DTOs cannot release capacity. */
+    settleMetaMaskNativeActual(operationId: string, now: Date): Promise<void>;
+    /** Atomic cancellation in the existing schema; a delayed reserve can only replay the released row. */
+    cancelUnsubmittedReservation(input: CancelUnsubmittedReservationInput): Promise<AssetUsageReservation>;
     usage(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;
     /** Existing-ledger snapshot for nonpersistent preflight; never initializes, locks, or creates a bucket. */
     usageReadOnly(identityValue: AssetUsageIdentity, now: Date): Promise<AssetUsageSnapshot>;
@@ -91,10 +44,9 @@ export declare class AssetUsageLedger extends SecureStateStore {
     load(identityValue: AssetUsageIdentity, reservationIdValue: string): Promise<AssetUsageReservation | null>;
     private ready;
     private loadBucket;
+    /** Central existing-record projection shared by reserve admission and every usage reader. */
+    private sumBucketUsage;
     private bucketDirectory;
     private recordPath;
     private bucketLock;
 }
-/** The reservation id that `reserve` creates or replays for this exact identity and idempotency key. */
-export declare function assetUsageReservationId(identityValue: AssetUsageIdentity, idempotencyKey: string): string;
-export declare function validateAssetUsageReservation(value: unknown): AssetUsageReservation;

@@ -1,5 +1,5 @@
-import { createx402DelegationProvider } from "@metamask/smart-accounts-kit/experimental";
-import { x402Erc7710Client } from "@metamask/x402";
+import { createx402DelegationProvider } from "../metamask-smart-account-vendor.js";
+import { x402Erc7710Client } from "../metamask-smart-account-vendor.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { smartAccountEnvironment } from "../metamask-smart-account-grant.js";
 /** Uses the pinned MetaMask SDK to create and sign exactly one child delegation. */

@@ -1,125 +1,16 @@
-import { lstat, mkdir, open, readFile, realpath, rename } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { SOURCE_CHAIN, DESTINATION_CHAIN, SOURCE_EID, DESTINATION_EID, SOURCE_POOL, DESTINATION_POOL, CODE, HASH, MAX_TTL_MS, fail, uint, address, hex32, rpcQuantity, transition, seal } from "./native-record.js";
+export { FileStargateNativeJournal } from "./native-journal.js";
+export { stargateV2NativeCanonicalReceipt } from "./native-record.js";
 import { decodeAbiParameters, decodeEventLog, decodeFunctionResult, encodeFunctionData, getAddress, keccak256, pad, parseTransaction, recoverTransactionAddress, zeroAddress, } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
+import { hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "./abi.js";
-import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy, stargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
-const SOURCE_CHAIN = 1;
-const DESTINATION_CHAIN = 130;
-const SOURCE_EID = 30101;
-const DESTINATION_EID = 30320;
-const SOURCE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
-const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
-const UINT = /^(?:0|[1-9][0-9]{0,77})$/u;
-const HASH = /^0x[0-9a-f]{64}$/u;
-const CODE = /^0x(?:[0-9a-f]{2})+$/u;
-const MAX_TTL_MS = 120_000;
-function fail(code, reason) {
-    throw new ApnError(code, `Direct Stargate V2 native execution failed closed: ${reason}.`, { reason });
-}
-function uint(value, positive = false) {
-    if (typeof value !== "string" || !UINT.test(value))
-        return fail("APN_INVALID_INPUT", "noncanonical_uint");
-    const n = BigInt(value);
-    if (n >= 1n << 256n || (positive && n === 0n))
-        return fail("APN_INVALID_INPUT", "uint_range");
-    return n;
-}
-function address(value) {
-    try {
-        const result = getAddress(value);
-        if (result === zeroAddress)
-            throw new Error("zero");
-        return result;
-    }
-    catch {
-        return fail("APN_INVALID_INPUT", "address");
-    }
-}
-function hex32(value) {
-    if (typeof value !== "string" || !HASH.test(value))
-        return fail("APN_RPC_PROTOCOL", "hash");
-    return value;
-}
-function rpcQuantity(value) {
-    if (typeof value !== "string" || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(value))
-        return fail("APN_RPC_PROTOCOL", "quantity");
-    return BigInt(value);
-}
-export class FileStargateNativeJournal {
-    root;
-    locks;
-    constructor(root, locks) {
-        this.root = root;
-        this.locks = locks ?? new StateStore(root, { lockWaitMs: 0 });
-    }
-    path(id) {
-        if (!/^[a-f0-9]{64}$/u.test(id))
-            fail("APN_STATE_CORRUPT", "operation_id");
-        return join(this.root, "stargate-v2-native", `${id}.json`);
-    }
-    async withLock(id, work) {
-        await this.locks.initialize();
-        return await this.locks.withLocks([`stargate-native:${id}`], work, { waitMs: 30_000 });
-    }
-    async withOwnerChainLock(owner, chainId, work) {
-        await this.locks.initialize();
-        return await this.locks.withLocks([`stargate-source:${chainId}:${address(owner).toLowerCase()}`], work, { waitMs: 30_000 });
-    }
-    async load(id) {
-        try {
-            const path = this.path(id);
-            await secureDirectory(dirname(path), false);
-            const info = await lstat(path);
-            if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0)
-                fail("APN_STATE_CORRUPT", "journal_file_mode");
-            return validateRecord(JSON.parse(await readFile(path, "utf8")));
-        }
-        catch (error) {
-            if (error.code === "ENOENT")
-                return null;
-            throw error;
-        }
-    }
-    async save(nextInput) {
-        const next = validateRecord(nextInput), path = this.path(next.operationId), previous = await this.load(next.operationId);
-        validateAdvance(previous, next);
-        const directory = dirname(path);
-        await secureDirectory(directory);
-        const temp = `${path}.${process.pid}.${Date.now()}.tmp`, handle = await open(temp, "wx", 0o600);
-        try {
-            await handle.writeFile(`${canonicalJson(next)}\n`);
-            await handle.sync();
-        }
-        finally {
-            await handle.close();
-        }
-        await rename(temp, path);
-        const dir = await open(directory, "r");
-        try {
-            await dir.sync();
-        }
-        finally {
-            await dir.close();
-        }
-    }
-}
-async function secureDirectory(directory, create = true) {
-    if (create)
-        await mkdir(directory, { recursive: true, mode: 0o700 });
-    const info = await lstat(directory);
-    if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0)
-        fail("APN_STATE_CORRUPT", "journal_directory_mode");
-    const resolved = await realpath(directory), parent = await realpath(dirname(directory));
-    if (relative(parent, resolved).startsWith(".."))
-        fail("APN_STATE_CORRUPT", "journal_path");
-}
 export class LocalStargateNativeSigner {
     state;
     wallets;
@@ -549,88 +440,5 @@ function assertLane(quote) {
         r.destinationEid !== DESTINATION_EID || r.sourcePool !== SOURCE_POOL || r.destinationPool !== DESTINATION_POOL || r.asset !== "ETH") {
         fail("APN_OPERATION_BLOCKED", "lane");
     }
-}
-function transition(operation, phase, reason, at) {
-    return seal({ ...operation, phase, transitions: [...operation.transitions, { phase, at: new Date(at).toISOString(), reason }] });
-}
-function seal(value) {
-    const { integrityHash: _old, ...body } = value;
-    return Object.freeze({ ...body, integrityHash: hashObject(body) });
-}
-function validateRecord(value) {
-    if (!isPlainRecord(value) || !["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2"].includes(String(value.schemaVersion)))
-        fail("APN_STATE_CORRUPT", "schema");
-    const raw = value, { integrityHash, ...body } = raw;
-    if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64)
-        fail("APN_STATE_CORRUPT", "integrity");
-    let record = raw;
-    if (raw.schemaVersion === "apn.stargate-v2-native-operation.v1") {
-        assertLegacyNativeLane(raw);
-        if (raw.finalityPolicy === undefined && raw.finalityPolicyProvenance === undefined)
-            record = seal({ ...body,
-                finalityPolicy: stargateV2LegacyRouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN), finalityPolicyProvenance: "derived_legacy_v1" });
-        else {
-            assertStargateV2LegacyRouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
-            if (raw.finalityPolicyProvenance !== "derived_legacy_v1")
-                fail("APN_STATE_CORRUPT", "finality_policy_provenance");
-        }
-    }
-    else {
-        assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
-        if (raw.finalityPolicyProvenance !== "pinned_v2")
-            fail("APN_STATE_CORRUPT", "finality_policy_provenance");
-    }
-    const order = ["prepared", "approved", "submission_started", "submitted", "observed"];
-    for (let i = 1; i < record.transitions.length; i++) {
-        const a = record.transitions[i - 1].phase, b = record.transitions[i].phase;
-        if (b === "unknown_finality") {
-            if (!["submission_started", "submitted"].includes(a))
-                fail("APN_STATE_CORRUPT", "transition");
-        }
-        else if (a === "unknown_finality") {
-            if (!["submitted", "observed"].includes(b))
-                fail("APN_STATE_CORRUPT", "transition");
-        }
-        else if (order.indexOf(b) < order.indexOf(a) || order.indexOf(b) > order.indexOf(a) + 1)
-            fail("APN_STATE_CORRUPT", "transition");
-    }
-    return record;
-}
-function assertLegacyNativeLane(record) {
-    const route = record.quote?.route;
-    if (record.recipient !== record.owner || record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
-        record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || record.envelope.from !== record.owner || record.envelope.to !== SOURCE_POOL || route?.sourceChainId !== SOURCE_CHAIN ||
-        route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID || record.quote.recipient !== record.owner ||
-        route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.sourceToken !== zeroAddress || route.destinationToken !== zeroAddress || route.asset !== "ETH")
-        fail("APN_STATE_CORRUPT", "legacy_lane");
-}
-function validateAdvance(previous, next) {
-    if (previous === null) {
-        if (next.phase !== "prepared" || next.transitions.length !== 1)
-            fail("APN_STATE_CORRUPT", "initial_state");
-        return;
-    }
-    const frozen = (x) => {
-        const { phase: _p, transitions: _t, integrityHash: _i, transactionHash: _h, guid: _g, sourceReceipt: _s, destinationEvidence: _d, ...rest } = x;
-        return rest;
-    };
-    if (canonicalJson(frozen(previous)) !== canonicalJson(frozen(next)) || next.transitions.length < previous.transitions.length ||
-        canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) ||
-        (previous.transactionHash !== undefined && previous.transactionHash !== next.transactionHash))
-        fail("APN_STATE_CORRUPT", "journal_rewrite");
-}
-export function stargateV2NativeCanonicalReceipt(operationInput) {
-    const operation = validateRecord(operationInput);
-    if (operation.phase !== "observed" || operation.sourceReceipt === undefined || operation.destinationEvidence === undefined) {
-        fail("APN_OPERATION_BLOCKED", "receipt_not_observed");
-    }
-    const body = { schemaVersion: "apn.stargate-v2-native-receipt.v1", operationId: operation.operationId,
-        profile: operation.profile, route: { sourceChainId: SOURCE_CHAIN, sourceEid: SOURCE_EID, sourcePool: SOURCE_POOL,
-            destinationChainId: DESTINATION_CHAIN, destinationEid: DESTINATION_EID, destinationPool: DESTINATION_POOL },
-        owner: operation.owner, recipient: operation.recipient, principalAtomic: operation.amountAtomic, finalityPolicy: operation.finalityPolicy,
-        nativeMessageFeeAtomic: operation.quote.quote.nativeMessageFeeAtomic, totalValueAtomic: operation.totalValueAtomic,
-        maximumDebitAtomic: operation.maximumDebitAtomic, quoteHash: operation.quote.quoteHash,
-        source: operation.sourceReceipt, destination: operation.destinationEvidence };
-    return Object.freeze({ ...body, evidenceHash: hashObject(body) });
 }
 //# sourceMappingURL=native-execution.js.map

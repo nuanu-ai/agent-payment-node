@@ -1,4 +1,4 @@
-import type { PermissionContext } from "@metamask/smart-accounts-kit";
+import type { PermissionContext } from "../metamask-smart-account-vendor.js";
 import type { Address, Hex } from "../model.js";
 export interface Erc7710PaymentRequirements {
     readonly scheme: string;

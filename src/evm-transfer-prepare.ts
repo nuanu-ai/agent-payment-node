@@ -1,3 +1,6 @@
+import { verifyCircleNativeAdmission } from "./circle-native-admission.js";
+import { DirectPublicEffectJournal } from "./direct-public-effect.js";
+import { evmNativeCustody } from "./evm-native-custody.js";
 import { hashObject } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { APPROVAL_WINDOW_MS, STATE_VERSION } from "./constants.js";
@@ -78,14 +81,17 @@ export async function prepareEvmTransfer(
   // A request without an owner tip hashes exactly as before, so existing idempotency keys keep resolving.
   const requestHash = hashObject({ method: "pay.transfer.evm.v1", profile, recipient, selection, amount: request.amount, maxFeeWei: maximumFeeWei,
     ...(priorityFeeWei === undefined ? {} : { priorityFeeWei }) });
-  return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
+  return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, ...(selection.chainId === 42161 && selection.token === "native" ? [`profile:${state.profileHash("default")}`] : [])], async () => {
     const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
     if (existing !== null) return publicOperation(existing.record as OperationRecord);
     return await state.withLocks([walletCustodyLock(state, profile)], async () => {
     const wallet = await state.loadWallet(profileHash);
     if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
     await retireExpired(profileHash, selection.chainId, wallet.address);
-    await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
+    const circleAdmission = selection.chainId === 42161 && selection.token === "native"
+      ? await verifyCircleNativeAdmission(state, context.requireRpc(), profile, wallet.address, recipient) : null;
+    if (circleAdmission === null) await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
+    else await operations.assertFinalizedCircleNativeAccountAvailable(profileHash, wallet.address, circleAdmission.token);
     const amount = evmAmount(request.amount, listed.decimals);
     // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
     const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
@@ -122,7 +128,8 @@ export async function prepareEvmTransfer(
     const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();
     const binding: EvmDirectBinding = {
       schemaVersion: "apn.evm-direct.v1", asset: balance.asset, transactionTo: transaction.to,
-      valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote,
+      valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote, nativeCustody: await evmNativeCustody(state, profile),
+      ...(circleAdmission === null ? {} : { circleNativeAdmission: circleAdmission.binding }),
     };
     const frozen = {
       operationId, profile, chainId: selection.chainId, token: balance.asset.address, walletAddress: wallet.address,
@@ -135,6 +142,7 @@ export async function prepareEvmTransfer(
       state: initial.state, terminal: false, reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial),
     });
     await persist(operation);
+    await new DirectPublicEffectJournal(context.state).prepare(operation);
     return publicOperation(operation);
     });
   });

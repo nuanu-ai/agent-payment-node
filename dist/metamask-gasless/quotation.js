@@ -10,7 +10,7 @@ export async function metaMaskGaslessQuote(provider, binding, request, rpcUrl, c
             recipient: request.recipient, netAtomic, rpcUrl });
         clock.check();
         const quote = mmQuote(value, request, binding, netAtomic);
-        if (BigInt(netAtomic) + BigInt(quote.feeAtomic) === gross) {
+        if (request.fixedNet || BigInt(netAtomic) + BigInt(quote.feeAtomic) === gross) {
             mmAssertStableQuote(request, quote);
             return quote;
         }

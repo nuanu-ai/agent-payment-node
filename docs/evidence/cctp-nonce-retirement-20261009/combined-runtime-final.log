@@ -1,0 +1,136 @@
+✔ expired DNS authority produces zero physical POST requests (5.7585ms)
+✔ expired queue authority produces zero physical POST requests after a slot frees (3.542041ms)
+✔ expired TLS authority writes no POST body; valid TLS authority writes exact bytes once (1.412292ms)
+✔ Circle raw-send RPC requires a private dispatch guard before touching transport (0.268584ms)
+✔ one-millisecond bound policy expiration after DNS or TLS writes zero signed POST bytes (0.920417ms)
+✔ full actual Iris COMPLETE response passes runtime API parsing and real enabled-attester signatures (51.595625ms)
+✔ each mint preflight verifies both chains once and passes its fresh digest to current attesters (29.002458ms)
+✔ explicit nonce cleanup signs/sends one different approve0; finalized proof retires holds without changing original historical material (71.3935ms)
+✔ restored valid original journal cannot sign or send another cleanup; permanent original tombstone survives restoration (67.119875ms)
+✔ existing cleanup cannot use zero allowance to cancel an unknown sealed approval (1.955583ms)
+✔ retirement rejects burn_attempt before signature or dispatch (1.613ms)
+✔ retirement rejects unexpired before signature or dispatch (1.323542ms)
+✔ retirement rejects wrong_chain before signature or dispatch (1.584625ms)
+✔ retirement rejects wrong_nonce before signature or dispatch (1.535042ms)
+✔ retirement rejects wrong_spender before signature or dispatch (3.093917ms)
+✔ retirement rejects full_fee before signature or dispatch (1.558167ms)
+✔ retirement included retains holds and never resends (53.466292ms)
+✔ retirement missing_finalized_nonce_proof retains holds and never resends (60.048791ms)
+✔ retirement forged_nonce_proof retains holds and never resends (51.413041ms)
+✔ retirement old_approval_wins_race retains holds and never resends (16.988459ms)
+✔ retirement policy_change retains holds and never resends (1.558959ms)
+✔ retirement unrelated_conflict retains holds and never resends (1.575459ms)
+✔ retirement tty_expiry retains holds and never resends (21.3595ms)
+✔ retirement postsign_expiry retains holds and never resends (39.345458ms)
+✔ retirement lost_rpc retains holds and never resends (47.026417ms)
+✔ production custody rejects original restored signer and cleanup without durable sign claim before key access (17.854083ms)
+✔ ordinary observation of an intent persisted before cancelled TTY cannot grant financial start (20.203917ms)
+✔ real private retirement guard expiring at TLS after durable SEND claim writes zero POST bytes and never retries (51.433625ms)
+✔ expiration between SIGN claim and custody signing produces zero signatures and no send (35.05125ms)
+✔ policy scope 143: distinct/same profiles deduplicate; reads do not reacquire held locks (127.062791ms)
+✔ policy scope 1329: distinct/same profiles deduplicate; reads do not reacquire held locks (82.289041ms)
+✔ revoked waits for the entire two-owner execution policy scope (199.812917ms)
+✔ active waits for the entire two-owner execution policy scope (177.779042ms)
+✔ changed activation before acquisition refuses the frozen grant; absence cannot grant legacy dispatch (123.163375ms)
+✔ opposite profile ordering shares canonical locks without deadlock or concurrent scopes (126.467125ms)
+✔ policy expiration while waiting for locks refuses before any financial continuation (103.453791ms)
+✔ async work inherited from an ended scope cannot perform policy reads (72.462334ms)
+✔ held USDC and 75T source capacity are re-admitted without counting the same reservation twice (244.693834ms)
+✔ seller Sei uses the exact destination activation and native policy hold (219.719583ms)
+✔ authorization deadline is the earliest exact locked source/destination policy window (236.909167ms)
+✔ an owner registry without an end has no policy deadline and does not mint authority outside its scope (355.535333ms)
+✔ expired owner policy can release only the existing proven-unspent reservation outcome (616.035625ms)
+✔ finite 1329: exact source bytes, enabled issuer attestation, canonical mint (19.87925ms)
+✔ finite 59144: exact source bytes, enabled issuer attestation, canonical mint (8.137042ms)
+✔ finite 143: exact source bytes, enabled issuer attestation, canonical mint (9.77275ms)
+✔ source guards reject receipt reorg, foreign transaction, duplicate event and noncanonical log membership (3.292375ms)
+✔ immutable header and burn body fields cannot be normalized (0.954584ms)
+✔ enabled issuers, sorted canonical signatures and exact API/hash metadata are required (27.112083ms)
+✔ exact allowance approval/reset receipts and native source budget (1.490791ms)
+✔ fast quote uses rational ceil and refuses unavailable, expired or over-cap fees (0.375792ms)
+✔ deployment verification binds implementation plus proxy and reverse token pairs (0.394334ms)
+✔ fast issuer evidence does not turn source inclusion into finalized bridge closure (1.2375ms)
+✔ actual V2 issuer eventNonce is strict bytes32 and bound to the signed raw nonce (12.281792ms)
+✔ lost broadcast holds a durable submission fence and explicit replay observes without signing or sending (9.532542ms)
+✔ crash immediately after signing mark cannot re-enter custody even if no sealed bytes were saved (1.269792ms)
+✔ unknown signing can recover encrypted material only for observation (1.850417ms)
+✔ issuer Fast attestation permits one mint while source finality pending, but cannot complete or finalize usage (20.588916ms)
+✔ source reorg refuses mint and preserves all holds (10.065041ms)
+✔ both Circle account domains are exposed to shared cross-rail conflicts and global idempotency (86.264208ms)
+✔ journal forbids source nonce, fee ceiling, destination payer and terminal-finality forgery (1.092208ms)
+✔ shared profile and operation locks allow exactly one concurrent financial claim (178.07625ms)
+✔ destination safe mint leaves usage held until independently finalized source is observed (20.795292ms)
+✔ only a canonical finalized reverted source effect can enter explicit cleanup (7.342ms)
+✔ a different Circle route queues after source inclusion; other money rails retain the source hold (44.007417ms)
+✔ unsubmitted explicit cancellation releases reserves only after proving no private material and zero allowance (2.014ms)
+✔ runtime bytecode has the EIP-170 bound while wire fields retain their narrower bound (0.422708ms)
+✔ expired TTY and first preflight fail before any private marker (2.726875ms)
+✔ expiry after signing or submission fences becomes unknown and never signs or sends again (16.988084ms)
+✔ private consent cannot be forged, reused after controller return or applied to another effect (2.573959ms)
+✔ mint and no-effect cancellation have fresh finite TTY authority (7.421458ms)
+✔ bound policy expiry at either preflight prevents dispatch even after all policy confirmations (2.942ms)
+✔ policy expiry after a submission fence or queued dispatch remains observation-only (6.225125ms)
+✔ later or absent owner policy expiry preserves the finite sixty-second TTY bound (1.60225ms)
+✔ expired or revised policy cannot prevent proven-unsubmitted cancellation or grant a financial exemption (9.033708ms)
+✔ saved included source with pending finality acquires fresh issuer proof without closing holds (8.059125ms)
+✔ pending-finality fallback requires exact fresh canonical source and never manufactures issuer proof (7.758541ms)
+✔ saved finalized source cannot use included fallback to mask absent finalized canonical proof (5.874542ms)
+✔ finalized Linea mint scopes conflicts to its destination payer without freeing any source unknown holds (289.236ms)
+✔ Sei seller is a finite profile/account variant; historical buyer/default selectors remain identical (0.931417ms)
+✔ frozen seller profile and custody bind strict journal/nonce/fee while old absent metadata hashes are unchanged (4.996208ms)
+✔ seller account preflight cannot authorize buyer, arbitrary payer, non-Sei or wrong profile (0.226458ms)
+✔ same pinned burn and issuer attestation mint canonical USDC only through the frozen seller variant (17.307334ms)
+✔ normal CLI has the explicit finite seller selector (0.172542ms)
+✔ one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields (4.511125ms)
+✔ root, every group and every leaf have identical prefix/suffix text discovery (5.352125ms)
+✔ status and receipt discovery disclose possible local recovery writes in CLI and MCP (3.218292ms)
+✔ stable observation discovery discloses durable operation and principal writes (1.837833ms)
+✔ group help renders exact subgroup usages and complete leaf synopses (0.176959ms)
+✔ machine discovery emits the exact complete manifest as one raw JSON value (3.477125ms)
+✔ invalid discovery and operational usage return bounded catalog-only guidance without reflecting argv (1.022291ms)
+✔ catalog parser derives requiredness, defaults, duplicate rejection and scalar constraints for every command (19.876958ms)
+✔ catalog-declared x402 policy ceiling is enforced before request binding (0.209875ms)
+✔ HTTPS parser constraints preserve RPC compatibility and match canonical bounded x402 policy (6.715625ms)
+✔ manifest validator and compatibility gate reject every declared structural or semantic drift class (66.645542ms)
+✔ README command block and package/build identity are mechanically identical to the catalog (18.558167ms)
+✖ actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile (2182.802291ms)
+✔ actual compiled Stargate status needs no RPC environment and creates no state (1387.061375ms)
+✔ actual compiled discovery is raw and no-effect with empty or unwritable caller HOME (8825.398167ms)
+✔ wallet status for an absent unique profile is read-only before initialization, locks, native or Keychain (31.21475ms)
+✔ official MCP client proves production stdio descriptor, the exact tool set, application failures and clean close (1969.792792ms)
+✔ manifest projection is exact, strict and rejects missing, colliding or unsupported selected metadata (8.887958ms)
+✔ MCP runtime preserves wallet lifecycle, reads, balance and one core execution per valid call (138.12775ms)
+✔ direct MCP approval returns the exact foreground handoff before custody and ignores hostile native injection (584.490209ms)
+✔ MCP policy creation and increases fail closed before write while a pure decrease is allowed (174.249334ms)
+✔ MCP failures classify raw errors without leaking protected material (12.346917ms)
+✔ MCP dependencies are exact and package lockfiles are byte-identical (5.244167ms)
+✔ Circle financial MCP tools return exact foreground CLI handoff before runtime entry (1.552ms)
+ℹ tests 107
+ℹ suites 0
+ℹ pass 106
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26085.169709
+
+✖ failing tests:
+
+test at dist-test-retirement/tests/core/command-discovery.test.js:434:1
+✖ actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile (2182.802291ms)
+  AssertionError [ERR_ASSERTION]: HOME is ignored by design; the effective-user ~/.apn tree metadata must remain unchanged
+  + actual - expected
+  
+  + '71dc794684bf5bf8989af10ad9053df77a451634731282ef39006dd604bfbd6d'
+  - '61456bfa8ae3e902de5781b9d3fa551f1af4f51ec60d5ebe78d1c321ee42b902'
+  
+      at TestContext.<anonymous> (file:///Users/tony/Work/Projects/nuanu-ai-lab/worktrees/apn-cctp-nonce-cleanup-20261009/dist-test-retirement/tests/core/command-discovery.test.js:456:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '71dc794684bf5bf8989af10ad9053df77a451634731282ef39006dd604bfbd6d',
+    expected: '61456bfa8ae3e902de5781b9d3fa551f1af4f51ec60d5ebe78d1c321ee42b902',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

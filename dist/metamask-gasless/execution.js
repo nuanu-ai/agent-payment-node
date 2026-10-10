@@ -2,7 +2,7 @@ import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from ".
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
 import { MetaMaskGaslessClock } from "./clock.js";
 import { mmDispatchIntent } from "./dispatch.js";
-import { mmPolicyHash, mmRepriceWithinCap } from "./economics.js";
+import { mmActualGross, mmPolicyHash, mmRepriceWithinCap } from "./economics.js";
 import { mmAssertSameBinding } from "./identity.js";
 import { assertMetaMaskGaslessDispatchCapacity } from "./journal/transitions.js";
 import { MM_MIN_REMAINING_MS } from "./model.js";
@@ -151,15 +151,17 @@ export class MetaMaskGaslessExecution {
         if (rpc.chainId !== op.intent.request.chainId || rpc.endpointHash !== op.intent.initialSnapshot.endpointHash ||
             rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin)
             mmFail("mm_gasless_rpc_binding");
-        let current = await this.chainState(op, rpc, op.intent.delegationHash);
+        let current = op.intent.request.fixedNet ? null : await this.chainState(op, rpc, op.intent.delegationHash, mmActualGross(op.intent.quote));
         const fresh = mmRepriceWithinCap(await metaMaskGaslessQuote(this.provider, binding, op.intent.request, rpc.rpcUrl, this.clock), op.intent.request, binding);
         this.clock.check(op);
         let dispatch = null;
         if (!mmSame(fresh, op.intent.quote)) {
             dispatch = { quote: fresh, ...await this.redelegate(op, binding, fresh) };
             // The permission counter is keyed by the delegation, so the repriced one is proven unconsumed in its own right.
-            current = await this.chainState(op, rpc, dispatch.delegationHash);
+            current = await this.chainState(op, rpc, dispatch.delegationHash, mmActualGross(fresh));
         }
+        if (current === null)
+            current = await this.chainState(op, rpc, op.intent.delegationHash, mmActualGross(fresh));
         this.clock.beforeDispatchAtCurrent(op, current.observedAt);
         return { observedAt: current.observedAt, dispatch };
     }
@@ -170,12 +172,12 @@ export class MetaMaskGaslessExecution {
         this.clock.check(op);
         return unsigned;
     }
-    async chainState(op, rpc, delegationHash) {
+    async chainState(op, rpc, delegationHash, grossAtomic) {
         const snapshot = await rpc.snapshot({ owner: op.intent.binding.address, delegationHash,
-            grossAtomic: op.intent.request.grossAtomic });
+            grossAtomic });
         this.clock.check(op);
         const current = validateMetaMaskGaslessSnapshot(snapshot, { chainId: op.intent.request.chainId,
-            endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: op.intent.request.grossAtomic });
+            endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic });
         this.clock.beforeDispatchAtCurrent(op, current.observedAt);
         for (const key of ["safeState", "headState"]) {
             if (current[key].ownerCodeHash !== op.intent.initialSnapshot[key].ownerCodeHash ||

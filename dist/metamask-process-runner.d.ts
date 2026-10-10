@@ -1,3 +1,15 @@
+import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import type { Hex } from "./model.js";
+interface NativeFailureIdentifiers {
+    readonly requestId?: string;
+    readonly transactionHash?: Hex;
+    readonly sender?: string;
+    readonly chainId?: number;
+    readonly vendorProjectHash?: string;
+}
+export declare function takeMetaMaskNativeProcessFailureDiagnostic(error: unknown): MetaMaskNativeDiagnostic | undefined;
+/** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
+export declare function takeMetaMaskNativeProcessFailureIdentifiers(error: unknown): NativeFailureIdentifiers | undefined;
 interface CapturedStream {
     on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
     removeListener(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -29,9 +41,10 @@ export type MetaMaskForegroundLaunchPort = (executable: string, args: readonly s
 export interface MetaMaskProcessResult {
     readonly exitCode: number;
     readonly stdout: Buffer;
+    readonly nativeDiagnostic?: MetaMaskNativeDiagnostic;
 }
 export interface MetaMaskProcessRunnerPort {
-    runJson(argv: readonly string[], timeoutMs?: number): Promise<MetaMaskProcessResult>;
+    runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskProcessResult>;
     runForeground(argv: readonly string[]): Promise<number>;
 }
 export declare class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
@@ -43,7 +56,7 @@ export declare class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerP
     private readonly openTerminal;
     private readonly closeTerminal;
     constructor(binResolver?: () => Promise<string>, capturedLaunch?: MetaMaskCapturedLaunchPort, foregroundLaunch?: MetaMaskForegroundLaunchPort, jsonTimeoutMs?: number, foregroundTimeoutMs?: number, openTerminal?: () => number, closeTerminal?: (fd: number) => void);
-    runJson(argv: readonly string[], timeoutMs?: number): Promise<MetaMaskProcessResult>;
+    runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskProcessResult>;
     runForeground(argv: readonly string[]): Promise<number>;
 }
 export {};

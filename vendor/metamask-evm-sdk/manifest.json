@@ -1,0 +1,189 @@
+{
+  "builtinSubstitutions": {
+    "punycode": "punycode.js@2.3.1"
+  },
+  "bundler": {
+    "target": "node24",
+    "version": "0.28.2"
+  },
+  "entryNames": [
+    "sdk-root",
+    "sdk-base",
+    "sdk-evm",
+    "fox-evm",
+    "fox-keyring",
+    "controller"
+  ],
+  "files": {
+    "_esm-7ONLYTQJ.mjs": {
+      "bytes": 456092,
+      "sha256": "e5fb381b39c981ff49741395dddac19fdfa7b98a70f2c382e9d6d453b8b827d8"
+    },
+    "_esm-7ONLYTQJ.mjs.LEGAL.txt": {
+      "bytes": 596,
+      "sha256": "766e6ec723ce09333b3f82c6cab1f340298f6f2741dfaeb8cca626449bb8f4b4"
+    },
+    "_esm-FRPCQA6A.mjs": {
+      "bytes": 1151,
+      "sha256": "b7a6b1fac023737c1cc39d0ae7090a74746e2fdc352de5b6c2b68e160062bf39"
+    },
+    "ccip-R22SMXZK.mjs": {
+      "bytes": 662,
+      "sha256": "4dc2b446b5a6ec8b9dcfdd88f3d7889c3ffd1869d0946f700cf2832c7b186039"
+    },
+    "ccip-U3GCIZCG.mjs": {
+      "bytes": 693,
+      "sha256": "de66bed8b76325a2ea8270d1f2901aa41bc0f632c093a236dba06cc700445364"
+    },
+    "chunk-23SLZEUA.mjs": {
+      "bytes": 268213,
+      "sha256": "adb57036b7e5c37c59f938c8cfbd02cc53cd5293df4b7e6ba77ee30125622227"
+    },
+    "chunk-23SLZEUA.mjs.LEGAL.txt": {
+      "bytes": 255,
+      "sha256": "8c0e9026639d84b78086ff2c3c8605d6493373301ea44cdfbe4878d6e1b18863"
+    },
+    "chunk-6HTIMX4Q.mjs": {
+      "bytes": 209325,
+      "sha256": "e9e0faa96c0edffe0e69d30a8074a63f36316e007d499d8a01a156dba64a77c0"
+    },
+    "chunk-6XX5MONG.mjs": {
+      "bytes": 456969,
+      "sha256": "f2d8e27324e48954f34f378215fdf31ac8bd10ce9244c0e40782c8b0d6716f1d"
+    },
+    "chunk-6XX5MONG.mjs.LEGAL.txt": {
+      "bytes": 250,
+      "sha256": "4feaf2e650e3d139cb1d2cd4e1a7a963788d26345062ac4b6b551a93a4dda530"
+    },
+    "chunk-AI6UKPXV.mjs": {
+      "bytes": 136810,
+      "sha256": "990c11b6f2da15cbb073ab5ef4bc1271a8c6bc3cb1b0207386f9bd791ab2139c"
+    },
+    "chunk-B7AVLEE2.mjs": {
+      "bytes": 2489,
+      "sha256": "ace99e1c9eab612f96b9e17ebb136fb692b365273a0be2beda964bb227653d07"
+    },
+    "chunk-CW2DSIM7.mjs": {
+      "bytes": 1205973,
+      "sha256": "787aafb6b8b0cec038cfcacc2165ec02e1c2c0757daa3ea375df0817b366b475"
+    },
+    "chunk-CW2DSIM7.mjs.LEGAL.txt": {
+      "bytes": 900,
+      "sha256": "64c8e54b651606b33ef0163f506b9eb6209b91e2d84ce5afe628aa0488f4dbfa"
+    },
+    "chunk-E2KNBJAZ.mjs": {
+      "bytes": 9097,
+      "sha256": "e49bf8e14866acb4d141d4055c3248000e66cbfd437dc217df8f57c0ed39bc27"
+    },
+    "chunk-FXOPQFK3.mjs": {
+      "bytes": 187355,
+      "sha256": "6618ecc53a1693a76b00c661894a046dd4fe3c9003f78acd4a5d1c19198f118b"
+    },
+    "chunk-GBOH3J37.mjs": {
+      "bytes": 28456,
+      "sha256": "8cc8d21bfa88919a180e1deb6cc4a26422217415c116fb668d62f114ff4a2789"
+    },
+    "chunk-IFNW6LVK.mjs": {
+      "bytes": 147340,
+      "sha256": "4b8b1dfbcf8f3c0b4a015f14692ea35e2bc37e272c1f9825c36b98929bc98457"
+    },
+    "chunk-ITJRA3TR.mjs": {
+      "bytes": 222426,
+      "sha256": "10cd4bb518ec6973502ddb864268a410720639c8de07032631504548cfb0a17b"
+    },
+    "chunk-ITJRA3TR.mjs.LEGAL.txt": {
+      "bytes": 577,
+      "sha256": "b27fb94e22be8a8df63a9c8258787104b611b471af08f21ed2ff156c7e0aa56f"
+    },
+    "chunk-IXRUFS4W.mjs": {
+      "bytes": 201323,
+      "sha256": "ace37691688c122c69a7baebfb88952958d4ad3d02c325794bd0f382ae68c89f"
+    },
+    "chunk-IXRUFS4W.mjs.LEGAL.txt": {
+      "bytes": 1002,
+      "sha256": "a5d74760dda1fc3cdc016aad902408be5637b5855ac3822673e5d59278232918"
+    },
+    "chunk-JQEX5LXJ.mjs": {
+      "bytes": 18032,
+      "sha256": "8bdae056a75b4ac4ab6f346d61a326f36b4432061d00626fa33fdbb9341fc1ca"
+    },
+    "chunk-JQH5VL7I.mjs": {
+      "bytes": 369416,
+      "sha256": "59518621e8541c2cbf950a0e88215524372a162e9f30ba54d63bf08f4cdd9af4"
+    },
+    "chunk-JQH5VL7I.mjs.LEGAL.txt": {
+      "bytes": 149,
+      "sha256": "7e5a2fa9f710ac6939dbf371ba57daa43cb5dbaf2001514d76f1b9470d1d95b0"
+    },
+    "chunk-PN5QSJPY.mjs": {
+      "bytes": 78695,
+      "sha256": "a0f562a481ba0d791e52af7e5c3e978accf8ba6432ab5c98a0ad884c0c26f5e9"
+    },
+    "chunk-PN5QSJPY.mjs.LEGAL.txt": {
+      "bytes": 290,
+      "sha256": "dc6a0bce1c7fcf4569acb7059c292c383403b547183301a79cc363d114785e48"
+    },
+    "chunk-QI5RJC2T.mjs": {
+      "bytes": 5824,
+      "sha256": "055c0d807244694eaea038bd141325486b558a3db874114860f67e320726b526"
+    },
+    "chunk-R3CE7L2C.mjs": {
+      "bytes": 2794,
+      "sha256": "789bbbbc59b8b2183b985b92cee694eccbbc5617b4aedce05b8ccf5bfd41ca76"
+    },
+    "chunk-VWOLN53K.mjs": {
+      "bytes": 349,
+      "sha256": "229e41348c0c10da08796dd7ad987164a67967d4998c28dff6857fa12de81476"
+    },
+    "chunk-YQQOMOUG.mjs": {
+      "bytes": 16254,
+      "sha256": "2e76827971afad976f1c7c5e9d0ec94638be8af94c289b0bb9300f71a2c22c98"
+    },
+    "chunk-YQQOMOUG.mjs.LEGAL.txt": {
+      "bytes": 242,
+      "sha256": "9a86b9d315af398df6f4dfe6f13ff4f4cacee6110ef9e83d3e88da232d255210"
+    },
+    "controller.mjs": {
+      "bytes": 736,
+      "sha256": "58feafeb6541f4bb8ed2aa582faaf4a86787edfe302c9ef81977df473df231b0"
+    },
+    "fox-evm.mjs": {
+      "bytes": 1021,
+      "sha256": "8634ed2c87c7c40a2bd6a97b1dd026e619d5d9c0d1fc188279525127ba6a7bb3"
+    },
+    "fox-keyring.mjs": {
+      "bytes": 557,
+      "sha256": "a782e2535693ee5bf78aa47b269ffe80da1bce367542956a9a89cbf47870cb44"
+    },
+    "lib-HO5XJIPP.mjs": {
+      "bytes": 155188,
+      "sha256": "38fe0db6044e74f2818417165e11456b4791d9441e424fe95eb6f259429bdf2f"
+    },
+    "lib-HO5XJIPP.mjs.LEGAL.txt": {
+      "bytes": 497,
+      "sha256": "892e3cf13e86ebb55e1a6a2cc475fc254286c258fe4630565477d17ce81fc4fa"
+    },
+    "sdk-base.mjs": {
+      "bytes": 959,
+      "sha256": "6c2e733515409bf1a5d022e4400415099158b4620f0bf4cae7c1d3a62c2f4c5c"
+    },
+    "sdk-evm.mjs": {
+      "bytes": 958,
+      "sha256": "ba90f4f4a2112cd177628ca606e50f366c70392eee37276c103288ffba862d15"
+    },
+    "sdk-root.mjs": {
+      "bytes": 1065,
+      "sha256": "c02f952987bc0b725306095613021368f28f8e2c5e08f9fb8fb032b4aed570c9"
+    },
+    "secp256k1-TR54H6HX.mjs": {
+      "bytes": 613,
+      "sha256": "70ab80d75fc5a06d05934c66bd4ebb27dd125c1de51870418ad73161b3f07a3f"
+    }
+  },
+  "schemaVersion": "apn.metamask-evm-sdk.v1",
+  "upstreamVersions": {
+    "agentSdk": "6.1.4",
+    "ethereumControllers": "9.12.0",
+    "foxSdk": "2.7.0"
+  }
+}

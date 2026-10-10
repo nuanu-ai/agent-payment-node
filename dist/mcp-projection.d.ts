@@ -7,6 +7,7 @@ export interface ProjectedMcpTool {
         readonly properties: Record<string, JsonValue>;
         readonly required: string[];
         readonly additionalProperties: false;
+        readonly oneOf?: JsonValue[];
     };
     readonly command: CommandDefinition;
 }

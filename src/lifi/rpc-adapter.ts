@@ -1,3 +1,4 @@
+import { assertBridgePhysicalGrant, type BridgeAuthorityCheck } from "./effect-authority.js";
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -37,7 +38,7 @@ export class BridgeRpc implements BridgeRpcPort {
     sessionBatchCall?: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>) {
     bridgeChain(chainId); this.readSession = session; this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
     this.submit = session === undefined || oneAttempt === undefined ? call :
-      sessionCall?.(session) ?? (async (method, params) => await submitDirect(method, params, (m, p) => oneAttempt(m, p)));
+      sessionCall?.(session) ?? (async (method, params, beforeSend) => await submitDirect(method, params, (m, p) => oneAttempt(m, p, beforeSend)));
     this.batchCall = session === undefined ? undefined : sessionBatchCall?.(session);
     this.evm = new EvmRpc(this.call, origin, 16 * 1024);
   }
@@ -66,7 +67,8 @@ export class BridgeRpc implements BridgeRpcPort {
   async deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin = false) {
     if (this.batchCall === undefined) await this.assertChain();
     const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token),
-      compactDeployment = tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161),
+      compactDeployment = (tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161)) ||
+        (tool === "across" && this.chainId === 8453 && token === BRIDGE_ZERO_ADDRESS),
       tag = exactHashPin ? { blockHash: at.hash, requireCanonical: true } : quantity(BigInt(at.numberAtomic));
     const code: Array<{ address: Address; codeHash: Hex }> = [], configuration: Array<{ kind: string; address: Address; data: Hex; expected: Hex }> = [];
     const feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
@@ -221,10 +223,12 @@ export class BridgeRpc implements BridgeRpcPort {
       const data = encodeFunctionData({ abi: ERC20_READ, functionName: "balanceOf", args: [owner] });
       const allowanceData = encodeFunctionData({ abi: ERC20_READ, functionName: "allowance", args: [owner, spender] });
       const l1Data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [16384n] });
+      // Approval inclusion and foreground consent can change the account within this invocation.
+      // Keep exact block-pinned reads cached, but acquire a new moving head and fee suggestion each time.
       const phaseOne: Array<Omit<RpcBatchReadItem, "batchAttempt">> = [
         { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-        { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "snapshot", decoder: rpcFeeBlockValue },
-        ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "snapshot" as const, decoder: rpcQuantityValue }]),
+        { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: rpcFeeBlockValue },
+        ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none" as const, decoder: rpcQuantityValue }]),
       ];
       const head = await this.batchCall(phaseOne);
       let headOffset = 0;
@@ -363,9 +367,10 @@ export class BridgeRpc implements BridgeRpcPort {
     if (evmRpcQuantity(recheck.number).toString() !== block.numberAtomic || evmRpcHex(recheck.hash, 32) !== block.hash) bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
     return quotes;
   }
-  async send(raw: Hex): Promise<Hex> {
+  async send(raw: Hex, beforeSend?: BridgeAuthorityCheck): Promise<Hex> {
     bridgeHex(raw, 16 * 1024, undefined, "APN_PROVIDER_EFFECT_UNAVAILABLE");
-    const hash = evmRpcHex(await this.submit("eth_sendRawTransaction", [raw]), 32);
+    if (beforeSend !== undefined) { assertBridgePhysicalGrant(beforeSend, raw); await beforeSend(); }
+    const hash = evmRpcHex(await this.submit("eth_sendRawTransaction", [raw], beforeSend), 32);
     if (hash !== keccak256(raw)) bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
     return hash;
   }
@@ -448,7 +453,12 @@ export class BridgeRpc implements BridgeRpcPort {
       const [beforeBalance, afterBalance, trace] = await Promise.all([
         this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: before.hash, requireCanonical: true }]).then(evmRpcQuantity),
         this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
-        this.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
+        this.chainId === 59144 && this.batchCall !== undefined ? this.batchCall([
+          { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcArchiveChainValue(this.chainId) },
+          { method: "debug_traceTransaction", params: [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }],
+            cachePolicy: "immutable", decoder: rpcRecordValue },
+        ], "archive_deployment").then((values) => values[1])
+          : this.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
       ]);
       if (afterBalance < beforeBalance) bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
       nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,

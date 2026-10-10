@@ -1,0 +1,31 @@
+✔ actual original unsigned metadata retains original binding and C denial lookup identity (58.836042ms)
+✔ versioned successor comparator preserves public request/wire and requires separate identity/slot (4.582125ms)
+✔ pure successor operationId mutation cannot retain lineage binding (5.413583ms)
+✔ pure successor idempotencyHash mutation cannot retain lineage binding (4.794ms)
+✔ pure successor requestHash mutation cannot retain lineage binding (1.147167ms)
+✔ pure successor originalOperationId mutation cannot retain lineage binding (4.761541ms)
+✔ pure successor retirementProofHash mutation cannot retain lineage binding (4.224458ms)
+✔ pure successor nativeReservationId mutation cannot retain lineage binding (1.071625ms)
+✔ pure successor version mutation cannot retain lineage binding (4.775ms)
+✔ v1 absence bytes remain compatible and v1 cannot smuggle successor fields (0.499917ms)
+✔ plain or cloned source lineage/admission DTOs grant no private capability (3.989792ms)
+✔ successor cannot present legacy v1 to bypass its private lineage (1.199417ms)
+✔ readonly absent audit refuses original_slot without private or network effects (25.357167ms)
+✔ readonly absent audit refuses successor_slot without private or network effects (26.683833ms)
+✔ readonly absent audit refuses retirement_proof without private or network effects (6.161041ms)
+✔ readonly absent audit refuses orphan_v2 without private or network effects (21.3725ms)
+✔ readonly absent audit refuses overflow without private or network effects (99.146375ms)
+✔ whole normal successor foreground preserves original and full2T (1505.695ms)
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+✔ whole normal successor broker_failure preserves original and full2T (1733.487ms)
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=422; no live HTTP/private key/crypto sign/send
+✔ whole normal successor marker_loss preserves original and full2T (1394.896166ms)
+ℹ OFFLINE underlying public transport attempts including normal A expiry preparation and B successor preSIGN=362; no live HTTP/private key/crypto sign/send
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5495.41675

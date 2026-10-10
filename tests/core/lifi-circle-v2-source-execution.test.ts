@@ -52,6 +52,7 @@ async function liveHarness(t: import("node:test").TestContext, ambiguous: boolea
   const tmp = await temporaryState(); t.after(tmp.cleanup);
   const state = new StateStore(tmp.root), wrapping = { async load() { return Buffer.alloc(32, 7); }, async create() { return Buffer.alloc(32, 7); } };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
+  const blockTimestamp = `0x${Math.floor(Date.now() / 1000).toString(16)}`;
   let sends = 0, approvals = 0;
   t.mock.method(TtyCircleV2SourceApproval.prototype, "approve", async () => { approvals++; });
   t.mock.method(BridgeHttps.prototype, "request", async (endpoint: string, _verb: string, body: string | null) => {
@@ -66,7 +67,7 @@ async function liveHarness(t: import("node:test").TestContext, ambiguous: boolea
       return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id, result: keccak256(params[0]) }) };
     }
     const result = method === "eth_chainId" ? "0x2105" :
-      method === "eth_getBlockByNumber" ? { number: "0x63", hash: blockHash, timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}`, baseFeePerGas: "0x3b9aca00" } :
+      method === "eth_getBlockByNumber" ? { number: "0x63", hash: blockHash, timestamp: blockTimestamp, baseFeePerGas: "0x3b9aca00" } :
       method === "eth_getBalance" ? "0xde0b6b3a7640000" :
       method === "eth_getTransactionCount" ? "0x7" :
       method === "eth_estimateGas" ? "0x186a0" :
@@ -90,6 +91,20 @@ for (const ambiguous of [false, true]) test(`concrete Circle effect makes one du
   assert.equal(h.sends(), 1); assert.equal(h.approvals(), 1);
   await assert.rejects(h.service.submit(request));
   assert.equal(h.sends(), 1);
+});
+test("concrete Circle effect keeps its pinned block timestamp across a clock second", async t => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const h = await liveHarness(t, false), requestRpc = BridgeHttps.prototype.request;
+  t.mock.method(BridgeHttps.prototype, "request", async function (this: BridgeHttps, ...args: Parameters<typeof requestRpc>) {
+    const response = await requestRpc.apply(this, args);
+    if (args[2] !== null && JSON.parse(args[2]).method === "eth_getBlockByNumber") now += 1000;
+    return response;
+  });
+  const result = await h.service.submit(request);
+  assert.equal(result.sourceState, "submitted_pending");
+  assert.equal(result.submissionAttempts, 1);
+  assert.equal(h.sends(), 1); assert.equal(h.approvals(), 1);
 });
 test("an unsupported second quote fee item cannot reach consent or send", async t => {
   const h = await liveHarness(t, false, true);

@@ -1,24 +1,33 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Hex } from "../../src/model.js";
+import { CanonicalDirectTestNative as TestNative } from "./canonical-direct-native-fixture.js";
 import {
   OTHER_RECIPIENT,
   RAW_TRANSACTION,
   RECIPIENT,
   TestClock,
-  TestNative,
   TestRpc,
   ensureWallet,
   exactReceipt,
-  makeCore,
+  makeCore as legacyMakeCore,
   prepareTransfer,
   temporaryState,
 } from "./helpers.js";
 
+// Real Native checks wall-clock approval expiry. Keep explicit historical-clock
+// cases, and use the current clock for cases that enter the real TEST signer.
+function makeCore(options: Parameters<typeof legacyMakeCore>[0]) {
+  const clock = options.clock ?? new TestClock();
+  if (options.clock === undefined) clock.value = new Date();
+  return legacyMakeCore({ ...options, clock });
+}
+
+
 type Envelope = Awaited<ReturnType<ReturnType<typeof makeCore>["execute"]>>;
 
 function operationRecord(envelope: Envelope): Record<string, unknown> {
-  assert.equal(envelope.ok, true);
+  assert.equal(envelope.ok, true, JSON.stringify(envelope.error));
   assert.equal(envelope.error, null);
   assert.notEqual(envelope.operation, null);
   return envelope.operation as Record<string, unknown>;
@@ -34,10 +43,10 @@ function dataRecord(envelope: Envelope): Record<string, unknown> {
 test("wallet reconcile, restart-safe status, and safe labelled balance guidance", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const native = new TestNative();
+  const native = new TestNative(temporary.root);
   await ensureWallet(makeCore({ root: temporary.root, native }));
 
-  const status = await makeCore({ root: temporary.root, native: new TestNative() }).execute({
+  const status = await makeCore({ root: temporary.root, native: new TestNative(temporary.root) }).execute({
     command: "wallet.status",
     profile: "default",
   });
@@ -74,7 +83,7 @@ test("wallet reconcile, restart-safe status, and safe labelled balance guidance"
 test("duplicate prepare converges and changed input conflicts before RPC effect", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
   const rpc = new TestRpc();
   const core = makeCore({ root: temporary.root, rpc });
   const request = {
@@ -100,7 +109,7 @@ test("duplicate prepare converges and changed input conflicts before RPC effect"
 test("concurrent duplicate prepares serialize and perform one RPC preparation", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
   const rpc = new TestRpc();
   const core = makeCore({ root: temporary.root, rpc });
   const request = {
@@ -119,7 +128,7 @@ test("concurrent duplicate prepares serialize and perform one RPC preparation", 
 test("direct-transfer resume rejects x402 settlement wait without signing or submission", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const native = new TestNative();
+  const native = new TestNative(temporary.root);
   const rpc = new TestRpc();
   await ensureWallet(makeCore({ root: temporary.root, native }));
   const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), "direct-no-x402-wait");
@@ -137,7 +146,7 @@ test("direct-transfer resume rejects x402 settlement wait without signing or sub
 test("prepared time is whole-second canonical even with a production-style millisecond clock", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
   const clock = new TestClock();
   clock.value = new Date("2026-08-26T00:00:00.987Z");
   const prepared = await makeCore({ root: temporary.root, rpc: new TestRpc(), clock }).execute({
@@ -155,7 +164,7 @@ test("prepared time is whole-second canonical even with a production-style milli
 test("gas shortage rejects prepare and fee drift durably requires reprepare before signing", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
 
   const poorRpc = new TestRpc();
   poorRpc.balances = { ...poorRpc.balances, ethAtomic: "1" };
@@ -172,7 +181,7 @@ test("gas shortage rejects prepare and fee drift durably requires reprepare befo
   const rpc = new TestRpc();
   const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), "fee-drift-001");
   rpc.fees = { ...rpc.fees, maxFeePerGasAtomic: "2000000001" };
-  const native = new TestNative();
+  const native = new TestNative(temporary.root);
   const drift = await makeCore({ root: temporary.root, rpc, native }).execute({
     command: "transfer.approve",
     operationId,
@@ -199,11 +208,11 @@ test("gas shortage rejects prepare and fee drift durably requires reprepare befo
 test("ambiguous submission completes from an exact receipt without a second send", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
   const rpc = new TestRpc();
   const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), "recover-001");
   rpc.submitError = new Error("timeout with secret provider body");
-  const signingNative = new TestNative();
+  const signingNative = new TestNative(temporary.root);
   const approved = await makeCore({ root: temporary.root, rpc, native: signingNative }).execute({
     command: "transfer.approve",
     operationId,
@@ -213,7 +222,7 @@ test("ambiguous submission completes from an exact receipt without a second send
 
   rpc.submitError = null;
   rpc.receipt = exactReceipt();
-  const recoveryNative = new TestNative();
+  const recoveryNative = new TestNative(temporary.root);
   const resumed = await makeCore({ root: temporary.root, rpc, native: recoveryNative }).execute({
     command: "operation.resume",
     operationId,
@@ -235,17 +244,17 @@ test("ambiguous submission with unavailable receipt stays unknown without nonce 
   for (const outcome of ["null", "error"] as const) {
     const temporary = await temporaryState();
     t.after(temporary.cleanup);
-    await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+    await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
     const rpc = new TestRpc();
     const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), `unknown-receipt-${outcome}`);
     rpc.submitError = new Error("ambiguous send");
-    const approved = await makeCore({ root: temporary.root, rpc, native: new TestNative() }).execute({ command: "transfer.approve", operationId });
+    const approved = await makeCore({ root: temporary.root, rpc, native: new TestNative(temporary.root) }).execute({ command: "transfer.approve", operationId });
     assert.equal(operationRecord(approved).state, "unknown_finality");
     rpc.submitError = null;
     rpc.latestNonceAtomic = "8";
     rpc.confirmedAtNonce = `0x${"c".repeat(64)}` as Hex;
     if (outcome === "error") rpc.getReceipt = async () => { throw new Error("receipt provider unavailable"); };
-    const resumed = await makeCore({ root: temporary.root, rpc, native: new TestNative() }).execute({ command: "operation.resume", operationId });
+    const resumed = await makeCore({ root: temporary.root, rpc, native: new TestNative(temporary.root) }).execute({ command: "operation.resume", operationId });
     assert.equal(operationRecord(resumed).state, "unknown_finality", outcome);
     assert.equal(operationRecord(resumed).terminal, false, outcome);
     assert.deepEqual(rpc.submissions, [RAW_TRANSACTION], outcome);
@@ -253,14 +262,14 @@ test("ambiguous submission with unavailable receipt stays unknown without nonce 
   }
 });
 
-test("invalid log stays unknown, revert is terminal, and older-block superseding nonce is proven", async (t) => {
+test("invalid log stays unknown, revert is terminal, and nonce advance without the exact receipt remains held", async (t) => {
   const missingLogState = await temporaryState();
   t.after(missingLogState.cleanup);
-  await ensureWallet(makeCore({ root: missingLogState.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: missingLogState.root, native: new TestNative(missingLogState.root) }));
   const missingLogRpc = new TestRpc();
   const missingLogId = await prepareTransfer(makeCore({ root: missingLogState.root, rpc: missingLogRpc }), "missing-log-001");
   missingLogRpc.receipt = { ...exactReceipt(), logs: [] };
-  const missingLog = await makeCore({ root: missingLogState.root, rpc: missingLogRpc, native: new TestNative() }).execute({
+  const missingLog = await makeCore({ root: missingLogState.root, rpc: missingLogRpc, native: new TestNative(missingLogState.root) }).execute({
     command: "transfer.approve",
     operationId: missingLogId,
   });
@@ -269,11 +278,11 @@ test("invalid log stays unknown, revert is terminal, and older-block superseding
 
   const revertState = await temporaryState();
   t.after(revertState.cleanup);
-  await ensureWallet(makeCore({ root: revertState.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: revertState.root, native: new TestNative(revertState.root) }));
   const revertRpc = new TestRpc();
   const revertId = await prepareTransfer(makeCore({ root: revertState.root, rpc: revertRpc }), "revert-001");
   revertRpc.receipt = { ...exactReceipt(), status: "reverted", logs: [] };
-  const reverted = await makeCore({ root: revertState.root, rpc: revertRpc, native: new TestNative() }).execute({
+  const reverted = await makeCore({ root: revertState.root, rpc: revertRpc, native: new TestNative(revertState.root) }).execute({
     command: "transfer.approve",
     operationId: revertId,
   });
@@ -281,28 +290,33 @@ test("invalid log stays unknown, revert is terminal, and older-block superseding
 
   const supersededState = await temporaryState();
   t.after(supersededState.cleanup);
-  await ensureWallet(makeCore({ root: supersededState.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: supersededState.root, native: new TestNative(supersededState.root) }));
   const supersededRpc = new TestRpc();
   const supersededId = await prepareTransfer(makeCore({ root: supersededState.root, rpc: supersededRpc }), "superseded-001");
-  await makeCore({ root: supersededState.root, rpc: supersededRpc, native: new TestNative() }).execute({
+  await makeCore({ root: supersededState.root, rpc: supersededRpc, native: new TestNative(supersededState.root) }).execute({
     command: "transfer.approve",
     operationId: supersededId,
   });
   supersededRpc.latestNonceAtomic = "8";
   supersededRpc.confirmedAtNonce = `0x${"c".repeat(64)}` as Hex;
-  const superseded = await makeCore({ root: supersededState.root, rpc: supersededRpc, native: new TestNative() }).execute({
+  const superseded = await makeCore({ root: supersededState.root, rpc: supersededRpc, native: new TestNative(supersededState.root) }).execute({
     command: "operation.resume",
     operationId: supersededId,
   });
-  assert.equal(operationRecord(superseded).state, "failed_proven_superseded");
-  assert.equal(supersededRpc.confirmedNonceStartBlockAtomic, "12345", "scan must start at durable prepare-block provenance");
-  assert.equal(supersededRpc.submissions.length, 1, "confirmed nonce advance must be resolved before any rebroadcast");
+  assert.equal(operationRecord(superseded).state, "submitted_pending");
+  assert.equal(operationRecord(superseded).terminal, false);
+  assert.equal(supersededRpc.confirmedNonceStartBlockAtomic, null, "exact-hash observation does not classify from a different transaction");
+  const stillPending = await makeCore({ root: supersededState.root, rpc: supersededRpc,
+    native: new TestNative(supersededState.root) }).execute({ command: "operation.resume", operationId: supersededId });
+  assert.equal(operationRecord(stillPending).state, "submitted_pending");
+  assert.equal(operationRecord(stillPending).terminal, false);
+  assert.equal(supersededRpc.submissions.length, 1, "repeated exact-hash observation must never rebroadcast");
 });
 
 test("safe envelope redacts raw bytes, raw idempotency, and native exception text", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const native = new TestNative();
+  const native = new TestNative(temporary.root);
   native.rejectMessage = "CANARY_PRIVATE_KEY_012345";
   const envelope = await makeCore({ root: temporary.root, native }).execute({ command: "wallet.ensure", profile: "default" });
   assert.deepEqual(Object.keys(envelope), [

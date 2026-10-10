@@ -17,12 +17,12 @@ const operation = option("--operation", "operation_id", ["64_lowercase_hex_chara
 export const UNISWAP_COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["swap"], summary: "Separately admitted guarded swaps.", kind: "group" },
   { path: ["swap", "ethereum"], summary: "Ethereum guarded swaps.", kind: "group" },
-  { path: ["swap", "ethereum", "uniswap"], summary: "Keyless Uniswap V3 native ETH to USDC or USDT exact input via pinned Universal Router 2.2.0.", kind: "group" },
+  { path: ["swap", "ethereum", "uniswap"], summary: "Keyless Uniswap V3 native ETH to USDC, USDT or separately admitted WBTC exact input via pinned Universal Router 2.2.0.", kind: "group" },
 ];
 export const UNISWAP_COMMANDS: readonly CommandDefinition[] = [
-  command("inventory", [], "Read the immutable official Uniswap pin and frozen pair without admitting it.", "none"),
+  command("inventory", [], "Read immutable Uniswap pins and finite reviewed pairs without admitting them.", "none"),
   command("quote", [profile, account, option("--to", "address", ["checksummed_recipient"]),
-    option("--output-token", "address", ["pinned_checksummed_usdc_or_usdt"]), option("--amount", "wei", ["positive_native_wei"]),
+    option("--output-token", "address", ["pinned_checksummed_usdc_usdt_or_wbtc"]), option("--amount", "wei", ["positive_native_wei"]),
     option("--slippage-bps", "string", ["integer_0_through_owner_cap"]), option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"]),
     option("--deadline", "string", ["unix_seconds_within_30_minutes"]), option("--max-gas-limit", "wei", ["positive_bound"]),
     option("--max-fee-per-gas", "wei", ["positive_bound"]), option("--max-priority-fee-per-gas", "wei", ["positive_bound"])],

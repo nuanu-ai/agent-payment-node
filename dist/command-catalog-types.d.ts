@@ -1,4 +1,4 @@
-export type ScalarType = "string" | "base64" | "profile" | "provider_id" | "provider_auth_method" | "positive_integer" | "https_url" | "address" | "decimal_usdc" | "atomic_usdc" | "wei" | "operation_id" | "transaction_hash" | "provider_request_id" | "idempotency_key" | "integer_seconds";
+export type ScalarType = "boolean" | "string" | "base64" | "profile" | "provider_id" | "provider_auth_method" | "positive_integer" | "https_url" | "address" | "decimal_usdc" | "atomic_usdc" | "wei" | "operation_id" | "transaction_hash" | "provider_request_id" | "idempotency_key" | "integer_seconds";
 export type EffectClass = "none" | "local_read" | "network_read" | "network_request" | "local_write" | "payment_prepare" | "payment_submit" | "recovery";
 export type ApprovalClass = "none" | "foreground_tty" | "prior_profile_policy" | "prior_operation_authorization";
 export interface CommandOption {

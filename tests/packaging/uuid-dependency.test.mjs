@@ -38,38 +38,42 @@ test("MetaMask utils UUID override and production lock closure are exact", async
 
   assert.deepEqual(manifest.overrides, {
     "@solana/web3.js": {
-      jayson: "5.0.0",
+        "jayson": "5.0.0"
     },
     "@metamask/utils": {
-      uuid: "11.1.1",
+        "uuid": "11.1.1"
     },
-    "axios@<0.33.0": "0.33.0",
     "uuid@<11.1.1": "11.1.1",
     "@metamask/number-to-bn": {
-      "bn.js": "5.2.5",
+        "bn.js": "5.2.5"
     },
     "ethjs-abi": {
-      "bn.js": "4.12.5",
+        "bn.js": "4.12.5"
     },
     "number-to-bn": {
-      "bn.js": "4.12.5",
+        "bn.js": "4.12.5"
     },
     "@nktkas/hyperliquid": {
-      valibot: "1.4.2",
+        "valibot": "1.4.2"
     },
     "@ethersproject/providers": {
-      ws: "8.21.3",
+        "ws": "8.21.3"
     },
     "viem@2.52.2": {
-      ws: "8.21.3",
+        "ws": "8.21.3"
     },
     "@coral-xyz/anchor": {
-      toml: "4.2.0",
+        "toml": "4.2.0"
     },
     "viem@2.47.6": {
-      ws: "8.21.3",
+        "ws": "8.21.3"
     },
-  });
+    "axios@<0.34.0": "0.34.0",
+    "axios@>=1.15.1 <1.20.0": "1.20.0",
+    "fast-uri@<3.1.8": "3.1.8",
+    "brace-expansion@>=4 <5.0.12": "5.0.12",
+    "pbkdf2@<=3.1.6": "3.1.7"
+});
   assert.deepEqual(lockBytes, shrinkwrapBytes);
 
   assert.equal(lock.packages["node_modules/uuid"].version, "11.1.1");
@@ -105,7 +109,7 @@ test("direct MetaMask package identities remain on the accepted graph", async ()
   };
 
   for (const [name, identity] of Object.entries(expected)) {
-    assert.equal(manifest.dependencies[name], identity.version);
+    assert.equal(manifest.devDependencies[name], identity.version);
     assert.equal(lock.packages[`node_modules/${name}`].version, identity.version);
     assert.equal(lock.packages[`node_modules/${name}`].integrity, identity.integrity);
   }

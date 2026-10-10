@@ -10,10 +10,11 @@ const TOKEN_ABI = parseAbi(["function approve(address spender,uint256 value) ret
 const ACCOUNT_ABI = parseAbi(["function executeBatch((address target,uint256 value,bytes data)[] calls)"]);
 const ESTIMATE_SIGNATURE = `0x${"fffffffffffffffffffffffffffffff0"}${"0".repeat(32)}7${"a".repeat(63)}1c`;
 const STUB_WORD = `0x${"11".repeat(32)}`;
+export const USDT_PREPARE_STUB_WORD = STUB_WORD;
 const HASH = /^0x[0-9a-f]{64}$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const serializable = (value) => JSON.parse(JSON.stringify(value, (_key, entry) => typeof entry === "bigint" ? entry.toString() : entry));
-function frozenCopy(value) {
+export function frozenCopy(value) {
     const copy = structuredClone(value);
     const freeze = (entry) => {
         if (entry !== null && typeof entry === "object") {
@@ -25,7 +26,7 @@ function frozenCopy(value) {
     freeze(copy);
     return copy;
 }
-function canonicalAddress(value) {
+export function canonicalAddress(value) {
     if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(value))
         usdtFailure("APN_INVALID_INPUT", "gasless_usdt_address");
     try {
@@ -35,7 +36,7 @@ function canonicalAddress(value) {
     catch { /* refused below */ }
     usdtFailure("APN_INVALID_INPUT", "gasless_usdt_address");
 }
-function requirePolicy(active, request, usage, now) {
+export function requirePolicy(active, request, usage, now) {
     if (active === null)
         usdtFailure("APN_ALLOWLIST_REFUSED", "gasless_usdt_policy_required");
     if (active.profile !== request.profile || active.accounts.evm !== request.sender || active.digest !== active.registry.policyDigest ||

@@ -1,5 +1,9 @@
 import type { Address } from "../model.js";
 import { type UsdtPolicyPrepared, type UsdtPreparePort } from "./policy-prepare.js";
+import { type UsdtBoundOperationV2 } from "./bound-v2-codec.js";
+import { type UsdtPolicyPreparedV2 } from "./policy-prepare-v2.js";
+export type UsdtAnyBoundOperation = UsdtBoundOperation | UsdtBoundOperationV2;
+export declare function validateUsdtAnyBoundOperation(value: unknown): UsdtAnyBoundOperation;
 export declare const USDT_BOUND_OPERATION_SCHEMA: "apn.gasless-usdt-bound-operation.v1";
 type Persisted<T> = T extends bigint ? string : T extends readonly (infer Item)[] ? readonly Persisted<Item>[] : T extends object ? {
     readonly [Key in keyof T]: Persisted<T[Key]>;
@@ -18,11 +22,11 @@ export interface UsdtBoundOperation {
 }
 export type UsdtBoundRecovery = {
     readonly state: "prepared";
-    readonly operation: UsdtBoundOperation;
+    readonly operation: UsdtAnyBoundOperation;
 } | {
     readonly state: "capability_unavailable" | "recovery_required";
     readonly reason: string;
-    readonly operation: UsdtBoundOperation;
+    readonly operation: UsdtAnyBoundOperation;
 };
 export interface UsdtBoundReplayIntent {
     readonly profile: string;
@@ -51,11 +55,13 @@ export declare class UsdtBoundOperationRepository {
     /** Publish a fully written file with link(2), which fails rather than replacing an existing record. */
     private publish;
     private cleanupOldTemps;
-    load(profileHash: string, operationId: string): Promise<UsdtBoundOperation | null>;
+    load(profileHash: string, operationId: string): Promise<UsdtAnyBoundOperation | null>;
     /** Read the durable claim before fresh policy or RPC work; repair claim-only publication for an exact caller intent. */
-    replay(profileHash: string, idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtBoundOperation | null>;
+    replay(profileHash: string, idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtAnyBoundOperation | null>;
     create(profileHash: string, binding: UsdtPolicyPrepared, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation>;
+    create(profileHash: string, binding: UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtBoundOperationV2>;
+    create(profileHash: string, binding: UsdtPolicyPrepared | UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtAnyBoundOperation>;
 }
 /** Classification reads only. Drift or revocation never advances the operation or authorizes an effect. */
-export declare function classifyUsdtBoundRecovery(operation: UsdtBoundOperation, port: UsdtPreparePort): Promise<UsdtBoundRecovery>;
+export declare function classifyUsdtBoundRecovery(operation: UsdtAnyBoundOperation, port: UsdtPreparePort): Promise<UsdtBoundRecovery>;
 export {};
