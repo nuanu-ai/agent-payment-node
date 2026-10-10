@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { SolanaRpc, SolanaRpcBudget, type SolanaBatchRead, type SolanaRpcPort } from "../../src/solana/rpc.js";
+import { SolanaRpc, SolanaRpcBudget, type SolanaBatchRead, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
 import { JupiterV1BudgetedRpc } from "../../src/swap/jupiter-solana/v1-execution.js";
 import { JupiterV1MaterialResolver } from "../../src/swap/jupiter-solana/v1-resolver.js";
 import { liveSimulationCapture } from "../fixtures/jupiter-v1-live-simulation-83/capture.js";
@@ -127,4 +127,25 @@ test("Jupiter cannot batch a financial send into the public transport", async t 
  const temp = await temporaryState(); t.after(temp.cleanup); let posts = 0;
  const rpc = new JupiterV1BudgetedRpc(new SolanaRpc("https://rpc.example", async () => {posts++; throw Error("forbidden");}), temp.root, "quote");
  await assert.rejects(rpc.batch([{method: "sendTransaction", params: []}] as any)); assert.equal(posts, 0);
+});
+
+for(const malformed of ["none","missing","unknown"] as const)test(`single height batch charges once and refuses ${malformed} ID without scalar retry`,async t=>{
+ const temp=await temporaryState();t.after(temp.cleanup);let posts=0;
+ const budget=new SolanaRpcBudget({maxPhysicalRequests:1});
+ const rpc=new JupiterV1BudgetedRpc(new SolanaRpc("https://rpc.example",async(_url,init)=>{
+  posts++;const body=JSON.parse(String(init?.body));assert.ok(Array.isArray(body));assert.equal(body.length,1);
+  assert.equal(body[0].method,"getBlockHeight");assert.deepEqual(body[0].params,[{commitment:"confirmed"}]);
+  return new Response(JSON.stringify(malformed==="missing"?[]:[{jsonrpc:"2.0",id:malformed==="unknown"?"foreign":body[0].id,result:433327703}]),{headers:{"content-type":"application/json"}});
+ },budget),temp.root,"quote");
+ if(malformed==="none")assert.equal(await rpc.call("getBlockHeight",[{commitment:"confirmed"}]),433327703n);
+ else await assert.rejects(rpc.call("getBlockHeight",[{commitment:"confirmed"}]),{code:"APN_RPC_PROTOCOL"});
+ await rpc.bindQuote("b".repeat(64));const record=JSON.parse(await readFile(join(temp.root,"jupiter-v1-budget-quotes",`${"b".repeat(64)}.json`),"utf8"));
+ assert.equal(record.calls,1);assert.equal(posts,1);assert.equal(budget.logicalCalls,1);assert.equal(budget.physicalRequests,1);
+});
+
+test("a call-only alternate height port keeps its scalar dispatch",async t=>{
+ const temp=await temporaryState();t.after(temp.cleanup);let calls=0;
+ const base=new SolanaRpc("https://rpc.example");Object.defineProperty(base,"batch",{value:undefined});
+ t.mock.method(base,"call",async(method:SolanaMethod,params:readonly unknown[])=>{calls++;assert.equal(method,"getBlockHeight");assert.deepEqual(params,[{commitment:"confirmed"}]);return 1000n;});
+ const rpc=new JupiterV1BudgetedRpc(base,temp.root,"quote");assert.equal(await rpc.call("getBlockHeight",[{commitment:"confirmed"}]),1000n);assert.equal(calls,1);
 });
