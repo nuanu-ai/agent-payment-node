@@ -1,3 +1,4 @@
+import { SOLANA_PUBLIC_RPC_URL } from "./constants.js";
 import { finiteFundingRuntime } from "./runtime-factory-finite-rails.js";
 import { executeMerchantCli } from "./x402-merchant/cli.js";
 import { createSpecialApnCore } from "./runtime-factory-special.js";
@@ -105,7 +106,6 @@ import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 import type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
 
 export type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
-
 export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
   const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
   const special = createSpecialApnCore(bound, options, state);
@@ -119,7 +119,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
-  const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? process.env.APN_SOLANA_RPC_URL, options.solanaRpcFetch,
+  const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? (process.env.APN_SOLANA_RPC_URL || SOLANA_PUBLIC_RPC_URL), options.solanaRpcFetch,
     new SolanaRpcBudget({ maxPhysicalRequests: bound.request.command.startsWith("swap.jupiter.") ? 64 : 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
       wait: options.solanaRpcWait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))) }),
     new SolanaRpcPacer(state, options.solanaRpcNow, options.solanaRpcWait));
@@ -253,7 +253,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
-  // Keyless Orca uses the owner-named APN_SOLANA_RPC_URL rail client and the encrypted local Solana wallet.
+  // Keyless Orca uses the anonymous-default or owner-overridden Solana rail client and the encrypted local Solana wallet.
   const orcaRuntime = options.orcaRuntime ?? (bound.request.command.startsWith("swap.orca.") &&
     !bound.request.command.startsWith("swap.orca.stable-")
     ? createOrcaKeylessRuntime({ state, clock, rpc: solanaRpc, accounts: chainAccounts, verifyPins: verifyOrcaProgramPins,

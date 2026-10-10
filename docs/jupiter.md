@@ -1,5 +1,9 @@
 # Solana Jupiter surfaces
 
+Normal Solana RPC uses the anonymous `https://api.mainnet-beta.solana.com` baseline when `APN_SOLANA_RPC_URL` is unset or empty. No RPC account, signup or API key is required. A custom HTTPS URL is optional; invalid nonempty overrides fail without fallback. Public RPC has no APN availability guarantee and may rate-limit or refuse requests.
+
+A saved `quoteRpcLifetime` binds the exact full endpoint hash. Known origin mismatches refuse before public resolver reads, preparation, owner approval or observation, without rewriting the operation or releasing its holds. Set the original endpoint to read that material. Legacy material without a saved origin keeps its existing genesis, executable-pin and signed-operation fences; no origin comparison can be inferred for it.
+
 The canonical runtime supports the finite owner-admitted Jupiter V1 lanes described below. The retained Jupiter V2 Quantum prototype remains dormant. Its historical limitations in this section apply to that prototype.
 
 ## Dormant V2 prototype

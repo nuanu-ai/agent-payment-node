@@ -15,7 +15,7 @@ import { JupiterV1OwnerAdmission, detached } from "./v1-admission.js";
 import { JupiterV1QuoteBuilder, type JupiterV1QuoteRequest } from "./v1-builder.js";
 import { JupiterV1ExecutionBindingStore, JupiterV1LocalSigner } from "./v1-effects.js";
 import { JupiterV1ExecutionDriver, JupiterV1SingleSender, JupiterV1BudgetedRpc } from "./v1-execution.js";
-import { SavedJupiterV1MaterialStore, validateJupiterV1PreparedMaterial } from "./v1-material.js";
+import { SavedJupiterV1MaterialStore, validateJupiterV1PreparedMaterial, assertJupiterV1RpcOrigin } from "./v1-material.js";
 import { JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 import { proveJupiterV1Quote } from "./v1-proof.js";
 import { JupiterV1ReadOnlyProvider, jupiterV1HttpsFetch } from "./v1-provider.js";
@@ -103,7 +103,7 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
   // The canonical signer cannot enter custody before publishing its marker under this same lock.
   return await core.failBeforeEffect(op,at,domainHash("apn.jupiter-v1-expired-unsent.v1",canonicalJson({operationId:op.operationId,integrityHash:op.integrityHash,expiresAt:op.quote.expiresAt})));
  });}
- async function materialRoute(quoteHash:string){const saved=await materials.load(quoteHash);if(saved===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Jupiter quote was not found.");return routeConfigForMaterial(saved.execution);}
+ async function materialRoute(quoteHash:string){const saved=await materials.load(quoteHash);if(saved===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Jupiter quote was not found.");assertJupiterV1RpcOrigin(rpc.originHash,saved.execution.quoteRpcLifetime);return routeConfigForMaterial(saved.execution);}
  async function operationRuntime(operationId:string){const op=await required(operationId),route=await materialRoute(op.quote.quoteHash),registry=route.protocolRegistry;
   if(op.mechanismDigest!==swapMechanismDigest(route.mechanismPin)||op.protocolRegistryDigest!==registry.registryDigest||op.protocolRegistryVersion!==registry.registryVersion)blocked("Jupiter saved operation registry or mechanism differs from its authenticated material.");return make(route);}
  // This canonical instance owns the shared Native signer, RPC journal and cached fixed-registry runtimes.

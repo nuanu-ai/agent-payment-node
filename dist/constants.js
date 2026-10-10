@@ -15,4 +15,6 @@ export const NATIVE_REQUEST_FD_ENV = "APN_NATIVE_REQUEST_FD";
 export const NATIVE_RESPONSE_FD_ENV = "APN_NATIVE_RESPONSE_FD";
 export const HOST_SERIALIZED_ENV = "APN_HOST_SERIALIZED";
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/** Anonymous Solana mainnet baseline shared by normal rails and portfolio. */
+export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com";
 //# sourceMappingURL=constants.js.map

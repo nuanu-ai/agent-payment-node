@@ -77,6 +77,10 @@ export interface JupiterV1QuoteRpcLifetime {
     readonly lastValidBlockHeight: string;
 }
 export declare function checkedJupiterV1QuoteRpcLifetime(value: unknown): JupiterV1QuoteRpcLifetime;
+/** A saved RPC lifetime cannot silently move to another configured endpoint.
+ * Legacy material has no origin evidence; its existing genesis and pin guards remain.
+ */
+export declare function assertJupiterV1RpcOrigin(originHash: string, lifetime?: JupiterV1QuoteRpcLifetime): void;
 export interface JupiterV1PreparedMaterial extends GuardedSwapPreparedMaterial {
     readonly quote: SwapQuoteSnapshot;
     readonly approvalCapAtomic: "0";
