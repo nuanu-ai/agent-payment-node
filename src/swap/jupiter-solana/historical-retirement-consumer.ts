@@ -365,7 +365,9 @@ async function canonicalProof(token: OwnedJupiterHistoricalRetirementAuthority,
     const compiled = context.fresh.compiledAccounts.filter(value => value.source === "lookup");
     const witness = await verifyJupiterCanonicalFutureInvalidity({
       signedTransactionBase64: context.effect.rawPayload,
-      originalQuoteRpcLifetime: lifetime,
+      originalQuoteRpcLifetime: {
+        contextSlot: lifetime.contextSlot, blockhash: lifetime.blockhash, lastValidBlockHeight: lifetime.lastValidBlockHeight,
+      },
       resolvedLookupAddresses: {
         loadedWritable: compiled.filter(value => value.writable).map(value => value.address),
         loadedReadonly: compiled.filter(value => !value.writable).map(value => value.address),

@@ -24,6 +24,10 @@ import { HISTORICAL_RETIREMENT_IDENTITY as identity, HISTORICAL_RETIREMENT_NAMES
   type HistoricalRetirementRecord } from "../../src/swap/jupiter-solana/historical-retirement-record.js";
 import { historicalRetirementRootSnapshot, JupiterHistoricalRetirementReader } from "../../src/swap/jupiter-solana/historical-retirement-reader.js";
 import { temporaryState } from "./helpers.js";
+import { verifyJupiterCanonicalFutureInvalidity as realCanonicalVerifier,
+  type JupiterFutureInvalidityInput, type JupiterFutureInvalidityReadPort } from "../../src/swap/jupiter-solana/canonical-future-invalidity.js";
+import { checkedJupiterV1QuoteRpcLifetime as realCheckedLifetime } from "../../src/swap/jupiter-solana/v1-material.js";
+import { parseLifetime as realParseLifetime } from "../../src/swap/jupiter-solana/canonical-future-invalidity-parsing.js";
 
 // These explicit module mocks exercise C2's storage/recovery boundaries only. They do not mint a
 // production owner token, prove genuine C1 private-origin authority, or call live RPC.
@@ -32,6 +36,9 @@ let currentContext: any;
 let currentActive: ActiveAssetPolicy | undefined;
 let currentWitness: any;
 let canonicalCalls = 0;
+let exerciseRealCanonical = false;
+let realReadCalls = 0;
+let realVerifierInput: JupiterFutureInvalidityInput | undefined;
 let policyDecodeCalls = 0;
 let policyDecodeHook: (() => void) | undefined;
 const ownerMock = {
@@ -45,11 +52,21 @@ const ownerMock = {
 mock.module("../../src/swap/jupiter-solana/historical-retirement-owner.js", { namedExports: ownerMock });
 mock.module("../../src/swap/jupiter-solana/canonical-future-invalidity.js", { namedExports: {
   adaptJupiterFutureInvalidityReadPort: (rpc: { readonly originHash: string }) => ({ originHash: rpc.originHash,
-    async read(): Promise<null> { return null; } }),
+    async read(method: string): Promise<unknown> {
+      if (!exerciseRealCanonical) return null;
+      realReadCalls += 1;
+      if (method === "getGenesisHash") return SOLANA_MAINNET_GENESIS;
+      if (method === "getBlocks") return [];
+      assert.fail("Unexpected frozen canonical read");
+    } }),
   async verifyJupiterCanonicalFutureInvalidity(_input: unknown, providers: readonly { readonly originHash: string }[]): Promise<unknown> {
     canonicalCalls += 1;
     assert.equal(providers.length, 2);
     assert.notEqual(providers[0]!.originHash, providers[1]!.originHash);
+    if (exerciseRealCanonical) {
+      realVerifierInput = _input as JupiterFutureInvalidityInput;
+      return await realCanonicalVerifier(realVerifierInput, providers as readonly JupiterFutureInvalidityReadPort[]);
+    }
     return currentWitness;
   },
 } });
@@ -456,4 +473,61 @@ test("TEST-MOCKED reader confirms the consumer never uses the standard receipt s
   assert.deepEqual(await readFile(f.originalReceiptPath), f.originalReceiptBytes);
   const rows = [f.context.operation.usageLease!];
   assert.equal((await new JupiterHistoricalRetirementReader(tmp.root).forBucket(identity, rows)).length, 1);
+});
+
+
+async function persistentSnapshot(root: string, prefix = ""): Promise<Record<string, string>> {
+  const hashes: Record<string, string> = {};
+  for (const entry of await readdir(join(root, prefix), { withFileTypes: true })) {
+    if (prefix === "" && entry.name === "locks") continue;
+    const path = join(prefix, entry.name);
+    if (entry.isDirectory()) Object.assign(hashes, await persistentSnapshot(root, path));
+    else hashes[path] = sha256(await readFile(join(root, path)));
+  }
+  return hashes;
+}
+
+// This case deliberately keeps the declared C2 owner/material/signature boundary doubles.
+// It proves the actual caller projection seam and real canonical parser, never owner/writer positivity.
+test("C2 projects validated production six-field lifetime into the real canonical verifier before empty-history refusal", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const f = await fixture(temp.root); activate(f);
+  const lifetime = f.context.material.execution.quoteRpcLifetime;
+  assert.equal(realCheckedLifetime(lifetime), lifetime);
+  assert.throws(() => realParseLifetime(lifetime), (error: unknown) =>
+    error instanceof Error && "reason" in error && error.reason === "invalid_input");
+  const message = Buffer.concat([Buffer.from([128, 1, 0, 1, 2]), Buffer.alloc(32, 1),
+    Buffer.alloc(32, 2), Buffer.alloc(32), Buffer.from([1, 1, 0, 1, 0, 0])]);
+  // Nonzero TEST signature follows routine wire-parser fixtures; no genuine cryptographic claim.
+  f.effect.rawPayload = Buffer.concat([Buffer.from([1]), Buffer.alloc(64, 7), message]).toString("base64");
+  const before = await persistentSnapshot(temp.root);
+  exerciseRealCanonical = true; realReadCalls = 0; realVerifierInput = undefined;
+  try {
+    await assert.rejects(consumeJupiterHistoricalRetirement(f.token as never, f.context as never), { code: "APN_OPERATION_BLOCKED" });
+    assert.equal(realReadCalls, 4);
+    assert.deepEqual((realVerifierInput as JupiterFutureInvalidityInput | undefined)?.originalQuoteRpcLifetime, {
+      contextSlot: lifetime.contextSlot, blockhash: lifetime.blockhash, lastValidBlockHeight: lifetime.lastValidBlockHeight,
+    });
+    assert.deepEqual(Object.keys(lifetime), ["source", "rpcOriginHash", "contextSlot", "minimumContextSlot", "blockhash", "lastValidBlockHeight"]);
+    assert.equal(realCheckedLifetime(lifetime), lifetime);
+    assert.deepEqual(await persistentSnapshot(temp.root), before);
+  } finally { exerciseRealCanonical = false; }
+});
+
+test("production lifetime provenance/minimum-context checks and canonical unknown-key refusal remain strict", () => {
+  const valid = { source: "configured_mainnet_rpc_before_quote_freeze", rpcOriginHash: H("7"),
+    contextSlot: "120", minimumContextSlot: "100", blockhash, lastValidBlockHeight: "300" };
+  assert.equal(realCheckedLifetime(valid), valid);
+  for (const changed of [{ ...valid, source: "provider_raw_build" }, { ...valid, rpcOriginHash: "invalid" },
+    { ...valid, minimumContextSlot: "121" }, { ...valid, contextSlot: "0" },
+    { ...valid, lastValidBlockHeight: "0" }]) {
+    assert.throws(() => realCheckedLifetime(changed), { code: "APN_STATE_CORRUPT" });
+  }
+  assert.throws(() => realCheckedLifetime({ ...valid, blockhash: "invalid" }));
+  const projected = { contextSlot: valid.contextSlot, blockhash: valid.blockhash, lastValidBlockHeight: valid.lastValidBlockHeight };
+  assert.deepEqual(realParseLifetime(projected), { contextSlot: 120n, blockhash, lastValidBlockHeight: 300n });
+  for (const extra of ["source", "rpcOriginHash", "minimumContextSlot"]) {
+    assert.throws(() => realParseLifetime({ ...projected, [extra]: valid[extra as keyof typeof valid] }),
+      (error: unknown) => error instanceof Error && "reason" in error && error.reason === "invalid_input");
+  }
 });
