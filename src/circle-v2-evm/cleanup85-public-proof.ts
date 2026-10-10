@@ -45,7 +45,23 @@ export async function verifyCancellationPublic(source: CircleRpc, proof: Cleanup
   const observation = await source.observation(circleHex(proof.transactionHash, 32), "finalized"); if (observation === null) circleBlocked("cleanup85_cancellation_not_finalized");
   await verifyCleanup85PublicWire(observation, e, proof.transactionHash, true);
   const r = circleRecord(observation.receipt);
-  if (circleUint(r.gasUsed) > BigInt(e.gasLimitAtomic) || circleUint(r.effectiveGasPrice) > BigInt(e.maxFeePerGasAtomic) || (circleUint(r.gasUsed) * circleUint(r.effectiveGasPrice)).toString() !== proof.actualFeeAtomic || hashObject(observation.receipt) !== hashObject(proof.observation.receipt) || hashObject(observation.transaction) !== hashObject(proof.observation.transaction) || circleHex(circleRecord(observation.canonicalBlock).hash, 32) !== circleHex(circleRecord(proof.observation.canonicalBlock).hash, 32)) circleBlocked("cleanup85_cancellation_receipt_changed");
+  if (circleUint(r.gasUsed) > BigInt(e.gasLimitAtomic) || circleUint(r.effectiveGasPrice) > BigInt(e.maxFeePerGasAtomic) || (circleUint(r.gasUsed) * circleUint(r.effectiveGasPrice)).toString() !== proof.actualFeeAtomic || hashObject(observation.receipt) !== hashObject(proof.observation.receipt) || cancellationTransactionDigest(observation, proof.observation) !== hashObject(proof.observation.transaction) || circleHex(circleRecord(observation.canonicalBlock).hash, 32) !== circleHex(circleRecord(proof.observation.canonicalBlock).hash, 32)) circleBlocked("cleanup85_cancellation_receipt_changed");
   for (const field of ["l1Fee", "operatorFee", "blobGasUsed", "blobGasPrice"]) if (r[field] !== undefined && circleUint(r[field]) !== 0n) circleBlocked("cleanup85_unmodeled_native_fee");
   await cleanup85Reanchor(source, observation); return observation;
+}
+
+/** Reconstruct only omitted non-signed timestamp metadata for an unchanged retained block.
+ * Raw durable proof bytes remain authoritative; every other transaction field is bound exactly. */
+function cancellationTransactionDigest(observation: CircleObservation, retained: CircleObservation): string {
+  const transaction = circleRecord(observation.transaction), expected = circleRecord(retained.transaction);
+  const block = circleRecord(observation.canonicalBlock), original = circleRecord(retained.canonicalBlock);
+  if (circleHex(block.hash, 32) !== circleHex(original.hash, 32) || circleUint(block.number) !== circleUint(original.number) ||
+    circleUint(block.timestamp) !== circleUint(original.timestamp)) circleBlocked("cleanup85_cancellation_receipt_changed");
+  for (const [value, header] of [[transaction, block], [expected, original]] as const) {
+    if (Object.hasOwn(value, "blockTimestamp") && (typeof value.blockTimestamp !== "string" ||
+      circleUint(value.blockTimestamp) !== circleUint(header.timestamp))) circleBlocked("cleanup85_cancellation_timestamp_changed");
+  }
+  // An originally absent field stays absent in the expected digest. New provider fields still fail binding.
+  return hashObject(!Object.hasOwn(transaction, "blockTimestamp") && Object.hasOwn(expected, "blockTimestamp")
+    ? { ...transaction, blockTimestamp: block.timestamp } : transaction);
 }
