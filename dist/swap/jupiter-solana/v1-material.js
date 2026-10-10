@@ -81,7 +81,12 @@ export function validateJupiterV1Material(value) {
 export function assertJupiterV1FreshMaterial(material) {
     validateJupiterV1Material(material);
     if (material.networkFeeLamports === null || BigInt(material.currentBlockHeight) > BigInt(material.lifetime.lastValidBlockHeight))
-        throw new ApnError("APN_REPREPARE_REQUIRED", "Jupiter V1 exact blockhash expired or its fee is unavailable.");
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Jupiter V1 exact blockhash expired or its fee is unavailable.", {
+            feeUnavailable: material.networkFeeLamports === null,
+            blockhashExpired: BigInt(material.currentBlockHeight) > BigInt(material.lifetime.lastValidBlockHeight),
+            observedBlockHeight: material.currentBlockHeight,
+            lastValidBlockHeight: material.lifetime.lastValidBlockHeight,
+        });
 }
 export function validateJupiterV1PreparedMaterial(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["quote", "approvalCapAtomic", "gasOrEnergy", "execution"]) || value.approvalCapAtomic !== "0")

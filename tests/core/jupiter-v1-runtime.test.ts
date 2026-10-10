@@ -135,6 +135,8 @@ test("known frozen origin mismatch rejects prepare, owner approval and status wi
  assert.equal(f.rpcReads,reads);assert.equal(f.providerReads,providerReads);assert.equal(f.secretReads,0);assert.equal(f.sends,0);
  const released=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());
  assert.equal(released.state,"failed_before_effect");assert.equal(released.submissionMarker,null);
+ const status=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},{state:new StateStore(f.temp.root),clock:{now:()=>new Date()},jupiterV1Runtime:f.runtime("observe",op.operationId,false)} as RuntimeContext);
+ assert.equal(status.proofClass,"failed_before_effect");assert.deepEqual(status.nextActions,[]);
  assert.equal(f.rpcReads,reads);assert.equal(f.providerReads,providerReads);assert.equal(f.secretReads,0);assert.equal(f.sends,0);
 });
 
@@ -157,6 +159,8 @@ test("V1 genuine Native pipeline prepares unsigned, prompts exact TTY, sends onc
  assert.equal(f.rpcReads,originReads);assert.equal(f.providerReads,originProviderReads);assert.equal(f.secretReads,originSecrets);assert.equal(f.sends,1);
 
  f.setFinal();const finalized=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());assert.equal(finalized.state,"finalized");const secrets=f.secretReads;
+ const finalStatus=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},{state:new StateStore(f.temp.root),clock:{now:()=>new Date()},jupiterV1Runtime:f.runtime("observe",op.operationId,false)} as RuntimeContext);
+ assert.deepEqual(finalStatus.nextActions,[]);
  const again=await f.runtime("execute",op.operationId).execute(op.operationId,new Date());assert.equal(again.state,"finalized");assert.equal(f.sends,1);assert.equal(f.secretReads,secrets);assert.equal(forbiddenGetter.mock.callCount(),0);
  const usage=await new AssetUsageLedger(f.temp.root).usage({account:f.owner,chain:PIN.chain,asset:{kind:"native",identifier:null}},new Date());assert.equal(usage.amountAtomic,"1000000");
 });
@@ -186,6 +190,7 @@ test("V1 RPC rejection is durable public diagnosis and never finalizes or retrie
  assert.doesNotMatch(raw,/SECRET|provider echo|rawPayload|transactionBase64|logs/u);
  const secrets=f.secretReads,context={state:new StateStore(f.temp.root),clock:{now:()=>new Date()},jupiterV1Runtime:f.runtime("observe",op.operationId,false)} as unknown as RuntimeContext;
  const status=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},context);
+ assert.deepEqual(status.nextActions,[`apn swap solana jupiter status --operation ${op.operationId}`]);
  assert.deepEqual(status.data,{dispatchObservation:observation});assert.equal(status.proofClass,"unknown_finality");
  f.setNow(new Date(Date.parse(op.quote.expiresAt)+1));await f.runtime("execute",op.operationId).execute(op.operationId,new Date());
  assert.equal(f.sends,1);assert.equal(f.secretReads,secrets);assert.deepEqual(await new JupiterV1DispatchStore(f.temp.root).load(result),observation);
@@ -244,6 +249,7 @@ test("V1 expiry after signing retains public failure and never retries without a
  const secrets=f.secretReads;
  const context={state:new StateStore(f.temp.root),clock:{now:()=>new Date()},jupiterV1Runtime:f.runtime("observe",op.operationId,false)} as unknown as RuntimeContext;
  const status=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},context);
+ assert.deepEqual(status.nextActions,[`apn swap solana jupiter status --operation ${op.operationId}`]);
  assert.deepEqual(status.data,{executionFailure:failure});assert.equal(status.proofClass,"unknown_finality");
  f.setNow(new Date(Date.parse(op.quote.expiresAt)+1));await f.runtime("execute",op.operationId).execute(op.operationId,new Date());
  assert.equal(f.sends,0);assert.equal(f.secretReads,secrets);assert.deepEqual(await failures.load(result),failure);

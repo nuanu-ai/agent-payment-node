@@ -111,3 +111,24 @@ test("V1 builder refuses cloned producer capability", async () => { await withBu
 test("V1 builder refuses proof bound to another time or native cap", async () => { for (const kind of ["time", "cap"]) {
     await withBuilder(() => async (m, input) => { const { materialDigest, ...capBody } = { ...m, maximumNativeExpenseLamports: "5999999" }; const other = kind === "cap" ? { ...capBody, materialDigest: jupiterV1MaterialDigest(capBody) } : m; const proofInput = kind === "time" ? { ...input, now: new Date(input.now.getTime() + 1) } : input; return await makeProducedQuote(other, proofInput); }, async (builder, m) => { await assert.rejects(builder.quote(builderInput(m))); });
 } });
+
+for (const [label, feeUnavailable, blockhashExpired] of [["fee unavailable", true, false], ["blockhash expired", false, true], ["both", true, true]] as const)
+test(`V1 freshness diagnosis preserves exact refusal for ${label}`, () => {
+    const initial = guardedFixture();
+    const { materialDigest, ...body } = { ...initial,
+        networkFeeLamports: feeUnavailable ? null : initial.networkFeeLamports,
+        currentBlockHeight: (BigInt(initial.lifetime.lastValidBlockHeight) + (blockhashExpired ? 1n : 0n)).toString() };
+    const material = { ...body, materialDigest: jupiterV1MaterialDigest(body) };
+    validateJupiterV1Material(material);
+    assert.throws(() => assertJupiterV1FreshMaterial(material), {
+        code: "APN_REPREPARE_REQUIRED",
+        message: "Jupiter V1 exact blockhash expired or its fee is unavailable.",
+        details: { feeUnavailable, blockhashExpired, observedBlockHeight: material.currentBlockHeight,
+            lastValidBlockHeight: material.lifetime.lastValidBlockHeight },
+    });
+});
+test("V1 exact last-valid height with available fee remains fresh", () => {
+    const initial = guardedFixture();
+    const { materialDigest, ...body } = { ...initial, currentBlockHeight: initial.lifetime.lastValidBlockHeight };
+    assertJupiterV1FreshMaterial({ ...body, materialDigest: jupiterV1MaterialDigest(body) });
+});

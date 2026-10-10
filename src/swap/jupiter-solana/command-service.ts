@@ -59,8 +59,10 @@ function data(value: unknown, proofClass: string): CommandOutcome {
 }
 
 function operationOutcome(operation:import("../model.js").SwapOperationRecord):CommandOutcome {
- return {proofClass:operation.state,data:null,operation,receipt:null,nextActions:operation.submissionMarker===null?
-  [`apn swap solana jupiter approve --operation ${operation.operationId}`]:[`apn swap solana jupiter status --operation ${operation.operationId}`]};
+ const terminal = ["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(operation.state);
+ const approvable = ["awaiting_approval", "reserved"].includes(operation.state) && operation.submissionMarker === null;
+ return {proofClass:operation.state,data:null,operation,receipt:null,nextActions:terminal ? [] :
+  [`apn swap solana jupiter ${approvable ? "approve" : "status"} --operation ${operation.operationId}`]};
 }
 async function withDispatch(operation:import("../model.js").SwapOperationRecord,context:RuntimeContext):Promise<CommandOutcome>{
  const observation=await new JupiterV1DispatchStore(context.state.root).load(operation);
