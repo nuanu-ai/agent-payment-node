@@ -38,7 +38,7 @@ export function validateDirectory(stats, root) {
     if (!root && (permissions(stats) & 0o077) !== 0)
         stateSecurity("State directory is accessible by another user.");
 }
-function validateFile(stats) {
+export function validateFile(stats) {
     if (!stats.isFile() || stats.isSymbolicLink())
         stateSecurity("State entry is not a regular file.");
     if (stats.uid !== uid())

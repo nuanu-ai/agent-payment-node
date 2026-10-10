@@ -11,6 +11,9 @@ for (const [path, symbol] of [
   ["circle-v2-evm/rpc.js", "CircleRpc"],
   ["circle-cleanup85-native-cancellation.js", "Cleanup85NativeCancellation"],
   ["cli.js", "runCli"],
+  ["circle-v2-evm/cleanup85-recovery-runtime.js", "Cleanup85RecoveryRuntime"],
+  ["circle-v2-evm/cleanup86-store.js", "Cleanup86Store"],
+  ["circle-v2-evm/cleanup86-snapshot.js", "Cleanup86SnapshotStore"],
 ] as const) test(`fresh normal Node imports ${path} without a core-first shim`, async t => {
   const root = await mkdtemp(join(tmpdir(), "apn-circle-import-"));
   t.after(() => rm(root, { recursive: true, force: true }));

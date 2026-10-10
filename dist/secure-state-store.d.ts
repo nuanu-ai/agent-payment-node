@@ -4,6 +4,7 @@ export declare function stateSecurity(message: string): never;
 export declare function stateCorrupt(message: string): never;
 export declare function stateIdentifier(value: string, label: string): void;
 export declare function validateDirectory(stats: Stats, root: boolean): void;
+export declare function validateFile(stats: Stats): void;
 export declare function isCode(error: unknown, code: string): boolean;
 export declare class SecureStateStore {
     readonly root: string;

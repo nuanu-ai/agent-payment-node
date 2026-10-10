@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile, writeFile, symlink, mkdir } from "node:fs/promises";
+import { readFile, writeFile, symlink, mkdir, link } from "node:fs/promises";
 import { join } from "node:path";
 import type { Cleanup85CancellationProof } from "../../src/circle-cleanup85-cancellation-contract.js";
 import type { VerifiedCleanup86CurrentPurpose } from "../../src/circle-v2-evm/cleanup86-current-purpose.js";
@@ -9,13 +9,29 @@ import type { VerifiedCleanup86CurrentPurpose } from "../../src/circle-v2-evm/cl
  * cryptography, carry ledger and controller fences remain production. No private owner/key positive. */
 test("current86 actual permission issuer with explicit future F85 TEST public-state oracle", async t => {
   let accountingCalls = 0, accountingRefuse = false;
+  const realAccounts = await import("viem/accounts"), testKey = `0x${"0".repeat(63)}1` as const;
+  let testOwnerOracle: `0x${string}` | undefined, testSigns = 0, testCanonicalF85Witnesses = false;
+  t.mock.module("viem/accounts", { namedExports: { ...realAccounts, privateKeyToAccount: (key: `0x${string}`) => {
+    const account = realAccounts.privateKeyToAccount(key);
+    if (testOwnerOracle === undefined) return account;
+    return {...account,address:testOwnerOracle,signTransaction: async (...args: Parameters<typeof account.signTransaction>) => { testSigns++; return account.signTransaction(...args); }};
+  } } });
   t.mock.module("../../src/circle-cleanup85-native-cancellation.js", { namedExports: { verifyCleanup85CancellationAccounting: async () => { accountingCalls++; if (accountingRefuse) throw Error("TEST_F85_accounting_refusal"); } } });
   let publicProof: typeof import("../../src/circle-v2-evm/cleanup85-public-proof.js");
   t.mock.module("../../src/circle-v2-evm/cleanup85-public-proof.js", { namedExports: {
     verifyCleanup85PublicWire: (...args: Parameters<typeof publicProof.verifyCleanup85PublicWire>) => publicProof.verifyCleanup85PublicWire(...args),
     cleanup85Reanchor: (...args: Parameters<typeof publicProof.cleanup85Reanchor>) => publicProof.cleanup85Reanchor(...args),
     assertCancellationProofShape: (...args: Parameters<typeof publicProof.assertCancellationProofShape>) => publicProof.assertCancellationProofShape(...args),
-    verifyCancellationPublic: async (_source: unknown, proof: Cleanup85CancellationProof) => { publicProof.assertCancellationProofShape(proof); return structuredClone(proof.observation); }
+    verifyCancellationPublic: async (source: import("../../src/circle-v2-evm/rpc.js").CircleRpc, proof: Cleanup85CancellationProof) => {
+      publicProof.assertCancellationProofShape(proof);
+      if (!testCanonicalF85Witnesses) return structuredClone(proof.observation);
+      // Explicit fixed-owner signature/accounting oracle; the ten canonical witnesses below
+      // execute through the real cumulative-budget transport in the same public-verifier order.
+      await publicProof.cleanup85Reanchor(source,proof.observation);
+      const fresh = await source.observation(proof.transactionHash as `0x${string}`,"finalized"); assert.ok(fresh);
+      for (const key of ["canonicalBlock","recheckedBlock","finalityHead"] as const) assert.deepEqual(fresh[key],proof.observation[key]);
+      await publicProof.cleanup85Reanchor(source,fresh); return fresh;
+    }
   } });
   // Register the future-public oracle before any shared production graph is loaded.
   publicProof = await import(new URL("../../src/circle-v2-evm/cleanup85-public-proof.js?unmocked-shape", import.meta.url).href);
@@ -30,9 +46,10 @@ test("current86 actual permission issuer with explicit future F85 TEST public-st
   const { withCleanup85FinancialScope } = await import("../../src/circle-cleanup85-financial-scope.js");
   const { executeAllowlistPolicyCommand } = await import("../../src/allowlist-policy-command.js"), { AllowlistPolicyStore } = await import("../../src/allowlist-policy-store.js");
   const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js"), { StateStore } = await import("../../src/state.js");
-  const { executeCleanup86 } = await import("../../src/circle-v2-evm/cleanup86-controller.js");
-  const variants = ["positive", "expired_legacy", "proof", "proof_hash", "root", "copied_token", "nonce", "fee", "day", "expired", "policy", "daily", "perop", "carry", "no_reset", "material", "sign", "send", "history", "history_one", "history_gap", "history_high", "history_corrupt", "history_symlink", "history_directory", "no_private_dto", "no_repeat", "legacy_strict", "historical_reload", "rpc_budget", "f85_accounting_refusal", "claimed_unknown", "normal_cli"] as const;
+  const { executeCleanup86, executeFreshCleanup86 } = await import("../../src/circle-v2-evm/cleanup86-controller.js");
+  const variants = ["positive", "expired_legacy", "proof", "proof_hash", "root", "copied_token", "nonce", "fee", "day", "expired", "policy", "daily", "perop", "carry", "no_reset", "material", "sign", "send", "history", "history_one", "history_gap", "history_high", "history_corrupt", "history_symlink", "history_directory", "no_private_dto", "no_repeat", "legacy_strict", "historical_reload", "rpc_budget", "f85_accounting_refusal", "claimed_unknown", "normal_cli", "normal_preflight_fee", "normal_preflight_native", "normal_preflight_call", "normal_preflight_receipt", "normal_preflight_rpc", "reprepare_positive", "reprepare_generation_hardlink", "reprepare_preflight_call", "reprepare_sign", "reprepare_send", "reprepare_effect", "reprepare_material", "reprepare_first_failure", "reprepare_history", "reprepare_malformed", "reprepare_symlink", "reprepare_mode", "reprepare_hardlink", "reprepare_hardlink_drift", "reprepare_global", "reprepare_unknown", "reprepare_generation", "reprepare_drift", "reprepare_full_test_material", "normal_full_test_material", "normal_postquote_code", "normal_postquote_storage", "normal_postquote_header", "normal_legacy_first_deployment", "receipt_wrong_envelope", "receipt_stale", "receipt_reused", "receipt_fabricated"] as const;
   for (const variant of variants) await t.test(variant, async t => {
+    testOwnerOracle = undefined; testSigns = 0; testCanonicalF85Witnesses = false;
     const temp = await temporaryState(); t.after(temp.cleanup); const f = await cleanup85PublicState(temp.root), transport = await cleanup85PublicTransport(); let clock = Date.parse("2026-10-09T20:00:00.000Z");
     const store = new Cleanup86Store(temp.root), { CircleNonceRetirementStore } = await import("../../src/circle-v2-evm/nonce-retirement-store.js"), parentIntent = (await new CircleNonceRetirementStore(temp.root).intent(f.parent))!;
     const recovery = (await new Cleanup85RecoveryStore(temp.root).load(f.parent, parentIntent))!;
@@ -57,18 +74,103 @@ test("current86 actual permission issuer with explicit future F85 TEST public-st
     const { envelopeHash: _old, ...old } = f.parent.effects[2]!.envelope, envelope = circleEnvelope({ ...old, nonceAtomic: variant === "nonce" ? "87" : "86", ...(variant === "fee" ? { gasLimitAtomic: "15000000000001", maxFeePerGasAtomic: "1", maxPriorityFeePerGasAtomic: "0" } : {}) });
     const https: typeof transport.https = { request: async (...args) => { const q = JSON.parse(args[2]!); if (q.method === "eth_getTransactionCount") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: q.id, result: variant === "carry" ? "0x57" : "0x56" }) }; if (q.method === "eth_getBlockByNumber" && q.params[0] === "finalized") return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: q.id, result: head }) }; return transport.https.request(...args); } };
     const source = new CircleRpc("https://arbitrum-one-public.nodies.app", 42161, https, variant === "rpc_budget" ? 2 : 256), destination = new CircleRpc("https://evm-rpc.sei-apis.com", 1329, https);
-    if (variant === "normal_cli") {
+    if (variant === "normal_cli" || variant === "normal_full_test_material" || variant === "normal_legacy_first_deployment" || variant.startsWith("normal_postquote_") || variant.startsWith("normal_preflight_") || variant.startsWith("reprepare_")) {
+      let legacyBytes: Buffer | undefined, legacyHash: string | undefined;
+      const legacyPath = join(temp.root,"circle-cleanup85-recovery",`${f.parent.operationId}-cleanup86-intent.json`);
+      if (variant.startsWith("reprepare_")) {
+        await withCleanup85FinancialScope(f.state, f.request, lineage.operationId, async scope => {
+          const certificate = await verifyCleanup86CurrentPurpose(f.state,f.parent,recovery,proof,envelope,source,destination,() => clock,scope);
+          const legacy = await store.startCurrent(f.state,f.parent,recovery,envelope,certificate); legacyHash = legacy.intentHash;
+        });
+        legacyBytes = await readFile(legacyPath);
+        const kind = variant.slice("reprepare_".length).replace("first_failure","first-failure");
+        if (["sign","send","effect","material","first-failure","history"].includes(kind)) await writeFile(join(temp.root,"circle-cleanup85-recovery",`${f.parent.operationId}-cleanup86-${kind === "history" ? "history-0" : kind}.json`),"{}",{mode:0o600});
+        if (kind === "malformed") await writeFile(legacyPath,"not JSON");
+        if (kind === "symlink") { const { unlink } = await import("node:fs/promises"); await unlink(legacyPath); await symlink(parentPath,legacyPath); }
+        if (kind === "hardlink") await link(legacyPath,join(temp.root,"external-legacy-alias.json"));
+        if (kind === "mode") { const { chmod } = await import("node:fs/promises"); await chmod(legacyPath,0o644); }
+        if (kind === "global") await writeFile(join(temp.root,`${f.parent.operationId}-cleanup86-sign.json`),"{}",{mode:0o600});
+        if (kind === "unknown" || kind === "generation") await writeFile(join(temp.root,"circle-cleanup85-recovery",`${f.parent.operationId}-cleanup86-${kind === "unknown" ? "foreign" : "generation-2-intent"}.json`),"{}",{mode:0o600});
+      }
       const { CircleEvmService } = await import("../../src/circle-v2-evm/runtime.js"), { approvalCode } = await import("../../src/approval-code.js");
-      let keys = 0, terminals = 0, closed = 0; const entered = performance.now(), clockNow = () => clock + Math.floor(performance.now() - entered); t.mock.method(Date, "now", clockNow);
+      if (variant === "normal_legacy_first_deployment") {
+        const {Cleanup85RecoveryRuntime} = await import("../../src/circle-v2-evm/cleanup85-recovery-runtime.js");
+        // Read-only TEST historical financial oracle: permits reaching the legacy first pin read.
+        // The deliberately corrupt deployment refuses before quote, TTY or any private effect.
+        t.mock.method(Cleanup85RecoveryRuntime.prototype as unknown as {financialGuard:()=>Promise<void>},"financialGuard",async()=>{});
+        await store.start(f.parent,recovery,{cancellationProofHash:proof.proofHash,envelope,policies:recovery.policies,capturedAt:recovery.capturedAt,windowEndsAt:recovery.windowEndsAt});
+      }
+      const fullTestMaterial = variant.endsWith("full_test_material");
+      if (fullTestMaterial) { testOwnerOracle = f.parent.sourceCustody.walletAddress; testCanonicalF85Witnesses = true; }
+      let keys = 0, terminals = 0, closed = 0, testSends = 0, wrappingLoads = 0; const entered = performance.now(), clockNow = () => clock + Math.floor(performance.now() - entered); t.mock.method(Date, "now", clockNow);
       const { EncryptedWalletStore } = await import("../../src/encrypted-wallet-store.js");
-      t.mock.method(EncryptedWalletStore.prototype, "describe", async (profile: string, beforeDecrypt?: () => void, beforeKeyLoad?: (identity: { profile: string; address: typeof f.parent.sourceCustody.walletAddress; bindingHash: string; createdAt: string }) => Promise<void>) => { assert.equal(profile, f.parent.profile); await beforeKeyLoad?.({ profile, address: f.parent.sourceCustody.walletAddress, bindingHash: f.parent.sourceCustody.walletBindingHash, createdAt: f.parent.sourceCustody.walletCreatedAt }); beforeDecrypt?.(); keys++; throw Error("TEST_private_broker_refusal"); });
+      t.mock.method(EncryptedWalletStore.prototype, "describe", async (profile: string, beforeDecrypt?: () => void, beforeKeyLoad?: (identity: { profile: string; address: typeof f.parent.sourceCustody.walletAddress; bindingHash: string; createdAt: string }) => Promise<void>) => { assert.equal(profile, f.parent.profile); await beforeKeyLoad?.({ profile, address: f.parent.sourceCustody.walletAddress, bindingHash: f.parent.sourceCustody.walletBindingHash, createdAt: f.parent.sourceCustody.walletCreatedAt }); beforeDecrypt?.(); keys++; if (fullTestMaterial) return {secret:{privateKey:testKey,directEffects:{},x402Effects:{}}} as never; throw Error("TEST_private_broker_refusal"); });
       const terminal = { isTerminal: () => true, openTerminal: async () => { terminals++; return { fd: 123, write: async () => {}, read: async function* () { const saved = (await store.intent(f.parent, recovery))!; yield Buffer.from(approvalCode("bridge", f.parent.operationId, saved.intentHash) + "\n"); }, close: async () => { closed++; } }; } };
-      const runtimeTransport: typeof https = { request: async (...args) => { const q = JSON.parse(args[2]!); if (q.method === "eth_call" && String(q.params[0].data).startsWith("0x095ea7b3")) return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: q.id, result: "0x" + "0".repeat(63) + "1" }) }; return https.request(...args); } };
-      const service = new CircleEvmService(f.state, { load: async () => { keys++; throw Error("TEST_private_broker_refusal"); }, create: async () => { throw Error("forbidden"); } }, { APN_ARBITRUM_RPC_URL: "https://arbitrum-one-public.nodies.app", APN_SEI_RPC_URL: "https://evm-rpc.sei-apis.com" }, clockNow, terminal, runtimeTransport, { cancellation: { inspect: async () => ({ operationId: proof.operationId, phase: "finalized", transactionHash: proof.transactionHash, proof }), execute: async () => { throw Error("no native cancellation dispatch"); } }, verifyCancellationAccounting: async () => { accountingCalls++; } });
-      await assert.rejects(service.approveCleanup86(f.parent.operationId), /TEST_private_broker_refusal/);
-      const intent = (await store.intent(f.parent, recovery))!; assert.equal(intent.version, "apn.circle-cleanup86-intent.v3"); assert.equal((await store.effect(f.parent, intent))!.phase, "unknown"); assert.equal(await store.claimed(f.parent, intent, "sign"), true); assert.deepEqual([keys, terminals, closed], [1, 1, 1]);
-      await assert.rejects(service.approveCleanup86(f.parent.operationId), /existing_observe_only/); assert.equal(keys, 1); assert.equal(terminals, 1);
-      assert.deepEqual(await readFile(frozenPath), frozen); assert.deepEqual(await readFile(parentPath), parentBytes); t.diagnostic(`normal86 bounded TEST public requests=${transport.rows.length}; no signing/send; genuine TEST terminal consumed once`); return;
+      const runtimeRequestCounts: Record<string,number> = {};
+      let guardDepth = 0, preflightInvocation = 0;
+      if (fullTestMaterial) {
+        const originalGuarded = CircleRpc.prototype.guarded;
+        t.mock.method(CircleRpc.prototype,"guarded",function<T>(this: InstanceType<typeof CircleRpc>,guard:()=>void,action:()=>Promise<T>):Promise<T> {
+          const first = guardDepth++ === 0; if (first) preflightInvocation++;
+          return originalGuarded.call(this,guard,action).finally(()=>{guardDepth--;}) as Promise<T>;
+        });
+      }
+      t.after(() => { if (fullTestMaterial) t.diagnostic(JSON.stringify({TEST_ONLY:true,runtimeRequestCounts,testSigns,testSends,wrappingLoads})); });
+      let oldReceiptReads = 0, injected = false, approveCallCompleted = false, quoteCompleted = false;
+      const runtimeTransport: typeof https = { request: async (...args) => {
+        const q = JSON.parse(args[2]!);
+        const requestPhase = guardDepth > 0 ? `preflight_${preflightInvocation}` : terminals === 0 ? "before_prompt" : wrappingLoads === 0 ? "after_prompt_before_seal" : "after_seal"; const requestKey = `${args[0]}:${requestPhase}`; runtimeRequestCounts[requestKey] = (runtimeRequestCounts[requestKey] ?? 0) + 1;
+        if (variant === "normal_legacy_first_deployment" && q.method === "eth_getCode") { assert.equal(quoteCompleted,false); return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:"0x00"})}; }
+        if (q.method === "eth_estimateGas") quoteCompleted = true;
+        if (quoteCompleted && variant === "normal_postquote_code" && q.method === "eth_getCode") return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:"0x00"})};
+        if (quoteCompleted && variant === "normal_postquote_storage" && q.method === "eth_getStorageAt") return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:"0x"+"0".repeat(64)})};
+        if (quoteCompleted && variant === "normal_postquote_header" && q.method === "eth_getBlockByNumber") return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:{...head,hash:"0x"+"0".repeat(64)}})};
+        if (testCanonicalF85Witnesses && ["eth_getTransactionByHash","eth_getTransactionReceipt"].includes(q.method) && q.params[0] === proof.transactionHash) return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:q.method === "eth_getTransactionByHash" ? proof.observation.transaction : proof.observation.receipt})};
+        if (q.method === "eth_sendRawTransaction") { assert.equal(fullTestMaterial,true); testSends++; const {keccak256,parseTransaction,recoverTransactionAddress} = await import("viem"); const raw = q.params[0]; const tx = parseTransaction(raw); assert.equal(tx.chainId,42161); assert.equal(tx.nonce,86); assert.equal(tx.to?.toLowerCase(),envelope.to.toLowerCase()); assert.equal(tx.data,envelope.data); assert.equal(tx.value ?? 0n,0n); assert.equal(await recoverTransactionAddress({serializedTransaction:raw}),realAccounts.privateKeyToAccount(testKey).address); return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:keccak256(raw)})}; }
+        if (fullTestMaterial && q.method === "eth_getTransactionReceipt" && !["0x24cb1b6244a30ca2a829b4f561c907565d49aad806735137e3160ae0f7f03b95"].includes(q.params[0])) { const saved = await store.intent(f.parent,recovery); const metadata = saved === null ? null : await new (await import("../../src/circle-v2-evm/cleanup86-custody.js")).Cleanup86Custody(f.state,{load:async()=>null,create:async()=>Buffer.alloc(32)}).publicMetadata(f.parent,saved); if (metadata?.transactionHash === q.params[0]) return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:null})}; }
+        if (q.method === "eth_getBlockByNumber" && args[0] === "https://arb1.arbitrum.io/rpc" && variant === "normal_preflight_fee") return { status: 200, body: JSON.stringify({jsonrpc:"2.0",id:q.id,result:{...head,baseFeePerGas:"0xffffffffffff"}}) };
+        if (q.method === "eth_getBalance" && q.params[1] === "pending" && variant === "normal_preflight_native") return { status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:"0x0"}) };
+        if (q.method === "eth_getTransactionReceipt" && q.params[0] === "0x24cb1b6244a30ca2a829b4f561c907565d49aad806735137e3160ae0f7f03b95") { oldReceiptReads++; if (variant === "normal_preflight_receipt" && approveCallCompleted) return {status:200,body:JSON.stringify({jsonrpc:"2.0",id:q.id,result:{}})}; }
+        if (q.method === "eth_call" && String(q.params[0].data).startsWith("0x095ea7b3")) {
+          if (variant === "normal_preflight_rpc") return {status:503,body:"TEST initial RPC refusal"};
+          if (variant === "reprepare_hardlink_drift" && !injected) { injected = true; await link(legacyPath,join(temp.root,"external-inflight-alias.json")); }
+          if (variant === "reprepare_drift" && !injected) { injected = true; await writeFile(join(temp.root,"circle-cleanup85-recovery",`${f.parent.operationId}-cleanup86-history-9.json`),"{}",{mode:0o600}); }
+          approveCallCompleted = true;
+          return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: q.id, result: "0x" + "0".repeat(63) + (["normal_preflight_call","reprepare_preflight_call"].includes(variant) ? "0" : "1") }) };
+        }
+        return https.request(...args);
+      } };
+      const service = new CircleEvmService(f.state, { load: async () => { if (fullTestMaterial) { wrappingLoads++; return Buffer.alloc(32,7); } keys++; throw Error("TEST_private_broker_refusal"); }, create: async () => { throw Error("forbidden"); } }, { APN_ARBITRUM_RPC_URL: "https://arbitrum-one-public.nodies.app", APN_SEI_RPC_URL: "https://evm-rpc.sei-apis.com" }, clockNow, terminal, runtimeTransport, { cancellation: { inspect: async () => ({ operationId: proof.operationId, phase: "finalized", transactionHash: proof.transactionHash, proof }), execute: async () => { throw Error("no native cancellation dispatch"); } }, verifyCancellationAccounting: async () => { accountingCalls++; } });
+      const positive = ["normal_cli","reprepare_positive","reprepare_generation_hardlink","reprepare_full_test_material","normal_full_test_material"].includes(variant);
+      if (fullTestMaterial) await service.approveCleanup86(f.parent.operationId);
+      else await assert.rejects(service.approveCleanup86(f.parent.operationId), positive ? /TEST_private_broker_refusal/ : ["normal_preflight_fee","normal_preflight_native","normal_preflight_call","normal_preflight_receipt","reprepare_preflight_call"].includes(variant) ? /cleanup86_fresh_network_guard/ : /./);
+      if (!positive) {
+        assert.deepEqual([keys,terminals,closed],[0,0,0]);
+        if (variant.startsWith("normal_postquote_")) assert.equal(quoteCompleted,true);
+        const { access } = await import("node:fs/promises");
+        await assert.rejects(access(join(temp.root,"circle-cleanup85-recovery",`${f.parent.operationId}-cleanup86-generation-1-intent.json`)));
+        if (legacyBytes === undefined && variant !== "normal_legacy_first_deployment") assert.equal(await store.intent(f.parent,recovery),null);
+        if (variant === "normal_legacy_first_deployment") { const retained = (await store.intent(f.parent,recovery))!; assert.equal(retained.version,"apn.circle-cleanup86-intent.v1"); assert.equal(await store.effect(f.parent,retained),null); assert.equal(quoteCompleted,false); }
+        else if (legacyBytes !== undefined && !["reprepare_malformed","reprepare_symlink","reprepare_mode"].includes(variant)) assert.deepEqual(await readFile(legacyPath),legacyBytes);
+        assert.deepEqual(await readFile(frozenPath),frozen); assert.deepEqual(await readFile(parentPath),parentBytes); return;
+      }
+      const intent = (await store.intent(f.parent, recovery))!; assert.equal(intent.version, variant.startsWith("reprepare_") ? "apn.circle-cleanup86-intent.v4" : "apn.circle-cleanup86-intent.v3"); if (legacyBytes !== undefined) { assert.deepEqual(await readFile(legacyPath),legacyBytes); assert.equal(intent.unsignedPredecessor!.intentHash,legacyHash); } assert.equal((await store.effect(f.parent, intent))!.phase, "unknown"); assert.equal(await store.claimed(f.parent, intent, "sign"), true); assert.deepEqual([keys, terminals, closed], [1, 1, 1]);
+      if (fullTestMaterial) {
+        assert.equal(intent.envelope.maxFeePerGasAtomic,(BigInt(head.baseFeePerGas) * 2n).toString());
+        assert.equal(intent.envelope.maxPriorityFeePerGasAtomic,"0");
+        assert.equal(intent.currentPurpose!.envelopeHash,intent.envelope.envelopeHash);
+        assert.equal(intent.currentPurpose!.cleanupReservationId,f.parent.usage[3]!.reservationId);
+        assert.equal(intent.currentPurpose!.maximumFeeAtomic,"15000000000000");
+        if (legacyBytes !== undefined) { const previous = JSON.parse(legacyBytes.toString("utf8")); assert.notEqual(intent.envelope.envelopeHash,previous.envelope.envelopeHash); assert.equal(intent.currentPurpose!.cleanupReservationHash,previous.currentPurpose.cleanupReservationHash); }
+        const count = (role:string) => Object.entries(runtimeRequestCounts).filter(([key])=>key.startsWith(role)).reduce((n,[,value])=>n+value,0);
+        assert.equal(count("https://arbitrum-one-public.nodies.app/"),254); assert.equal(count("https://evm-rpc.sei-apis.com/"),104); assert.equal(count("https://arb1.arbitrum.io/rpc"),7);
+        t.diagnostic(JSON.stringify({TEST_COMMAND_COUNTS:true,variant,runtimeRequestCounts:{...runtimeRequestCounts},preflightInvocation,testSigns,testSends,wrappingLoads}));
+        assert.equal(preflightInvocation,3); assert.equal(await store.claimed(f.parent,intent,"send"),true); assert.deepEqual([testSigns,testSends,wrappingLoads],[1,1,1]); }
+      if (variant === "reprepare_generation_hardlink") { await link(join(temp.root,"circle-cleanup85-recovery",`${f.parent.operationId}-cleanup86-generation-1-intent.json`),join(temp.root,"external-generation-alias.json")); await assert.rejects(store.intent(f.parent,recovery),/exactly one link|hardlink alias/); await assert.rejects(service.approveCleanup86(f.parent.operationId)); assert.deepEqual([keys,terminals],[1,1]); return; }
+      const publicStatus = await service.status(f.parent.operationId); assert.equal(publicStatus.cleanup85_recovery!.cleanup86!.intentHash,intent.intentHash);
+      const observed = await service.observe(f.parent.operationId); assert.equal(observed.integrityHash,f.parent.integrityHash); assert.equal(keys,1);
+      await assert.rejects(service.approveCleanup86(f.parent.operationId), /existing_observe_only/); assert.equal(keys, 1); assert.equal(terminals, 1); if(fullTestMaterial) assert.deepEqual([testSigns,testSends,wrappingLoads],[1,1,1]);
+      assert.deepEqual(await readFile(frozenPath), frozen); assert.deepEqual(await readFile(parentPath), parentBytes); t.diagnostic(fullTestMaterial ? "Explicit TEST owner-identity oracle: valid unrelated TEST-key serialization, production seal/encryption/hash validation, exactly one TEST SEND, selected-generation pending observer; no authentic owner wire/finality proof" : `normal86 bounded TEST public requests=${transport.rows.length}; no signing/send; genuine TEST terminal consumed once`); return;
     }
     let token: VerifiedCleanup86CurrentPurpose | undefined, historicalIntentHash: string | undefined;
     await withCleanup85FinancialScope(f.state, f.request, lineage.operationId, async scope => {
@@ -96,6 +198,27 @@ test("current86 actual permission issuer with explicit future F85 TEST public-st
         else await writeFile(marker, variant === "history_corrupt" ? "not JSON" : "{}", { mode: 0o600 });
         await assert.rejects(store.startCurrent(f.state, f.parent, recovery, envelope, token), /existing_observe_only/);
         assert.equal(await store.intent(f.parent, recovery), null); return;
+      }
+      if (variant.startsWith("receipt_")) {
+        let prompts = 0, privateCalls = 0, preflightCalls = 0;
+        const ports = { now: () => clock, preflight: async () => { preflightCalls++; }, confirm: async () => { prompts++; throw Error("TEST_stop_prompt"); }, seal: async () => { privateCalls++; throw Error("forbidden"); }, send: async () => { throw Error("forbidden"); } };
+        const current = {state:f.state,recovery,certificate:token};
+        if (variant === "receipt_fabricated") {
+          const i = await store.startCurrent(f.state,f.parent,recovery,envelope,token);
+          await assert.rejects(executeCleanup86(temp.root,f.parent,i,store,ports,{...current, initialPreflight:{kind:"verified-cleanup86-initial-preflight"}} as typeof current),/initial_preflight_required/);
+          assert.equal(preflightCalls,0); assert.equal(prompts,0);
+        } else {
+          const publish = async () => {
+            const i = await store.startCurrent(f.state,f.parent,recovery,envelope,token!);
+            if (variant === "receipt_stale") clock += 60_000;
+            if (variant === "receipt_wrong_envelope") return {...i,envelope:circleEnvelope({...envelope,maxFeePerGasAtomic:"1",maxPriorityFeePerGasAtomic:"0"})};
+            return i;
+          };
+          await assert.rejects(executeFreshCleanup86(temp.root,f.parent,envelope,store,ports,current,async () => {preflightCalls++;},publish),variant === "receipt_stale" ? /initial_preflight_required/ : variant === "receipt_wrong_envelope" ? /preflight_frame_changed/ : /TEST_stop_prompt/);
+          if (variant === "receipt_reused") { const i = (await store.intent(f.parent,recovery))!; await assert.rejects(executeCleanup86(temp.root,f.parent,i,store,ports,current),/certificate_used/); }
+          assert.equal(prompts,variant === "receipt_reused" ? 1 : 0);
+        }
+        assert.equal(privateCalls,0); return;
       }
       const intent = await store.startCurrent(f.state, f.parent, recovery, envelope, token); assert.equal(intent.version, "apn.circle-cleanup86-intent.v3"); assert.equal((await store.intent(f.parent, recovery))!.intentHash, intent.intentHash);
       if (variant === "legacy_strict") { const { currentPurpose: _purpose, intentHash: _hash, ...body } = intent; assert.throws(() => validateCleanup86Intent({ ...body, version: "apn.circle-cleanup86-intent.v1", intentHash: hashObject({ ...body, version: "apn.circle-cleanup86-intent.v1" }) }, recovery), /intent_binding/); return; }

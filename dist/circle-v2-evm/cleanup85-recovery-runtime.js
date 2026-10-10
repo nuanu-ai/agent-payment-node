@@ -17,7 +17,7 @@ import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { Cleanup85RecoveryStore, cleanup85CancellationRequest, assertCleanup85Window, CLEANUP85_HASH } from "./cleanup85-recovery-store.js";
 import { Cleanup86Store } from "./cleanup86-store.js";
 import { Cleanup86Custody } from "./cleanup86-custody.js";
-import { executeCleanup86, assertCleanup86Grant } from "./cleanup86-controller.js";
+import { executeCleanup86, executeFreshCleanup86, assertCleanup86Grant } from "./cleanup86-controller.js";
 import { observeCleanup86 } from "./cleanup86-observer.js";
 import { verifyCancellationPublic } from "./cleanup85-public-proof.js";
 import { prepareCleanup85Recovery } from "./cleanup85-recovery-prepare.js";
@@ -91,8 +91,10 @@ export class Cleanup85RecoveryRuntime {
         if (initial.op.state === "nonce_retired")
             return initial.op;
         const prior = await new Cleanup86Store(this.state.root).intent(initial.op, initial.recovery);
-        if (prior?.version === "apn.circle-cleanup86-intent.v3")
+        if (prior?.version === "apn.circle-cleanup86-intent.v4")
             circleBlocked("cleanup86_existing_observe_only");
+        if (prior?.version === "apn.circle-cleanup86-intent.v3")
+            await new Cleanup86Store(this.state.root).unsignedOrphan(initial.op, initial.recovery);
         if (prior !== null && (await new Cleanup86Store(this.state.root).claimed(initial.op, prior, "sign") || await new Cleanup86Store(this.state.root).claimed(initial.op, prior, "send")))
             circleBlocked("cleanup86_claimed_observe_only");
         const backend = this.backend(), status = await backend.cancellation.inspect(initial.request);
@@ -100,28 +102,27 @@ export class Cleanup85RecoveryRuntime {
             circleBlocked("cleanup85_cancellation_finalized_proof_required");
         return this.locked(id, status.proof, async (op, recovery, source, destination, scope) => {
             const store = new Cleanup86Store(this.state.root), existing = await store.intent(op, recovery);
-            if (existing?.version === "apn.circle-cleanup86-intent.v3")
+            if (existing?.version === "apn.circle-cleanup86-intent.v4")
                 circleBlocked("cleanup86_existing_observe_only");
+            const orphan = existing?.version === "apn.circle-cleanup86-intent.v3" ? await store.unsignedOrphan(op, recovery) : undefined;
             if (existing !== null && (await store.claimed(op, existing, "sign") || await store.claimed(op, existing, "send")))
                 circleBlocked("cleanup86_claimed_observe_only");
-            const authority = await this.financialFrame(op, recovery), current = existing === null && authority.windowEndsAt !== null && this.now() >= Date.parse(authority.windowEndsAt);
+            const authority = await this.financialFrame(op, recovery), current = (existing === null || orphan !== undefined) && authority.windowEndsAt !== null && this.now() >= Date.parse(authority.windowEndsAt);
             if (!current)
                 await this.financialGuard(op, recovery);
             const cancellation = await this.verifyCancellation(initial.request, status.proof, recovery, source);
             const evidence = await consumedBurnEvidence(source, op, "cancel85");
-            await currentCircleDeployments(source, destination, 1329);
+            // Current-purpose admission repeats these complete canonical pins after the fresh quote.
+            // Legacy authority still needs this first check; the cumulative 256-request cap is unchanged.
+            if (!current)
+                await currentCircleDeployments(source, destination, 1329);
             if (await source.call("eth_getTransactionReceipt", [CLEANUP85_HASH]) !== null)
                 circleBlocked("cleanup85_original_receipt_requires_public_reconciliation");
-            const envelope = existing?.envelope ?? await source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), "86");
+            const envelope = (orphan === undefined ? existing?.envelope : undefined) ?? await source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true), "86");
             const certificate = current ? await verifyCleanup86CurrentPurpose(this.state, op, recovery, status.proof, envelope, source, destination, this.now, scope) : undefined;
-            const intent = certificate !== undefined ? await store.startCurrent(this.state, op, recovery, envelope, certificate) : existing ?? await store.start(op, recovery, { cancellationProofHash: status.proof.proofHash, envelope, policies: authority.policies, capturedAt: new Date(this.now()).toISOString(), windowEndsAt: authority.windowEndsAt });
-            if (intent.cancellationProofHash !== status.proof.proofHash)
-                circleBlocked("cleanup86_cancellation_identity_changed");
-            const financial = () => certificate === undefined ? this.financialGuard(op, recovery) : assertCleanup86CurrentPermission(certificate, this.state, op, recovery, intent.envelope);
+            const financial = () => certificate === undefined ? this.financialGuard(op, recovery) : assertCleanup86CurrentPermission(certificate, this.state, op, recovery, envelope);
             const submission = new CircleRpc("https://arb1.arbitrum.io/rpc", 42161, this.https, 256, this.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0");
-            const preflight = async (i, grant) => {
-                const guard = () => { if (grant !== undefined)
-                    assertCleanup86Grant(grant, this.state.root, op, i); };
+            const preflightEnvelope = async (i, guard) => {
                 return source.guarded(guard, () => destination.guarded(guard, () => submission.guarded(guard, async () => {
                     await financial();
                     await backend.verifyCancellationAccounting(this.state, initial.request, status.proof);
@@ -137,9 +138,23 @@ export class Cleanup85RecoveryRuntime {
                 })));
             };
             await this.custody.assertAbsent(op);
-            await executeCleanup86(this.state.root, op, intent, store, { now: this.now, preflight, confirm: (i, deadline) => exactChainConsent(["Agent Payment Node distinct Circle cleanup86", `Operation: ${op.operationId}`, `Original UNKNOWN cleanup85 ${CLEANUP85_HASH} stays retained; finalized distinct native cancellation ${status.proof.transactionHash} consumed nonce85.`, `Owner: ${op.sourceCustody.walletAddress} / eip155:42161`, `Fresh zero approval nonce86: token ${i.envelope.to}; spender ${CIRCLE_MESSENGER}; value0; USDC97924 unchanged; allowance40100→0.`, `Full native fee ceiling15000000000000; signed gas${i.envelope.gasLimitAtomic} × maxFee${i.envelope.maxFeePerGasAtomic}.`, `Immutable intent: ${i.intentHash}`, "Foreground authority lasts at most60 seconds; no old signature is replayed."], approvalCode("bridge", op.operationId, i.intentHash), deadline, this.tty),
+            let intent;
+            const publish = async () => {
+                const selected = certificate !== undefined ? orphan === undefined ? await store.startCurrent(this.state, op, recovery, envelope, certificate) : await store.startReprepared(this.state, op, recovery, envelope, certificate, orphan) : existing ?? await store.start(op, recovery, { cancellationProofHash: status.proof.proofHash, envelope, policies: authority.policies, capturedAt: new Date(this.now()).toISOString(), windowEndsAt: authority.windowEndsAt });
+                if (selected.cancellationProofHash !== status.proof.proofHash)
+                    circleBlocked("cleanup86_cancellation_identity_changed");
+                intent = selected;
+                return selected;
+            };
+            const preflight = (i, grant) => preflightEnvelope(i, () => { if (grant !== undefined)
+                assertCleanup86Grant(grant, this.state.root, op, i); });
+            const ports = { now: this.now, preflight, confirm: (i, deadline) => exactChainConsent(["Agent Payment Node distinct Circle cleanup86", `Operation: ${op.operationId}`, `Original UNKNOWN cleanup85 ${CLEANUP85_HASH} stays retained; finalized distinct native cancellation ${status.proof.transactionHash} consumed nonce85.`, `Owner: ${op.sourceCustody.walletAddress} / eip155:42161`, `Fresh zero approval nonce86: token ${i.envelope.to}; spender ${CIRCLE_MESSENGER}; value0; USDC97924 unchanged; allowance40100→0.`, `Full native fee ceiling15000000000000; signed gas${i.envelope.gasLimitAtomic} × maxFee${i.envelope.maxFeePerGasAtomic}.`, `Immutable intent: ${i.intentHash}`, "Foreground authority lasts at most60 seconds; no old signature is replayed."], approvalCode("bridge", op.operationId, i.intentHash), deadline, this.tty),
                 seal: (i, grant) => certificate === undefined ? this.custody.seal(op, i, grant, financial) : this.custody.sealCurrent(op, i, grant, recovery, certificate),
-                send: async (material, grant) => { await financial(); assertCleanup86Grant(grant, this.state.root, op, intent); return circleHex(await submission.call("eth_sendRawTransaction", [material.rawTransaction], () => assertCleanup86Grant(grant, this.state.root, op, intent)), 32); } }, certificate === undefined ? undefined : { state: this.state, recovery, certificate });
+                send: async (material, grant) => { await financial(); assertCleanup86Grant(grant, this.state.root, op, intent); return circleHex(await submission.call("eth_sendRawTransaction", [material.rawTransaction], () => assertCleanup86Grant(grant, this.state.root, op, intent)), 32); } };
+            if (certificate === undefined)
+                await executeCleanup86(this.state.root, op, await publish(), store, ports);
+            else
+                await executeFreshCleanup86(this.state.root, op, envelope, store, ports, { state: this.state, recovery, certificate }, () => preflightEnvelope({ envelope }, () => { }), publish);
             return op;
         });
     }

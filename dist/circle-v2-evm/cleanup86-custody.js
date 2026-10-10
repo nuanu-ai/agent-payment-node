@@ -32,7 +32,7 @@ export class Cleanup86Custody extends SecureStateStore {
         return { transactionHash: h.transactionHash, materialHash: h.materialHash };
     }
     async seal(op, i, grant, beforePrivate) {
-        if (i.version === "apn.circle-cleanup86-intent.v3")
+        if (["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4"].includes(i.version))
             circleBlocked("cleanup86_private_current_custody_required");
         const gate = () => assertCleanup86Grant(grant, this.state.root, op, i);
         gate();
@@ -80,10 +80,11 @@ export class Cleanup86Custody extends SecureStateStore {
         const gate = () => {
             assertCleanup86Grant(grant, this.state.root, op, i);
             const purpose = verifiedCleanup86CurrentPurpose(certificate, this.state, op, recovery, i.envelope);
-            if (i.version !== "apn.circle-cleanup86-intent.v3" || hashObject(purpose) !== hashObject(i.currentPurpose))
+            if (!["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4"].includes(i.version) || hashObject(purpose) !== hashObject(i.currentPurpose))
                 circleBlocked("cleanup86_private_current_custody_required");
         };
-        const permission = async () => { gate(); await assertCleanup86CurrentPermission(certificate, this.state, op, recovery, i.envelope); gate(); };
+        const permission = async () => { gate(); await new Cleanup86Store(this.root).assertGeneration(op, i); gate(); if (!await new Cleanup86Store(this.root).claimed(op, i, "sign"))
+            circleBlocked("cleanup86_sign_claim_required"); await assertCleanup86CurrentPermission(certificate, this.state, op, recovery, i.envelope); gate(); };
         gate();
         if (!await new Cleanup86Store(this.root).claimed(op, i, "sign"))
             circleBlocked("cleanup86_sign_claim_required");
