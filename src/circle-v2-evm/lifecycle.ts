@@ -147,7 +147,7 @@ export async function observeCircle(input: CircleOperationV1, ports: CircleLifec
       freshSource = true;
       if (op.source !== null && (source.transactionHash !== op.source.transactionHash || source.blockHash !== op.source.blockHash || source.receiptHash !== op.source.receiptHash || source.sourceMessageHash !== op.source.sourceMessageHash)) circleBlocked("source_reorg_holds_required");
       const allowance = await ports.allowance(op); if (allowance !== "0") circleBlocked("burn_residual_allowance");
-      if (!circleSame(op.source, source) || op.residualAllowanceAtomic !== "0") op = await persist(op, { source, residualAllowanceAtomic: "0", effects: updateEffect(op, "burn", { phase: "confirmed", proof: source }), state: "awaiting_mint" }, "source_message_verified", ports);
+      if (!circleSame(op.source, source) || op.residualAllowanceAtomic !== "0") op = await persist(op, { source, residualAllowanceAtomic: "0", effects: updateEffect(op, "burn", { phase: "confirmed", proof: source }), state: op.destination === null ? "awaiting_mint" : "awaiting_finality" }, "source_message_verified", ports);
       if (op.attestation === null) {
         const attestation = await ports.attestation(op); if (attestation !== null) op = await persist(op, { attestation }, "issuer_attestation_verified", ports);
       }

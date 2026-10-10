@@ -70,7 +70,10 @@ async function sourceReady(finalized = false, chain: 143 | 1329 | 59144 = 143) {
   return op;
 }
 test("issuer Fast attestation permits one mint while source finality pending, but cannot complete or finalize usage", async () => {
-  const op = await sourceReady(), p = ports(op); const minted = await approveCircleMint(op, p.p);
+  const op = await sourceReady(), p = ports(op);
+  p.p.observeSource = async () => decodeCircleSource({ ...source(143), finalityHead: { hash: `0x${"ab".repeat(32)}`, number: "0xb" } }, 143);
+  const refreshed = await observeCircle(op, p.p); assert.equal(refreshed.state, "awaiting_mint"); assert.equal(refreshed.destination, null);
+  const minted = await approveCircleMint(refreshed, p.p);
   assert.equal(minted.source!.finalityTag, "included"); assert.equal(minted.effects.find(e => e.role === "mint")!.phase, "submitted"); assert.equal(minted.terminal, false); assert.equal(minted.usageFinalized, false);
   assert.equal(p.signs(), 1); assert.equal(p.sends(), 1); await approveCircleMint(minted, p.p); assert.equal(p.signs(), 1); assert.equal(p.sends(), 1);
 });
@@ -117,7 +120,19 @@ test("destination safe mint leaves usage held until independently finalized sour
     event("MessageReceived", CIRCLE_TRANSMITTER, { caller: route.gasPayer, sourceDomain: 3, nonce: attested.nonce, sender: circleWord(CIRCLE_MESSENGER), finalityThresholdExecuted: 1000, messageBody: attested.body }, 3)];
   const minted = decodeCircleDestination(op.source!, attested, observation(143, route.gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(attested), logs), "1", undefined, issuerFeeRecipient);
   p.p.observeDestination = async () => minted; op = await observeCircle(op, p.p); assert.equal(op.state, "awaiting_finality"); assert.equal(op.terminal, false); assert.ok(op.usage.every(u => u.state === "unknown_finality"));
-  const raw = source(143), finalized = decodeCircleSource({ ...raw, finalityTag: "finalized" }, 143); p.p.observeSource = async () => finalized;
+  const heldUsage = canonicalJson(op.usage), signs = p.signs(), sends = p.sends();
+  let settlements = 0; p.p.usage = async (current, target) => { settlements++; return usage(current, target === "finalized" ? "finalized" : "unknown_finality"); };
+  const raw = source(143);
+  for (const height of [11, 12]) {
+    const included = decodeCircleSource({ ...raw, finalityHead: { hash: `0x${height.toString(16).padStart(2, "0").repeat(32)}`, number: `0x${height.toString(16)}` } }, 143);
+    assert.notEqual(included.finalityBlockHash, op.source!.finalityBlockHash);
+    p.p.observeSource = async () => included; op = await observeCircle(op, p.p);
+    assert.equal(op.state, "awaiting_finality"); assert.equal(op.terminal, false); assert.equal(op.usageFinalized, false);
+    assert.equal(op.usage.length, 5); assert.equal(canonicalJson(op.usage), heldUsage);
+    assert.equal(p.signs(), signs); assert.equal(p.sends(), sends); assert.equal(settlements, 0);
+    assert.equal(op.source!.finalityBlockNumberAtomic, String(height)); assert.equal(op.source!.finalityTag, "included");
+  }
+  const finalized = decodeCircleSource({ ...raw, finalityTag: "finalized" }, 143); p.p.observeSource = async () => finalized;
   p.p.observeDestination = async () => null; op = await observeCircle(op, p.p); assert.equal(op.terminal, false);
   p.p.observeDestination = async () => ({ ...minted, blockHash: `0x${"99".repeat(32)}` }); await assert.rejects(observeCircle(op, p.p), /destination_reorg/);
   p.p.observeDestination = async () => minted; op = await observeCircle(op, p.p); assert.equal(op.state, "completed"); assert.equal(op.terminal, true); assert.ok(op.usage.every(u => u.state === "finalized")); validateCircle(op);

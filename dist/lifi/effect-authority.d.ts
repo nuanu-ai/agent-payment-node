@@ -16,5 +16,6 @@ export interface BridgeEffectAuthority {
 export declare function withBridgeEffectAuthority<T>(op: BridgeOperationRecord, now: () => number, foregroundConfirm: () => Promise<boolean>, rejected: () => Promise<T>, confirmPolicy: (op: BridgeOperationRecord) => Promise<string | undefined>, work: (authority: BridgeEffectAuthority, approvedAt: number) => Promise<T>): Promise<T>;
 /** Permanent create-only barriers live outside rollbackable operation/usage journals. A lost result never permits another effect. */
 export declare class BridgeEffectClaims extends SecureStateStore {
+    assertUnsignedBridge(op: BridgeOperationRecord): Promise<void>;
     claim(op: BridgeOperationRecord, role: "approval" | "bridge", boundary: "sign" | "send", material?: BridgeSealedMaterial): Promise<void>;
 }

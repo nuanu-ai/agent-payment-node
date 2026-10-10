@@ -346,7 +346,7 @@ export function createApnCore(bound, options = {}) {
             lineaArchiveDeploymentScalarCode: bound.request.command === "bridge.prepare" &&
                 process.env.APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE === "1",
             custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
-            ...(bound.request.command === "bridge.approve" ? { approval: new TtyBridgeApproval() } : {}) },
+            ...((bound.request.command === "bridge.approve" || (bound.request.command === "operation.resume" && bound.request.observeOnly !== true)) ? { approval: new TtyBridgeApproval() } : {}) },
         chainAccounts, directRails,
         ...(bound.request.command === "transfer.approve" || options.railApproval !== undefined ? { railApproval: options.railApproval ?? new TtyRailApproval() } : {}),
         ...(bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron" || options.chainPolicyApproval !== undefined ? { chainPolicyApproval: options.chainPolicyApproval ?? new TtyChainPolicyApproval() } : {}),

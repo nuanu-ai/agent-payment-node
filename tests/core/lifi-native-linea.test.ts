@@ -157,6 +157,7 @@ test("Linea native Across executes one exact EIP-1559 source effect and complete
   assert.equal(signed.data, record.effects[0]!.envelope.data);
 
   const sourceCalls = s.source.calls.length, destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
+  const custodyLoads = s.wrapping.loads, approvalCalls = s.approval.calls.length;
   for (let i = 0; i < 2; i++) {
     const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
     assert.equal(resumed.ok, true, resumed.error?.message);
@@ -164,6 +165,7 @@ test("Linea native Across executes one exact EIP-1559 source effect and complete
     assert.equal(status.ok, true, status.error?.message);
   }
   assert.equal(s.source.submissions.length, 1);
+  assert.equal(s.wrapping.loads, custodyLoads); assert.equal(s.approval.calls.length, approvalCalls);
   assert.equal(s.source.calls.length, sourceCalls); assert.equal(s.destination.calls.length, destinationCalls);
   assert.equal(s.provider.statusCalls, providerCalls);
 });
