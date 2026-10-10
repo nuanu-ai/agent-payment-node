@@ -71,9 +71,15 @@ async function project(runner, deadline) {
         result.stdout.fill(0);
     }
 }
-async function readPolicy(runner, deadline) {
+async function readPolicy(runner, deadline, observation) {
+    if (observation !== undefined)
+        observation.guard_step = "project_before";
     const vendorProjectHash = await project(runner, deadline);
+    if (observation !== undefined)
+        observation.guard_step = "address_before";
     await address(runner, deadline);
+    if (observation !== undefined)
+        observation.guard_step = "trading_mode";
     const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
     try {
         const data = success(mode);
@@ -83,6 +89,8 @@ async function readPolicy(runner, deadline) {
     finally {
         mode.stdout.fill(0);
     }
+    if (observation !== undefined)
+        observation.guard_step = "vendor_policy";
     const result = await runner.runJson(["wallet", "policy", "get", "--json"], remaining(deadline), deadline);
     let variant;
     try {
@@ -100,7 +108,11 @@ async function readPolicy(runner, deadline) {
     finally {
         result.stdout.fill(0);
     }
+    if (observation !== undefined)
+        observation.guard_step = "address_after";
     await address(runner, deadline);
+    if (observation !== undefined)
+        observation.guard_step = "project_after";
     if (await project(runner, deadline) !== vendorProjectHash)
         refuse();
     return Object.freeze({ selectedAddress: PAYER, ...variant, vendorProjectHash, tradingMode: "guard", observedAt: new Date().toISOString() });
@@ -185,37 +197,70 @@ export async function submitOwnedMetaMaskNative(scope, context) {
     }
     return { ...hint, ...(result.nativeDiagnostic === undefined ? {} : { diagnostic: result.nativeDiagnostic }) };
 }
+function readDiagnostic(value) {
+    try {
+        return validateMetaMaskNativeDiagnostic(value);
+    }
+    catch {
+        return null;
+    }
+}
 /** Normal status READ only. Owner supplies RID/project hash from its authentic journal; a service hint is not chain evidence. */
 export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHash) {
+    const observation = { stage: "input", guard_step: null, request_id: null, watch_returned: false,
+        before_guard_verified: false, after_guard_verified: false, request_identity_verified: false, provider_status: null,
+        transaction_hash: null, chain_id: null, response_hash: null, reason: null, error_code: null, diagnostic: null };
+    const observed = (hint) => {
+        observation.transaction_hash = "transactionHash" in hint ? hint.transactionHash ?? null : null;
+        observation.chain_id = hint.chainId ?? null;
+        observation.reason = hint.disposition === "unknown" ? hint.reason : null;
+        return { ...hint, readObservation: Object.freeze({ ...observation }) };
+    };
     if (!/^[A-Za-z0-9._:-]{1,256}$/u.test(requestId) || !/^[a-f0-9]{64}$/u.test(vendorProjectHash))
-        return { disposition: "unknown", reason: "provider_request_binding_invalid" };
+        return observed({ disposition: "unknown", reason: "provider_request_binding_invalid" });
+    observation.request_id = requestId;
     const runner = new NodeMetaMaskProcessRunner();
     let hint = { disposition: "unknown", reason: "provider_request_read_unavailable", requestId };
     try {
-        const before = await readPolicy(runner);
+        observation.stage = "before_guard";
+        const before = await readPolicy(runner, undefined, observation);
         if (before.vendorProjectHash !== vendorProjectHash)
             refuse();
+        observation.before_guard_verified = true;
+        observation.stage = "watch";
+        observation.guard_step = null;
         const result = await runner.runJson(["wallet", "requests", "watch", requestId, "--wallet-timeout", "1", "--json"], 6_000);
+        observation.watch_returned = true;
         try {
-            hint = requestHint(result, requestId);
+            observation.response_hash = sha256(result.stdout);
+            observation.diagnostic = result.nativeDiagnostic === undefined ? null : readDiagnostic(result.nativeDiagnostic);
+            hint = requestHint(result, requestId, observation);
         }
         finally {
             result.stdout.fill(0);
         }
-        const after = await readPolicy(runner);
+        observation.stage = "after_guard";
+        const after = await readPolicy(runner, undefined, observation);
         if (after.vendorProjectHash !== vendorProjectHash || after.vendorPolicyHash !== before.vendorPolicyHash)
             refuse();
         if (hint.chainId !== undefined)
             policyAllowsChain(after, hint.chainId);
-        return hint;
+        observation.after_guard_verified = true;
+        observation.stage = "complete";
+        observation.guard_step = null;
+        return observed(hint);
     }
-    catch {
-        return { disposition: "unknown", reason: "provider_request_read_guard_changed_or_unavailable", requestId,
+    catch (error) {
+        observation.error_code = error instanceof ApnError && ["APN_OPERATION_BLOCKED", "APN_PROVIDER_PROTOCOL", "APN_PROVIDER_UNAVAILABLE", "APN_STATE_CORRUPT"].includes(error.code)
+            ? error.code : "unavailable";
+        const diagnostic = error instanceof NativeReadRefusal ? error.nativeDiagnostic : takeMetaMaskNativeProcessFailureDiagnostic(error);
+        observation.diagnostic = diagnostic === undefined ? observation.diagnostic : readDiagnostic(diagnostic);
+        return observed({ disposition: "unknown", reason: "provider_request_read_guard_changed_or_unavailable", requestId,
             ...("transactionHash" in hint && hint.transactionHash !== undefined ? { transactionHash: hint.transactionHash } : {}),
-            ...(hint.chainId === undefined ? {} : { chainId: hint.chainId }) };
+            ...(hint.chainId === undefined ? {} : { chainId: hint.chainId }) });
     }
 }
-function requestHint(result, requestId) {
+function requestHint(result, requestId, observation) {
     const parsed = parseMetaMaskProcessOutput(result.stdout);
     const unknown = (reason) => ({ disposition: "unknown", reason, requestId });
     if (parsed === null)
@@ -243,6 +288,10 @@ function requestHint(result, requestId) {
     if (requestHash !== undefined && statusHash !== undefined && requestHash !== statusHash)
         return unknown("provider_transaction_identity_conflict");
     const transactionHash = statusHash ?? requestHash;
+    observation.request_identity_verified = true;
+    const states = ["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING", "CONFIRMED", "FAILED", "EXPIRED", "DENIED", "APPROVED", "SIGNED", "CANCELLED"];
+    observation.provider_status = typeof status.status === "string" && states.includes(status.status)
+        ? status.status : typeof status.status === "string" ? "unrecognized" : null;
     if (result.exitCode !== 0 || parsed.envelope?.ok !== true)
         return { disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint,
             ...(transactionHash === undefined ? {} : { transactionHash }) };

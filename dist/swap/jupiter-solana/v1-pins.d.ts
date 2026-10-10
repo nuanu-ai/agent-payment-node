@@ -40,6 +40,11 @@ export declare const JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY: import("../proto
 export declare const JUPITER_V1_WHIRLPOOL_4H_POOL = "4HppGTweoGQ8ZZ6UcCgwJKfi5mJD9Dqwy6htCpnbfBLW";
 export declare const JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
 export declare const JUPITER_V1_WHIRLPOOL_4H_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+/** Additive upgraded generations; historical SwapV2 admissions do not authorize these bytes. */
+export declare const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+export declare const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
 export declare const JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS: readonly (Readonly<{
     programId: "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
     loader: "BPFLoader2111111111111111111111111111111111";

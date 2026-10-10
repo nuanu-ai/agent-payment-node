@@ -63,6 +63,24 @@ export const JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN = Object.freeze(validateSwapM
  validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc-whirlpool-swap-v2-4h" }));
 export const JUPITER_V1_WHIRLPOOL_4H_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-swap-v2-4h.2026-10-08", pins: [JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN] });
 
+/** Additive upgraded generations; historical SwapV2 admissions do not authorize these bytes. */
+export const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({
+ ...JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, protocolVersion: "jup6-route-v1-whirlpool-swap-v2-runtime.2",
+ validationPolicyIdentity: "apn.jupiter-v1.runtime-099da3a26d336aa7174960f057546f192fc1ccda8e3e9d1b4aa5c69fa8a79a5f-sol-usdc-whirlpool-swap-v2-esv",
+ validationPolicyVersion: "2.0.0"
+}));
+export const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({
+ registryVersion: "jupiter-v1-whirlpool-swap-v2-esv-runtime.2026-10-11", pins: [JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_MECHANISM_PIN]
+});
+export const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({
+ ...JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN, protocolVersion: "jup6-route-v1-whirlpool-swap-v2-4h-runtime.2",
+ validationPolicyIdentity: "apn.jupiter-v1.runtime-099da3a26d336aa7174960f057546f192fc1ccda8e3e9d1b4aa5c69fa8a79a5f-sol-usdc-whirlpool-swap-v2-4h",
+ validationPolicyVersion: "2.0.0"
+}));
+export const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({
+ registryVersion: "jupiter-v1-whirlpool-swap-v2-4h-runtime.2026-10-11", pins: [JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_MECHANISM_PIN]
+});
+
 export const JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS = Object.freeze([
     Object.freeze({programId: ASSOCIATED_TOKEN_PROGRAM, loader: "BPFLoader2111111111111111111111111111111111", payloadHash: "6804554e69fd3a58caa191dc4a58f4c67223d30ca28ab8987f39fc18d2f7374d"}),
     Object.freeze({programId: COMPUTE_BUDGET_PROGRAM, loader: "NativeLoader1111111111111111111111111111111", payloadHash: "005950c007e8e550a16beddf836f0082d26d197f5f645ff7c04a5c8d171cf8a1"}),

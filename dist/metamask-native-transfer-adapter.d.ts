@@ -38,7 +38,24 @@ export type MetaMaskNativeSubmission = ({
 export declare function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId, deadline?: MetaMaskNativeDeadlineInput): Promise<FixedMetaMaskNativePolicy>;
 /** Owner alone persists the one-effect handoff marker before this statically bound call. */
 export declare function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission>;
-export type MetaMaskNativeRequestObservation = {
+/** Transient read evidence only. No field grants financial authority or changes a held journal. */
+export interface MetaMaskNativeReadObservation {
+    readonly stage: "not_requested" | "input" | "before_guard" | "watch" | "after_guard" | "complete";
+    readonly guard_step: "project_before" | "address_before" | "trading_mode" | "vendor_policy" | "address_after" | "project_after" | null;
+    readonly request_id: string | null;
+    readonly watch_returned: boolean;
+    readonly before_guard_verified: boolean;
+    readonly after_guard_verified: boolean;
+    readonly request_identity_verified: boolean;
+    readonly provider_status: "EVALUATING" | "AWAITING_MFA" | "SIGNING" | "BROADCASTING" | "CONFIRMED" | "FAILED" | "EXPIRED" | "DENIED" | "APPROVED" | "SIGNED" | "CANCELLED" | "unrecognized" | null;
+    readonly transaction_hash: Hex | null;
+    readonly chain_id: MetaMaskNativeFeeChainId | null;
+    readonly response_hash: string | null;
+    readonly reason: string | null;
+    readonly error_code: "APN_OPERATION_BLOCKED" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_UNAVAILABLE" | "APN_STATE_CORRUPT" | "unavailable" | null;
+    readonly diagnostic: MetaMaskNativeDiagnostic | null;
+}
+type RequestHint = {
     readonly disposition: "acknowledged";
     readonly requestId: string;
     readonly transactionHash: Hex;
@@ -54,6 +71,9 @@ export type MetaMaskNativeRequestObservation = {
     readonly requestId?: string;
     readonly transactionHash?: Hex;
     readonly chainId?: MetaMaskNativeFeeChainId;
+};
+export type MetaMaskNativeRequestObservation = RequestHint & {
+    readonly readObservation?: MetaMaskNativeReadObservation;
 };
 /** Normal status READ only. Owner supplies RID/project hash from its authentic journal; a service hint is not chain evidence. */
 export declare function readFixedMetaMaskNativeRequest(requestId: string, vendorProjectHash: string): Promise<MetaMaskNativeRequestObservation>;
