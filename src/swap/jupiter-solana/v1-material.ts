@@ -89,6 +89,13 @@ export function checkedJupiterV1QuoteRpcLifetime(value: unknown): JupiterV1Quote
     canonicalAddress(value.blockhash);
     return value as unknown as JupiterV1QuoteRpcLifetime;
 }
+/** A saved RPC lifetime cannot silently move to another configured endpoint.
+ * Legacy material has no origin evidence; its existing genesis and pin guards remain.
+ */
+export function assertJupiterV1RpcOrigin(originHash: string, lifetime?: JupiterV1QuoteRpcLifetime): void {
+    if (lifetime !== undefined && checkedJupiterV1QuoteRpcLifetime(lifetime).rpcOriginHash !== originHash)
+        throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 configured RPC differs from the frozen quote origin.", { reason: "jupiter_v1_rpc_origin_mismatch" });
+}
 export interface JupiterV1PreparedMaterial extends GuardedSwapPreparedMaterial {
     readonly quote: SwapQuoteSnapshot;
     readonly approvalCapAtomic: "0";

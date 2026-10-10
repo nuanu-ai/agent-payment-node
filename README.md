@@ -573,6 +573,15 @@ explicitly injected read-only builder, and approval and execution refuse
 because the JUP6 instruction and account ABI has not been verified for
 signing. See `docs/jupiter.md`.
 
+Normal Solana commands use the anonymous public mainnet RPC
+`https://api.mainnet-beta.solana.com` when `APN_SOLANA_RPC_URL` is unset or empty.
+No RPC account or API key is required. Set `APN_SOLANA_RPC_URL` only to choose
+your own HTTPS endpoint; invalid nonempty values refuse instead of falling back.
+Public RPC can rate-limit or refuse requests and provides no APN availability
+guarantee. Jupiter material with a frozen RPC origin requires that exact endpoint
+for preparation, approval and observation. Legacy material without that origin
+retains its existing genesis and program-pin checks.
+
 `apn swap solana orca stable-prepare` is a separate, owner-admitted USDC to
 USDT route through the pinned Whirlpool. It reads and simulates one exact
 unsigned transaction, optionally including creation of the owner's USDT ATA,

@@ -5,7 +5,7 @@ import { assertSolanaNetwork, rpcRecord, rpcAtomic, solanaReadBatch, type Solana
 import { rawAccount } from "../orca-solana/accounts.js";
 import { ADDRESS_LOOKUP_TABLE_PROGRAM, SOLANA_MAINNET_GENESIS, canonicalAddress, invalid } from "./catalog.js";
 import { jupiterV1Instructions, jupiterV1Lifetime, jupiterV1ResponseHash, decodeJupiterV1Build, decodeJupiterV1Quote, freezeJson, type JupiterV1QuoteResponse, type JupiterV1RawBuildResponse } from "./v1-codec.js";
-import { JUPITER_V1_MATERIAL_SCHEMA, jupiterV1MaterialDigest, type JupiterV1SemanticAccount, type JupiterV1AddressTable, type JupiterV1RuntimeProgramPin, type JupiterV1ResolvedMaterial, type JupiterV1CompiledAccount, checkedJupiterV1QuoteRpcLifetime, type JupiterV1QuoteRpcLifetime } from "./v1-material.js";
+import { JUPITER_V1_MATERIAL_SCHEMA, jupiterV1MaterialDigest, type JupiterV1SemanticAccount, type JupiterV1AddressTable, type JupiterV1RuntimeProgramPin, type JupiterV1ResolvedMaterial, type JupiterV1CompiledAccount, assertJupiterV1RpcOrigin, checkedJupiterV1QuoteRpcLifetime, type JupiterV1QuoteRpcLifetime } from "./v1-material.js";
 import { routeConfigForQuoteBuild, jupiterV1RegisteredProgramPins, type JupiterV1RouteId } from "./v1-route-config.js";
 import { assertWhirlpoolV2Memo, validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { refreshJupiterV1QuoteBuild } from "./v1-quote-refresh.js";
@@ -22,6 +22,7 @@ export class JupiterV1MaterialResolver {
         decodeJupiterV1Quote(quote);
         decodeJupiterV1Build(build);
         const route = routeConfigForQuoteBuild(quote, build, expectedRouteId), registeredPins = jupiterV1RegisteredProgramPins(route);
+        assertJupiterV1RpcOrigin(this.rpc.originHash, frozenRpcLifetime);
         await assertSolanaNetwork(this.rpc);
         const instructions = jupiterV1Instructions(build), keys = [...new Set([payer, ...instructions.flatMap(ix => [ix.programId, ...ix.accounts.map(a => a.pubkey)]), ...build.addressLookupTableAddresses])];
         const accounts = await this.read(keys, quote.contextSlot), map = new Map(accounts.map(a => [a.address, a]));

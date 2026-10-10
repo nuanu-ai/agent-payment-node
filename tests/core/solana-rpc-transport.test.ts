@@ -28,6 +28,45 @@ test("installed runtime gives each command a fresh 24 POST Solana cap", async t 
   assert.notEqual(leftRpc.budget, rightRpc.budget);
 });
 
+for (const choice of [
+  { name: "unset env", env: undefined, expected: "https://api.mainnet-beta.solana.com" },
+  { name: "empty env", env: "", expected: "https://api.mainnet-beta.solana.com" },
+  { name: "explicit env", env: "https://owner.example/rpc", expected: "https://owner.example/rpc" },
+  { name: "option overrides env", env: "https://env.example/rpc", option: "https://option.example/rpc", expected: "https://option.example/rpc" },
+  { name: "invalid nonempty env", env: "not-a-url", invalid: true },
+  { name: "invalid explicit option", env: "https://env.example/rpc", option: "", invalid: true },
+]) test(`normal runtime Solana anonymous endpoint selection: ${choice.name}`, async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  await new StateStore(temporary.root).initialize();
+  const prior = process.env.APN_SOLANA_RPC_URL;
+  let posts = 0, endpoint: string | undefined;
+  const fetcher: typeof fetch = async (url, init) => {
+    posts++; endpoint = String(url);
+    const request = JSON.parse(String(init?.body));
+    return json({ jsonrpc: "2.0", id: request.id, result: "mainnet-evidence" });
+  };
+  let rpc: SolanaRpc;
+  try {
+    if (choice.env === undefined) delete process.env.APN_SOLANA_RPC_URL;
+    else process.env.APN_SOLANA_RPC_URL = choice.env;
+    const core = createApnCore(bindArgv(["wallet", "capabilities-solana"]), {
+      stateRoot: temporary.root, solanaRpcFetch: fetcher,
+      ...("option" in choice ? { solanaRpcUrl: choice.option } : {}),
+    });
+    rpc = (core.context.directRails[0] as SolanaLocalAdapter).rpc as SolanaRpc;
+  } finally {
+    if (prior === undefined) delete process.env.APN_SOLANA_RPC_URL;
+    else process.env.APN_SOLANA_RPC_URL = prior;
+  }
+  if ("invalid" in choice) {
+    await assert.rejects(rpc.call("getGenesisHash", []), { code: "APN_RPC_CONFIG" });
+    assert.equal(posts, 0);
+  } else {
+    assert.equal(await rpc.call("getGenesisHash", []), "mainnet-evidence");
+    assert.equal(endpoint, new URL(choice.expected).href); assert.equal(posts, 1);
+  }
+});
+
 test("Solana batch correlates shuffled unique IDs and counts one physical POST", async () => {
   const budget = new SolanaRpcBudget({ maxPhysicalRequests: 1 });
   let posts = 0;

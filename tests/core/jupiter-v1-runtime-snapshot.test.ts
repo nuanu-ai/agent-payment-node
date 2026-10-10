@@ -106,3 +106,21 @@ test("resolver rejects unchanged payload with a changed deployment header before
  await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(p.m.payer,p.m.quoteResponse,p.m.rawBuildResponse,"6000000",undefined,NEW.routeId),/runtime executable pin changed/);
  assert.equal(p.methods.includes("getFeeForMessage"),false);
 });
+
+for (const changed of [false, true]) test(`frozen resolver origin ${changed ? "mismatch refuses before all reads" : "match preserves executable proof"}`, async () => {
+ const p = publicPort(), before = canonicalJson(p.m);
+ const lifetime = { source: "configured_mainnet_rpc_before_quote_freeze" as const,
+  rpcOriginHash: changed ? "1".repeat(64) : p.rpc.originHash,
+  contextSlot: p.m.accountSlot, minimumContextSlot: p.m.accountSlot,
+  blockhash: p.m.lifetime.blockhash, lastValidBlockHeight: p.m.lifetime.lastValidBlockHeight };
+ const resolved = new JupiterV1MaterialResolver(p.rpc).resolve(p.m.payer,p.m.quoteResponse,p.m.rawBuildResponse,"6000000",lifetime,NEW.routeId);
+ if (changed) {
+  await assert.rejects(resolved, { code: "APN_OPERATION_BLOCKED", details: { reason: "jupiter_v1_rpc_origin_mismatch" } });
+  assert.deepEqual(p.methods, []);
+ } else {
+  const fresh = await resolved; assert.deepEqual(fresh.quoteRpcLifetime,lifetime);
+  assert.equal(fresh.messageHash,p.m.messageHash); assert.equal(p.methods[0],"getGenesisHash");
+  assert.equal(canonicalJson(fresh.programPins),canonicalJson(p.m.programPins));
+ }
+ assert.equal(canonicalJson(p.m),before);
+});

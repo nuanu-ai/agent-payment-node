@@ -17,6 +17,13 @@ export function checkedJupiterV1QuoteRpcLifetime(value) {
     canonicalAddress(value.blockhash);
     return value;
 }
+/** A saved RPC lifetime cannot silently move to another configured endpoint.
+ * Legacy material has no origin evidence; its existing genesis and pin guards remain.
+ */
+export function assertJupiterV1RpcOrigin(originHash, lifetime) {
+    if (lifetime !== undefined && checkedJupiterV1QuoteRpcLifetime(lifetime).rpcOriginHash !== originHash)
+        throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 configured RPC differs from the frozen quote origin.", { reason: "jupiter_v1_rpc_origin_mismatch" });
+}
 export function jupiterV1MaterialDigest(value) { return domainHash(JUPITER_V1_MATERIAL_SCHEMA, canonicalJson(value)); }
 export function validateJupiterV1Material(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "genesis", "payer", "quoteResponse", "rawBuildResponse", "quoteResponseHash", "rawBuildResponseHash", "lifetime", ...(Object.hasOwn(value, "quoteRpcLifetime") ? ["quoteRpcLifetime"] : []), "transactionBase64", "transactionHash", "messageBase64", "messageHash", "compiledAccounts", "lookupBindingDigest", "rawInstructions", "semanticAccounts", "addressTables", "programPins", "accountSlot", "currentBlockHeight", "networkFeeLamports", "tokenAccountRentLamports", "maximumNativeExpenseLamports", "materialDigest"]) || value.schemaVersion !== JUPITER_V1_MATERIAL_SCHEMA || value.genesis !== SOLANA_MAINNET_GENESIS || typeof value.materialDigest !== "string")
