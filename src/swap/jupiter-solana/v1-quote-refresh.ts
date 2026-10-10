@@ -1,6 +1,6 @@
 import { canonicalJson, exactKeys } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
-import { rpcAtomic, rpcRecord, type SolanaRpcPort } from "../../solana/rpc.js";
+import { rpcAtomic, rpcRecord, type SolanaRpcPort, type SolanaBatchRead } from "../../solana/rpc.js";
 import { decodeJupiterV1Build, freezeJson, jupiterV1Instructions, jupiterV1Lifetime, jupiterV1ResponseHash, type JupiterV1RawBuildResponse } from "./v1-codec.js";
 import { assertJupiterV1FreshMaterial, checkedJupiterV1QuoteRpcLifetime, jupiterV1MaterialDigest, validateJupiterV1Material, type JupiterV1ResolvedMaterial, type JupiterV1QuoteRpcLifetime } from "./v1-material.js";
 import { assembleJupiterV1 } from "./v1-resolver.js";
@@ -10,7 +10,7 @@ import { assembleJupiterV1 } from "./v1-resolver.js";
  * lookup table and economic field. Only lifetime and timing metadata may change.
  * Execution still rereads all program bytes and uses the final frozen message.
  */
-export async function refreshJupiterV1QuoteBuild(rpc: Pick<SolanaRpcPort, "call"> & Partial<Pick<SolanaRpcPort, "originHash">>,
+export async function refreshJupiterV1QuoteBuild(rpc: Pick<SolanaRpcPort, "call" | "batch"> & Partial<Pick<SolanaRpcPort, "originHash">>,
   material: JupiterV1ResolvedMaterial, response: JupiterV1RawBuildResponse, useRpcLifetime = false): Promise<JupiterV1ResolvedMaterial> {
   const prior = validateJupiterV1Material(material), build = decodeJupiterV1Build(response);
   if (canonicalJson(withoutTiming(prior.rawBuildResponse)) !== canonicalJson(withoutTiming(build)) ||
@@ -32,8 +32,15 @@ export async function refreshJupiterV1QuoteBuild(rpc: Pick<SolanaRpcPort, "call"
       blockhash: value.blockhash, lastValidBlockHeight: rpcAtomic(value.lastValidBlockHeight).toString() });
   }
   const compiled = assembleJupiterV1(prior.payer, build, prior.addressTables, quoteRpcLifetime);
-  const fee = rpcRecord(await rpc.call("getFeeForMessage", [compiled.messageBase64, { commitment: "confirmed" }]));
-  const height = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "confirmed" }])).toString();
+  const reads: readonly SolanaBatchRead[] = [
+    { method: "getFeeForMessage", params: [compiled.messageBase64, { commitment: "confirmed" }] },
+    { method: "getBlockHeight", params: [{ commitment: "confirmed" }] },
+  ];
+  const values = rpc.batch === undefined ? [await rpc.call(reads[0]!.method, reads[0]!.params),
+    await rpc.call(reads[1]!.method, reads[1]!.params)] : await rpc.batch(reads);
+  if (!Array.isArray(values) || values.length !== reads.length)
+    throw new ApnError("APN_RPC_PROTOCOL", "Jupiter's pre-freeze RPC read batch is incomplete.");
+  const fee = rpcRecord(values[0]), height = rpcAtomic(values[1]).toString();
   if (quoteRpcLifetime !== undefined && (BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height) < 100n || BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height) > 151n))
     throw new ApnError("APN_REPREPARE_REQUIRED", "Jupiter's pre-freeze RPC blockhash has an insufficient or excessive lifetime.", {
       remainingBlocks: (BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height)).toString(),

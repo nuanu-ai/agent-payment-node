@@ -31,8 +31,15 @@ export async function refreshJupiterV1QuoteBuild(rpc, material, response, useRpc
             blockhash: value.blockhash, lastValidBlockHeight: rpcAtomic(value.lastValidBlockHeight).toString() });
     }
     const compiled = assembleJupiterV1(prior.payer, build, prior.addressTables, quoteRpcLifetime);
-    const fee = rpcRecord(await rpc.call("getFeeForMessage", [compiled.messageBase64, { commitment: "confirmed" }]));
-    const height = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "confirmed" }])).toString();
+    const reads = [
+        { method: "getFeeForMessage", params: [compiled.messageBase64, { commitment: "confirmed" }] },
+        { method: "getBlockHeight", params: [{ commitment: "confirmed" }] },
+    ];
+    const values = rpc.batch === undefined ? [await rpc.call(reads[0].method, reads[0].params),
+        await rpc.call(reads[1].method, reads[1].params)] : await rpc.batch(reads);
+    if (!Array.isArray(values) || values.length !== reads.length)
+        throw new ApnError("APN_RPC_PROTOCOL", "Jupiter's pre-freeze RPC read batch is incomplete.");
+    const fee = rpcRecord(values[0]), height = rpcAtomic(values[1]).toString();
     if (quoteRpcLifetime !== undefined && (BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height) < 100n || BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height) > 151n))
         throw new ApnError("APN_REPREPARE_REQUIRED", "Jupiter's pre-freeze RPC blockhash has an insufficient or excessive lifetime.", {
             remainingBlocks: (BigInt(quoteRpcLifetime.lastValidBlockHeight) - BigInt(height)).toString(),
