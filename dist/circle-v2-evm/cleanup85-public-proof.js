@@ -1,3 +1,4 @@
+import { evmRpcSignatureScalar } from "../circle-cleanup85-native-codec.js";
 import { getAddress, keccak256, serializeTransaction, recoverTransactionAddress } from "viem";
 import { hashObject, exactKeys, isPlainRecord } from "../canonical.js";
 import { validateEvmNativeCustody } from "../evm-native-custody.js";
@@ -16,7 +17,7 @@ export async function verifyCleanup85PublicWire(input, envelope, expectedHash, n
         block === zero || time === 0n || circleHex(b.hash, 32) !== block || circleUint(b.number) !== number || circleHex(check.hash, 32) !== block || circleUint(check.number) !== number || circleUint(check.timestamp) !== time ||
         !Array.isArray(b.transactions) || b.transactions[Number(index)] !== hash || b.transactions.filter(x => x === hash).length !== 1 || circleHex(head.hash, 32) === zero || circleUint(head.number) < number || circleUint(head.timestamp) < time || noLogs && (!Array.isArray(r.logs) || r.logs.length !== 0))
         circleBlocked("cleanup85_exact_finalized_wire_required");
-    const raw = serializeTransaction({ type: "eip1559", chainId: 42161, nonce: Number(circleUint(t.nonce)), to: getAddress(String(t.to)), data: circleHex(t.input), value: circleUint(t.value), gas: circleUint(t.gas), maxFeePerGas: circleUint(t.maxFeePerGas), maxPriorityFeePerGas: circleUint(t.maxPriorityFeePerGas), accessList: [] }, { r: circleHex(t.r, 32), s: circleHex(t.s, 32), yParity: Number(circleUint(t.yParity ?? t.v)) });
+    const raw = serializeTransaction({ type: "eip1559", chainId: 42161, nonce: Number(circleUint(t.nonce)), to: getAddress(String(t.to)), data: circleHex(t.input), value: circleUint(t.value), gas: circleUint(t.gas), maxFeePerGas: circleUint(t.maxFeePerGas), maxPriorityFeePerGas: circleUint(t.maxPriorityFeePerGas), accessList: [] }, { r: evmRpcSignatureScalar(t.r), s: evmRpcSignatureScalar(t.s), yParity: Number(circleUint(t.yParity ?? t.v)) });
     if (keccak256(raw) !== hash || getAddress(await recoverTransactionAddress({ serializedTransaction: raw })) !== CIRCLE_SOURCE_OWNER)
         circleBlocked("cleanup85_public_signature_changed");
     return raw;
