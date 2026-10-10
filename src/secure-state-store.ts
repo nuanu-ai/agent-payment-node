@@ -51,7 +51,7 @@ export function validateDirectory(stats: Stats, root: boolean): void {
   if (!root && (permissions(stats) & 0o077) !== 0) stateSecurity("State directory is accessible by another user.");
 }
 
-function validateFile(stats: Stats): void {
+export function validateFile(stats: Stats): void {
   if (!stats.isFile() || stats.isSymbolicLink()) stateSecurity("State entry is not a regular file.");
   if (stats.uid !== uid()) stateSecurity("State file has the wrong owner.");
   if (permissions(stats) !== FILE_MODE) stateSecurity("State file must have mode 0600.");

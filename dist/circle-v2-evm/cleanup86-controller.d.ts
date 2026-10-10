@@ -9,6 +9,14 @@ export interface Cleanup86Grant {
 }
 export declare function assertCleanup86Grant(grant: Cleanup86Grant, root: string, op: CircleOperationV1, intent: Cleanup86Intent): void;
 export declare function claimCleanup86Custody(grant: Cleanup86Grant, root: string, op: CircleOperationV1, intent: Cleanup86Intent): void;
+interface CurrentExecution {
+    readonly state: StateStore;
+    readonly recovery: Cleanup85RecoveryIntent;
+    readonly certificate: VerifiedCleanup86CurrentPurpose;
+}
+/** The normal controller completes its initial guard before invoking create-only publication.
+ * The completion receipt never leaves this module, and binds the precise published generation. */
+export declare function executeFreshCleanup86(root: string, op: CircleOperationV1, envelope: Cleanup86Intent["envelope"], store: Cleanup86Store, ports: Cleanup86Ports, current: CurrentExecution, initialPreflight: () => Promise<void>, publish: () => Promise<Cleanup86Intent>): Promise<Cleanup86Effect>;
 export interface Cleanup86Ports {
     readonly now: () => number;
     confirm(intent: Cleanup86Intent, deadline: string): Promise<void>;
@@ -23,3 +31,4 @@ export declare function executeCleanup86(root: string, op: CircleOperationV1, in
     readonly recovery: Cleanup85RecoveryIntent;
     readonly certificate: VerifiedCleanup86CurrentPurpose;
 }): Promise<Cleanup86Effect>;
+export {};
