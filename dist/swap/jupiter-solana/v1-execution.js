@@ -265,7 +265,16 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
         corrupt(); await this.journal.bindQuote(quoteHash, this.calls); }
     async chargeOfficialRead() { await this.charge(); }
     async charge() { this.calls = await this.journal.charge(this.stageKey, this.priorQuoteCalls); }
-    async call(method, params) { await this.charge(); return await this.base.call(method, params); }
+    async call(method, params) {
+        await this.charge();
+        if (method === "getBlockHeight" && typeof this.base.batch === "function") {
+            const results = await this.base.batch([{ method, params }]);
+            if (!Array.isArray(results) || results.length !== 1)
+                throw new ApnError("APN_RPC_PROTOCOL", "Jupiter height batch is incomplete.");
+            return results[0];
+        }
+        return await this.base.call(method, params);
+    }
     async batch(reads) {
         // Every logical read consumes the durable stage cap before the shared physical POST.
         for (const _read of reads)
