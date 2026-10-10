@@ -8,6 +8,7 @@ import { circleBlocked, validateCircleEnvelope } from "./operation-model.js";
 import { assertCleanup85Parent } from "./cleanup85-recovery-store.js";
 import { Cleanup86SnapshotStore } from "./cleanup86-snapshot.js";
 import { sanitizedCircleFailure } from "./public-failure-store.js";
+import { assertCleanup86FirstDispatchRecords } from "./cleanup86-first-dispatch-record.js";
 const digest = (x) => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x);
 export function validateCleanup86Intent(value, recovery, context, current) {
     if (!isPlainRecord(value) || !exactKeys(value, ["version", "recoveryBinding", "cancellationProofHash", "envelope", "policies", "capturedAt", "windowEndsAt", "intentHash", ...(value.version === "apn.circle-cleanup86-intent.v2" ? ["retirementProofHash", "freshReadmissionHash"] : []), ...(["apn.circle-cleanup86-intent.v3", "apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(String(value.version)) ? ["currentPurpose"] : []), ...(["apn.circle-cleanup86-intent.v4", "apn.circle-cleanup86-intent.v5"].includes(String(value.version)) ? ["unsignedPredecessor"] : []), ...(value.version === "apn.circle-cleanup86-intent.v5" ? ["unsignedPreparedPredecessor"] : [])]))
@@ -136,8 +137,11 @@ export class Cleanup86Store extends SecureStateStore {
             if (hashObject(previous) !== hashObject(i.unsignedPreparedPredecessor))
                 circleBlocked("cleanup86_prepared_predecessor_changed");
         }
+        assertCleanup86FirstDispatchRecords(s, this.root, op, i);
         for (const [name, entry] of Object.entries(s.entries)) {
             let kind = name.slice(prefix.length);
+            if (kind.startsWith("first-dispatch-"))
+                continue; // Complete separate journal authenticated above.
             if (i.version === "apn.circle-cleanup86-intent.v5") {
                 if (["effect.json", "history-0.json"].includes(kind))
                     continue;
