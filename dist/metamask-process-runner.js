@@ -112,7 +112,8 @@ export class NodeMetaMaskProcessRunner {
             nativeDeadlineRemaining(absoluteDeadline);
         const utc = absoluteDeadline === undefined ? undefined : typeof absoluteDeadline === "string" ? absoluteDeadline : absoluteDeadline.utcExpiresAt;
         const monotonicEnd = absoluteDeadline === undefined ? undefined : typeof absoluteDeadline === "string" ? started + nativeDeadlineRemaining(absoluteDeadline) : absoluteDeadline.monotonicDeadlineMs;
-        const remaining = () => absoluteDeadline === undefined ? 0 : Math.max(0, Math.min(60000, Math.floor(Math.min(Date.parse(utc) - Date.now(), monotonicEnd - performance.now()))));
+        const rawRemaining = () => absoluteDeadline === undefined ? 0 : Math.min(Date.parse(utc) - Date.now(), monotonicEnd - performance.now());
+        const remaining = () => Math.max(0, Math.min(60000, Math.floor(rawRemaining())));
         const diagnostic = (stage, code, exitCode = null, signal = null, stderrClass = "none", providerCode = "none") => validateMetaMaskNativeDiagnostic({ stage, code, exitCode, signal, durationMs: Math.min(86400000, Math.max(0, Math.floor(performance.now() - started))), remainingMs: remaining(), stderrClass, providerCode });
         const beforeLaunch = () => { if (absoluteDeadline !== undefined && remaining() < 1) {
             const error = providerUnavailable("Native SDK deadline reached before launch.");
@@ -122,14 +123,24 @@ export class NodeMetaMaskProcessRunner {
         beforeLaunch();
         let script;
         let resolverTimer;
+        let resolverDeadlineFailure;
         try {
             script = absoluteDeadline === undefined ? await this.binResolver() : await Promise.race([this.binResolver(), new Promise((_, reject) => {
-                    resolverTimer = setTimeout(() => reject(providerUnavailable("Native SDK resolver deadline reached.")), Math.max(1, remaining()));
+                    const expire = () => {
+                        const left = rawRemaining();
+                        if (left > 0) {
+                            resolverTimer = setTimeout(expire, Math.max(1, Math.ceil(left)));
+                            return;
+                        }
+                        resolverDeadlineFailure = providerUnavailable("Native SDK resolver deadline reached.");
+                        reject(resolverDeadlineFailure);
+                    };
+                    resolverTimer = setTimeout(expire, Math.max(1, Math.ceil(rawRemaining())));
                 })]);
         }
         catch (error) {
             if (error instanceof ApnError)
-                nativeFailureDiagnostics.set(error, diagnostic("sdk_resolver", remaining() < 1 && absoluteDeadline !== undefined ? "deadline" : "refused"));
+                nativeFailureDiagnostics.set(error, diagnostic("sdk_resolver", error === resolverDeadlineFailure || absoluteDeadline !== undefined && rawRemaining() <= 0 ? "deadline" : "refused"));
             throw error;
         }
         finally {

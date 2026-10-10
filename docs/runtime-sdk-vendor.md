@@ -46,3 +46,11 @@ The original development graph still retains upstream advisory records. `ellipti
 The former EVM bundle emitted GPL-3.0 `@toruslabs/ffjavascript@6.0.0`, and the former Relay root emitted LGPL-3.0-only `rpc-websockets@9.3.9`. Official ESM selection and the narrower upstream Relay entry remove their executable contributions without replacing cryptographic functions. All four emitted package graphs now exclude elliptic, ffjavascript and rpc-websockets; generation rejects their reintroduction in every slice. Unused analyzed-input notices are excluded from the runtime inventory. APN's MIT license still does not replace licenses of the components it actually ships.
 
 The release SBOM includes each vendor root's emitted package versions and licenses with `CONTAINS` relationships, alongside the production installation graph. The SBOM namespace incorporates the lock and all four provenance bytes. Local verification, private installation, publication and paid acceptance remain distinct proof layers.
+
+
+The MetaMask package resolver uses the invocation's original absolute wall and
+monotonic deadline. A fractional timer callback that arrives before that epoch
+re-arms against the same deadline; it cannot mint a new budget or launch a child.
+The resolver's deadline diagnostic comes from its private timer rejection
+identity. A provider error with the same public message or code remains an
+ordinary refusal before expiry. All child launch checks keep the original bound.
