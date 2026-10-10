@@ -42,5 +42,5 @@ test(`SYNTHETIC ${label} Fp production factory quote, prepare and CLI status pas
  const op=await runtime.prepare({profile,quoteHash:quote.quoteHash,idempotencyKey:"test-fp-command"},new Date());
  const result=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},{state,clock:{now:()=>new Date()},jupiterV1Runtime:runtime} as RuntimeContext);
  const checked=validateSwapOperation(result.operation);
- assert.equal(checked.operationId,op.operationId);assert.equal(checked.mechanismDigest,swapMechanismDigest(ROUTE.mechanismPin));assert.equal(checked.submissionMarker,null);assert.equal(checked.state,"awaiting_approval");assert.equal(checked.usageLease,null);assert.equal(secrets,0);assert.equal(sends,0);
+ assert.equal(checked.operationId,op.operationId);assert.equal(checked.mechanismDigest,swapMechanismDigest(ROUTE.mechanismPin));assert.equal(checked.submissionMarker,null);assert.equal(checked.state,"awaiting_approval");assert.deepEqual(result.nextActions,[`apn swap solana jupiter approve --operation ${op.operationId}`]);assert.equal(checked.usageLease,null);assert.equal(secrets,0);assert.equal(sends,0);
 });
