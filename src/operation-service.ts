@@ -30,7 +30,7 @@ import {
   type ProviderX402OperationRecord,
 } from "./provider-x402-model.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
-import { projectPublicX402Receipt, projectPublicX402Result } from "./x402-public-artifacts.js";
+import { localX402Outcome, providerX402Outcome, x402ReceiptOutcome } from "./operation-x402-outcome.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { publicRailOperation, type RailOperationRecord } from "./rail-operation-model.js";
 import { BridgeOperationRepository } from "./lifi/operation-repository.js";
@@ -467,17 +467,7 @@ export class OperationService {
       if (operation.terminal && options.exposeTerminalReceipt && receipt === null) {
         throw new ApnError("APN_STATE_CORRUPT", "Terminal provider x402 operation has no public receipt.");
       }
-      return {
-        proofClass: operation.proofClass,
-        data: options.exposeSellerResult && operation.state === "completed" && operation.sellerResult !== undefined
-          ? projectPublicX402Result({ variant: "normalized_provider_json", result: operation.sellerResult })
-          : null,
-        operation: publicProviderX402Operation(operation, options.settlementWait),
-        receipt: receipt === null ? null : projectPublicX402Receipt({
-          variant: "normalized_provider_json", operation, receipt,
-        }),
-        nextActions: operation.nextActions,
-      };
+      return providerX402Outcome(operation, receipt, options);
     }
     const operation = found.record;
     const result = operation.resultLink === undefined
@@ -492,43 +482,19 @@ export class OperationService {
     if (operation.terminal && options.exposeTerminalReceipt && receipt === null) {
       throw new ApnError("APN_STATE_CORRUPT", "Terminal x402 operation has no public receipt.");
     }
-    let data: unknown | null = null;
-    if (options.exposeSellerResult && operation.state === "completed") {
-      if (result === null) throw new ApnError("APN_STATE_CORRUPT", "Completed x402 operation has no public result.");
-      data = projectPublicX402Result({ variant: "local", result });
-    }
-    return {
-      proofClass: operation.proofClass,
-      data,
-      operation: publicX402Operation(operation, result ?? undefined, options.settlementWait),
-      receipt: receipt === null ? null : projectPublicX402Receipt({ variant: "local", receipt }),
-      nextActions: operation.nextActions,
-    };
+    return localX402Outcome(operation, result, receipt, options);
   }
-
   async x402ReceiptOutcome(operationId: string): Promise<CommandOutcome> {
     const found = await this.required(operationId);
     if (found.kind !== "x402_fetch") throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
     if (found.strategy === "provider_atomic") {
       const receipt = await this.providerX402.loadReceipt(found.record.profileHash, found.record.operationId);
       if (receipt === null) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
-      return {
-        proofClass: receipt.proofClass,
-        data: null,
-        operation: null,
-        receipt: projectPublicX402Receipt({ variant: "normalized_provider_json", operation: found.record, receipt }),
-        nextActions: [],
-      };
+      return x402ReceiptOutcome({ variant: "normalized_provider_json", operation: found.record, receipt });
     }
     const operation = found.record;
     const receipt = await this.state.loadX402Receipt(operation.profileHash, operation.operationId);
     if (receipt === null) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
-    return {
-      proofClass: receipt.proofClass,
-      data: null,
-      operation: null,
-      receipt: projectPublicX402Receipt({ variant: "local", receipt }),
-      nextActions: [],
-    };
+    return x402ReceiptOutcome({ variant: "local", receipt });
   }
 }
