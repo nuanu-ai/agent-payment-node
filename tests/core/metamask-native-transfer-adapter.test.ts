@@ -22,7 +22,7 @@ let allowTransport = false, currentChecks = 0, rejectAfterHandoff = false;
 const buffers: Buffer[] = [];
 // These doubles test the transport contract only. They cannot prove an owned private issuer positive.
 mock.module("../../src/metamask-package.js", {namedExports: {resolveMetaMaskBin: async () => "/test-only-pinned-package"}});
-mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
+mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureDiagnostic: () => undefined, takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
   async runJson(argv:readonly string[], timeout?:number) {
     calls.push({argv, ...(timeout === undefined ? {} : {timeout})});
     const value = queue.shift(); assert.ok(value, "unexpected child call"); if (argv[1] === "send-transaction") policyQueue({project:postProject??PROJECT,policy:postPolicy??POLICY}); return value;
@@ -31,7 +31,7 @@ mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMask
 mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
   claimMetaMaskNativeOwnedScope: () => {if (!allowTransport) throw new Error("unowned");},
   assertMetaMaskNativeOwnedScope: () => {},
-  assertMetaMaskNativeOwnedContextCurrent: async () => {currentChecks++; if (rejectAfterHandoff && currentChecks === 3) throw new Error("expired");},
+  assertMetaMaskNativeOwnedContextCurrent: async (_scope:unknown,ctx:MetaMaskNativeOwnedContext) => {currentChecks++; if (rejectAfterHandoff && currentChecks === 2) throw new Error("expired");const p=await readFixedMetaMaskNativePolicy(ctx.quote.chainId,ctx.consentExpiresAt);assert.equal(p.vendorProjectHash,ctx.vendorProjectHash);assert.equal(p.vendorPolicyHash,ctx.vendorPolicyHash);},
   readMetaMaskNativeSettlement: async () => {throw new Error("not a settlement fixture");},
   readMetaMaskNativeReservation: async () => {throw new Error("not a ledger fixture");},
   assertMetaMaskNativeFailedBeforeEffect: async () => {throw new Error("not a release fixture");},

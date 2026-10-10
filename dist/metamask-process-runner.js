@@ -1,3 +1,5 @@
+import { performance } from "node:perf_hooks";
+import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
@@ -5,6 +7,14 @@ import { isPlainRecord, sha256 } from "./canonical.js";
 import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 import { METAMASK_FOREGROUND_TIMEOUT_MS, METAMASK_PROCESS_TIMEOUT_MS, resolveMetaMaskBin, } from "./metamask-package.js";
 const MAX_JSON_BYTES = 1024 * 1024;
+const nativeFailureDiagnostics = new WeakMap();
+export function takeMetaMaskNativeProcessFailureDiagnostic(error) {
+    if (!(error instanceof ApnError))
+        return undefined;
+    const value = nativeFailureDiagnostics.get(error);
+    nativeFailureDiagnostics.delete(error);
+    return value;
+}
 const nativeFailureIdentifiers = new WeakMap();
 /** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
 export function takeMetaMaskNativeProcessFailureIdentifiers(error) {
@@ -94,26 +104,83 @@ export class NodeMetaMaskProcessRunner {
         this.openTerminal = openTerminal;
         this.closeTerminal = closeTerminal;
     }
-    async runJson(argv, timeoutMs = this.jsonTimeoutMs) {
+    async runJson(argv, timeoutMs = this.jsonTimeoutMs, absoluteDeadline) {
         if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 305_000)
             throw providerProtocol();
-        const script = await this.binResolver();
+        const started = performance.now(), monotonicEnd = absoluteDeadline === undefined ? undefined : started + nativeDeadlineRemaining(absoluteDeadline);
+        const remaining = () => absoluteDeadline === undefined ? 0 : Math.max(0, Math.min(60000, Math.floor(Math.min(Date.parse(absoluteDeadline) - Date.now(), monotonicEnd - performance.now()))));
+        const diagnostic = (stage, code, exitCode = null, signal = null, stderrClass = "none", providerCode = "none") => validateMetaMaskNativeDiagnostic({ stage, code, exitCode, signal, durationMs: Math.min(86400000, Math.max(0, Math.floor(performance.now() - started))), remainingMs: remaining(), stderrClass, providerCode });
+        const beforeLaunch = () => { if (absoluteDeadline !== undefined && remaining() < 1) {
+            const error = providerUnavailable("Native SDK deadline reached before launch.");
+            nativeFailureDiagnostics.set(error, diagnostic("sdk_resolver", "deadline"));
+            throw error;
+        } };
+        beforeLaunch();
+        let script;
+        let resolverTimer;
+        try {
+            script = absoluteDeadline === undefined ? await this.binResolver() : await Promise.race([this.binResolver(), new Promise((_, reject) => {
+                    resolverTimer = setTimeout(() => reject(providerUnavailable("Native SDK resolver deadline reached.")), Math.max(1, remaining()));
+                })]);
+        }
+        catch (error) {
+            if (error instanceof ApnError)
+                nativeFailureDiagnostics.set(error, diagnostic("sdk_resolver", remaining() < 1 && absoluteDeadline !== undefined ? "deadline" : "refused"));
+            throw error;
+        }
+        finally {
+            if (resolverTimer !== undefined)
+                clearTimeout(resolverTimer);
+        }
+        beforeLaunch();
         return await new Promise((resolveResult, reject) => {
             let child;
             try {
+                beforeLaunch();
                 child = this.capturedLaunch(process.execPath, [script, ...argv], {
                     shell: false,
                     stdio: ["ignore", "pipe", "pipe"],
                 });
             }
-            catch {
-                reject(providerUnavailable("The MetaMask Agent Wallet process could not start."));
+            catch (error) {
+                if (error instanceof ApnError) {
+                    reject(error);
+                    return;
+                }
+                const failure = providerUnavailable("The MetaMask Agent Wallet process could not start.");
+                nativeFailureDiagnostics.set(failure, diagnostic("sdk_resolver", "start"));
+                reject(failure);
                 return;
             }
             const chunks = [];
             let size = 0;
+            const stderrChunks = [];
+            let stderrSize = 0, stderrOverflow = false;
+            const stage = argv[0] === "wallet" && argv[1] === "send-transaction" ? "sdk_send" : "sdk_read";
+            const stderrObservation = () => {
+                if (stderrSize === 0)
+                    return { stderrClass: "none", providerCode: "none" };
+                if (stderrOverflow)
+                    return { stderrClass: "unclassified", providerCode: "other" };
+                const bytes = Buffer.concat(stderrChunks);
+                try {
+                    const parsed = JSON.parse(bytes.toString("utf8"));
+                    const error = isPlainRecord(parsed) ? (isPlainRecord(parsed.error) ? parsed.error : isPlainRecord(parsed._error) ? parsed._error : null) : null;
+                    if (error === null)
+                        return { stderrClass: "unclassified", providerCode: "other" };
+                    const code = typeof error.code === "string" ? error.code : "";
+                    const providerCode = code === "POLICY_VIOLATION" || code === "POLICY_REJECTED" ? "policy" : code === "MFA_REQUIRED" ? "mfa" : code === "UNAUTHORIZED" || code === "AUTH_REQUIRED" ? "auth" : code === "INSUFFICIENT_FUNDS" ? "funds" : code === "RATE_LIMITED" ? "rate_limit" : "other";
+                    return { stderrClass: "json_error", providerCode };
+                }
+                catch {
+                    return { stderrClass: "unclassified", providerCode: "other" };
+                }
+                finally {
+                    bytes.fill(0);
+                }
+            };
             let settled = false;
-            const zero = () => { for (const chunk of chunks)
+            const zero = () => { for (const chunk of [...chunks, ...stderrChunks])
                 chunk.fill(0); };
             const cleanup = () => {
                 clearTimeout(timeout);
@@ -138,6 +205,8 @@ export class NodeMetaMaskProcessRunner {
                         bytes.fill(0);
                     }
                 }
+                const stderr = stderrObservation();
+                nativeFailureDiagnostics.set(error, diagnostic(stage, absoluteDeadline !== undefined && remaining() < 1 ? "deadline" : error.message.includes("timed out") ? "timeout" : error.code === "APN_PROVIDER_PROTOCOL" ? "protocol" : "start", null, null, stderr.stderrClass, stderr.providerCode));
                 zero();
                 reject(error);
             };
@@ -155,25 +224,33 @@ export class NodeMetaMaskProcessRunner {
                 chunks.push(bytes);
             };
             const onStderr = (chunk) => {
+                const bytes = Buffer.isBuffer(chunk) ? Buffer.from(chunk) : Buffer.from(chunk, "utf8");
                 if (Buffer.isBuffer(chunk))
                     chunk.fill(0);
-                else
-                    Buffer.from(chunk, "utf8").fill(0);
+                stderrSize += bytes.length;
+                if (stderrSize <= 4096)
+                    stderrChunks.push(bytes);
+                else {
+                    stderrOverflow = true;
+                    bytes.fill(0);
+                }
             };
             const onError = () => fail(providerUnavailable("The MetaMask Agent Wallet process could not start."), true);
-            const onClose = (code) => {
+            const onClose = (code, rawSignal) => {
                 if (settled)
                     return;
                 settled = true;
                 cleanup();
                 const stdout = Buffer.concat(chunks);
+                const signal = ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGABRT", "SIGSEGV", "SIGPIPE"].includes(rawSignal ?? "") ? rawSignal : null;
+                const stderr = stderrObservation(), nativeDiagnostic = diagnostic(stage, signal !== null ? "signal" : code === 0 ? "ok" : "exit", code, signal, stderr.stderrClass, stderr.providerCode);
                 zero();
-                resolveResult({ exitCode: code ?? 1, stdout });
+                resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }) });
             };
             const timeout = setTimeout(() => {
                 fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."), true);
                 child.kill();
-            }, timeoutMs);
+            }, absoluteDeadline === undefined ? timeoutMs : Math.max(1, Math.min(timeoutMs, remaining())));
             child.stdout.on("data", onStdout);
             child.stderr.on("data", onStderr);
             child.once("error", onError);

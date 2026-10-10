@@ -1,3 +1,4 @@
+import { type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import type { Hex } from "./model.js";
 import { type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
 import { type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
@@ -17,7 +18,7 @@ export type FixedMetaMaskNativePolicy = FixedMetaMaskNativePolicyBase & ({
     readonly vendorPolicyHash: typeof OP_POLICY_HASH;
     readonly policyBytes: 945;
 });
-export type MetaMaskNativeSubmission = {
+export type MetaMaskNativeSubmission = ({
     readonly disposition: "acknowledged";
     readonly transactionHash: Hex;
     readonly requestId?: never;
@@ -30,9 +31,11 @@ export type MetaMaskNativeSubmission = {
     readonly reason: string;
     readonly transactionHash?: Hex;
     readonly requestId?: string;
+}) & {
+    readonly diagnostic?: MetaMaskNativeDiagnostic;
 };
 /** Normal pinned CLI GETs only. No YAML decoder, policy mutation or remote rolling-usage prediction. */
-export declare function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId): Promise<FixedMetaMaskNativePolicy>;
+export declare function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId, deadline?: string): Promise<FixedMetaMaskNativePolicy>;
 /** Owner alone persists the one-effect handoff marker before this statically bound call. */
 export declare function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission>;
 export type MetaMaskNativeRequestObservation = {

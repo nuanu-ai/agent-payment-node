@@ -1,7 +1,8 @@
+import { nativeContextDeadline, nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { Hex } from "./model.js";
-import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, type MetaMaskProcessResult } from "./metamask-process-runner.js";
+import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic, type MetaMaskProcessResult } from "./metamask-process-runner.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
 import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices } from "./metamask-process-output.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
@@ -26,12 +27,18 @@ export type FixedMetaMaskNativePolicy = FixedMetaMaskNativePolicyBase & (
   | {readonly vendorPolicyHash: typeof POLICY_HASH; readonly policyBytes: 866}
   | {readonly vendorPolicyHash: typeof OP_POLICY_HASH; readonly policyBytes: 945}
 );
-export type MetaMaskNativeSubmission =
+export type MetaMaskNativeSubmission = (
   | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly requestId?: never }
   | { readonly disposition: "pending"; readonly requestId: string; readonly transactionHash?: never }
-  | { readonly disposition: "unknown"; readonly reason: string; readonly transactionHash?: Hex; readonly requestId?: string };
+  | { readonly disposition: "unknown"; readonly reason: string; readonly transactionHash?: Hex; readonly requestId?: string }) & {readonly diagnostic?: MetaMaskNativeDiagnostic};
 
-function refuse(): never {throw new ApnError("APN_OPERATION_BLOCKED", "The fixed MetaMask native transfer is unavailable.");}
+class NativeReadRefusal extends ApnError {
+  constructor(readonly nativeDiagnostic:MetaMaskNativeDiagnostic) {super("APN_OPERATION_BLOCKED","The fixed MetaMask native transfer is unavailable.");}
+}
+function refuse(diagnostic?:MetaMaskNativeDiagnostic): never {
+  if(diagnostic!==undefined)throw new NativeReadRefusal(diagnostic);
+  throw new ApnError("APN_OPERATION_BLOCKED","The fixed MetaMask native transfer is unavailable.");
+}
 function chain(value: MetaMaskNativeFeeChainId): void {
   if (!CHAINS.has(value)) refuse();
 }
@@ -41,11 +48,11 @@ function policyAllowsChain(policy: FixedMetaMaskNativePolicy, chainId: MetaMaskN
 }
 function success(result: MetaMaskProcessResult): Record<string, unknown> {
   const parsed = parseMetaMaskProcessOutput(result.stdout), envelope = parsed?.envelope;
-  if (result.exitCode !== 0 || parsed === null || parsed.notices.length !== 0 || envelope?.ok !== true || !isPlainRecord(envelope.data)) refuse();
+  if (result.exitCode !== 0 || parsed === null || parsed.notices.length !== 0 || envelope?.ok !== true || !isPlainRecord(envelope.data)) refuse(result.nativeDiagnostic===undefined?undefined:validateMetaMaskNativeDiagnostic({...result.nativeDiagnostic,code:result.exitCode===0?"protocol":result.nativeDiagnostic.code}));
   return envelope.data;
 }
-async function address(runner: NodeMetaMaskProcessRunner, maximumMs?: number): Promise<void> {
-  const result = await runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"], maximumMs);
+async function address(runner: NodeMetaMaskProcessRunner, deadline?: string): Promise<void> {
+  const result = await runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"], remaining(deadline), deadline);
   try {
     const data = success(result);
     if (data.mode !== "server" || !isMetaMaskEvmNamespace(data.chainNamespace) ||
@@ -54,12 +61,10 @@ async function address(runner: NodeMetaMaskProcessRunner, maximumMs?: number): P
 }
 function remaining(deadline?: string): number | undefined {
   if (deadline === undefined) return undefined;
-  const value = Date.parse(deadline) - Date.now();
-  if (!Number.isFinite(value) || value < 1) refuse();
-  return Math.min(60_000, value);
+  return nativeDeadlineRemaining(deadline);
 }
 async function project(runner: NodeMetaMaskProcessRunner, deadline?: string): Promise<string> {
-  const result = await runner.runJson(["auth", "status", "--json"], remaining(deadline));
+  const result = await runner.runJson(["auth", "status", "--json"], remaining(deadline), deadline);
   try {
     const data = success(result);
     if (data.authenticated !== true || !isPlainRecord(data.summary) || data.summary.mode !== "session" ||
@@ -69,13 +74,13 @@ async function project(runner: NodeMetaMaskProcessRunner, deadline?: string): Pr
 }
 async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: string): Promise<FixedMetaMaskNativePolicy> {
   const vendorProjectHash = await project(runner, deadline);
-  await address(runner, remaining(deadline));
-  const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline));
+  await address(runner, deadline);
+  const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
   try {
     const data = success(mode);
     if (data.mode !== "guard" || typeof data.address !== "string" || data.address.toLowerCase() !== PAYER) refuse();
   } finally {mode.stdout.fill(0);}
-  const result = await runner.runJson(["wallet", "policy", "get", "--json"], remaining(deadline));
+  const result = await runner.runJson(["wallet", "policy", "get", "--json"], remaining(deadline), deadline);
   let variant: (
     | {readonly vendorPolicyHash: typeof POLICY_HASH; readonly policyBytes: 866}
     | {readonly vendorPolicyHash: typeof OP_POLICY_HASH; readonly policyBytes: 945});
@@ -87,15 +92,15 @@ async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: string):
     else if (bytes === 945 && hash === OP_POLICY_HASH) variant = {vendorPolicyHash: OP_POLICY_HASH, policyBytes: 945};
     else refuse();
   } finally {result.stdout.fill(0);}
-  await address(runner, remaining(deadline));
+  await address(runner, deadline);
   if (await project(runner, deadline) !== vendorProjectHash) refuse();
   return Object.freeze({selectedAddress: PAYER, ...variant, vendorProjectHash, tradingMode: "guard", observedAt: new Date().toISOString()});
 }
 
 /** Normal pinned CLI GETs only. No YAML decoder, policy mutation or remote rolling-usage prediction. */
-export async function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId): Promise<FixedMetaMaskNativePolicy> {
+export async function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId, deadline?: string): Promise<FixedMetaMaskNativePolicy> {
   chain(chainId);
-  const policy = await readPolicy(new NodeMetaMaskProcessRunner());
+  const policy = await readPolicy(new NodeMetaMaskProcessRunner(), deadline);
   policyAllowsChain(policy, chainId);
   return policy;
 }
@@ -106,17 +111,21 @@ const quantity = (value: string): string => `0x${BigInt(value).toString(16)}`;
 export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
   context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission> {
   claimMetaMaskNativeOwnedScope(scope, context);
-  await assertMetaMaskNativeOwnedContextCurrent(scope, context);
+  const deadline = nativeContextDeadline(context);
+  nativeDeadlineRemaining(deadline);
   const quote = validateMetaMaskNativeFeeQuote(context.quote);
   chain(quote.chainId);
   if (context.profile !== PROFILE || quote.sender.toLowerCase() !== PAYER ||
       (context.vendorPolicyHash !== POLICY_HASH && context.vendorPolicyHash !== OP_POLICY_HASH)) refuse();
-  const runner = new NodeMetaMaskProcessRunner();
-  const policy = await readPolicy(runner, context.consentExpiresAt);
-  policyAllowsChain(policy, quote.chainId);
-  if (policy.vendorPolicyHash !== context.vendorPolicyHash || policy.vendorProjectHash !== context.vendorProjectHash) refuse();
   // Finish package validation before the last owner/deadline check, so a slow resolver cannot move the private handoff past it.
-  const executable = await resolveMetaMaskBin();
+  nativeDeadlineRemaining(deadline);
+  let resolverTimer:ReturnType<typeof setTimeout>|undefined;
+  let executable:string;
+  try {executable=await Promise.race([resolveMetaMaskBin(),new Promise<never>((_,reject)=>{
+    resolverTimer=setTimeout(()=>reject(new ApnError("APN_OPERATION_BLOCKED","Native SDK resolver deadline reached.")),nativeDeadlineRemaining(deadline));
+  })]);}finally{if(resolverTimer!==undefined)clearTimeout(resolverTimer);}
+  assertMetaMaskNativeOwnedScope(scope, context);
+  nativeDeadlineRemaining(deadline);
   const handoffRunner = new NodeMetaMaskProcessRunner(async () => executable);
   await assertMetaMaskNativeOwnedContextCurrent(scope, context);
   assertMetaMaskNativeOwnedScope(scope, context);
@@ -128,33 +137,30 @@ export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
   let result: MetaMaskProcessResult;
   try {
     result = await handoffRunner.runJson(["wallet", "send-transaction", "--chain-id", String(quote.chainId), "--payload", payload,
-      "--intent", `APN ${context.operationId}: native-paid fixed 1000 atomic USDC to Seller`, "--json"], remaining(context.consentExpiresAt));
+      "--intent", `APN ${context.operationId}: native-paid fixed 1000 atomic USDC to Seller`, "--json"], nativeDeadlineRemaining(deadline), deadline);
   } catch (error) {
+    const diagnostic = takeMetaMaskNativeProcessFailureDiagnostic(error);
     const observed = takeMetaMaskNativeProcessFailureIdentifiers(error);
     const bound = observed !== undefined && (observed.sender === undefined || observed.sender === PAYER) &&
       (observed.chainId === undefined || observed.chainId === quote.chainId) &&
       (observed.vendorProjectHash === undefined || observed.vendorProjectHash === context.vendorProjectHash);
     // Rejection remains UNKNOWN even when the real failed child emitted a recoverable identifier.
     try {
-      const fresh = await readPolicy(runner, context.consentExpiresAt);
-      if (fresh.vendorProjectHash !== context.vendorProjectHash || fresh.vendorPolicyHash !== context.vendorPolicyHash) refuse();
       await assertMetaMaskNativeOwnedContextCurrent(scope, context); assertMetaMaskNativeOwnedScope(scope, context);
     } catch { /* The source deadline is never extended to recover a rejected invocation. */ }
-    return {disposition: "unknown", reason: "provider_private_handoff_outcome_unknown",
+    return {disposition: "unknown", reason: "provider_private_handoff_outcome_unknown", ...(diagnostic === undefined ? {} : {diagnostic}),
       ...(bound && observed.transactionHash !== undefined ? {transactionHash: observed.transactionHash} : {}),
       ...(bound && observed.requestId !== undefined ? {requestId: observed.requestId} : {})};
   }
   let hint: MetaMaskNativeSubmission;
   try { hint = submissionHint(result); } finally {result.stdout.fill(0);}
   try {
-    const fresh = await readPolicy(runner, context.consentExpiresAt);
-    if (fresh.vendorProjectHash !== context.vendorProjectHash || fresh.vendorPolicyHash !== context.vendorPolicyHash) refuse();
     await assertMetaMaskNativeOwnedContextCurrent(scope, context); assertMetaMaskNativeOwnedScope(scope, context);
   }
-  catch {return {disposition: "unknown", reason: "provider_handoff_guard_expired_or_changed",
+  catch {return {disposition: "unknown", reason: "provider_handoff_guard_expired_or_changed", diagnostic:validateMetaMaskNativeDiagnostic({...result.nativeDiagnostic,stage:"post_handoff",code:Date.now()>=Date.parse(deadline)?"deadline":"refused",exitCode:result.nativeDiagnostic?.exitCode??null,signal:result.nativeDiagnostic?.signal??null,durationMs:result.nativeDiagnostic?.durationMs??0,remainingMs:Math.max(0,Math.min(60000,Date.parse(deadline)-Date.now())),stderrClass:result.nativeDiagnostic?.stderrClass??"none",providerCode:result.nativeDiagnostic?.providerCode??"none"}),
     ...("transactionHash" in hint ? {transactionHash: hint.transactionHash} : {}),
     ...("requestId" in hint ? {requestId: hint.requestId} : {})};}
-  return hint;
+  return {...hint, ...(result.nativeDiagnostic === undefined ? {} : {diagnostic:result.nativeDiagnostic})};
 }
 
 export type MetaMaskNativeRequestObservation =

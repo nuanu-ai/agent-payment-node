@@ -55,7 +55,11 @@ try {
    await state.writeOperation(sealOperation({...body,state:started.state,reason:started.reason,proofClass:started.proofClass,transitions:appendTransition(saved.transitions,started)}));
  }
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
- if(['policy','wrongcustody','fees','balance','op','alias-samechain','sameprofile','mismatch-old','mismatch-new','newpolicy-pre-drift'].includes(scenario)){
+ if(scenario==='newpolicy-pre-drift'){
+   const result=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-refused-0001');assert.equal(result.state,'unknown');assert.equal(result.effect_attempts,1);assert.equal(effects,0);
+   const saved=JSON.parse(await readFile(join(root,'metamask-native-operations',result.operation_id+'.json'),'utf8'));assert.equal(saved.reservations.length,2);assert.equal(saved.context.vendorPolicyHash,newVendor);assert.equal(saved.diagnostic.stage,'sdk_read');
+   const replay=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-refused-0001');assert.deepEqual(replay,result);assert.equal(effects,0);process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
+ } else if(['policy','wrongcustody','fees','balance','op','alias-samechain','sameprofile','mismatch-old','mismatch-new'].includes(scenario)){
    await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,scenario==='op'?10:1,'native-test-refused-0001'));assert.equal(effects,0);process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
  } else {
  const result=await owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-positive-0001');assert.equal(result.state,acknowledgedScenarios.includes(scenario)?'acknowledged':'unknown');assert.equal(result.transaction_hash,scenario==='pending'?null:'0x'+'e'.repeat(64));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(lastScope,lastContext));
