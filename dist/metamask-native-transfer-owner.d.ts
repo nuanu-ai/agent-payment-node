@@ -1,3 +1,4 @@
+import { type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { type AssetUsageReservation } from "./asset-usage-ledger.js";
 import { type MetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
 export declare const METAMASK_NATIVE_OWNER_PROFILE: "metamask-live-v042";
@@ -37,6 +38,7 @@ export declare function assertMetaMaskNativeOwnedConflictDomainAvailable(scope: 
 /** Normal finite command owner. No injected provider, terminal, scope issuer or arbitrary effect is accepted. */
 export declare function runFixedMetaMaskNativeTransfer(stateRoot: string, chainInput: number, keyInput: string): Promise<{
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
     chain_id: 1 | 10 | 59144 | 143 | 1329;
@@ -52,6 +54,7 @@ export declare function runFixedMetaMaskNativeTransfer(stateRoot: string, chainI
 }>;
 export declare function readFixedMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean): Promise<{
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
     chain_id: 1 | 10 | 59144 | 143 | 1329;

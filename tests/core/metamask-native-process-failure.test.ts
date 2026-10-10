@@ -8,12 +8,12 @@ import {hashObject,sha256} from "../../src/canonical.js";
 import {directEvmListRows} from "../../src/evm-direct-networks.js";
 import type {MetaMaskNativeFeeQuote} from "../../src/metamask-native-fee-evidence.js";
 import type {MetaMaskNativeOwnedContext,MetaMaskNativeOwnedScope} from "../../src/metamask-native-transfer-owner.js";
-import {NodeMetaMaskProcessRunner as RealRunner,takeMetaMaskNativeProcessFailureIdentifiers} from "../../src/metamask-process-runner.js";
+import {NodeMetaMaskProcessRunner as RealRunner,takeMetaMaskNativeProcessFailureIdentifiers,takeMetaMaskNativeProcessFailureDiagnostic} from "../../src/metamask-process-runner.js";
 const PAYER="0xf41170df51aab52aaa04fbc3ff325cf051644aca",HASH="e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a",PROJECT="11111111-2222-4333-8444-555555555555",PROJECT_HASH=sha256(PROJECT),RID="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",TX=`0x${"a".repeat(64)}`;
 let script="";
 // Real runJson accumulation/spawn/timeout, with only package resolution pointed to an owned local fake child.
 // Owner assertions are transport doubles, not a private issuer positive.
-mock.module("../../src/metamask-process-runner.js",{namedExports:{NodeMetaMaskProcessRunner:class extends RealRunner{constructor(){super(async()=>script);}},takeMetaMaskNativeProcessFailureIdentifiers}});
+mock.module("../../src/metamask-process-runner.js",{namedExports:{NodeMetaMaskProcessRunner:class extends RealRunner{constructor(){super(async()=>script);}},takeMetaMaskNativeProcessFailureIdentifiers,takeMetaMaskNativeProcessFailureDiagnostic}});
 mock.module("../../src/metamask-package.js",{namedExports:{resolveMetaMaskBin:async()=>script}});
 mock.module("../../src/metamask-native-transfer-owner.js",{namedExports:{claimMetaMaskNativeOwnedScope:()=>{},assertMetaMaskNativeOwnedScope:()=>{},assertMetaMaskNativeOwnedContextCurrent:async()=>{},readMetaMaskNativeSettlement:async()=>{throw new Error("unused");},readMetaMaskNativeReservation:async()=>{throw new Error("unused");},assertMetaMaskNativeFailedBeforeEffect:async()=>{throw new Error("unused");},assertMetaMaskNativeGenericCapacityRelease:async()=>{throw new Error("unused");},assertMetaMaskNativeConflictDomainAvailable:async()=>{throw new Error("unused");},assertMetaMaskNativeOwnedConflictDomainAvailable:async()=>{throw new Error("unused");}}});
 const {submitOwnedMetaMaskNative}=await import("../../src/metamask-native-transfer-adapter.js");

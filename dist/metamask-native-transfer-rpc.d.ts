@@ -12,8 +12,8 @@ export type FixedMetaMaskNativeObservation = {
     readonly reason: string;
 };
 /** Recheck the fixed owner's current pending nonce before a private signing handoff. */
-export declare function readFixedMetaMaskNativeNonce(chainId: MetaMaskNativeFeeChainId): Promise<string>;
-export declare function readFixedMetaMaskNativeBalances(chainId: MetaMaskNativeFeeChainId): Promise<EvmBalanceSnapshot>;
+export declare function readFixedMetaMaskNativeNonce(chainId: MetaMaskNativeFeeChainId, deadline?: string): Promise<string>;
+export declare function readFixedMetaMaskNativeBalances(chainId: MetaMaskNativeFeeChainId, deadline?: string): Promise<EvmBalanceSnapshot>;
 export declare function prepareFixedMetaMaskNativeQuote(input: {
     readonly chainId: MetaMaskNativeFeeChainId;
     readonly maximumNativeFeeWei: string;
