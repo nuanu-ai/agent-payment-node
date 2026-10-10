@@ -1,4 +1,4 @@
-import { type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import type { Hex } from "./model.js";
 interface NativeFailureIdentifiers {
     readonly requestId?: string;
@@ -44,7 +44,7 @@ export interface MetaMaskProcessResult {
     readonly nativeDiagnostic?: MetaMaskNativeDiagnostic;
 }
 export interface MetaMaskProcessRunnerPort {
-    runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: string): Promise<MetaMaskProcessResult>;
+    runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskProcessResult>;
     runForeground(argv: readonly string[]): Promise<number>;
 }
 export declare class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
@@ -56,7 +56,7 @@ export declare class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerP
     private readonly openTerminal;
     private readonly closeTerminal;
     constructor(binResolver?: () => Promise<string>, capturedLaunch?: MetaMaskCapturedLaunchPort, foregroundLaunch?: MetaMaskForegroundLaunchPort, jsonTimeoutMs?: number, foregroundTimeoutMs?: number, openTerminal?: () => number, closeTerminal?: (fd: number) => void);
-    runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: string): Promise<MetaMaskProcessResult>;
+    runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskProcessResult>;
     runForeground(argv: readonly string[]): Promise<number>;
 }
 export {};

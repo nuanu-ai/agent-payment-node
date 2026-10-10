@@ -1,4 +1,5 @@
-import { nativeContextDeadline, nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import {performance} from "node:perf_hooks";
+import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { Hex } from "./model.js";
@@ -51,7 +52,7 @@ function success(result: MetaMaskProcessResult): Record<string, unknown> {
   if (result.exitCode !== 0 || parsed === null || parsed.notices.length !== 0 || envelope?.ok !== true || !isPlainRecord(envelope.data)) refuse(result.nativeDiagnostic===undefined?undefined:validateMetaMaskNativeDiagnostic({...result.nativeDiagnostic,code:result.exitCode===0?"protocol":result.nativeDiagnostic.code}));
   return envelope.data;
 }
-async function address(runner: NodeMetaMaskProcessRunner, deadline?: string): Promise<void> {
+async function address(runner: NodeMetaMaskProcessRunner, deadline?: MetaMaskNativeDeadlineInput): Promise<void> {
   const result = await runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"], remaining(deadline), deadline);
   try {
     const data = success(result);
@@ -59,11 +60,11 @@ async function address(runner: NodeMetaMaskProcessRunner, deadline?: string): Pr
         typeof data.address !== "string" || data.address.toLowerCase() !== PAYER) refuse();
   } finally {result.stdout.fill(0);}
 }
-function remaining(deadline?: string): number | undefined {
+function remaining(deadline?: MetaMaskNativeDeadlineInput): number | undefined {
   if (deadline === undefined) return undefined;
   return nativeDeadlineRemaining(deadline);
 }
-async function project(runner: NodeMetaMaskProcessRunner, deadline?: string): Promise<string> {
+async function project(runner: NodeMetaMaskProcessRunner, deadline?: MetaMaskNativeDeadlineInput): Promise<string> {
   const result = await runner.runJson(["auth", "status", "--json"], remaining(deadline), deadline);
   try {
     const data = success(result);
@@ -72,7 +73,7 @@ async function project(runner: NodeMetaMaskProcessRunner, deadline?: string): Pr
     return sha256(data.summary.projectId);
   } finally {result.stdout.fill(0);}
 }
-async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: string): Promise<FixedMetaMaskNativePolicy> {
+async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: MetaMaskNativeDeadlineInput): Promise<FixedMetaMaskNativePolicy> {
   const vendorProjectHash = await project(runner, deadline);
   await address(runner, deadline);
   const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
@@ -98,7 +99,7 @@ async function readPolicy(runner: NodeMetaMaskProcessRunner, deadline?: string):
 }
 
 /** Normal pinned CLI GETs only. No YAML decoder, policy mutation or remote rolling-usage prediction. */
-export async function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId, deadline?: string): Promise<FixedMetaMaskNativePolicy> {
+export async function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId, deadline?: MetaMaskNativeDeadlineInput): Promise<FixedMetaMaskNativePolicy> {
   chain(chainId);
   const policy = await readPolicy(new NodeMetaMaskProcessRunner(), deadline);
   policyAllowsChain(policy, chainId);
@@ -111,7 +112,7 @@ const quantity = (value: string): string => `0x${BigInt(value).toString(16)}`;
 export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
   context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission> {
   claimMetaMaskNativeOwnedScope(scope, context);
-  const deadline = nativeContextDeadline(context);
+  const deadline = assertMetaMaskNativeOwnedScope(scope,context);
   nativeDeadlineRemaining(deadline);
   const quote = validateMetaMaskNativeFeeQuote(context.quote);
   chain(quote.chainId);
@@ -157,7 +158,7 @@ export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
   try {
     await assertMetaMaskNativeOwnedContextCurrent(scope, context); assertMetaMaskNativeOwnedScope(scope, context);
   }
-  catch {return {disposition: "unknown", reason: "provider_handoff_guard_expired_or_changed", diagnostic:validateMetaMaskNativeDiagnostic({...result.nativeDiagnostic,stage:"post_handoff",code:Date.now()>=Date.parse(deadline)?"deadline":"refused",exitCode:result.nativeDiagnostic?.exitCode??null,signal:result.nativeDiagnostic?.signal??null,durationMs:result.nativeDiagnostic?.durationMs??0,remainingMs:Math.max(0,Math.min(60000,Date.parse(deadline)-Date.now())),stderrClass:result.nativeDiagnostic?.stderrClass??"none",providerCode:result.nativeDiagnostic?.providerCode??"none"}),
+  catch {return {disposition: "unknown", reason: "provider_handoff_guard_expired_or_changed", diagnostic:validateMetaMaskNativeDiagnostic({...result.nativeDiagnostic,stage:"post_handoff",code:Date.now()>=Date.parse(deadline.utcExpiresAt)||performance.now()>=deadline.monotonicDeadlineMs?"deadline":"refused",exitCode:result.nativeDiagnostic?.exitCode??null,signal:result.nativeDiagnostic?.signal??null,durationMs:result.nativeDiagnostic?.durationMs??0,remainingMs:Math.max(0,Math.min(60000,Math.floor(Math.min(Date.parse(deadline.utcExpiresAt)-Date.now(),deadline.monotonicDeadlineMs-performance.now())))),stderrClass:result.nativeDiagnostic?.stderrClass??"none",providerCode:result.nativeDiagnostic?.providerCode??"none"}),
     ...("transactionHash" in hint ? {transactionHash: hint.transactionHash} : {}),
     ...("requestId" in hint ? {requestId: hint.requestId} : {})};}
   return {...hint, ...(result.nativeDiagnostic === undefined ? {} : {diagnostic:result.nativeDiagnostic})};

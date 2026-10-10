@@ -1,3 +1,4 @@
+import {performance} from "node:perf_hooks";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 
@@ -23,10 +24,16 @@ export function validateMetaMaskNativeDiagnostic(value:unknown):MetaMaskNativeDi
     !["none","json_error","unclassified"].includes(v.stderrClass)||!["none","policy","mfa","auth","funds","rate_limit","other"].includes(v.providerCode))throw new ApnError("APN_STATE_CORRUPT","Native diagnostic binding is invalid.");
   return Object.freeze({...v});
 }
+/** A timing observation only; financial authority remains the owner's private WeakMap scope. */
+export interface MetaMaskNativeDeadline {readonly utcExpiresAt:string;readonly monotonicDeadlineMs:number}
+export type MetaMaskNativeDeadlineInput = string | MetaMaskNativeDeadline;
 /** Read-only timing bound, never a consent or financial authority. */
-export function nativeDeadlineRemaining(deadline:string):number {
-  const expires=Date.parse(deadline),remaining=Math.floor(expires-Date.now());
-  if(!Number.isFinite(expires)||new Date(expires).toISOString()!==deadline||remaining<1||remaining>60000)throw new ApnError("APN_OPERATION_BLOCKED","Native transfer deadline reached.");
+export function nativeDeadlineRemaining(deadline:MetaMaskNativeDeadlineInput):number {
+  if(typeof deadline!=="string"&&(!isPlainRecord(deadline)||!exactKeys(deadline,["utcExpiresAt","monotonicDeadlineMs"])||typeof deadline.utcExpiresAt!=="string"||typeof deadline.monotonicDeadlineMs!=="number"||!Number.isFinite(deadline.monotonicDeadlineMs)))throw new ApnError("APN_OPERATION_BLOCKED","Native transfer deadline is invalid.");
+  const utc=typeof deadline==="string"?deadline:deadline.utcExpiresAt,expires=Date.parse(utc);
+  const wall=Math.floor(expires-Date.now()),mono=typeof deadline==="string"?wall:Math.floor(deadline.monotonicDeadlineMs-performance.now());
+  const remaining=Math.min(wall,mono);
+  if(!Number.isFinite(expires)||new Date(expires).toISOString()!==utc||!Number.isFinite(mono)||remaining<1||wall>60000||mono>60000)throw new ApnError("APN_OPERATION_BLOCKED","Native transfer deadline reached.");
   return remaining;
 }
 export function nativeContextDeadline(context:{readonly consentExpiresAt:string;readonly quote:{readonly expiresAt:string}}):string {

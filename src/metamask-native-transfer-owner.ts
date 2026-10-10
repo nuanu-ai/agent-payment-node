@@ -1,4 +1,4 @@
-import { nativeContextDeadline, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { nativeContextDeadline, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDeadline, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { takeMetaMaskNativeProcessFailureDiagnostic } from "./metamask-process-runner.js";
 import { OperationService } from "./operation-service.js";
 import { evmAddressLock } from "./evm-address-ownership.js";
@@ -75,22 +75,24 @@ export function claimMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, c
   if (e.state !== "issued") blocked("Native transfer consent has already been consumed.");
   e.state = "consuming";
 }
-export function assertMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): void {
-  if (entry(scope, context).state !== "consuming") blocked("Native transfer scope has not been claimed.");
+export function assertMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): MetaMaskNativeDeadline {
+  const e=entry(scope,context);
+  if (e.state !== "consuming") blocked("Native transfer scope has not been claimed.");
+  return Object.freeze({utcExpiresAt:nativeContextDeadline(context),monotonicDeadlineMs:e.monotonicDeadline});
 }
 /** Static owner guard, never a caller supplied callback. Adapter must invoke this after every awaited seam. */
 export async function assertMetaMaskNativeOwnedContextCurrent(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void> {
-  assertMetaMaskNativeOwnedScope(scope, context);
+  const deadline=assertMetaMaskNativeOwnedScope(scope, context);
   const e=entry(scope,context);
   e.guardStage="owner_guard";
   await assertCurrentLocal(scope,context);
   e.guardStage="sdk_read";
-  const vendor=await readFixedMetaMaskNativePolicy(context.quote.chainId,nativeContextDeadline(context)); assertMetaMaskNativeOwnedScope(scope,context);
+  const vendor=await readFixedMetaMaskNativePolicy(context.quote.chainId,deadline); assertMetaMaskNativeOwnedScope(scope,context);
   if(vendor.vendorPolicyHash!==context.vendorPolicyHash||vendor.vendorProjectHash!==context.vendorProjectHash||vendor.tradingMode!=="guard"||vendor.selectedAddress.toLowerCase()!==METAMASK_NATIVE_OWNER_ADDRESS||!vendorPolicyAllowsChain(vendor,context.quote.chainId))blocked("Native transfer current vendor project or Guard policy changed.");
   e.guardStage="rpc_balance";
-  const balances=await readFixedMetaMaskNativeBalances(context.quote.chainId,nativeContextDeadline(context)); assertMetaMaskNativeOwnedScope(scope,context);
+  const balances=await readFixedMetaMaskNativeBalances(context.quote.chainId,deadline); assertMetaMaskNativeOwnedScope(scope,context);
   e.guardStage="rpc_nonce";
-  const nonce=await readFixedMetaMaskNativeNonce(context.quote.chainId,nativeContextDeadline(context)); assertMetaMaskNativeOwnedScope(scope,context);
+  const nonce=await readFixedMetaMaskNativeNonce(context.quote.chainId,deadline); assertMetaMaskNativeOwnedScope(scope,context);
   if(balances.address.toLowerCase()!==METAMASK_NATIVE_OWNER_ADDRESS||balances.asset.chainId!==context.quote.chainId||balances.asset.address!==context.quote.token||balances.asset.kind!=="erc20"||balances.asset.decimals!==6||balances.blockHash===undefined||
     BigInt(balances.nativeAtomic)<BigInt(context.quote.feeQuote.totalQuoteWei)||BigInt(balances.assetAtomic)<1000n||Date.now()-Date.parse(balances.observedAt)>30_000||Date.parse(balances.observedAt)>Date.now()||nonce!==context.quote.transaction.nonceAtomic)blocked("Native transfer current physical balance or nonce changed.");
   assertMetaMaskNativeOwnedScope(scope, context);
@@ -320,7 +322,7 @@ export async function runFixedMetaMaskNativeTransfer(stateRoot: string, chainInp
     } catch (error) {
       if (op !== undefined) {
         if (op.effectAttempts===1) {
-          if (op.state==="effect_started") {const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(error)??(error instanceof ApnError&&"nativeDiagnostic" in error?validateMetaMaskNativeDiagnostic(error.nativeDiagnostic):undefined)??validateMetaMaskNativeDiagnostic({stage:scope===undefined?"owner_guard":scopes.get(scope)?.guardStage??"owner_guard",code:Date.now()>=Date.parse(nativeContextDeadline(context))?"deadline":"refused",exitCode:null,signal:null,durationMs:Math.floor(scope===undefined?0:performance.now()-(scopes.get(scope)?.startedAt??performance.now())),remainingMs:Math.max(0,Math.min(60000,Date.parse(nativeContextDeadline(context))-Date.now())),stderrClass:"none",providerCode:"none"});op=await journal.persist(patch(op,{state:"unknown",diagnostic}));}
+          if (op.state==="effect_started") {const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(error)??(error instanceof ApnError&&"nativeDiagnostic" in error?validateMetaMaskNativeDiagnostic(error.nativeDiagnostic):undefined)??validateMetaMaskNativeDiagnostic({stage:scope===undefined?"owner_guard":scopes.get(scope)?.guardStage??"owner_guard",code:Date.now()>=Date.parse(nativeContextDeadline(context))||scope!==undefined&&performance.now()>=(scopes.get(scope)?.monotonicDeadline??0)?"deadline":"refused",exitCode:null,signal:null,durationMs:Math.floor(scope===undefined?0:performance.now()-(scopes.get(scope)?.startedAt??performance.now())),remainingMs:Math.max(0,Math.min(60000,Math.floor(Math.min(Date.parse(nativeContextDeadline(context))-Date.now(),scope===undefined?60000:(scopes.get(scope)?.monotonicDeadline??0)-performance.now())))),stderrClass:"none",providerCode:"none"});op=await journal.persist(patch(op,{state:"unknown",diagnostic}));}
           for (const r of reservations) await ledger.transition({...transitionIdentity(r),state:"unknown_finality",now:new Date()});
           return publicOperation(op);
         }

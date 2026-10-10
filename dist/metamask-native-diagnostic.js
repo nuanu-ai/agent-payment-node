@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 const NATIVE_DIAGNOSTIC_STAGES = ["sdk_resolver", "sdk_read", "sdk_send", "owner_guard", "rpc_balance", "rpc_nonce", "post_handoff"];
@@ -16,8 +17,12 @@ export function validateMetaMaskNativeDiagnostic(value) {
 }
 /** Read-only timing bound, never a consent or financial authority. */
 export function nativeDeadlineRemaining(deadline) {
-    const expires = Date.parse(deadline), remaining = Math.floor(expires - Date.now());
-    if (!Number.isFinite(expires) || new Date(expires).toISOString() !== deadline || remaining < 1 || remaining > 60000)
+    if (typeof deadline !== "string" && (!isPlainRecord(deadline) || !exactKeys(deadline, ["utcExpiresAt", "monotonicDeadlineMs"]) || typeof deadline.utcExpiresAt !== "string" || typeof deadline.monotonicDeadlineMs !== "number" || !Number.isFinite(deadline.monotonicDeadlineMs)))
+        throw new ApnError("APN_OPERATION_BLOCKED", "Native transfer deadline is invalid.");
+    const utc = typeof deadline === "string" ? deadline : deadline.utcExpiresAt, expires = Date.parse(utc);
+    const wall = Math.floor(expires - Date.now()), mono = typeof deadline === "string" ? wall : Math.floor(deadline.monotonicDeadlineMs - performance.now());
+    const remaining = Math.min(wall, mono);
+    if (!Number.isFinite(expires) || new Date(expires).toISOString() !== utc || !Number.isFinite(mono) || remaining < 1 || wall > 60000 || mono > 60000)
         throw new ApnError("APN_OPERATION_BLOCKED", "Native transfer deadline reached.");
     return remaining;
 }

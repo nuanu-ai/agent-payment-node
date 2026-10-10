@@ -1,3 +1,4 @@
+import {performance} from "node:perf_hooks";
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { encodeFunctionData, getAddress } from "viem";
@@ -30,7 +31,7 @@ mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMask
 }}});
 mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
   claimMetaMaskNativeOwnedScope: () => {if (!allowTransport) throw new Error("unowned");},
-  assertMetaMaskNativeOwnedScope: () => {},
+  assertMetaMaskNativeOwnedScope: (_s:unknown,c:MetaMaskNativeOwnedContext) => ({utcExpiresAt:c.consentExpiresAt,monotonicDeadlineMs:performance.now()+Date.parse(c.consentExpiresAt)-Date.now()}),
   assertMetaMaskNativeOwnedContextCurrent: async (_scope:unknown,ctx:MetaMaskNativeOwnedContext) => {currentChecks++; if (rejectAfterHandoff && currentChecks === 2) throw new Error("expired");const p=await readFixedMetaMaskNativePolicy(ctx.quote.chainId,ctx.consentExpiresAt);assert.equal(p.vendorProjectHash,ctx.vendorProjectHash);assert.equal(p.vendorPolicyHash,ctx.vendorPolicyHash);},
   readMetaMaskNativeSettlement: async () => {throw new Error("not a settlement fixture");},
   readMetaMaskNativeReservation: async () => {throw new Error("not a ledger fixture");},

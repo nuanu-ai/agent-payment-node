@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { nativeDeadlineRemaining } from "./metamask-native-diagnostic.js";
+import { nativeDeadlineRemaining, type MetaMaskNativeDeadlineInput } from "./metamask-native-diagnostic.js";
 import { encodeFunctionData, getAddress } from "viem";
 import { hashObject } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -40,21 +40,21 @@ function productionRpc(chainId: MetaMaskNativeFeeChainId, options: {readonly tot
   return new HttpsBaseRpc(endpoint, {totalDeadlineMs:performance.now()+120000,...options}).evm;
 }
 /** Private read-only bounded transport. A timeout cannot authorize or launch a financial effect. */
-async function deadlineRead<T>(chainId:MetaMaskNativeFeeChainId,deadline:string|undefined,read:(rpc:EvmRpc)=>Promise<T>):Promise<T> {
+async function deadlineRead<T>(chainId:MetaMaskNativeFeeChainId,deadline:MetaMaskNativeDeadlineInput|undefined,read:(rpc:EvmRpc)=>Promise<T>):Promise<T> {
   if(deadline===undefined)return await read(productionRpc(chainId));
   const budget=nativeDeadlineRemaining(deadline),controller=new AbortController();
   let timeout:ReturnType<typeof setTimeout>|undefined;
   try {
-    return await Promise.race([read(productionRpc(chainId,{totalDeadlineMs:performance.now()+budget,abortSignal:controller.signal})),new Promise<never>((_,reject)=>{
+    return await Promise.race([read(productionRpc(chainId,{totalDeadlineMs:typeof deadline==="string"?performance.now()+budget:deadline.monotonicDeadlineMs,abortSignal:controller.signal})),new Promise<never>((_,reject)=>{
       timeout=setTimeout(()=>{controller.abort();reject(new ApnError("APN_RPC_AMBIGUOUS","Native transfer RPC deadline reached."));},budget);
     })]);
   } finally {if(timeout!==undefined)clearTimeout(timeout);controller.abort();}
 }
 /** Recheck the fixed owner's current pending nonce before a private signing handoff. */
-export async function readFixedMetaMaskNativeNonce(chainId: MetaMaskNativeFeeChainId,deadline?:string): Promise<string> {
+export async function readFixedMetaMaskNativeNonce(chainId: MetaMaskNativeFeeChainId,deadline?:MetaMaskNativeDeadlineInput): Promise<string> {
   return await deadlineRead(chainId,deadline,rpc=>rpc.nonce(fixedChain(chainId),METAMASK_NATIVE_FIXED_SENDER,"pending"));
 }
-export async function readFixedMetaMaskNativeBalances(chainId: MetaMaskNativeFeeChainId,deadline?:string): Promise<EvmBalanceSnapshot> {
+export async function readFixedMetaMaskNativeBalances(chainId: MetaMaskNativeFeeChainId,deadline?:MetaMaskNativeDeadlineInput): Promise<EvmBalanceSnapshot> {
   return await deadlineRead(chainId,deadline,rpc=>rpc.balance(METAMASK_NATIVE_FIXED_SENDER,{chainId,token:token(chainId),decimals:6}));
 }
 export async function prepareFixedMetaMaskNativeQuote(input: { readonly chainId: MetaMaskNativeFeeChainId; readonly maximumNativeFeeWei: string }): Promise<MetaMaskNativeFeeQuote> {
