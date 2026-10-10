@@ -497,7 +497,12 @@ export class BridgeRpc {
             const [beforeBalance, afterBalance, trace] = await Promise.all([
                 this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: before.hash, requireCanonical: true }]).then(evmRpcQuantity),
                 this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
-                this.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
+                this.chainId === 59144 && this.batchCall !== undefined ? this.batchCall([
+                    { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcArchiveChainValue(this.chainId) },
+                    { method: "debug_traceTransaction", params: [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }],
+                        cachePolicy: "immutable", decoder: rpcRecordValue },
+                ], "archive_deployment").then((values) => values[1])
+                    : this.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
             ]);
             if (afterBalance < beforeBalance)
                 bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
