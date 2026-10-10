@@ -5,6 +5,7 @@ import { JUPITER_V6_PROGRAM, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PRO
 import { JUPITER_V1_WHIRLPOOL_FP_POOL, JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_FP_PROTOCOL_REGISTRY } from "./v1-pins.js";
 import { JUPITER_V1_RUNTIME_PROGRAM_PINS, JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
 import { JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
+import { JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
 export const JUPITER_V1_OLD_ROUTE = Object.freeze({ routeId: "whirlpool-v1-83-sol-usdc", pool: JUPITER_V1_POOL, variant: 17, instructionBytes: 36, accountCount: 21, mechanismPin: Object.freeze({ ...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, auxiliaryContractProgramIdentities: Object.freeze([...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.auxiliaryContractProgramIdentities]) }), protocolRegistry: JUPITER_V1_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([]) });
 export const JUPITER_V1_WHIRLPOOL_V2_ROUTE = Object.freeze({ routeId: "whirlpool-swap-v2-esv-sol-usdc", pool: JUPITER_V1_WHIRLPOOL_V2_POOL, variant: 47, instructionBytes: 37, accountCount: 25, mechanismPin: JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, protocolRegistry: JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([JUPITER_V1_MEMO_PROGRAM]) });
 export const JUPITER_V1_WHIRLPOOL_4H_ROUTE = Object.freeze({ routeId: "whirlpool-swap-v2-4h-sol-usdc", pool: JUPITER_V1_WHIRLPOOL_4H_POOL, variant: 47, instructionBytes: 37, accountCount: 25, mechanismPin: JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN, protocolRegistry: JUPITER_V1_WHIRLPOOL_4H_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([JUPITER_V1_MEMO_PROGRAM]) });
@@ -21,7 +22,19 @@ export const JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE = Object.freeze({
     protocolRegistry: JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY,
     runtimeProgramPins: JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS
 });
-export const JUPITER_V1_FINITE_ROUTES = Object.freeze([JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_V2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE]);
+export const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_ROUTE = Object.freeze({
+    ...JUPITER_V1_WHIRLPOOL_V2_ROUTE, routeId: "whirlpool-swap-v2-esv-sol-usdc-runtime-099da3",
+    mechanismPin: JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_MECHANISM_PIN,
+    protocolRegistry: JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_PROTOCOL_REGISTRY,
+    runtimeProgramPins: JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS
+});
+export const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE = Object.freeze({
+    ...JUPITER_V1_WHIRLPOOL_4H_ROUTE, routeId: "whirlpool-swap-v2-4h-sol-usdc-runtime-099da3",
+    mechanismPin: JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_MECHANISM_PIN,
+    protocolRegistry: JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_PROTOCOL_REGISTRY,
+    runtimeProgramPins: JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS
+});
+export const JUPITER_V1_FINITE_ROUTES = Object.freeze([JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_V2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE]);
 export function jupiterV1RegisteredProgramPins(route) {
     return route.runtimeProgramPins ?? JUPITER_V1_RUNTIME_PROGRAM_PINS;
 }
@@ -55,7 +68,8 @@ export function routeConfigForQuoteBuild(quote, build, expectedRouteId) {
     if (args.inputAtomic !== quote.inAmount || args.quotedOutputAtomic !== quote.outAmount || args.slippageBps !== quote.slippageBps)
         blocked();
     if (config.variant === 47) {
-        whirlpoolV2NamedRoles(build);
+        if (whirlpoolV2NamedRoles(build).pool !== config.pool)
+            blocked();
         const programs = [TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM, JUPITER_V6_PROGRAM];
         if ([...build.computeBudgetInstructions, ...build.setupInstructions, build.swapInstruction, ...(build.cleanupInstruction === null ? [] : [build.cleanupInstruction])].some(ix => !programs.includes(ix.programId)))
             blocked();

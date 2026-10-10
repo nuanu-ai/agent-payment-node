@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-This source tree prepares an unreleased APN 0.5.37 candidate for Apple Silicon
+This source tree prepares an unreleased APN 0.5.38 candidate for Apple Silicon
 macOS. Published packages and the Homebrew Formula have separate provenance.
 A matching version number does not prove that an installed artifact contains
 these source changes: verify its release commit or artifact digest and installed
