@@ -9,6 +9,7 @@ import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMe
 import { StateStore } from "../../src/state.js";
 import { OperationService } from "../../src/operation-service.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { bindArgv } from "../../src/command-binder.js";
 import { parseCatalogArgv } from "../../src/command-catalog.js";
 
 const scope = Object.freeze({}) as MetaMaskNativeOwnedScope;
@@ -34,7 +35,7 @@ test("settlement and reserve do not accept forged operation identities or a quot
   } finally {await rm(root,{recursive:true,force:true});}
 });
 test("fixed CLI rejects caller custody, recipient, token, RPC and raw transaction parameters",()=>{
-  const base=["wallet","metamask","native-transfer","--chain-id","1","--idempotency-key","native-0001"];
+  const base=["wallet","metamask","native-transfer","--chain","ethereum","--idempotency-key","native-0001"];
   for(const flag of ["--profile","--recipient","--token","--raw-tx","--rpc-url","--wallet"]) assert.throws(()=>parseCatalogArgv([...base,flag,"arbitrary"]));
 });
 
@@ -51,4 +52,14 @@ test("normal central EVM guard reads existing native journals only and cannot hi
     await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,59144,payer),{code:"APN_STATE_CORRUPT"});
     assert.deepEqual(await readdir(root),["metamask-native-operations"]);
   } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test("fixed public chain names bind intrinsically and reject numeric IDs or aliases",()=>{
+  for (const [name,chainId] of Object.entries({ethereum:1,optimism:10,monad:143,linea:59144,sei:1329})) {
+    assert.deepEqual(bindArgv(["wallet","metamask","native-transfer","--chain",name,"--idempotency-key","native-0001"]).request,
+      {command:"wallet.metamask.native-transfer",chainId,idempotencyKey:"native-0001"});
+  }
+  for (const name of ["1","10","143","59144","1329","base","eth","Ethereum","eip155:1","arbitrum"])
+    assert.throws(()=>bindArgv(["wallet","metamask","native-transfer","--chain",name,"--idempotency-key","native-0001"]));
+  assert.throws(()=>bindArgv(["wallet","metamask","native-transfer","--chain-id","1","--idempotency-key","native-0001"]));
 });
