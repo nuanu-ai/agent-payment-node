@@ -141,7 +141,13 @@ export class JupiterV1BudgetedRpc extends SolanaRpc{
  async bindQuote(quoteHash:string):Promise<void>{if(this.stage!=="quote")corrupt();await this.journal.bindQuote(quoteHash,this.calls);}
  async chargeOfficialRead():Promise<void>{await this.charge();}
  private async charge(){this.calls=await this.journal.charge(this.stageKey,this.priorQuoteCalls);}
- override async call(method:SolanaMethod,params:readonly unknown[]):Promise<unknown>{await this.charge();return await this.base.call(method,params);}
+ override async call(method:SolanaMethod,params:readonly unknown[]):Promise<unknown>{await this.charge();
+  if(method==="getBlockHeight"&&typeof this.base.batch==="function"){
+   const results=await this.base.batch([{method,params}]);
+   if(!Array.isArray(results)||results.length!==1)throw new ApnError("APN_RPC_PROTOCOL","Jupiter height batch is incomplete.");
+   return results[0];
+  }
+  return await this.base.call(method,params);}
  override async batch(reads:readonly SolanaBatchRead[]):Promise<readonly unknown[]>{
   // Every logical read consumes the durable stage cap before the shared physical POST.
   for(const _read of reads)await this.charge();return await this.base.batch(reads);
