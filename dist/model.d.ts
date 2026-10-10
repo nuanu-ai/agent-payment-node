@@ -73,7 +73,14 @@ export interface CoinbaseGaslessCursor {
     readonly nextBlockAtomic: string;
     readonly previousEndBlock: CoinbaseGaslessBlock | null;
 }
+export interface CoinbaseGaslessObservationSource {
+    readonly policy: "apn.coinbase-gasless.observation-source.v1";
+    readonly callRpcOrigin: string;
+    readonly logsRpcOrigin: "https://base-rpc.publicnode.com";
+    readonly preset: "publicnode-base";
+}
 export interface CoinbaseGaslessSettlement {
+    readonly observationSource?: CoinbaseGaslessObservationSource;
     readonly schemaVersion: "apn.coinbase-gasless-settlement.v1";
     readonly userOperationHash: Hex;
     readonly transactionHash: Hex;

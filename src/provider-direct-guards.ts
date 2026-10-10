@@ -1,7 +1,7 @@
 import { ApnError } from "./errors.js";
 import type { OperationRecord, ProviderDirectBinding } from "./model.js";
-import type { ProviderProfileRepositoryPort } from "./provider-ports.js";
-import type { ProviderProfileRecord } from "./provider-profile.js";
+import type { ProviderAdapterBundle, ProviderProfileRepositoryPort } from "./provider-ports.js";
+import { capabilityHash, type ProviderProfileRecord } from "./provider-profile.js";
 import type { RuntimeContext } from "./runtime.js";
 
 export function requiredProviderBinding(operation: OperationRecord): ProviderDirectBinding {
@@ -20,4 +20,17 @@ export async function requiredProviderDirectProfile(context: RuntimeContext, pro
       profile.capability_snapshot.direct.retry_owner === "apn_operation_state")
   )) throw new ApnError("APN_PROFILE_DRIFT", "The provider profile is not bound for direct payment effects.");
   return profile;
+}
+
+export function requiredProviderDirectAdapter(context: RuntimeContext, binding: ProviderDirectBinding): ProviderAdapterBundle & {
+  readonly direct: Required<Pick<NonNullable<ProviderAdapterBundle["direct"]>, "execute">> & NonNullable<ProviderAdapterBundle["direct"]>;
+} {
+  const adapter = context.requireProviderRegistry().resolve(binding.providerId);
+  if (
+    adapter.direct?.mode !== binding.executionMode || adapter.direct.execute === undefined ||
+    capabilityHash(adapter.capabilities) !== binding.capabilityHash ||
+    adapter.capabilities.direct.available !== true || adapter.capabilities.direct.mode !== binding.executionMode ||
+    adapter.capabilities.evidence.available !== true || adapter.capabilities.evidence.owner !== "apn"
+  ) throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The bound provider direct effect is unavailable.");
+  return adapter as ReturnType<typeof requiredProviderDirectAdapter>;
 }

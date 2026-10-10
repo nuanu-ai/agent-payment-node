@@ -127,7 +127,10 @@ export class HelperNetworkPolicy {
     }
 }
 function classifyQuote(context, rawUrl, method, headers, body) {
-    if (rawUrl === context.input.rpcUrl && method === "POST" && body !== null) {
+    // Preserve the existing validated exact match, including a purpose-bound configured RPC query.
+    const rpcEndpoint = quoteRpcEndpoint(context.input.rpcUrl);
+    if ((rawUrl === context.input.rpcUrl || (rpcEndpoint !== null && quoteRpcEndpoint(rawUrl) === rpcEndpoint)) &&
+        method === "POST" && body !== null) {
         parsePublicHttpsUrl(rawUrl, "APN_RPC_CONFIG", "MetaMask quote RPC", 2048);
         requireNoBearer(headers);
         return validateRpcBody(body, context);
@@ -152,6 +155,24 @@ function classifyQuote(context, rawUrl, method, headers, body) {
         return "sentinel-quote";
     }
     return mmFail("mm_gasless_provider_unavailable");
+}
+/** The SDK serializes RPC targets through URL.href, adding a root slash and removing the default HTTPS port. */
+function quoteRpcEndpoint(value) {
+    // Do not let WHATWG parsing erase raw control/whitespace or reinterpret backslashes.
+    if (/[\\\u0000-\u0020\u007f]/u.test(value))
+        return null;
+    let url;
+    try {
+        url = parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "MetaMask quote RPC", 2048);
+    }
+    catch {
+        return null;
+    }
+    // Preserve the bound path rather than admitting dot-segment or backslash path aliases.
+    const spelling = /^https:\/\/([^/?#]+)(\/[^?#]*)?$/iu.exec(value);
+    if (!spelling || spelling[1].includes("@") || url.search || url.hash || (spelling[2] ?? "/") !== url.pathname)
+        return null;
+    return url.href;
 }
 function exactProviderUrl(value) {
     let url;
@@ -311,25 +332,33 @@ function validateSentinelResponse(value, context) {
         !isPlainRecord(value.result) || !Array.isArray(value.result.transactions) ||
         value.result.transactions.length < 1 || value.result.transactions.length > 8)
         mmFail("mm_gasless_provider_unavailable");
-    let matching = 0;
-    for (const transaction of value.result.transactions) {
-        if (!isPlainRecord(transaction) || !Array.isArray(transaction.fees) || transaction.fees.length < 1 || transaction.fees.length > 8)
+    // The pinned SDK consumes only the last transaction's low fee tier with the requested fee token.
+    // Keep container bounds, but do not treat unconsumed earlier transactions or other tiers as fee quotes.
+    const transaction = value.result.transactions.at(-1);
+    if (!isPlainRecord(transaction) || !Array.isArray(transaction.fees) ||
+        transaction.fees.length < 1 || transaction.fees.length > 8)
+        mmFail("mm_gasless_provider_unavailable");
+    const fee = transaction.fees[0];
+    if (!isPlainRecord(fee) || !Array.isArray(fee.tokenFees) ||
+        fee.tokenFees.length < 1 || fee.tokenFees.length > 32)
+        mmFail("mm_gasless_provider_unavailable");
+    const matching = [];
+    for (const entry of fee.tokenFees) {
+        // SDK find() reads each candidate token address before it chooses the requested token.
+        if (!isPlainRecord(entry) || !isPlainRecord(entry.token) || typeof entry.token.address !== "string" ||
+            !/^0x[0-9a-fA-F]{40}$/u.test(entry.token.address))
             mmFail("mm_gasless_provider_unavailable");
-        for (const fee of transaction.fees) {
-            if (!isPlainRecord(fee) || !Array.isArray(fee.tokenFees) || fee.tokenFees.length > 32)
-                mmFail("mm_gasless_provider_unavailable");
-            for (const entry of fee.tokenFees) {
-                if (!isPlainRecord(entry) || !isPlainRecord(entry.token) || typeof entry.token.address !== "string" || typeof entry.token.symbol !== "string" ||
-                    !Number.isSafeInteger(entry.token.decimals) || !tokenFeeQuantity(entry.balanceNeededToken) || typeof entry.feeRecipient !== "string") {
-                    mmFail("mm_gasless_provider_unavailable");
-                }
-                if (entry.token.address.toLowerCase() === context.input.token && entry.token.decimals === 6 &&
-                    /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient))
-                    matching += 1;
-            }
-        }
+        if (entry.token.address.toLowerCase() === context.input.token)
+            matching.push(entry);
     }
-    if (matching < 1)
+    // A duplicate matching token is ambiguous, even though the SDK would select its first occurrence.
+    if (matching.length !== 1)
+        mmFail("mm_gasless_provider_unavailable");
+    const entry = matching[0];
+    const token = entry.token;
+    if (entry.error || typeof token.symbol !== "string" || token.symbol.length < 1 || token.symbol.length > 32 ||
+        token.decimals !== 6 || !tokenFeeQuantity(entry.balanceNeededToken) || typeof entry.feeRecipient !== "string" ||
+        !/^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient))
         mmFail("mm_gasless_provider_unavailable");
 }
 function tokenFeeQuantity(value) {

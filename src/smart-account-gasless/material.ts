@@ -1,6 +1,6 @@
-import { ROOT_AUTHORITY } from "@metamask/smart-accounts-kit";
-import { decodeDelegations, encodeDelegations, toDelegationStruct } from "@metamask/smart-accounts-kit/utils";
-import { hashDelegation } from "@metamask/delegation-core";
+import { ROOT_AUTHORITY } from "../metamask-smart-account-vendor.js";
+import { decodeDelegations, encodeDelegations, toDelegationStruct } from "../metamask-smart-account-vendor.js";
+import { hashDelegation } from "../metamask-smart-account-vendor.js";
 import { canonicalJson, domainHash, sha256 } from "../canonical.js";
 import type {
   SmartAccountGaslessMaterialRecord,

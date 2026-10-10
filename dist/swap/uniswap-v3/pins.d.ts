@@ -40,6 +40,14 @@ export declare const UNISWAP_V3_PAIRS: readonly UniswapV3PairPin[];
 export declare const UNISWAP_V3_KEYLESS_MECHANISM_PIN: SwapMechanismPin;
 /** Official identity only. Owners must still admit both assets with this exact pin under a sealed policy. */
 export declare const UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY: SwapProtocolRegistry;
+/** Separate finite WBTC route; old mechanism and registry constants remain byte-for-byte stable. */
+export declare const ETHEREUM_WBTC: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";
+export declare const UNISWAP_V3_WBTC_WETH_3000: "0xCBCdF9626bC03E24f779434178A73a0B4bad62eD";
+export declare const UNISWAP_WBTC_PAIR: UniswapV3PairPin;
+export declare const UNISWAP_WBTC_MECHANISM_PIN: SwapMechanismPin;
+export declare const UNISWAP_WBTC_PROTOCOL_REGISTRY: SwapProtocolRegistry;
+export declare const UNISWAP_WBTC_CODE_PINS: readonly UniswapV3CodePin[];
+export declare function verifyUniswapWbtcCodePins(call: EvmRpcCall, tag: Hex): Promise<readonly UniswapV3CodePin[]>;
 export declare function uniswapV3Pair(outputToken: string): UniswapV3PairPin;
 /** Verifies the code pins a quote or send depends on at one exact block tag; drift fails closed. */
 export type UniswapV3PinVerifier = (call: EvmRpcCall, tag: Hex) => Promise<readonly UniswapV3CodePin[]>;

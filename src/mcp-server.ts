@@ -52,6 +52,15 @@ async function callTool(
 ): Promise<OutputEnvelope> {
   try {
     const bound = bindMcpInput(tool.command, input);
+    if (bound.request.command === "circle.evm.approve-source" || bound.request.command === "circle.evm.approve-mint" || bound.request.command === "circle.evm.cleanup" || bound.request.command === "circle.evm.cleanup-nonce" || bound.request.command === "circle.evm.cleanup85-cancel" || bound.request.command === "circle.evm.cleanup86-approve") {
+      const action = bound.request.command.slice("circle.evm.".length);
+      const handoff = createCliHandoff(["apn", "circle", "evm", action, "--operation", bound.request.operationId]);
+      return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Confirm the exact Circle financial effect and both owners in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+    }
+    if (bound.request.command === "x402.merchant.approve") {
+      const handoff = createCliHandoff(["apn", "x402", "merchant", "approve", "--operation", bound.request.operationId]);
+      return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve the frozen USDm transfer in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
+    }
     if (bound.request.command === "operation.abandon") {
       const handoff = createCliHandoff(["apn", "operation", "abandon", "--operation", bound.request.operationId]);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError(
@@ -60,8 +69,8 @@ async function callTool(
         { ...cliHandoffDetails(handoff), foreground_auth: true },
       ));
     }
-    if (bound.request.command === "gasless.transfer.approve") {
-      const handoff = createCliHandoff(["apn", "gasless", "transfer", "approve", "--operation", bound.request.operationId]);
+    if (bound.request.command === "gasless.transfer.approve" || bound.request.command === "gasless.transfer.approve-sealed") {
+      const handoff = createCliHandoff(["apn", "gasless", "transfer", bound.request.command === "gasless.transfer.approve-sealed" ? "approve-sealed" : "approve", "--operation", bound.request.operationId]);
       return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED",
         "Review the USDC fee budget and provider-specific permission, including Smart Account child expiry, in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
     }

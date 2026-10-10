@@ -11,6 +11,9 @@ export declare function encodePaymentRequiredHeader(value: PaymentRequired): str
 export declare function decodePaymentRequiredHeader(value: string): PaymentRequired;
 export declare function encodePaymentSignatureHeader(value: unknown): string;
 export declare function decodePaymentSignatureHeader(value: string): PaymentPayload;
+/** Dedicated pinned Permit2 boundary; generic payment codec acceptance stays unchanged. */
+export declare function encodePermit2PaymentSignatureHeader(value: unknown): string;
+export declare function decodePermit2PaymentSignatureHeader(value: string): PaymentPayload;
 export interface DecodedPaymentResponse {
     readonly classification: "success" | "settlement_pending" | "failure_with_transaction";
     readonly normalizedCanonicalJson: string;
@@ -21,6 +24,6 @@ export interface DecodedPaymentResponse {
 export declare function decodeAndNormalizePaymentResponseHeader(value: string, expected: {
     readonly payer: string;
     readonly amountAtomic: string;
-    readonly network?: X402Network;
+    readonly network?: X402Network | "eip155:43114";
 }): DecodedPaymentResponse;
 export declare function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, chainId?: EvmChainId): readonly InspectCandidate[];

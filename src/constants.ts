@@ -1,5 +1,5 @@
 export const OUTPUT_VERSION = "apn.cli.v1" as const;
-export const PRODUCT_VERSION = "0.5.35" as const;
+export const PRODUCT_VERSION = "0.5.36" as const;
 export const STATE_VERSION = "apn.state.v1" as const;
 export const NATIVE_IPC_VERSION = "apn.native.v1" as const;
 export const CHAIN_ID = 8453 as const;
@@ -16,3 +16,5 @@ export const NATIVE_RESPONSE_FD_ENV = "APN_NATIVE_RESPONSE_FD" as const;
 export const HOST_SERIALIZED_ENV = "APN_HOST_SERIALIZED" as const;
 export const TRANSFER_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" as const;
+/** Anonymous Solana mainnet baseline shared by normal rails and portfolio. */
+export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com" as const;

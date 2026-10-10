@@ -1,3 +1,4 @@
+import { agentSdk, agentEvm, foxEvm, foxKeyring, ethereumControllers } from "./sdk-vendor.js";
 import { homedir } from "node:os";
 import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
 import { isPlainRecord } from "../../canonical.js";
@@ -76,9 +77,9 @@ async function inspect(home, expected, now) {
     return state.binding;
 }
 async function quote(input, state, policy) {
-    const sdk = await import("@metamask/agent-sdk");
+    const sdk = await agentSdk();
     sdk.disableAnalytics();
-    const evm = await import("@metamask/agent-sdk/evm");
+    const evm = await agentEvm();
     const hydrated = await hydrateSdkState(state);
     let cacheWrites = 0;
     let cache = null;
@@ -116,8 +117,8 @@ async function quote(input, state, policy) {
     return validateSdkQuote(raw, input, state.address);
 }
 async function buildUnsigned(input) {
-    const evm = await import("@metamask/fox-sdk/wallets/evm");
-    const controller = await import("@toruslabs/ethereum-controllers");
+    const evm = await foxEvm();
+    const controller = await ethereumControllers();
     mmRegistry(input.chainId);
     const executions = input.executions.map((item) => ({ target: item.target, value: BigInt(item.value), callData: item.callData }));
     const prepared = evm.prepareDelegation({ delegator: input.owner, chainId: input.chainId, executions });
@@ -132,8 +133,8 @@ async function buildUnsigned(input) {
     return mmValidateUnsigned(result, input);
 }
 async function submit(intent, first, home, now, policy, firstObservedAt) {
-    const evm = await import("@metamask/fox-sdk/wallets/evm");
-    const keyrings = await import("@metamask/fox-sdk/wallets/keyring");
+    const evm = await foxEvm();
+    const keyrings = await foxKeyring();
     const firstHydrated = await hydrateSdkState(first);
     if (firstHydrated.writes() !== 0)
         mmFail("mm_gasless_state_security");
@@ -162,8 +163,8 @@ async function submit(intent, first, home, now, policy, firstObservedAt) {
     return providerObservation(status, intent, now(), "mm_gasless_submit_unknown");
 }
 async function observe(intent, state, policy, now) {
-    const evm = await import("@metamask/fox-sdk/wallets/evm");
-    const keyrings = await import("@metamask/fox-sdk/wallets/keyring");
+    const evm = await foxEvm();
+    const keyrings = await foxKeyring();
     const hydrated = await hydrateSdkState(state);
     if (hydrated.writes() !== 0)
         mmFail("mm_gasless_state_security");

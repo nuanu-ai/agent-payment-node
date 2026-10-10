@@ -1,0 +1,46 @@
+import { z } from "zod";
+import type { Address, Hex } from "../model.js";
+export declare const FIRST_SEND_POLICY: "apn.gasless.sealed-first-send-approval.v1";
+export declare const FIRST_SEND_TTL_MS = 120000;
+export interface GaslessFirstSendApproval {
+    readonly policy: typeof FIRST_SEND_POLICY;
+    readonly operationId: string;
+    readonly operationFingerprint: string;
+    readonly profileHash: string;
+    readonly envelopeHash: string;
+    readonly bootstrapMaterialHash: string;
+    readonly bootstrapEstimateHash: string;
+    readonly userOperationMaterialHash: string;
+    readonly userOperationHash: Hex;
+    readonly owner: Address;
+    readonly reservationId: string;
+    readonly policyDigest: string;
+    readonly policyRevision: number;
+    readonly activationDigest: string;
+    readonly issuedAt: string;
+    readonly expiresAt: string;
+    readonly approvedAt: string;
+    readonly approvalFingerprint: string;
+    readonly approvalDigest: string;
+}
+export declare const firstSendApprovalSchema: z.ZodObject<{
+    policy: z.ZodLiteral<"apn.gasless.sealed-first-send-approval.v1">;
+    operationId: z.ZodString;
+    operationFingerprint: z.ZodString;
+    profileHash: z.ZodString;
+    envelopeHash: z.ZodString;
+    bootstrapMaterialHash: z.ZodString;
+    bootstrapEstimateHash: z.ZodString;
+    userOperationMaterialHash: z.ZodString;
+    userOperationHash: z.ZodString;
+    owner: z.ZodString;
+    reservationId: z.ZodString;
+    policyDigest: z.ZodString;
+    policyRevision: z.ZodNumber;
+    activationDigest: z.ZodString;
+    issuedAt: z.ZodISODateTime;
+    expiresAt: z.ZodISODateTime;
+    approvedAt: z.ZodISODateTime;
+    approvalFingerprint: z.ZodString;
+    approvalDigest: z.ZodString;
+}, z.core.$strict>;

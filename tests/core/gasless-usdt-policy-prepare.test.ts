@@ -1,3 +1,7 @@
+import { CanonicalDirectTestNative as TestNative } from "./canonical-direct-native-fixture.js";
+import { privateKeyToAccount } from "viem/accounts";
+import { usdtSponsorHash } from "../../src/gasless-usdt/sponsor-hash.js";
+import { attestUsdtSponsor } from "../../src/gasless-usdt/sponsor-auth.js";
 import assert from "node:assert/strict";
 import { lstat, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,7 +20,7 @@ import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
 import { UsdtExecutionJournal, usdtExecutionIntent } from "../../src/gasless-usdt/execution-journal.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { TestNative, TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
+import { TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import { createMcpServer } from "../../src/mcp-server.js";
@@ -66,9 +70,31 @@ function fixture(delegation: "empty" | "expected" = "empty") {
     setPrice: (value: typeof PRICE) => { price = value; } };
 }
 
+/** Current command fixture uses a genuinely re-signed payload; historical mutated fixtures stay v1-only. */
+function commandFixture() {
+  const f = fixture(), key = privateKeyToAccount(`0x${"11".repeat(32)}`);
+  const snapshot = f.ports.prepare.safeSnapshot;
+  f.ports.prepare.safeSnapshot = async sender => ({ ...await snapshot(sender), pins: {
+    token: USDT_GASLESS.tokenCodeHash, entryPoint: USDT_GASLESS.entryPointCodeHash, delegate: USDT_GASLESS.delegateCodeHash,
+    paymaster: USDT_GASLESS.paymasterCodeHash, paymasterEntryPoint: USDT_GASLESS.entryPoint } });
+  const data = f.ports.sponsor.paymasterData;
+  f.ports.sponsor.paymasterData = async op => {
+    const result = await data(op) as typeof SIGNED;
+    const signature = await key.signMessage({ message: { raw: usdtSponsorHash({ ...op, paymasterData: result.paymasterData as `0x${string}`, signature: "0x" }) } });
+    return { ...result, paymasterData: `${result.paymasterData.slice(0, -130)}${signature.slice(2)}` };
+  };
+  f.ports.prepare.sponsorAuth = async (op, safe) => await attestUsdtSponsor({ op, snapshot: safe, expectedBlockHash: safe.blockHash,
+    clock: { now: () => NOW }, rpcUrl: "https://rpc.test/", transport: { request: async (_u, _m, body) => {
+      const calls = JSON.parse(body!) as { id: string }[];
+      return { status: 200, body: JSON.stringify(calls.map((call, index) => ({ jsonrpc: "2.0", id: call.id,
+        result: index === 0 ? `0x${"0".repeat(63)}1` : usdtSponsorHash(op) }))) };
+    } } });
+  return f;
+}
+
 test("installed CLI and MCP prepare save the same unsigned bound operation; status reads it", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
+  const f = commandFixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
     gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor },
     ids: { next: () => "12345678-1234-4234-8234-123456789abc" } };
   const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
@@ -155,7 +181,7 @@ test("command refuses inactive or changed policy before RPC or journal publicati
 
 test("bound USDT key replays exact material and conflicts on a changed intent within its journal", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
+  const f = commandFixture(), options = { stateRoot: temporary.root, clock: { now: () => NOW },
     gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } };
   const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
     "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", "family-local-001"];
@@ -173,7 +199,7 @@ test("bound USDT key replays exact material and conflicts on a changed intent wi
 
 test("CLI and MCP replay the first bound claim after time, policy, safe block and sponsor drift without fresh reads", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const f = fixture(), options = { stateRoot: temporary.root, clock: { now: () => new Date(NOW.getTime() + 86_400_000) },
+  const f = commandFixture(), options = { stateRoot: temporary.root, clock: { now: () => new Date(NOW.getTime() + 86_400_000) },
     gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor },
     ids: { next: () => "12345678-1234-4234-8234-123456789abc" } };
   const argv = ["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
@@ -222,12 +248,12 @@ test("CLI and MCP replay the first bound claim after time, policy, safe block an
 test("the same key can independently prepare an older direct rail and the bound USDT journal", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const key = "cross-family-local-001";
-  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
   const directRpc = new TestRpc();
   const direct = await makeCore({ root: temporary.root, rpc: directRpc }).execute({ command: "transfer.prepare",
     profile: "default", recipient: RECIPIENT, amount: "1", idempotencyKey: key });
   assert.equal(direct.ok, true, JSON.stringify(direct.error));
-  const f = fixture(), usdt = await runCli(["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
+  const f = commandFixture(), usdt = await runCli(["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
     "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", key], {},
   { stateRoot: temporary.root, clock: { now: () => NOW },
     gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } });

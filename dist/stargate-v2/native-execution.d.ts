@@ -1,3 +1,6 @@
+export { FileStargateNativeJournal } from "./native-journal.js";
+export { stargateV2NativeCanonicalReceipt } from "./native-record.js";
+export type { StargateNativeCanonicalReceipt } from "./native-record.js";
 import { type Hex } from "viem";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -169,16 +172,6 @@ export interface StargateNativeJournal {
     withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
     withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
 }
-export declare class FileStargateNativeJournal implements StargateNativeJournal {
-    private readonly root;
-    private readonly locks;
-    constructor(root: string, locks?: Pick<StateStore, "initialize" | "withLocks">);
-    private path;
-    withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
-    withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
-    load(id: string): Promise<StargateNativeOperation | null>;
-    save(nextInput: StargateNativeOperation): Promise<void>;
-}
 export declare class LocalStargateNativeSigner {
     private readonly state;
     private readonly wallets;
@@ -191,28 +184,3 @@ export declare class LocalStargateNativeSigner {
 }
 export declare function prepareStargateV2NativeEth(request: StargateNativePreparationRequest, ports: StargateNativeExecutionPorts, journal: StargateNativeJournal): Promise<StargateNativeOperation>;
 export declare function executeStargateV2NativeEth(operationId: string, ports: StargateNativeExecutionPorts, journal: StargateNativeJournal): Promise<StargateNativeOperation>;
-export interface StargateNativeCanonicalReceipt {
-    readonly schemaVersion: "apn.stargate-v2-native-receipt.v1";
-    readonly operationId: string;
-    readonly profile: string;
-    readonly route: Readonly<{
-        sourceChainId: 1;
-        sourceEid: 30101;
-        sourcePool: Address;
-        destinationChainId: 130;
-        destinationEid: 30320;
-        destinationPool: Address;
-    }>;
-    readonly owner: Address;
-    readonly recipient: Address;
-    readonly principalAtomic: string;
-    readonly nativeMessageFeeAtomic: string;
-    readonly finalityPolicy: StargateV2RouteFinalityPolicy;
-    readonly totalValueAtomic: string;
-    readonly maximumDebitAtomic: string;
-    readonly quoteHash: string;
-    readonly source: StargateSourceReceipt;
-    readonly destination: StargateDestinationEvidence;
-    readonly evidenceHash: string;
-}
-export declare function stargateV2NativeCanonicalReceipt(operationInput: StargateNativeOperation): StargateNativeCanonicalReceipt;

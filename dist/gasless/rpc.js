@@ -254,7 +254,7 @@ export class GaslessRpc {
         assertGaslessEstimate(intent, estimate);
         return estimate;
     }
-    async send(intent, sealed) {
+    async send(intent, sealed, beforeSend) {
         assertGaslessExecutionChain(this.chainId);
         this.assertIntent(intent);
         const wire = validateGaslessWire(intent, sealed.userOperation);
@@ -264,7 +264,7 @@ export class GaslessRpc {
         }
         await this.assertChainUnlessVerified();
         try {
-            const returned = rpcHex(await this.bundlerCall("eth_sendUserOperation", [wire, intent.entryPoint]), 32, 32);
+            const returned = rpcHex(await this.call("bundler", "eth_sendUserOperation", [wire, intent.entryPoint], this.transport, beforeSend), 32, 32);
             if (returned !== localHash)
                 throw new Error("hash");
             return returned;
@@ -324,7 +324,7 @@ export class GaslessRpc {
             gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_mismatch");
         return layout.mappingSlotAtomic;
     }
-    async call(which, method, params, transport) {
+    async call(which, method, params, transport, beforeSend) {
         const methods = which === "rpc" ? RPC_METHODS : BUNDLER_METHODS;
         if (!methods.has(method))
             gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_method");
@@ -336,7 +336,7 @@ export class GaslessRpc {
         session.reserve();
         let response;
         try {
-            response = await transport.request(this.bundlerEndpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG", () => session.assertActive());
+            response = await transport.request(this.bundlerEndpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG", () => { session.assertActive(); beforeSend?.(); });
         }
         catch {
             throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable.");

@@ -1,0 +1,26 @@
+{
+  "builtinSubstitutions": {
+    "punycode": "punycode.js@2.3.1"
+  },
+  "bundler": {
+    "target": "node24",
+    "version": "0.28.2"
+  },
+  "entryNames": [
+    "order-id"
+  ],
+  "files": {
+    "order-id.mjs": {
+      "bytes": 5568281,
+      "sha256": "af95223ffa7f81ae66a5c4187c67a5ceb15f3a113173109b3f560d3193c95343"
+    },
+    "order-id.mjs.LEGAL.txt": {
+      "bytes": 1581,
+      "sha256": "ca784819588b95e12a550a4bb7e0e3ace35c2311ad369098feccab4843c7c86c"
+    }
+  },
+  "schemaVersion": "apn.relay-order-id.v1",
+  "upstreamVersions": {
+    "settlementSdk": "0.0.143"
+  }
+}

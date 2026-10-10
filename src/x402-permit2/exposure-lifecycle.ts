@@ -75,6 +75,12 @@ export class Permit2ExposureLifecycle extends SecureStateStore {
   async load(operationId: string): Promise<Permit2ExposureRecord | null> {
     if (!HASH.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Invalid Permit2 operation ID.");
     await this.ready();
+    return this.loadReadOnly(operationId);
+  }
+
+  /** Checked compatibility read without initializing or changing legacy records. */
+  async loadReadOnly(operationId: string): Promise<Permit2ExposureRecord | null> {
+    if (!HASH.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Invalid Permit2 operation ID.");
     const value = await this.readJson(this.path(operationId));
     if (value === null) return null;
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "reservationId", "profileHash",

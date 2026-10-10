@@ -55,6 +55,7 @@ export interface MetaMaskGaslessPublicOperation {
   readonly transfer: {
     readonly chain_id: MetaMaskGaslessChainId; readonly token: Address; readonly symbol: "USDC"; readonly decimals: 6;
     readonly sender: Address; readonly recipient: Address; readonly fee_recipient: Address;
+    readonly requested_fixed_net_atomic?: string; readonly maximum_gross_atomic?: string;
     readonly gross_atomic: string; readonly user_max_fee_atomic: string; readonly minimum_received_atomic: string;
     readonly frozen_net_atomic: string; readonly frozen_fee_atomic: string;
     readonly actual_delivered_atomic: string | null; readonly actual_sender_debit_atomic: string | null;
@@ -106,5 +107,5 @@ export function mmRequestHash(profileHash: string, intent: Pick<MetaMaskGaslessI
   const r = intent.request;
   return hashObject({ kind: MM_OPERATION_KIND, profileHash, providerId: "metamask-agent-wallet",
     chainId: r.chainId, token: intent.token, recipient: r.recipient, grossAtomic: r.grossAtomic,
-    maxFeeAtomic: r.maxFeeAtomic, minReceivedAtomic: r.minReceivedAtomic });
+    maxFeeAtomic: r.maxFeeAtomic, minReceivedAtomic: r.minReceivedAtomic, ...(r.fixedNet ? { fixedNet: r.fixedNet } : {}) });
 }

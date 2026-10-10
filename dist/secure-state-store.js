@@ -38,7 +38,7 @@ export function validateDirectory(stats, root) {
     if (!root && (permissions(stats) & 0o077) !== 0)
         stateSecurity("State directory is accessible by another user.");
 }
-function validateFile(stats) {
+export function validateFile(stats) {
     if (!stats.isFile() || stats.isSymbolicLink())
         stateSecurity("State entry is not a regular file.");
     if (stats.uid !== uid())
@@ -263,6 +263,8 @@ export class SecureStateStore {
             await handle.close();
         }
     }
+    /** Optional internal assertion seam for specialized create-only stores. */
+    async beforeCreateOnlyPublication(_relativePath, _value) { }
     async writeJson(relativePath, value, createOnly = false) {
         const target = this.resolveRelative(relativePath);
         const parent = dirname(target);
@@ -322,6 +324,11 @@ export class SecureStateStore {
                 }
             }
             if (createOnly) {
+                // Keep ordinary stores on the original path; only a subclass that
+                // supplies a publication assertion adds work at this atomic seam.
+                if (this.beforeCreateOnlyPublication !== SecureStateStore.prototype.beforeCreateOnlyPublication) {
+                    await this.beforeCreateOnlyPublication(relativePath, value);
+                }
                 try {
                     await link(temporary, target);
                 }

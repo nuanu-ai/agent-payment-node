@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 import { installGaslessDependencyBoundary } from "../../src/metamask-gasless/client/dependency-boundary.js";
+import { foxEvm } from "../../src/metamask-gasless/client/sdk-vendor.js";
 import type { MetaMaskGaslessUnsignedResult } from "../../src/metamask-gasless/model.js";
 import { expectedQuote, intent, NOW, OWNER, quoteInput, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
@@ -17,8 +18,14 @@ test("gasless helper rejects ESM and CommonJS Solana decoder loads while allowin
   assert.throws(() => require("@solana/buffer-layout-utils"), rejected);
   assert.throws(() => require("bigint-buffer"), rejected);
   assert.throws(() => require("@solana/spl-token"), rejected);
-  const evm = await import("@metamask/fox-sdk/wallets/evm");
-  assert.equal(typeof evm.prepareDelegation, "function");
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  try {
+    const evm = await foxEvm();
+    assert.equal(typeof evm.prepareDelegation, "function");
+  } finally {
+    if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    else Reflect.deleteProperty(globalThis, "window");
+  }
 });
 
 test("all five supported EVM helper modes run with the decoder boundary installed", async (t) => {

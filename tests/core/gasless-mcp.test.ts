@@ -28,6 +28,7 @@ const GASLESS_TOOL_NAMES = [
   "apn_gasless_transfer_quote",
   "apn_gasless_transfer_prepare",
   "apn_gasless_transfer_approve",
+  "apn_gasless_transfer_approve_sealed",
 ] as const;
 const OPERATION_ID = "a".repeat(64);
 
@@ -46,7 +47,7 @@ test("CLI and MCP discovery expose the terminal permission-invalidation recovery
   }
 });
 
-test("gasless CLI and MCP project the same eight strict tools and canonical inputs", () => {
+test("gasless CLI and MCP project the same nine strict tools and canonical inputs", () => {
   const tools = projectMcpTools().filter((item) => item.name.startsWith("apn_gasless_"));
   assert.deepEqual(tools.map((item) => item.name), GASLESS_TOOL_NAMES);
   assert.deepEqual(tools.map((item) => ({
@@ -63,9 +64,10 @@ test("gasless CLI and MCP project the same eight strict tools and canonical inpu
     { name: "apn_gasless_balance", properties: ["profile", "chain"], required: ["profile", "chain"], additionalProperties: false },
     { name: "apn_gasless_transfer_quote", properties: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url", "rpc_max_batch_items"],
       required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], additionalProperties: false },
-    { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"],
-      required: ["profile", "chain", "to", "amount", "max_fee", "min_received", "idempotency_key"], additionalProperties: false },
+    { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"],
+      required: ["profile", "chain", "to", "idempotency_key"], additionalProperties: false },
     { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], additionalProperties: false },
+    { name: "apn_gasless_transfer_approve_sealed", properties: ["operation"], required: ["operation"], additionalProperties: false },
   ]);
   assert.equal((requiredTool(tools, "apn_gasless_usdt_status").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
   assert.equal((requiredTool(tools, "apn_gasless_usdt_resume").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
@@ -135,6 +137,33 @@ test("live MCP gasless approval returns only the exact foreground CLI handoff", 
   assert.deepEqual(envelope.error?.details, {
     cli_handoff: handoff,
     cli_handoff_argv: ["apn", "gasless", "transfer", "approve", "--operation", OPERATION_ID],
+    foreground_auth: true,
+  });
+  assert.deepEqual(envelope.next_actions, [handoff]);
+  assert.deepEqual(effects.calls, { rpc: 0, load: 0, seal: 0, approval: 0 });
+  assert.deepEqual({ loads: wrapping.loads, creates: wrapping.creates }, { loads: 0, creates: 0 });
+  await assert.rejects(stat(temporary.root), { code: "ENOENT" });
+});
+
+test("live MCP sealed first-send approval returns only the exact foreground CLI handoff", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const effects = effectCounters();
+  const wrapping = new ThrowingWrappingSecret();
+  const connection = await connectMcp({ stateRoot: temporary.root, wrappingSecret: wrapping, gasless: effects.dependencies });
+  t.after(connection.close);
+
+  const envelope = decode(await connection.client.callTool({
+    name: "apn_gasless_transfer_approve_sealed",
+    arguments: { operation: OPERATION_ID },
+  }));
+  const handoff = `apn gasless transfer approve-sealed --operation ${OPERATION_ID}`;
+  assert.equal(envelope.command, "gasless.transfer.approve-sealed");
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+  assert.deepEqual(envelope.error?.details, {
+    cli_handoff: handoff,
+    cli_handoff_argv: ["apn", "gasless", "transfer", "approve-sealed", "--operation", OPERATION_ID],
     foreground_auth: true,
   });
   assert.deepEqual(envelope.next_actions, [handoff]);

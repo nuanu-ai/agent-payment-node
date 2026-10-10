@@ -6,6 +6,7 @@ import { ApnError } from "./errors.js";
 import { canonicalErc7710Facilitators, isStrictErc7710Payload } from "./x402-erc7710-codec.js";
 import { MAX_DECODED_X402_BYTES, decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 import { isEip2612GasSponsoringDeclaration } from "./x402-permit2/extension.js";
+import { validatePermit2PaymentPayload } from "./x402-permit2/codec-shape.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const LOWER_ADDRESS = /^0x[0-9a-f]{40}$/u;
 const BYTES32 = /^0x[0-9a-f]{64}$/u;
@@ -86,6 +87,29 @@ export function decodePaymentSignatureHeader(value) {
     if (JSON.stringify(official) !== JSON.stringify(strict)) {
         throw protocol("Official and strict PAYMENT-SIGNATURE representations disagree.");
     }
+    return strict;
+}
+/** Dedicated pinned Permit2 boundary; generic payment codec acceptance stays unchanged. */
+export function encodePermit2PaymentSignatureHeader(value) {
+    validatePermit2PaymentPayload(value);
+    const encoded = Buffer.from(canonicalJson(value), "utf8").toString("base64");
+    if (canonicalJson(decodePermit2PaymentSignatureHeader(encoded)) !== canonicalJson(value)) {
+        throw protocol("Official and pinned Permit2 representations disagree.");
+    }
+    return encoded;
+}
+export function decodePermit2PaymentSignatureHeader(value) {
+    const strict = decodeCanonicalBase64Json(value);
+    validatePermit2PaymentPayload(strict);
+    let official;
+    try {
+        official = decodeOfficialPaymentSignatureHeader(value);
+    }
+    catch {
+        throw protocol("Official x402 v2 representation rejected Permit2 PAYMENT-SIGNATURE.");
+    }
+    if (canonicalJson(official) !== canonicalJson(strict))
+        throw protocol("Official and pinned Permit2 representations disagree.");
     return strict;
 }
 export function decodeAndNormalizePaymentResponseHeader(value, expected) {

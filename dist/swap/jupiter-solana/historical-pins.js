@@ -1,0 +1,12 @@
+export const HISTORICAL_JUPITER_IDS = Object.freeze([
+    "67cec83fd91f78acb9decf9ef89dcf1f95c9551dcdf996d0a840db4c48cd8457",
+    "ea25d97d0da057bfab9a6b6ade2b5799d8b81333ab99c33c793a75c0a8bde5ee",
+    "ed04535cb343db8bd5b7871b8725492c395206ccfe339661d15817c2ead7a738",
+]);
+export const HISTORICAL_JUPITER_PAYER = "GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki";
+export const HISTORICAL_JUPITER_ACCOUNT_BINDING = "6300729b2c444cb67eaf0d75a49f8dd2eb39ea095a7dfdf20c8bf3279da066a1";
+export const HISTORICAL_JUPITER_OWNER_PROFILE = "3b39c575c04b7b84570f0b98c721accfb75743d1aa3fe0275c54e8931d366193";
+// Original public signed-marker raw file bytes, matched by both unchanged attempt8 inventories.
+// This anchor admits material authentication only and says nothing about submission history.
+export const HISTORICAL_JUPITER_EA25_SIGNED_MARKER_SHA256 = "45d36d569a31a454125d328d5f4d3a434a30bb76216a536aa13420244181282e";
+//# sourceMappingURL=historical-pins.js.map

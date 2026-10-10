@@ -40,6 +40,10 @@ export declare function publicRelayNativeSourceJournal(journal: RelayNativeSourc
 export declare class RelayNativeSourceJournalRepository extends SecureStateStore {
     private path;
     load(op: RelayUnsignedOperation): Promise<RelayNativeSourceJournal | null>;
+    hasEffectClaim(op: RelayUnsignedOperation): Promise<boolean>;
+    claimSigning(op: RelayUnsignedOperation, nonce: bigint): Promise<void>;
+    /** Independent create-only fence survives restoration of an older mutable journal. */
+    claimBroadcast(op: RelayUnsignedOperation, raw: Hex): Promise<void>;
     advance(op: RelayUnsignedOperation, expected: string | null, phase: Phase, hash?: string | null, now?: Date): Promise<RelayNativeSourceJournal>;
 }
 /** Persist the single dispatch marker before the send. Replays only return the marker. */
@@ -47,8 +51,8 @@ export declare function dispatchRelayNativeDepositOnce(op: RelayUnsignedOperatio
 export interface RelayNativeSourcePorts {
     readonly confirm: (summary: {
         operationId: string;
-        sourceChainId: 56;
-        destinationChainId: 137 | 143;
+        sourceChainId: 56 | 8453;
+        destinationChainId: 137 | 143 | 4326;
         sourceAccount: string;
         recipient: string;
         amountAtomic: string;
@@ -63,6 +67,7 @@ export interface RelayNativeSourcePorts {
     readonly rpc: Rpc;
 }
 export declare class RelayNativeSourceRuntime {
+    #private;
     private readonly state;
     private readonly ports;
     private readonly clock;

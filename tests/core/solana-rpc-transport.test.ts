@@ -28,6 +28,45 @@ test("installed runtime gives each command a fresh 24 POST Solana cap", async t 
   assert.notEqual(leftRpc.budget, rightRpc.budget);
 });
 
+for (const choice of [
+  { name: "unset env", env: undefined, expected: "https://api.mainnet-beta.solana.com" },
+  { name: "empty env", env: "", expected: "https://api.mainnet-beta.solana.com" },
+  { name: "explicit env", env: "https://owner.example/rpc", expected: "https://owner.example/rpc" },
+  { name: "option overrides env", env: "https://env.example/rpc", option: "https://option.example/rpc", expected: "https://option.example/rpc" },
+  { name: "invalid nonempty env", env: "not-a-url", invalid: true },
+  { name: "invalid explicit option", env: "https://env.example/rpc", option: "", invalid: true },
+]) test(`normal runtime Solana anonymous endpoint selection: ${choice.name}`, async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  await new StateStore(temporary.root).initialize();
+  const prior = process.env.APN_SOLANA_RPC_URL;
+  let posts = 0, endpoint: string | undefined;
+  const fetcher: typeof fetch = async (url, init) => {
+    posts++; endpoint = String(url);
+    const request = JSON.parse(String(init?.body));
+    return json({ jsonrpc: "2.0", id: request.id, result: "mainnet-evidence" });
+  };
+  let rpc: SolanaRpc;
+  try {
+    if (choice.env === undefined) delete process.env.APN_SOLANA_RPC_URL;
+    else process.env.APN_SOLANA_RPC_URL = choice.env;
+    const core = createApnCore(bindArgv(["wallet", "capabilities-solana"]), {
+      stateRoot: temporary.root, solanaRpcFetch: fetcher,
+      ...("option" in choice ? { solanaRpcUrl: choice.option } : {}),
+    });
+    rpc = (core.context.directRails[0] as SolanaLocalAdapter).rpc as SolanaRpc;
+  } finally {
+    if (prior === undefined) delete process.env.APN_SOLANA_RPC_URL;
+    else process.env.APN_SOLANA_RPC_URL = prior;
+  }
+  if ("invalid" in choice) {
+    await assert.rejects(rpc.call("getGenesisHash", []), { code: "APN_RPC_CONFIG" });
+    assert.equal(posts, 0);
+  } else {
+    assert.equal(await rpc.call("getGenesisHash", []), "mainnet-evidence");
+    assert.equal(endpoint, new URL(choice.expected).href); assert.equal(posts, 1);
+  }
+});
+
 test("Solana batch correlates shuffled unique IDs and counts one physical POST", async () => {
   const budget = new SolanaRpcBudget({ maxPhysicalRequests: 1 });
   let posts = 0;
@@ -98,6 +137,34 @@ test("shared Solana operation budget refuses a send before transport and paces P
   assert.equal(budget.logicalCalls, 3); assert.equal(budget.physicalRequests, 2);
 });
 
+test("a Solana timer waking one millisecond early waits for the boundary before the next POST", async () => {
+  let now = 0;
+  const waits: number[] = [], starts: number[] = [];
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 3, minimumIntervalMs: 750, now: () => now,
+    wait: async ms => { waits.push(ms); now += waits.length === 1 ? ms - 1 : ms; } });
+  const rpc = new SolanaRpc("https://rpc.example", (async (_url, init) => {
+    starts.push(now); const q = JSON.parse(String(init?.body)); return json({ jsonrpc: "2.0", id: q.id, result: 1 });
+  }) as typeof fetch, budget);
+  await rpc.call("getGenesisHash", []);
+  await rpc.call("getBlockHeight", []);
+  await rpc.call("getBlockHeight", []);
+  assert.deepEqual(starts, [0,750,1500]); assert.deepEqual(waits, [750,1,750]);
+  assert.equal(budget.physicalRequests, 3); assert.equal(budget.logicalCalls, 3);
+});
+for (const kind of ["stuck", "backwards", "second early wake"] as const) test(`Solana pacing refuses a ${kind} clock without an early POST or unbounded waits`, async () => {
+  let now = 0, posts = 0;
+  const waits: number[] = [];
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 3, minimumIntervalMs: 750, now: () => now,
+    wait: async ms => { waits.push(ms); now += kind === "stuck" ? 0 : kind === "backwards" ? -1 : Math.max(0,ms-1); } });
+  const rpc = new SolanaRpc("https://rpc.example", (async (_url,init) => {
+    posts++; const q = JSON.parse(String(init?.body)); return json({ jsonrpc: "2.0", id: q.id, result: 1 });
+  }) as typeof fetch,budget);
+  await rpc.call("getGenesisHash", []);
+  await assert.rejects(rpc.call("getBlockHeight", []),{code:"APN_RPC_RATE_LIMITED"});
+  assert.equal(posts,1); assert.equal(budget.physicalRequests,1); assert.equal(budget.logicalCalls,2);
+  assert.deepEqual(waits,kind === "second early wake" ? [750,1] : [750]);
+});
+
 test("default operation pacing fails fast without sleeping under a caller's state lock", async () => {
   let now = 0; let posts = 0;
   const budget = new SolanaRpcBudget({ maxPhysicalRequests: 3, now: () => now });
@@ -145,6 +212,33 @@ test("a batched read returns HTTP 429 after one POST without retrying", async ()
   assert.equal(posts, 1);
   assert.equal(budget.logicalCalls, 2);
   assert.equal(budget.physicalRequests, 1);
+});
+
+for (const endpoint of ["https://api.mainnet-beta.solana.com", "https://api.mainnet-beta.solana.com/",
+  "https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"]) test(`public account compatibility charges each single POST at ${endpoint}`, async () => {
+  const methods: string[] = [], budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 500, wait: ms => new Promise(resolve => setTimeout(resolve, ms)) });
+  const rpc = new SolanaRpc(endpoint, async (_url, init) => {
+    const request = JSON.parse(String(init?.body)); assert.equal(Array.isArray(request), false); methods.push(request.method);
+    return json({ jsonrpc: "2.0", id: request.id, result: request.method });
+  }, budget);
+  assert.deepEqual(await rpc.batch([{ method: "getAccountInfo", params: [] }, { method: "getMultipleAccounts", params: [] }]), ["getAccountInfo", "getMultipleAccounts"]);
+  assert.deepEqual(methods, ["getAccountInfo", "getMultipleAccounts"]); assert.equal(budget.physicalRequests, 2); assert.equal(budget.logicalCalls, 2);
+});
+for (const endpoint of ["https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"]) test(`PublicNode account compatibility stops on its first HTTP refusal at ${endpoint}`, async () => {
+  let posts = 0; const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2 });
+  const rpc = new SolanaRpc(endpoint, async () => { posts++; return json({ error: "batch refused" }, 400); }, budget);
+  await assert.rejects(rpc.batch([{ method: "getMultipleAccounts", params: [] }, { method: "getMultipleAccounts", params: [] }]), { code: "APN_RPC_PROTOCOL" });
+  assert.equal(posts, 1); assert.equal(budget.physicalRequests, 1); assert.equal(budget.logicalCalls, 1);
+});
+test("public mainnet account compatibility stops on its first cooldown response", async () => {
+  let posts = 0; const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 500, wait: ms => new Promise(resolve => setTimeout(resolve, ms)) });
+  const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", async () => { posts++; return json({ error: "cooldown" }, 429, { "retry-after": "10" }); }, budget);
+  await assert.rejects(rpc.batch([{ method: "getAccountInfo", params: [] }, { method: "getMultipleAccounts", params: [] }]), { code: "APN_RPC_RATE_LIMITED" });
+  assert.equal(posts, 1); assert.equal(budget.physicalRequests, 1); assert.equal(budget.logicalCalls, 1);
+});
+test("public mainnet compatibility cannot dispatch an effect hidden after a read", async () => {
+  let posts = 0; const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", async () => { posts++; throw Error("transport forbidden"); });
+  await assert.rejects(rpc.batch([{ method: "getAccountInfo", params: [] }, { method: "sendTransaction" as never, params: [] }])); assert.equal(posts, 0);
 });
 
 test("persistent Solana pacing serializes concurrent commands and survives a fresh client", async t => {
@@ -218,4 +312,42 @@ test("Solana HTTP 403 ends a read after one physical POST", async () => {
   await assert.rejects(rpc.call("getGenesisHash", []), { code: "APN_RPC_PROTOCOL" });
   assert.equal(posts, 1);
   assert.equal(rpc.budget?.physicalRequests, 1);
+});
+
+
+test("Solana send awaits the final asynchronous admission fence before one physical POST",async()=>{
+ let posts=0,resolveFence!:()=>void;const fence=new Promise<void>(resolve=>{resolveFence=resolve;});
+ const rpc=new SolanaRpc("https://rpc.example",async(_url,init)=>{posts++;const request=JSON.parse(String(init?.body));return json({jsonrpc:"2.0",id:request.id,result:"admitted"});});
+ const sending=rpc.sendTransactionAtStart(["fixture"],async()=>{await fence;});
+ await new Promise<void>(resolve=>setImmediate(resolve));assert.equal(posts,0);resolveFence();assert.equal(await sending,"admitted");assert.equal(posts,1);
+});
+test("Solana rejected asynchronous dispatch admission starts zero physical POSTs",async()=>{
+ let posts=0;const rpc=new SolanaRpc("https://rpc.example",async()=>{posts++;throw new Error("must not post");});
+ await assert.rejects(rpc.sendTransactionAtStart(["fixture"],async()=>{await Promise.resolve();throw new Error("policy revoked at dispatch");}));assert.equal(posts,0);
+});
+
+test("Solana send retains correlated numeric RPC rejection without provider text or simulation logs",async()=>{
+ let posts=0;
+ const rpc=new SolanaRpc("https://rpc.example",async(_url,init)=>{
+  posts++;const request=JSON.parse(String(init?.body));
+  return json({jsonrpc:"2.0",id:request.id,error:{code:-32002,message:"untrusted SECRET raw payload",data:{err:"BlockhashNotFound",logs:["SECRET"]}}});
+ });
+ await assert.rejects(rpc.sendTransactionAtStart(["fixture"],()=>{}),error=>{
+  assert.equal((error as any).code,"APN_RPC_PROTOCOL");
+  assert.deepEqual((error as any).details,{rpcErrorCode:-32002,rpcErrorReason:"blockhash_not_found"});
+  assert.doesNotMatch(JSON.stringify(error),/SECRET|payload|logs/u);return true;
+ });assert.equal(posts,1);
+});
+test("Solana send does not attribute mismatched or malformed RPC error envelopes",async()=>{
+ for(const shape of ["wrong-id","result-and-error","string-code"]){
+  let posts=0;const rpc=new SolanaRpc("https://rpc.example",async(_url,init)=>{
+   posts++;const request=JSON.parse(String(init?.body));
+   return json({jsonrpc:"2.0",id:shape==="wrong-id"?"foreign":request.id,error:{code:shape==="string-code"?"-32002":-32002,message:"untrusted"},...(shape==="result-and-error"?{result:"anything"}:{})});
+  });
+  await assert.rejects(rpc.sendTransactionAtStart(["fixture"],()=>{}),error=>{assert.equal((error as any).code,"APN_RPC_PROTOCOL");assert.equal((error as any).details,undefined);return true;});assert.equal(posts,1);
+ }
+});
+test("Solana unsuccessful send HTTP status is bounded evidence and never retried",async()=>{
+ let posts=0;const rpc=new SolanaRpc("https://rpc.example",async()=>{posts++;return json({error:"untrusted SECRET"},403);});
+ await assert.rejects(rpc.sendTransactionAtStart(["fixture"],()=>{}),error=>{assert.deepEqual((error as any).details,{httpStatus:403});assert.doesNotMatch(JSON.stringify(error),/SECRET/u);return true;});assert.equal(posts,1);
 });

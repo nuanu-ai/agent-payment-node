@@ -58,11 +58,17 @@ export function mmChain(value: unknown): MetaMaskGaslessChainId {
 }
 export function mmSame(a: unknown, b: unknown): boolean { return canonicalJson(a) === canonicalJson(b); }
 export function mmRequest(value: unknown, reason: MetaMaskGaslessFailureReason = "mm_gasless_input"): MetaMaskGaslessRequest {
-  const r = mmExact(value, ["chainId", "recipient", "grossAtomic", "maxFeeAtomic", "minReceivedAtomic"], reason);
+  const fixed = isPlainRecord(value) && Object.hasOwn(value, "fixedNet");
+  const r = mmExact(value, ["chainId", "recipient", "grossAtomic", "maxFeeAtomic", "minReceivedAtomic", ...(fixed ? ["fixedNet"] : [])], reason);
   mmChain(r.chainId);
   if (mmCanonicalAddress(r.recipient, reason) === MM_ZERO_ADDRESS) mmFail(reason);
   const gross = mmUint(r.grossAtomic, true, reason), minimum = mmUint(r.minReceivedAtomic, true, reason);
   mmUint(r.maxFeeAtomic, false, reason);
   if (minimum > gross) mmFail(reason);
+  if (fixed) {
+    const f = mmExact(r.fixedNet, ["netAtomic", "maxGrossAtomic"], reason);
+    const net = mmUint(f.netAtomic, true, reason);
+    if (mmUint(f.maxGrossAtomic, true, reason) !== gross || net > gross || f.netAtomic !== r.minReceivedAtomic) mmFail(reason);
+  }
   return r as unknown as MetaMaskGaslessRequest;
 }

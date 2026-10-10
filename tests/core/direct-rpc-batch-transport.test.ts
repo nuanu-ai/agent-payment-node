@@ -57,7 +57,7 @@ test("batch transport sends one read-only POST and restores request order from r
 test("BNB native funding accepts the gas price read batch before signing and blocks invalid fees without a send", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const hash = `0x${"a".repeat(64)}`;
-  const op = { sourceAccount: WALLET, nativeQuote: { deposit: { value: "100", maxFeePerGas: "10" } },
+  const op = { sourceChainId: 56, sourceAccount: WALLET, nativeQuote: { deposit: { value: "100", maxFeePerGas: "10" } },
     depositNetworkFeeCeilingWei: "100" } as RelayUnsignedOperation;
   let gasPrice = "0x5", sends = 0;
   const bodies = mockHttps(t, (body) => {

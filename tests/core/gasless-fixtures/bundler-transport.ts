@@ -37,7 +37,8 @@ export async function bundledGaslessFixture(root: string) {
     "code" | "proxy" | "reorg" = "";
   let batchReply: (rows: Json[]) => unknown = rows => rows;
   let feeQuote: unknown;
-  const transport: GaslessTransport = { request: async (endpoint, method, body) => {
+  const transport: GaslessTransport = { request: async (endpoint, method, body, _maxBytes, _code, beforeSend) => {
+    beforeSend?.();
     assert.equal(method, "POST"); assert.notEqual(body, null);
     const request = JSON.parse(body!) as Json | Json[], bundler = endpoint === BUNDLER_URL;
     assert.ok(bundler || endpoint === RPC_URL);

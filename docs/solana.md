@@ -38,14 +38,18 @@ This command creates a real local wallet when run outside a test fixture.
 Keep the custody acknowledgement explicit. Only fund the returned public
 address after reviewing the intended account and network.
 
-Configure the intended public HTTPS RPC endpoint in `APN_SOLANA_RPC_URL`. There
-is no default endpoint. URL credentials, query parameters, fragments, private
+Normal Solana commands use the anonymous public mainnet RPC
+`https://api.mainnet-beta.solana.com` when `APN_SOLANA_RPC_URL` is unset or empty.
+No RPC account, signup or API key is required. Set `APN_SOLANA_RPC_URL` only to
+choose another public HTTPS endpoint; invalid nonempty overrides refuse
+instead of falling back. URL credentials, query parameters, fragments, private
 addresses and redirects are rejected. APN verifies mainnet genesis
 `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` at execution and observation
 boundaries. Endpoint text and raw RPC errors are not included in receipts.
 
 ```sh
-export APN_SOLANA_RPC_URL=https://your-solanamainnet-rpc.example
+# Optional: choose another public HTTPS endpoint.
+# export APN_SOLANA_RPC_URL=https://your-solanamainnet-rpc.example
 apn wallet balance-solana --profile solana-local --asset sol
 apn wallet balance-solana --profile solana-local --asset usdc
 ```

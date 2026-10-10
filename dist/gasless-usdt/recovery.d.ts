@@ -1,5 +1,5 @@
 import type { Hex } from "../model.js";
-import { type UsdtBoundOperation } from "./bound-operation.js";
+import { type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import { UsdtExecutionJournal, type UsdtExecutionRecord } from "./execution-journal.js";
 import { type UsdtChainReceipt } from "./receipt.js";
 /** Untrusted bundler locator. The chain receipt and its EntryPoint event remain the outcome authority. */

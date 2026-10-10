@@ -14,9 +14,10 @@ export class ChainAccountStore extends SecureStateStore {
         super(root, options);
         this.wrappingSecret = wrappingSecret;
     }
+    async initializeStorage() { await super.initialize(); }
     async ready() {
         this.initialized ??= (async () => {
-            await super.initialize();
+            await this.initializeStorage();
             for (const name of ["chain-accounts", "chain-wallets"])
                 await this.ensureDirectory(name);
         })();

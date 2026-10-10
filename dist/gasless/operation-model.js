@@ -11,7 +11,8 @@ export function newGaslessEffect(role) {
 }
 export function gaslessSnapshot(op) {
     return { state: op.state, approval: op.approval, bootstrap: op.bootstrap, userOperation: op.userOperation,
-        cursor: op.cursor, observation: op.observation, settlement: op.settlement, failure: op.failure };
+        cursor: op.cursor, observation: op.observation, settlement: op.settlement, failure: op.failure,
+        ...(op.firstSendApprovals === undefined ? {} : { firstSendApprovals: op.firstSendApprovals }) };
 }
 export function sealGaslessOperation(op) {
     return { ...op, integrityHash: hashObject(op) };

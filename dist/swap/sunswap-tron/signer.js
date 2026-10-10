@@ -1,4 +1,4 @@
-import { utils } from "tronweb";
+import { utils } from "../../tron/utils.js";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import { validateChainAccount } from "../../chain-account-store.js";
 import { ApnError } from "../../errors.js";

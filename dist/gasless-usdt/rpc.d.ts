@@ -23,6 +23,7 @@ export declare function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: st
     readonly blockNumber: bigint;
     readonly blockHash: Hex;
     readonly account: UsdtAccountState;
+    readonly pins: import("./sponsor-auth.js").UsdtSponsorSnapshot["pins"];
 }>;
 /**
  * The keyless sponsor is the mechanism itself: Pimlico's public endpoint for chain 1, fixed, never configurable, so the

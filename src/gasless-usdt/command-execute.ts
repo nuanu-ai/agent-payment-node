@@ -5,7 +5,7 @@ import { GaslessHttps, type GaslessTransport } from "../gasless/https.js";
 import type { Address } from "../model.js";
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
-import { UsdtBoundOperationRepository, validateUsdtBoundOperation, type UsdtBoundOperation } from "./bound-operation.js";
+import { UsdtBoundOperationRepository, validateUsdtAnyBoundOperation as validateUsdtBoundOperation, type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import { UsdtCommandReadBudget } from "./command-prepare.js";
 import { UsdtExecutionJournal, type UsdtExecutionRecord } from "./execution-journal.js";
 import { LocalUsdtSigningService } from "./local-signing.js";
@@ -13,6 +13,7 @@ import { USDT_GASLESS } from "./model.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import { UsdtRecoveryService, type UsdtRecoveryPort } from "./recovery.js";
 import { usdtPacedRecoveryPort } from "./recovery-port.js";
+import { mintUsdtSponsorPermit } from "./sponsor-permit.js";
 import { usdtSafeSnapshot, usdtSendPort } from "./rpc.js";
 import { GuardedUsdtSendService, type UsdtSendSigner, type UsdtSendTransport } from "./send.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -112,6 +113,7 @@ export class GaslessUsdtCommandExecute {
       dailyUsage: async (sender: Address, at: Date) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
         chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
       safeSnapshot: async sender => await usdtSafeSnapshot(budget, rpcUrl, sender),
+      sponsorPermit: async (bound, identity, snapshot) => await mintUsdtSponsorPermit({ bound, identity, snapshot, transport: budget, rpcUrl, clock: this.clock }),
     };
   }
 

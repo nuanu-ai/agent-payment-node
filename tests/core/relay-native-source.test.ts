@@ -252,6 +252,8 @@ for (const profile of ["evm-live-buyer", "default"] as const) test(`${profile} n
 });
 
 test("Monad foreground consent names MON, the destination chain and exact deposit", async t => {
+  // Keep the foreground wall clock aligned with this signed historical fixture.
+  t.mock.method(Date, "now", () => now.getTime());
   const temp = await temporaryState(); t.after(temp.cleanup);
   const op = await prepared(new StateStore(temp.root), true);
   let screen = "";
@@ -376,6 +378,11 @@ for (const lane of ["polygon", "buyer-monad", "default-monad"] as const) test(`$
   await ledger.reserve({ ...identity, registry, rail: "bridge", amountAtomic: op.amountAtomic,
     idempotencyKey: `relay-native-execute:${op.operationId}`, now });
   const journalStore = new RelayNativeSourceJournalRepository(temp.root);
+  // New Base permanent fences must not change legacy BNB unsigned crash/retirement semantics.
+  await journalStore.claimSigning(op, 0n); await journalStore.claimBroadcast(op, "0x0102");
+  assert.equal(await journalStore.hasEffectClaim(op), false);
+  await assert.rejects(readFile(join(temp.root, "relay-native-signing-claims", `${op.operationId}.json`)), { code: "ENOENT" });
+  await assert.rejects(readFile(join(temp.root, "relay-native-broadcast-claims", `${op.operationId}.json`)), { code: "ENOENT" });
   let journal = await journalStore.advance(op, null, "pending", null, now);
   journal = await journalStore.advance(op, journal.integrityHash, "signing_started", null, now);
   let sends = 0;

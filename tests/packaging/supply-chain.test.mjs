@@ -170,7 +170,15 @@ test("production SPDX SBOM is deterministic and bound to the lockfiles", async (
   const sbom = JSON.parse(firstBytes);
   assert.doesNotMatch(textIfPresent(generateSbom), /localeCompare/);
   assert.equal(sbom.spdxVersion, "SPDX-2.3");
-  assert.equal(sbom.documentNamespace.endsWith(sha256(lockBytes)), true);
+  const vendorBytes = await Promise.all(["metamask-evm-sdk", "metamask-smart-account", "relay-order-id", "tron-utils"].map(name => readFile(resolve(sourceRoot, "vendor", name, "provenance.json"))));
+  assert.equal(sbom.documentNamespace.endsWith(sha256(Buffer.concat([lockBytes, ...vendorBytes]))), true);
+  const contained = new Set(sbom.relationships.filter(row => row.relationshipType === "CONTAINS").map(row => row.relatedSpdxElement));
+  const bundled = sbom.packages.filter(row => contained.has(row.SPDXID));
+  assert.ok(bundled.length > 0, "vendor components omitted from release SBOM");
+  for (const bytes of vendorBytes) for (const row of Object.values(JSON.parse(bytes).emittedPackages)) {
+    assert.ok(bundled.some(item => item.name === row.name && item.versionInfo === row.version), `missing bundled ${row.name}@${row.version}`);
+  }
+  assert.equal(bundled.some(row => ["elliptic", "@toruslabs/ffjavascript", "rpc-websockets"].includes(row.name)), false);
   assert.equal(sbom.creationInfo.created, new Date(Number(epoch) * 1000).toISOString());
   const packageJson = JSON.parse(await readFile(resolve(sourceRoot, "package.json"), "utf8"));
   const packages = new Set(sbom.packages.map((entry) => `${entry.name}@${entry.versionInfo}`));
@@ -178,12 +186,9 @@ test("production SPDX SBOM is deterministic and bound to the lockfiles", async (
     assert.equal(packages.has(`${name}@${version}`), true, `missing production dependency ${name}@${version}`);
   }
   assert.equal(sbom.packages.some((entry) => entry.name === "@modelcontextprotocol/client"), false, "dev-only MCP client leaked");
-  // Public gasless SDK dependencies also require Node types, so this formerly
-  // dev-only root version is now part of npm's production dependency closure.
   const locked = JSON.parse(lockBytes);
-  assert.equal(locked.packages["node_modules/@types/node"].dev, undefined);
-  assert.equal(locked.packages["node_modules/@types/bn.js"].dependencies["@types/node"], "*");
-  assert.equal(packages.has("@types/node@24.5.2"), true, "production Node types omitted");
+  assert.equal(locked.packages["node_modules/@types/node"].dev, true);
+  assert.equal(packages.has("@types/node@24.5.2"), false, "dev-only Node types leaked");
   assert.equal(packages.has("@types/node@22.7.5"), true, "ethers production dependency omitted Node types");
   assert.equal(packages.has("typescript@5.9.2"), true, "installed production peer closure omitted TypeScript");
 });

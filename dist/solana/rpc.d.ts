@@ -32,6 +32,7 @@ export declare class SolanaRpcBudget {
 }
 export interface SolanaRpcPort {
     readonly originHash: string;
+    readonly maximumAccountsPerRead?: 8 | 16;
     call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
     batch?(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
 }
@@ -46,9 +47,10 @@ export declare class SolanaRpc implements SolanaRpcPort {
     readonly budget: SolanaRpcBudget | undefined;
     constructor(endpoint?: string | undefined, fetcher?: typeof fetch, budget?: SolanaRpcBudget, pacer?: Pick<SolanaRpcPacer, "schedule"> | undefined);
     get hasPersistentPacer(): boolean;
+    get maximumAccountsPerRead(): 8 | 16;
     call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
     /** Guard the actual send transport start after persistent pacing has admitted the POST. */
-    sendTransactionAtStart(params: readonly unknown[], beforePost: () => void): Promise<unknown>;
+    sendTransactionAtStart(params: readonly unknown[], beforePost: () => void | Promise<void>): Promise<unknown>;
     /** Independent read methods share one POST; results retain input order despite unordered replies. */
     batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
     private request;

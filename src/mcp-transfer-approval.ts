@@ -16,7 +16,9 @@ export async function genericTransferHandoff(core: ApnCore, request: TransferApp
       fingerprint: rail.fingerprint, policyHash: rail.policyHash, prepared: rail.prepared });
   }
   const operation = await core.context.state.findOperation(request.operationId);
-  if (operation?.evm !== undefined && operation.state === "awaiting_approval") await approval.approve(operation);
+  // Both generic EVM and the older Base-USDC local lane must hand off before
+  // TransferService can persist started or Native can create a signing marker.
+  if (operation !== null && operation.providerDirect === undefined && operation.state === "awaiting_approval") await approval.approve(operation);
 }
 
 export class RejectingMcpTransferApproval implements TransferApprovalPort {

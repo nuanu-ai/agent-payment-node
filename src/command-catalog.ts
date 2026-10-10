@@ -1,3 +1,9 @@
+import { MEGA_FUNDING_COMMANDS } from "./lifi/mega-gaszip-command-catalog.js";
+import { SEI_FUNDING_COMMANDS } from "./lifi/sei-gaszip-command-catalog.js";
+import { CIRCLE_EVM_COMMANDS, CIRCLE_EVM_GROUPS } from "./circle-v2-evm/command-catalog.js";
+import { MERCHANT_COMMANDS } from "./x402-merchant/command-catalog.js";
+import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
+import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_COMMANDS } from "./evm-command-catalog.js";import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";import { UNISWAP_COMMANDS, UNISWAP_COMMAND_GROUPS } from "./swap/uniswap-command-catalog.js";import { SUNSWAP_COMMANDS, SUNSWAP_COMMAND_GROUPS } from "./swap/sunswap-tron/command-catalog.js";import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/command-catalog.js";import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { networkCommandVariants } from "./network-command-catalog.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
@@ -62,9 +68,14 @@ const httpOptions = [
   option("--body-base64", "base64", false, noDefault, ["maximum_65536_decoded_bytes", "empty_is_present_zero_bytes", "omission_is_absent"], "operator_input"),
 ];
 const httpSynopsis = " [--method <method>] [--headers-json <json>] [--body-base64 <base64>]";
-export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS, ...UNISWAP_TOKEN_COMMAND_GROUPS,
+export const COMMAND_GROUPS: readonly CommandGroup[] = [
+  ...ALLOWLIST_COMMAND_GROUPS, ...UNISWAP_COMMAND_GROUPS, ...UNISWAP_TOKEN_COMMAND_GROUPS,
   ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
   { path: ["relay"], summary: "Prepare finite Relay quotes; execute only admitted Ethereum USDC source routes.", kind: "group" },
+  { path: ["mega"], summary: "Finite Mega native funding.", kind: "group" },
+  { path: ["mega", "funding"], summary: "GasZip direct Base ETH to Mega ETH for the default owner.", kind: "group" },
+  { path: ["sei"], summary: "Finite Sei native funding.", kind: "group" },
+  { path: ["sei", "funding"], summary: "GasZip direct Base ETH to Sei SEI, self only.", kind: "group" },
   { path: ["stargate"], summary: "Execute the pinned Stargate V2 Ethereum ETH to Unichain ETH lane.", kind: "group" },
   { path: ["stargate", "native"], summary: "Prepare, submit and observe one exact self transfer.", kind: "group" },
   { path: ["stargate", "token"], summary: "Bridge pinned Optimism USDC to Polygon with an optional native drop.", kind: "group" },
@@ -75,14 +86,17 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["circle"], summary: "Bounded Circle V2 Base to Solana USDC operations.", kind: "group" },
   { path: ["circle", "approval"], summary: "Prepare and execute an exact Base USDC allowance.", kind: "group" },
   { path: ["circle", "source"], summary: "Submit one Base CCTP V2 source transfer.", kind: "group" },
+  ...CIRCLE_EVM_GROUPS,
   { path: ["policy"], summary: "Explicit human admission of mainnet chain assets.", kind: "group" },
   { path: ["mcp"], summary: "Serve and discover the local APN MCP transport.", kind: "group" },
   { path: ["doctor"], summary: "Inspect local APN prerequisites.", kind: "group" },
   { path: ["wallet"], summary: "Create, inspect and configure the disposable wallet.", kind: "group" },
   { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
+  { path: ["wallet", "metamask"], summary: "Finite fixed MetaMask native-paid transfer.", kind: "group" },
   { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
   { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
-  { path: ["x402", "permit2"], summary: "Read current owner admission and existing blocked Permit2 intents.", kind: "group" },
+  { path: ["x402", "merchant"], summary: "Finite external USDm merchant transfer-proof payment and delivery.", kind: "group" },
+  { path: ["x402", "permit2"], summary: "Read owner admission and intents, approve one foreground Permit2 GET and observe chain evidence.", kind: "group" },
   { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
   { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
   { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },
@@ -90,21 +104,8 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [...ALLOWLIST_COMMAND_GRO
   { path: ["receipt"], summary: "Read durable terminal receipts.", kind: "group" },
 ] as const;
 const BASE_COMMANDS: readonly CommandDefinition[] = [
-  command(["x402", "permit2", "preflight"],
-    "apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>",
-    "Check current local owner admission for exact inspected Permit2 terms without signing or saving a payment.",
-    [profileRequired, option("--payment-required", "base64", true, noDefault, ["decoded_x402_v2_PAYMENT-REQUIRED"], "operator_input"),
-      option("--expected-challenge-hash", "string", true, noDefault, ["64_lowercase_hex_characters"], "public"),
-      option("--expected-index", "string", true, noDefault, ["canonical_nonnegative_integer"], "public"),
-      option("--expected-terms", "base64", true, noDefault, ["decoded_selected_requirements_json"], "operator_input"), rpcRequired],
-    "network_read", "Reads local owner binding, active policy, usage, one finalized Avalanche block and facilitator capability; writes only RPC pacing metadata, never payment state or submission.",
-    "none", "Never.", { terminal: ["admissible_unsigned"], non_terminal: [] }, [],
-    ["apn x402 permit2 preflight --profile default --payment-required <inspected-header> --expected-challenge-hash <hash> --expected-index 0 --expected-terms <inspected-terms-base64> --rpc-url https://avalanche-rpc.example"]),
-  command(["x402", "permit2", "status"], "apn x402 permit2 status --profile <profile> --operation <operation-id>",
-    "Read one existing blocked Permit2 intent with redacted output.", [profileRequired, operationRequired],
-    "local_read", "Checks existing local state only; never initializes, repairs, reserves, signs or sends.",
-    "none", "Never.", { terminal: ["not_found"], non_terminal: ["execution_blocked"] }, [],
-    ["apn x402 permit2 status --profile default --operation <operation-id>"]),
+  ...PERMIT2_COMMANDS,
+  ...MERCHANT_COMMANDS,
   command(["relay", "arbitrum", "prepare"],
     "apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>",
     "Save one unsigned Arbitrum USDC to the exact Ethereum USDC recipient Relay quote.",
@@ -155,11 +156,11 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   command(["relay", "base", "prepare"], "apn relay base prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>", "Freeze one unsigned Ethereum USDC to Base ETH Relay quote.", [profileRequired, option("--recipient", "address", true, noDefault, ["canonical_evm_address"], "public"), option("--amount-atomic", "atomic_usdc", true, noDefault, ["positive_integer"], "operator_input"), option("--min-output-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--max-approval-network-fee-wei", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--max-deposit-network-fee-wei", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Requires an active route-specific owner policy pin; saves only an unsigned quote. Source execution requires the fixed default owner as both payer and recipient, the exact saved Base route, and fresh foreground confirmation.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["operation", "status"], when: "Inspect the saved unsigned quote." }], ["apn relay base prepare --profile default --recipient <address> --amount-atomic 2500000 --min-output-atomic 891439003839815 --max-approval-network-fee-wei 100000000000000 --max-deposit-network-fee-wei 100000000000000 --idempotency-key relay-base-0001"]),
   command(["relay", "base", "observe"], "apn relay base observe --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]", "Read one provider candidate and safe Base native recipient credit.", [operationRequired, rpcRequired, option("--ethereum-rpc-url", "https_url", false, noDefault, ["credential_free_https_without_fragment", "public_target_required_at_runtime"], "operator_input")], "network_read", "Uses up to three Ethereum source RPC POSTs when supplied, one Relay status GET, and up to eight Base RPC POSTs with persisted 750 ms pacing. Operational acceptance requires finalized source, provider source binding, and safe recipient credit; paid acceptance remains unproven.", "none", "Never.", { terminal: [], non_terminal: ["prepared_waiting", "provider_candidate_unproven", "recipient_credit_observed", "operational_acceptance"] }, [], ["apn relay base observe --operation <operation-id> --rpc-url https://base-rpc.example --ethereum-rpc-url https://ethereum-rpc.example"]),
   command(["relay", "prepare"], "apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>", "Freeze one unsigned owner-policy-bound Relay quote.", [profileRequired, option("--recipient", "address", true, noDefault, ["canonical_evm_address"], "public"), option("--amount-atomic", "atomic_usdc", true, noDefault, ["positive_integer"], "operator_input"), option("--min-output-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--max-approval-network-fee-wei", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--max-deposit-network-fee-wei", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Reads active policy and one no-key Relay quote; writes an unsigned PREPARED journal. Does not inspect funds or allowance.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["operation", "status"], when: "Inspect saved unsigned quote." }], ["apn relay prepare --profile default --recipient <address> --amount-atomic 1000000 --min-output-atomic 1000000000000000 --max-approval-network-fee-wei 1000000000000000 --max-deposit-network-fee-wei 1000000000000000 --idempotency-key relay-quote-0001"]),
-  command(["relay", "native", "prepare"], "apn relay native prepare --profile <bnb-owner-profile> --recipient <pinned-destination-address> --amount-atomic <bnb-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <bnb-wei> --idempotency-key <key>", "Freeze one unsigned BNB native to Polygon POL or Monad MON Relay quote.", [profileRequired, option("--recipient", "address", true, noDefault, ["canonical_evm_address"], "public"), option("--amount-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--min-output-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--max-deposit-network-fee-wei", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Reads active BNB native bridge policy and one public Relay quote; writes an unsigned operation. Source profile, account and destination recipient are fixed by route; default BNB to Monad uses bnb-native-monad-native-default-v1. No preflight, signing or send path is admitted.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["operation", "status"], when: "Inspect saved unsigned quote." }], ["apn relay native prepare --profile evm-live-buyer --recipient <default-wallet-address> --amount-atomic 1500000000000000 --min-output-atomic 9000000000000000000 --max-deposit-network-fee-wei 30000000000000 --idempotency-key relay-bnb-pol-0001", "apn relay native prepare --profile default --recipient <default-wallet-address> --amount-atomic 1200000000000000 --min-output-atomic 32000000000000000000 --max-deposit-network-fee-wei 30000000000000 --idempotency-key relay-bnb-mon-default-0001"]),
+  command(["relay", "native", "prepare"], "apn relay native prepare --profile <fixed-owner-profile> --recipient <pinned-destination-address> --amount-atomic <source-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <source-wei> --idempotency-key <key>", "Freeze one finite BNB or Base native Relay funding quote.", [profileRequired, option("--recipient", "address", true, noDefault, ["canonical_evm_address"], "public"), option("--amount-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--min-output-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--max-deposit-network-fee-wei", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Reads active source native bridge policy and one public Relay quote; writes an unsigned operation. Source profile, account and destination recipient are fixed by route; default BNB to Monad uses bnb-native-monad-native-default-v1. Base seller lanes fix 50T wei principal, 1T full fee budget, and MegaUSDm/default or PolygonPOL/buyer recipients. No signing or send occurs.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["operation", "status"], when: "Inspect saved unsigned quote." }], ["apn relay native prepare --profile evm-live-buyer --recipient <default-wallet-address> --amount-atomic 1500000000000000 --min-output-atomic 9000000000000000000 --max-deposit-network-fee-wei 30000000000000 --idempotency-key relay-bnb-pol-0001", "apn relay native prepare --profile default --recipient <default-wallet-address> --amount-atomic 1200000000000000 --min-output-atomic 32000000000000000000 --max-deposit-network-fee-wei 30000000000000 --idempotency-key relay-bnb-mon-default-0001"]),
   command(["relay", "preflight"], "apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>", "Observe source funds and exact Relay allowance for a saved unsigned quote.", [profileRequired, operationRequired, rpcRequired], "network_read", "Reads active policy and two bounded Ethereum RPC batches pinned to one block hash; never signs, approves, or submits.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [], ["apn relay preflight --profile default --operation <operation-id> --rpc-url https://rpc.example"]),
   command(["relay", "execute"], "apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>", "Foreground-confirm and run the exact saved Ethereum approval and deposit source effects.", [operationRequired, rpcRequired], "payment_submit", "Requires explicit foreground confirmation, an exact saved Ethereum USDC to BNB native or fixed-owner Base ETH route, and its active route-specific policy pin; may sign and submit the exact saved Ethereum source effects once per durable effect. Returns only the source effect journal; destination delivery and paid acceptance remain unproven.", "foreground_tty", "Inside the source runtime, after operation validation and before any durable source effect or signing.", { terminal: ["confirmed", "failed"], non_terminal: ["pending", "signing_started", "sealed", "submitting", "submission_marked", "tx_known"] }, [{ command_path: ["operation", "status"], when: "Inspect saved source state without a new signing attempt." }], ["apn relay execute --operation <operation-id> --rpc-url https://rpc.example"]),
-  command(["relay", "native", "execute"], "apn relay native execute --operation <operation-id> --rpc-url <bnb-rpc>", "Foreground-confirm and submit the exact saved BNB native Relay deposit once.", [operationRequired, rpcRequired], "payment_submit", "Requires the exact buyer or default profile for its fixed BNB to Polygon or Monad quote, active native bridge policy, fresh funding and nonce, encrypted local wallet, and one durable send marker. Returns BNB source evidence only; destination delivery and paid acceptance remain unproven.", "foreground_tty", "After saved operation validation and before signing or source effects.", { terminal: ["confirmed", "failed", "failed_before_effect"], non_terminal: ["pending", "signing_started", "sealed", "submitting"] }, [{ command_path: ["operation", "status"], when: "Inspect the saved unsigned quote." }], ["apn relay native execute --operation <operation-id> --rpc-url https://bnb-rpc.example"]),
-  command(["relay", "retire"], "apn relay retire --profile <default|evm-live-buyer> --operation <operation-id>", "Retire one untouched prepared Relay quote locally.", [profileRequired, operationRequired], "local_write", "Writes a durable retirement marker only for an untouched quote or an exact native attempt proven to have failed before any effect, with its exact usage reservation released. Buyer and default profiles accept only their respective fixed BNB native routes. Does not sign or use the network.", "none", "Never.", { terminal: ["retired"], non_terminal: [] }, [{ command_path: ["operation", "status"], when: "Inspect the retained quote and retirement proof." }], ["apn relay retire --profile default --operation <operation-id>", "apn relay retire --profile evm-live-buyer --operation <operation-id>"]),
+  command(["relay", "native", "execute"], "apn relay native execute --operation <operation-id> --rpc-url <source-rpc>", "Foreground-confirm and submit the exact saved finite native Relay deposit once.", [operationRequired, rpcRequired], "payment_submit", "Requires the exact fixed source owner profile and saved route, active native bridge policy, fresh funding and nonce, encrypted local wallet, and one durable send marker. Finite seller Base lanes verify depository runtime and full OP Stack fee before signing and dispatch. Returns source evidence only; destination delivery and paid acceptance remain unproven.", "foreground_tty", "After saved operation validation and before signing or source effects.", { terminal: ["confirmed", "failed", "failed_before_effect"], non_terminal: ["pending", "signing_started", "sealed", "submitting"] }, [{ command_path: ["operation", "status"], when: "Inspect the saved unsigned quote." }], ["apn relay native execute --operation <operation-id> --rpc-url https://bnb-rpc.example"]),
+  command(["relay", "retire"], "apn relay retire --profile <default|evm-live-buyer|evm-live-seller> --operation <operation-id>", "Retire one untouched prepared Relay quote locally.", [profileRequired, operationRequired], "local_write", "Writes a durable retirement marker only for an untouched quote or an exact native attempt proven to have failed before any effect, with its exact usage reservation released. Buyer/default BNB and seller Base profiles accept only their respective fixed native-source routes. Does not sign or use the network.", "none", "Never.", { terminal: ["retired"], non_terminal: [] }, [{ command_path: ["operation", "status"], when: "Inspect the retained quote and retirement proof." }], ["apn relay retire --profile default --operation <operation-id>", "apn relay retire --profile evm-live-buyer --operation <operation-id>"]),
   command(["relay", "status"], "apn relay status --operation <operation-id>", "Read one keyless Relay provider status for a saved quote.", [operationRequired], "network_read", "Checks the retirement marker and makes one bounded GET to Relay status/v3; reads saved operation and makes no journal or usage changes. Provider hashes are candidates, not onchain proof or paid acceptance.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [], ["apn relay status --operation <operation-id>"]),
   command(["relay", "observe"], "apn relay observe --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>", "Read source and destination evidence for one saved Relay operation.", [operationRequired, rpcRequired, option("--bnb-rpc-url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "public_target_required_at_runtime"], "operator_input")], "network_read", "Reads the saved quote and source journal, up to three source RPC POSTs, one bounded Relay status GET, and up to eight destination RPC POSTs; physical starts share persisted 750 ms provider-family pacing. A proven native source receipt reconciles its local journal and usage reservation. Never signs, submits, or establishes paid acceptance.", "none", "Never.", { terminal: [], non_terminal: ["prepared", "source_finalized", "recipient_credit_observed", "operational_acceptance"] }, [], ["apn relay observe --operation <operation-id> --rpc-url https://source-rpc.example --bnb-rpc-url https://destination-rpc.example"]),
   command(["stargate", "native", "prepare"], "apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>", "Freeze a fresh quote and exact Ethereum Stargate sendToken envelope.", [profileRequired, option("--amount-atomic", "wei", true, noDefault, ["positive_integer", "dust_free_quote_amount"], "operator_input"), option("--max-native-debit-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Reads both chains and writes a crash-durable unsigned operation.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["stargate", "native", "execute"], when: "After reviewing the frozen operation." }], ["apn stargate native prepare --profile owner --amount-atomic 10000000000000000 --max-native-debit-atomic 12000000000000000 --idempotency-key eth-unichain-0001"]),
@@ -280,6 +281,9 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
     [],
     ["apn wallet permission forget --profile smart-account --expected-revision 1"],
   ),
+  command(["wallet","metamask","native-transfer"],"apn wallet metamask native-transfer --chain <chain> --idempotency-key <key>","Transfer exactly 1000 canonical USDC atomic to the fixed Seller with a finite native fee.",[option("--chain","string",true,noDefault,["ethereum","optimism","monad","linea","sei"],"public"),option("--idempotency-key","string",true,noDefault,["canonical_idempotency_key"],"public")],"payment_submit","Fixed MetaMask profile, active owner native/USDC policy, vendor Guard policy, physical balances and durable single effect marker.","foreground_tty","Genuine foreground stdin/stderr approval within 60 seconds.",{terminal:["confirmed","confirmed_reverted","failed_before_effect"],non_terminal:["prepared","effect_started","acknowledged","unknown"]},[],["apn wallet metamask native-transfer --chain ethereum --idempotency-key native-0001"]),
+  command(["wallet","metamask","native-transfer-status"],"apn wallet metamask native-transfer-status --operation <id>","Read the durable fixed transfer journal.",[operationRequired],"local_read","Reads public journal without private wallet action.","none","Never.",completedStates,[],["apn wallet metamask native-transfer-status --operation <operation-id>"]),
+  command(["wallet","metamask","native-transfer-observe"],"apn wallet metamask native-transfer-observe --operation <id>","Observe stored exact transaction and settle actual full native fees.",[operationRequired],"network_read","Public canonical RPC observation of the saved quote; never sends again.","none","Never.",completedStates,[],["apn wallet metamask native-transfer-observe --operation <operation-id>"]),
   command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),
   command(["wallet", "balance"], "apn wallet balance [--profile <profile>] --rpc-url <https-url>", "Read Base ETH and canonical Base-USDC balances.", [profileOptional, rpcRequired], "network_read", "Reads the configured public Base RPC; never signs or submits.", "none", "Never.", completedStates, [], ["apn wallet balance --profile default --rpc-url <https-base-rpc-url>"]),
   command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile>", "Read the encrypted owner-approved profile policy.", [profileRequired], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default"]),
@@ -394,9 +398,9 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
     ], ["apn operation abandon --operation <operation-id>"]),
   command(
     ["operation", "resume"],
-    "apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>] [--observe-only true]",
+    "apn operation resume --operation <operation-id> --rpc-url <https-url> [--wait-seconds <1..300>] [--observe-only true] [--coinbase-observation-rpc publicnode-base]",
     "Perform only the next legal durable recovery transition.",
-    [operationRequired, rpcRequired, option("--wait-seconds", "integer_seconds", false, noDefault, ["canonical_integer_1_through_300", "x402_or_provider_approval_watch"], "operator_input"),
+    [operationRequired, rpcRequired, option("--coinbase-observation-rpc", "string", false, noDefault, ["publicnode-base", "saved_started_or_ambiguous_awal_gasless_only", "fixed_secondary_bounded_logs_only"], "public"), option("--wait-seconds", "integer_seconds", false, noDefault, ["canonical_integer_1_through_300", "x402_or_provider_approval_watch"], "operator_input"),
       option("--observe-only", "string", false, noDefault, ["literal_true", "already_submitted_local_direct_only", "receipt_observation_without_rebroadcast"], "public")],
     "recovery",
     "Reuses protected effect material and may reconcile or resubmit only when the stored state permits. --observe-only true inspects one already submitted local direct receipt without custody access or resubmission.",
@@ -451,7 +455,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   ),
   command(["receipt", "get"], "apn receipt get --operation <operation-id>", "Inspect one durable terminal receipt.", [operationRequired], "local_write", "May initialize local state and repair saved operation or receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", { terminal: allOperationStates.terminal, non_terminal: [] }, [], ["apn receipt get --operation <operation-id>"]),
 ] as const;
-export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...PORTFOLIO_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS, ...UNISWAP_COMMANDS, ...UNISWAP_TOKEN_COMMANDS, ...SUNSWAP_COMMANDS, ...JUPITER_COMMANDS, ...ORCA_COMMANDS];
+export const COMMANDS: readonly CommandDefinition[] = [...includeGaslessRecovery(includeBridgeRecovery(includeRailRecovery(BASE_COMMANDS))), ...networkCommandVariants(BASE_COMMANDS), ...CHAIN_COMMANDS, ...PORTFOLIO_COMMANDS, ...BRIDGE_COMMANDS, ...CIRCLE_COMMANDS, ...SEI_FUNDING_COMMANDS, ...CIRCLE_EVM_COMMANDS, ...MEGA_FUNDING_COMMANDS, ...ONECLICK_COMMANDS, ...GASLESS_COMMANDS, ...ALLOWLIST_COMMANDS, ...UNISWAP_COMMANDS, ...UNISWAP_TOKEN_COMMANDS, ...SUNSWAP_COMMANDS, ...JUPITER_COMMANDS, ...ORCA_COMMANDS];
 export const COMMAND_MANIFEST = {
   schema_version: "apn.command-manifest.v1",
   product: "agent-payment-node",
@@ -479,46 +483,3 @@ export const COMMAND_MANIFEST = {
   commands: COMMANDS,
 } as const;
 validateCommandManifest(COMMAND_MANIFEST);
-function command(
-  path: readonly string[],
-  synopsis: string,
-  summary: string,
-  options: readonly CommandOption[],
-  effectClass: EffectClass,
-  effectSummary: string,
-  approvalClass: ApprovalClass,
-  approvalWhen: string,
-  states: CommandDefinition["states"],
-  recovery: CommandDefinition["recovery"],
-  examples: readonly string[],
-  outputContract: CommandDefinition["output"]["contract"] = "apn.cli.v1",
-): CommandDefinition {
-  return {
-    path,
-    synopsis,
-    summary,
-    options,
-    effect: { class: effectClass, summary: effectSummary },
-    approval: { class: approvalClass, when: approvalWhen },
-    output: {
-      contract: outputContract,
-      success_exit: 0,
-      failure_exit: 1,
-      success: outputContract === "apn.cli.v1" ? "One successful apn.cli.v1 envelope." : "The command-specific raw transport output.",
-      failures: [outputContract === "apn.cli.v1" ? "One classified-failure apn.cli.v1 envelope." : "A classified command failure."],
-    },
-    states,
-    recovery,
-    examples,
-  };
-}
-function option(
-  name: `--${string}`,
-  type: ScalarType,
-  required: boolean,
-  defaultValue: CommandOption["default"],
-  constraints: readonly string[],
-  sensitivity: CommandOption["sensitivity"],
-): CommandOption {
-  return { name, type, required, default: defaultValue, constraints, sensitivity };
-}

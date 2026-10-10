@@ -5,10 +5,11 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-The source tree prepares unreleased APN 0.5.35 for Apple Silicon macOS. The
-published 0.5.34 release and its Homebrew Formula are separate from this source
-version. Verify the exact installed version before relying on source changes
-after 0.5.34.
+This source tree prepares an unreleased APN 0.5.36 candidate for Apple Silicon
+macOS. Published packages and the Homebrew Formula have separate provenance.
+A matching version number does not prove that an installed artifact contains
+these source changes: verify its release commit or artifact digest and installed
+command contract before relying on them.
 
 The current platform boundary and the required work for future Linux or
 Windows support are recorded in the [platform support matrix](docs/platform-support.md).
@@ -71,9 +72,10 @@ and the [verified archive recovery preflight](docs/gasless.md#existing-state-and
 
 ## Install
 
-Homebrew installation is a separate publication gate. Verify that `apn --version`
-reports `0.5.35` before relying on the current source behavior. The published
-0.5.34 installation predates this unreleased source version.
+Homebrew installation is a separate publication gate. The command below installs
+the published Formula; it does not establish that the unreleased source candidate
+is available there. Check `apn --version`, the installed release provenance and
+`apn help --json` together before using a source capability.
 
 ```sh
 brew install nuanu-ai/tap/apn
@@ -119,7 +121,7 @@ CLI terminal without payment.
 
 Candidate and release artifacts are built twice with Node 24.15.0 and must be
 byte-identical. The workflow emits the npm tarball, a deterministic SPDX 2.3
-SBOM derived from the production lock graph, and a release manifest binding
+SBOM derived from the production lock graph and each vendor slice's emitted package provenance, and a release manifest binding
 their names, sizes and SHA-256 digests to the exact repository commit. GitHub
 artifact attestations bind those bytes to the pinned workflow identity.
 
@@ -571,6 +573,15 @@ explicitly injected read-only builder, and approval and execution refuse
 because the JUP6 instruction and account ABI has not been verified for
 signing. See `docs/jupiter.md`.
 
+Normal Solana commands use the anonymous public mainnet RPC
+`https://api.mainnet-beta.solana.com` when `APN_SOLANA_RPC_URL` is unset or empty.
+No RPC account or API key is required. Set `APN_SOLANA_RPC_URL` only to choose
+your own HTTPS endpoint; invalid nonempty values refuse instead of falling back.
+Public RPC can rate-limit or refuse requests and provides no APN availability
+guarantee. Jupiter material with a frozen RPC origin requires that exact endpoint
+for preparation, approval and observation. Legacy material without that origin
+retains its existing genesis and program-pin checks.
+
 `apn swap solana orca stable-prepare` is a separate, owner-admitted USDC to
 USDT route through the pinned Whirlpool. It reads and simulates one exact
 unsigned transaction, optionally including creation of the owner's USDT ATA,
@@ -602,7 +613,9 @@ operations.
 
 ## Portfolio read
 
-`apn wallet portfolio [--profile <profile>]` (MCP: `apn_wallet_portfolio`)
+Complete successful network results are cached privately for 15 seconds, including zero balances. `--refresh` (MCP `refresh: true`) always reads again; a failed refresh reports the failure without returning an older result. Cache hits preserve the original `provenance.observed_at`, block or slot, expose `cache.hit`, age and expiry, and report zero current RPC calls. `cache.source_rpc` records the work spent capturing the result. Changes to the profile, account, dataset, assets or endpoint invalidate the result. Money-moving commands never use this cache.
+
+`apn wallet portfolio [--profile <profile>] [--refresh]` (MCP: `apn_wallet_portfolio`)
 reads the native coin and every token of the frozen allowlist
 (`data/allowlist/2026-09-17/dataset.json`: 13 networks, 28 rows) for the
 profile's local EVM wallet and its Solana and TRON chain accounts. It is
@@ -681,10 +694,51 @@ in another profile blocks execution; unreadable or malformed permission state
 fails closed. Grant commits use the same address lock after browser consent has
 returned. The signer must perform network reads outside that lock.
 
+## Foreground Permit2 requests
+
+The source candidate provides CLI-only Avalanche USDT Permit2 approval and
+observation. Verify installed artifact provenance and both commands' help first.
+No eligible live merchant URL is established here. These are templates: fill
+every placeholder with verified merchant, profile and public HTTPS RPC inputs.
+Before approval, verify the current local-native owner binding, active Permit2
+policy and caps, funds and the exact merchant offer.
+
+```text
+apn x402 permit2 approve --url <verified-merchant-https-url> --rpc-url <verified-public-avalanche-https-rpc> --profile <verified-local-profile> --idempotency-key <stable-request-key>
+```
+
+Read the frozen request, payee and maximum debit in the foreground TTY. Consent
+authorizes signing and at most one paid GET. Keep the returned operation ID.
+The same profile, key and exact request retain that operation; changing the
+request with the same profile/key conflicts. Exposed, signed, pending and terminal
+operations never prepare again, sign again or send again. For a held operation
+(HOLD), continue only with observation:
+
+```text
+apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-avalanche-https-rpc> --profile <same-local-profile> --transaction <candidate-transaction-hash>
+```
+
+HTTP 200 and transaction hints do not prove public chain finality. Observation
+checks genuine chain evidence and can reconcile the owned local journal and usage
+ledger. For an expired authorization with no effect, replace `--transaction <hash>`
+with `--expired-unused`; the modes are mutually exclusive. This requires actual
+finalized chain time beyond the saved deadline and unused nonce evidence.
+See the [Permit2 guide](docs/x402-non-usdc.md#foreground-production-cli) for exact
+options, saved-hint handling and recovery boundaries.
+
+The finite [x402engine USDm merchant adapter](docs/x402-merchant-usdm.md) uses one foreground local ERC20 transfer on MegaETH and a canonical v2 transaction-hash proof. Payment finality and upstream Bitcoin-price delivery are recorded separately; delivery retries use the same original proof and never create another payment.
+
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
+apn x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <profile>] --idempotency-key <key>
+apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]
 apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
+apn x402 merchant prepare --profile <profile> --max-native-fee-wei <wei> --idempotency-key <key>
+apn x402 merchant approve --operation <operation-id>
+apn x402 merchant observe --operation <operation-id> [--deliver]
+apn x402 merchant retire-unsent --operation <operation-id>
+apn x402 merchant status --operation <operation-id>
 apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
 apn relay arbitrum observe --operation <operation-id> --rpc-url <arbitrum-rpc>
 apn relay arbitrum approval-check --profile default --operation <operation-id> --rpc-url <arbitrum-rpc>
@@ -693,11 +747,11 @@ apn relay arbitrum deposit-dispatch --profile default --operation <operation-id>
 apn relay base prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
 apn relay base observe --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
 apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay native prepare --profile <bnb-owner-profile> --recipient <pinned-destination-address> --amount-atomic <bnb-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <bnb-wei> --idempotency-key <key>
+apn relay native prepare --profile <fixed-owner-profile> --recipient <pinned-destination-address> --amount-atomic <source-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <source-wei> --idempotency-key <key>
 apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>
 apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>
-apn relay native execute --operation <operation-id> --rpc-url <bnb-rpc>
-apn relay retire --profile <default|evm-live-buyer> --operation <operation-id>
+apn relay native execute --operation <operation-id> --rpc-url <source-rpc>
+apn relay retire --profile <default|evm-live-buyer|evm-live-seller> --operation <operation-id>
 apn relay status --operation <operation-id>
 apn relay observe --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
@@ -724,6 +778,9 @@ apn wallet permission list --profile <profile>
 apn wallet permission sync --profile <profile> --expected-revision <positive-integer>
 apn wallet permission disable --profile <profile> --expected-revision <positive-integer>
 apn wallet permission forget --profile <profile> --expected-revision <positive-integer>
+apn wallet metamask native-transfer --chain <chain> --idempotency-key <key>
+apn wallet metamask native-transfer-status --operation <id>
+apn wallet metamask native-transfer-observe --operation <id>
 apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>
@@ -735,7 +792,7 @@ apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <addre
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
 apn operation status --operation <operation-id>
 apn operation abandon --operation <operation-id>
-apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observe-only true] [--observation-rpc-env <APN_ENV_RPC_URL>]
+apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observe-only true] [--coinbase-observation-rpc publicnode-base] [--observation-rpc-env <APN_ENV_RPC_URL>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
@@ -753,7 +810,7 @@ apn wallet balance-tron --profile <profile> --asset <trx-or-usdt>
 apn wallet capabilities-tron [--profile <profile>]
 apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
 apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
-apn wallet portfolio [--profile <profile>]
+apn wallet portfolio [--profile <profile>] [--refresh]
 apn operation repair-deployment --operation <operation-id>
 apn bridge capabilities [--profile <profile>]
 apn bridge inventory
@@ -764,6 +821,24 @@ apn circle approval prepare --profile <profile> --cap-atomic <USDC atomic> --max
 apn circle approval execute --operation <approval-id>
 apn circle approval status --operation <approval-id>
 apn circle source submit --profile <profile> --expected-payer <base-address> --recipient-owner <solana-address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>
+apn sei funding prepare --profile <profile> --expected-payer <address> --amount-atomic <wei> --minimum-output-atomic <sei-wei> --maximum-fee-atomic <wei> --idempotency-key <key>
+apn sei funding approve --operation <operation-id>
+apn sei funding status --operation <operation-id>
+apn circle evm prepare --profile <profile> --destination-profile <profile> --destination-chain <string> --idempotency-key <idempotency_key>
+apn circle evm approve-source --operation <operation_id>
+apn circle evm adopt-external-mint --operation <operation_id> --transaction-hash <string>
+apn circle evm approve-mint --operation <operation_id>
+apn circle evm observe --operation <operation_id>
+apn circle evm refresh-attestation --operation <operation_id>
+apn circle evm cleanup --operation <operation_id>
+apn circle evm cleanup-nonce --operation <operation_id>
+apn circle evm cleanup85-prepare --operation <operation_id>
+apn circle evm cleanup85-cancel --operation <operation_id>
+apn circle evm cleanup86-approve --operation <operation_id>
+apn circle evm status --operation <operation_id>
+apn mega funding prepare --profile <profile> --expected-payer <address> --amount-atomic <wei> --minimum-output-atomic <mega-wei> --maximum-fee-atomic <wei> --idempotency-key <key>
+apn mega funding approve --operation <operation-id>
+apn mega funding status --operation <operation-id>
 apn oneclick source submit --lane <lane> --profile <profile> --expected-payer <evm-address> --recipient <tron-or-solana-address> --amount-atomic <origin atomic> --min-output-atomic <destination atomic> --max-quoted-loss-atomic <lane loss atomic> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>
 apn oneclick source status --operation <operation-id>
 apn gasless usdt prepare --profile <profile> --to <address> --amount <gross-USDT> --max-fee <USDT> --min-received <USDT> --idempotency-key <key>
@@ -775,8 +850,9 @@ apn gasless usdt observe --profile-hash <hash> --operation <operation-id>
 apn gasless capabilities [--profile <profile>]
 apn gasless balance --profile <profile> --chain <chain-id>
 apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]
-apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --idempotency-key <key>
+apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>
 apn gasless transfer approve --operation <operation-id>
+apn gasless transfer approve-sealed --operation <operation-id>
 apn allowlist inventory
 apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--identifier <exact-token-identifier>]
 apn allowlist policy prepare --profile <profile> --account <canonical-account> --overlay-version <version> --chain <network> --kind <native|token> [--identifier <token>] --rail <rail> --max-per-transfer-atomic <atomic> --daily-limit-atomic <atomic> --effective-at <ISO-instant> [--expires-at <ISO-instant>] [--mechanism-provider <provider> --mechanism-reference <reference>] [--expected-revision <revision>]
@@ -955,3 +1031,5 @@ The former signed-app/Cask path is retained only as a deferred historical
 track under `packaging/`; it is not required by the Formula installation.
 
 Licensed under the MIT License.
+
+Finite seller Base ETH funding to MegaETH USDm and Polygon POL uses the existing durable Relay native commands; see [the fixed routes and fee checks](docs/relay-base-native.md).

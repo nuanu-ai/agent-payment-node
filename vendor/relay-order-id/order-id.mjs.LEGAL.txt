@@ -1,0 +1,54 @@
+Bundled license information:
+
+@noble/hashes/utils.js:
+@noble/hashes/utils.js:
+@noble/hashes/utils.js:
+  /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
+
+@noble/curves/abstract/utils.js:
+@noble/curves/abstract/modular.js:
+@noble/curves/abstract/curve.js:
+@noble/curves/abstract/weierstrass.js:
+@noble/curves/_shortw_utils.js:
+@noble/curves/secp256k1.js:
+@noble/curves/abstract/utils.js:
+@noble/curves/abstract/modular.js:
+@noble/curves/abstract/curve.js:
+@noble/curves/abstract/weierstrass.js:
+@noble/curves/_shortw_utils.js:
+@noble/curves/secp256k1.js:
+@noble/curves/abstract/utils.js:
+@noble/curves/abstract/modular.js:
+@noble/curves/abstract/curve.js:
+@noble/curves/abstract/weierstrass.js:
+@noble/curves/_shortw_utils.js:
+@noble/curves/secp256k1.js:
+  /*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) */
+
+aes-js/lib.commonjs/aes.js:
+  /*! MIT License. Copyright 2015-2022 Richard Moore <me@ricmoo.com>. See LICENSE.txt. */
+
+mime-db/index.js:
+  /*!
+   * mime-db
+   * Copyright(c) 2014 Jonathan Ong
+   * Copyright(c) 2015-2022 Douglas Christopher Wilson
+   * MIT Licensed
+   */
+
+mime-types/index.js:
+  /*!
+   * mime-types
+   * Copyright(c) 2014 Jonathan Ong
+   * Copyright(c) 2015 Douglas Christopher Wilson
+   * MIT Licensed
+   */
+
+axios/dist/node/axios.cjs:
+  /*! Axios v1.20.0 Copyright (c) 2026 Matt Zabriskie and contributors */
+
+safe-buffer/index.js:
+  /*! safe-buffer. MIT License. Feross Aboukhadijeh <https://feross.org/opensource> */
+
+@scure/base/index.js:
+  /*! scure-base - MIT License (c) 2022 Paul Miller (paulmillr.com) */

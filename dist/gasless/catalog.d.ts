@@ -34,7 +34,7 @@ export declare function gaslessCapabilities(profile?: string): {
             symbol: string;
             decimals: number;
             rpc_environment: string;
-            finality_tag: "finalized" | "safe";
+            finality_tag: "safe" | "finalized";
             deployment_evidence_hash: string;
             executable_adapter: boolean;
             action_time_verification_required: boolean;

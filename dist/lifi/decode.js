@@ -18,9 +18,8 @@ export function decodeBridgeCall(materialization) {
     if (gas > BRIDGE_MAX_GAS || tx.chainId !== request.fromChainId || tx.from !== materialization.sender ||
         bridgeAddress(tx.from) !== tx.from || tx.to !== BRIDGE_DIAMOND || materialization.approvalAddress !== BRIDGE_DIAMOND ||
         materialization.sender !== bridgeAddress(materialization.sender) || materialization.sender === BRIDGE_ZERO_ADDRESS ||
-        (bridgeNativePrincipal(request) ?
-            (materialization.tool === "stargateV2" ? value <= sourceAmount || value - sourceAmount > BigInt(request.maxNativeDebitWei) : value !== sourceAmount) :
-            value > BigInt(request.maxNativeDebitWei)))
+        (bridgeNativePrincipal(request) &&
+            (materialization.tool === "stargateV2" ? value <= sourceAmount : value !== sourceAmount)))
         fail("transaction_envelope");
     const nativeConversion = bridgeNativeDenominationConversion(request);
     if (quotedOutput < minimumOutput || minimumOutput < BigInt(request.minOutputAtomic) ||
@@ -95,6 +94,12 @@ function decodeStargate(m, bridge, swaps, stargate, data, sourceAmount, minimum,
         stargate.fee.nativeFee !== nativeFee || nativeFee === 0n || stargate.fee.lzTokenFee !== 0n || stargate.refundAddress !== m.sender)
         fail("stargate_taxi_semantics");
     validateFeeRows(m, common.fee, nativeFee, "stargateV2");
+    // Classify a reconciled protocol fee above the owner's cap without treating it as malformed provider data.
+    if (nativeFee > BigInt(m.request.maxNativeDebitWei))
+        bridgeFailure("APN_FEE_BUDGET_EXCEEDED", "stargate_native_fee_exceeds_cap", {
+            offendingPredicate: "nativeFeeWei > maxNativeDebitWei", nativeFeeWei: nativeFee.toString(),
+            maxNativeDebitWei: m.request.maxNativeDebitWei,
+        });
     return result(m, data, STARGATE_SELECTOR, bridge, common.fee, {
         kind: "stargateV2", assetId: native ? 13 : 1, dstEid: p.dstEid, receiverAddress: bridgeHex(p.to, 32, 32),
         amountLD: p.amountLD.toString(), minAmountLD: p.minAmountLD.toString(), nativeFee: nativeFee.toString(), lzTokenFee: "0",

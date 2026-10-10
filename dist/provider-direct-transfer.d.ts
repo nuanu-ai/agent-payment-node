@@ -13,7 +13,7 @@ export declare class ProviderDirectTransferService {
         command: "gasless.transfer.prepare";
     }>): Promise<unknown>;
     approve(operationIdInput: string): Promise<unknown>;
-    resume(operationIdInput: string, waitSeconds?: number): Promise<unknown>;
+    resume(operationIdInput: string, waitSeconds?: number, observationPreset?: string): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;
     private assertFrozenPreconditions;
     private requiredAdapter;

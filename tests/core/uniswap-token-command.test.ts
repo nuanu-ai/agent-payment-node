@@ -16,7 +16,12 @@ const OPERATION = "b".repeat(64);
 test("token-input CLI binds a separate exact seven-command family without widening native Uniswap", () => {
   const paths = ["inventory", "quote", "prepare", "status", "approve", "execute", "cleanup"];
   for (const action of paths) assert.ok(MCP_TOOLS.some((tool) => tool.name === `apn_swap_ethereum_uniswap_token_${action}`));
-  assert.equal(MCP_TOOLS.length, 93);
+  assert.deepEqual(MCP_TOOLS.filter(tool => tool.name.startsWith("apn_swap_ethereum_uniswap_token_")).map(tool => tool.name).sort(),
+    paths.map(action => `apn_swap_ethereum_uniswap_token_${action}`).sort());
+  assert.deepEqual(MCP_TOOLS.filter(tool => tool.name.startsWith("apn_swap_ethereum_uniswap_") &&
+    !tool.name.startsWith("apn_swap_ethereum_uniswap_token_")).map(tool => tool.name).sort(),
+  ["inventory", "quote", "prepare", "status", "approve", "execute"].map(action => `apn_swap_ethereum_uniswap_${action}`).sort());
+  assert.equal(MCP_TOOLS.length, 122);
   const quote = bindArgv(["swap", "ethereum", "uniswap-token", "quote", "--profile", "owner", "--account", ACCOUNT,
     "--to", ACCOUNT, "--source-token", UNISWAP_USDC, "--output-token", ETHEREUM_USDT, "--amount", "1000000",
     "--minimum-output", "999000", "--approval-cap", "1000000", "--deadline", "1800000000",

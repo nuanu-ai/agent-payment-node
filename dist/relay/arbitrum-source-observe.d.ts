@@ -25,7 +25,7 @@ export declare class RelayArbitrumSourceObserveService {
     private finalizeUsage;
     observe(operationId: string): Promise<{
         operationId: string;
-        state: "observation_only" | "source_effect_not_recorded" | "approval_skipped" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";
+        state: "observation_only" | "approval_skipped" | "source_effect_not_recorded" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";
         reason: string;
         approvalPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;
         depositPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;

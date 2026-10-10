@@ -46,10 +46,21 @@ export interface RelayBnbProofPorts {
     block(number: bigint): Promise<RelayBnbBlock | null>;
     /** A consensus safe or finalized checkpoint; null when the RPC cannot supply one. */
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
+    /** Polygon milestone consensus finality, required by the new Base source lane. */
+    polygonFinalizedCheckpoint?(): Promise<RelayBnbBlock | null>;
     /** null when trace support or exhaustive success semantics are unavailable. */
     nativeTrace(hash: string): Promise<RelayBnbNativeTrace | null>;
+    /** Exhaustive canonical callTracer plus adjacent balance proof for the finite Base→Polygon lane. */
+    polygonNativeTrace?(hash: string): Promise<RelayBnbNativeTrace | null>;
     /** Base only: bytecode identity and two balances from one pinned inclusion window. */
     routerCodeHash?(address: string, block: bigint): Promise<string>;
+    tokenIdentityAndBalances?(token: string, recipient: string, block: bigint, blockHash: string): Promise<Readonly<{
+        proxyHash: string;
+        implementation: string;
+        implementationHash: string;
+        before: bigint;
+        after: bigint;
+    }>>;
     adjacentBalances?(address: string, block: bigint, expectedBlockHash: string): Promise<readonly [bigint, bigint]>;
 }
 export interface RelaySourceDepositProof {
@@ -66,12 +77,13 @@ export interface RelayBnbRecipientCreditEvidence {
     readonly destinationTransactionHash: string;
     readonly destinationBlockNumber: string;
     readonly destinationBlockHash: string;
+    readonly finalityKind?: "polygon_milestone_finalized";
     readonly finalityBlockNumber: string;
     readonly finalityBlockHash: string;
     readonly recipient: string;
     readonly minimumOutputWei: string;
     readonly creditedWei: string;
-    readonly method: "direct_native_transaction" | "receipt_bound_native_trace" | "verified_relay_router_event_balance";
+    readonly method: "direct_native_transaction" | "receipt_bound_native_trace" | "verified_relay_router_event_balance" | "pinned_erc20_transfer_balance";
 }
 export type RelayBnbProofResult = Readonly<{
     /** A candidate hash can be an unrelated transfer, even when its recipient credit is real. */

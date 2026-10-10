@@ -1,3 +1,4 @@
+import { agentSdk, agentEvm, foxEvm, foxKeyring, ethereumControllers } from "./sdk-vendor.js";
 import { homedir } from "node:os";
 import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
 import { isPlainRecord } from "../../canonical.js";
@@ -76,9 +77,9 @@ async function inspect(home: string, expected: Extract<HelperRequest, { mode: "i
 
 async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], state: PrivateState,
   policy: HelperNetworkPolicy): Promise<MetaMaskGaslessQuote> {
-  const sdk = await import("@metamask/agent-sdk");
+  const sdk = await agentSdk();
   sdk.disableAnalytics();
-  const evm = await import("@metamask/agent-sdk/evm");
+  const evm = await agentEvm();
   const hydrated = await hydrateSdkState(state);
   let cacheWrites = 0; let cache: unknown = null;
   const registry = new sdk.NetworkRegistry({ env: "prod", storage: { read: () => cache as never,
@@ -109,8 +110,8 @@ async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], 
 }
 
 async function buildUnsigned(input: Extract<HelperRequest, { mode: "buildUnsigned" }>["input"]): Promise<MetaMaskGaslessUnsignedResult> {
-  const evm = await import("@metamask/fox-sdk/wallets/evm");
-  const controller = await import("@toruslabs/ethereum-controllers");
+  const evm = await foxEvm();
+  const controller = await ethereumControllers();
   mmRegistry(input.chainId);
   const executions = input.executions.map((item) => ({ target: item.target, value: BigInt(item.value), callData: item.callData }));
   const prepared = evm.prepareDelegation({ delegator: input.owner, chainId: input.chainId, executions });
@@ -126,8 +127,8 @@ async function buildUnsigned(input: Extract<HelperRequest, { mode: "buildUnsigne
 
 async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: string, now: () => Date,
   policy: HelperNetworkPolicy, firstObservedAt: Date): Promise<MetaMaskGaslessProviderObservation> {
-  const evm = await import("@metamask/fox-sdk/wallets/evm");
-  const keyrings = await import("@metamask/fox-sdk/wallets/keyring");
+  const evm = await foxEvm();
+  const keyrings = await foxKeyring();
   const firstHydrated = await hydrateSdkState(first);
   if (firstHydrated.writes() !== 0) mmFail("mm_gasless_state_security");
   const { keyring } = await keyrings.createKeyringController({ mode: keyrings.KEYRING_KIND.SERVER,
@@ -156,8 +157,8 @@ async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: 
 
 async function observe(intent: MetaMaskGaslessIntent, state: PrivateState, policy: HelperNetworkPolicy,
   now: () => Date): Promise<MetaMaskGaslessProviderObservation> {
-  const evm = await import("@metamask/fox-sdk/wallets/evm");
-  const keyrings = await import("@metamask/fox-sdk/wallets/keyring");
+  const evm = await foxEvm();
+  const keyrings = await foxKeyring();
   const hydrated = await hydrateSdkState(state);
   if (hydrated.writes() !== 0) mmFail("mm_gasless_state_security");
   const { keyring } = await keyrings.createKeyringController({ mode: keyrings.KEYRING_KIND.SERVER,

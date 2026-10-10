@@ -22,7 +22,7 @@ export declare function bridgeCapabilities(profile?: string): {
             symbol: string;
             coin_key: string;
             decimals: number;
-            upgradeability: "immutable" | "legacy_proxy" | "eip1967_proxy" | "beacon_proxy";
+            upgradeability: "immutable" | "beacon_proxy" | "legacy_proxy" | "eip1967_proxy";
             tools: string[];
             approval: "standard" | "zero_first";
             transfer_fee: "none" | "tether_fee_zero";
@@ -151,7 +151,7 @@ export declare function bridgeInventory(responses: Readonly<Record<"chains" | "t
                 symbol: string;
                 coin_key: string;
                 decimals: number;
-                upgradeability: "immutable" | "legacy_proxy" | "eip1967_proxy" | "beacon_proxy";
+                upgradeability: "immutable" | "beacon_proxy" | "legacy_proxy" | "eip1967_proxy";
                 tools: string[];
                 approval: "standard" | "zero_first";
                 transfer_fee: "none" | "tether_fee_zero";

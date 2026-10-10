@@ -18,7 +18,7 @@ export interface UsdtUserOperation {
   readonly signature: Hex; readonly eip7702Auth?: UsdtAuthorization;
 }
 
-export function usdtUserOperation(plan: UsdtTransferPlan, input: {
+export function usdtUserOperation(plan: Pick<UsdtTransferPlan, "request" | "gas" | "price">, input: {
   readonly entryPointNonce: bigint; readonly callData: Hex; readonly paymasterData: Hex; readonly signature: Hex; readonly authorization: UsdtAuthorization | null;
 }): UsdtUserOperation {
   if (input.authorization !== null && (input.authorization.address !== USDT_GASLESS.delegate || input.authorization.chainId !== "0x1")) {

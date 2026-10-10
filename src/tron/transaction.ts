@@ -1,4 +1,4 @@
-import { utils } from "tronweb";
+import { utils } from "./utils.js";
 import { canonicalJson, exactKeys, sha256 } from "../canonical.js";
 import { atomic } from "../chain-policy.js";
 import type { RailPreparedTransfer, RailSignedEffect } from "../direct-rail-ports.js";

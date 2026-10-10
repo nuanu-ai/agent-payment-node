@@ -1,3 +1,4 @@
+import { assertBridgePhysicalGrant, type BridgeAuthorityCheck } from "./effect-authority.js";
 import { canonicalJson } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { EvmRpcCall } from "../evm-ports.js";
@@ -42,9 +43,9 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     ? distinctArchive === null ? null : { url: distinctArchive, maxItemsPerRequest: 3, role: "archive" }
     : { ...distinctReceipt, role: "receipt" };
   let sequence = 0n, archiveChain: Promise<void> | undefined;
-  const call: EvmRpcCall = async (method, params) => {
+  const call: EvmRpcCall = async (method, params, beforeSend) => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
-    if (method === "eth_sendRawTransaction") return await submitDirect(method, params, (m, p) => oneAttempt(endpoint, m, p));
+    if (method === "eth_sendRawTransaction") return await submitDirect(method, params, (m, p) => oneAttempt(endpoint, m, p, undefined, "primary", undefined, beforeSend));
     if (method === "eth_getTransactionReceipt" && isArchiveRead(method, params)) {
       if (distinctReceipt !== null) return await withEndpointRole(fallbackReceipt(method, params, { ...distinctReceipt, role: "receipt" }), "receipt");
       let primary: unknown;
@@ -95,14 +96,15 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     }, wait);
   };
   const oneAttempt = async (target: URL, method: string, params: readonly unknown[], now = Date.now(),
-    endpointRole: "primary" | "receipt" | "archive" = "primary", telemetrySession?: RpcReadSession): Promise<unknown> => {
+    endpointRole: "primary" | "receipt" | "archive" = "primary", telemetrySession?: RpcReadSession, beforeSend?: BridgeAuthorityCheck): Promise<unknown> => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
     const id = (++sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
     let response: LifiResponse;
     try {
+      if (method === "eth_sendRawTransaction" && beforeSend !== undefined) assertBridgePhysicalGrant(beforeSend, params[0]);
       options.onRequest?.({ origin: target.origin, endpointRole, methods: [method], batchSize: 1 });
       telemetrySession?.recordPhysicalAttempt(endpointRole, [method]);
-      response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG");
+      response = await transport.request(target.toString(), "POST", body, 1024 * 1024, "APN_RPC_CONFIG", beforeSend);
     }
     catch (error) {
       if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS") throw error;
@@ -168,9 +170,9 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     ], "receipt");
     return values[1];
   };
-  const sessionCall = (session: RpcReadSession): EvmRpcCall => async (method, params) => {
+  const sessionCall = (session: RpcReadSession): EvmRpcCall => async (method, params, beforeSend) => {
     if (!READ_METHODS.has(method)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_method");
-    const primaryAttempt = (m: string, p: readonly unknown[]) => oneAttempt(endpoint, m, p, session.currentTime(), "primary", session);
+    const primaryAttempt = (m: string, p: readonly unknown[]) => oneAttempt(endpoint, m, p, session.currentTime(), "primary", session, beforeSend);
     if (method === "eth_sendRawTransaction") return await submitDirect(method, params,
       (m, p) => session.submit(endpoint.toString(), m, p, primaryAttempt));
     if (method === "eth_getTransactionReceipt" && isArchiveRead(method, params)) {
@@ -195,7 +197,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     }
     return await withEndpointRole(session.read(endpoint.toString(), chainId, method, params, primaryAttempt), "primary");
   };
-  return { origin: endpoint.origin, call, attempt: (method, params) => oneAttempt(endpoint, method, params), sessionCall, sessionBatchCall };
+  return { origin: endpoint.origin, call, attempt: (method, params, beforeSend) => oneAttempt(endpoint, method, params, undefined, "primary", undefined, beforeSend), sessionCall, sessionBatchCall };
 }
 export function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options: {
   readonly transport?: Pick<BridgeHttps, "request">;

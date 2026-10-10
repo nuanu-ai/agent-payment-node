@@ -23,6 +23,7 @@ import { StateStore } from "../../src/state.js";
 import { mmPrivateHash, mmWalletIdentityHash } from "../../src/metamask-gasless/identity.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessRequest } from "../../src/metamask-gasless/model.js";
 import { ensureWallet, makeCore, TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { solanaFixture } from "./solana-helpers.js";
@@ -301,7 +302,7 @@ test("a durable MM dispatch marker keeps wallet lifecycle blocked with the saved
 
 async function localDirectOperation(root: string) {
   const state = new StateStore(root), profile = "compat-local-direct", idempotencyKey = "compat-local-direct-0001";
-  const core = new ApnCore({ state, native: new TestNative(), rpc: new TestRpc(), clock: new TestClock() });
+  const core = new ApnCore({ state, native: new CanonicalDirectTestNative(root), rpc: new TestRpc(), clock: new TestClock() });
   assert.equal((await core.execute({ command: "wallet.ensure", profile })).ok, true);
   const result = await core.execute({ command: "transfer.prepare", profile, recipient: MM_TEST_RECIPIENT,
     amount: "1", idempotencyKey });

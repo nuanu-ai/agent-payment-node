@@ -12,6 +12,7 @@ import { evmDirectFingerprint } from "../../src/evm-direct.js";
 import { evmCustodyPayload } from "../../src/evm-transfer-approval.js";
 import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OperationRecord } from "../../src/model.js";
+import type { NativeRequest } from "../../src/ports.js";
 import { parseEvmNativeIntent } from "../../src/evm-native-intent.js";
 import type { ProviderProfileRecord } from "../../src/provider-profile.js";
 import { sealOperation, validateOperation } from "../../src/state-integrity.js";
@@ -22,7 +23,7 @@ import { temporaryState } from "./helpers.js";
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
 
-for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process resumes exactly once without signing`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process observes a recovered signature without signing or dispatch`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   setup.rpc.chainId = chainId;
@@ -35,18 +36,35 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real 
   const resumed = spawnSync(process.execPath, [worker, "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(resumed.status, 0, resumed.stderr);
   const result = JSON.parse(resumed.stdout);
-  assert.equal(result.result.state, chainId === 1 ? "submitted_pending" : "completed");
-  assert.equal(result.approvals, 0); assert.equal(result.submissions, 1);
-  const replay = spawnSync(process.execPath, [worker, chainId === 1 ? "observe" : "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
+  assert.equal(result.result.state, "unknown_finality");
+  assert.equal(result.approvals, 0); assert.equal(result.submissions, 0);
+  const replay = spawnSync(process.execPath, [worker, "observe", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(replay.status, 0, replay.stderr);
   const observed = JSON.parse(replay.stdout);
   assert.equal(observed.result.state, "completed"); assert.equal(observed.approvals, 0); assert.equal(observed.submissions, 0);
 });
 
-for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "usdc"] as const) test(`MCP ${chainId}/${kind} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
+// Named lifecycle contracts: canonical Base/Arbitrum USDC and both Ethereum lanes
+// deliberately finish approval at submission; explicit observation proves delivery.
+const mcpLifecycleScenarios = [
+  { chainId: 8453, kind: "native", approvalState: "completed" },
+  { chainId: 8453, kind: "usdc", approvalState: "submitted_pending" },
+  { chainId: 1, kind: "native", approvalState: "submitted_pending" },
+  { chainId: 1, kind: "usdc", approvalState: "submitted_pending" },
+  { chainId: 42161, kind: "native", approvalState: "completed" },
+  { chainId: 42161, kind: "usdc", approvalState: "submitted_pending" },
+] as const;
+for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP ${chainId}/${kind} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
   const asset = kind === "native" ? "native" : EVM_USDC[chainId];
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
+  let receiptCalls = 0, signingRequests = 0;
+  const originalReceipt = setup.rpc.evm.receipt;
+  setup.rpc.evm.receipt = async (chain, hash) => { receiptCalls += 1; return await originalReceipt(chain, hash); };
+  const native = { request: async (request: NativeRequest) => {
+    if (request.operation === "directTransfer.approveAndSign") signingRequests += 1;
+    return await setup.local.request(request);
+  } };
   setup.rpc.sender = (await ensureDirectWallet(setup)).address;
   setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
@@ -67,21 +85,41 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.deepEqual(await setup.state.findOperation(operation.operation_id), before);
   assert.equal(setup.wrapping.loads, loads); assert.equal(setup.rpc.genericBalanceCalls, rpcCalls); assert.equal(setup.rpc.submissions.length, 0);
   const approved = await runCli(["pay", "transfer", "approve", "--operation", operation.operation_id, "--rpc-url", selection.rpc_url], {}, {
-    stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval,
+    stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval, native,
   });
   assert.equal(approved.ok, true, JSON.stringify(approved));
-  const observe = chainId === 1;
-  assert.equal((approved.operation as { state: string }).state, observe ? "submitted_pending" : "completed");
-  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1);
+  assert.equal((approved.operation as { state: string }).state, approvalState);
+  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1); assert.equal(signingRequests, 1);
+  const afterApproval = { receiptCalls, loads: setup.wrapping.loads };
+  assert.deepEqual((await invoke("apn_operation_status", { operation: operation.operation_id })).operation, approved.operation);
+  assert.equal(receiptCalls, afterApproval.receiptCalls); assert.equal(setup.wrapping.loads, afterApproval.loads);
+  assert.equal(signingRequests, 1); assert.equal(setup.rpc.submissions.length, 1);
+  const observe = approvalState === "submitted_pending";
+  if (observe) assert.equal(receiptCalls, 0);
   const completed = observe ? await runCli(["operation", "resume", "--operation", operation.operation_id, "--rpc-url", selection.rpc_url, "--observe-only", "true"], {}, {
-    stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval,
+    stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval, native,
   }) : approved;
   assert.equal(completed.ok, true, JSON.stringify(completed));
   assert.equal((completed.operation as { state: string }).state, "completed");
-  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1);
+  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1); assert.equal(signingRequests, 1);
+  assert.equal(setup.wrapping.loads, afterApproval.loads);
+  const finalReceiptCalls = receiptCalls;
+  const replay = await runCli(["operation", "resume", "--operation", operation.operation_id, "--rpc-url", selection.rpc_url, "--observe-only", "true"], {}, {
+    stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval, native,
+  });
+  assert.deepEqual(replay.operation, completed.operation);
+  assert.equal(receiptCalls, finalReceiptCalls); assert.equal(setup.wrapping.loads, afterApproval.loads);
+  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1); assert.equal(signingRequests, 1);
   const status = await invoke("apn_operation_status", { operation: operation.operation_id });
   assert.deepEqual(status.operation, completed.operation);
-  assert.equal((await invoke("apn_receipt_get", { operation: operation.operation_id })).ok, true);
+  const result = await invoke("apn_receipt_get", { operation: operation.operation_id });
+  assert.equal(result.ok, true);
+  const receipt = result.receipt as { operation_id: string; state: string; terminal: boolean; transaction_hash: string; exact_transfer_log?: boolean };
+  assert.equal(receipt.operation_id, operation.operation_id); assert.equal(receipt.state, "completed"); assert.equal(receipt.terminal, true);
+  assert.equal(receipt.transaction_hash, (completed.operation as { transaction_hash: string }).transaction_hash);
+  if (kind === "usdc") assert.equal(receipt.exact_transfer_log, true);
+  assert.equal(receiptCalls, finalReceiptCalls); assert.equal(setup.wrapping.loads, afterApproval.loads);
+  assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1); assert.equal(signingRequests, 1);
 });
 
 test("parallel duplicate generic prepares serialize and other asset or kind cannot bypass profile exclusion", async (context) => {

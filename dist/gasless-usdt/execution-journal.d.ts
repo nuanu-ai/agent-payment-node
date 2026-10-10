@@ -1,5 +1,5 @@
 import { SecureStateStore } from "../secure-state-store.js";
-import { type UsdtBoundOperation } from "./bound-operation.js";
+import { type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtSettlement } from "./receipt.js";
 export declare const USDT_EXECUTION_SCHEMA: "apn.gasless-usdt-execution.v1";
@@ -37,6 +37,8 @@ export declare function validateUsdtExecutionRecord(value: unknown): UsdtExecuti
 /** Separate v1 effect journal. It cannot sign or send; each phase is fsynced before returning. */
 export declare class UsdtExecutionJournal extends SecureStateStore {
     private readonly usage;
+    private readonly exposureSnapshots;
+    reservedSnapshot(bound: UsdtBoundOperation): import("./sponsor-auth.js").UsdtSponsorSnapshot;
     constructor(root: string);
     private path;
     private lock;
@@ -51,6 +53,7 @@ export declare class UsdtExecutionJournal extends SecureStateStore {
     private write;
     private otherUsage;
     private guard;
+    beforeCustodyPolicyFence(bound: UsdtBoundOperation, port: UsdtPreparePort): Promise<void>;
     /** Last read fence immediately before the submitting marker. Dispatch must perform its own fresh guard. */
     private submissionFence;
     /** Create a durable intent, then atomically reserve common usage. Retry repairs only the exact planned intent. */

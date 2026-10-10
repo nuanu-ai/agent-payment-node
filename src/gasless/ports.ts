@@ -51,7 +51,7 @@ export interface GaslessRpcPort extends GaslessObservationPort {
   mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
   /** v4 intents need the `fees` their guard chose before disclosure; earlier intents use their frozen fees. */
   estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
-  send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial): Promise<Hex>;
+  send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial, beforeSend?: () => void): Promise<Hex>;
 }
 export type GaslessRpcFactory = (chainId: GaslessChainId) => GaslessRpcPort;
 export interface GaslessApprovalPort {

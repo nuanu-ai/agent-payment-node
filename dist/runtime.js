@@ -18,6 +18,7 @@ export class RuntimeContext {
     relayNativeExecute;
     relayExecuteConfirmation;
     stargateNative;
+    circleEvm;
     stargateToken;
     portfolio;
     uniswapRuntime;
@@ -35,6 +36,7 @@ export class RuntimeContext {
     uniswap;
     sunswap;
     jupiter;
+    jupiterV1Runtime;
     facilitatorGasless;
     smartAccountGasless;
     metaMaskGasless;
@@ -46,6 +48,8 @@ export class RuntimeContext {
     circleApproval;
     circleSource;
     oneClickSource;
+    seiFunding;
+    megaFunding;
     directRails;
     chainAccounts;
     railApproval;
@@ -103,6 +107,8 @@ export class RuntimeContext {
             this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
         if (dependencies.stargateNative !== undefined)
             this.stargateNative = dependencies.stargateNative;
+        if (dependencies.circleEvm !== undefined)
+            this.circleEvm = dependencies.circleEvm;
         if (dependencies.stargateToken !== undefined)
             this.stargateToken = dependencies.stargateToken;
         if (dependencies.portfolio !== undefined)
@@ -137,6 +143,8 @@ export class RuntimeContext {
             this.sunswap = dependencies.sunswap;
         if (dependencies.jupiter !== undefined)
             this.jupiter = dependencies.jupiter;
+        if (dependencies.jupiterV1Runtime !== undefined)
+            this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
         if (dependencies.facilitatorGasless !== undefined)
             this.facilitatorGasless = dependencies.facilitatorGasless;
         if (dependencies.smartAccountGasless !== undefined)
@@ -157,6 +165,10 @@ export class RuntimeContext {
             this.circleApproval = dependencies.circleApproval;
         if (dependencies.circleSource !== undefined)
             this.circleSource = dependencies.circleSource;
+        if (dependencies.seiFunding !== undefined)
+            this.seiFunding = dependencies.seiFunding;
+        if (dependencies.megaFunding !== undefined)
+            this.megaFunding = dependencies.megaFunding;
         if (dependencies.oneClickSource !== undefined)
             this.oneClickSource = dependencies.oneClickSource;
         this.directRails = dependencies.directRails ?? [];

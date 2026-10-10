@@ -1,0 +1,10 @@
+{
+  "officialRepository": "https://github.com/x402-foundation/x402",
+  "commit": "ad2658ac57bbf24d33192cb0f5dac5cf423f00a8",
+  "sources": ["contracts/evm/src/x402ExactPermit2Proxy.sol", "contracts/evm/src/x402BasePermit2Proxy.sol"],
+  "compiler": "0.8.28+commit.7893614a",
+  "artifact": "candidate-abi.json from independently reviewed source reproduction",
+  "originalRuntimeKeccak": "0xce6429c0bb49284660683287c0a8fe548a88379072327d026626909d202048b9",
+  "correspondence": "Original and reproduction runtime instruction-and-constant prefix matches; only 32 CBOR IPFS digest bytes differ.",
+  "limitations": "Original metadata CID/build-input identity remains unproved. Fixture is not a fresh Avalanche chain attestation or replacement runtime pin."
+}

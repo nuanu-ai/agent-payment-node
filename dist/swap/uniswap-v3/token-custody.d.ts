@@ -38,7 +38,9 @@ export declare class UniswapTokenCustody {
     probeSealed(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null>;
     send(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<"accepted" | "ambiguous">;
     private sendUnlocked;
-    bindEffectProvider(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<void>;
+    /** Recovery reads only the public signed-effect journal; it never opens custody. */
+    probeJournaled(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null>;
+    bindEffectProvider(op: UniswapTokenOperation, kind: TokenEffectKind, hash: string): Promise<void>;
     private bindProvider;
 }
 export declare function envelopeOf(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): TokenTransactionEnvelope;

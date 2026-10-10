@@ -28,5 +28,19 @@ export interface Permit2ProductionReadOptions {
     readonly transport?: GaslessTransport;
     readonly now?: () => Date;
 }
+export interface Permit2ReadCheckpoint {
+    readonly policyRevision: number;
+    readonly registryVersion: string;
+    readonly activationDigest: string;
+    readonly blockNumber: string;
+    readonly blockHash: string;
+    readonly blockTimestamp: number;
+    readonly facilitatorSupportedDigest: string;
+}
+export interface Permit2CheckedReadPort extends Permit2PrepareReadPort {
+    readChecked(input: Parameters<Permit2PrepareReadPort["read"]>[0]): Promise<Awaited<ReturnType<Permit2PrepareReadPort["read"]>> & {
+        readonly checkpoint: Permit2ReadCheckpoint;
+    }>;
+}
 /** Production read adapter for the existing unsigned prepare boundary. It never creates an operation or reservation. */
-export declare function createPermit2ProductionReadPort(options: Permit2ProductionReadOptions): Permit2PrepareReadPort;
+export declare function createPermit2ProductionReadPort(options: Permit2ProductionReadOptions): Permit2CheckedReadPort;

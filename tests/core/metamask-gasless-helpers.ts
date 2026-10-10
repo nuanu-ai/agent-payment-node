@@ -148,8 +148,8 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
       receiptHash: hashObject("receipt-proof"), protocolHash: hashObject({ deploymentEvidenceHash: intent.deploymentEvidenceHash,
         receipt: { block: transactionBlock, code: codes }, finality: { block: finalityBlock, code: codes } }),
       tokenImplementationHash: hashObject({ token: row.token, receipt: tokenProof(transactionBlock), finality: tokenProof(finalityBlock) }),
-      deliveredAtomic: intent.quote.netAtomic, feeAtomic: intent.quote.feeAtomic, debitAtomic: intent.request.grossAtomic,
-      refundAtomic: "0", unusedGrossAtomic: "0", designation: "pinned", permission: "consumed",
+      deliveredAtomic: intent.quote.netAtomic, feeAtomic: intent.quote.feeAtomic, debitAtomic: (BigInt(intent.quote.netAtomic) + BigInt(intent.quote.feeAtomic)).toString(),
+      refundAtomic: "0", unusedGrossAtomic: (BigInt(intent.request.grossAtomic) - BigInt(intent.quote.netAtomic) - BigInt(intent.quote.feeAtomic)).toString(), designation: "pinned", permission: "consumed",
       receiptCounterAtomic: "1", finalityCounterAtomic: "1" } };
   }
 }

@@ -14,7 +14,7 @@ import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote, type RelayQuoteIntent, type ValidatedRelayQuote } from "./quote.js";
-import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, relayNativeRoute,
+import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, RELAY_BASE_SOURCE, RELAY_BASE_FULL_FEE, relayNativeRoute,
   requestRelayNativeQuote, type RelayNativeQuoteIntent, type ValidatedRelayNativeQuote } from "./native-quote.js";
 import { createRelayArbitrumSourceDraft } from "./arbitrum-usdc-source-draft.js";
 import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT } from "./arbitrum-usdc-ethereum-quote.js";
@@ -215,11 +215,13 @@ export class RelayUnsignedPrepareService {
     }
     allowlistProfileHash(input.profile);
     const expectedPayer = input.profile === "evm-live-buyer" ? RELAY_BNB_SOURCE :
-      input.profile === "default" ? RELAY_BNB_DEFAULT_SOURCE : null;
+      input.profile === "default" ? RELAY_BNB_DEFAULT_SOURCE : input.profile === "evm-live-seller" ? RELAY_BASE_SOURCE : null;
     if (expectedPayer === null) refuse("relay_native_profile_route_mismatch");
     let route: ReturnType<typeof relayNativeRoute>;
     try { route = relayNativeRoute(expectedPayer, input.recipient); }
     catch { throw new ApnError("APN_INVALID_INPUT", "Relay native payer and recipient are outside admitted routes."); }
+    if (route.sourceChainId === 8453 && BigInt(input.maxDepositNetworkFeeWei) !== RELAY_BASE_FULL_FEE)
+      throw new ApnError("APN_INVALID_INPUT", "Finite Base Relay requires a 1000000000000 wei full native fee budget.");
     const profileHash = this.state.profileHash(input.profile);
     const operationId = this.state.operationId(input.profile, input.idempotencyKey);
     const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
@@ -246,13 +248,12 @@ export class RelayUnsignedPrepareService {
       this.state.loadWallet(profileHash).then(wallet => wallet?.address ?? null));
     if (publicAccount?.toLowerCase() !== payer) refuse("relay_public_profile_owner_mismatch");
     const usage = await (this.ports.dailyUsage?.(active.accounts.evm, now) ?? new AssetUsageLedger(this.state.root).usage({
-      account: active.accounts.evm, chain: "eip155:56", asset: { kind: "native", identifier: null },
+      account: active.accounts.evm, chain: `eip155:${route.sourceChainId}`, asset: { kind: "native", identifier: null },
     }, now).then(value => value.amountAtomic));
-    const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:56",
-      asset: { kind: "native", identifier: null }, rail: "bridge", amountAtomic: input.amountAtomic,
+    const admission = evaluateAssetPolicy(active.registry, { chain: `eip155:${route.sourceChainId}`,
+      asset: { kind: "native", identifier: null }, rail: "bridge", mechanism: { provider: "relay", reference: route.reference }, amountAtomic: input.amountAtomic,
       dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-    const pin = admission.asset.mechanismPins?.bridge;
-    if (pin?.provider !== "relay" || pin.reference !== route.reference) refuse("relay_native_route_pin_required");
+    if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: route.reference })) refuse("relay_native_route_pin_required");
     await this.state.initialize();
     const checkOwner = async () => this.state.withLocks([evmAddressLock(payer)],
       async () => assertExclusiveEvmOwner(this.state, payer, profileHash));
@@ -262,19 +263,31 @@ export class RelayUnsignedPrepareService {
       minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
     const quote = await (this.ports.nativeQuote?.(intent) ?? requestRelayNativeQuote(intent));
     const { quoteDigest, ...projection } = quote;
+    // A Base order's signed deadline bounds settlement/refunds, not local source-effect authority.
+    const authorizationDeadline = Math.min(quote.deadline * 1000 - 60_000,
+      active.registry.expiresAt === undefined ? Infinity : Date.parse(active.registry.expiresAt));
+    if (route.sourceChainId === 8453) {
+      const current = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry(
+        { state: this.state, clock: this.clock }, input.profile));
+      const at = this.clock.now().getTime();
+      if (current === null || current.profile !== active.profile || current.digest !== active.digest || current.revision !== active.revision ||
+        current.activationDigest !== active.activationDigest || current.accounts.evm?.toLowerCase() !== payer ||
+        !Number.isFinite(at) || !Number.isFinite(authorizationDeadline) || at >= authorizationDeadline) refuse("relay_native_authorization_window");
+    }
     if (hashObject(projection) !== quoteDigest || quote.routeReference !== route.reference ||
       quote.payer !== payer || quote.recipient !== intent.recipient || quote.principalAtomic !== input.amountAtomic ||
       BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
       quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
-      (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
+      (route.sourceChainId !== 8453 && active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
       BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
       throw new ApnError("APN_OPERATION_BLOCKED", "Relay native quote identity, deadline, or fee ceiling changed.");
     }
     const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
       kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-      requestHash, sourceChainId: 56, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
+      requestHash, sourceChainId: route.sourceChainId, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
       quoteDigest, nativeQuote: quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
       policyDigest: active.digest, policyRevision: active.revision,
+      ...(route.sourceChainId === 8453 ? { policyActivationDigest: active.activationDigest } : {}),
       depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
       amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
       createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });

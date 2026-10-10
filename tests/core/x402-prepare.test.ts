@@ -17,6 +17,7 @@ import {
   x402Fingerprint,
   type X402OperationRecord,
 } from "../../src/x402-state-integrity.js";
+import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 import { challengeObservation, TestHttp } from "./x402-helpers.js";
 import {
   canonicalPaymentRequiredHeader,
@@ -531,7 +532,7 @@ test("production prepare RPC pins every eth_call and rechecks the exact block id
 test("global idempotency and active-operation scans cover direct and x402 stores before seller or RPC", async (t) => {
   const directFirst = await temporaryState();
   t.after(directFirst.cleanup);
-  await ensureWallet(makeCore({ root: directFirst.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: directFirst.root, native: new CanonicalDirectTestNative(directFirst.root) }));
   const directRpc = new TestRpc();
   const direct = await makeCore({ root: directFirst.root, rpc: directRpc }).execute({
     command: "transfer.prepare",
@@ -606,7 +607,7 @@ test("global idempotency and active-operation scans cover direct and x402 stores
 test("direct and x402 concurrency shares profile then operation locks", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await ensureWallet(makeCore({ root: temporary.root, native: new CanonicalDirectTestNative(temporary.root) }));
   const rpc = new TestRpc();
   const http = challenge();
   const [direct, x402] = await Promise.all([

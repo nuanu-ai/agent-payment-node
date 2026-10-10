@@ -17,6 +17,7 @@ export declare class RailOperationService {
     readonly policies: ChainPolicyService;
     private readonly operations;
     private readonly allowlist;
+    private readonly lifecycle;
     constructor(context: RuntimeContext);
     prepare(input: RailPrepareInput): Promise<unknown>;
     /** A durable, key-scoped claim survives a crash; only its short commit phases hold money-operation locks. */
@@ -25,34 +26,10 @@ export declare class RailOperationService {
     /** The owner prompt and send-window reads run under a durable claim, outside money-operation locks. */
     private approveLocalSolana;
     private failApprovalClaim;
-    private finishLocalApproval;
-    /** The claim lock serializes recovery, while RPC revalidation and the one send run outside money-operation locks. */
-    private executeLocalSolanaClaimed;
     resume(operationId: string): Promise<unknown>;
     /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
     private resumeLocalSolana;
-    private resumeLocalSolanaPhase;
     receipt(operationId: string): Promise<unknown>;
     private locked;
-    private required;
-    private adapter;
-    /**
-     * The send guard re-acquires a validity window and simulates, so a lost read must be re-run
-     * rather than reported as a refusal. Only a transport loss is retried, only while the owner's
-     * approved window still leaves room to send, and every attempt re-acquires a fresh window.
-     */
-    private patientBind;
-    private revalidate;
-    private assertCurrentRailPolicy;
-    private firstLocalSubmit;
-    private submit;
-    private inspect;
-    private inspectEvidence;
-    private assertEffect;
-    private move;
-    /** After the foreground decision and every pre-send check, before signing or a provider send. Refusals end the operation. */
-    private reserveUsage;
-    /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently. */
-    private followUsage;
 }
 export {};

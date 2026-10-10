@@ -157,6 +157,7 @@ test("Linea native Across executes one exact EIP-1559 source effect and complete
   assert.equal(signed.data, record.effects[0]!.envelope.data);
 
   const sourceCalls = s.source.calls.length, destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
+  const custodyLoads = s.wrapping.loads, approvalCalls = s.approval.calls.length;
   for (let i = 0; i < 2; i++) {
     const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
     assert.equal(resumed.ok, true, resumed.error?.message);
@@ -164,6 +165,7 @@ test("Linea native Across executes one exact EIP-1559 source effect and complete
     assert.equal(status.ok, true, status.error?.message);
   }
   assert.equal(s.source.submissions.length, 1);
+  assert.equal(s.wrapping.loads, custodyLoads); assert.equal(s.approval.calls.length, approvalCalls);
   assert.equal(s.source.calls.length, sourceCalls); assert.equal(s.destination.calls.length, destinationCalls);
   assert.equal(s.provider.statusCalls, providerCalls);
 });
@@ -239,22 +241,18 @@ test("Linea reconciles an exact reservation after a crash before the operation s
     const prepared = await s.prepare("across", `linea-crash-${outcome}`), binding = prepared.operation.intent.allowlist!;
     const identity = { account: binding.account, chain: binding.chain, asset: binding.asset };
     const reservationId = assetUsageReservationId(identity, `apn.bridge-usage:${prepared.id}`);
-    const repository = s.core.bridges.records as any, persist = repository.persist.bind(repository);
-    let injected = false;
-    repository.persist = async (op: any) => {
-      if (!injected && op.state === "execution_pending" && op.usageLease !== null) {
-        injected = true; throw new Error("fault_after_usage_reserve_before_operation_save");
-      }
-      return await persist(op);
-    };
-    const crashed = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
-    assert.equal(crashed.ok, false); assert.equal(injected, true);
+    // A terminated process cannot run approve's catch. Preserve its exact ledger-only state.
+    const reserved = await new BridgeAllowlistGate({ state: s.state, clock: { now: () => new Date(s.now) } })
+      .reserve(prepared.operation);
+    assert.equal(reserved.reservationId, reservationId);
     const unchanged = (await s.core.bridges.records.findOperation(prepared.id))!;
     assert.equal(unchanged.state, "awaiting_approval"); assert.equal(unchanged.usageLease, null);
     const ledger = new AssetUsageLedger(temporary.root), orphan = await ledger.load(identity, reservationId);
     assert.equal(orphan?.state, "reserved");
     assert.equal((await ledger.usage(identity, s.now)).amountAtomic, amount);
-    repository.persist = persist;
+    const privateLoads = s.wrapping.loads, seal = s.custody.seal.bind(s.custody);
+    let signingAttempts = 0;
+    s.custody.seal = async (...args: Parameters<typeof seal>) => { signingAttempts++; return await seal(...args); };
 
     if (outcome === "rejected") s.approval.accepted = false;
     if (outcome === "expired") s.now.setTime(Date.parse(unchanged.intent.expiresAt) + 1);
@@ -273,13 +271,56 @@ test("Linea reconciles an exact reservation after a crash before the operation s
       assert.equal(recovered?.state, "finalized");
       assert.equal((await ledger.usage(identity, s.now)).amountAtomic, amount);
       assert.equal(s.source.submissions.length, 1);
+      assert.equal(signingAttempts, 1);
     } else {
       assert.equal(record.state, "failed_before_effect"); assert.equal(record.usageLease, null);
       assert.equal(recovered?.state, "failed_before_effect");
       assert.equal((await ledger.usage(identity, s.now)).amountAtomic, "0");
       assert.equal(s.source.submissions.length, 0);
+      assert.equal(signingAttempts, 0); assert.equal(s.wrapping.loads, privateLoads);
     }
   }
+});
+
+test("Linea caught reservation-save failure releases the exact hold before any private effect", async (t) => {
+  const amount = "200000000000000", temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-linea", {
+    policy: { maximumPerTransferAtomic: amount, dailyLimitAtomic: amount },
+  });
+  const prepared = await s.prepare("across", "linea-caught-save-001"), binding = prepared.operation.intent.allowlist!;
+  const identity = { account: binding.account, chain: binding.chain, asset: binding.asset };
+  const reservationId = assetUsageReservationId(identity, `apn.bridge-usage:${prepared.id}`);
+  const repository = s.core.bridges.records, persist = repository.persist.bind(repository);
+  const privateLoads = s.wrapping.loads, seal = s.custody.seal.bind(s.custody);
+  let injected = false, signingAttempts = 0;
+  s.custody.seal = async (...args: Parameters<typeof seal>) => { signingAttempts++; return await seal(...args); };
+  repository.persist = async (op) => {
+    if (!injected && op.state === "execution_pending" && op.usageLease !== null) {
+      injected = true; throw new Error("fault_after_usage_reserve_before_operation_save");
+    }
+    return await persist(op);
+  };
+  const refused = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+  assert.equal(refused.ok, true); assert.equal(injected, true);
+  repository.persist = persist;
+  const record = (await repository.findOperation(prepared.id))!;
+  assert.equal(record.state, "failed_before_effect"); assert.equal(record.terminal, true);
+  assert.equal(record.failure?.reason, "unsent_guard_unavailable"); assert.equal(record.usageLease, null);
+  const ledger = new AssetUsageLedger(temporary.root), held = await ledger.load(identity, reservationId);
+  assert.equal(held?.reservationId, reservationId); assert.equal(held?.state, "failed_before_effect");
+  assert.equal((await ledger.usage(identity, s.now)).amountAtomic, "0");
+  assert.equal(signingAttempts, 0); assert.equal(s.source.submissions.length, 0);
+  assert.equal(s.wrapping.loads, privateLoads);
+  assert.equal(record.effects.every(effect => effect.phase === "unsealed" && effect.submissionAttempts === 0 && effect.transactionHash === null), true);
+  const retried = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+  assert.equal(retried.ok, true);
+  assert.deepEqual(await repository.findOperation(prepared.id), record);
+  assert.deepEqual(await ledger.load(identity, reservationId), held);
+  const fresh = await s.prepare("across", "linea-caught-save-fresh-001");
+  assert.notEqual(fresh.id, prepared.id); assert.equal(fresh.operation.state, "awaiting_approval");
+  assert.equal(fresh.operation.usageLease, null);
+  assert.equal(signingAttempts, 0); assert.equal(s.source.submissions.length, 0);
+  assert.equal(s.wrapping.loads, privateLoads);
 });
 
 test("Linea execution refuses active policy drift before signing or sending", async (t) => {

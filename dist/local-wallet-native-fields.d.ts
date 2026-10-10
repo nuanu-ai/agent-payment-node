@@ -1,0 +1,15 @@
+import { ApnError } from "./errors.js";
+import type { WalletIdentity } from "./encrypted-wallet-store.js";
+import type { Address, Hex } from "./model.js";
+export declare function decimal(value: unknown, label: string, positive?: boolean): string;
+export declare function hash(value: unknown, label: string): string;
+export declare function hex32(value: unknown, label: string): Hex;
+export declare function assertWallet(identity: WalletIdentity, expected: Address): void;
+export declare function ensureX402Live(validBefore: string): void;
+export declare function effectSlot(domain: string, profile: string, operationId: string, fingerprint: string): string;
+export declare function requestProfile(payload: Readonly<Record<string, unknown>>): string;
+export declare function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown>;
+export declare function addressEqual(left: string, right: string): boolean;
+export declare function x402Address(value: unknown, label: string): Address;
+export declare function protocol(message: string): ApnError;
+export declare function rejected(nativeCode: string, message: string): ApnError;

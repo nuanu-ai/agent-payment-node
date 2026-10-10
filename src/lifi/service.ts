@@ -1,3 +1,7 @@
+import { evmAddressLock } from "../evm-address-ownership.js";
+import { walletCustodyLock } from "../encrypted-wallet-store.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
+import { bridgeRpcPhysicalPolicy } from "./rpc-execution-budget.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
@@ -84,7 +88,7 @@ export class BridgeService {
   }
   async resume(operationId: string) {
     return await this.locked(operationId, async (op) => publicBridgeOperation(
-      op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
+      op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).resume(op, this.dependencies().approval)));
   }
   async status(operationId: string): Promise<StoredPublicBridgeOperation> {
     const found = await this.operations.required(operationId);
@@ -179,7 +183,7 @@ export class BridgeService {
   }
   private execution(op: BridgeOperationRecord) {
     const d = this.dependencies(), m = op.intent.materialization;
-    const physicalBudget = new BridgeRpcPhysicalBudget();
+    const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeRpcPhysicalPolicy(op));
     // The modeled worst-case first token guard spends 19 requests: two safe heads, 6+9 Ethereum/Base archive chunks and two account batches.
     // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof. Arbitrum code remains fully fresh
     // because this verifier lacks an exact fork activation point: two safe heads, four Base plus five Arbitrum chunks,
@@ -212,29 +216,31 @@ export class BridgeService {
     return next;
   }
   private async followUsage(op: BridgeOperationRecord) {
-    await new BridgeAllowlistGate(this.context).follow(op, bridgeUsageTarget(op));
+    await new BridgeAllowlistGate(this.context, true).follow(op, bridgeUsageTarget(op));
   }
   private async locked<T>(input: string, work: (op: BridgeOperationRecord) => Promise<T>): Promise<T> {
     const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
     if (first.kind !== "bridge_route") bridgeFailure("APN_OPERATION_BLOCKED", "operation_is_not_bridge");
     if (isLegacyBridgeOperation(first.record)) bridgeFailure("APN_OPERATION_BLOCKED", "legacy_bridge_non_resumable");
-    return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${operationId}`], async () => {
+    return await this.context.state.withLocks([walletCustodyLock(this.context.state, first.record.intent.profile)], async () =>
+      await this.context.state.withLocks([ `profile:${first.record.profileHash}`, `profile:${allowlistProfileHash(first.record.intent.profile)}`, `operation:${operationId}`, evmAddressLock(first.record.intent.owner.address)], async () => {
       const current = await this.operations.required(operationId);
       if (current.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "bridge_operation_kind_changed");
       if (isLegacyBridgeOperation(current.record)) bridgeFailure("APN_OPERATION_BLOCKED", "legacy_bridge_non_resumable");
       await this.records.repairReceipt(current.record);
       await this.followUsage(current.record);
       return await work(current.record);
-    });
+    }));
   }
   private async deploymentMigrationLocked<T>(input: string, work: (op: StoredBridgeOperationRecord) => Promise<T>): Promise<T> {
     const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
     if (first.kind !== "bridge_route") bridgeFailure("APN_OPERATION_BLOCKED", "migration_operation_kind");
-    return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${operationId}`], async () => {
+    return await this.context.state.withLocks([walletCustodyLock(this.context.state, first.record.intent.profile)], async () =>
+      await this.context.state.withLocks([ `profile:${first.record.profileHash}`, `profile:${allowlistProfileHash(first.record.intent.profile)}`, `operation:${operationId}`, evmAddressLock(first.record.intent.owner.address)], async () => {
       const current = await this.operations.required(operationId);
       if (current.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "migration_operation_kind_changed");
       return await work(current.record);
-    });
+    }));
   }
 }
 function migrationProjection(operation: BridgeOperationRecord, audit: BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit,

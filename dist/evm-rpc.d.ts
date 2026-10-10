@@ -40,6 +40,8 @@ export declare class EvmRpc implements EvmRpcPort {
     estimate(input: EvmTransactionInput): Promise<FeeEstimate>;
     feeQuote(chainId: DirectEvmChainId, economics: Economics): Promise<EvmFeeQuote>;
     receipt(chainId: DirectEvmChainId, transactionHash: Hex): Promise<RpcReceipt | null>;
+    /** Bounded read-only transport for the native fee observer. */
+    nativeFeeRead(method: "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getBlockByNumber" | "eth_call", params: readonly unknown[]): Promise<unknown>;
     evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
     confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
 }

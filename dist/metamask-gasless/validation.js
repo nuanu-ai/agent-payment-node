@@ -73,7 +73,8 @@ export function mmChain(value) {
 }
 export function mmSame(a, b) { return canonicalJson(a) === canonicalJson(b); }
 export function mmRequest(value, reason = "mm_gasless_input") {
-    const r = mmExact(value, ["chainId", "recipient", "grossAtomic", "maxFeeAtomic", "minReceivedAtomic"], reason);
+    const fixed = isPlainRecord(value) && Object.hasOwn(value, "fixedNet");
+    const r = mmExact(value, ["chainId", "recipient", "grossAtomic", "maxFeeAtomic", "minReceivedAtomic", ...(fixed ? ["fixedNet"] : [])], reason);
     mmChain(r.chainId);
     if (mmCanonicalAddress(r.recipient, reason) === MM_ZERO_ADDRESS)
         mmFail(reason);
@@ -81,6 +82,12 @@ export function mmRequest(value, reason = "mm_gasless_input") {
     mmUint(r.maxFeeAtomic, false, reason);
     if (minimum > gross)
         mmFail(reason);
+    if (fixed) {
+        const f = mmExact(r.fixedNet, ["netAtomic", "maxGrossAtomic"], reason);
+        const net = mmUint(f.netAtomic, true, reason);
+        if (mmUint(f.maxGrossAtomic, true, reason) !== gross || net > gross || f.netAtomic !== r.minReceivedAtomic)
+            mmFail(reason);
+    }
     return r;
 }
 //# sourceMappingURL=validation.js.map

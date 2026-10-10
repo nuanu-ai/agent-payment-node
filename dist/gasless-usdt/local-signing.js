@@ -5,9 +5,12 @@ import { recoverTypedDataAddress } from "viem";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
-import { UsdtBoundOperationRepository, validateUsdtBoundOperation } from "./bound-operation.js";
+import { UsdtBoundOperationRepository, validateUsdtAnyBoundOperation as validateUsdtBoundOperation } from "./bound-operation.js";
 import { USDT_GASLESS, usdtFailure } from "./model.js";
 import { validateUsdtPaymasterData } from "./paymaster-data.js";
+import { restoreUsdtPlan } from "./restored-plan.js";
+import { consumeUsdtSponsorPermit, assertUsdtConsumedPermitFresh } from "./sponsor-permit.js";
+import { signedUsdtV2 } from "./economics-v2.js";
 import { usdtEffectiveFeeCap } from "./quote.js";
 import { usdtUserOperationHash, usdtUserOperationTypedData } from "./userop.js";
 /** Local custody only. The signed wire is returned to the caller; no journal or transport is touched. */
@@ -20,7 +23,7 @@ export class LocalUsdtSigningService {
         this.now = now;
         this.wallets = new EncryptedWalletStore(state, wrapping);
     }
-    async sign(value, expected) {
+    async sign(value, expected, permit) {
         const bound = validateUsdtBoundOperation(value);
         assertIdentity(bound, expected);
         return await this.state.withLocks([walletCustodyLock(this.state, expected.profile)], async () => {
@@ -29,6 +32,7 @@ export class LocalUsdtSigningService {
                 usdtFailure("APN_STATE_CORRUPT", "gasless_usdt_saved_binding_mismatch");
             }
             assertReady(bound, this.now());
+            const context = bound.schemaVersion === "apn.gasless-usdt-bound-operation.v2" ? consumeUsdtSponsorPermit(permit, bound, expected, { now: this.now }) : undefined;
             const wallet = await this.wallets.describe(expected.profile);
             if (wallet === null)
                 usdtFailure("APN_WALLET_MISMATCH", "gasless_usdt_wallet_missing");
@@ -46,6 +50,8 @@ export class LocalUsdtSigningService {
                 if (account.address !== wallet.identity.address)
                     usdtFailure("APN_WALLET_MISMATCH", "gasless_usdt_wallet_key");
                 assertReady(bound, this.now());
+                if (context !== undefined)
+                    assertUsdtConsumedPermitFresh(context, { now: this.now });
                 const saved = bound.binding, unsigned = saved.unsignedOperation;
                 let authorization = undefined;
                 if (saved.account.delegation === "empty") {
@@ -67,6 +73,10 @@ export class LocalUsdtSigningService {
                 }
                 const draft = { ...unsigned, signature: "0x", ...(authorization === undefined ? {} : { eip7702Auth: authorization }) };
                 let signature;
+                if (context !== undefined) {
+                    assertReady(bound, this.now());
+                    assertUsdtConsumedPermitFresh(context, { now: this.now });
+                }
                 try {
                     signature = await account.signTypedData(usdtUserOperationTypedData(draft));
                 }
@@ -152,20 +162,12 @@ function assertReady(bound, at) {
         BigInt(b.plan.quotedFeeAtomic) > BigInt(b.plan.feeCapAtomic)) {
         usdtFailure("APN_STATE_CORRUPT", "gasless_usdt_signing_binding");
     }
-    const unpack = (value, names) => {
-        const copy = { ...value };
-        for (const name of names)
-            copy[name] = BigInt(value[name]);
-        return copy;
-    };
-    const restored = { ...b.plan, request: unpack(b.plan.request, ["grossAtomic", "maxFeeAtomic", "minReceivedAtomic"]),
-        quote: unpack(b.plan.quote, ["postOpGas", "exchangeRate", "exchangeRateNativeToUsd"]),
-        price: unpack(b.plan.price, ["maxFeePerGas", "maxPriorityFeePerGas"]),
-        gas: unpack(b.plan.gas, Object.keys(b.plan.gas)),
-        feeCapAtomic: BigInt(b.plan.feeCapAtomic), netAtomic: BigInt(b.plan.netAtomic),
-        quotedFeeAtomic: BigInt(b.plan.quotedFeeAtomic) };
+    const restored = restoreUsdtPlan(bound);
     try {
-        validateUsdtPaymasterData({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, restored, nowSeconds);
+        if (bound.schemaVersion === "apn.gasless-usdt-bound-operation.v2")
+            signedUsdtV2({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, restored, nowSeconds);
+        else
+            validateUsdtPaymasterData({ paymaster: USDT_GASLESS.paymaster, paymasterData: b.paymasterData }, restored, nowSeconds);
     }
     catch {
         usdtFailure("APN_REPREPARE_REQUIRED", "gasless_usdt_quote_expired_or_changed");

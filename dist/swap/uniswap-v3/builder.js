@@ -8,7 +8,7 @@ import { createSwapQuote } from "../quote.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
 import { encodeUniswapV3ExactInput } from "./encoder.js";
 import { readUniswapV3Quote } from "./onchain.js";
-import { UNISWAP_V3_KEYLESS_MECHANISM_PIN, uniswapV3Pair } from "./pins.js";
+import { ETHEREUM_WBTC, UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_V3_KEYLESS_MECHANISM_PIN, uniswapV3Pair } from "./pins.js";
 import { SavedUniswapQuoteStore, UNISWAP_KEYLESS_EXECUTION_SCHEMA, uniswapEvidenceHash, uniswapGasDisplay } from "./material.js";
 import { nativeReads } from "./native-rpc.js";
 const MAX_HEAD_DRIFT = 64, GAS_MARGIN_NUMERATOR = 5n, GAS_MARGIN_DENOMINATOR = 4n;
@@ -49,6 +49,8 @@ export class KeylessUniswapQuoteBuilder {
         if (pool.priceImpactBps > request.ownerSlippageCapBps)
             blocked("Pool price impact exceeds the owner slippage cap.", "uniswap_price_impact");
         const expected = BigInt(pool.amountOutAtomic), minimum = (expected * BigInt(10_000 - request.slippageBps) + 9999n) / 10000n;
+        if (request.pair.outputToken === ETHEREUM_WBTC && minimum < 1000n)
+            blocked("WBTC acquisition requires at least 1000 atomic output.", "uniswap_wbtc_output_floor");
         if (minimum <= 0n)
             blocked("Uniswap output floor is zero.", "uniswap_output_floor");
         const encoded = encodeUniswapV3ExactInput({ recipient: request.recipient, inputAmountAtomic: request.amount.toString(),
@@ -133,7 +135,7 @@ export class KeylessUniswapQuoteBuilder {
                 blockHash: block.hash, sqrtPriceX96: pool.sqrtPriceX96, spotOutputPerEthAtomic: pool.spotOutputPerEthAtomic,
                 expectedOutputAtomic: expected.toString(), minimumOutputAtomic: minimum.toString(), slippageBps: request.slippageBps,
                 priceImpactBps: pool.priceImpactBps, outputSymbol: pair.outputSymbol, outputDecimals: pair.outputDecimals },
-            mechanism: { pin: UNISWAP_V3_KEYLESS_MECHANISM_PIN, digest: swapMechanismDigest(UNISWAP_V3_KEYLESS_MECHANISM_PIN) },
+            mechanism: { pin: pair.outputToken === ETHEREUM_WBTC ? UNISWAP_WBTC_MECHANISM_PIN : UNISWAP_V3_KEYLESS_MECHANISM_PIN, digest: swapMechanismDigest(pair.outputToken === ETHEREUM_WBTC ? UNISWAP_WBTC_MECHANISM_PIN : UNISWAP_V3_KEYLESS_MECHANISM_PIN) },
             codePins: codePins.map((pin) => ({ role: pin.role, address: pin.address, codeHash: pin.codeHash })), signed: false, broadcast: false };
     }
     async load(quoteHash) { return await this.quotes.load(quoteHash); }

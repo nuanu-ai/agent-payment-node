@@ -1,0 +1,18 @@
+{
+  "fixtureSha256": "87779693cf16be43f5a9ef510be29a3108beed497f5214101655f0f549181fbb",
+  "diagnosticOnly": true,
+  "simulationObserved": false,
+  "mixedSlotTestFixture": true,
+  "newAccountsSlot": "454302173",
+  "newAccountAddresses": [
+    "4HppGTweoGQ8ZZ6UcCgwJKfi5mJD9Dqwy6htCpnbfBLW",
+    "htf1KLePyGs8R6xUZ1oEYmkStQ21uP1Hq8GY5P5Mp2G",
+    "9ma53jxdWJ3RmumpJBJGSSmDJB9ENNEey6frh8iTGvM4",
+    "48Sj9e1Bymfe7dT5F3o9xtHrGfN2zG8vAprgxSBvxMV2",
+    "DLHT8eMw7zuuw1j8AvyQsySk31FRELGdUmbjZQHQczZR",
+    "4hJQEPftoEVVfH3wFeBziS9EJxQaAftqQWcD5jw36LNg",
+    "31HfnCJfkAmdiAqXTRPVCPo9uDXLRstpK7tU2kk5zYB7"
+  ],
+  "historicalAncillaryCaptureSha256": "f431c01dc29942ea1a179ebca6ce3ffa8f49a42772e8846b61eca1013577517e",
+  "provenance": "Unsigned official Jupiter quote/build and seven canonical public RPC accounts. Ancillary mint/program/owner rows retain their original historical slots. This assembled TEST fixture is not a uniform live snapshot or financial acceptance."
+}

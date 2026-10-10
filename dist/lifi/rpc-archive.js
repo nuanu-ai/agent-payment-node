@@ -48,6 +48,16 @@ export function bridgeReceiptEndpoint(chainId, environment) {
 }
 /** A state read pinned to one block number or block hash. Moving tags (latest, safe, finalized, pending) never qualify. */
 export function isHistoricalStateRead(method, params) {
+    // Native-fill balance witnesses require the exact canonical EIP-1898 hash object.
+    // Numeric and moving balance snapshots retain their existing primary route.
+    if (method === "eth_getBalance") {
+        const tag = params[1];
+        return params.length === 2 && typeof tag === "object" && tag !== null && !Array.isArray(tag) &&
+            Object.keys(tag).length === 2 && Object.hasOwn(tag, "blockHash") && Object.hasOwn(tag, "requireCanonical") &&
+            tag.requireCanonical === true &&
+            isBlockHash(tag.blockHash) &&
+            tag.blockHash.toLowerCase() !== `0x${"0".repeat(64)}`;
+    }
     const index = TAG_INDEX[method];
     if (index === undefined || params.length !== index + 1)
         return false;

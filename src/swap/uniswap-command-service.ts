@@ -4,7 +4,7 @@ import type { RuntimeContext } from "../runtime.js";
 import { SwapOperationRepository } from "./repository.js";
 import { UNISWAP_OFFICIAL_PIN_CATALOG, UNISWAP_USDC } from "./uniswap-pin.js";
 import { swapMechanismDigest } from "./pin.js";
-import { UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS,
+import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS,
   USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
 
 type Request = Extract<CommandRequest, { readonly command: `swap.uniswap.${string}` | `swap.uniswap-token.${string}` }>;
@@ -25,7 +25,9 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
     execution: context.uniswapRuntime === undefined ? "dormant" : "foreground_cli_after_owner_admission",
     keyless: { mechanismPin: UNISWAP_V3_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(UNISWAP_V3_KEYLESS_MECHANISM_PIN),
       protocolRegistryDigest: UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY.registryDigest, pairs: UNISWAP_V3_PAIRS,
-      codePins: [...UNISWAP_V3_CODE_PINS, USDC_IMPLEMENTATION_PIN] } }, "official_catalog_not_owner_admission");
+      codePins: [...UNISWAP_V3_CODE_PINS, USDC_IMPLEMENTATION_PIN] },
+    wbtc: { mechanismPin: UNISWAP_WBTC_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(UNISWAP_WBTC_MECHANISM_PIN),
+      protocolRegistryDigest: UNISWAP_WBTC_PROTOCOL_REGISTRY.registryDigest, pair: UNISWAP_WBTC_PAIR, codePins: UNISWAP_WBTC_CODE_PINS, minimumOutputAtomic: "1000" } }, "official_catalog_not_owner_admission");
   if (request.command === "swap.uniswap.quote") {
     if (context.uniswapRuntime !== undefined) return data(await context.uniswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
     if (context.uniswap === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",

@@ -151,7 +151,7 @@ function parseEpoch(value) {
   return date.toISOString();
 }
 
-export function buildProductionSbom({ packageJson, lockfile, lockBytes, created }) {
+export function buildProductionSbom({ packageJson, lockfile, lockBytes, created, vendorProvenances = [] }) {
   if (packageJson.name !== lockfile.name || packageJson.version !== lockfile.version) {
     throw new Error("package.json and package-lock.json root identity differ");
   }
@@ -200,19 +200,39 @@ export function buildProductionSbom({ packageJson, lockfile, lockBytes, created 
     if (checksums.length > 0) entry.checksums = checksums;
     return entry;
   });
+  const bundledPackages = [];
+  const bundledRelationships = [];
+  for (const { directory, provenance, provenanceBytes } of vendorProvenances) {
+    if (!provenance.emittedPackages || !Array.isArray(provenance.outputContributions)) {
+      throw new Error(`missing emitted vendor provenance: ${directory}`);
+    }
+    const contributed = new Set(provenance.outputContributions.filter(row => row.bytesInOutput > 0).map(row => row.identity));
+    for (const [identity, metadata] of Object.entries(provenance.emittedPackages).sort(([a], [b]) => lexicalCompare(a, b))) {
+      if (!contributed.has(identity) || identity !== `${metadata.name}@${metadata.version}`) throw new Error(`invalid emitted vendor package: ${identity}`);
+      const id = spdxId(metadata.name, metadata.version, `vendor/${directory}/${identity}`);
+      bundledPackages.push({ name: metadata.name, SPDXID: id, versionInfo: metadata.version,
+        downloadLocation: "NOASSERTION", filesAnalyzed: false, licenseConcluded: "NOASSERTION",
+        licenseDeclared: license(metadata), copyrightText: "NOASSERTION",
+        comment: `Bundled code in vendor/${directory}; input hashes and output contributions are recorded in its provenance.json (SHA256 ${sha256(provenanceBytes)}).`,
+        externalRefs: [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl",
+          referenceLocator: `pkg:npm/${purlName(metadata.name)}@${encodeURIComponent(metadata.version)}` }] });
+      bundledRelationships.push({ spdxElementId: rootId, relationshipType: "CONTAINS", relatedSpdxElement: id });
+    }
+  }
   const relationships = [
     {
       spdxElementId: "SPDXRef-DOCUMENT",
       relationshipType: "DESCRIBES",
       relatedSpdxElement: rootId,
     },
+    ...bundledRelationships,
     ...graph.edges.map(({ from, to }) => ({
       spdxElementId: ids.get(from),
       relationshipType: "DEPENDS_ON",
       relatedSpdxElement: ids.get(to),
     })),
   ];
-  const lockHash = sha256(lockBytes);
+  const lockHash = sha256(Buffer.concat([lockBytes, ...vendorProvenances.map(row => row.provenanceBytes)]));
   return {
     spdxVersion: "SPDX-2.3",
     dataLicense: "CC0-1.0",
@@ -224,7 +244,7 @@ export function buildProductionSbom({ packageJson, lockfile, lockBytes, created 
       creators: ["Tool: @nuanu-ai/apn/scripts/generate-sbom.mjs"],
     },
     documentDescribes: [rootId],
-    packages: [rootPackage, ...dependencyPackages],
+    packages: [rootPackage, ...dependencyPackages, ...bundledPackages],
     relationships,
   };
 }
@@ -256,11 +276,16 @@ async function main() {
   if (!lockBytes.equals(shrinkwrapBytes)) {
     throw new Error("package-lock.json and npm-shrinkwrap.json differ");
   }
+  const vendorProvenances = await Promise.all(["metamask-evm-sdk", "metamask-smart-account", "relay-order-id", "tron-utils"].map(async directory => {
+    const provenanceBytes = await readFile(resolve(sourceRoot, "vendor", directory, "provenance.json"));
+    return { directory, provenanceBytes, provenance: JSON.parse(provenanceBytes) };
+  }));
   const sbom = buildProductionSbom({
     packageJson: JSON.parse(packageBytes),
     lockfile: JSON.parse(lockBytes),
     lockBytes,
     created: parseEpoch(arguments_["--source-date-epoch"]),
+    vendorProvenances,
   });
   await writeFile(resolve(arguments_["--output"]), `${JSON.stringify(sbom, null, 2)}\n`, {
     flag: "wx",

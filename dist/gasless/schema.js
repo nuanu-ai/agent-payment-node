@@ -1,3 +1,4 @@
+import { firstSendApprovalSchema } from "./first-send-model.js";
 import { z } from "zod";
 import { gaslessAddress, gaslessIso, gaslessUint } from "./validation.js";
 export const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
@@ -103,7 +104,7 @@ export const effectSchema = z.strictObject({ role: z.enum(["bootstrap", "user_op
     submissionAttempts: attemptSchema, userOperationHash: wordSchema.nullable(), estimate: estimateSchema.nullable(),
     signingStartedAt: isoSchema.nullable(), sealedAt: isoSchema.nullable(), disclosedAt: isoSchema.nullable(),
     submittedAt: isoSchema.nullable() });
-const mutableFields = { state: stateSchema, approval: consentSchema.nullable(), bootstrap: effectSchema,
+const mutableFields = { firstSendApprovals: z.array(firstSendApprovalSchema).min(1).max(128).optional(), state: stateSchema, approval: consentSchema.nullable(), bootstrap: effectSchema,
     userOperation: effectSchema, cursor: cursorSchema, observation: observationSchema.nullable(),
     settlement: settlementSchema.nullable(), failure: reasonSchema.nullable() };
 export const transitionSchema = z.strictObject({ ...mutableFields, at: isoSchema, previousHash: hashSchema, transitionHash: hashSchema });

@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { TextDecoder } from "node:util";
-import { decodeDelegations, encodeDelegations } from "@metamask/smart-accounts-kit/utils";
+import { decodeDelegations, encodeDelegations } from "./metamask-smart-account-vendor.js";
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";

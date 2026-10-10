@@ -77,14 +77,19 @@ async function assertSbomMatchesProductionLock(sbom) {
   if (!lockBytes.equals(shrinkwrapBytes)) {
     throw new Error("package-lock.json and npm-shrinkwrap.json differ");
   }
+  const vendorProvenances = await Promise.all(["metamask-evm-sdk", "metamask-smart-account", "relay-order-id", "tron-utils"].map(async directory => {
+    const provenanceBytes = await readFile(resolve(sourceRoot, "vendor", directory, "provenance.json"));
+    return { directory, provenanceBytes, provenance: JSON.parse(provenanceBytes) };
+  }));
   const expected = buildProductionSbom({
     packageJson: JSON.parse(packageBytes),
     lockfile: JSON.parse(lockBytes),
     lockBytes,
     created: sbom?.creationInfo?.created,
+    vendorProvenances,
   });
   if (JSON.stringify(sbom) !== JSON.stringify(expected)) {
-    throw new Error("SBOM does not match the exact locked production closure");
+    throw new Error("SBOM does not match the exact locked production and emitted vendor closure");
   }
 }
 

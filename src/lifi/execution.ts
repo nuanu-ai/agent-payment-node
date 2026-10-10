@@ -1,3 +1,6 @@
+import { AssetUsageLedger } from "../asset-usage-ledger.js";
+import { assertExclusiveEvmRawSigner } from "../evm-address-ownership.js";
+import { BridgeEffectClaims, guardedWbtc, withBridgeEffectAuthority, type BridgeEffectAuthority } from "./effect-authority.js";
 import { approvalCode } from "../approval-code.js";
 import { ApnError } from "../errors.js";
 import type { StateStore } from "../state.js";
@@ -24,24 +27,48 @@ export class BridgeExecution {
   }
   async approve(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<BridgeOperationRecord> {
     if (op.terminal || op.state !== "awaiting_approval") return op;
+    if (guardedWbtc(op) && op.intent.allowlist?.activationDigest === undefined) throw new ApnError("APN_ALLOWLIST_REFUSED",
+      "This WBTC operation predates activation-bound effect authority; prepare a new operation.", { reason: "bridge_activation_binding_missing" });
     try { await this.guard(op, op.effects[0]!.role); }
     catch (error) { return budgetExhausted(error) ? op : await this.haltUnsent(op, error); }
-    const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
-      exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op) });
-    if (!accepted) return await this.save(op, { state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } });
-    // Consent does not extend the exact materialization expiry.
-    try { assertBridgeRemaining(op, this.now()); }
+    if (guardedWbtc(op)) return await withBridgeEffectAuthority(op, this.now,
+      async () => await this.confirmForeground(op, approval),
+      async () => await this.save(op, { state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } }),
+      async current => await this.authorityPolicy(current), async (authority, approvedAt) => {
+        try { op = await this.approved(op, approvedAt); }
+        catch (error) { return await this.haltUnsent(op, error); }
+        return await this.run(op, authority);
+      });
+    if (!await this.confirmForeground(op, approval)) return await this.save(op, {
+      state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } });
+    try { op = await this.approved(op, this.now()); }
     catch (error) { return await this.haltUnsent(op, error); }
-    let usageLease = null;
-    if (op.intent.allowlist !== null) {
-      try { usageLease = await this.allowlist().reserve(op); }
-      catch (error) { return await this.haltUnsent(op, error); }
-    }
-    op = await this.save(op, { state: "execution_pending", approval: { policy: "apn.bridge.foreground-approval.v1",
-      fingerprint: op.fingerprint, approvedAt: new Date(this.now()).toISOString(), expiresAt: op.intent.expiresAt }, usageLease });
     return await this.run(op);
   }
-  async run(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
+  private async confirmForeground(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<boolean> {
+    return await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
+      exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op) });
+  }
+  private async approved(op: BridgeOperationRecord, approvedAt: number): Promise<BridgeOperationRecord> {
+    // Consent cannot extend the original exact materialization expiry.
+    assertBridgeRemaining(op, this.now());
+    const usageLease = op.intent.allowlist === null ? null : await this.allowlist().reserve(op);
+    return await this.save(op, { state: "execution_pending", approval: { policy: "apn.bridge.foreground-approval.v1",
+      fingerprint: op.fingerprint, approvedAt: new Date(approvedAt).toISOString(), expiresAt: op.intent.expiresAt }, usageLease });
+  }
+  async resume(op: BridgeOperationRecord, approval?: BridgeApprovalPort): Promise<BridgeOperationRecord> {
+    if (!guardedWbtc(op) || op.effects.every(e => e.submissionAttempts === 1) || op.terminal ||
+      Date.parse(op.intent.expiresAt) <= this.now()) return await this.run(op);
+    const unattempted = op.effects.findIndex(e => e.submissionAttempts === 0);
+    if (op.intent.allowlist?.activationDigest === undefined || op.failure?.reason.startsWith("unsent_") ||
+      op.effects[unattempted]?.phase === "signing_started" || op.effects.slice(0, unattempted).some(e =>
+        !["included_success", "safe_success"].includes(e.phase))) return await this.run(op);
+    if (approval === undefined) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Fresh foreground approval is required for an unattempted WBTC effect.");
+    await this.authorityPolicy(op);
+    return await withBridgeEffectAuthority(op, this.now, async () => await this.confirmForeground(op, approval),
+      async () => op, async current => await this.authorityPolicy(current), async authority => await this.run(op, authority));
+  }
+  async run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord> {
     if (op.terminal || op.state === "awaiting_approval") return op;
     const haltReason = op.failure?.reason.startsWith("unsent_") ? op.failure.reason : null;
     const refreshed = await this.observation.sources(op); op = refreshed.operation;
@@ -61,14 +88,27 @@ export class BridgeExecution {
       }
       if (effect.role === "bridge" && op.effects[0]!.role === "approval" &&
         !["included_success", "safe_success"].includes(op.effects[0]!.phase)) return op;
+      if (guardedWbtc(op) && authority === undefined) {
+        if (effect.role === "bridge" && effect.phase === "unsealed" && op.effects[0]?.role === "approval" &&
+          op.effects[0].phase === "safe_success" && Date.parse(op.intent.expiresAt) <= this.now()) {
+          await new BridgeEffectClaims(this.state.root).assertUnsignedBridge(op);
+          try { assertBridgeRemaining(op, this.now()); }
+          catch (error) { return await this.haltUnsent(op, error); }
+        }
+        return op;
+      }
       if (effect.phase === "unsealed") {
         try { await this.guard(op, effect.role); }
         catch (error) { return budgetExhausted(error) ? op : await this.haltUnsent(op, error); }
         // Signing commits an effect; leave room for a fresh guard and its single raw send.
         if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2) return op;
+        if (authority !== undefined) {
+          await authority.check(op);
+          await new BridgeEffectClaims(this.state.root).claim(op, effect.role, "sign");
+        }
         op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "signing_started" }) });
         // The marker is durable before entering custody. A recovered marker only loads its original seal.
-        try { await this.custody.seal(op, effect.role, op.intent.owner); }
+        try { await this.custody.seal(op, effect.role, op.intent.owner, authority?.sign(op, effect.role)); }
         catch { /* A completed durable seal is recoverable even if its response was lost. */ }
         effect = op.effects.find((e) => e.role === effect.role)!;
       }
@@ -87,13 +127,17 @@ export class BridgeExecution {
       catch (error) { return budgetExhausted(error) ? op : await this.haltUnsent(op, error); }
       // Preserve a sealed effect for a later invocation when its one permitted send cannot fit.
       if (this.physicalBudget?.remaining() === 0) return op;
+      if (authority !== undefined) {
+        await authority.check(op);
+        await new BridgeEffectClaims(this.state.root).claim(op, effect.role, "send", material);
+      }
       op = await this.save(op, { state: "source_pending", effects: replaceEffect(op, { ...effect, phase: "submitting",
         submittedAt: new Date(this.now()).toISOString(), submissionAttempts: 1 }) });
       effect = op.effects.find((e) => e.role === effect.role)!;
       let sent = false;
       try {
         assertBridgeRemaining(op, this.now());
-        const hash = await this.source.send(material.rawTransaction);
+        const hash = await this.source.send(material.rawTransaction, authority?.send(op, material));
         if (hash !== effect.transactionHash) bridgeFailure("APN_RPC_AMBIGUOUS", "bridge_returned_hash_mismatch");
         sent = true;
       } catch { /* The durable first-send boundary is final even when submission is ambiguous. */ }
@@ -117,8 +161,21 @@ export class BridgeExecution {
     await this.allowlist().confirm(op.intent.profile, op.intent.materialization.request, op.intent.materialization.tool, op.intent.allowlist);
     await guardBridgeEffect(op, role, this.source, this.destination, this.now);
   }
+  private async authorityPolicy(op: BridgeOperationRecord): Promise<string | undefined> {
+    await assertExclusiveEvmRawSigner(this.state, op.intent.owner.address, op.profileHash);
+    await assertBridgeOwner(this.state, op.intent);
+    const active = await this.allowlist().confirm(op.intent.profile, op.intent.materialization.request, op.intent.materialization.tool, op.intent.allowlist);
+    const lease = op.usageLease;
+    if (lease === null) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_effect_hold_missing");
+    const held = await new AssetUsageLedger(this.state.root).load({ account: lease.account, chain: lease.chain, asset: lease.asset }, lease.reservationId);
+    if (held === null || held.policyDigest !== active.digest || held.amountAtomic !== op.intent.materialization.request.amountAtomic ||
+      held.rail !== "bridge" || !["reserved", "submitted", "unknown_finality"].includes(held.state)) {
+      bridgeFailure("APN_OPERATION_BLOCKED", "bridge_effect_hold_missing");
+    }
+    return active.registry.expiresAt;
+  }
   private allowlist(): BridgeAllowlistGate {
-    return new BridgeAllowlistGate({ state: this.state, clock: { now: () => new Date(this.now()) } });
+    return new BridgeAllowlistGate({ state: this.state, clock: { now: () => new Date(this.now()) } }, true);
   }
   private async haltUnsent(op: BridgeOperationRecord, error: unknown, existingReason?: string): Promise<BridgeOperationRecord> {
     const retained = retainedUnsentBridgeRpcFailure(op);
@@ -146,6 +203,8 @@ export class BridgeExecution {
     if (!residual.ok) return await this.save(op, { state: "unknown_finality", observationTelemetry: residual.observationTelemetry,
       failure: { reason: failureReason, residualAllowance: null,
       ...(diagnostic === null ? {} : { residualAllowanceStatus: "unavailable" as const, preSignRpc: diagnostic }) } });
+    if (state === "failed_after_approval" && guardedWbtc(op) && op.effects.at(-1)?.phase === "unsealed" &&
+      Date.parse(op.intent.expiresAt) <= this.now()) await new BridgeEffectClaims(this.state.root).assertUnsignedBridge(op);
     return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason, residualAllowance: residual.value,
       ...(diagnostic === null ? {} : { residualAllowanceStatus: "observed" as const, preSignRpc: diagnostic }) } });
   }

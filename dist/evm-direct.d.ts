@@ -1,7 +1,10 @@
+import { type CircleNativeAdmission } from "./circle-native-admission.js";
 import { type EvmAsset } from "./evm-asset.js";
 import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcPort, EvmTransactionInput } from "./evm-ports.js";
 import type { Address, Economics, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
+import { type EvmNativeCustody } from "./evm-native-custody.js";
+import { type Cleanup85NativeBinding } from "./circle-cleanup85-native-binding.js";
 export interface EvmDirectBinding {
     readonly schemaVersion: "apn.evm-direct.v1";
     readonly asset: EvmAsset;
@@ -9,6 +12,9 @@ export interface EvmDirectBinding {
     readonly valueAtomic: string;
     readonly maxFeeWei: string;
     readonly feeQuote: EvmFeeQuote;
+    readonly nativeCustody?: EvmNativeCustody;
+    readonly circleNativeAdmission?: CircleNativeAdmission;
+    readonly cleanup85Cancellation?: Cleanup85NativeBinding;
 }
 export declare function requireEvmRpc(rpc: RpcPort): EvmRpcPort;
 export declare function evmTransaction(asset: EvmAsset, from: Address, recipient: Address, amountAtomic: string): EvmTransactionInput;

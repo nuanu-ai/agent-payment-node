@@ -1,3 +1,4 @@
+import { type BridgeAuthorityCheck } from "./effect-authority.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { StateStore } from "../state.js";
 import type { BridgeOwner } from "./model.js";
@@ -10,5 +11,5 @@ export declare class LocalBridgeCustody implements BridgeCustodyPort {
     private readonly effects;
     constructor(state: StateStore, wrapping: WrappingSecretPort, now?: () => number);
     load(op: BridgeOperationRecord, role: "approval" | "bridge"): Promise<BridgeSealedMaterial | null>;
-    seal(op: BridgeOperationRecord, role: "approval" | "bridge", owner: BridgeOwner): Promise<BridgeSealedMaterial>;
+    seal(op: BridgeOperationRecord, role: "approval" | "bridge", owner: BridgeOwner, beforeSign?: BridgeAuthorityCheck): Promise<BridgeSealedMaterial>;
 }
