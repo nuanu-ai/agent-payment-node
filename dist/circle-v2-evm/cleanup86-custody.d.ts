@@ -16,7 +16,9 @@ export interface Cleanup86Material {
     readonly transactionHash: Hex;
     readonly materialHash: string;
 }
-/** First sign only. There is deliberately no private material restore/unseal API for recovery dispatch. */
+import { type Cleanup86FirstDispatchGrant } from "./cleanup86-first-dispatch-authority.js";
+import { type Cleanup86FirstDispatchJournal } from "./cleanup86-first-dispatch-journal.js";
+/** Internal custody boundary: restoration requires a live controller-issued capability. */
 export declare class Cleanup86Custody extends SecureStateStore {
     private readonly state;
     private readonly wrapping;
@@ -32,5 +34,9 @@ export declare class Cleanup86Custody extends SecureStateStore {
     /** V3 only: the opaque admission's live financial scope already owns this exact custody lock.
      * No public lock flag or callback can select this path. Legacy seal keeps its own lock. */
     sealCurrent(op: CircleOperationV1, i: Cleanup86Intent, grant: Cleanup86Grant, recovery: Cleanup85RecoveryIntent, certificate: VerifiedCleanup86CurrentPurpose): Promise<Cleanup86Material>;
+    restoreFirstDispatch(op: CircleOperationV1, i: Cleanup86Intent, recovery: Cleanup85RecoveryIntent, grant: Cleanup86FirstDispatchGrant, metadata: {
+        readonly transactionHash: Hex;
+        readonly materialHash: string;
+    }, journal: Cleanup86FirstDispatchJournal): Promise<Cleanup86Material>;
     private encrypt;
 }

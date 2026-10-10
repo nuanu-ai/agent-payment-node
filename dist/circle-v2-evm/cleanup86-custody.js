@@ -1,4 +1,4 @@
-import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, hashObject, exactKeys, isPlainRecord } from "../canonical.js";
@@ -9,7 +9,11 @@ import { circleBlocked } from "./operation-model.js";
 import { Cleanup86Store } from "./cleanup86-store.js";
 import { assertCleanup86CurrentPermission, verifiedCleanup86CurrentPurpose } from "./cleanup86-current-purpose.js";
 import { assertCleanup86Grant, claimCleanup86Custody } from "./cleanup86-controller.js";
-/** First sign only. There is deliberately no private material restore/unseal API for recovery dispatch. */
+import { assertCleanup86FirstDispatchGrant } from "./cleanup86-first-dispatch-authority.js";
+import { Cleanup86SnapshotStore } from "./cleanup86-snapshot.js";
+import { assertAuthenticatedCleanup86FirstDispatchJournal } from "./cleanup86-first-dispatch-journal.js";
+import { assertCleanup86RestoredWire } from "./cleanup86-wire-validation.js";
+/** Internal custody boundary: restoration requires a live controller-issued capability. */
 export class Cleanup86Custody extends SecureStateStore {
     state;
     wrapping;
@@ -113,6 +117,109 @@ export class Cleanup86Custody extends SecureStateStore {
         }
         finally {
             this.wallets.clear(wallet.secret);
+        }
+    }
+    async restoreFirstDispatch(op, i, recovery, grant, metadata, journal) {
+        const binding = { root: this.state.root, operationId: op.operationId, intentHash: i.intentHash, recoveryId: recovery.recoveryBinding, envelopeHash: i.envelope.envelopeHash, transactionHash: metadata.transactionHash, materialHash: metadata.materialHash };
+        const gate = () => {
+            assertCleanup86FirstDispatchGrant(grant, binding, "restore");
+            assertAuthenticatedCleanup86FirstDispatchJournal(journal, grant, binding);
+            if (journal.root !== this.state.root || hashObject(journal.operation) !== hashObject(op) || hashObject(journal.intent) !== hashObject(i))
+                circleBlocked("cleanup86_restored_journal_binding");
+        };
+        gate();
+        const { intentHash, ...intentBody } = i, { recoveryBinding, ...recoveryBody } = recovery;
+        if (intentHash !== hashObject(intentBody) || recoveryBinding !== hashObject(recoveryBody) || i.recoveryBinding !== recoveryBinding || recovery.parentOperationId !== op.operationId || i.envelope.from !== op.sourceCustody.walletAddress || hashObject(recovery.sourceCustody) !== hashObject(op.sourceCustody))
+            circleBlocked("cleanup86_restored_intent_binding");
+        await journal.assertStable();
+        gate();
+        const snapshots = new Cleanup86SnapshotStore(this.state.root), original = await snapshots.capture(op.operationId);
+        gate();
+        const stable = async () => {
+            gate();
+            await journal.assertStable();
+            gate();
+            if (hashObject(await snapshots.capture(op.operationId)) !== hashObject(original))
+                circleBlocked("cleanup86_snapshot_drift");
+            gate();
+        };
+        await stable();
+        // Read exclusively from the complete nofollow/nlink=1 protected capture, never readJson.
+        const h = original.entries[`${op.operationId}-cleanup86-material.json`]?.value;
+        gate();
+        if (!isPlainRecord(h) || !exactKeys(h, ["version", "operationId", "intentHash", "recoveryBinding", "envelopeHash", "materialHash", "transactionHash", "salt", "nonce", "ciphertext", "tag"]) || h.version !== "apn.circle-cleanup86-envelope.v1" || h.operationId !== op.operationId || h.intentHash !== intentHash || h.recoveryBinding !== recoveryBinding || h.envelopeHash !== binding.envelopeHash || h.materialHash !== metadata.materialHash || h.transactionHash !== metadata.transactionHash || !/^[a-f0-9]{64}$/u.test(metadata.materialHash) || !/^0x[a-f0-9]{64}$/u.test(metadata.transactionHash))
+            circleBlocked("cleanup86_material_metadata_changed");
+        const decode = (value, length) => {
+            if (typeof value !== "string" || value.length === 0)
+                circleBlocked("cleanup86_material_cipher_shape");
+            const bytes = Buffer.from(value, "base64");
+            if (bytes.toString("base64") !== value || length !== undefined && bytes.length !== length || bytes.length === 0) {
+                bytes.fill(0);
+                circleBlocked("cleanup86_material_cipher_shape");
+            }
+            return bytes;
+        };
+        const salt = decode(h.salt, 32), nonce = decode(h.nonce, 12), ciphertext = decode(h.ciphertext), tag = decode(h.tag, 16);
+        let wrapping = null, key = Buffer.alloc(0), plaintext = Buffer.alloc(0);
+        try {
+            await stable();
+            gate();
+            wrapping = await this.wrapping.load();
+            gate();
+            await stable();
+            if (wrapping === null || wrapping.length !== 32)
+                circleBlocked("cleanup86_wrapping_missing");
+            const { ciphertext: _ciphertext, tag: _tag, ...header } = h;
+            key = Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(canonicalJson(header)), 32));
+            gate();
+            try {
+                const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+                decipher.setAAD(Buffer.from(canonicalJson(header)));
+                decipher.setAuthTag(tag);
+                const partial = decipher.update(ciphertext);
+                try {
+                    plaintext = Buffer.concat([partial, decipher.final()]);
+                }
+                finally {
+                    partial.fill(0);
+                }
+            }
+            catch {
+                circleBlocked("cleanup86_material_authentication_failed");
+            }
+            gate();
+            await stable();
+            let value;
+            try {
+                const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
+                value = JSON.parse(text);
+                if (text !== canonicalJson(value))
+                    circleBlocked("cleanup86_material_plaintext_shape");
+            }
+            catch {
+                circleBlocked("cleanup86_material_plaintext_shape");
+            }
+            if (!isPlainRecord(value) || !exactKeys(value, ["version", "intentHash", "recoveryBinding", "envelopeHash", "rawTransaction", "transactionHash", "materialHash"]) || value.version !== "apn.circle-cleanup86-material.v1" || value.intentHash !== intentHash || value.recoveryBinding !== recoveryBinding || value.envelopeHash !== binding.envelopeHash || value.transactionHash !== metadata.transactionHash || value.materialHash !== metadata.materialHash || typeof value.rawTransaction !== "string")
+                circleBlocked("cleanup86_restored_material_binding");
+            const { materialHash, ...body } = value;
+            if (materialHash !== hashObject(body))
+                circleBlocked("cleanup86_restored_material_binding");
+            const material = value;
+            gate();
+            await assertCleanup86RestoredWire(material.rawTransaction, i.envelope, material.transactionHash);
+            gate();
+            await stable();
+            gate();
+            return material;
+        }
+        finally {
+            wrapping?.fill(0);
+            key.fill(0);
+            plaintext.fill(0);
+            salt.fill(0);
+            nonce.fill(0);
+            ciphertext.fill(0);
+            tag.fill(0);
         }
     }
     async encrypt(op, material, gate) {

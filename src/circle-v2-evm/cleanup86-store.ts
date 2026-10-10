@@ -8,6 +8,7 @@ import { circleBlocked, validateCircleEnvelope, type CircleEnvelope, type Circle
 import { type Cleanup85RecoveryIntent, assertCleanup85Parent } from "./cleanup85-recovery-store.js";
 import { Cleanup86SnapshotStore, type Cleanup86FileIdentity, type Cleanup86Snapshot } from "./cleanup86-snapshot.js";
 import { sanitizedCircleFailure } from "./public-failure-store.js";
+import { assertCleanup86FirstDispatchRecords } from "./cleanup86-first-dispatch-record.js";
 export interface Cleanup86Intent {
   readonly version: "apn.circle-cleanup86-intent.v1" | "apn.circle-cleanup86-intent.v2" | "apn.circle-cleanup86-intent.v3" | "apn.circle-cleanup86-intent.v4" | "apn.circle-cleanup86-intent.v5";
   readonly currentPurpose?: Cleanup86CurrentPurpose;
@@ -112,8 +113,10 @@ export class Cleanup86Store extends SecureStateStore {
       const previous = this.preparedDescriptor(s,op,i.unsignedPreparedPredecessor!.intentHash);
       if(hashObject(previous)!==hashObject(i.unsignedPreparedPredecessor)) circleBlocked("cleanup86_prepared_predecessor_changed");
     }
+    assertCleanup86FirstDispatchRecords(s,this.root,op,i);
     for (const [name, entry] of Object.entries(s.entries)) {
       let kind = name.slice(prefix.length);
+      if(kind.startsWith("first-dispatch-")) continue; // Complete separate journal authenticated above.
       if(i.version === "apn.circle-cleanup86-intent.v5") {
         if(["effect.json","history-0.json"].includes(kind)) continue;
         if(kind === "generation-2-intent.json") continue;

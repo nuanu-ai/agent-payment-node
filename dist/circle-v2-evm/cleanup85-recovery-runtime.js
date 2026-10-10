@@ -1,4 +1,5 @@
 import { resolveCleanup85NativeLineage, verifiedCleanup85NativeLineage } from "../circle-cleanup85-unsigned-retirement.js";
+import { firstDispatchCleanup86 } from "./cleanup86-first-dispatch-runtime.js";
 import { withCleanup85FinancialScope } from "../circle-cleanup85-financial-scope.js";
 import { Cleanup85UnsignedRetirementStore } from "../circle-cleanup85-unsigned-retirement-store.js";
 import { verifyCleanup86RecoveryContext, verifiedCleanup86RecoveryContext } from "./cleanup85-effective-context.js";
@@ -93,21 +94,22 @@ export class Cleanup85RecoveryRuntime {
         if (initial.op.state === "nonce_retired")
             return initial.op;
         const prior = await new Cleanup86Store(this.state.root).intent(initial.op, initial.recovery);
-        if (prior?.version === "apn.circle-cleanup86-intent.v5")
-            circleBlocked("cleanup86_existing_observe_only");
+        const firstDispatch = prior?.version === "apn.circle-cleanup86-intent.v5";
         if (prior?.version === "apn.circle-cleanup86-intent.v4")
             await new Cleanup86Store(this.state.root).unsignedPrepared(initial.op, initial.recovery);
         if (prior?.version === "apn.circle-cleanup86-intent.v3")
             await new Cleanup86Store(this.state.root).unsignedOrphan(initial.op, initial.recovery);
-        if (prior !== null && (await new Cleanup86Store(this.state.root).claimed(initial.op, prior, "sign") || await new Cleanup86Store(this.state.root).claimed(initial.op, prior, "send")))
+        if (!firstDispatch && prior !== null && (await new Cleanup86Store(this.state.root).claimed(initial.op, prior, "sign") || await new Cleanup86Store(this.state.root).claimed(initial.op, prior, "send")))
             circleBlocked("cleanup86_claimed_observe_only");
         const backend = this.backend(), status = await backend.cancellation.inspect(initial.request);
         if (status.phase !== "finalized" || status.proof === null || status.operationId !== status.proof.operationId || status.transactionHash !== status.proof.transactionHash)
             circleBlocked("cleanup85_cancellation_finalized_proof_required");
         return this.locked(id, status.proof, async (op, recovery, source, destination, scope) => {
             const store = new Cleanup86Store(this.state.root), existing = await store.intent(op, recovery);
-            if (existing?.version === "apn.circle-cleanup86-intent.v5")
-                circleBlocked("cleanup86_existing_observe_only");
+            if (existing?.version === "apn.circle-cleanup86-intent.v5") {
+                await firstDispatchCleanup86(this.state, op, recovery, existing, status.proof, source, destination, scope, this.now, this.tty, this.https, this.custody, backend.verifyCancellationAccounting, this.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS ?? "0");
+                return op;
+            }
             const prepared = existing?.version === "apn.circle-cleanup86-intent.v4" ? await store.unsignedPrepared(op, recovery) : undefined;
             const orphan = existing?.version === "apn.circle-cleanup86-intent.v3" ? await store.unsignedOrphan(op, recovery) : undefined;
             if (existing !== null && (await store.claimed(op, existing, "sign") || await store.claimed(op, existing, "send")))
