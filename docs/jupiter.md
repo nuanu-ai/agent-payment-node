@@ -302,3 +302,37 @@ The separate CLI-only historical authentication route accepts the same exact six
 Only operation `ea25d97d0da057bfab9a6b6ade2b5799d8b81333ab99c33c793a75c0a8bde5ee` may authenticate signed material while the exact retained claim file is absent. The private issuer additionally requires the original signed-marker raw file SHA256 `45d36d569a31a454125d328d5f4d3a434a30bb76216a536aa13420244181282e`. Present claims still require all existing strict checks, including signature, binding and authenticated raw payload correspondence. Missing claims for the other two IDs refuse. Directory and marker changes, including a claim appearing after consent or a signed-marker leaf replaced with identical bytes, refuse before private issuance or one-use consumption. The session retains the nofollow-read marker leaf UID, device, inode and immutable file facts; `signedMarkerSnapshotHash` exposes only their hash. No host inode is hardcoded.
 
 The absent projection reports `kind: "retained_send_claim_absent"`, `observation: "current_observation"`, `submissionHistory: "unknown"`, `transactionMayHaveBeenSubmitted: true`, and a hash of the current guarded absence snapshot. It establishes no past absence, transaction expiry, settlement, retirement, accounting release or financial permission. The operation retains its existing submission uncertainty. Generated encrypted TEST fixtures verify the lower reader's cryptographic path; they cannot prove genuine fixed-owner private authority or actual ea25 authentication.
+
+## Additive upgraded Esv and 4H registrations, 11 October 2026
+
+The unreleased 0.5.38 candidate separately registers the existing Esv and 4H
+WhirlpoolSwapV2 pools for the same `099da3…` JUP6 payload and complete
+ProgramData hash recorded above. Each has its own runtime.2 mechanism and
+registry. Both asset rows require the selected new mechanism; historical owner
+admissions cannot authorize it. All six preceding registrations and their
+mechanism/registry digests remain unchanged, including the default historical
+quote selection. No pool identity, enum-47 instruction, 25-account role, Memo
+requirement, Whirlpool/Token executable pin, CPI or decoder contract changes.
+
+This is registered support under the existing `runtime_bytes_only` contract.
+The historical Esv simulation and diagnostic mixed-slot 4H fixture do not prove
+either pool's behavior under upgraded JUP6. Each lane still requires a fresh
+normal quote, complete program and account reads, successful exact-message
+simulation with the unchanged strict CPI/account checks, exact active owner
+admission and genuine foreground approval before a single send. Paid acceptance
+requires its own finalized receipt within the frozen minima and expense caps.
+Any different ABI, account, CPI or callback behavior refuses and requires
+separate review; registration does not accommodate it. Quantum V2 remains
+dormant and `signable: false`; its paid criterion is not waived.
+
+Local synthetic generation vectors are not live simulation or paid proof.
+Version 0.5.38 is an unpublished candidate and still needs separate normal
+release and installed-consumer qualification.
+
+The candidate also closes a source-identified relationship check: for enum47,
+the named raw Whirlpool pool must equal the pool selected by the quote and
+registered mechanism. A rehashed 4H quote paired with Esv raw roles previously
+passed the initial material guard. That observation did not demonstrate a
+financial bypass; exact simulation and receipt authority checks were still
+required. The relationship now refuses in the shared quote/build binder before
+resolver reads or guard admission. Valid same-pool layouts remain unchanged.

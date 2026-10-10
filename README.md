@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-This source tree prepares an unreleased APN 0.5.37 candidate for Apple Silicon
+This source tree prepares an unreleased APN 0.5.38 candidate for Apple Silicon
 macOS. Published packages and the Homebrew Formula have separate provenance.
 A matching version number does not prove that an installed artifact contains
 these source changes: verify its release commit or artifact digest and installed
@@ -567,15 +567,20 @@ with the keyless pin from `inventory`; `approve` shows the exact screen,
 takes a typed code, and the profile's local TRON key signs and broadcasts
 once. See `docs/sunswap.md`.
 
-The same six-command surface is present for native SOL to USDC through
-Jupiter. Its inventory is offline and unadmitted, quotes require an
-explicitly injected read-only builder, and approval and execution refuse
-because the JUP6 instruction and account ABI has not been verified for
-signing. See `docs/jupiter.md`.
+The same six-command surface supports the finite Jupiter V1 native SOL to
+USDC lanes through the installed runtime and anonymous Solana RPC default
+below. It requires an owned local account and profile, funds, and an active
+owner policy admitting both assets and the exact mechanism; quotes verify the
+full runtime and account pins and simulate the exact unsigned message before
+genuine foreground approval can sign and send once. The dormant V2 Quantum
+prototype requires an explicitly injected read-only builder and remains
+`signable: false`, with approval and execution refused. Registered support and
+source tests do not establish each lane's finalized paid acceptance; see
+`docs/jupiter.md` for those proof boundaries.
 
 Normal Solana commands use the anonymous public mainnet RPC
 `https://api.mainnet-beta.solana.com` when `APN_SOLANA_RPC_URL` is unset or empty.
-No RPC account or API key is required. Set `APN_SOLANA_RPC_URL` only to choose
+No RPC account, signup or API key is required. Set `APN_SOLANA_RPC_URL` only to choose
 your own HTTPS endpoint; invalid nonempty values refuse instead of falling back.
 Public RPC can rate-limit or refuse requests and provides no APN availability
 guarantee. Jupiter material with a frozen RPC origin requires that exact endpoint
