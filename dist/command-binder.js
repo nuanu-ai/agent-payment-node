@@ -270,7 +270,7 @@ function bindParsedCatalog(parsed) {
                 expectedRevision: Number(value(options, "--expected-revision")),
             },
         };
-        case "wallet metamask native-transfer": return { request: { command: "wallet.metamask.native-transfer", chainId: Number(value(options, "--chain-id")), idempotencyKey: value(options, "--idempotency-key") } };
+        case "wallet metamask native-transfer": return { request: { command: "wallet.metamask.native-transfer", chainId: fixedMetaMaskNativeChain(value(options, "--chain")), idempotencyKey: value(options, "--idempotency-key") } };
         case "wallet metamask native-transfer-status": return { request: { command: "wallet.metamask.native-transfer-status", operationId: value(options, "--operation") } };
         case "wallet metamask native-transfer-observe": return { request: { command: "wallet.metamask.native-transfer-observe", operationId: value(options, "--operation") } };
         case "wallet status": return { request: { command: "wallet.status", profile: value(options, "--profile") } };
@@ -434,5 +434,16 @@ function nativeBatchMode(value) {
     if (value !== "batch")
         throw new ApnError("APN_INVALID_INPUT", "RPC read mode must be batch when supplied.");
     return true;
+}
+/** Public names map only to the five fixed owner chains; journals and quotes retain numeric IDs. */
+function fixedMetaMaskNativeChain(name) {
+    switch (name) {
+        case "ethereum": return 1;
+        case "optimism": return 10;
+        case "monad": return 143;
+        case "linea": return 59144;
+        case "sei": return 1329;
+        default: throw new ApnError("APN_INVALID_INPUT", "Only the fixed MetaMask native transfer chains are admitted.");
+    }
 }
 //# sourceMappingURL=command-binder.js.map

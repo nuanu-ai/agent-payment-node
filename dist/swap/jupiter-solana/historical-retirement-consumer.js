@@ -1,42 +1,29 @@
 import { constants } from "node:fs";
 import { lstat, open, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { canonicalJson, domainHash, hashObject, sha256 } from "../../canonical.js";
+import { canonicalJson, hashObject, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { AllowlistPolicyStore } from "../../allowlist-policy-store.js";
 import { activeAssetPolicyFromState } from "../../allowlist-active-policy.js";
 import { allowlistProfileHash } from "../../allowlist-policy-overlay.js";
-import { sumUsage, validateAssetUsageReservation } from "../../asset-usage-ledger-record.js";
+import { sumUsage } from "../../asset-usage-ledger-record.js";
 import { SecureStateStore, isCode } from "../../secure-state-store.js";
 import { StateStore } from "../../state.js";
 import { SolanaRpc, SolanaRpcBudget } from "../../solana/rpc.js";
 import { solanaHttpsFetch } from "../../solana/https.js";
 import { SolanaRpcPacer } from "../../solana/pacing.js";
-import { verifySignedJupiterV1Transaction, validateJupiterV1ExecutionBinding } from "./v1-effects.js";
-import { validateJupiterV1Material, validateJupiterV1PreparedMaterial } from "./v1-material.js";
+import { verifySignedJupiterV1Transaction } from "./v1-effects.js";
 import { assertHistoricalOrdinaryRecentBlockhash } from "./historical-wire.js";
 import { adaptJupiterFutureInvalidityReadPort, verifyJupiterCanonicalFutureInvalidity } from "./canonical-future-invalidity.js";
 import { HISTORICAL_JUPITER_IDS } from "./historical-pins.js";
-import { SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT } from "./catalog.js";
-import { HISTORICAL_RETIREMENT_IDENTITY, HISTORICAL_RETIREMENT_NAMESPACE, assertHistoricalRetirementBindings, hashBucket, historicalRetirementUsage, sealHistoricalRetirementRecord, validateHistoricalRetirementRecord } from "./historical-retirement-record.js";
+import { HISTORICAL_RETIREMENT_NAMESPACE, assertHistoricalRetirementBindings, hashBucket, historicalRetirementUsage, sealHistoricalRetirementRecord, validateHistoricalRetirementRecord } from "./historical-retirement-record.js";
 import { calculateHistoricalRetirementPolicy } from "./historical-retirement-policy.js";
 import { historicalRetirementRootSnapshot, JupiterHistoricalRetirementReader } from "./historical-retirement-reader.js";
 import { assertOwnedJupiterRetirementScope, claimOwnedJupiterRetirementScope } from "./historical-retirement-owner.js";
 import { SwapOperationRepository } from "../repository.js";
-import { validateSwapOperation } from "../model.js";
-const PROFILE = "solana-local";
-const JOURNAL_NAMESPACE = "jupiter-historical-retirement-journals";
-const RECEIPT_NAMESPACE = "jupiter-historical-retirement-receipts";
-const JOURNAL_SCHEMA = "apn.jupiter-historical-retirement-journal.v1";
-const RECEIPT_SCHEMA = "apn.jupiter-historical-retirement-receipt.v1";
+import { PROFILE, NATIVE_IDENTITY, USDC_IDENTITY, assertNoOrphanPostCommit, JOURNAL_NAMESPACE, RECEIPT_NAMESPACE, loadHistoricalUsageBucket, loadHistoricalUsageBuckets, lockKey, assertContext, canonicalWitness, journalFor, receiptFor, validateJournal, validateReceipt, publicResult, bucketRowsOriginal, lstatOptional, corrupt, refuse, scopeDeadline, loadRetirements, readRowsAndRetirements, retirementFileStatValid, projectionFileStatValid, fileStatFacts, decodeRetirementBytes } from "./historical-retirement-validation.js";
 const RPC_ORIGINS = Object.freeze(["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"]);
 const MAX_RPC_PHYSICAL_POSTS = 64;
-const NATIVE_IDENTITY = HISTORICAL_RETIREMENT_IDENTITY;
-const USDC_IDENTITY = Object.freeze({
-    account: HISTORICAL_RETIREMENT_IDENTITY.account,
-    chain: `solana:${SOLANA_MAINNET_GENESIS}`,
-    asset: Object.freeze({ kind: "token", identifier: SOLANA_USDC_MINT }),
-});
 /** Create-only, separately namespaced durability after the accounting record commits. */
 class HistoricalRetirementStore extends SecureStateStore {
     guard;
@@ -184,36 +171,15 @@ class HistoricalRetirementStore extends SecureStateStore {
         try {
             const before = await handle.stat({ bigint: true });
             const leaf = await lstat(path, { bigint: true });
-            const valid = (value) => value.isFile() && !value.isSymbolicLink() &&
-                value.uid === BigInt(process.geteuid?.() ?? -1) && (value.mode & 511n) === 384n &&
-                value.dev === parentDev && value.nlink === expectedLinks && value.size > 0n && value.size <= 1048576n;
-            const facts = (value) => canonicalJson({ dev: String(value.dev), ino: String(value.ino),
-                uid: String(value.uid), mode: String(value.mode), nlink: String(value.nlink), size: String(value.size),
-                mtimeNs: String(value.mtimeNs), ctimeNs: String(value.ctimeNs) });
-            if (!valid(before) || !valid(leaf) || facts(before) !== facts(leaf))
+            const valid = (value) => retirementFileStatValid(value, parentDev, expectedLinks);
+            if (!valid(before) || !valid(leaf) || fileStatFacts(before) !== fileStatFacts(leaf))
                 corrupt();
             const bytes = await handle.readFile();
             const after = await lstat(path, { bigint: true });
             await this.assertNoSymlinkAncestors(path);
-            if (!valid(after) || facts(before) !== facts(after) || bytes.byteLength !== Number(before.size))
+            if (!valid(after) || fileStatFacts(before) !== fileStatFacts(after) || bytes.byteLength !== Number(before.size))
                 corrupt();
-            let text;
-            try {
-                text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-            }
-            catch {
-                corrupt();
-            }
-            let parsed;
-            try {
-                parsed = JSON.parse(text);
-            }
-            catch {
-                corrupt();
-            }
-            const record = validateHistoricalRetirementRecord(parsed);
-            if (text !== `${canonicalJson(record)}\n`)
-                corrupt();
+            const record = decodeRetirementBytes(bytes);
             return { record, dev: before.dev, ino: before.ino, bytes };
         }
         finally {
@@ -278,17 +244,12 @@ class HistoricalRetirementStore extends SecureStateStore {
         const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         try {
             const before = await handle.stat({ bigint: true }), leaf = await lstat(path, { bigint: true });
-            const valid = (value) => value.isFile() && !value.isSymbolicLink() &&
-                value.uid === BigInt(process.geteuid?.() ?? -1) && (value.mode & 511n) === 384n &&
-                value.dev === parentDev && value.nlink === expectedLinks && value.size === BigInt(expectedBytes.byteLength);
-            const facts = (value) => canonicalJson({ dev: String(value.dev), ino: String(value.ino),
-                uid: String(value.uid), mode: String(value.mode), nlink: String(value.nlink), size: String(value.size),
-                mtimeNs: String(value.mtimeNs), ctimeNs: String(value.ctimeNs) });
-            if (!valid(before) || !valid(leaf) || facts(before) !== facts(leaf))
+            const valid = (value) => projectionFileStatValid(value, parentDev, expectedLinks, expectedBytes);
+            if (!valid(before) || !valid(leaf) || fileStatFacts(before) !== fileStatFacts(leaf))
                 corrupt();
             const bytes = await handle.readFile(), after = await lstat(path, { bigint: true });
             await this.assertNoSymlinkAncestors(path);
-            if (!valid(after) || facts(before) !== facts(after) || !bytes.equals(expectedBytes))
+            if (!valid(after) || fileStatFacts(before) !== fileStatFacts(after) || !bytes.equals(expectedBytes))
                 corrupt();
             return { dev: before.dev, ino: before.ino, bytes };
         }
@@ -309,77 +270,10 @@ class HistoricalRetirementStore extends SecureStateStore {
         }
     }
 }
-/** Read both daily buckets through SecureStateStore while their shared ledger locks are held. */
-class HistoricalUsageBucketReader extends SecureStateStore {
-    guard;
-    constructor(root, guard) {
-        super(root);
-        this.guard = guard;
-    }
-    async load(identity) {
-        const directory = `asset-usage/${hashBucket(identity)}`;
-        await this.guard.check(["asset-usage"]);
-        const entries = await this.readDirectory(directory);
-        await this.pinIfPresent(directory);
-        const rows = [];
-        for (const entry of entries) {
-            if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name))
-                corrupt();
-            const value = await this.readJson(`${directory}/${entry.name}`);
-            if (value === null)
-                corrupt();
-            const row = validateAssetUsageReservation(value);
-            if (`${row.reservationId}.json` !== entry.name || row.account !== identity.account || row.chain !== identity.chain ||
-                canonicalJson(row.asset) !== canonicalJson(identity.asset))
-                corrupt();
-            rows.push(row);
-        }
-        await this.guard.check(["asset-usage"]);
-        await this.pinIfPresent(directory);
-        return Object.freeze(rows);
-    }
-    async pinIfPresent(relativePath) {
-        try {
-            await lstat(resolve(this.root, relativePath));
-            await this.guard.check([relativePath]);
-        }
-        catch (error) {
-            if (!isCode(error, "ENOENT"))
-                throw error;
-        }
-    }
-}
-function lockKey(identity) {
-    return `asset-usage:${domainHash("apn.asset-usage-lock.v1", canonicalJson(identity))}`;
-}
-function scopeDeadline(context) {
-    const deadline = Date.parse(context.deadline);
-    if (!Number.isFinite(deadline) || new Date(deadline).toISOString() !== context.deadline || deadline <= Date.now())
-        refuse();
-    return deadline;
-}
 async function assertScope(token, context) {
     scopeDeadline(context);
     await assertOwnedJupiterRetirementScope(token, context);
     scopeDeadline(context);
-}
-function assertContext(context) {
-    const operation = validateSwapOperation(context.operation);
-    if (!HISTORICAL_JUPITER_IDS.some(id => id === operation.operationId) || operation.quote.profile !== PROFILE ||
-        operation.ownerProfileHash !== context.projection.ownerProfileHash || operation.integrityHash !== context.projection.operationIntegrityHash ||
-        context.projection.rootBinding !== hashObject({ root: context.state.root }) ||
-        operation.usageLease === null || context.projection.operationId !== operation.operationId ||
-        context.projection.authenticationExpiresAt !== context.deadline || context.binding.operationId !== operation.operationId ||
-        context.binding.markerHash !== operation.submissionMarker?.markerHash || context.effect.operationId !== operation.operationId ||
-        context.effect.transactionId !== context.projection.signature || context.effect.rawPayloadHash !== context.projection.rawPayloadHash ||
-        context.binding.messageHash !== context.projection.messageHash || context.binding.freshMaterialDigest !== context.fresh.materialDigest ||
-        context.material.execution.quoteRpcLifetime === undefined || context.material.execution.quoteRpcLifetime.blockhash !== context.projection.blockhash ||
-        context.fresh.lifetime.blockhash !== context.projection.freshBlockhash)
-        refuse();
-    validateJupiterV1PreparedMaterial(context.material);
-    validateJupiterV1Material(context.fresh);
-    validateJupiterV1ExecutionBinding(context.binding, operation, context.material);
-    assertHistoricalOrdinaryRecentBlockhash(context.effect.rawPayload, context.fresh.rawInstructions);
 }
 async function activePolicy(root, context, at) {
     const guard = context.state.directoryGuard(), profileHash = allowlistProfileHash(PROFILE);
@@ -392,34 +286,6 @@ async function activePolicy(root, context, at) {
         canonicalJson(policy) !== canonicalJson(context.activePolicy) || Date.parse(context.deadline) > Date.parse(policy.registry.expiresAt))
         refuse();
     return policy;
-}
-function canonicalWitness(value) {
-    if (value === null || typeof value !== "object" || value.outcome !== "future_invalidity_witness")
-        refuse();
-    return value;
-}
-function journalFor(record) {
-    const body = { schemaVersion: JOURNAL_SCHEMA, operationId: record.operationId, recordHash: record.recordHash,
-        accountingAt: record.accountingAt };
-    return Object.freeze({ ...body, journalHash: hashObject(body) });
-}
-function receiptFor(record) {
-    const body = { schemaVersion: RECEIPT_SCHEMA, operationId: record.operationId, profile: PROFILE,
-        status: "retired_unknown", retirementRecordHash: record.recordHash, accountingAt: record.accountingAt,
-        conservativeNativeAmount: "6000000", additionalAdmissionNativeAmount: "5000000",
-        effectAt: null, actualNativeFee: null, transactionOutcome: "unknown",
-        transactionMayHaveBeenSubmitted: true };
-    return Object.freeze({ ...body, receiptHash: hashObject(body) });
-}
-function validateJournal(value, expected) {
-    if (value === null || typeof value !== "object" || Array.isArray(value) || canonicalJson(value) !== canonicalJson(expected))
-        corrupt();
-    return expected;
-}
-function validateReceipt(value, expected) {
-    if (value === null || typeof value !== "object" || Array.isArray(value) || canonicalJson(value) !== canonicalJson(expected))
-        corrupt();
-    return expected;
 }
 async function createOrVerify(store, path, expected) {
     const existing = await store.read(path);
@@ -439,19 +305,6 @@ async function finishPostCommit(record, store, checkpoint = async () => { }) {
     await createOrVerify(store, `${RECEIPT_NAMESPACE}/${record.operationId}.json`, receiptFor(record));
     await checkpoint();
 }
-function publicResult(record, idempotentRecovered) {
-    return Object.freeze({ operationId: record.operationId, profile: PROFILE, status: "retired_unknown",
-        retirementRecordHash: record.recordHash, accountingAt: record.accountingAt,
-        conservativeNativeAmount: "6000000", additionalAdmissionNativeAmount: "5000000",
-        effectAt: null, actualNativeFee: null, transactionOutcome: "unknown", transactionMayHaveBeenSubmitted: true,
-        idempotentRecovered });
-}
-function bucketRowsOriginal(rows, reservationId, expected) {
-    const row = rows.find(value => value.reservationId === reservationId);
-    if (row === undefined || canonicalJson(row) !== canonicalJson(expected))
-        corrupt();
-    return row;
-}
 async function assertAccountingPublication(token, context, record) {
     await assertScope(token, context);
     if (record.operationId !== context.operation.operationId || record.authentication.rootBinding !== hashObject({ root: context.state.root }) ||
@@ -465,8 +318,8 @@ async function assertAccountingPublication(token, context, record) {
         activationDigest: currentPolicy.activationDigest, revision: currentPolicy.revision, activatedAt: currentPolicy.activatedAt }))
         refuse();
     const rootSnapshot = await historicalRetirementRootSnapshot(root);
-    const guard = context.state.directoryGuard(), buckets = new HistoricalUsageBucketReader(root, guard);
-    const native = await buckets.load(NATIVE_IDENTITY), usdc = await buckets.load(USDC_IDENTITY);
+    const guard = context.state.directoryGuard();
+    const { native, usdc } = await loadHistoricalUsageBuckets(root, guard);
     await guard.check([HISTORICAL_RETIREMENT_NAMESPACE]);
     const retirements = await new JupiterHistoricalRetirementReader(root)
         .forBucketDuringPublication(NATIVE_IDENTITY, native, record);
@@ -496,31 +349,6 @@ async function assertAccountingPublication(token, context, record) {
     scopeDeadline(context);
     if (record.accountingAt.slice(0, 10) !== new Date().toISOString().slice(0, 10))
         refuse();
-}
-async function lstatOptional(path) {
-    try {
-        return await lstat(path, { bigint: true });
-    }
-    catch (error) {
-        if (isCode(error, "ENOENT"))
-            return null;
-        throw error;
-    }
-}
-async function loadRetirements(root, rows) {
-    return await new JupiterHistoricalRetirementReader(root).forBucket(NATIVE_IDENTITY, rows);
-}
-async function assertNoOrphanPostCommit(store, operationId) {
-    const journal = await store.read(`${JOURNAL_NAMESPACE}/${operationId}.json`);
-    const receipt = await store.read(`${RECEIPT_NAMESPACE}/${operationId}.json`);
-    if (journal !== null || receipt !== null)
-        corrupt();
-}
-async function readRowsAndRetirements(root, context) {
-    const guard = context.state.directoryGuard(), buckets = new HistoricalUsageBucketReader(root, guard);
-    const native = await buckets.load(NATIVE_IDENTITY), usdc = await buckets.load(USDC_IDENTITY);
-    const retirements = await loadRetirements(root, native);
-    return { native, usdc, retirements };
 }
 async function canonicalProof(token, context) {
     await assertScope(token, context);
@@ -663,7 +491,7 @@ export async function recoverCommittedJupiterHistoricalRetirement(operationId, s
     const deadline = Date.now() + 5_000;
     return await state.withLocks([lockKey(NATIVE_IDENTITY)], async () => {
         await guard.check();
-        const buckets = new HistoricalUsageBucketReader(root, guard), rows = await buckets.load(NATIVE_IDENTITY);
+        const rows = await loadHistoricalUsageBucket(root, guard, NATIVE_IDENTITY);
         await store.recoverExactAccountingTemp(operationId, rows);
         const records = await loadRetirements(root, rows);
         const record = records.find(value => value.operationId === operationId);
@@ -685,11 +513,5 @@ export async function recoverCommittedJupiterHistoricalRetirement(operationId, s
         await guard.check();
         return publicResult(record, true);
     }, { waitMs: Math.max(0, Math.min(5_000, deadline - Date.now() - 1)) });
-}
-function corrupt() {
-    throw new ApnError("APN_STATE_CORRUPT", "Historical Jupiter retirement state is inconsistent or not create-only.");
-}
-function refuse() {
-    throw new ApnError("APN_OPERATION_BLOCKED", "The fixed Jupiter historical retirement could not be safely committed.");
 }
 //# sourceMappingURL=historical-retirement-consumer.js.map

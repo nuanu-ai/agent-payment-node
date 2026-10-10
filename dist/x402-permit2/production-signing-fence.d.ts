@@ -31,7 +31,7 @@ export declare class Permit2ProductionSigningFence {
     static withNativeScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
     static nativeScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
         record: import("./production-repository.js").Permit2ProductionRecord;
-        lease: import("../asset-usage-ledger.js").AssetUsageReservation;
+        lease: import("../asset-usage-ledger-types.js").AssetUsageReservation;
     }>;
     static checkNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
         readonly projection: Permit2SigningProjection;
@@ -43,7 +43,7 @@ export declare class Permit2ProductionSigningFence {
     static withNativeDispatchScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
     static nativeDispatchScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
         record: import("./production-repository.js").Permit2ProductionRecord;
-        lease: import("../asset-usage-ledger.js").AssetUsageReservation;
+        lease: import("../asset-usage-ledger-types.js").AssetUsageReservation;
     }>;
     check(operationId: string, mode: Permit2SigningMode): Promise<{
         readonly projection: Permit2SigningProjection;
