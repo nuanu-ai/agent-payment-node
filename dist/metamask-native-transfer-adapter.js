@@ -1,4 +1,5 @@
-import { nativeContextDeadline, nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { performance } from "node:perf_hooks";
+import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic } from "./metamask-process-runner.js";
@@ -115,7 +116,7 @@ const quantity = (value) => `0x${BigInt(value).toString(16)}`;
 /** Owner alone persists the one-effect handoff marker before this statically bound call. */
 export async function submitOwnedMetaMaskNative(scope, context) {
     claimMetaMaskNativeOwnedScope(scope, context);
-    const deadline = nativeContextDeadline(context);
+    const deadline = assertMetaMaskNativeOwnedScope(scope, context);
     nativeDeadlineRemaining(deadline);
     const quote = validateMetaMaskNativeFeeQuote(context.quote);
     chain(quote.chainId);
@@ -178,7 +179,7 @@ export async function submitOwnedMetaMaskNative(scope, context) {
         assertMetaMaskNativeOwnedScope(scope, context);
     }
     catch {
-        return { disposition: "unknown", reason: "provider_handoff_guard_expired_or_changed", diagnostic: validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, stage: "post_handoff", code: Date.now() >= Date.parse(deadline) ? "deadline" : "refused", exitCode: result.nativeDiagnostic?.exitCode ?? null, signal: result.nativeDiagnostic?.signal ?? null, durationMs: result.nativeDiagnostic?.durationMs ?? 0, remainingMs: Math.max(0, Math.min(60000, Date.parse(deadline) - Date.now())), stderrClass: result.nativeDiagnostic?.stderrClass ?? "none", providerCode: result.nativeDiagnostic?.providerCode ?? "none" }),
+        return { disposition: "unknown", reason: "provider_handoff_guard_expired_or_changed", diagnostic: validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, stage: "post_handoff", code: Date.now() >= Date.parse(deadline.utcExpiresAt) || performance.now() >= deadline.monotonicDeadlineMs ? "deadline" : "refused", exitCode: result.nativeDiagnostic?.exitCode ?? null, signal: result.nativeDiagnostic?.signal ?? null, durationMs: result.nativeDiagnostic?.durationMs ?? 0, remainingMs: Math.max(0, Math.min(60000, Math.floor(Math.min(Date.parse(deadline.utcExpiresAt) - Date.now(), deadline.monotonicDeadlineMs - performance.now())))), stderrClass: result.nativeDiagnostic?.stderrClass ?? "none", providerCode: result.nativeDiagnostic?.providerCode ?? "none" }),
             ...("transactionHash" in hint ? { transactionHash: hint.transactionHash } : {}),
             ...("requestId" in hint ? { requestId: hint.requestId } : {}) };
     }

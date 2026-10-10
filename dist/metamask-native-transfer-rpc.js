@@ -41,7 +41,7 @@ async function deadlineRead(chainId, deadline, read) {
     const budget = nativeDeadlineRemaining(deadline), controller = new AbortController();
     let timeout;
     try {
-        return await Promise.race([read(productionRpc(chainId, { totalDeadlineMs: performance.now() + budget, abortSignal: controller.signal })), new Promise((_, reject) => {
+        return await Promise.race([read(productionRpc(chainId, { totalDeadlineMs: typeof deadline === "string" ? performance.now() + budget : deadline.monotonicDeadlineMs, abortSignal: controller.signal })), new Promise((_, reject) => {
                 timeout = setTimeout(() => { controller.abort(); reject(new ApnError("APN_RPC_AMBIGUOUS", "Native transfer RPC deadline reached.")); }, budget);
             })]);
     }

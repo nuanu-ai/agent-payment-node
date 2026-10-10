@@ -11,8 +11,14 @@ export interface MetaMaskNativeDiagnostic {
     readonly providerCode: "none" | "policy" | "mfa" | "auth" | "funds" | "rate_limit" | "other";
 }
 export declare function validateMetaMaskNativeDiagnostic(value: unknown): MetaMaskNativeDiagnostic;
+/** A timing observation only; financial authority remains the owner's private WeakMap scope. */
+export interface MetaMaskNativeDeadline {
+    readonly utcExpiresAt: string;
+    readonly monotonicDeadlineMs: number;
+}
+export type MetaMaskNativeDeadlineInput = string | MetaMaskNativeDeadline;
 /** Read-only timing bound, never a consent or financial authority. */
-export declare function nativeDeadlineRemaining(deadline: string): number;
+export declare function nativeDeadlineRemaining(deadline: MetaMaskNativeDeadlineInput): number;
 export declare function nativeContextDeadline(context: {
     readonly consentExpiresAt: string;
     readonly quote: {

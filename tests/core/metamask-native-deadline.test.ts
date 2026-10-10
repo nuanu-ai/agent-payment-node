@@ -4,7 +4,7 @@ import {mkdtemp,writeFile,rm} from "node:fs/promises";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {NodeMetaMaskProcessRunner,takeMetaMaskNativeProcessFailureDiagnostic} from "../../src/metamask-process-runner.js";
-import {validateMetaMaskNativeDiagnostic} from "../../src/metamask-native-diagnostic.js";
+import {validateMetaMaskNativeDiagnostic,nativeDeadlineRemaining} from "../../src/metamask-native-diagnostic.js";
 
 test("absolute deadline prevents a late package resolver from launching even a read child",async()=>{
  let launches=0;
@@ -24,4 +24,9 @@ test("diagnostic is immutable finite metadata and refuses message/raw output/unk
  const good={stage:"sdk_send",code:"exit",exitCode:1,signal:null,durationMs:10,remainingMs:100,stderrClass:"json_error",providerCode:"policy"};
  assert.ok(Object.isFrozen(validateMetaMaskNativeDiagnostic(good)));
  for(const bad of [{...good,message:"secret"},{...good,stderr:"secret"},{...good,code:"arbitrary"},{...good,remainingMs:60001}])assert.throws(()=>validateMetaMaskNativeDiagnostic(bad));
+});
+
+test("shared original epoch refuses exhausted and nonfinite clocks without minting authority",()=>{
+ const utcExpiresAt=new Date(Date.now()+3000).toISOString();
+ for(const monotonicDeadlineMs of [0,NaN,Infinity,-Infinity])assert.throws(()=>nativeDeadlineRemaining(Object.freeze({utcExpiresAt,monotonicDeadlineMs})));
 });

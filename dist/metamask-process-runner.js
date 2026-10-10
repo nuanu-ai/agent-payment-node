@@ -107,8 +107,12 @@ export class NodeMetaMaskProcessRunner {
     async runJson(argv, timeoutMs = this.jsonTimeoutMs, absoluteDeadline) {
         if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 305_000)
             throw providerProtocol();
-        const started = performance.now(), monotonicEnd = absoluteDeadline === undefined ? undefined : started + nativeDeadlineRemaining(absoluteDeadline);
-        const remaining = () => absoluteDeadline === undefined ? 0 : Math.max(0, Math.min(60000, Math.floor(Math.min(Date.parse(absoluteDeadline) - Date.now(), monotonicEnd - performance.now()))));
+        const started = performance.now();
+        if (absoluteDeadline !== undefined)
+            nativeDeadlineRemaining(absoluteDeadline);
+        const utc = absoluteDeadline === undefined ? undefined : typeof absoluteDeadline === "string" ? absoluteDeadline : absoluteDeadline.utcExpiresAt;
+        const monotonicEnd = absoluteDeadline === undefined ? undefined : typeof absoluteDeadline === "string" ? started + nativeDeadlineRemaining(absoluteDeadline) : absoluteDeadline.monotonicDeadlineMs;
+        const remaining = () => absoluteDeadline === undefined ? 0 : Math.max(0, Math.min(60000, Math.floor(Math.min(Date.parse(utc) - Date.now(), monotonicEnd - performance.now()))));
         const diagnostic = (stage, code, exitCode = null, signal = null, stderrClass = "none", providerCode = "none") => validateMetaMaskNativeDiagnostic({ stage, code, exitCode, signal, durationMs: Math.min(86400000, Math.max(0, Math.floor(performance.now() - started))), remainingMs: remaining(), stderrClass, providerCode });
         const beforeLaunch = () => { if (absoluteDeadline !== undefined && remaining() < 1) {
             const error = providerUnavailable("Native SDK deadline reached before launch.");

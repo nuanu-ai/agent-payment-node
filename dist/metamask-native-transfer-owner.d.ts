@@ -1,4 +1,4 @@
-import { type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { type MetaMaskNativeDeadline, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { type AssetUsageReservation } from "./asset-usage-ledger.js";
 import { type MetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
 export declare const METAMASK_NATIVE_OWNER_PROFILE: "metamask-live-v042";
@@ -28,7 +28,7 @@ export interface MetaMaskNativeOwnedContext {
 }
 /** Claim is deliberately synchronous: no second SDK action can claim the same foreground consent. */
 export declare function claimMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): void;
-export declare function assertMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): void;
+export declare function assertMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): MetaMaskNativeDeadline;
 /** Static owner guard, never a caller supplied callback. Adapter must invoke this after every awaited seam. */
 export declare function assertMetaMaskNativeOwnedContextCurrent(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
 /** Read-only central conflict guard. No namespace creation, caller skip ID or financial proof DTO. */
