@@ -179,3 +179,34 @@ for (const chain of [143, 59144, 1329] as const) for (const bad of ["none", "ben
   const ports = internal.ports(op), mint = op.effects[2]!; if (bad === "none") { await ports.preflight(op, mint); assert.equal(attesterReads, 1); assert.equal(usedReads, 1); } else { await assert.rejects(ports.preflight(op, mint)); if (bad === "signer") assert.equal(attesterReads, 1); if (bad === "nonce" || bad === "expiry") assert.equal(usedReads, 1); }
   assert.deepEqual(await readdir(root), []); assert.equal(keys, 0); assert.equal(sends, 0);
 });
+
+// Exercise production CircleRpc HTTP serialization at both V2 source and legacy cleanup pre-SIGN boundaries.
+for (const kind of ["approval", "burn", "legacy-cleanup"] as const) for (const result of ["0x10000", null, "nothex", "missing", "0xffffffffff"] as const)
+test(`production estimate pending ${kind} HTTP result ${result} fails closed before custody`, async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "circle-estimate-pending-"))); t.after(() => rm(root, { recursive: true, force: true }));
+  const op = kind === "legacy-cleanup" ? initial(root, 143) : funding(root, 143);
+  const effect = kind === "legacy-cleanup" ? { ...op.effects[0]!, role: "cleanup" as const } : op.effects.find(e => e.role === kind)!;
+  let keys = 0; const requests: { method: string; params: unknown[] }[] = [];
+  const remote = new CircleRpc("https://estimate-test.example", 42161, { request: async (_url, method, body) => {
+    assert.equal(method, "POST"); const q = JSON.parse(body!); requests.push(q); let value: unknown;
+    if (q.method === "eth_chainId") value = "0xa4b1";
+    else if (q.method === "eth_getTransactionCount") value = `0x${BigInt(effect.envelope.nonceAtomic).toString(16)}`;
+    else if (q.method === "eth_getBalance") value = "0x100000000000000";
+    else if (q.method === "eth_estimateGas") { assert.equal(q.params.length, 2); assert.equal(q.params[1], "pending"); value = result; }
+    else if (q.method === "eth_call") {
+      const data = q.params[0].data as Hex;
+      if (data === effect.envelope.data) { assert.equal(q.params[1], "pending"); value = "0x"; }
+      else { const decoded = decodeFunctionData({ abi: CIRCLE_RPC_ABI, data }); value = encodeFunctionResult({ abi: CIRCLE_RPC_ABI, functionName: decoded.functionName as never, result: (decoded.functionName === "balanceOf" ? 1000000n : kind === "burn" ? 1000000n : 0n) as never }); }
+    } else throw Error(q.method);
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: q.id, ...(q.method === "eth_estimateGas" && result === "missing" ? {} : { result: value }) }) };
+  } });
+  const wrapping = { create: async () => { keys++; throw Error("NO_KEY"); }, load: async () => { keys++; throw Error("NO_KEY"); } };
+  const service = kind === "legacy-cleanup" ? new CircleEvmService(new StateStore(root), wrapping, {}, () => at) : new CircleFundingEvmService(new StateStore(root), wrapping, {}, () => at, {}, { request: async () => ({ status: 200, body: JSON.stringify([{ finalityThreshold: 1000, minimumFee: 1 }]) }) });
+  const internal = service as unknown as { remotes(chain: number): unknown; preflightDeployments(...args: unknown[]): Promise<unknown>; assertPriorSourcesCanonical(...args: unknown[]): Promise<void>; retirements: { intent(...args: unknown[]): Promise<null> }; ports(o: unknown): { preflight(o: unknown, e: unknown): Promise<void> } };
+  t.mock.method(internal, "remotes", () => ({ source: remote, destination: remote })); t.mock.method(internal, "preflightDeployments", async () => ({ digest: op.deploymentDigest }));
+  if (kind === "legacy-cleanup") { t.mock.method(internal, "assertPriorSourcesCanonical", async () => {}); t.mock.method(internal.retirements, "intent", async () => null); }
+  const action = internal.ports(op).preflight(op, effect);
+  if (result === "0x10000") await action; else await assert.rejects(action);
+  assert.equal(requests.filter(q => q.method === "eth_estimateGas").length, 1);
+  assert.equal(requests.some(q => q.method === "eth_sendRawTransaction"), false); assert.equal(keys, 0); assert.deepEqual(await readdir(root), []);
+});
