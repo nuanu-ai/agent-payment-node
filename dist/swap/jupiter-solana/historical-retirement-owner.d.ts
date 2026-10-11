@@ -1,3 +1,4 @@
+import type { HistoricalRetirementDiagnostic } from "./historical-retirement-diagnostic-types.js";
 import { type ActiveAssetPolicy } from "../../allowlist-active-policy.js";
 import type { RailSignedEffect } from "../../direct-rail-ports.js";
 import type { SwapOperationRecord } from "../model.js";
@@ -5,6 +6,8 @@ import { type JupiterV1ExecutionBinding } from "./v1-effects.js";
 import type { JupiterV1PreparedMaterial, JupiterV1ResolvedMaterial } from "./v1-material.js";
 import type { HistoricalJupiterProjection } from "./historical-projection-reader.js";
 import { HistoricalReadState } from "./historical-authentication-readers.js";
+/** Read-only lookup; fabricated errors and public details do not establish provenance. */
+export declare function historicalRetirementDiagnostic(error: unknown): HistoricalRetirementDiagnostic | undefined;
 declare const AUTHORITY: unique symbol;
 export interface OwnedJupiterHistoricalRetirementAuthority {
     readonly [AUTHORITY]: true;
@@ -40,6 +43,6 @@ export interface JupiterHistoricalRetirementPublicResult {
 export declare function claimOwnedJupiterRetirementScope(token: OwnedJupiterHistoricalRetirementAuthority, context: OwnedJupiterHistoricalRetirementContext): Promise<void>;
 /** C2 must call at every canonical-read, policy and commit seam while the original fixed locks remain held. */
 export declare function assertOwnedJupiterRetirementScope(token: OwnedJupiterHistoricalRetirementAuthority, context: OwnedJupiterHistoricalRetirementContext): Promise<void>;
-/** Production-owned entry: only a root and exact fixed operation can be selected; custody/consumer are hardcoded. */
+/** Diagnostic-only outer boundary; all original execution checks remain in the owned path. */
 export declare function executeJupiterHistoricalRetirement(operationId: string, root: string): Promise<JupiterHistoricalRetirementPublicResult>;
 export {};

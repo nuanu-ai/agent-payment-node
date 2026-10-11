@@ -1,3 +1,4 @@
+import { ApnError } from "../../errors.js";
 import { dirname } from "node:path";
 import { canonicalJson, hashObject } from "../../canonical.js";
 import { approvalCode } from "../../approval-code.js";
@@ -16,7 +17,12 @@ import { routeConfigForMaterial } from "./v1-route-config.js";
 import { HistoricalReadState, HistoricalDirectoryGuard, HistoricalBindingReader, HistoricalCustodyReader, HistoricalMaterialReader, historicalAuthenticationRefused as refuse } from "./historical-authentication-readers.js";
 import { HISTORICAL_JUPITER_IDS, HISTORICAL_JUPITER_PAYER, HISTORICAL_JUPITER_ACCOUNT_BINDING, HISTORICAL_JUPITER_OWNER_PROFILE } from "./historical-pins.js";
 import { historicalJupiterRetirementConsentLines } from "./historical-retirement-purpose.js";
-import { consumeJupiterHistoricalRetirement, recoverCommittedJupiterHistoricalRetirement } from "./historical-retirement-consumer.js";
+import { consumeJupiterHistoricalRetirement, recoverCommittedJupiterHistoricalRetirement, historicalRetirementConsumerDiagnostic } from "./historical-retirement-consumer.js";
+const diagnostics = new WeakMap();
+/** Read-only lookup; fabricated errors and public details do not establish provenance. */
+export function historicalRetirementDiagnostic(error) {
+    return typeof error === "object" && error !== null ? diagnostics.get(error) : undefined;
+}
 const PROFILE = "solana-local";
 const AUTHORITY = Symbol("OwnedJupiterHistoricalRetirementScope");
 const ownedScopes = new WeakMap();
@@ -101,7 +107,7 @@ function freezeSnapshot(value) {
     return value;
 }
 /** Production-owned entry: only a root and exact fixed operation can be selected; custody/consumer are hardcoded. */
-export async function executeJupiterHistoricalRetirement(operationId, root) {
+async function executeOwnedRetirement(operationId, root) {
     if (!HISTORICAL_JUPITER_IDS.some(id => id === operationId))
         refuse();
     const state = new HistoricalReadState(root), directoryGuard = state.directoryGuard();
@@ -204,11 +210,14 @@ export async function executeJupiterHistoricalRetirement(operationId, root) {
             activePolicy: activePolicy.digest, activation: activePolicy.activationDigest, accountedLamports: "6000000" })), deadline, {});
         live = true;
         let token;
+        let stage = "frame";
         try {
             await checkFrame();
+            stage = "custody_authentication";
             const effect = await custody.effect(owner, operationId, binding.bindingHash);
             if (effect === null)
                 refuse();
+            stage = "signed_material_verification";
             await checkFrame();
             await verifySignedJupiterV1Transaction(effect, binding);
             assertHistoricalOrdinaryRecentBlockhash(effect.rawPayload, material.execution.rawInstructions);
@@ -237,10 +246,17 @@ export async function executeJupiterHistoricalRetirement(operationId, root) {
                 activePolicy: freezeSnapshot(activePolicy), deadline });
             token = Object.freeze({});
             ownedScopes.set(token, { context, expires, check: checkFrame, phase: "issued" });
+            stage = "frame";
             const result = await consumeJupiterHistoricalRetirement(token, context);
             if (scope(token, context).phase !== "consuming")
                 refuse();
             return result;
+        }
+        catch (error) {
+            const diagnostic = historicalRetirementConsumerDiagnostic(error) ?? Object.freeze({ stage, reason: "stage_refused" });
+            if (typeof error === "object" && error !== null)
+                diagnostics.set(error, diagnostic);
+            throw error;
         }
         finally {
             if (token !== undefined)
@@ -248,5 +264,17 @@ export async function executeJupiterHistoricalRetirement(operationId, root) {
             live = false;
         }
     });
+}
+/** Diagnostic-only outer boundary; all original execution checks remain in the owned path. */
+export async function executeJupiterHistoricalRetirement(operationId, root) {
+    try {
+        return await executeOwnedRetirement(operationId, root);
+    }
+    catch (error) {
+        const diagnostic = historicalRetirementDiagnostic(error) ?? Object.freeze({ stage: "frame", reason: "stage_refused" });
+        const failure = new ApnError("APN_OPERATION_BLOCKED", "Historical Jupiter conservative retirement is unavailable.");
+        diagnostics.set(failure, diagnostic);
+        throw failure;
+    }
 }
 //# sourceMappingURL=historical-retirement-owner.js.map

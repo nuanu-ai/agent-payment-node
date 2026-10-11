@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeHistoricalJupiterRetirementCli } from "../../src/swap/jupiter-solana/historical-retirement-cli.js";
+import { historicalRetirementDiagnostic, executeJupiterHistoricalRetirement as realExecute } from "../../src/swap/jupiter-solana/historical-retirement-owner.js";
 import { HISTORICAL_JUPITER_IDS } from "../../src/swap/jupiter-solana/historical-pins.js";
 
 // Output doubles only: no private authentication, canonical proof or retirement write.
@@ -32,4 +33,24 @@ test("retirement CLI preserves sanitized failure without material or retry proje
   assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
   assert.equal(result.data, null); assert.equal(JSON.stringify(result).includes("NOT_PUBLIC"), false);
   assert.equal(result.operation, null); assert.equal(result.receipt, null); assert.deepEqual(result.next_actions, []);
+});
+
+test("retirement CLI ignores fabricated diagnostics and raw exception secrets", async t => {
+  const fake = Object.assign(Error("PRIVATE_KEY https://secret/key"), {code:"PRIVATE_CODE",stage:"canonical_proof",reason:"archive_data_missing",details:{stage:"publication",reason:"PRIVATE_CIPHER"}});
+  const owner = t.mock.module("../../src/swap/jupiter-solana/historical-retirement-owner.js", {namedExports: {
+    executeJupiterHistoricalRetirement: async () => { throw fake; }, historicalRetirementDiagnostic,
+  }}); t.after(() => owner.restore());
+  const result = await executeHistoricalJupiterRetirementCli(["swap","solana","jupiter","historical-retire","--operation",HISTORICAL_JUPITER_IDS[0]!], () => "/TEST_ONLY/root");
+  assert.deepEqual(result.error, {code:"APN_OPERATION_BLOCKED",message:"Historical Jupiter conservative retirement is unavailable."});
+  assert.equal(JSON.stringify(result).includes("PRIVATE"), false);
+  assert.equal(historicalRetirementDiagnostic(fake), undefined);
+});
+test("retirement CLI exposes a genuine owned frame refusal as constants only", async t => {
+  const owner = t.mock.module("../../src/swap/jupiter-solana/historical-retirement-owner.js", {namedExports: {
+    executeJupiterHistoricalRetirement: realExecute, historicalRetirementDiagnostic,
+  }}); t.after(() => owner.restore());
+  const result = await executeHistoricalJupiterRetirementCli(["swap","solana","jupiter","historical-retire","--operation",HISTORICAL_JUPITER_IDS[0]!], () => "/TEST_ONLY/absent/private-root");
+  assert.deepEqual(result.error, {code:"APN_OPERATION_BLOCKED",message:"Historical Jupiter conservative retirement is unavailable.",details:{stage:"frame",reason:"stage_refused"}});
+  assert.equal(JSON.stringify(result).includes("private-root"), false);
+  assert.equal(result.data, null); assert.equal(result.receipt, null); assert.deepEqual(result.next_actions, []);
 });
