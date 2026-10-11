@@ -1,3 +1,4 @@
+import { type CircleFundingBindingV2 } from "./funding-binding.js";
 /** Finite CCTP V2 Fast codecs. Pure caller-supplied chain observations are not RPC authenticity proof.
  * Wire layouts/signatures: circlefin/evm-cctp-contracts commit 6e7513cdb2bee6bb0cddf331fe972600fc5017c9. */
 import { type Address, type Hex } from "viem";
@@ -181,8 +182,15 @@ export declare function circleRecord(value: unknown): Record<string, unknown>;
 export declare function circleHex(value: unknown, bytes?: number): Hex;
 export declare function circleUint(value: unknown): bigint;
 export declare const circleWord: (address: string) => Hex;
-export declare function encodeCircleApproval(reset?: boolean): Hex;
-export declare function encodeCircleBurn(chain: CircleDestinationChain): Hex;
+/** A v2 binding is checked in full; no binding retains the exact legacy economic tuple. */
+export declare function circleEconomics(chain: CircleDestinationChain, binding?: CircleFundingBindingV2): {
+    amount: bigint;
+    maxFee: bigint;
+    minMint: bigint;
+    recipient: `0x${string}`;
+};
+export declare function encodeCircleApproval(reset?: boolean, binding?: CircleFundingBindingV2): Hex;
+export declare function encodeCircleBurn(chain: CircleDestinationChain, binding?: CircleFundingBindingV2): Hex;
 export interface CircleMessage {
     readonly bytes: Hex;
     readonly hash: Hex;
@@ -194,7 +202,7 @@ export interface CircleMessage {
     readonly feeExecutedAtomic: string;
     readonly receivedAtomic: string;
 }
-export declare function decodeCircleMessage(value: unknown, chain: CircleDestinationChain, attested: boolean): CircleMessage;
+export declare function decodeCircleMessage(value: unknown, chain: CircleDestinationChain, attested: boolean, binding?: CircleFundingBindingV2): CircleMessage;
 /** The caller must read chain ID, receipt, canonical included block and finality head independently and recheck the included block. */
 export interface CircleObservation {
     readonly transaction: unknown;
@@ -237,8 +245,8 @@ export interface CircleSourceProof extends CircleReceiptProof {
     readonly sourceMessageHash: Hex;
     readonly integrityHash: string;
 }
-export declare function decodeCircleSource(input: CircleObservation, chain: CircleDestinationChain): CircleSourceProof;
-export declare function assertCircleSource(source: CircleSourceProof): void;
+export declare function decodeCircleSource(input: CircleObservation, chain: CircleDestinationChain, binding?: CircleFundingBindingV2): CircleSourceProof;
+export declare function assertCircleSource(source: CircleSourceProof, binding?: CircleFundingBindingV2): void;
 export interface CircleAttesterSnapshot {
     readonly threshold: number;
     readonly enabledAttesters: readonly Address[];
@@ -261,11 +269,11 @@ export interface CircleAttestation extends CircleMessage {
 }
 /** Config digest deliberately excludes observation block and block-bearing deployment digest. Deployment pins are checked separately. */
 export declare function circleAttesterConfigurationHash(snapshot: CircleAttesterSnapshot): string;
-export declare function verifyCircleAttestationSigners(message: CircleMessage, attestation: Hex, snapshot: CircleAttesterSnapshot): Promise<readonly Address[]>;
-export declare function bindCircleAttestation(source: CircleSourceProof, response: unknown, snapshot: CircleAttesterSnapshot): Promise<CircleAttestation>;
-export declare function assertCircleAttestation(source: CircleSourceProof, attested: CircleAttestation): void;
+export declare function verifyCircleAttestationSigners(message: CircleMessage, attestation: Hex, snapshot: CircleAttesterSnapshot, binding?: CircleFundingBindingV2): Promise<readonly Address[]>;
+export declare function bindCircleAttestation(source: CircleSourceProof, response: unknown, snapshot: CircleAttesterSnapshot, binding?: CircleFundingBindingV2): Promise<CircleAttestation>;
+export declare function assertCircleAttestation(source: CircleSourceProof, attested: CircleAttestation, binding?: CircleFundingBindingV2): void;
 export declare function encodeCircleMint(attested: CircleAttestation): Hex;
-export declare function decodeCircleDestination(source: CircleSourceProof, attested: CircleAttestation, input: CircleObservation, usedNonceAtomic: string, destinationProfile?: string, feeRecipient?: Address): {
+export declare function decodeCircleDestination(source: CircleSourceProof, attested: CircleAttestation, input: CircleObservation, usedNonceAtomic: string, destinationProfile?: string, feeRecipient?: Address, binding?: CircleFundingBindingV2): {
     sourceTransactionHash: `0x${string}`;
     attestedMessageHash: `0x${string}`;
     nonce: `0x${string}`;
@@ -285,4 +293,4 @@ export declare function decodeCircleDestination(source: CircleSourceProof, attes
     actualFeeAtomic: string;
     kind: "circle_v2_evm_destination";
 };
-export declare function verifyCircleApproval(input: CircleObservation, reset: boolean, allowanceAtReceiptAtomic: string): CircleReceiptProof;
+export declare function verifyCircleApproval(input: CircleObservation, reset: boolean, allowanceAtReceiptAtomic: string, binding?: CircleFundingBindingV2): CircleReceiptProof;

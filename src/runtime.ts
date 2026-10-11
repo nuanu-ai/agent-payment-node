@@ -1,3 +1,4 @@
+import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
 import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
@@ -92,6 +93,7 @@ export interface CoreDependencies {
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
   readonly circleEvm?: CircleEvmService;
+  readonly circleFundingEvm?: CircleFundingEvmService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
@@ -167,6 +169,7 @@ export class RuntimeContext {
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
   readonly circleEvm?: CircleEvmService;
+  readonly circleFundingEvm?: CircleFundingEvmService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
@@ -243,6 +246,7 @@ export class RuntimeContext {
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;
     if (dependencies.circleEvm !== undefined) this.circleEvm = dependencies.circleEvm;
+    if (dependencies.circleFundingEvm !== undefined) this.circleFundingEvm = dependencies.circleFundingEvm;
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
     if (dependencies.uniswapRuntime !== undefined) this.uniswapRuntime = dependencies.uniswapRuntime;

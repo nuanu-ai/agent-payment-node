@@ -1,3 +1,4 @@
+import { publicKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import { assertMetaMaskNativeConflictDomainAvailable, assertMetaMaskNativeOwnedConflictDomainAvailable, assertMetaMaskNativeOwnedScope } from "./metamask-native-transfer-owner.js";
 import { listLocalWallets, listEncryptedWalletEnvelopes } from "./wallet-import-collision.js";
 import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
@@ -231,7 +232,7 @@ export class OperationService {
                 // Only another CCTP operation may queue a source nonce after canonical inclusion. Other rails remain conservative.
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             }
-            if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
+            if (operation.kind === "circle_route" && operation.record.schemaVersion === "apn.circle-v2-evm-operation.v1" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash)
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
@@ -279,7 +280,7 @@ export class OperationService {
         if (this.state.root === undefined)
             return [];
         const repo = new CircleRepository(this.state.root);
-        return profileHash === undefined ? repo.listAllOperations() : repo.listOperations(profileHash);
+        return profileHash === undefined ? repo.listAllAny() : repo.listAny(profileHash);
     }
     /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
     async assertCleanup85PreparationAccountsAvailable(record, now) {
@@ -292,7 +293,7 @@ export class OperationService {
     /** Both Circle signing accounts are held under their existing profile locks. */
     async assertCircleAccountsAvailable(record, exceptSaved = false, effectRole) {
         if (exceptSaved) {
-            const saved = await new CircleRepository(this.state.root).load(record.operationId);
+            const saved = await new CircleRepository(this.state.root).loadAny(record.operationId);
             if (saved === null || saved.integrityHash !== record.integrityHash)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Circle exclusion requires the exact durable journal.");
         }
@@ -302,7 +303,7 @@ export class OperationService {
             record.effects.filter(e => e.role !== "mint").every(e => e.phase === "confirmed");
         // Finalized source settlement is read-only during mint. Its signer remains occupied for all other financial roles.
         if (settledSourceMint)
-            assertCircleAttestation(record.source, record.attestation);
+            assertCircleAttestation(record.source, record.attestation, record.schemaVersion === "apn.circle-v2-evm-operation.v2" ? record.funding : undefined);
         else
             await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], except, true);
         await this.assertConflictDomainsAvailable(record.destinationProfileHash, () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], except);
@@ -395,7 +396,7 @@ export class OperationService {
         if (operation.kind === "sei_gaszip")
             return publicSeiFunding(operation.record);
         if (operation.kind === "circle_route")
-            return publicCircle(operation.record);
+            return publicKnownCircle(operation.record);
         if (operation.kind === "mega_gaszip")
             return publicMegaFunding(operation.record);
         if (operation.kind === "merchant_x402")

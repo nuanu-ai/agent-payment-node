@@ -1,3 +1,5 @@
+import { validateCircleFundingBinding } from "./funding-binding.js";
+import type { CircleKnownOperation } from "./funding-operation.js";
 import { assertHeldCleanup85Scope, type HeldCleanup85Scope } from "../circle-cleanup85-financial-scope.js";
 import type { Cleanup85CancellationRequest } from "../circle-cleanup85-cancellation-contract.js";
 import { consumeHistoricalPaidClosure, type VerifiedHistoricalPaidClosure } from "./historical-paid-closure.js";
@@ -18,10 +20,12 @@ import type { StateStore } from "../state.js";
 import { CIRCLE_SOURCE_TOKEN, circleRoute, type CircleDestinationChain } from "./catalog.js";
 import { circleBlocked, circleCorrupt, type CircleOperationV1, type CirclePolicy } from "./operation-model.js";
 export const circleMechanism = (chain: CircleDestinationChain) => ({ provider: "circle-cctp-v2", reference: `circle-v2-evm-fast-42161-${chain}.v1` });
+const ordinaryMechanism = (op: CircleKnownOperation) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).mechanism : circleMechanism(op.destinationChain);
+const ordinaryNamespace = (op: CircleKnownOperation) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? "circle-v2-evm.v2" : "circle-v2-evm.v1";
 interface Lease { readonly key: string; readonly profile: string; readonly identity: AssetUsageIdentity; readonly amount: string; }
-function leases(op: CircleOperationV1): readonly Lease[] {
+function leases(op: CircleKnownOperation): readonly Lease[] {
   const source = op.sourceCustody.walletAddress, destination = op.destinationCustody.walletAddress;
-  return [{ key: "usdc", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "token", identifier: CIRCLE_SOURCE_TOKEN } }, amount: "40100" },
+  return [{ key: "usdc", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "token", identifier: CIRCLE_SOURCE_TOKEN } }, amount: op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).amountAtomic : "40100" },
     { key: "approval-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
     { key: "burn-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
     { key: "cleanup-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "15000000000000" },
@@ -56,13 +60,13 @@ export class CircleUsage {
     const active = activeAssetPolicyFromState(stored, new Date(this.now()));
     if (active === null || active.accounts.evm !== account) circleBlocked("active_owner_asset_policy_required"); return active;
   }
-  async policies(op: CircleOperationV1): Promise<readonly CirclePolicy[]> {
+  async policies(op: CircleKnownOperation): Promise<readonly CirclePolicy[]> {
     const result: CirclePolicy[] = [];
     for (const lease of leases(op)) {
       const active = await this.active(lease.profile, lease.identity.account), at = new Date(this.now()), current = await this.ledger.usageReadOnly(lease.identity, at);
-      const admission = evaluateAssetPolicy(active.registry, { chain: lease.identity.chain, asset: lease.identity.asset, rail: "bridge", mechanism: circleMechanism(op.destinationChain), amountAtomic: lease.amount,
+      const admission = evaluateAssetPolicy(active.registry, { chain: lease.identity.chain, asset: lease.identity.asset, rail: "bridge", mechanism: ordinaryMechanism(op), amountAtomic: lease.amount,
         dailyUsageAtomic: current.amountAtomic, asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
-      if (!bridgeMechanismAdmitted(admission, circleMechanism(op.destinationChain))) circleBlocked("exact_circle_mechanism_admission_required");
+      if (!bridgeMechanismAdmitted(admission, ordinaryMechanism(op))) circleBlocked("exact_circle_mechanism_admission_required");
       const policy = { profile: lease.profile, profileHash: this.state.profileHash(lease.profile), policyDigest: active.digest, revision: active.revision, activationDigest: active.activationDigest };
       if (!result.some(row => row.profileHash === policy.profileHash)) result.push(policy);
     }
@@ -79,7 +83,7 @@ export class CircleUsage {
     return result;
   }
   /** Readonly authority window from both exact owner activations while their locks remain held. */
-  async authorizationDeadline(op: CircleOperationV1, policies = op.policies): Promise<string | null> {
+  async authorizationDeadline(op: CircleKnownOperation, policies = op.policies): Promise<string | null> {
     let end = Infinity;
     for (const profile of new Set([op.profile, op.destinationProfile])) {
       const frozen = policies.find(p => p.profile === profile), account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
@@ -91,7 +95,7 @@ export class CircleUsage {
     if (this.now() >= end) circleBlocked("owner_policy_window_expired");
     return end === Infinity ? null : new Date(end).toISOString();
   }
-  async confirm(op: CircleOperationV1, policies = op.policies): Promise<void> {
+  async confirm(op: CircleKnownOperation, policies = op.policies): Promise<void> {
     for (const policy of policies) {
       const account = policy.profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
       const active = await this.active(policy.profile, account);
@@ -105,18 +109,18 @@ export class CircleUsage {
       const lease = leases(op)[index]!, active = await this.active(lease.profile, lease.identity.account), at = new Date(this.now());
       const current = await this.ledger.usageReadOnly(lease.identity, at), other = BigInt(current.amountAtomic) - BigInt(saved.amountAtomic);
       if (other < 0n) circleCorrupt("usage_total_below_hold");
-      const admission = evaluateAssetPolicy(active.registry, { chain: lease.identity.chain, asset: lease.identity.asset, rail: "bridge", mechanism: circleMechanism(op.destinationChain),
+      const admission = evaluateAssetPolicy(active.registry, { chain: lease.identity.chain, asset: lease.identity.asset, rail: "bridge", mechanism: ordinaryMechanism(op),
         amountAtomic: lease.amount, dailyUsageAtomic: other.toString(), asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
-      if (!bridgeMechanismAdmitted(admission, circleMechanism(op.destinationChain))) circleBlocked("exact_circle_mechanism_admission_required");
+      if (!bridgeMechanismAdmitted(admission, ordinaryMechanism(op))) circleBlocked("exact_circle_mechanism_admission_required");
     }
   }
-  async reserve(op: CircleOperationV1): Promise<readonly AssetUsageReservation[]> {
+  async reserve(op: CircleKnownOperation): Promise<readonly AssetUsageReservation[]> {
     const result: AssetUsageReservation[] = [];
     for (const lease of leases(op)) {
       const active = await this.active(lease.profile, lease.identity.account), frozen = op.policies.find(p => p.profile === lease.profile);
       if (frozen === undefined || frozen.activationDigest === undefined || active.activationDigest !== frozen.activationDigest || active.digest !== frozen.policyDigest || active.revision !== frozen.revision) circleBlocked("reserve_policy_changed");
-      const reservation = await this.ledger.reserve({ ...lease.identity, registry: active.registry, rail: "bridge", mechanism: circleMechanism(op.destinationChain), amountAtomic: lease.amount,
-        idempotencyKey: `circle-v2-evm.v1:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
+      const reservation = await this.ledger.reserve({ ...lease.identity, registry: active.registry, rail: "bridge", mechanism: ordinaryMechanism(op), amountAtomic: lease.amount,
+        idempotencyKey: `${ordinaryNamespace(op)}:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
       if (reservation.state !== "reserved") circleBlocked("reserve_replay_already_exposed"); result.push(reservation);
     }
     return result;
@@ -170,12 +174,12 @@ export class CircleUsage {
     }
     return result;
   }
-  async follow(op: CircleOperationV1, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<readonly AssetUsageReservation[]> {
+  async follow(op: CircleKnownOperation, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<readonly AssetUsageReservation[]> {
     let rows = op.usage;
     if (target === "failed_before_effect" && rows.length === 0) {
       const existing: AssetUsageReservation[] = [];
       for (const lease of leases(op)) {
-        const saved = await this.ledger.load(lease.identity, assetUsageReservationId(lease.identity, `circle-v2-evm.v1:${op.operationId}:${lease.key}`));
+        const saved = await this.ledger.load(lease.identity, assetUsageReservationId(lease.identity, `${ordinaryNamespace(op)}:${op.operationId}:${lease.key}`));
         if (saved === null) break;
         const policy = op.policies.find(p => p.profile === lease.profile);
         if (saved.policyDigest !== policy?.policyDigest || saved.amountAtomic !== lease.amount || !["reserved", "failed_before_effect"].includes(saved.state)) circleBlocked("unsubmitted_reserve_exposed_or_drifted");

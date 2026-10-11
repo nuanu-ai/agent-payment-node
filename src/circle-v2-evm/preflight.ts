@@ -1,3 +1,4 @@
+import type { CircleFundingBindingV2 } from "./funding-binding.js";
 /** Pure finite preflight admission. Runtime must obtain all inputs from bounded canonical RPC/API reads under account locks. */
 import { encodePacked, keccak256, type Address, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
@@ -97,16 +98,16 @@ export function verifyCircleGasEnvelope(envelope: CircleGasEnvelope, chain: 4216
 export function verifyCircleMintPreflight(source: CircleSourceProof, attested: CircleAttestation, input: {
   readonly destinationBlockAtomic: string; readonly usedNonceAtomic: string; readonly attesterConfigurationHash: string;
   readonly transactionSimulationResult: Hex; readonly previousNonce?: Hex;
-}): void {
-  assertCircleAttestation(source, attested);
+}, binding?: CircleFundingBindingV2): void {
+  assertCircleAttestation(source, attested, binding);
   if (input.attesterConfigurationHash !== attested.attesterConfigurationHash || circleUint(input.usedNonceAtomic) !== 0n ||
     input.previousNonce !== undefined && input.previousNonce !== attested.nonce ||
     BigInt(attested.expirationBlock) !== 0n && BigInt(attested.expirationBlock) <= circleUint(input.destinationBlockAtomic)) circleFail("mint_nonce_expired_or_attesters_changed");
   if (circleHex(input.transactionSimulationResult, 32) !== `0x${"0".repeat(63)}1`) circleFail("mint_simulation");
 }
 /** Finalization is independent of the issuer's fast attestation threshold. */
-export function verifyCircleClosureFinality(source: CircleSourceProof, finalizedSource: CircleSourceProof): void {
-  assertCircleSource(source); assertCircleSource(finalizedSource);
+export function verifyCircleClosureFinality(source: CircleSourceProof, finalizedSource: CircleSourceProof, binding?: CircleFundingBindingV2): void {
+  assertCircleSource(source, binding); assertCircleSource(finalizedSource, binding);
   if (source.finalityTag !== "included" && source.finalityTag !== "finalized" || finalizedSource.finalityTag !== "finalized" ||
     source.transactionHash !== finalizedSource.transactionHash || source.sourceMessageHash !== finalizedSource.sourceMessageHash ||
     source.blockHash !== finalizedSource.blockHash || source.blockNumberAtomic !== finalizedSource.blockNumberAtomic ||

@@ -2,7 +2,7 @@
  * All inputs remain public observations; the caller must authenticate the historical feeRecipient getter. */
 import { decodeEventLog, encodeAbiParameters, encodeEventTopics, getAddress, parseAbi, toEventSelector } from "viem";
 import { CIRCLE_AMOUNT, CIRCLE_MESSENGER, CIRCLE_RECIPIENT, circleRoute } from "./catalog.js";
-import { circleFail, circleHex, circleRecord, circleUint } from "./protocol.js";
+import { circleEconomics, circleFail, circleHex, circleRecord, circleUint } from "./protocol.js";
 const ABI = parseAbi([
     "event MintAndWithdraw(address indexed mintRecipient,uint256 amount,address indexed mintToken,uint256 feeCollected)",
     "event Transfer(address indexed from,address indexed to,uint256 value)",
@@ -19,9 +19,10 @@ function decode(log, name) {
         circleFail("noncanonical_mint_event");
     return { args, index: circleUint(log.logIndex) };
 }
-export function decodeCircleMintEvents(attested, observation, feeRecipient) {
+export function decodeCircleMintEvents(attested, observation, feeRecipient, binding) {
+    const e = circleEconomics(attested.destinationChain, binding);
     const token = circleRoute(attested.destinationChain).token, fee = BigInt(attested.feeExecutedAtomic), net = BigInt(attested.receivedAtomic);
-    if (fee + net !== CIRCLE_AMOUNT)
+    if (fee + net !== e.amount)
         circleFail("mint_conservation");
     const logs = circleRecord(observation.receipt).logs.map(circleRecord);
     const mintSelector = toEventSelector(ABI[0]), transferSelector = toEventSelector(ABI[1]);
@@ -29,7 +30,7 @@ export function decodeCircleMintEvents(attested, observation, feeRecipient) {
     if (mints.length !== 1 || getAddress(String(mints[0].address)) !== CIRCLE_MESSENGER || circleHex(mints[0].topics[0], 32) !== mintSelector)
         circleFail("mint_event_count_or_version");
     const mint = decode(mints[0], "MintAndWithdraw");
-    if (mint.args.mintRecipient !== CIRCLE_RECIPIENT || mint.args.mintToken !== token || mint.args.amount !== net || mint.args.feeCollected !== fee)
+    if (mint.args.mintRecipient !== e.recipient || mint.args.mintToken !== token || mint.args.amount !== net || mint.args.feeCollected !== fee)
         circleFail("mint_event_binding");
     const transfers = logs.filter(l => Array.isArray(l.topics) && circleHex(l.topics[0], 32) === transferSelector);
     if (transfers.length !== (fee === 0n ? 1 : 2))
@@ -40,7 +41,7 @@ export function decodeCircleMintEvents(attested, observation, feeRecipient) {
         return decode(l, "Transfer");
     }).sort((a, b) => a.index < b.index ? -1 : 1);
     const principal = decoded[0];
-    if (principal.args.from !== ZERO || principal.args.to !== CIRCLE_RECIPIENT || principal.args.value !== net || principal.index >= mint.index)
+    if (principal.args.from !== ZERO || principal.args.to !== e.recipient || principal.args.value !== net || principal.index >= mint.index)
         circleFail("mint_transfer_binding");
     if (fee > 0n) {
         if (feeRecipient === undefined || getAddress(feeRecipient) === ZERO)

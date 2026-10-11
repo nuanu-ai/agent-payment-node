@@ -84,8 +84,8 @@ export function verifyCircleGasEnvelope(envelope, chain, previousSourceFeeAtomic
     return (gas * fee).toString();
 }
 /** An expired attestation requires an explicit read-only API refresh for this burn, never another source effect. */
-export function verifyCircleMintPreflight(source, attested, input) {
-    assertCircleAttestation(source, attested);
+export function verifyCircleMintPreflight(source, attested, input, binding) {
+    assertCircleAttestation(source, attested, binding);
     if (input.attesterConfigurationHash !== attested.attesterConfigurationHash || circleUint(input.usedNonceAtomic) !== 0n ||
         input.previousNonce !== undefined && input.previousNonce !== attested.nonce ||
         BigInt(attested.expirationBlock) !== 0n && BigInt(attested.expirationBlock) <= circleUint(input.destinationBlockAtomic))
@@ -94,9 +94,9 @@ export function verifyCircleMintPreflight(source, attested, input) {
         circleFail("mint_simulation");
 }
 /** Finalization is independent of the issuer's fast attestation threshold. */
-export function verifyCircleClosureFinality(source, finalizedSource) {
-    assertCircleSource(source);
-    assertCircleSource(finalizedSource);
+export function verifyCircleClosureFinality(source, finalizedSource, binding) {
+    assertCircleSource(source, binding);
+    assertCircleSource(finalizedSource, binding);
     if (source.finalityTag !== "included" && source.finalityTag !== "finalized" || finalizedSource.finalityTag !== "finalized" ||
         source.transactionHash !== finalizedSource.transactionHash || source.sourceMessageHash !== finalizedSource.sourceMessageHash ||
         source.blockHash !== finalizedSource.blockHash || source.blockNumberAtomic !== finalizedSource.blockNumberAtomic ||
