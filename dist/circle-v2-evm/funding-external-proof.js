@@ -77,4 +77,12 @@ export function validateFundingExternalFulfillment(p, op) {
     if (p.claimDigest !== fundingExternalClaimKey(op))
         circleFail("external_claim_digest");
 }
+/** Both full proofs are validated before comparing identity. Only advancing finality witnesses and their
+ * derived digests are excluded; included transactions, receipts, events, economics and pins stay exact. */
+export function fundingExternalStableIdentity(p) {
+    const { proofHash: _proof, evidenceHash: _evidence, sourceFinality, destinationReceipt, ...identity } = p;
+    const { finalityBlockHash: _sourceHead, finalityBlockNumberAtomic: _sourceHeight, integrityHash: _sourceDigest, ...source } = sourceFinality;
+    const { finalityBlockHash: _destinationHead, finalityBlockNumberAtomic: _destinationHeight, ...destination } = destinationReceipt;
+    return { ...identity, sourceFinality: source, destinationReceipt: destination };
+}
 //# sourceMappingURL=funding-external-proof.js.map

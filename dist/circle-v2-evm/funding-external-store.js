@@ -4,9 +4,11 @@ import { circleBlocked } from "./operation-model.js";
 import { fundingExternalClaimKey, validateFundingExternalFulfillment } from "./funding-external-proof.js";
 export class CircleFundingExternalStore extends SecureStateStore {
     paths(op) {
-        const result = [`circle-external-claims/operation-${op.operationId}.json`];
+        const result = [];
+        // Publish the shared unique nonce first; every partial claim already fences competing operations.
         if (op.source !== null && op.attestation !== null)
-            result.push(`circle-external-claims/message-${hashObject({ sourceTransactionHash: op.source.transactionHash, sourceMessageHash: op.source.sourceMessageHash })}.json`, `circle-external-claims/${fundingExternalClaimKey(op)}.json`);
+            result.push(`circle-external-claims/${fundingExternalClaimKey(op)}.json`, `circle-external-claims/message-${hashObject({ sourceTransactionHash: op.source.transactionHash, sourceMessageHash: op.source.sourceMessageHash })}.json`);
+        result.push(`circle-external-claims/operation-${op.operationId}.json`);
         return result;
     }
     async evidence(proof) { const x = await this.readJson(`circle-external-evidence/${proof.evidenceHash}.json`); if (x === null || hashObject(x) !== proof.evidenceHash)
@@ -44,7 +46,13 @@ export class CircleFundingExternalStore extends SecureStateStore {
             await this.initialize();
             await this.ensureDirectory("circle-external-evidence");
             await this.ensureDirectory("circle-external-claims");
-            await this.writeJson(`circle-external-evidence/${proof.evidenceHash}.json`, evidence, true);
+            const path = `circle-external-evidence/${proof.evidenceHash}.json`, savedEvidence = await this.readJson(path);
+            if (savedEvidence !== null) {
+                if (hashObject(savedEvidence) !== proof.evidenceHash || canonicalJson(savedEvidence) !== canonicalJson(evidence))
+                    circleBlocked("external_evidence_replacement");
+            }
+            else
+                await this.writeJson(path, evidence, true);
         }
         const body = { schemaVersion: "apn.circle-funding-external-claim.v2", claimKey: fundingExternalClaimKey(op), operationId: op.operationId, fingerprint: op.fingerprint, proof }, claim = { ...body, claimHash: hashObject(body) };
         for (const path of this.paths(op))

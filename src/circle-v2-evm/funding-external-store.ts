@@ -4,8 +4,10 @@ import { circleBlocked } from "./operation-model.js";
 import type { CircleFundingOperationV2 } from "./funding-operation.js";
 import { fundingExternalClaimKey, validateFundingExternalFulfillment, type CircleFundingExternalFulfillment } from "./funding-external-proof.js";
 export class CircleFundingExternalStore extends SecureStateStore {
-  private paths(op:CircleFundingOperationV2):string[]{const result=[`circle-external-claims/operation-${op.operationId}.json`];
-    if(op.source!==null&&op.attestation!==null)result.push(`circle-external-claims/message-${hashObject({sourceTransactionHash:op.source.transactionHash,sourceMessageHash:op.source.sourceMessageHash})}.json`,`circle-external-claims/${fundingExternalClaimKey(op)}.json`);return result;}
+  private paths(op:CircleFundingOperationV2):string[]{const result:string[]=[];
+    // Publish the shared unique nonce first; every partial claim already fences competing operations.
+    if(op.source!==null&&op.attestation!==null)result.push(`circle-external-claims/${fundingExternalClaimKey(op)}.json`,`circle-external-claims/message-${hashObject({sourceTransactionHash:op.source.transactionHash,sourceMessageHash:op.source.sourceMessageHash})}.json`);
+    result.push(`circle-external-claims/operation-${op.operationId}.json`);return result;}
   async evidence(proof:CircleFundingExternalFulfillment):Promise<unknown>{const x=await this.readJson(`circle-external-evidence/${proof.evidenceHash}.json`);if(x===null||hashObject(x)!==proof.evidenceHash)circleBlocked("external_evidence_missing");return x;}
   async readClaim(op:CircleFundingOperationV2):Promise<CircleFundingExternalFulfillment|null>{let prior:CircleFundingExternalFulfillment|null=null;
     for(const path of this.paths(op)){const x=await this.readJson(path);if(x===null)continue;
@@ -17,7 +19,9 @@ export class CircleFundingExternalStore extends SecureStateStore {
   async assertOwnedMintAvailable(op:CircleFundingOperationV2):Promise<void>{if(await this.readClaim(op)!==null)circleBlocked("external_mint_claimed_owned_entry_forbidden");}
   async claim(op:CircleFundingOperationV2,proof:CircleFundingExternalFulfillment,evidence:unknown):Promise<void>{validateFundingExternalFulfillment(proof,op);const prior=await this.readClaim(op);
     if(prior!==null&&canonicalJson(prior)!==canonicalJson(proof))circleBlocked("external_claim_replacement");
-    if(prior===null){if(hashObject(evidence)!==proof.evidenceHash)circleBlocked("external_evidence_digest");await this.initialize();await this.ensureDirectory("circle-external-evidence");await this.ensureDirectory("circle-external-claims");await this.writeJson(`circle-external-evidence/${proof.evidenceHash}.json`,evidence,true);}
+    if(prior===null){if(hashObject(evidence)!==proof.evidenceHash)circleBlocked("external_evidence_digest");await this.initialize();await this.ensureDirectory("circle-external-evidence");await this.ensureDirectory("circle-external-claims");const path=`circle-external-evidence/${proof.evidenceHash}.json`,savedEvidence=await this.readJson(path);
+      if(savedEvidence!==null){if(hashObject(savedEvidence)!==proof.evidenceHash||canonicalJson(savedEvidence)!==canonicalJson(evidence))circleBlocked("external_evidence_replacement");}
+      else await this.writeJson(path,evidence,true);}
     const body={schemaVersion:"apn.circle-funding-external-claim.v2",claimKey:fundingExternalClaimKey(op),operationId:op.operationId,fingerprint:op.fingerprint,proof},claim={...body,claimHash:hashObject(body)};
     for(const path of this.paths(op))if(await this.readJson(path)===null)await this.writeJson(path,claim,true);
   }
