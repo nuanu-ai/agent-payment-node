@@ -1,3 +1,4 @@
+import { type CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
 import { type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
 import { type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
@@ -31,7 +32,7 @@ export type StoredMoneyOperation = {
     readonly record: SeiFundingRecord;
 } | {
     readonly kind: "circle_route";
-    readonly record: CircleOperationV1;
+    readonly record: CircleKnownOperation;
 } | {
     readonly kind: "mega_gaszip";
     readonly record: MegaFundingRecord;
@@ -121,7 +122,7 @@ export declare class OperationService {
     /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
     assertCleanup85PreparationAccountsAvailable(record: CircleOperationV1, now: number): Promise<void>;
     /** Both Circle signing accounts are held under their existing profile locks. */
-    assertCircleAccountsAvailable(record: CircleOperationV1, exceptSaved?: boolean, effectRole?: CircleRole): Promise<void>;
+    assertCircleAccountsAvailable(record: CircleKnownOperation, exceptSaved?: boolean, effectRole?: CircleRole): Promise<void>;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
     private merchantOperations;
     assertMerchantAccountAvailable(record: MerchantOperation): Promise<void>;

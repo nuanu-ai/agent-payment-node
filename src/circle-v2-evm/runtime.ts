@@ -59,7 +59,7 @@ export class CircleEvmService {
     const keys = [`profile:${sourceCustody.profileHash}`, `profile:${destinationCustody.profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(sourceCustody.walletAddress), evmAddressLock(destinationCustody.walletAddress)];
     return this.state.withLocks(keys, async () => this.usage.withPolicyLocks([profile, destinationProfile], async () => {
       const replay = await this.operations.resolvePrepare({ kind: "circle_route", profileHash: sourceCustody.profileHash, operationId, idempotencyHash, requestHash });
-      if (replay !== null) { if (replay.kind !== "circle_route") circleCorrupt("replay_kind"); return replay.record; }
+      if (replay !== null) { if (replay.kind !== "circle_route" || replay.record.schemaVersion !== "apn.circle-v2-evm-operation.v1") circleCorrupt("replay_kind"); return replay.record; }
       try { await this.operations.required(operationId); circleBlocked("operation_identity_occupied"); } catch (e) { if (!(e instanceof ApnError) || e.code !== "APN_OPERATION_NOT_FOUND") throw e; }
       await assertExclusiveEvmRawSigner(this.state, sourceCustody.walletAddress, sourceCustody.profileHash);
       await assertExclusiveEvmRawSigner(this.state, destinationCustody.walletAddress, destinationCustody.profileHash);
@@ -129,12 +129,12 @@ export class CircleEvmService {
     }));
   }
   private async assertPriorSourcesCanonical(source: CircleRpc, exceptOperationId?: string): Promise<void> {
-    for (const old of await this.repo.listAllOperations()) {
+    for (const old of await this.repo.listAllAny()) {
       if (old.operationId === exceptOperationId || old.source === null || old.terminal) continue;
       const observation = await source.observation(old.source.transactionHash, "included");
       if (observation === null) circleBlocked("prior_circle_source_not_canonical");
       assertObservedEnvelope(old.effects.find(e => e.role === "burn")!, observation.transaction);
-      const proof = decodeCircleSource(observation, old.destinationChain);
+      const proof = decodeCircleSource(observation, old.destinationChain, old.schemaVersion === "apn.circle-v2-evm-operation.v2" ? old.funding : undefined);
       if (proof.blockHash !== old.source.blockHash || proof.receiptHash !== old.source.receiptHash || proof.sourceMessageHash !== old.source.sourceMessageHash ||
         circleUint(await source.call("eth_getTransactionCount", [old.sourceCustody.walletAddress, "latest"])) <= BigInt(old.effects.find(e => e.role === "burn")!.envelope.nonceAtomic)) circleBlocked("prior_circle_source_reorg_or_nonce_not_advanced");
     }

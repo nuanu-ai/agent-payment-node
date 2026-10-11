@@ -1,3 +1,4 @@
+import { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import { Cleanup85NativeCancellation, verifyCleanup85CancellationAccounting } from "./circle-cleanup85-native-cancellation.js";
 import { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import { SeiFundingService } from "./lifi/sei-gaszip-service.js";
@@ -8,8 +9,9 @@ import type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
 
 /** Construct finite funding rails while retaining their existing construction boundaries. */
 export function finiteFundingRuntime(command: string, state: StateStore, wrappingSecret: WrappingSecretPort,
-  options: Pick<RuntimeFactoryOptions, "seiFunding" | "megaFunding" | "circleEvm" | "cleanup85Recovery">, environment: NodeJS.ProcessEnv, now: () => number) {
+  options: Pick<RuntimeFactoryOptions, "seiFunding" | "megaFunding" | "circleEvm" | "circleFundingEvm" | "cleanup85Recovery">, environment: NodeJS.ProcessEnv, now: () => number) {
   return {
+    circleFundingEvm: options.circleFundingEvm ?? new CircleFundingEvmService(state, wrappingSecret, environment, now),
     circleEvm: options.circleEvm ?? new CircleEvmService(state, wrappingSecret, environment, now, {}, undefined, options.cleanup85Recovery ?? {
       cancellation: new Cleanup85NativeCancellation(state, wrappingSecret, environment, {
         now, sourceArchiveRpcUrl: "https://arbitrum-one-public.nodies.app", nativeRpcUrl: "https://arb1.arbitrum.io/rpc",

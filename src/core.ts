@@ -1,6 +1,6 @@
 import { runFixedMetaMaskNativeTransfer, readFixedMetaMaskNativeTransfer } from "./metamask-native-transfer-owner.js";
 import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";import { readPermit2IntentStatus } from "./x402-permit2/status.js";
-import { publicCircle } from "./circle-v2-evm/operation-model.js";
+import { publicKnownCircle, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { failureEnvelope, successEnvelope } from "./output.js";
 import { dataOutcome, operationOutcome, receiptOutcome } from "./core-outcome.js";
 import { RuntimeContext, type CoreDependencies } from "./runtime.js";
@@ -457,7 +457,7 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
         const operation = await this.operations.required(request.operationId);
         if (operation.kind === "circle_route") {
           if (!operation.record.terminal) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.");
-          return receiptOutcome(publicCircle(operation.record));
+          return receiptOutcome(publicKnownCircle(validateKnownCircle(operation.record)));
         }
         if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_RECEIPT_NOT_FOUND", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no receipt." : operation.kind === "merchant_x402" ? "Use x402 merchant status for its payment and delivery evidence." : "Permit2 production has no paid receipt.");
         if (operation.kind === "smart_account_gasless_transfer") return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));

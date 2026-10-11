@@ -197,7 +197,7 @@ export declare class BridgeService {
             batch_count: number;
             max_batch_size: number;
             budget_rejected_before_transport: number;
-            attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
+            attempts_by_endpoint_role: Readonly<Record<"primary" | "receipt" | "archive", number>>;
             attempts_by_method_class: Readonly<Record<string, number>>;
         }[];
         rpc_origins: {
@@ -238,7 +238,7 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
-            endpoint_role?: "receipt" | "primary" | "archive";
+            endpoint_role?: "primary" | "receipt" | "archive";
             attempts?: number;
             http_status?: number;
             rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
@@ -258,7 +258,7 @@ export declare class BridgeService {
             category: import("./operation-model.js").BridgePreSignRpcCategory;
             method: import("./operation-model.js").BridgePreSignRpcMethod | null;
         };
-        residual_allowance_status?: "observed" | "unavailable";
+        residual_allowance_status?: "unavailable" | "observed";
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;
@@ -425,7 +425,7 @@ export declare class BridgeService {
             batch_count: number;
             max_batch_size: number;
             budget_rejected_before_transport: number;
-            attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
+            attempts_by_endpoint_role: Readonly<Record<"primary" | "receipt" | "archive", number>>;
             attempts_by_method_class: Readonly<Record<string, number>>;
         }[];
         rpc_origins: {
@@ -466,7 +466,7 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
-            endpoint_role?: "receipt" | "primary" | "archive";
+            endpoint_role?: "primary" | "receipt" | "archive";
             attempts?: number;
             http_status?: number;
             rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
@@ -486,7 +486,7 @@ export declare class BridgeService {
             category: import("./operation-model.js").BridgePreSignRpcCategory;
             method: import("./operation-model.js").BridgePreSignRpcMethod | null;
         };
-        residual_allowance_status?: "observed" | "unavailable";
+        residual_allowance_status?: "unavailable" | "observed";
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;

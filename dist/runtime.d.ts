@@ -1,3 +1,4 @@
+import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
 import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
@@ -83,6 +84,7 @@ export interface CoreDependencies {
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
     readonly stargateNative?: StargateNativeService;
     readonly circleEvm?: CircleEvmService;
+    readonly circleFundingEvm?: CircleFundingEvmService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
@@ -165,6 +167,7 @@ export declare class RuntimeContext {
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
     readonly stargateNative?: StargateNativeService;
     readonly circleEvm?: CircleEvmService;
+    readonly circleFundingEvm?: CircleFundingEvmService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
     readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
