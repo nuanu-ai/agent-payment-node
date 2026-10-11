@@ -38,6 +38,14 @@ export function adaptJupiterFutureInvalidityReadPort(rpc) {
             if (method === "getBlocks" || method === "getSlot" || method === "isBlockhashValid") {
                 return await extendedCall.call(rpc, method, params);
             }
+            if (method === "getBlockHeight") {
+                if (rpc.batch === undefined)
+                    throw new Refusal("rpc_proof_failed");
+                const results = await rpc.batch.call(rpc, [{ method, params }]);
+                if (results.length !== 1)
+                    throw new Refusal("malformed_rpc_result");
+                return results[0];
+            }
             // The helper races this call against the single absolute deadline. SolanaRpcPort already
             // applies its own bounded transport deadline and accepts only this fixed read-method set.
             return await rpc.call(method, params);
