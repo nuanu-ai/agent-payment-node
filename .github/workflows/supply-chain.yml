@@ -93,6 +93,8 @@ jobs:
             dist-test/tests/core/mcp.test.js \
             dist-test/tests/core/smart-account-gasless-https.test.js \
             dist-test/tests/core/metamask-gasless-rpc.test.js \
+            dist-test/tests/core/metamask-gasless-sponsored.test.js \
+            dist-test/tests/core/metamask-gasless-observation-rpc.test.js \
             dist-test/tests/core/jupiter-route-v2-offline.test.js \
             dist-test/tests/core/x402-permit2-payload.test.js \
             dist-test/tests/core/x402-permit2-preflight-cli.test.js

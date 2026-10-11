@@ -53,7 +53,7 @@ export async function verifyRedemption(calldataInput: Hex,
   const mode = mmHex(modesValue[0], 32, "mm_gasless_evidence_invalid");
   const executionCallData = mmHex(executionsValue[0], undefined, "mm_gasless_evidence_invalid", 64 * 1024);
   if (mode !== intent.mode || executionCallData !== mmExactBatchTerms({ owner: intent.binding.address,
-    chainId: intent.request.chainId, executions: intent.quote.executions })) mmFail("mm_gasless_evidence_invalid");
+    chainId: intent.request.chainId, executions: intent.quote.executions, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) })) mmFail("mm_gasless_evidence_invalid");
 
   let decodedDelegations: readonly DecodedDelegation[];
   try {
@@ -80,7 +80,7 @@ export async function verifyRedemption(calldataInput: Hex,
   };
   mmValidateUnsigned({ unsignedDelegation, delegationHash: intent.delegationHash,
     signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode },
-  { owner: intent.binding.address, chainId: intent.request.chainId, executions: intent.quote.executions },
+  { owner: intent.binding.address, chainId: intent.request.chainId, executions: intent.quote.executions, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) },
   "mm_gasless_evidence_invalid");
 
   const signature = canonicalSignature(signed.signature);

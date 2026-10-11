@@ -351,3 +351,21 @@ function rawSettlementLogs(value: MetaMaskGaslessIntent, at: ReturnType<typeof b
 const readMethods = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getCode", "eth_getStorageAt",
   "eth_call", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
 const protocolError = { code: "APN_RPC_PROTOCOL" };
+
+
+test("closed snapshot diagnostics identify public counter and balance failures without downgrading refusal", () => {
+  const original = intent(block(8453, 100n)).initialSnapshot;
+  const expected = { chainId: 8453 as const, endpointHash: sha256(RPC_URL), endpointOrigin: "https://rpc.example", grossAtomic: "1000000" };
+  for (const [predicate, state] of [["counter", { ...original.safeState, counterAtomic: "1" }],
+    ["balance", { ...original.safeState, usdcBalanceAtomic: "999999" }]] as const) {
+    assert.throws(() => validateMetaMaskGaslessSnapshot({ ...original, safeState: state }, expected),
+      { code: "APN_RPC_PROTOCOL", details: { reason: "mm_gasless_evidence_invalid", evidenceStage: "safe", evidencePredicate: predicate, evidenceMethod: "eth_call" } });
+  }
+});
+
+test("production snapshot reports SAFE protocol pin mismatch with no endpoint or raw body disclosure", async () => {
+  const transport = new FakeRpcTransport(8453, { corruptProtocol: true });
+  const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
+  await assert.rejects(rpc.snapshot({ owner: vector.owner, delegationHash: vector.delegationHash, grossAtomic: "1000000" }),
+    { code: "APN_RPC_PROTOCOL", details: { reason: "mm_gasless_evidence_invalid", evidenceStage: "safe", evidencePredicate: "protocol_code_pin", evidenceMethod: "eth_getCode" } });
+});
