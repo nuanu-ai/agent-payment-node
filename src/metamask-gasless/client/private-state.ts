@@ -108,10 +108,12 @@ function validateWallet(envelope: Record<string, unknown>): Record<string, unkno
 
 function validateRemote(value: unknown): void {
   if (!isPlainRecord(value)) mmFail("mm_gasless_state_corrupt");
-  const allowed = new Set(["address", "name", "deviceInfo", "namespace"]);
+  // The stock SDK retains remote `type` as metadata; custody and selection bind mode, namespace and address.
+  const allowed = new Set(["address", "name", "deviceInfo", "namespace", "type"]);
   if (Object.keys(value).some((key) => !allowed.has(key)) || !boundedString(value.address) ||
     !(value.namespace === undefined || value.namespace === "evm" || value.namespace === "solana") ||
-    !(value.name === undefined || boundedString(value.name)) || !(value.deviceInfo === undefined || boundedString(value.deviceInfo))) {
+    !(value.name === undefined || boundedString(value.name)) || !(value.deviceInfo === undefined || boundedString(value.deviceInfo)) ||
+    !(value.type === undefined || (typeof value.type === "string" && value.type.length > 0 && value.type.length <= 64))) {
     mmFail("mm_gasless_state_corrupt");
   }
   if (value.namespace !== "solana") mmAddress(value.address, "mm_gasless_state_corrupt");
