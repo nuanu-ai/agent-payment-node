@@ -14,6 +14,69 @@ function identity(binding: Awaited<ReturnType<typeof syntheticHome>>["binding"])
     accountBindingHash: binding.accountBindingHash, capabilityHash: binding.capabilityHash, revision: binding.revision };
 }
 
+test("stock remote type metadata preserves the selected payer and exact legacy inspect binding", async (t) => {
+  for (const typed of [false, true]) await t.test(typed ? "stock typed roster" : "legacy roster", async (t) => {
+    const home = await syntheticHome({ remoteWallets: [
+      { address: "0x4444444444444444444444444444444444444444", name: "other", namespace: "evm",
+        deviceInfo: "synthetic-device", ...(typed ? { type: "inert-other-metadata" } : {}) },
+      { address: OWNER, name: "primary", namespace: "evm", deviceInfo: "synthetic-device",
+        ...(typed ? { type: "inert-selected-metadata" } : {}) },
+    ] }); t.after(home.cleanup);
+    const exchange = new SdkExchange(8453);
+    const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
+      expected: identity(home.binding) }, { homeDirectory: home.home, now: () => NOW, exchange });
+    assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true, result: home.binding });
+    assert.deepEqual(exchange.requests, [], "inspect must not query the provider or sign");
+    assert.equal(await readFile(join(home.directory, "session.json"), "utf8"), home.sessionBytes);
+    assert.equal(await readFile(join(home.directory, "wallets.json"), "utf8"), home.walletBytes);
+    const quoted = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote",
+      input: quoteInput(home.binding, 8453) }, { homeDirectory: home.home, now: () => NOW, exchange });
+    assert.deepEqual(quoted, { version: MM_HELPER_VERSION, ok: true, result: expectedQuote(8453) });
+    assert.equal(exchange.beforeSends, 0, "quoting cannot acquire a financial dispatch claim");
+    assert.equal(await readFile(join(home.directory, "wallets.json"), "utf8"), home.walletBytes);
+    assert.equal(JSON.stringify([result, quoted]).includes("inert-selected-metadata"), false);
+  });
+});
+
+test("remote type compatibility retains closed shape, payer, namespace, reference and duplicate guards", async (t) => {
+  const cases = [
+    { name: "empty type", row: { type: "" }, reason: "mm_gasless_state_corrupt" },
+    { name: "null type", row: { type: null }, reason: "mm_gasless_state_corrupt" },
+    { name: "object type", row: { type: {} }, reason: "mm_gasless_state_corrupt" },
+    { name: "number type", row: { type: 1 }, reason: "mm_gasless_state_corrupt" },
+    { name: "oversized type", row: { type: "x".repeat(65) }, reason: "mm_gasless_state_corrupt" },
+    { name: "unrecognized extra key", row: { type: "inert", signingPermission: true }, reason: "mm_gasless_state_corrupt" },
+    { name: "invalid namespace", row: { type: "inert", namespace: "eip155" }, reason: "mm_gasless_state_corrupt" },
+    { name: "invalid address", row: { type: "inert", address: "not-an-address" }, reason: "mm_gasless_state_corrupt" },
+  ];
+  for (const row of cases) await t.test(row.name, async (t) => {
+    const home = await syntheticHome({ remoteWallets: [{ address: OWNER, namespace: "evm", ...row.row }] });
+    t.after(home.cleanup);
+    const exchange = new SdkExchange(8453);
+    const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
+      expected: identity(home.binding) }, { homeDirectory: home.home, now: () => NOW, exchange });
+    assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
+      failure: { code: "APN_STATE_CORRUPT", reason: row.reason } });
+    assert.deepEqual(exchange.requests, []);
+    assert.equal(await readFile(join(home.directory, "wallets.json"), "utf8"), home.walletBytes);
+  });
+  const home = await syntheticHome({ remoteWallets: [{ address: OWNER, namespace: "evm", type: "inert" }] });
+  t.after(home.cleanup);
+  const drift = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
+    expected: { ...identity(home.binding), address: "0x4444444444444444444444444444444444444444" } },
+    { homeDirectory: home.home, now: () => NOW });
+  assert.deepEqual(drift, { version: MM_HELPER_VERSION, ok: false,
+    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_binding_changed" } });
+  const duplicate = await syntheticHome({ ref: { name: "primary" }, remoteWallets: [
+    { address: OWNER, name: "primary", namespace: "evm", type: "inert" },
+    { address: "0x4444444444444444444444444444444444444444", name: "primary", namespace: "evm", type: "inert" },
+  ] }); t.after(duplicate.cleanup);
+  const ambiguous = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
+    expected: identity(duplicate.binding) }, { homeDirectory: duplicate.home, now: () => NOW });
+  assert.deepEqual(ambiguous, { version: MM_HELPER_VERSION, ok: false,
+    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_identity" } });
+});
+
 test("client inspect hydrates official managers and resolves exact address/name while preserving unrelated records", async (t) => {
   const addressHome = await syntheticHome({ byokWallets: [{ id: "byok:evm:0", address: OWNER, namespace: "evm", index: 0,
     derivationPath: "m/44'/60'/0'/0/0" }], remoteWallets: [{ address: "solana-address", name: "sol", namespace: "solana" },
