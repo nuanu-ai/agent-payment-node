@@ -133,6 +133,7 @@ const observationRpcFailureSchema = z.strictObject({
         "transaction_signature", "transaction_parity", "transaction_signature_reconstruction",
         "approval_event_identity", "source_proof", "receipt_fee_shape", "unsupported_Base_blob_transaction",
         "operator_fee_formula", "operator_receipt_parameters",
+        "distinct_archive_RPC_required", "explicit_archive_RPC_required", "historical_receipt_unavailable",
         "request_interrupted", "response_aborted", "response_interrupted"]).optional(),
     rpcMethod: z.enum(["eth_chainId", "eth_getBlockByNumber", "eth_getTransactionByHash", "eth_getTransactionReceipt",
         "eth_getLogs", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_estimateGas",

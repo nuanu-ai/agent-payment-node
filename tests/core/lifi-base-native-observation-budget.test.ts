@@ -21,11 +21,18 @@ function reader(mutation?: "configuration" | "multicall_code") {
     const identity = key(row.role, row.method, row.params);
     if (responses.has(identity)) assert.deepEqual(responses.get(identity), row.result);
     responses.set(identity, row.result);
+    // Reuse only captured numeric-header fixture bytes for the newly required primary recheck.
+    // This is synthetic routing coverage, not evidence that a live primary returned this header.
+    if (row.role === "archive" && row.method === "eth_getBlockByNumber" && /^0x[0-9a-f]+$/i.test(row.params[0])) {
+      const primaryKey = key("primary", row.method, row.params);
+      if (responses.has(primaryKey)) assert.deepEqual(responses.get(primaryKey), row.result);
+      responses.set(primaryKey, row.result);
+    }
   }
   let now = Date.parse(captured.capturedAt[0]);
   const wait = async (ms: number) => { now += ms; };
   const physical = new BridgeRpcPhysicalBudget(() => now, wait);
-  const session = new RpcReadSession({ now: () => now, wait, maxHttpRequests: 14, maxHttpAttempts: 16,
+  const session = new RpcReadSession({ now: () => now, wait, maxHttpRequests: 15, maxHttpAttempts: 16,
     archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const posts: Array<{ role: string; count: number; methods: string[] }> = [];
   const read = (endpointRole: string, method: string, params: unknown[]): unknown => {
@@ -65,7 +72,7 @@ function reader(mutation?: "configuration" | "multicall_code") {
   return { rpc, session, physical, posts };
 }
 
-test("Base native Across observation and exact historical deployment fit the unchanged 14 POST source budget", async () => {
+test("Base native Across observation and exact historical deployment fit the 15 POST source budget including fresh primary headers", async () => {
   const r = reader();
   const observed = await r.rpc.observe(captured.transactionHash, captured.envelope as BridgeEnvelope);
   assert(observed); assert(observed.transaction.safeBlock);
@@ -73,7 +80,7 @@ test("Base native Across observation and exact historical deployment fit the unc
   assert.deepEqual(observed.transaction.block, captured.observed.transaction.block);
   const deployment = await r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", observed.transaction.block, true);
   assert.deepEqual(deployment, captured.historical);
-  assert(r.session.telemetry().httpRequests <= 14);
+  assert(r.session.telemetry().httpRequests <= 15);
   assert(r.session.telemetry().httpAttempts <= 16);
   assert(r.physical.remaining() >= 10);
   assert(r.posts.filter(post => post.role === "archive").every(post => post.count <= 3));

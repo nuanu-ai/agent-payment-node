@@ -8,6 +8,7 @@ import { bridgeFailure } from "./validation.js";
  * frozen deployment identity, L1 fee inputs, or transaction receipt needs an archive-capable reader. The operation stays
  * bound to its original RPC origin; only state reads pinned to one explicit block and exact-hash receipt reads go to this
  * endpoint, and only when the owner names it for that chain. Nothing is inferred or defaulted.
+ * An owner-explicit archive URL may share the primary origin; historical capability is still validated.
  */
 export const BRIDGE_ARCHIVE_RPC_ENV = {
   1: "APN_ETHEREUM_ARCHIVE_RPC_URL",

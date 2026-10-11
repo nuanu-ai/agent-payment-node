@@ -202,14 +202,15 @@ for (const fallback of [false, true]) test(`LI.FI bounded observation uses scala
     { transport, wait: async () => {} })(1, session);
   const observed = await rpc.observe(s.hash); assert.ok(observed); assert.equal(observed.transaction.rpcOrigin, "https://primary.example");
   const primary = calls.filter((call) => call.host === "primary.example");
-  assert.equal(primary.length, 5); assert.ok(primary.every((call) => !Array.isArray(call.request)));
-  assert.deepEqual(primary.map((call) => (call.request as Json).method), ["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt",
+  assert.equal(primary.length, 6); assert.ok(primary.slice(0, 5).every((call) => !Array.isArray(call.request)));
+  assert.deepEqual((primary.at(-1)!.request as Json[]).map(row => row.method), ["eth_getBlockByNumber", "eth_getBlockByNumber"]);
+  assert.deepEqual(primary.filter(call => !Array.isArray(call.request)).map((call) => (call.request as Json).method), ["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt",
     "eth_getBlockByNumber", "eth_getBlockByNumber"]);
   const archive = calls.filter((call) => call.host === "archive.example");
   assert.equal(calls.length, fallback ? 7 : 6);
   assert.deepEqual(archive.map((call) => (call.request as Json[]).map((row) => row.method)), fallback
-    ? [["eth_chainId", "eth_getTransactionReceipt"], ["eth_getBlockByNumber", "eth_getBlockByNumber"]]
-    : [["eth_chainId", "eth_getBlockByNumber", "eth_getBlockByNumber"]]);
+    ? [["eth_chainId", "eth_getTransactionReceipt"]]
+    : []);
   assert.equal(archive.flatMap((call) => call.request as Json[]).some((row) => ["eth_sendRawTransaction", "eth_estimateGas", "eth_getLogs"].includes(row.method)), false);
 });
 
@@ -236,9 +237,10 @@ test("LI.FI explicit receipt routing uses six requests while primary remains aut
   const observed = await rpc.observe(s.hash); assert.ok(observed); assert.equal(observed.transaction.rpcOrigin, "https://primary.example");
   assert.equal(calls.length, 6); assert.equal(session.telemetry().httpRequests, 6);
   const primary = calls.filter((call) => call.host === "primary.example");
-  assert.deepEqual(primary.map((call) => (call.request as Json).method), ["eth_chainId", "eth_getTransactionByHash",
+  assert.deepEqual(primary.filter(call => !Array.isArray(call.request)).map((call) => (call.request as Json).method), ["eth_chainId", "eth_getTransactionByHash",
     "eth_getBlockByNumber", "eth_getBlockByNumber"]);
   assert.equal(primary.some((call) => (call.request as Json).method === "eth_getTransactionReceipt"), false);
+  assert.deepEqual((primary.at(-1)!.request as Json[]).map(row => row.method), ["eth_getBlockByNumber", "eth_getBlockByNumber"]);
   assert.deepEqual(calls.filter((call) => call.host === "receipt.example").map((call) =>
     (call.request as Json[]).map((row) => row.method)), [["eth_chainId", "eth_getTransactionReceipt"]]);
 });
@@ -288,7 +290,7 @@ type BaseObservationMode = "success" | "missing" | "reverted" | "first429" | "re
   "multicallMalformed" | "multicallRevert" | "multicallOrder" | "multicallCode" | "deploymentCode" |
   "deploymentConfiguration" | "approvalEvent";
 async function baseApprovalObservation(mode: BaseObservationMode,
-  limits: { maxHttpRequests: number; maxHttpAttempts: number } = { maxHttpRequests: 14, maxHttpAttempts: 16 }) {
+  limits: { maxHttpRequests: number; maxHttpAttempts: number } = { maxHttpRequests: 15, maxHttpAttempts: 16 }) {
   const s = await rpcObservation(8453), fee = await baseFeeFixture();
   const deploymentFixture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/deployment-rpc-20260908.json"), "utf8")) as Json;
   const deploymentCapture = (deploymentFixture.chains as Json[]).find((chain) => chain.chainId === 8453)!;
@@ -390,11 +392,11 @@ test("LI.FI production source observation uses the complete ordered physical tra
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const prepared = await productionBaseObservation(temporary.root, "success"), { run, fixture } = prepared;
   const result = await prepared.execute(), operation = result.operation; assert.equal(result.reliable, true);
-  assert.equal(run.session.telemetry().httpRequests, 14); assert.equal(run.session.telemetry().httpAttempts, 14);
-  assert.equal(run.calls.length, 14);
+  assert.equal(run.session.telemetry().httpRequests, 15); assert.equal(run.session.telemetry().httpAttempts, 15);
+  assert.equal(run.calls.length, 15);
   assert.deepEqual(Object.fromEntries(["base-rpc.publicnode.com", "mainnet.base.org", "base.drpc.org"].map((host) =>
     [host, run.calls.filter((call) => call.host === host).length])),
-  { "base-rpc.publicnode.com": 4, "mainnet.base.org": 2, "base.drpc.org": 8 });
+  { "base-rpc.publicnode.com": 5, "mainnet.base.org": 2, "base.drpc.org": 8 });
   assert.deepEqual(run.traces.filter((call) => call.endpointRole === "receipt").map((call) => call.methods),
     [["eth_chainId"], ["eth_getTransactionReceipt"]]);
   assert.ok(run.traces.filter((call) => call.endpointRole === "archive").every((call) => call.batchSize <= 3));
@@ -410,20 +412,21 @@ test("LI.FI production source observation uses the complete ordered physical tra
     trace(archive, "archive", ["eth_getCode", "eth_getStorageAt", "eth_getStorageAt"]),
     trace(archive, "archive", ["eth_call", "eth_call", "eth_call"]),
     trace(archive, "archive", ["eth_call", "eth_getBlockByNumber", "eth_getBlockByNumber"]),
+    trace(primary, "primary", ["eth_getBlockByNumber", "eth_getBlockByNumber"]),
     trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getCode"]),
     trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getCode"]),
     trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getStorageAt"]),
     trace(archive, "archive", ["eth_getStorageAt", "eth_call", "eth_call"]),
   ]);
-  assert.deepEqual(run.traces[10], trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getCode"]));
+  assert.deepEqual(run.traces[11], trace(archive, "archive", ["eth_getCode", "eth_getCode", "eth_getCode"]));
   assert.deepEqual(operation.effects.map((effect) => [effect.role, effect.phase, effect.submissionAttempts]),
     [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]);
   assert.ok(operation.effects[0]!.safeProof); assert.equal(fixture.source.submissions.length, 0);
   assert.deepEqual(operation.observationTelemetry?.at(-1), {
     schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "approval", outcome: "success",
-    physicalRequests: 14, httpAttempts: 14, logicalRpcItems: 30, batchCount: 8, maxBatchSize: 3,
-    budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 8 },
-    attemptsByMethodClass: { block: 4, call: 6, chain: 3, code: 11, receipt: 1, storage: 4, transaction: 1 },
+    physicalRequests: 15, httpAttempts: 15, logicalRpcItems: 32, batchCount: 9, maxBatchSize: 3,
+    budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 5, receipt: 2, archive: 8 },
+    attemptsByMethodClass: { block: 6, call: 6, chain: 3, code: 11, receipt: 1, storage: 4, transaction: 1 },
   });
 });
 
@@ -475,14 +478,14 @@ test("LI.FI source protocol evidence failures persist the consumed production tr
   assert.equal(result.operation.observationTelemetry?.length, 1);
   assert.deepEqual(result.operation.observationTelemetry?.[0], {
     schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "bridge", outcome: "failure",
-    physicalRequests: 14, httpAttempts: 14, logicalRpcItems: 30, batchCount: 8, maxBatchSize: 3,
-    budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 8 },
-    attemptsByMethodClass: { block: 4, call: 6, chain: 3, code: 11, receipt: 1, storage: 4, transaction: 1 },
+    physicalRequests: 15, httpAttempts: 15, logicalRpcItems: 32, batchCount: 9, maxBatchSize: 3,
+    budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 5, receipt: 2, archive: 8 },
+    attemptsByMethodClass: { block: 6, call: 6, chain: 3, code: 11, receipt: 1, storage: 4, transaction: 1 },
   });
   const projectedOperation = transitionBridge(prepared.template, { observationTelemetry: result.operation.observationTelemetry },
     new Date(Date.parse(prepared.template.updatedAt) + 1).toISOString());
   const projected = (bridgeReceipt(projectedOperation) as any).observation_rpc_telemetry;
-  assert.equal(projected.length, 1); assert.equal(projected[0].physical_requests, 14); assert.equal(projected[0].effect_role, "bridge");
+  assert.equal(projected.length, 1); assert.equal(projected[0].physical_requests, 15); assert.equal(projected[0].effect_role, "bridge");
   const serialized = JSON.stringify(projected);
   for (const forbidden of ["base.drpc.org", "publicnode.com", "mainnet.base.org", "authorization", "api_key"])
     assert.equal(serialized.includes(forbidden), false, forbidden);
@@ -510,16 +513,16 @@ for (const field of ["contractHash", "codeHash", "configurationHash", "block"] a
   assert.equal(result.reliable, false);
   assert.equal(result.operation.failure?.observationRpc?.reason, `historical_deployment_${field.replace("Hash", "_hash")}`);
   assert.equal(result.operation.failure?.observationRpc?.stage, "source_deployment");
-  assert.equal(result.operation.observationTelemetry?.at(-1)?.physicalRequests, 14);
+  assert.equal(result.operation.observationTelemetry?.at(-1)?.physicalRequests, 15);
 });
 
 test("LI.FI Base approval observation keeps missing, reverted, first-429 and transient retry outcomes bounded", async () => {
   const missing = await baseApprovalObservation("missing"); assert.equal(await missing.observe(), null);
   assert.equal(missing.session.telemetry().httpRequests, 4); assert.equal(missing.session.telemetry().httpAttempts, 4);
   const reverted = await baseApprovalObservation("reverted"), revertedProof = await reverted.observe();
-  assert.equal(revertedProof?.transaction.status, "reverted"); assert.equal(reverted.session.telemetry().httpRequests, 10);
+  assert.equal(revertedProof?.transaction.status, "reverted"); assert.equal(reverted.session.telemetry().httpRequests, 11);
   const retried = await baseApprovalObservation("retry503"), recovered = await retried.observe(); assert.ok(recovered);
-  assert.equal(retried.session.telemetry().httpRequests, 10); assert.equal(retried.session.telemetry().httpAttempts, 11);
+  assert.equal(retried.session.telemetry().httpRequests, 11); assert.equal(retried.session.telemetry().httpAttempts, 12);
   const retryCalls = retried.calls.filter(call => call.host === "base.drpc.org" && call.rows.some(row => row.method === "eth_getCode"));
   assert.deepEqual(retryCalls[0], retryCalls[1]); // The one retry preserves the exact batch and IDs.
   const limitedRuns = [];
@@ -593,4 +596,71 @@ test("LI.FI Base fee quote budgets 16 KiB signed bytes while existing direct-tra
   await new EvmRpc(call, "https://base.example").feeQuote(8453, economics); const direct = inputs[0]!;
   inputs.length = 0; await new BridgeRpc(8453, "https://base.example", call).feeQuote({ economics });
   assert.equal(BigInt(`0x${direct.slice(-64)}`), 512n); assert.equal(BigInt(`0x${inputs[0]!.slice(-64)}`), 16384n); assert.equal(direct.slice(0, 10), inputs[0]!.slice(0, 10));
+});
+
+async function sessionHeaderObservation(mutation: "none" | "chain" | "inclusion" | "safe" = "none", scalarReorg = false) {
+  const s = await rpcObservation(), posts: Array<{ host: string; batch: boolean; methods: string[] }> = [];
+  let numericInclusionReads = 0;
+  const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
+    const parsed = JSON.parse(body!) as { id: string; method: string; params: unknown[] } | Array<{ id: string; method: string; params: unknown[] }>;
+    const requests = Array.isArray(parsed) ? parsed : [parsed];
+    posts.push({ host: new URL(endpoint).host, batch: Array.isArray(parsed), methods: requests.map(row => row.method) });
+    const responses = requests.map(request => {
+      let result: unknown;
+      if (request.method === "eth_chainId") result = mutation === "chain" ? "0x2105" : "0x1";
+      else if (request.method === "eth_getTransactionByHash") result = s.tx;
+      else if (request.method === "eth_getTransactionReceipt") result = s.receipt;
+      else if (request.method === "eth_getBlockByNumber") {
+        const safe = request.params[0] === "safe" || request.params[0] === "0x7d1";
+        result = safe ? { ...s.block, number: "0x7d1", hash: word(99n) } : s.block;
+        if (request.params[0] === s.block.number) numericInclusionReads += 1;
+        const recheck = Array.isArray(parsed) || scalarReorg && (safe ? request.params[0] === "0x7d1" : numericInclusionReads > 1);
+        if (recheck && (mutation === "inclusion" && !safe || mutation === "safe" && safe))
+          result = { ...(result as Json), hash: word(100n) };
+      } else throw new Error(`unexpected method: ${request.method}`);
+      return { jsonrpc: "2.0", id: request.id, result };
+    });
+    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
+  } };
+  const environment = { APN_ETHEREUM_RPC_URL: "https://primary.example" };
+  const options = { transport, wait: async () => {} };
+  const factory = bridgeRpcFactory(environment, options);
+  return { ...s, posts, scalar: factory(1), session: factory(1, new RpcReadSession({ wait: async () => {} })) };
+}
+
+test("LI.FI session canonical header rechecks match scalar proof using primary without archive", async () => {
+  const s = await sessionHeaderObservation();
+  const scalar = await s.scalar.observe(s.hash), session = await s.session.observe(s.hash);
+  assert.ok(scalar); assert.deepEqual(session, scalar);
+  assert.ok(s.posts.some(row => row.batch && row.methods.join(",") === "eth_getBlockByNumber,eth_getBlockByNumber"));
+  assert.ok(s.posts.every(row => row.host === "primary.example"));
+  assert.ok(s.posts.every(row => row.methods.every(method => !method.includes("send"))));
+});
+
+for (const mutation of ["chain", "inclusion", "safe"] as const)
+  test(`LI.FI primary session header proof rejects ${mutation} mismatch`, async () => {
+    const s = await sessionHeaderObservation(mutation);
+    await assert.rejects(s.session.observe(s.hash), { code: mutation === "chain" ? "APN_CHAIN_MISMATCH" : "APN_RPC_PROTOCOL" });
+    assert.ok(s.posts.every(row => row.host === "primary.example"));
+  });
+
+for (const mutation of ["inclusion", "safe"] as const)
+  test(`LI.FI scalar primary canonical recheck rejects ${mutation} reorg`, async () => {
+    const s = await sessionHeaderObservation(mutation, true);
+    await assert.rejects(s.scalar.observe(s.hash), { code: "APN_RPC_PROTOCOL" });
+    assert.ok(s.posts.every(row => row.host === "primary.example"));
+  });
+
+for (const capacity of [14, 15]) test(`Base canonical observation enforces ${capacity} physical request ceiling`, async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const prepared = await productionBaseObservation(temporary.root, "success", { maxHttpRequests: capacity, maxHttpAttempts: 16 });
+  const result = await prepared.execute();
+  assert.equal(result.reliable, capacity === 15);
+  assert.equal(prepared.run.calls.length, capacity);
+  if (capacity === 14) {
+    assert.equal(result.operation.failure?.observationRpc?.code, "APN_RPC_BUDGET_EXCEEDED");
+    assert.equal(prepared.run.session.telemetry().budgetRejectedBeforeTransport, 1);
+  }
+  assert.equal(prepared.run.calls.flatMap(call => call.rows).some(row => row.method === "eth_sendRawTransaction"), false);
+  assert.equal(prepared.fixture.source.submissions.length, 0);
 });
