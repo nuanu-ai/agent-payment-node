@@ -406,7 +406,6 @@ declare const schemaV3: z.ZodObject<{
     integrityHash: z.ZodString;
     profileHash: z.ZodString;
     transactionHash: z.ZodNullable<z.ZodString>;
-    operationId: z.ZodString;
     nonceAtomic: z.ZodNullable<z.ZodString>;
     phase: z.ZodEnum<{
         signing_started: "signing_started";
@@ -420,6 +419,7 @@ declare const schemaV3: z.ZodObject<{
         source_reverted: "source_reverted";
     }>;
     submissionAttempts: z.ZodUnion<readonly [z.ZodLiteral<0>, z.ZodLiteral<1>]>;
+    operationId: z.ZodString;
     createdAt: z.ZodString;
     transitions: z.ZodArray<z.ZodObject<{
         at: z.ZodString;
