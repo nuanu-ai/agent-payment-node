@@ -3,6 +3,7 @@ import { hashObject, isPlainRecord } from "../../canonical.js";
 import type { Address, Hex } from "../../model.js";
 import type { MetaMaskGaslessBlock } from "../model.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
+import { mmEvidenceFail } from "./diagnostic.js";
 
 export type MmRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getCode" |
   "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" |
@@ -58,20 +59,20 @@ export const MM_DELEGATION_PARAMETER = {
 
 export function rpcRecord(value: unknown,
   reason: MetaMaskGaslessFailureReason = "mm_gasless_evidence_invalid"): Record<string, unknown> {
-  if (!isPlainRecord(value)) mmFail(reason);
+  if (!isPlainRecord(value)) mmEvidenceFail(reason, "rpc_record");
   return value;
 }
 
 export function rpcQuantity(value: unknown,
   reason: MetaMaskGaslessFailureReason = "mm_gasless_evidence_invalid"): bigint {
-  if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63})$/u.test(value)) mmFail(reason);
+  if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63})$/u.test(value)) mmEvidenceFail(reason, "rpc_quantity");
   return BigInt(value);
 }
 
 export function rpcHex(value: unknown, maximumBytes = 256 * 1024, bytes?: number,
   reason: MetaMaskGaslessFailureReason = "mm_gasless_evidence_invalid"): Hex {
   if (typeof value !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/u.test(value) ||
-    value.length > 2 + maximumBytes * 2 || (bytes !== undefined && value.length !== 2 + bytes * 2)) mmFail(reason);
+    value.length > 2 + maximumBytes * 2 || (bytes !== undefined && value.length !== 2 + bytes * 2)) mmEvidenceFail(reason, "rpc_hex");
   return value.toLowerCase() as Hex;
 }
 
@@ -104,7 +105,7 @@ export async function rpcBlock(call: MmRpcCall, tag: "latest" | "safe" | "finali
   const raw = rpcRecord(await call("eth_getBlockByNumber", [tag, fullTransactions]));
   const number = rpcQuantity(raw.number), hash = rpcHex(raw.hash, 32, 32);
   if (hash === MM_ZERO_HEX_HASH || (tag.startsWith("0x") && number !== rpcQuantity(tag))) {
-    mmFail("mm_gasless_evidence_invalid");
+    mmEvidenceFail("mm_gasless_evidence_invalid", "header_identity", "eth_getBlockByNumber");
   }
   return { block: { numberAtomic: number.toString(), hash, timestampAtomic: rpcQuantity(raw.timestamp).toString() },
     raw, tag: quantity(number) };
@@ -113,7 +114,7 @@ export async function rpcBlock(call: MmRpcCall, tag: "latest" | "safe" | "finali
 export async function recheckBlock(call: MmRpcCall, block: MetaMaskGaslessBlock,
   reason: MetaMaskGaslessFailureReason = "mm_gasless_scan_reorg"): Promise<void> {
   const current = await rpcBlock(call, quantity(BigInt(block.numberAtomic)));
-  if (!sameBlock(current.block, block)) mmFail(reason);
+  if (!sameBlock(current.block, block)) mmEvidenceFail(reason, "header_recheck", "eth_getBlockByNumber");
 }
 
 export function sameBlock(left: MetaMaskGaslessBlock, right: MetaMaskGaslessBlock): boolean {
