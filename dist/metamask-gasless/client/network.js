@@ -112,7 +112,9 @@ export class HelperNetworkPolicy {
         }
         catch (error) {
             if (this.context.mode === "quote" && error !== null && typeof error === "object")
-                this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed });
+                this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
+                    ...(validationFailed && readNetwork === "sentinel-quote" && validationPredicates.has(error)
+                        ? { validationPredicate: validationPredicates.get(error) } : {}) });
             throw error;
         }
     }
@@ -322,7 +324,7 @@ function validateSubmitBody(body, intent, expected) {
     }
 }
 function validateResponse(key, body, requestBody, context) {
-    const value = parseBody(body);
+    const value = key === "sentinel-quote" ? parseSentinelResponse(body) : parseBody(body);
     if (key === "mimir-networks") {
         if (!exactKeys(value, ["networks"]) || !Array.isArray(value.networks) || value.networks.length > 256 || value.networks.some((row) => !isPlainRecord(row) || typeof row.chainId !== "number" || typeof row.name !== "string" ||
             !["mainnet", "testnet"].includes(String(row.networkType)) || typeof row.shieldSupported !== "boolean"))
@@ -354,39 +356,70 @@ function validateResponse(key, body, requestBody, context) {
     else if (key === "sentinel-quote")
         validateSentinelResponse(value, context);
 }
+const validationPredicates = new WeakMap();
+function sentinelRequire(condition, predicate) {
+    if (condition)
+        return;
+    try {
+        mmFail("mm_gasless_provider_unavailable");
+    }
+    catch (error) {
+        if (error !== null && typeof error === "object")
+            validationPredicates.set(error, predicate);
+        throw error;
+    }
+}
+function parseSentinelResponse(body) {
+    let value;
+    try {
+        value = JSON.parse(body);
+    }
+    catch {
+        sentinelRequire(false, "response_json");
+    }
+    sentinelRequire(isPlainRecord(value), "response_root");
+    return value;
+}
 function validateSentinelResponse(value, context) {
-    if (context.mode !== "quote" || !exactKeys(value, ["jsonrpc", "id", "result"]) || value.jsonrpc !== "2.0" || value.id !== 10 ||
-        !isPlainRecord(value.result) || !Array.isArray(value.result.transactions) ||
-        value.result.transactions.length < 1 || value.result.transactions.length > 8)
-        mmFail("mm_gasless_provider_unavailable");
-    // The pinned SDK consumes only the last transaction's low fee tier with the requested fee token.
-    // Keep container bounds, but do not treat unconsumed earlier transactions or other tiers as fee quotes.
-    const transaction = value.result.transactions.at(-1);
-    if (!isPlainRecord(transaction) || !Array.isArray(transaction.fees) ||
-        transaction.fees.length < 1 || transaction.fees.length > 8)
-        mmFail("mm_gasless_provider_unavailable");
-    const fee = transaction.fees[0];
-    if (!isPlainRecord(fee) || !Array.isArray(fee.tokenFees) ||
-        fee.tokenFees.length < 1 || fee.tokenFees.length > 32)
-        mmFail("mm_gasless_provider_unavailable");
+    sentinelRequire(context.mode === "quote", "sentinel_mode");
+    sentinelRequire(exactKeys(value, ["jsonrpc", "id", "result"]), "sentinel_keys");
+    sentinelRequire(value.jsonrpc === "2.0", "sentinel_jsonrpc");
+    sentinelRequire(value.id === 10, "sentinel_id");
+    sentinelRequire(isPlainRecord(value.result), "sentinel_result");
+    const result = value.result;
+    sentinelRequire(Array.isArray(result.transactions), "sentinel_transactions");
+    const transactions = result.transactions;
+    sentinelRequire(transactions.length >= 1 && transactions.length <= 8, "sentinel_transactions_length");
+    // The pinned SDK consumes only the last transaction's low tier with the requested fee token.
+    const transaction = transactions.at(-1);
+    sentinelRequire(isPlainRecord(transaction), "sentinel_last_transaction");
+    const tx = transaction;
+    sentinelRequire(Array.isArray(tx.fees), "sentinel_fees");
+    const fees = tx.fees;
+    sentinelRequire(fees.length >= 1 && fees.length <= 8, "sentinel_fees_length");
+    sentinelRequire(isPlainRecord(fees[0]), "sentinel_low_tier");
+    const fee = fees[0];
+    sentinelRequire(Array.isArray(fee.tokenFees), "sentinel_token_fees");
+    const tokenFees = fee.tokenFees;
+    sentinelRequire(tokenFees.length >= 1 && tokenFees.length <= 32, "sentinel_token_fees_length");
     const matching = [];
-    for (const entry of fee.tokenFees) {
-        // SDK find() reads each candidate token address before it chooses the requested token.
-        if (!isPlainRecord(entry) || !isPlainRecord(entry.token) || typeof entry.token.address !== "string" ||
-            !/^0x[0-9a-fA-F]{40}$/u.test(entry.token.address))
-            mmFail("mm_gasless_provider_unavailable");
-        if (entry.token.address.toLowerCase() === context.input.token)
+    for (const candidate of tokenFees) {
+        sentinelRequire(isPlainRecord(candidate), "sentinel_entry");
+        const entry = candidate;
+        sentinelRequire(isPlainRecord(entry.token), "sentinel_token");
+        const token = entry.token;
+        sentinelRequire(typeof token.address === "string" && /^0x[0-9a-fA-F]{40}$/u.test(token.address), "sentinel_token_address");
+        if (context.mode === "quote" && token.address.toLowerCase() === context.input.token)
             matching.push(entry);
     }
-    // A duplicate matching token is ambiguous, even though the SDK would select its first occurrence.
-    if (matching.length !== 1)
-        mmFail("mm_gasless_provider_unavailable");
-    const entry = matching[0];
-    const token = entry.token;
-    if (entry.error || typeof token.symbol !== "string" || token.symbol.length < 1 || token.symbol.length > 32 ||
-        token.decimals !== 6 || !tokenFeeQuantity(entry.balanceNeededToken) || typeof entry.feeRecipient !== "string" ||
-        !/^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient))
-        mmFail("mm_gasless_provider_unavailable");
+    // Duplicated matching tokens remain ambiguous; no SDK first-match relaxation.
+    sentinelRequire(matching.length === 1, "sentinel_token_match");
+    const entry = matching[0], token = entry.token;
+    sentinelRequire(!entry.error, "sentinel_entry_error");
+    sentinelRequire(typeof token.symbol === "string" && token.symbol.length >= 1 && token.symbol.length <= 32, "sentinel_symbol");
+    sentinelRequire(token.decimals === 6, "sentinel_decimals");
+    sentinelRequire(tokenFeeQuantity(entry.balanceNeededToken), "sentinel_fee_quantity");
+    sentinelRequire(typeof entry.feeRecipient === "string" && /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient), "sentinel_fee_recipient");
 }
 function tokenFeeQuantity(value) {
     // Sentinel emits hex quantities; the SDK also accepts decimal strings through BigInt.

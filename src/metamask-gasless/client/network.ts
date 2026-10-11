@@ -1,4 +1,4 @@
-import type { ReadNetwork } from "./read-diagnostic.js";
+import type { ReadNetwork, ReadValidationPredicate } from "./read-diagnostic.js";
 import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
@@ -44,9 +44,9 @@ export class HelperNetworkPolicy {
   private lastClockMs: number | undefined;
   private deadlineFailure: "mm_gasless_expired" | "mm_gasless_clock" | undefined;
   private sessionFailure = false;
-  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean }>();
+  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate }>();
   /** Transient fixed metadata, never response content or permission. */
-  readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean } {
+  readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate } {
     return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
       : { network: "none", httpStatus: null, validationFailed: false };
   }
@@ -111,7 +111,9 @@ export class HelperNetworkPolicy {
     return new Response(response.body, { status: response.status, headers: outputHeaders });
     } catch (error) {
       if (this.context.mode === "quote" && error !== null && typeof error === "object")
-        this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed });
+        this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
+          ...(validationFailed && readNetwork === "sentinel-quote" && validationPredicates.has(error)
+            ? { validationPredicate: validationPredicates.get(error)! } : {}) });
       throw error;
     }
   }
@@ -263,7 +265,7 @@ function validateSubmitBody(body: string, intent: MetaMaskGaslessIntent, expecte
   }
 }
 function validateResponse(key: string, body: string, requestBody: string | null, context: ModeContext): void {
-  const value = parseBody(body);
+  const value = key === "sentinel-quote" ? parseSentinelResponse(body) : parseBody(body);
   if (key === "mimir-networks") {
     if (!exactKeys(value, ["networks"]) || !Array.isArray(value.networks) || value.networks.length > 256 || value.networks.some((row) =>
       !isPlainRecord(row) || typeof row.chainId !== "number" || typeof row.name !== "string" ||
@@ -288,32 +290,57 @@ function validateResponse(key: string, body: string, requestBody: string | null,
       (key === "rpc-decimals" && BigInt(value.result) !== 6n)) mmFail("mm_gasless_provider_unavailable");
   } else if (key === "sentinel-quote") validateSentinelResponse(value, context);
 }
+const validationPredicates = new WeakMap<object, ReadValidationPredicate>();
+function sentinelRequire(condition: boolean, predicate: ReadValidationPredicate): void {
+  if (condition) return;
+  try { mmFail("mm_gasless_provider_unavailable"); }
+  catch (error) { if (error !== null && typeof error === "object") validationPredicates.set(error, predicate); throw error; }
+}
+function parseSentinelResponse(body: string): Record<string, unknown> {
+  let value: unknown;
+  try { value = JSON.parse(body); } catch { sentinelRequire(false, "response_json"); }
+  sentinelRequire(isPlainRecord(value), "response_root");
+  return value as Record<string, unknown>;
+}
 function validateSentinelResponse(value: Record<string, unknown>, context: ModeContext): void {
-  if (context.mode !== "quote" || !exactKeys(value, ["jsonrpc", "id", "result"]) || value.jsonrpc !== "2.0" || value.id !== 10 ||
-    !isPlainRecord(value.result) || !Array.isArray(value.result.transactions) ||
-    value.result.transactions.length < 1 || value.result.transactions.length > 8) mmFail("mm_gasless_provider_unavailable");
-  // The pinned SDK consumes only the last transaction's low fee tier with the requested fee token.
-  // Keep container bounds, but do not treat unconsumed earlier transactions or other tiers as fee quotes.
-  const transaction = value.result.transactions.at(-1);
-  if (!isPlainRecord(transaction) || !Array.isArray(transaction.fees) ||
-    transaction.fees.length < 1 || transaction.fees.length > 8) mmFail("mm_gasless_provider_unavailable");
-  const fee = transaction.fees[0];
-  if (!isPlainRecord(fee) || !Array.isArray(fee.tokenFees) ||
-    fee.tokenFees.length < 1 || fee.tokenFees.length > 32) mmFail("mm_gasless_provider_unavailable");
+  sentinelRequire(context.mode === "quote", "sentinel_mode");
+  sentinelRequire(exactKeys(value, ["jsonrpc", "id", "result"]), "sentinel_keys");
+  sentinelRequire(value.jsonrpc === "2.0", "sentinel_jsonrpc");
+  sentinelRequire(value.id === 10, "sentinel_id");
+  sentinelRequire(isPlainRecord(value.result), "sentinel_result");
+  const result = value.result as Record<string, unknown>;
+  sentinelRequire(Array.isArray(result.transactions), "sentinel_transactions");
+  const transactions = result.transactions as unknown[];
+  sentinelRequire(transactions.length >= 1 && transactions.length <= 8, "sentinel_transactions_length");
+  // The pinned SDK consumes only the last transaction's low tier with the requested fee token.
+  const transaction = transactions.at(-1);
+  sentinelRequire(isPlainRecord(transaction), "sentinel_last_transaction");
+  const tx = transaction as Record<string, unknown>;
+  sentinelRequire(Array.isArray(tx.fees), "sentinel_fees");
+  const fees = tx.fees as unknown[];
+  sentinelRequire(fees.length >= 1 && fees.length <= 8, "sentinel_fees_length");
+  sentinelRequire(isPlainRecord(fees[0]), "sentinel_low_tier");
+  const fee = fees[0] as Record<string, unknown>;
+  sentinelRequire(Array.isArray(fee.tokenFees), "sentinel_token_fees");
+  const tokenFees = fee.tokenFees as unknown[];
+  sentinelRequire(tokenFees.length >= 1 && tokenFees.length <= 32, "sentinel_token_fees_length");
   const matching: Record<string, unknown>[] = [];
-  for (const entry of fee.tokenFees) {
-    // SDK find() reads each candidate token address before it chooses the requested token.
-    if (!isPlainRecord(entry) || !isPlainRecord(entry.token) || typeof entry.token.address !== "string" ||
-      !/^0x[0-9a-fA-F]{40}$/u.test(entry.token.address)) mmFail("mm_gasless_provider_unavailable");
-    if (entry.token.address.toLowerCase() === context.input.token) matching.push(entry);
+  for (const candidate of tokenFees) {
+    sentinelRequire(isPlainRecord(candidate), "sentinel_entry");
+    const entry = candidate as Record<string, unknown>;
+    sentinelRequire(isPlainRecord(entry.token), "sentinel_token");
+    const token = entry.token as Record<string, unknown>;
+    sentinelRequire(typeof token.address === "string" && /^0x[0-9a-fA-F]{40}$/u.test(token.address), "sentinel_token_address");
+    if (context.mode === "quote" && (token.address as string).toLowerCase() === context.input.token) matching.push(entry);
   }
-  // A duplicate matching token is ambiguous, even though the SDK would select its first occurrence.
-  if (matching.length !== 1) mmFail("mm_gasless_provider_unavailable");
-  const entry = matching[0]!;
-  const token = entry.token as Record<string, unknown>;
-  if (entry.error || typeof token.symbol !== "string" || token.symbol.length < 1 || token.symbol.length > 32 ||
-    token.decimals !== 6 || !tokenFeeQuantity(entry.balanceNeededToken) || typeof entry.feeRecipient !== "string" ||
-    !/^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient)) mmFail("mm_gasless_provider_unavailable");
+  // Duplicated matching tokens remain ambiguous; no SDK first-match relaxation.
+  sentinelRequire(matching.length === 1, "sentinel_token_match");
+  const entry = matching[0]!, token = entry.token as Record<string, unknown>;
+  sentinelRequire(!entry.error, "sentinel_entry_error");
+  sentinelRequire(typeof token.symbol === "string" && token.symbol.length >= 1 && token.symbol.length <= 32, "sentinel_symbol");
+  sentinelRequire(token.decimals === 6, "sentinel_decimals");
+  sentinelRequire(tokenFeeQuantity(entry.balanceNeededToken), "sentinel_fee_quantity");
+  sentinelRequire(typeof entry.feeRecipient === "string" && /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient), "sentinel_fee_recipient");
 }
 function tokenFeeQuantity(value: unknown): boolean {
   // Sentinel emits hex quantities; the SDK also accepts decimal strings through BigInt.

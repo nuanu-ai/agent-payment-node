@@ -1,4 +1,4 @@
-import type { ReadNetwork } from "./read-diagnostic.js";
+import type { ReadNetwork, ReadValidationPredicate } from "./read-diagnostic.js";
 import { type MetaMaskGaslessIntent } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 export interface FetchExchangeRequest {
@@ -51,6 +51,7 @@ export declare class HelperNetworkPolicy {
         readonly network: ReadNetwork;
         readonly httpStatus: number | null;
         readonly validationFailed: boolean;
+        readonly validationPredicate?: ReadValidationPredicate;
     };
     constructor(context: ModeContext, exchange?: FetchExchange);
     didObserveNotFound(): boolean;
