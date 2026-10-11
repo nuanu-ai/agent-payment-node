@@ -4,7 +4,7 @@ import test from "node:test";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getAddress, keccak256, type Hex } from "viem";
+import { decodeFunctionData, encodeFunctionResult, getAddress, keccak256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject, canonicalJson } from "../../src/canonical.js";
 import { StateStore } from "../../src/state.js";
@@ -100,6 +100,47 @@ test("production funding constructor rejects injected terminal authority before 
 });
 
 import { readdir } from "node:fs/promises";
+import { CircleRpc, CIRCLE_RPC_ABI } from "../../src/circle-v2-evm/rpc.js";
+import { circleUint } from "../../src/circle-v2-evm/protocol.js";
+
+for (const role of ["approval", "burn"] as const) for (const bad of ["none", "principal", "native", "allowance", "nonce"] as const)
+test(`production ABI uint256 ${role} preflight ${bad} preserves finite checks`, async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "b2-abi-uint-preflight-"))); t.after(() => rm(root, { recursive: true, force: true }));
+  const op = funding(root, 143), effect = op.effects.find(e => e.role === role)!; let keys = 0, sends = 0, principalReads = 0;
+  const service = new CircleFundingEvmService(new StateStore(root), { create: async () => { keys++; throw Error("NO_KEY"); }, load: async () => { keys++; throw Error("NO_KEY"); } }, {}, () => at, {},
+    { request: async () => ({ status: 200, body: JSON.stringify([{ finalityThreshold: 1000, minimumFee: 1 }]) }) });
+  const remote = new CircleRpc("https://abi-test.example", 42161);
+  t.mock.method(remote, "call", async (method: string, args: readonly unknown[]) => {
+    if (method === "eth_sendRawTransaction") { sends++; throw Error("NO_SEND"); }
+    if (method === "eth_chainId") return "0xa4b1";
+    if (method === "eth_getTransactionCount") return `0x${(BigInt(effect.envelope.nonceAtomic) + (bad === "nonce" ? 1n : 0n)).toString(16)}`;
+    if (method === "eth_getBalance") return `0x${(bad === "native" ? 1n : 100_000_000_000_000n).toString(16)}`;
+    if (method === "eth_estimateGas") return "0x10000";
+    if (method === "eth_call") {
+      const tx = args[0] as { to: string; data: Hex };
+      if (tx.to === CIRCLE_SOURCE_TOKEN && args[1] === "latest") {
+        const decoded = decodeFunctionData({ abi: CIRCLE_RPC_ABI, data: tx.data }); assert.equal(decoded.functionName, "allowance");
+        const expected = role === "approval" ? 0n : BigInt(op.funding.amountAtomic);
+        return encodeFunctionResult({ abi: CIRCLE_RPC_ABI, functionName: "allowance", result: bad === "allowance" ? expected + 1n : expected });
+      }
+      if (tx.to === CIRCLE_SOURCE_TOKEN && args[1] === "pending" && tx.data !== effect.envelope.data) {
+        const decoded = decodeFunctionData({ abi: CIRCLE_RPC_ABI, data: tx.data }); assert.equal(decoded.functionName, "balanceOf"); principalReads++;
+        return encodeFunctionResult({ abi: CIRCLE_RPC_ABI, functionName: "balanceOf", result: bad === "principal" ? 999999n : 1000000n });
+      }
+      return "0x";
+    }
+    throw Error(method);
+  });
+  // Keep CircleRpc.read and its real uint256 ABI decoder; only the TEST physical transport result is synthetic.
+  const decoded = await remote.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], "pending");
+  assert.equal(typeof decoded, "bigint"); assert.throws(() => circleUint(decoded)); principalReads = 0;
+  const internal = service as unknown as { remotes(chain: number): unknown; preflightDeployments(...args: unknown[]): Promise<unknown>; ports(o: CircleFundingOperationV2): CircleFundingLifecyclePorts };
+  t.mock.method(internal, "remotes", () => ({ source: remote, destination: remote })); t.mock.method(internal, "preflightDeployments", async () => ({ digest: op.deploymentDigest }));
+  const ports = internal.ports(op);
+  if (bad === "none") { await ports.preflight(op, effect); assert.equal(principalReads, 1); }
+  else await assert.rejects(ports.preflight(op, effect), new RegExp(bad === "principal" ? "funding_source_principal_changed" : bad === "allowance" ? "exact_source_allowance_changed" : "nonce_or_native_balance_changed"));
+  assert.equal(keys, 0); assert.equal(sends, 0); assert.deepEqual(await readdir(root), []);
+});
 /** Production mint-preflight regression: public TEST observations and TEST issuer keys, no authority/custody seam. */
 async function finiteMintPreflight(root: string, chain: 143 | 59144 | 1329) {
   const original = funding(root, chain), secondRecipient = getAddress(`0x${"66".repeat(20)}`);

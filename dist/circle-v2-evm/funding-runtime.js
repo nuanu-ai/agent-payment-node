@@ -242,7 +242,7 @@ export class CircleFundingEvmService {
                     circleBlocked("exact_source_allowance_changed");
                 if (effect.role === "approval" || effect.role === "burn") {
                     assertCircleFundingFee(op.funding, await this.fee(op.funding), this.now());
-                    if (circleUint(await source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], "pending")) < BigInt(op.funding.amountAtomic))
+                    if (circleUint(String(await source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], "pending"))) < BigInt(op.funding.amountAtomic))
                         circleBlocked("funding_source_principal_changed");
                 }
                 const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction]));
