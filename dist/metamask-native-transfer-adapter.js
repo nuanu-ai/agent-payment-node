@@ -1,3 +1,5 @@
+import { metaMaskNativePolicyVariants, metaMaskNativePolicyAllowsChain } from "./metamask-native-policy.js";
+import { getAddress } from "viem";
 import { performance } from "node:perf_hooks";
 import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
@@ -9,9 +11,6 @@ import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import { validateMetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent } from "./metamask-native-transfer-owner.js";
 const PAYER = "0xf41170df51aab52aaa04fbc3ff325cf051644aca";
-const POLICY_HASH = "e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a";
-const OP_POLICY_HASH = "7e5d5899170740ccaa05fb45415c9ef5320815e446788719f3523eb0fd58ee37";
-const PROFILE = "metamask-live-v042";
 const CHAINS = new Set([1, 10, 143, 59144, 1329]);
 const EFFECT_STATES = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"]);
 class NativeReadRefusal extends ApnError {
@@ -32,7 +31,7 @@ function chain(value) {
 }
 function policyAllowsChain(policy, chainId) {
     chain(chainId);
-    if (chainId === 10 && policy.vendorPolicyHash !== OP_POLICY_HASH)
+    if (!metaMaskNativePolicyAllowsChain(policy, chainId, policy.selectedAddress))
         refuse();
 }
 function success(result) {
@@ -41,12 +40,12 @@ function success(result) {
         refuse(result.nativeDiagnostic === undefined ? undefined : validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, code: result.exitCode === 0 ? "protocol" : result.nativeDiagnostic.code }));
     return envelope.data;
 }
-async function address(runner, deadline) {
+async function address(runner, deadline, expectedPayer = PAYER) {
     const result = await runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"], remaining(deadline), deadline);
     try {
         const data = success(result);
         if (data.mode !== "server" || !isMetaMaskEvmNamespace(data.chainNamespace) ||
-            typeof data.address !== "string" || data.address.toLowerCase() !== PAYER)
+            typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase())
             refuse();
     }
     finally {
@@ -71,19 +70,19 @@ async function project(runner, deadline) {
         result.stdout.fill(0);
     }
 }
-async function readPolicy(runner, deadline, observation) {
+async function readPolicy(runner, deadline, observation, expectedPayer = PAYER) {
     if (observation !== undefined)
         observation.guard_step = "project_before";
     const vendorProjectHash = await project(runner, deadline);
     if (observation !== undefined)
         observation.guard_step = "address_before";
-    await address(runner, deadline);
+    await address(runner, deadline, expectedPayer);
     if (observation !== undefined)
         observation.guard_step = "trading_mode";
     const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
     try {
         const data = success(mode);
-        if (data.mode !== "guard" || typeof data.address !== "string" || data.address.toLowerCase() !== PAYER)
+        if (data.mode !== "guard" || typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase())
             refuse();
     }
     finally {
@@ -95,32 +94,30 @@ async function readPolicy(runner, deadline, observation) {
     let variant;
     try {
         const data = success(result);
-        if (typeof data.address !== "string" || data.address.toLowerCase() !== PAYER || typeof data.policy !== "string")
+        if (typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase() || typeof data.policy !== "string")
             refuse();
         const bytes = Buffer.byteLength(data.policy, "utf8"), hash = sha256(data.policy);
-        if (bytes === 866 && hash === POLICY_HASH)
-            variant = { vendorPolicyHash: POLICY_HASH, policyBytes: 866 };
-        else if (bytes === 945 && hash === OP_POLICY_HASH)
-            variant = { vendorPolicyHash: OP_POLICY_HASH, policyBytes: 945 };
-        else
+        const expected = metaMaskNativePolicyVariants(expectedPayer).find(v => v.policyBytes === bytes && v.vendorPolicyHash === hash);
+        if (expected === undefined)
             refuse();
+        variant = { vendorPolicyHash: expected.vendorPolicyHash, policyBytes: expected.policyBytes };
     }
     finally {
         result.stdout.fill(0);
     }
     if (observation !== undefined)
         observation.guard_step = "address_after";
-    await address(runner, deadline);
+    await address(runner, deadline, expectedPayer);
     if (observation !== undefined)
         observation.guard_step = "project_after";
     if (await project(runner, deadline) !== vendorProjectHash)
         refuse();
-    return Object.freeze({ selectedAddress: PAYER, ...variant, vendorProjectHash, tradingMode: "guard", observedAt: new Date().toISOString() });
+    return Object.freeze({ selectedAddress: getAddress(expectedPayer), ...variant, vendorProjectHash, tradingMode: "guard", observedAt: new Date().toISOString() });
 }
 /** Normal pinned CLI GETs only. No YAML decoder, policy mutation or remote rolling-usage prediction. */
-export async function readFixedMetaMaskNativePolicy(chainId, deadline) {
+export async function readFixedMetaMaskNativePolicy(chainId, deadline, expectedPayer = PAYER) {
     chain(chainId);
-    const policy = await readPolicy(new NodeMetaMaskProcessRunner(), deadline);
+    const policy = await readPolicy(new NodeMetaMaskProcessRunner(), deadline, undefined, getAddress(expectedPayer));
     policyAllowsChain(policy, chainId);
     return policy;
 }
@@ -132,8 +129,8 @@ export async function submitOwnedMetaMaskNative(scope, context) {
     nativeDeadlineRemaining(deadline);
     const quote = validateMetaMaskNativeFeeQuote(context.quote);
     chain(quote.chainId);
-    if (context.profile !== PROFILE || quote.sender.toLowerCase() !== PAYER ||
-        (context.vendorPolicyHash !== POLICY_HASH && context.vendorPolicyHash !== OP_POLICY_HASH))
+    const policy = metaMaskNativePolicyVariants(quote.sender).find(v => v.vendorPolicyHash === context.vendorPolicyHash);
+    if (policy === undefined || !metaMaskNativePolicyAllowsChain(policy, quote.chainId, quote.sender))
         refuse();
     // Finish package validation before the last owner/deadline check, so a slow resolver cannot move the private handoff past it.
     nativeDeadlineRemaining(deadline);
@@ -166,7 +163,7 @@ export async function submitOwnedMetaMaskNative(scope, context) {
     catch (error) {
         const diagnostic = takeMetaMaskNativeProcessFailureDiagnostic(error);
         const observed = takeMetaMaskNativeProcessFailureIdentifiers(error);
-        const bound = observed !== undefined && (observed.sender === undefined || observed.sender === PAYER) &&
+        const bound = observed !== undefined && (observed.sender === undefined || observed.sender === quote.sender.toLowerCase()) &&
             (observed.chainId === undefined || observed.chainId === quote.chainId) &&
             (observed.vendorProjectHash === undefined || observed.vendorProjectHash === context.vendorProjectHash);
         // Rejection remains UNKNOWN even when the real failed child emitted a recoverable identifier.
@@ -181,7 +178,7 @@ export async function submitOwnedMetaMaskNative(scope, context) {
     }
     let hint;
     try {
-        hint = submissionHint(result);
+        hint = submissionHint(result, quote.sender);
     }
     finally {
         result.stdout.fill(0);
@@ -206,7 +203,7 @@ function readDiagnostic(value) {
     }
 }
 /** Normal status READ only. Owner supplies RID/project hash from its authentic journal; a service hint is not chain evidence. */
-export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHash) {
+export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHash, expectedPayer = PAYER) {
     const observation = { stage: "input", guard_step: null, request_id: null, watch_returned: false,
         before_guard_verified: false, after_guard_verified: false, request_identity_verified: false, provider_status: null,
         transaction_hash: null, chain_id: null, response_hash: null, reason: null, error_code: null, diagnostic: null };
@@ -223,7 +220,7 @@ export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHas
     let hint = { disposition: "unknown", reason: "provider_request_read_unavailable", requestId };
     try {
         observation.stage = "before_guard";
-        const before = await readPolicy(runner, undefined, observation);
+        const before = await readPolicy(runner, undefined, observation, getAddress(expectedPayer));
         if (before.vendorProjectHash !== vendorProjectHash)
             refuse();
         observation.before_guard_verified = true;
@@ -240,7 +237,7 @@ export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHas
             result.stdout.fill(0);
         }
         observation.stage = "after_guard";
-        const after = await readPolicy(runner, undefined, observation);
+        const after = await readPolicy(runner, undefined, observation, getAddress(expectedPayer));
         if (after.vendorProjectHash !== vendorProjectHash || after.vendorPolicyHash !== before.vendorPolicyHash)
             refuse();
         if (hint.chainId !== undefined)
@@ -301,7 +298,7 @@ function requestHint(result, requestId, observation) {
         return { disposition: "pending", requestId, ...chainHint };
     return { disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint };
 }
-function submissionHint(result) {
+function submissionHint(result, expectedPayer) {
     const parsed = parseMetaMaskProcessOutput(result.stdout);
     if (parsed === null)
         return { disposition: "unknown", reason: "provider_response_malformed" };
@@ -318,7 +315,7 @@ function submissionHint(result) {
     if (result.exitCode !== 0)
         return unknown("provider_private_handoff_outcome_unknown");
     if (parsed.envelope?.ok === true && isPlainRecord(data)) {
-        if (data.mode !== "server" || typeof data.address !== "string" || data.address.toLowerCase() !== PAYER)
+        if (data.mode !== "server" || typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase())
             return unknown("provider_sender_mismatch");
         if (transactionHash !== undefined)
             return { disposition: "acknowledged", transactionHash };

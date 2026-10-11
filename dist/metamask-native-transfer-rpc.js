@@ -52,24 +52,25 @@ async function deadlineRead(chainId, deadline, read) {
     }
 }
 /** Recheck the fixed owner's current pending nonce before a private signing handoff. */
-export async function readFixedMetaMaskNativeNonce(chainId, deadline) {
-    return await deadlineRead(chainId, deadline, rpc => rpc.nonce(fixedChain(chainId), METAMASK_NATIVE_FIXED_SENDER, "pending"));
+export async function readFixedMetaMaskNativeNonce(chainId, deadline, sender = METAMASK_NATIVE_FIXED_SENDER) {
+    return await deadlineRead(chainId, deadline, rpc => rpc.nonce(fixedChain(chainId), getAddress(sender), "pending"));
 }
-export async function readFixedMetaMaskNativeBalances(chainId, deadline) {
-    return await deadlineRead(chainId, deadline, rpc => rpc.balance(METAMASK_NATIVE_FIXED_SENDER, { chainId, token: token(chainId), decimals: 6 }));
+export async function readFixedMetaMaskNativeBalances(chainId, deadline, sender = METAMASK_NATIVE_FIXED_SENDER) {
+    return await deadlineRead(chainId, deadline, rpc => rpc.balance(getAddress(sender), { chainId, token: token(chainId), decimals: 6 }));
 }
 export async function prepareFixedMetaMaskNativeQuote(input) {
     return await prepareWithRpc(productionRpc(input.chainId), input);
 }
 /** Test injection is the existing EvmRpc read-only transport, never a signing or payment callback. */
 export async function prepareWithRpc(rpc, input) {
+    const sender = getAddress(input.sender ?? METAMASK_NATIVE_FIXED_SENDER);
     const chainId = fixedChain(input.chainId), cap = evmUint(input.maximumNativeFeeWei, true).toString(), to = token(chainId);
     const data = encodeFunctionData({ abi: TRANSFER, functionName: "transfer", args: [getAddress(METAMASK_NATIVE_FEE_SELLER), 1000n] });
-    const nonceAtomic = await rpc.nonce(chainId, METAMASK_NATIVE_FIXED_SENDER, "pending");
-    const estimated = await rpc.estimate({ chainId, from: METAMASK_NATIVE_FIXED_SENDER, to, data, valueAtomic: "0" });
+    const nonceAtomic = await rpc.nonce(chainId, sender, "pending");
+    const estimated = await rpc.estimate({ chainId, from: sender, to, data, valueAtomic: "0" });
     const economics = { nonceAtomic, ...estimated, maximumGasCostAtomic: (evmUint(estimated.gasLimitAtomic, true) * evmUint(estimated.maxFeePerGasAtomic, true)).toString() };
     const feeQuote = await rpc.feeQuote(chainId, economics);
-    const body = { schemaVersion: METAMASK_NATIVE_FEE_QUOTE_SCHEMA, chainId, sender: METAMASK_NATIVE_FIXED_SENDER, token: to,
+    const body = { schemaVersion: METAMASK_NATIVE_FEE_QUOTE_SCHEMA, chainId, sender, token: to,
         tokenDecimals: 6, seller: METAMASK_NATIVE_FEE_SELLER, grossAtomic: "1000", netAtomic: "1000",
         tokenFeeAtomic: "0", nativeFeeCapAtomic: cap, transaction: { type: 2, to, data, valueAtomic: "0",
             nonceAtomic, gasLimitAtomic: estimated.gasLimitAtomic, maxFeePerGasAtomic: estimated.maxFeePerGasAtomic,
@@ -84,8 +85,6 @@ export async function observeFixedMetaMaskNativeTransfer(quote, transactionHash)
 export async function observeWithRpc(rpc, quoteValue, transactionHash) {
     // A mined receipt remains observable after quote TTL; TTL still gates preparing/submitting the frozen transaction.
     const quote = validateMetaMaskNativeFeeQuote(quoteValue, new Date(quoteValue.feeQuote.observedAt));
-    if (quote.sender !== METAMASK_NATIVE_FIXED_SENDER)
-        throw new ApnError("APN_STATE_CORRUPT", "Quote sender differs from fixed owner.");
     const chainId = fixedChain(quote.chainId), hash = evmRpcHex(transactionHash, 32);
     if (hash === `0x${"0".repeat(64)}`)
         throw new ApnError("APN_INVALID_INPUT", "Transaction hash must be nonzero.");
