@@ -324,21 +324,23 @@ test("malformed successful primary data is a validation failure and never falls 
   assert.deepEqual(calls, ["primary.example"]);
 });
 
-test("an archive URL with the primary origin never duplicates a null receipt read", async () => {
+test("an owner-explicit same-origin archive serves the checked receipt fallback", async () => {
   const calls: string[] = [];
   const environment = { ...primary, APN_ETHEREUM_ARCHIVE_RPC_URL: "https://primary.example/archive" };
   const transport = { request: async (endpoint: string, _verb: string, body: string | null) => {
-    calls.push(`${new URL(endpoint).pathname}:${(JSON.parse(body!) as { method: string }).method}`);
-    const request = JSON.parse(body!) as { id: string }; return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: request.id, result: null }) };
+    const request = JSON.parse(body!), rows = Array.isArray(request) ? request : [request];
+    const results = rows.map(row => { calls.push(`${new URL(endpoint).pathname}:${row.method}`);
+      return { jsonrpc: "2.0", id: row.id, result: row.method === "eth_chainId" ? "0x1" : null }; });
+    return { status: 200, body: JSON.stringify(Array.isArray(request) ? results : results[0]) };
   } };
   assert.equal(await bridgeRpcCall(1, environment, { transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]), null);
-  assert.deepEqual(calls, ["/:eth_getTransactionReceipt"]);
+  assert.deepEqual(calls, ["/:eth_getTransactionReceipt", "/archive:eth_chainId", "/archive:eth_getTransactionReceipt"]);
 });
 
 test("without an archive name historical state fails before a state read reaches the primary", async () => {
   const f = fixture();
   await assert.rejects(bridgeRpcCall(1, primary, { transport: f.transport }).call("eth_getCode", [DIAMOND, "0x18c9a42"]),
-    { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", details: { reason: "distinct_archive_RPC_required" } });
+    { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", details: { reason: "explicit_archive_RPC_required" } });
   await bridgeRpcCall(1, primary, { transport: f.transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]);
   assert.deepEqual(f.calls, [
     { host: "primary.example", method: "eth_getTransactionReceipt" },
@@ -504,4 +506,39 @@ test("only exact block-pinned state reads qualify as historical", () => {
   assert.equal(isArchiveRead("eth_getTransactionReceipt", ["0xdeadbeef"]), false);
   assert.equal(isArchiveRead("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`, "extra"]), false);
   assert.equal(isArchiveRead("eth_sendRawTransaction", [`0x${"b".repeat(64)}`]), false);
+});
+
+test("LI.FI missing historical state archive refuses before transport with explicit bounded reason", async () => {
+  const f = fixture(), descriptor = bridgeRpcCall(1, primary, { transport: f.transport });
+  for (const call of [descriptor.call, descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }))]) {
+    await assert.rejects(call("eth_getCode", [DIAMOND, "0x10"]), (error: unknown) => {
+      assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+      assert.deepEqual(error.details, { reason: "explicit_archive_RPC_required" }); return true;
+    });
+  }
+  assert.equal(f.calls.length, 0);
+});
+
+for (const sessionMode of [false, true]) test(`same-origin explicit archive preserves checked historical state routing; session=${sessionMode}`, async () => {
+  const f = fixture(), descriptor = bridgeRpcCall(1, { ...primary, APN_ETHEREUM_ARCHIVE_RPC_URL: "https://primary.example/archive" }, { transport: f.transport });
+  const session = new RpcReadSession({ wait: async () => {} }), call = sessionMode ? descriptor.sessionCall(session) : descriptor.call;
+  for (const [method, params] of [
+    ["eth_getCode", [DIAMOND, "0x18c9a42"]],
+    ["eth_call", [{ to: DIAMOND, data: "0x" }, { blockHash: `0x${"a".repeat(64)}`, requireCanonical: true }]],
+    ["eth_getStorageAt", [DIAMOND, "0x0", "0x18c9a42"]],
+  ] as const) assert.equal(await call(method, params), "0x60");
+  assert.deepEqual(f.calls.map(row => row.method), ["eth_chainId", "eth_getCode", "eth_call", "eth_getStorageAt"]);
+  assert.ok(f.calls.every(row => row.host === "primary.example"));
+  if (sessionMode) { assert.equal(session.telemetry().attemptsByEndpointRole.archive, 4); assert.equal(session.telemetry().attemptsByEndpointRole.primary, 0); }
+});
+for (const sessionMode of [false, true]) test(`same-origin explicit archive refusal never selects another reader; session=${sessionMode}`, async () => {
+  const methods: string[] = [];
+  const transport = { request: async (_endpoint: string, _verb: string, body: string | null) => {
+    const row = JSON.parse(body!); methods.push(row.method);
+    return { status: 200, body: JSON.stringify(row.method === "eth_chainId" ? { jsonrpc: "2.0", id: row.id, result: "0x1" }
+      : { jsonrpc: "2.0", id: row.id, error: { code: -32000, message: "historical state unavailable" } }) };
+  } };
+  const descriptor = bridgeRpcCall(1, { ...primary, APN_ETHEREUM_ARCHIVE_RPC_URL: primary.APN_ETHEREUM_RPC_URL }, { transport });
+  await assert.rejects((sessionMode ? descriptor.sessionCall(new RpcReadSession({ wait: async () => {} })) : descriptor.call)("eth_getCode", [DIAMOND, "0x10"]), { code: "APN_RPC_PROTOCOL" });
+  assert.deepEqual(methods, ["eth_chainId", "eth_getCode"]);
 });

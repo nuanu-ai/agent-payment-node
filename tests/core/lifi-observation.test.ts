@@ -265,3 +265,28 @@ test("LI.FI journals destination proof before residual failure and reuses it on 
   assert.deepEqual(completed.destinationProof, checkpoint.destinationProof);
   assert.equal(s.destination.calls.length, destinationCalls); assert.equal(s.provider.statusCalls, providerCalls);
 });
+
+for (const reason of ["distinct_archive_RPC_required", "explicit_archive_RPC_required", "historical_receipt_unavailable"] as const)
+  test(`LI.FI observation persists only bounded ${reason} capability diagnostic`, async (t) => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
+    const { id } = await s.prepare();
+    s.source.observe = async () => { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "secret provider body", {
+      reason, endpointUrl: "https://user:secret@rpc.example/key", responseBody: "secret provider body",
+    }); };
+    await s.core.execute({ command: "bridge.approve", operationId: id });
+    const current = (await s.core.bridges.records.findOperation(id))!;
+    assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
+      stage: "source_observation", effectRole: "approval", code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason });
+    validateBridgeOperation(current);
+    const projected = bridgeReceipt(current) as ReturnType<typeof bridgeReceipt> & { observation_rpc_failure?: any };
+    assert.equal(projected.observation_rpc_failure.reason, reason);
+    assert.equal(JSON.stringify({ current, projected }).includes("secret"), false);
+  });
+
+test("LI.FI observation does not publish arbitrary capability reason or provider payload", () => {
+  assert.deepEqual(observationRpcFailure("source", "bridge", new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+    "secret provider body", { reason: "secret-unbounded-reason", responseBody: "secret provider body" })), {
+    schemaVersion: "apn.bridge-observation-rpc-failure.v1", stage: "source_observation", effectRole: "bridge",
+    code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+  });
+});

@@ -178,13 +178,14 @@ export class BridgeService {
             return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ ...options, providerScheduler: this.providerScheduler, physicalBudget }));
         };
         const common = { now: () => this.context.clock.now().getTime(), archiveDeploymentBatchMaxItems: 3 };
-        // Base source observation with explicit scalar receipt and archive readers needs 14 clean requests:
+        // Base source observation with explicit scalar receipt and archive readers needs 15 clean requests:
         // primary chain+transaction+included+safe (4), receipt chain+receipt (2), four three-item archive chunks for
         // the pinned Base fee/code/config/operator/header proof, and four chunks for the historical deployment proof.
         // The latter reuses only exact pinned fee code/storage/reviewed-getter/Multicall and header cache entries;
         // protocol code, proxy/facet/implementation storage and unknown/caller-sensitive calls remain fresh and direct.
-        // Two additional attempts retain the command-wide bounded retry reserve without widening the request graph.
-        const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 14, maxHttpAttempts: 16 });
+        // One uncached primary batch rechecks the two canonical headers after the fee proof.
+        // Base retains one additional attempt; other source paths keep their existing request ceiling.
+        const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: m.request.fromChainId === 8453 ? 15 : 14, maxHttpAttempts: 16 });
         const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: 16, maxHttpAttempts: 16 });
         const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 2, maxHttpAttempts: 3 });
         return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation }, physicalBudget);

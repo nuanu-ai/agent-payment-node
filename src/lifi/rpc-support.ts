@@ -110,8 +110,8 @@ function credentialOrAuthorizationMessage(message: string): boolean {
     .some((part) => message.includes(part));
 }
 export function missingHistoricalArchive(): never {
-  throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Historical bridge proof requires a distinct archive RPC endpoint.",
-    { reason: "distinct_archive_RPC_required" });
+  throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Historical bridge proof requires an explicitly configured archive RPC endpoint.",
+    { reason: "explicit_archive_RPC_required" });
 }
 export function rpcBodyMethod(body: string): string {
   try {

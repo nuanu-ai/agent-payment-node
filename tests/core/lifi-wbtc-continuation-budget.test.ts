@@ -61,10 +61,10 @@ for (const reverse of [false, true]) for (const oldCap of [false, true]) test(`W
   const first = structuredClone(spy.calls); spy.calls.length = 0;
   await guardBridgeEffect(op, "bridge", source, destination, () => time);
   const second = structuredClone(spy.calls);
-  assert.equal(history.length, reverse ? 13 : 11); assert.equal(first.length, 17); assert.equal(second.length, 2);
+  assert.equal(history.length, reverse ? 13 : 12); assert.equal(first.length, 17); assert.equal(second.length, 2);
   // The last admission is the one durable send slot. A second send cannot gain capacity by resetting a read session.
   await physical.beforePost("eth_sendRawTransaction");
-  assert.equal(physical.remaining(), reverse ? 0 : 2);
+  assert.equal(physical.remaining(), reverse ? 0 : 1);
   if (reverse) await assert.rejects(physical.beforePost("eth_sendRawTransaction"), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert(history.every(call => !call.items.some(item => item.method === "eth_sendRawTransaction")));
   assert([...history, ...first, ...second].filter(call => call.host.includes("archive")).every(call => call.items.length <= 3));

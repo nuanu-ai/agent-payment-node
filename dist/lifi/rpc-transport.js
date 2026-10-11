@@ -23,10 +23,11 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
     if (endpoint.search !== "")
         bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_query_forbidden");
     const archive = bridgeArchiveEndpoint(chainId, environment), receipt = bridgeReceiptEndpoint(chainId, environment);
-    const distinctArchive = archive !== null && archive.origin !== endpoint.origin ? archive : null;
+    // The owner explicitly selects the archive role; it may share the primary origin.
+    const explicitArchive = archive;
     const distinctReceipt = receipt !== null && receipt.url.origin !== endpoint.origin ? receipt : null;
     const receiptFallback = distinctReceipt === null
-        ? distinctArchive === null ? null : { url: distinctArchive, maxItemsPerRequest: 3, role: "archive" }
+        ? explicitArchive === null ? null : { url: explicitArchive, maxItemsPerRequest: 3, role: "archive" }
         : { ...distinctReceipt, role: "receipt" };
     let sequence = 0n, archiveChain;
     const call = async (method, params, beforeSend) => {
@@ -51,9 +52,9 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
             return await withEndpointRole(fallbackReceipt(method, params, receiptFallback), receiptFallback.role);
         }
         if (isHistoricalStateRead(method, params)) {
-            if (distinctArchive === null)
+            if (explicitArchive === null)
                 return missingHistoricalArchive();
-            return await withEndpointRole(archiveRead(method, params, distinctArchive), "archive");
+            return await withEndpointRole(archiveRead(method, params, explicitArchive), "archive");
         }
         return await withEndpointRole(retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait), "primary");
     };
@@ -153,7 +154,7 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         const fallback = route === "receipt" ? receiptFallback : null;
         if (route === "receipt" && fallback === null)
             missingHistoricalArchive();
-        const target = route === "receipt" ? fallback.url : route !== "primary" ? distinctArchive ?? missingHistoricalArchive() : endpoint;
+        const target = route === "receipt" ? fallback.url : route !== "primary" ? explicitArchive ?? missingHistoricalArchive() : endpoint;
         const role = route === "primary" ? "primary" : route === "receipt" ? fallback.role : "archive";
         const attempt = async (body) => await batchAttempt(target, body, session.currentTime(), role, session);
         const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
@@ -193,14 +194,14 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
             return await withEndpointRole(sessionArchiveReceipt(session, method, params), receiptFallback.role);
         }
         if (isHistoricalStateRead(method, params)) {
-            if (distinctArchive === null)
+            if (explicitArchive === null)
                 return missingHistoricalArchive();
-            const archiveAttempt = (m, p) => oneAttempt(distinctArchive, m, p, session.currentTime(), "archive", session);
+            const archiveAttempt = (m, p) => oneAttempt(explicitArchive, m, p, session.currentTime(), "archive", session);
             return await withEndpointRole((async () => {
-                const chain = await session.read(distinctArchive.toString(), chainId, "eth_chainId", [], archiveAttempt);
+                const chain = await session.read(explicitArchive.toString(), chainId, "eth_chainId", [], archiveAttempt);
                 if (evmRpcQuantity(chain) !== BigInt(chainId))
                     bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
-                return await session.read(distinctArchive.toString(), chainId, method, params, archiveAttempt);
+                return await session.read(explicitArchive.toString(), chainId, method, params, archiveAttempt);
             })(), "archive");
         }
         return await withEndpointRole(session.read(endpoint.toString(), chainId, method, params, primaryAttempt), "primary");
