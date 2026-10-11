@@ -34,6 +34,7 @@ export declare class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
         readonly owner: Address;
         readonly delegationHash: Hex;
         readonly grossAtomic: string;
+        readonly feeMode?: "sponsored";
     }): Promise<MetaMaskGaslessSnapshot>;
     observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
     private assertIntent;

@@ -51,15 +51,15 @@ export class MetaMaskGaslessPreparation {
                 mmAssertProfileBinding(binding, owner);
                 const quote = await metaMaskGaslessQuote(this.o.provider, binding, request, rpc.rpcUrl, clock);
                 clock.check();
-                const unsignedInput = { owner: binding.address, chainId: request.chainId, executions: quote.executions };
+                const unsignedInput = { owner: binding.address, chainId: request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) };
                 const unsigned = await this.o.provider.buildUnsigned(unsignedInput);
                 clock.check();
                 const checkedUnsigned = mmValidateUnsigned(unsigned, unsignedInput);
                 const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: checkedUnsigned.delegationHash,
-                    grossAtomic: mmActualGross(quote) });
+                    grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
                 clock.check(undefined, [snapshot.observedAt]);
                 const initialSnapshot = validateMetaMaskGaslessSnapshot(snapshot, { chainId: request.chainId,
-                    endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: mmActualGross(quote) });
+                    endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
                 const prepared = clock.fresh(initialSnapshot.observedAt), preparedAt = new Date(prepared).toISOString();
                 const intent = { profile, request, binding, ...checkedUnsigned, token: row.token, decimals: 6,
                     deploymentEvidenceHash, initialSnapshot, ...(request.fixedNet ? { preparedGrossAtomic: mmActualGross(quote) } : {}), quote, requestId: mmUuid(this.o.ids.next()), preparedAt,

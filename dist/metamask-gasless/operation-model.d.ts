@@ -53,7 +53,8 @@ export interface MetaMaskGaslessPublicOperation {
         readonly decimals: 6;
         readonly sender: Address;
         readonly recipient: Address;
-        readonly fee_recipient: Address;
+        readonly fee_recipient: Address | null;
+        readonly fee_mode?: "sponsored";
         readonly requested_fixed_net_atomic?: string;
         readonly maximum_gross_atomic?: string;
         readonly gross_atomic: string;

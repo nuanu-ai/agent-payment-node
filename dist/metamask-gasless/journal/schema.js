@@ -3,6 +3,7 @@ import { hashObject } from "../../canonical.js";
 import { MM_MIN_REMAINING_MS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
 import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
+import { mmProtocolPins } from "../single-protocol.js";
 import { mmRegistry } from "../registry.js";
 import { MM_REASON_CODES, mmFail } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
@@ -43,13 +44,13 @@ function blockOrder(first, second) {
         (second.numberAtomic === first.numberAtomic && !mmSame(first, second)))
         corrupt();
 }
-function chainState(value, chainId) {
+function chainState(value, chainId, feeMode) {
     const s = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress",
         "tokenImplementationCodeHash", "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic", "counterAtomic"]);
-    const codes = mmExact(s.protocolCodeHashes, ["manager", "delegate", "limitedCalls", "exactBatch"]);
-    const row = mmRegistry(chainId).row;
-    for (const name of ["manager", "delegate", "limitedCalls", "exactBatch"]) {
-        if (mmHex(codes[name], 32) !== row.protocol[name].codeHash)
+    const row = mmRegistry(chainId).row, pins = mmProtocolPins(row, feeMode);
+    const codes = mmExact(s.protocolCodeHashes, Object.keys(pins));
+    for (const [name, pin] of Object.entries(pins)) {
+        if (mmHex(codes[name], 32) !== pin.codeHash)
             corrupt();
     }
     if (mmHex(s.tokenProxyCodeHash, 32) !== row.tokenProxyCodeHash ||
@@ -64,7 +65,7 @@ function chainState(value, chainId) {
     mmUint(s.usdcBalanceAtomic);
     return s;
 }
-function snapshot(value, chainId) {
+function snapshot(value, chainId, feeMode) {
     const s = mmExact(value, ["chainId", "endpointHash", "endpointOrigin", "observedAt", "safeBlock", "headBlock",
         "safeState", "headState"]);
     if (s.chainId !== chainId)
@@ -74,8 +75,8 @@ function snapshot(value, chainId) {
     mmIso(s.observedAt);
     const safeBlock = block(s.safeBlock), headBlock = block(s.headBlock);
     blockOrder(safeBlock, headBlock);
-    chainState(s.safeState, chainId);
-    chainState(s.headState, chainId);
+    chainState(s.safeState, chainId, feeMode);
+    chainState(s.headState, chainId, feeMode);
     return s;
 }
 export function mmJournalIntent(value, profileHash) {
@@ -89,7 +90,7 @@ export function mmJournalIntent(value, profileHash) {
     mmCanonicalAddress(i.token);
     mmHash(i.deploymentEvidenceHash);
     mmUuid(i.requestId);
-    const initial = snapshot(i.initialSnapshot, request.chainId);
+    const initial = snapshot(i.initialSnapshot, request.chainId, i.quote.feeMode);
     const preparedAt = mmIso(i.preparedAt), expiresAt = mmIso(i.expiresAt);
     if (time(expiresAt) - time(preparedAt) !== MM_TTL_MS || time(initial.observedAt) > time(preparedAt))
         corrupt();
@@ -107,7 +108,7 @@ export function mmJournalIntent(value, profileHash) {
     const intent = i;
     mmAssertIntentEconomics(intent, profileHash);
     mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,
-        signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode }, { owner: binding.address, chainId: request.chainId, executions: intent.quote.executions }, "mm_gasless_state_corrupt");
+        signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode }, { owner: binding.address, chainId: request.chainId, executions: intent.quote.executions, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
     return intent;
 }
 function approval(value, fingerprint, expiresAt, at) {
@@ -122,7 +123,7 @@ function approval(value, fingerprint, expiresAt, at) {
 /**
  * The repriced batch and its re-derived delegation, checked by exactly the rules the prepared material passed:
  * inside the owner's effective cap, above the recipient's floor, an exact split of the gross, and a delegation
- * derived from those two executions alone. `undefined` is a record written before this field existed.
+ * derived from those exact executions alone. `undefined` is a record written before this field existed.
  */
 function dispatchMaterial(value, intent) {
     if (value === undefined)
@@ -136,7 +137,7 @@ function dispatchMaterial(value, intent) {
     mmHex(d.mode, 32);
     const quote = mmRepriceWithinCap(d.quote, intent.request, intent.binding, "mm_gasless_state_corrupt");
     mmValidateUnsigned({ unsignedDelegation: d.unsignedDelegation, delegationHash: d.delegationHash,
-        signingDigest: d.signingDigest, relayTo: d.relayTo, mode: d.mode }, { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions }, "mm_gasless_state_corrupt");
+        signingDigest: d.signingDigest, relayTo: d.relayTo, mode: d.mode }, { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
     return d;
 }
 function providerObservation(value, intent, at) {
@@ -226,8 +227,8 @@ function settlement(value, intent, dispatched, at) {
     mmHash(s.tokenImplementationHash);
     const deployment = mmRegistry(intent.request.chainId), row = deployment.row;
     const protocolHash = hashObject({ deploymentEvidenceHash: deployment.deploymentEvidenceHash,
-        receipt: { block: transaction, code: Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) => [name, pin.codeHash])) },
-        finality: { block: finality, code: Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) => [name, pin.codeHash])) } });
+        receipt: { block: transaction, code: Object.fromEntries(Object.entries(mmProtocolPins(row, intent.quote.feeMode)).map(([name, pin]) => [name, pin.codeHash])) },
+        finality: { block: finality, code: Object.fromEntries(Object.entries(mmProtocolPins(row, intent.quote.feeMode)).map(([name, pin]) => [name, pin.codeHash])) } });
     const tokenState = { address: row.tokenImplementationAddress, codeHash: row.tokenImplementationCodeHash,
         proxyCodeHash: row.tokenProxyCodeHash };
     const tokenImplementationHash = hashObject({ token: row.token,

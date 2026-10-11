@@ -94,7 +94,9 @@ test("the MetaMask observation RPC proves chain and frozen anchor and never serv
   assert.deepEqual(wrongChain.methods, ["eth_chainId"]);
 
   const forked = new AnchorTransport(8453n, mmTestWord("forked-anchor"));
-  await assert.rejects(build(forked).observe(before.intent, before.cursor, null), { details: { reason: "mm_gasless_rpc_binding" } });
+  await assert.rejects(build(forked).observe(before.intent, before.cursor, null), { details: {
+    reason: "mm_gasless_rpc_binding", evidenceStage: "chain_evidence",
+    evidencePredicate: "header_recheck", evidenceMethod: "eth_getBlockByNumber" } });
   assert.deepEqual(forked.methods, ["eth_chainId", "eth_getBlockByNumber"]);
 });
 

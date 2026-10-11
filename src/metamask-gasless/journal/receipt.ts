@@ -52,6 +52,7 @@ export function publicMetaMaskGaslessOperation(operation: MetaMaskGaslessOperati
     proof_class: metaMaskGaslessProofClass(op),
     transfer: { chain_id: intent.request.chainId, token: intent.token, symbol: "USDC", decimals: 6,
       sender: intent.binding.address, recipient: intent.request.recipient, fee_recipient: intent.quote.feeRecipient,
+      ...(intent.quote.feeMode === "sponsored" ? { fee_mode: intent.quote.feeMode } : {}),
       ...(intent.request.fixedNet ? { requested_fixed_net_atomic: intent.request.fixedNet.netAtomic,
         maximum_gross_atomic: intent.request.fixedNet.maxGrossAtomic } : {}),
       gross_atomic: mmActualGross(intent.quote), user_max_fee_atomic: intent.request.maxFeeAtomic,

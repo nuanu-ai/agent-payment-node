@@ -4,6 +4,7 @@ import type { MetaMaskGaslessUnsignedInput } from "./ports.js";
 import { type MetaMaskGaslessFailureReason } from "./reasons.js";
 export declare const MM_ANY_BENEFICIARY: "0x0000000000000000000000000000000000000a11";
 export declare const MM_ROOT_AUTHORITY: Hex;
+export declare const MM_SINGLE_MODE: Hex;
 export declare const MM_BATCH_MODE: Hex;
 export declare const MM_ONE_CALL_TERMS: Hex;
 export declare const MM_EXECUTION_ABI: readonly [{
