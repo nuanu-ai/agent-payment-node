@@ -114,7 +114,8 @@ export class HelperNetworkPolicy {
             if (this.context.mode === "quote" && error !== null && typeof error === "object")
                 this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
                     ...(validationFailed && readNetwork === "sentinel-quote" && validationPredicates.has(error)
-                        ? { validationPredicate: validationPredicates.get(error) } : {}) });
+                        ? { validationPredicate: validationPredicates.get(error),
+                            ...(tokenFeesShapes.has(error) ? { tokenFeesShape: tokenFeesShapes.get(error) } : {}) } : {}) });
             throw error;
         }
     }
@@ -357,15 +358,19 @@ function validateResponse(key, body, requestBody, context) {
         validateSentinelResponse(value, context);
 }
 const validationPredicates = new WeakMap();
-function sentinelRequire(condition, predicate) {
+const tokenFeesShapes = new WeakMap();
+function sentinelRequire(condition, predicate, shape) {
     if (condition)
         return;
     try {
         mmFail("mm_gasless_provider_unavailable");
     }
     catch (error) {
-        if (error !== null && typeof error === "object")
+        if (error !== null && typeof error === "object") {
             validationPredicates.set(error, predicate);
+            if (shape !== undefined)
+                tokenFeesShapes.set(error, shape);
+        }
         throw error;
     }
 }
@@ -399,7 +404,13 @@ function validateSentinelResponse(value, context) {
     sentinelRequire(fees.length >= 1 && fees.length <= 8, "sentinel_fees_length");
     sentinelRequire(isPlainRecord(fees[0]), "sentinel_low_tier");
     const fee = fees[0];
-    sentinelRequire(Array.isArray(fee.tokenFees), "sentinel_token_fees");
+    if (!Array.isArray(fee.tokenFees)) {
+        const present = Object.hasOwn(fee, "tokenFees"), value = fee.tokenFees;
+        // Parsed JSON supplies only these closed kinds; no value or arbitrary field is retained.
+        const kind = !present ? "missing" : value === null ? "null" : typeof value === "object" ? "object" :
+            typeof value === "string" ? "string" : typeof value === "number" ? "number" : "boolean";
+        sentinelRequire(false, "sentinel_token_fees", kind);
+    }
     const tokenFees = fee.tokenFees;
     sentinelRequire(tokenFees.length >= 1 && tokenFees.length <= 32, "sentinel_token_fees_length");
     const matching = [];
