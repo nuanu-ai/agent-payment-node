@@ -9,7 +9,10 @@ export type ReadNetwork = "none" | "mimir-networks" | "accounts-networks" | "sen
   "rpc-decimals" | "rpc-balance" | "sentinel-quote";
 export const readValidationPredicates = ["response_json", "response_root", "sentinel_mode", "sentinel_keys", "sentinel_jsonrpc", "sentinel_id", "sentinel_result", "sentinel_transactions", "sentinel_transactions_length", "sentinel_last_transaction", "sentinel_fees", "sentinel_fees_length", "sentinel_low_tier", "sentinel_token_fees", "sentinel_token_fees_length", "sentinel_entry", "sentinel_token", "sentinel_token_address", "sentinel_token_match", "sentinel_entry_error", "sentinel_symbol", "sentinel_decimals", "sentinel_fee_quantity", "sentinel_fee_recipient"] as const;
 export type ReadValidationPredicate = typeof readValidationPredicates[number];
+export type TokenFeesKind = "missing" | "null" | "object" | "string" | "number" | "boolean";
+
 export interface MetaMaskReadDiagnostic {
+  readonly tokenFeesKind?: TokenFeesKind;
   readonly validationPredicate?: ReadValidationPredicate;
   readonly mode: ReadMode;
   readonly stage: ReadStage;
@@ -48,7 +51,8 @@ export function validateReadDiagnostic(value: unknown, mode: ReadMode): MetaMask
   const d = readDataRecord(value);
   const bounded = (v: unknown, low: number, high: number) => v === null ||
     typeof v === "number" && Number.isSafeInteger(v) && v >= low && v <= high;
-  if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
+  const hasShape = Object.hasOwn(d, "tokenFeesKind");
+  if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) + (hasShape ? 1 : 0) || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
     typeof d.stage !== "string" || !stages.includes(d.stage) || typeof d.invariant !== "string" || !invariants.includes(d.invariant) ||
     typeof d.network !== "string" || !networks.includes(d.network) ||
     !bounded(d.httpStatus, 100, 599) || !bounded(d.exitCode, 0, 255) ||
@@ -64,15 +68,20 @@ export function validateReadDiagnostic(value: unknown, mode: ReadMode): MetaMask
     !readValidationPredicates.includes(d.validationPredicate as ReadValidationPredicate) || mode !== "quote" ||
     d.invariant !== "network_validation" || d.network !== "sentinel-quote" || d.httpStatus === null ||
     (d.httpStatus as number) < 200 || (d.httpStatus as number) >= 300)) mmFail("mm_gasless_provider_unavailable");
+  if (hasShape && (typeof d.tokenFeesKind !== "string" ||
+    !["missing", "null", "object", "string", "number", "boolean"].includes(d.tokenFeesKind) ||
+    d.validationPredicate !== "sentinel_token_fees" || d.stage !== "fee_quote")) mmFail("mm_gasless_provider_unavailable");
   // Construct a new closed object; never retain caller-owned properties.
   return Object.freeze(Object.fromEntries([...keys.map(key => [key, d[key]]),
-    ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : [])])) as unknown as MetaMaskReadDiagnostic;
+    ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : []),
+    ...(hasShape ? [["tokenFeesKind", d.tokenFeesKind]] : [])])) as unknown as MetaMaskReadDiagnostic;
 }
 export function readDiagnostic(mode: ReadMode, stage: ReadStage,
   invariant: MetaMaskReadDiagnostic["invariant"], network: ReadNetwork = "none", httpStatus: number | null = null,
-  exitCode: number | null = null, signal: MetaMaskReadDiagnostic["signal"] = "none", timedOut = false, validationPredicate?: ReadValidationPredicate): MetaMaskReadDiagnostic {
+  exitCode: number | null = null, signal: MetaMaskReadDiagnostic["signal"] = "none", timedOut = false, validationPredicate?: ReadValidationPredicate, shape?: TokenFeesKind): MetaMaskReadDiagnostic {
   return validateReadDiagnostic({ mode, stage, invariant, network, httpStatus, exitCode, signal, timedOut,
-    ...(validationPredicate === undefined ? {} : { validationPredicate }) }, mode);
+    ...(validationPredicate === undefined ? {} : { validationPredicate }),
+    ...(shape === undefined ? {} : { tokenFeesKind: shape }) }, mode);
 }
 export function readFailureError(reason: MetaMaskGaslessFailureReason, d: MetaMaskReadDiagnostic): ApnError {
   const plain = readDataRecord(d);
@@ -81,6 +90,7 @@ export function readFailureError(reason: MetaMaskGaslessFailureReason, d: MetaMa
   return new ApnError(base.code, base.message, { reason,
     mm_read_mode: diagnostic.mode, mm_read_stage: diagnostic.stage, mm_read_invariant: diagnostic.invariant,
     ...(diagnostic.validationPredicate === undefined ? {} : { mm_read_validation_predicate: diagnostic.validationPredicate }),
+    ...(diagnostic.tokenFeesKind === undefined ? {} : { mm_read_token_fees_kind: diagnostic.tokenFeesKind }),
     mm_read_network: diagnostic.network, mm_read_signal: diagnostic.signal, mm_read_timed_out: diagnostic.timedOut,
     ...(diagnostic.httpStatus === null ? {} : { mm_read_http_status: diagnostic.httpStatus }),
     ...(diagnostic.exitCode === null ? {} : { mm_read_exit_code: diagnostic.exitCode }) });

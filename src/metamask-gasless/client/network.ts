@@ -1,4 +1,4 @@
-import type { ReadNetwork, ReadValidationPredicate } from "./read-diagnostic.js";
+import type { ReadNetwork, ReadValidationPredicate, TokenFeesKind } from "./read-diagnostic.js";
 import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
@@ -44,9 +44,9 @@ export class HelperNetworkPolicy {
   private lastClockMs: number | undefined;
   private deadlineFailure: "mm_gasless_expired" | "mm_gasless_clock" | undefined;
   private sessionFailure = false;
-  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate }>();
+  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate; readonly tokenFeesShape?: TokenFeesKind }>();
   /** Transient fixed metadata, never response content or permission. */
-  readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate } {
+  readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate; readonly tokenFeesShape?: TokenFeesKind } {
     return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
       : { network: "none", httpStatus: null, validationFailed: false };
   }
@@ -113,7 +113,8 @@ export class HelperNetworkPolicy {
       if (this.context.mode === "quote" && error !== null && typeof error === "object")
         this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
           ...(validationFailed && readNetwork === "sentinel-quote" && validationPredicates.has(error)
-            ? { validationPredicate: validationPredicates.get(error)! } : {}) });
+            ? { validationPredicate: validationPredicates.get(error)!,
+                ...(tokenFeesShapes.has(error) ? { tokenFeesShape: tokenFeesShapes.get(error)! } : {}) } : {}) });
       throw error;
     }
   }
@@ -291,10 +292,17 @@ function validateResponse(key: string, body: string, requestBody: string | null,
   } else if (key === "sentinel-quote") validateSentinelResponse(value, context);
 }
 const validationPredicates = new WeakMap<object, ReadValidationPredicate>();
-function sentinelRequire(condition: boolean, predicate: ReadValidationPredicate): void {
+const tokenFeesShapes = new WeakMap<object, TokenFeesKind>();
+function sentinelRequire(condition: boolean, predicate: ReadValidationPredicate, shape?: TokenFeesKind): void {
   if (condition) return;
   try { mmFail("mm_gasless_provider_unavailable"); }
-  catch (error) { if (error !== null && typeof error === "object") validationPredicates.set(error, predicate); throw error; }
+  catch (error) {
+    if (error !== null && typeof error === "object") {
+      validationPredicates.set(error, predicate);
+      if (shape !== undefined) tokenFeesShapes.set(error, shape);
+    }
+    throw error;
+  }
 }
 function parseSentinelResponse(body: string): Record<string, unknown> {
   let value: unknown;
@@ -321,7 +329,13 @@ function validateSentinelResponse(value: Record<string, unknown>, context: ModeC
   sentinelRequire(fees.length >= 1 && fees.length <= 8, "sentinel_fees_length");
   sentinelRequire(isPlainRecord(fees[0]), "sentinel_low_tier");
   const fee = fees[0] as Record<string, unknown>;
-  sentinelRequire(Array.isArray(fee.tokenFees), "sentinel_token_fees");
+  if (!Array.isArray(fee.tokenFees)) {
+    const present = Object.hasOwn(fee, "tokenFees"), value = fee.tokenFees;
+    // Parsed JSON supplies only these closed kinds; no value or arbitrary field is retained.
+    const kind = !present ? "missing" : value === null ? "null" : typeof value === "object" ? "object" :
+      typeof value === "string" ? "string" : typeof value === "number" ? "number" : "boolean";
+    sentinelRequire(false, "sentinel_token_fees", kind);
+  }
   const tokenFees = fee.tokenFees as unknown[];
   sentinelRequire(tokenFees.length >= 1 && tokenFees.length <= 32, "sentinel_token_fees_length");
   const matching: Record<string, unknown>[] = [];
