@@ -1,3 +1,4 @@
+import { readDataRecord, validateReadDiagnostic } from "./read-diagnostic.js";
 import { isPlainRecord } from "../../canonical.js";
 import { mmAssertProfileBinding, mmBinding, mmPrivateHash } from "../identity.js";
 import { mmAssertStableQuote, mmQuote, mmQuoteHash } from "../economics.js";
@@ -28,14 +29,22 @@ export function helperRequest(value) {
     return mmFail("mm_gasless_input");
 }
 export function helperResponse(value, request) {
+    if (request.mode === "inspect" || request.mode === "quote")
+        value = readDataRecord(value);
     if (!isPlainRecord(value) || value.version !== MM_HELPER_VERSION || typeof value.ok !== "boolean")
         mmFail(responseReason(request.mode));
     if (value.ok === false) {
-        const r = mmExact(value, ["version", "ok", "failure"], responseReason(request.mode));
-        const f = mmExact(r.failure, ["code", "reason"], responseReason(request.mode));
+        const readMode = request.mode === "inspect" || request.mode === "quote" ? request.mode : null;
+        const hasDiagnostic = readMode !== null && Object.hasOwn(value, "diagnostic");
+        const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : [])], responseReason(request.mode));
+        const f = mmExact(readMode === null ? r.failure : readDataRecord(r.failure), ["code", "reason"], responseReason(request.mode));
         if (typeof f.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, f.reason) || f.reason === "mm_gasless_success" ||
             MM_REASON_CODES[f.reason] !== f.code)
             mmFail(responseReason(request.mode));
+        if (hasDiagnostic) {
+            const diagnostic = validateReadDiagnostic(r.diagnostic, readMode);
+            return { version: MM_HELPER_VERSION, ok: false, failure: f, diagnostic };
+        }
         return value;
     }
     const r = mmExact(value, ["version", "ok", "result"], responseReason(request.mode));

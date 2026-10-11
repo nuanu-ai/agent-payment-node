@@ -1,3 +1,4 @@
+import type { ReadNetwork } from "./read-diagnostic.js";
 import { type MetaMaskGaslessIntent } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 export interface FetchExchangeRequest {
@@ -44,6 +45,12 @@ export declare class HelperNetworkPolicy {
     private lastClockMs;
     private deadlineFailure;
     private sessionFailure;
+    private readonly readFailures;
+    /** Transient fixed metadata, never response content or permission. */
+    readFailureContext(error: unknown): {
+        readonly network: ReadNetwork;
+        readonly httpStatus: number | null;
+    };
     constructor(context: ModeContext, exchange?: FetchExchange);
     didObserveNotFound(): boolean;
     fixedFailure(): "mm_gasless_expired" | "mm_gasless_clock" | "mm_gasless_session_unavailable" | undefined;

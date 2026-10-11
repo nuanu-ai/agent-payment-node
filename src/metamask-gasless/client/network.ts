@@ -1,3 +1,4 @@
+import type { ReadNetwork } from "./read-diagnostic.js";
 import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
@@ -43,6 +44,12 @@ export class HelperNetworkPolicy {
   private lastClockMs: number | undefined;
   private deadlineFailure: "mm_gasless_expired" | "mm_gasless_clock" | undefined;
   private sessionFailure = false;
+  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null }>();
+  /** Transient fixed metadata, never response content or permission. */
+  readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null } {
+    return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null }
+      : { network: "none", httpStatus: null };
+  }
   constructor(private readonly context: ModeContext, private readonly exchange: FetchExchange = new HttpsFetchExchange()) {
     this.fetch = this.handle.bind(this) as typeof globalThis.fetch;
   }
@@ -71,12 +78,19 @@ export class HelperNetworkPolicy {
     if (this.context.mode === "quote" && expected.some((key) => !this.successes.has(key))) mmFail("mm_gasless_provider_unavailable");
   }
   private async handle(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+    let readNetwork: ReadNetwork = "none", readStatus: number | null = null;
+    try {
     const url = input instanceof Request ? input.url : String(input);
     const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
     if (method !== "GET" && method !== "POST") mmFail("mm_gasless_provider_unavailable");
     const body = await requestBody(input, init);
     const headers = requestHeaders(input, init);
     const key = this.classify(url, method, headers, body);
+    if (this.context.mode === "quote") {
+      readNetwork = ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals", "rpc-balance", "sentinel-quote"].includes(key)
+        ? key as ReadNetwork : "none";
+      readStatus = null;
+    }
     if ((this.counts.get(key) ?? 0) !== 0) mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     this.counts.set(key, 1);
     if (this.context.mode === "submit") this.assertSubmitDeadline();
@@ -84,12 +98,18 @@ export class HelperNetworkPolicy {
     const request: FetchExchangeRequest = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
       ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => this.assertSubmitDeadline() } : {}) };
     const response = await this.exchange.request(request);
+    if (this.context.mode === "quote") readStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
     if (typeof response.body !== "string" || Buffer.byteLength(response.body) > MAX_RESPONSE) mmFail("mm_gasless_provider_unavailable");
     if (response.status === 401 || response.status === 403) { this.sessionFailure = true; mmFail("mm_gasless_session_unavailable"); }
     if (this.context.mode === "observe" && response.status === 404) this.notFound = true;
     if (response.status >= 200 && response.status < 300) { validateResponse(key, response.body, body, this.context); this.successes.add(key); }
     const outputHeaders = new Headers(response.headers); if (!outputHeaders.has("content-type")) outputHeaders.set("content-type", "application/json");
     return new Response(response.body, { status: response.status, headers: outputHeaders });
+    } catch (error) {
+      if (this.context.mode === "quote" && error !== null && typeof error === "object")
+        this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus });
+      throw error;
+    }
   }
   private assertSubmitDeadline(): void {
     if (this.context.mode !== "submit") return;

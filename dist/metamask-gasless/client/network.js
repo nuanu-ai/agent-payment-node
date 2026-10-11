@@ -23,6 +23,12 @@ export class HelperNetworkPolicy {
     lastClockMs;
     deadlineFailure;
     sessionFailure = false;
+    readFailures = new WeakMap();
+    /** Transient fixed metadata, never response content or permission. */
+    readFailureContext(error) {
+        return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null }
+            : { network: "none", httpStatus: null };
+    }
     constructor(context, exchange = new HttpsFetchExchange()) {
         this.context = context;
         this.exchange = exchange;
@@ -56,38 +62,53 @@ export class HelperNetworkPolicy {
             mmFail("mm_gasless_provider_unavailable");
     }
     async handle(input, init) {
-        const url = input instanceof Request ? input.url : String(input);
-        const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
-        if (method !== "GET" && method !== "POST")
-            mmFail("mm_gasless_provider_unavailable");
-        const body = await requestBody(input, init);
-        const headers = requestHeaders(input, init);
-        const key = this.classify(url, method, headers, body);
-        if ((this.counts.get(key) ?? 0) !== 0)
-            mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
-        this.counts.set(key, 1);
-        if (this.context.mode === "submit")
-            this.assertSubmitDeadline();
-        const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
-        const request = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
-            ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => this.assertSubmitDeadline() } : {}) };
-        const response = await this.exchange.request(request);
-        if (typeof response.body !== "string" || Buffer.byteLength(response.body) > MAX_RESPONSE)
-            mmFail("mm_gasless_provider_unavailable");
-        if (response.status === 401 || response.status === 403) {
-            this.sessionFailure = true;
-            mmFail("mm_gasless_session_unavailable");
+        let readNetwork = "none", readStatus = null;
+        try {
+            const url = input instanceof Request ? input.url : String(input);
+            const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+            if (method !== "GET" && method !== "POST")
+                mmFail("mm_gasless_provider_unavailable");
+            const body = await requestBody(input, init);
+            const headers = requestHeaders(input, init);
+            const key = this.classify(url, method, headers, body);
+            if (this.context.mode === "quote") {
+                readNetwork = ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals", "rpc-balance", "sentinel-quote"].includes(key)
+                    ? key : "none";
+                readStatus = null;
+            }
+            if ((this.counts.get(key) ?? 0) !== 0)
+                mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+            this.counts.set(key, 1);
+            if (this.context.mode === "submit")
+                this.assertSubmitDeadline();
+            const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+            const request = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
+                ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => this.assertSubmitDeadline() } : {}) };
+            const response = await this.exchange.request(request);
+            if (this.context.mode === "quote")
+                readStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
+            if (typeof response.body !== "string" || Buffer.byteLength(response.body) > MAX_RESPONSE)
+                mmFail("mm_gasless_provider_unavailable");
+            if (response.status === 401 || response.status === 403) {
+                this.sessionFailure = true;
+                mmFail("mm_gasless_session_unavailable");
+            }
+            if (this.context.mode === "observe" && response.status === 404)
+                this.notFound = true;
+            if (response.status >= 200 && response.status < 300) {
+                validateResponse(key, response.body, body, this.context);
+                this.successes.add(key);
+            }
+            const outputHeaders = new Headers(response.headers);
+            if (!outputHeaders.has("content-type"))
+                outputHeaders.set("content-type", "application/json");
+            return new Response(response.body, { status: response.status, headers: outputHeaders });
         }
-        if (this.context.mode === "observe" && response.status === 404)
-            this.notFound = true;
-        if (response.status >= 200 && response.status < 300) {
-            validateResponse(key, response.body, body, this.context);
-            this.successes.add(key);
+        catch (error) {
+            if (this.context.mode === "quote" && error !== null && typeof error === "object")
+                this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus });
+            throw error;
         }
-        const outputHeaders = new Headers(response.headers);
-        if (!outputHeaders.has("content-type"))
-            outputHeaders.set("content-type", "application/json");
-        return new Response(response.body, { status: response.status, headers: outputHeaders });
     }
     assertSubmitDeadline() {
         if (this.context.mode !== "submit")
