@@ -2,14 +2,18 @@ import { hashObject } from "../canonical.js";
 import { bridgeDeployment } from "./deployments.js";
 import { bridgeApprovalPolicyBinding } from "./economics.js";
 export const WBTC_ACROSS_CONTINUATION_POST_LIMIT = 33;
+export const USDC_ACROSS_CONTINUATION_POST_LIMIT = 33;
+const ETH_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+const ARB_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 const ETH_WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";
 const ARB_WBTC = "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f";
-/** Only the reviewed two-chain WBTC continuation needs historical approval plus both fresh guards in one invocation. */
+/** Exact pinned token continuations fit historical approval plus two fresh guards and one first bridge send. */
 export function bridgeRpcPhysicalPolicy(op) {
     const { intent: i, effects } = op, m = i.materialization, r = m.request;
     const exactPair = r.fromChainId === 1 && r.toChainId === 42161 && r.fromToken === ETH_WBTC && r.toToken === ARB_WBTC ||
         r.fromChainId === 42161 && r.toChainId === 1 && r.fromToken === ARB_WBTC && r.toToken === ETH_WBTC;
-    if (op.terminal || m.tool !== "across" || !exactPair || effects.length !== 2 || effects[0].role !== "approval" ||
+    const usdcPair = r.fromChainId === 1 && r.toChainId === 42161 && r.fromToken === ETH_USDC && r.toToken === ARB_USDC;
+    if (op.terminal || m.tool !== "across" || !(exactPair || usdcPair) || effects.length !== 2 || effects[0].role !== "approval" ||
         effects[0].submissionAttempts !== 1 || effects[0].safeProof !== null ||
         !["submitting", "submitted_pending", "unknown_finality", "included_success"].includes(effects[0].phase) || effects[1].role !== "bridge" ||
         effects[1].submissionAttempts !== 0 || !["unsealed", "signing_started", "sealed"].includes(effects[1].phase) || bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt) !== "full-refresh")
@@ -20,6 +24,6 @@ export function bridgeRpcPhysicalPolicy(op) {
     return i.sourceDeployment.contractHash === hashObject({ protocol: source, feeContract: { code: [], reads: [] } }) && i.sourceDeployment.codeHash === hashObject(source.code) &&
         i.sourceDeployment.configurationHash === hashObject(source.reads) && i.destinationDeployment.contractHash === hashObject({ protocol: destination, feeContract: { code: [], reads: [] } }) &&
         i.destinationDeployment.codeHash === hashObject(destination.code) && i.destinationDeployment.configurationHash === hashObject(destination.reads)
-        ? "canonical_wbtc_across_approval_continuation" : "default";
+        ? usdcPair ? "canonical_usdc_across_approval_continuation" : "canonical_wbtc_across_approval_continuation" : "default";
 }
 //# sourceMappingURL=rpc-execution-budget.js.map
