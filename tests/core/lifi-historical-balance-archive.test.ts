@@ -44,9 +44,26 @@ for(const sessionMode of [false,true]) test(`balance rejects wrong archive chain
   await assert.rejects(call("eth_getBalance",[owner,before]),{code:"APN_RPC_CONFIG",message:/bridge_archive_RPC_chain/});
   assert.deepEqual(f.rows.map(r=>r.method),["eth_chainId"]);
 });
-test("canonical balance requires distinct configured archive before transport",async()=>{
-  for(const archive of [undefined,"https://linea-rpc.publicnode.com/archive"]){const f=fixture();await assert.rejects(bridgeRpcCall(59144,{...environment,APN_LINEA_ARCHIVE_RPC_URL:archive},{transport:f.transport}).call("eth_getBalance",[owner,before]),{code:"APN_PROVIDER_CAPABILITY_UNAVAILABLE"});assert.equal(f.rows.length,0);}
+test("canonical balance requires an explicit archive before transport", async () => {
+  const f = fixture();
+  await assert.rejects(bridgeRpcCall(59144, { APN_LINEA_RPC_URL: environment.APN_LINEA_RPC_URL }, { transport: f.transport }).call("eth_getBalance", [owner, before]),
+    { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", details: { reason: "explicit_archive_RPC_required" } });
+  assert.equal(f.rows.length, 0);
 });
+for (const sessionMode of [false, true]) test(`owner-explicit same-origin archive validates canonical balance; session=${sessionMode}`, async () => {
+  const f = fixture(), d = bridgeRpcCall(59144, { ...environment, APN_LINEA_ARCHIVE_RPC_URL: `${environment.APN_LINEA_RPC_URL}/archive` }, { transport: f.transport });
+  const session = new RpcReadSession({ wait: async () => {} }), call = sessionMode ? d.sessionCall(session) : d.call;
+  assert.equal(await call("eth_getBalance", [owner, before]), "0x1");
+  assert.deepEqual(f.rows.map(row => [row.host, row.method]), [["linea-rpc.publicnode.com", "eth_chainId"], ["linea-rpc.publicnode.com", "eth_getBalance"]]);
+  assert.deepEqual(f.rows[1]!.params[1], before);
+  if (sessionMode) { assert.equal(session.telemetry().attemptsByEndpointRole.archive, 2); assert.equal(session.telemetry().attemptsByEndpointRole.primary, 0); }
+});
+for (const sessionMode of [false, true]) test(`same-origin archive still rejects wrong chain; session=${sessionMode}`, async () => {
+  const f = fixture("0x1"), d = bridgeRpcCall(59144, { ...environment, APN_LINEA_ARCHIVE_RPC_URL: environment.APN_LINEA_RPC_URL }, { transport: f.transport });
+  await assert.rejects((sessionMode ? d.sessionCall(new RpcReadSession({ wait: async () => {} })) : d.call)("eth_getBalance", [owner, before]), { code: "APN_RPC_CONFIG", message: /bridge_archive_RPC_chain/ });
+  assert.deepEqual(f.rows.map(row => row.method), ["eth_chainId"]);
+});
+
 test("balance RPC refusal is attributed to archive without primary fallback",async()=>{
   const f=fixture("0xe708",true),d=bridgeRpcCall(59144,environment,{transport:f.transport});
   await assert.rejects(d.sessionCall(new RpcReadSession({wait:async()=>{}}))("eth_getBalance",[owner,before]),(e:unknown)=>{assert(e instanceof ApnError);assert.equal(e.details?.endpointRole,"archive");return true;});

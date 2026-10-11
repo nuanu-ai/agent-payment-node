@@ -46,13 +46,16 @@ async function pendingUsdc(root: string, now: Date) {
   return { f, op, approvalRaw: f.source.submissions[0]! };
 }
 
-for (const scenario of ["old24", "typed33", "expiry", "nonce", "deployment"] as const) test(`cold USDC Across continuation ${scenario}`, async t => {
+for (const scenario of ["old24", "typed33", "typed34", "expiry", "nonce", "deployment"] as const) test(`cold USDC Across continuation ${scenario}`, async t => {
   const oldCap = scenario === "old24";
   const temp = await temporaryState(); t.after(temp.cleanup); const now = new Date("2026-10-09T03:44:00Z");
   const { f, op, approvalRaw } = await pendingUsdc(temp.root, now), spy = await usdcBudgetSpy(now, op, approvalRaw, scenario === "nonce" || scenario === "deployment" ? scenario : undefined);
   assert.equal(bridgeRpcPhysicalPolicy(op), "canonical_usdc_across_approval_continuation");
   let time = scenario === "expiry" ? Date.parse(op.intent.expiresAt) + 1 : now.getTime(); const wait = async (ms: number) => { time += ms; };
-  const physical = new BridgeRpcPhysicalBudget(() => time, wait, oldCap ? "default" : bridgeRpcPhysicalPolicy(op));
+  // Recreate only the previous typed ceiling while retaining the production POST gate and scheduler.
+  class PreviousTypedCeiling extends BridgeRpcPhysicalBudget { override remaining(): number { return super.remaining() - 1; } }
+  const Budget = scenario === "typed33" ? PreviousTypedCeiling : BridgeRpcPhysicalBudget;
+  const physical = new Budget(() => time, wait, oldCap ? "default" : bridgeRpcPhysicalPolicy(op));
   const session = new RpcReadSession({ now: () => time, wait, maxHttpRequests: 28, maxHttpAttempts: 30, archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const observation = new RpcReadSession({ now: () => time, wait, maxHttpRequests: 14, maxHttpAttempts: 16, archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const source = spy.rpcFor(1, session), destination = spy.rpcFor(42161, session), observer = spy.rpcFor(1, observation);
@@ -68,16 +71,24 @@ for (const scenario of ["old24", "typed33", "expiry", "nonce", "deployment"] as 
   assert.equal(resumed.effects[0]!.transactionHash, op.effects[0]!.transactionHash); assert.equal(resumed.effects[0]!.submissionAttempts, 1);
   assert.equal(f.source.submissions.length, 1); assert.equal(f.approval.calls.length, 1);
   assert(spy.calls.filter(x => x.host.includes("archive")).every(x => x.items.length <= 3));
-  if (scenario !== "typed33") {
+  if (scenario === "typed33") {
+    assert.equal(signCalls, 1); assert.deepEqual(signAt, [31]);
+    assert.equal(spy.submissions.length, 0); assert.equal(resumed.effects[1]!.submissionAttempts, 0);
+    assert.equal(resumed.effects[1]!.phase, "sealed"); assert.ok(resumed.effects[1]!.sealedMaterialHash);
+    assert.equal(spy.calls.length, 33); assert.equal(physical.remaining(), 0);
+    await assert.rejects(physical.beforePost("eth_sendRawTransaction"), { code: "APN_RPC_BUDGET_EXCEEDED" });
+    assert.equal(spy.calls.length, 33);
+  }
+  else if (scenario !== "typed34") {
     assert.equal(signCalls, 0); assert.equal(spy.submissions.length, 0); assert.equal(resumed.effects[1]!.phase, "unsealed");
     assert.equal(resumed.effects[1]!.submissionAttempts, 0);
     if (oldCap) assert.equal(physical.remaining(), 0);
   }
   else {
     assert.equal(signCalls, 1); assert.equal(spy.submissions.length, 1); assert.equal(resumed.effects[1]!.submissionAttempts, 1);
-    assert.equal(spy.calls.length, 33); assert.deepEqual(signAt, [30]); assert.equal(physical.remaining(), 0);
+    assert.equal(spy.calls.length, 34); assert.deepEqual(signAt, [31]); assert.equal(physical.remaining(), 0);
     await assert.rejects(physical.beforePost("eth_getBlockByNumber"), { code: "APN_RPC_BUDGET_EXCEEDED" });
-    assert.equal(spy.calls.length, 33); assert.equal(bridgeRpcPhysicalPolicy(resumed), "default");
+    assert.equal(spy.calls.length, 34); assert.equal(bridgeRpcPhysicalPolicy(resumed), "default");
     // A fresh observation invocation may remain pending, but attempt1 must never load/sign/send the original wire again.
     const freshPhysical = new BridgeRpcPhysicalBudget(() => time, wait, bridgeRpcPhysicalPolicy(resumed));
     assert.equal(freshPhysical.remaining(), 24);

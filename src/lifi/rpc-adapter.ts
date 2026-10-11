@@ -473,9 +473,9 @@ export class BridgeRpc implements BridgeRpcPort {
     } else {
       const values = await this.batchCall([
         { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcArchiveChainValue(this.chainId) },
-        { method: "eth_getBlockByNumber", params: [quantity(number), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-        { method: "eth_getBlockByNumber", params: [quantity(BigInt(safe.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-      ], "archive");
+        { method: "eth_getBlockByNumber", params: [quantity(number), false], cachePolicy: "none", decoder: rpcBlockValue },
+        { method: "eth_getBlockByNumber", params: [quantity(BigInt(safe.numberAtomic)), false], cachePolicy: "none", decoder: rpcBlockValue },
+      ], "primary");
       assertMatchingHeader(values[1] as Record<string, unknown>, block);
       assertMatchingHeader(values[2] as Record<string, unknown>, safe);
     }

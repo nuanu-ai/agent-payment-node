@@ -25,6 +25,7 @@ const REASONS = new Set<BridgeObservationRpcReason>([
   "transaction_chain_or_hash", "transaction_signature", "transaction_parity", "transaction_signature_reconstruction",
   "approval_event_identity", "source_proof", "receipt_fee_shape", "unsupported_Base_blob_transaction",
   "operator_fee_formula", "operator_receipt_parameters",
+  "distinct_archive_RPC_required", "explicit_archive_RPC_required", "historical_receipt_unavailable",
   "request_interrupted", "response_aborted", "response_interrupted",
 ]);
 

@@ -5,7 +5,7 @@ import type { BridgeOperationRecord } from "./operation-model.js";
 
 export type BridgeRpcPhysicalPolicy = "default" | "canonical_wbtc_across_approval_continuation" | "canonical_usdc_across_approval_continuation";
 export const WBTC_ACROSS_CONTINUATION_POST_LIMIT = 33;
-export const USDC_ACROSS_CONTINUATION_POST_LIMIT = 33;
+export const USDC_ACROSS_CONTINUATION_POST_LIMIT = 34;
 const ETH_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const ARB_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 const ETH_WBTC = "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599";

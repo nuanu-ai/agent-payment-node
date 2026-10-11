@@ -356,19 +356,33 @@ Each admitted EVM chain also accepts optional
 `APN_<CHAIN>_ARCHIVE_RPC_URL` and `APN_<CHAIN>_RECEIPT_RPC_URL` readers. The
 primary `APN_<CHAIN>_RPC_URL` remains the frozen operation identity and receives
 the first exact transaction receipt read. A qualifying missing or unavailable
-historical receipt uses a distinct receipt reader when configured, otherwise a
-distinct archive reader. Receipt readers can receive only `eth_chainId` and the
+historical receipt uses a distinct receipt reader when configured, otherwise an
+explicitly configured archive reader. Receipt readers can receive only `eth_chainId` and the
 exact `eth_getTransactionReceipt`; state, code, configuration, moving tags,
 logs, estimates and effects stay off that endpoint. APN validates the reader's
 chain and the receipt transaction hash, status and block fields before caching
 the atomic result. The official Base `https://mainnet.base.org` reader is a
 known scalar-only endpoint, so APN sends chain ID and receipt as two sequential
 JSON-RPC objects with the same 750ms per-origin pacing. Archive deployment and
-historical state reads retain their three-item chunk limit.
+historical state reads retain their three-item chunk limit. Canonical inclusion and safe-header
+rechecks stay on the frozen primary endpoint, including command-session batches;
+these header-only reads do not require an archive reader and bypass cached header
+values for fresh canonical revalidation. Block-pinned code,
+configuration and historical state verification still require an explicitly configured archive
+reader. Its URL may share the primary origin: no independent-provider quorum is
+claimed. Use a public anonymous endpoint that serves the required historical
+state; availability is not guaranteed, and APN never infers an archive URL when
+it is absent. Chain identity, canonical block pins and code/configuration proofs
+still fail closed. Missing configuration reports `explicit_archive_RPC_required`;
+old journals retain `distinct_archive_RPC_required`. The exact Ethereum USDC→Arbitrum
+Across approval continuation permits 34 physical POSTs, including the fresh
+canonical-header batch and one first bridge send. WBTC continuation remains 33
+and the default invocation remains 24; no other route gains capacity. Observation diagnostics retain these
+and `historical_receipt_unavailable` reasons without exposing provider bodies or URLs.
 
 For one `bridge prepare`, setting `APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE=1` sends
 Linea's pinned deployment `eth_getCode` reads as individual JSON-RPC POSTs to
-the same distinct archive endpoint. Other deployment reads remain batched.
+the same explicitly configured archive endpoint. Other deployment reads remain batched.
 The option is off by default and has no effect on other chains, other bridge
 commands, or other RPC roles. The three Linea code reads add two physical
 requests to the modeled 19-request prepare (21 of the 26-request ceiling).
