@@ -62,6 +62,8 @@ test("a rejected decoder load returns a closed helper failure", async (t) => {
     input: quoteInput(home.binding, 8453) }, { homeDirectory: home.home, now: () => NOW,
     exchange: { async request() { attempts += 1; await import("@solana/spl-token"); throw new Error("unreachable"); } } });
   assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } });
+    failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic: { mode: "quote", stage: "inventory",
+      invariant: "unclassified_exception", network: "mimir-networks", httpStatus: null, exitCode: null,
+      signal: "none", timedOut: false } });
   assert.ok(attempts >= 1 && attempts <= 3);
 });

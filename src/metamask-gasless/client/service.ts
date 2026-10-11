@@ -1,3 +1,5 @@
+import { ApnError } from "../../errors.js";
+import { readDiagnostic, type ReadStage } from "./read-diagnostic.js";
 import { agentSdk, agentEvm, foxEvm, foxKeyring, ethereumControllers } from "./sdk-vendor.js";
 import { homedir } from "node:os";
 import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
@@ -35,6 +37,7 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
   const now = options.now ?? (() => new Date());
   const home = options.homeDirectory ?? homedir();
   let policy: HelperNetworkPolicy | undefined;
+  const phase: { stage: ReadStage } = { stage: "private_state" };
   const originalFetch = globalThis.fetch;
   const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
   const consoleMethods = saveConsole();
@@ -50,37 +53,49 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
         new HelperNetworkPolicy(networkContextRequest(request.mode, request.intent, state.projectId, state.token, now), options.exchange);
       if (request.mode === "submit") policy.primeSubmitClock(firstObservedAt);
       globalThis.fetch = policy.fetch;
-      const result = request.mode === "quote" ? await quote(request.input, state, policy) : request.mode === "submit" ?
+      const result = request.mode === "quote" ? await quote(request.input, state, policy, phase) : request.mode === "submit" ?
         await submit(request.intent, state, home, now, policy, firstObservedAt) : await observe(request.intent, state, policy, now);
       policy.assertComplete();
       return { version: MM_HELPER_VERSION, ok: true, result };
     }
     globalThis.fetch = policy.fetch;
-    const result = request.mode === "inspect" ? await inspect(home, request.expected, now()) : await buildUnsigned(request.input);
+    const result = request.mode === "inspect" ? await inspect(home, request.expected, now(), phase) : await buildUnsigned(request.input);
     policy.assertComplete();
     return { version: MM_HELPER_VERSION, ok: true, result };
   } catch (error) {
     const fixedFailure = policy?.fixedFailure();
-    if (fixedFailure) return { version: MM_HELPER_VERSION, ok: false, failure: mmFailure(fixedFailure) };
-    return { version: MM_HELPER_VERSION, ok: false, failure: mmClassify(error, fallback(request.mode)) };
+    const failure = fixedFailure ? mmFailure(fixedFailure) : mmClassify(error, fallback(request.mode));
+    if (request.mode === "inspect" || request.mode === "quote") {
+      const context = policy?.readFailureContext(error);
+      return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage,
+        context?.validationFailed ? "network_validation" : error instanceof ApnError ? "closed_failure" : "unclassified_exception", context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate) };
+    }
+    return { version: MM_HELPER_VERSION, ok: false, failure };
   } finally {
     globalThis.fetch = originalFetch; restoreWindow(windowDescriptor); restoreConsole(consoleMethods);
   }
 }
 
-async function inspect(home: string, expected: Extract<HelperRequest, { mode: "inspect" }>["expected"], now: Date): Promise<MetaMaskGaslessBinding> {
-  const state = await readPrivateState(home, expected, now), hydrated = await hydrateSdkState(state);
+async function inspect(home: string, expected: Extract<HelperRequest, { mode: "inspect" }>["expected"], now: Date, phase: { stage: ReadStage }): Promise<MetaMaskGaslessBinding> {
+  phase.stage = "private_state";
+  const state = await readPrivateState(home, expected, now);
+  phase.stage = "hydrate";
+  const hydrated = await hydrateSdkState(state);
+  phase.stage = "inspect";
   if (hydrated.writes() !== 0 || hydrated.session.walletMode !== "server-wallet" ||
     !isPlainRecord(hydrated.walletState.selectedWallet)) mmFail("mm_gasless_state_corrupt");
   return state.binding;
 }
 
 async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], state: PrivateState,
-  policy: HelperNetworkPolicy): Promise<MetaMaskGaslessQuote> {
+  policy: HelperNetworkPolicy, phase: { stage: ReadStage }): Promise<MetaMaskGaslessQuote> {
+  phase.stage = "sdk_load";
   const sdk = await agentSdk();
   sdk.disableAnalytics();
   const evm = await agentEvm();
+  phase.stage = "hydrate";
   const hydrated = await hydrateSdkState(state);
+  phase.stage = "inventory";
   let cacheWrites = 0; let cache: unknown = null;
   const registry = new sdk.NetworkRegistry({ env: "prod", storage: { read: () => cache as never,
     write: (value) => { if (++cacheWrites !== 1) mmFail("mm_gasless_provider_unavailable"); cache = structuredClone(value); } },
@@ -88,6 +103,7 @@ async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], 
   const snapshot = await registry.getSnapshot();
   if (cacheWrites !== 1 || cache === null) mmFail("mm_gasless_provider_unavailable");
   policy.assertQuoteInventories();
+  phase.stage = "chain_override";
   const baseChain = evm.getAgenticEvmChains().find((chain) => chain.chainId === input.chainId);
   if (!baseChain) mmFail("mm_gasless_unsupported_chain");
   const rpcChain = evm.withEvmRpcTarget(baseChain, input.rpcUrl);
@@ -102,10 +118,13 @@ async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], 
     infuraRpcBaseUrl: INFURA_URL, priceService: new sdk.PriceService("prod", () => state.token), networkRegistry: registry,
     logger: logger() });
   const relay = { host: PROXY_URL, env: "prod" as const, getHeaders: () => ({ Authorization: `Bearer ${state.token}` }) };
+  phase.stage = "relay_support";
   if (!await service.isGaslessRelaySupported({ chainId: input.chainId, relay })) mmFail("mm_gasless_capability_unavailable");
+  phase.stage = "fee_quote";
   const raw = await service.quoteGaslessTransfer({ state: walletState as never, chainId: input.chainId, recipient: input.recipient,
     amount: formatSix(input.netAtomic), token: input.token, gasToken: input.token, relay });
   if (resolverCalls !== 0 || hydrated.writes() !== 0) mmFail("mm_gasless_state_security");
+  phase.stage = "quote_output";
   return validateSdkQuote(raw, input, state.address);
 }
 
