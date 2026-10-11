@@ -12,7 +12,7 @@ const HASH = "e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a";
 const POLICY = "# Mimir Wallet Policy\nschema_version: 1\nwallet_address: \"0xf41170df51aab52aaa04fbc3ff325cf051644aca\"\n\naddresses:\n  allowlist:\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1329\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 137\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 143\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 59144\n    - address: \"0x823a3a5bab1186141b32fc65f8e25ca24c679ce7\"\n      chain_id: 8453\n  blocklist: []\n\nevm:\n  allowed_chains:\n    - 1\n    - 10\n    - 56\n    - 137\n    - 143\n    - 999\n    - 1329\n    - 4326\n    - 4663\n    - 8453\n    - 42161\n    - 43114\n    - 46630\n    - 59144\n    - 84532\n    - 11155111\n  outflow_limits_usd:\n    rolling_24h: 0.5\n";
 const OP_POLICY = "# Mimir Wallet Policy\nschema_version: 1\nwallet_address: \"0xf41170df51aab52aaa04fbc3ff325cf051644aca\"\n\naddresses:\n  allowlist:\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 10\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1329\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 137\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 143\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 59144\n    - address: \"0x823a3a5bab1186141b32fc65f8e25ca24c679ce7\"\n      chain_id: 8453\n  blocklist: []\n\nevm:\n  allowed_chains:\n    - 1\n    - 10\n    - 56\n    - 137\n    - 143\n    - 999\n    - 1329\n    - 4326\n    - 4663\n    - 8453\n    - 42161\n    - 43114\n    - 46630\n    - 59144\n    - 84532\n    - 11155111\n  outflow_limits_usd:\n    rolling_24h: 0.5\n";
 const OP_HASH = "7e5d5899170740ccaa05fb45415c9ef5320815e446788719f3523eb0fd58ee37";
-let postPolicy: string | undefined;
+let postPolicy: string | undefined;let postPayer:string|undefined;
 const TX = `0x${"a".repeat(64)}`;
 const PROJECT = "11111111-2222-4333-8444-555555555555";
 const PROJECT_HASH = sha256(PROJECT);
@@ -28,13 +28,13 @@ mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMask
   async runJson(argv:readonly string[], timeout?:number) {
     calls.push({argv, ...(timeout === undefined ? {} : {timeout})});
     if(readFailure&&calls.length===readFailureAt){const failure=readFailure;readFailure=undefined;throw failure;}
-    const value = queue.shift(); assert.ok(value, "unexpected child call"); if (argv[1] === "send-transaction") policyQueue({project:postProject??PROJECT,policy:postPolicy??POLICY}); return value;
+    const value = queue.shift(); assert.ok(value, "unexpected child call"); if (argv[1] === "send-transaction") policyQueue({project:postProject??PROJECT,policy:postPolicy??POLICY,payer:postPayer??PAYER}); return value;
   }
 }}});
 mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
   claimMetaMaskNativeOwnedScope: () => {if (!allowTransport) throw new Error("unowned");},
   assertMetaMaskNativeOwnedScope: (_s:unknown,c:MetaMaskNativeOwnedContext) => ({utcExpiresAt:c.consentExpiresAt,monotonicDeadlineMs:performance.now()+Date.parse(c.consentExpiresAt)-Date.now()}),
-  assertMetaMaskNativeOwnedContextCurrent: async (_scope:unknown,ctx:MetaMaskNativeOwnedContext) => {currentChecks++; if (rejectAfterHandoff && currentChecks === 2) throw new Error("expired");const p=await readFixedMetaMaskNativePolicy(ctx.quote.chainId,ctx.consentExpiresAt);assert.equal(p.vendorProjectHash,ctx.vendorProjectHash);assert.equal(p.vendorPolicyHash,ctx.vendorPolicyHash);},
+  assertMetaMaskNativeOwnedContextCurrent: async (_scope:unknown,ctx:MetaMaskNativeOwnedContext) => {currentChecks++; if (rejectAfterHandoff && currentChecks === 2) throw new Error("expired");const p=await readFixedMetaMaskNativePolicy(ctx.quote.chainId,ctx.consentExpiresAt,ctx.quote.sender);assert.equal(p.vendorProjectHash,ctx.vendorProjectHash);assert.equal(p.vendorPolicyHash,ctx.vendorPolicyHash);},
   readMetaMaskNativeSettlement: async () => {throw new Error("not a settlement fixture");},
   readMetaMaskNativeReservation: async () => {throw new Error("not a ledger fixture");},
   assertMetaMaskNativeFailedBeforeEffect: async () => {throw new Error("not a release fixture");},
@@ -44,12 +44,12 @@ mock.module("../../src/metamask-native-transfer-owner.js", {namedExports: {
 }});
 const {readFixedMetaMaskNativePolicy, submitOwnedMetaMaskNative, readFixedMetaMaskNativeRequest} = await import("../../src/metamask-native-transfer-adapter.js");
 function result(data:unknown, exitCode=0) {const stdout=Buffer.from(JSON.stringify({ok:true,data})); buffers.push(stdout); return {exitCode,stdout};}
-function setup() {readFailureAt=1;readFailure=undefined;queue=[];calls=[];buffers.length=0;allowTransport=false;currentChecks=0;rejectAfterHandoff=false;postProject=undefined;postPolicy=undefined;}
-function policyQueue(overrides: {policy?:string;mode?:string;address?:string;lastAddress?:string;exit?:number;project?:string;lastProject?:string} = {}) {
-  queue.push(result({authenticated:true,summary:{mode:"session",projectId:overrides.project??PROJECT}}),result({mode:"server",chainNamespace:"evm",address:PAYER}),
-    result({mode:overrides.mode??"guard",address:PAYER}),
-    result({policy:overrides.policy??POLICY,address:overrides.address??PAYER},overrides.exit??0),
-    result({mode:"server",chainNamespace:"evm",address:overrides.lastAddress??PAYER}),result({authenticated:true,summary:{mode:"session",projectId:overrides.lastProject??overrides.project??PROJECT}}));
+function setup() {readFailureAt=1;readFailure=undefined;queue=[];calls=[];buffers.length=0;allowTransport=false;currentChecks=0;rejectAfterHandoff=false;postProject=undefined;postPolicy=undefined;postPayer=undefined;}
+function policyQueue(overrides: {payer?:string;policy?:string;mode?:string;address?:string;lastAddress?:string;exit?:number;project?:string;lastProject?:string} = {}) {
+  queue.push(result({authenticated:true,summary:{mode:"session",projectId:overrides.project??PROJECT}}),result({mode:"server",chainNamespace:"evm",address:overrides.payer??PAYER}),
+    result({mode:overrides.mode??"guard",address:overrides.payer??PAYER}),
+    result({policy:overrides.policy??POLICY,address:overrides.address??overrides.payer??PAYER},overrides.exit??0),
+    result({mode:"server",chainNamespace:"evm",address:overrides.lastAddress??overrides.payer??PAYER}),result({authenticated:true,summary:{mode:"session",projectId:overrides.lastProject??overrides.project??PROJECT}}));
 }
 function context():MetaMaskNativeOwnedContext {
   const now=new Date(), token=getAddress(directEvmListRows(1).find(r=>r.symbol==="USDC"&&r.kind==="token")!.identifier!);
@@ -126,3 +126,24 @@ test("thrown process errors retain only a fixed error category, never raw messag
 test("watch process failure is distinguishable from pre-provider refusal without exposing its message",async()=>{setup();policyQueue();readFailureAt=7;readFailure=new Error("token=PRIVATE raw provider failure");const v=await readFixedMetaMaskNativeRequest(RID,PROJECT_HASH);assert.equal(v.disposition,"unknown");assert.equal(v.readObservation?.stage,"watch");assert.equal(v.readObservation?.guard_step,null);assert.equal(v.readObservation?.before_guard_verified,true);assert.equal(v.readObservation?.watch_returned,false);assert.equal(v.readObservation?.error_code,"unavailable");assert.equal(calls.length,7);assert.ok(!JSON.stringify(v).includes("PRIVATE"));assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));});
 
 test("invalid diagnostic cannot alter a valid request hint or expose arbitrary provider fields",async()=>{setup();requestQueue(request(),{txHash:TX,status:"CONFIRMED"});Object.assign(queue[6]!,{nativeDiagnostic:{stage:"SECRET",providerCode:"token=SECRET",message:"https://rpc.invalid/?key=SECRET"}});const v=await readFixedMetaMaskNativeRequest(RID,PROJECT_HASH);assert.equal(v.disposition,"acknowledged");assert.equal(v.transactionHash,TX);assert.equal(v.readObservation?.diagnostic,null);assert.ok(!JSON.stringify(v).includes("SECRET"));});
+
+test("connected payer requires exact owner-substituted policy and full unchanged finite fields",async()=>{
+  const payer=`0x${"1".repeat(40)}`,policy=OP_POLICY.replace(`wallet_address: "${PAYER}"`,`wallet_address: "${payer}"`);
+  setup();policyQueue({payer,policy});const v=await readFixedMetaMaskNativePolicy(10,undefined,payer);
+  assert.equal(v.selectedAddress,payer);assert.equal(v.vendorPolicyHash,sha256(policy));assert.equal(v.policyBytes,945);
+  for(const altered of [OP_POLICY,policy+`wallet_address: "${payer}"\n`,policy.replace('rolling_24h: 0.5','rolling_24h: 5.0'),policy.replace('chain_id: 10','chain_id: 11'),policy.replace('allowlist:','allowlist: "*"')]){
+    setup();policyQueue({payer,policy:altered});await assert.rejects(readFixedMetaMaskNativePolicy(10,undefined,payer));assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));
+  }
+});
+test("SDK selected payer drift prevents quote-side read and stored-payer watch",async()=>{
+  const payer=`0x${"1".repeat(40)}`;setup();policyQueue();await assert.rejects(readFixedMetaMaskNativePolicy(1,undefined,payer));assert.equal(calls.length,2);
+  setup();policyQueue();const v=await readFixedMetaMaskNativeRequest(RID,PROJECT_HASH,payer);assert.equal(v.disposition,"unknown");assert.equal(v.readObservation?.guard_step,"address_before");assert.ok(calls.every(c=>c.argv[2]!=="watch"));
+});
+test("adapter submits exact profile payer and refuses drift before financial child",async()=>{
+  const payer=`0x${"1".repeat(40)}`,policy=POLICY.replace(`wallet_address: "${PAYER}"`,`wallet_address: "${payer}"`);
+  const ctx=context(),{quoteHash,...q}=ctx.quote,newQuote={...q,sender:getAddress(payer)};
+  const configured={...ctx,profile:"mm-owned-test",vendorPolicyHash:sha256(policy),quote:{...newQuote,quoteHash:hashObject(newQuote)}};
+  setup();allowTransport=true;postPayer=payer;postPolicy=policy;policyQueue({payer,policy});queue.push(result({mode:"server",address:payer,hash:TX}));
+  assert.equal((await submitOwnedMetaMaskNative(scope,configured)).disposition,"acknowledged");assert.equal(calls.filter(c=>c.argv[1]==="send-transaction").length,1);
+  setup();allowTransport=true;policyQueue();await assert.rejects(submitOwnedMetaMaskNative(scope,configured));assert.ok(calls.every(c=>c.argv[1]!=="send-transaction"));
+});

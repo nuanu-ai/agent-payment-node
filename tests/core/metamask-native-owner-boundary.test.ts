@@ -34,9 +34,10 @@ test("settlement and reserve do not accept forged operation identities or a quot
     await assert.rejects(()=>readFixedMetaMaskNativeTransfer(root,id),/does not exist/);
   } finally {await rm(root,{recursive:true,force:true});}
 });
-test("fixed CLI rejects caller custody, recipient, token, RPC and raw transaction parameters",()=>{
+test("native CLI admits connected profile selection and rejects recipient, token, RPC and raw transaction parameters",()=>{
   const base=["wallet","metamask","native-transfer","--chain","ethereum","--idempotency-key","native-0001"];
-  for(const flag of ["--profile","--recipient","--token","--raw-tx","--rpc-url","--wallet"]) assert.throws(()=>parseCatalogArgv([...base,flag,"arbitrary"]));
+  assert.deepEqual(bindArgv([...base,"--profile","mm-owned-test"]).request,{command:"wallet.metamask.native-transfer",profile:"mm-owned-test",chainId:1,idempotencyKey:"native-0001"});
+  for(const flag of ["--recipient","--token","--raw-tx","--rpc-url","--wallet"]) assert.throws(()=>parseCatalogArgv([...base,flag,"arbitrary"]));
 });
 
 test("normal central EVM guard reads existing native journals only and cannot hide malformed financial state",async()=>{
