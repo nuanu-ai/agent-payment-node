@@ -11,7 +11,7 @@ export function mmEconomics(request) {
     const maximum = mmUint(request.maxFeeAtomic), cap = maximum < gross - minimum ? maximum : gross - minimum;
     return { gross, cap, initialNet: request.fixedNet ? mmUint(request.fixedNet.netAtomic, true) : gross - cap };
 }
-/** Actual debit always equals the exact two-transfer batch, independent of the owner ceiling. */
+/** Actual debit always equals the exact mode-bound batch, independent of the owner ceiling. */
 export function mmActualGross(quote, reason = "mm_gasless_input") {
     return (mmUint(quote.netAtomic, true, reason) + mmUint(quote.feeAtomic, false, reason)).toString();
 }
@@ -20,24 +20,31 @@ export function mmUnusedGross(request, quote) {
 }
 export function mmQuoteHash(quote) {
     return hashObject({ netAtomic: quote.netAtomic, feeAtomic: quote.feeAtomic,
-        feeRecipient: quote.feeRecipient, executions: quote.executions });
+        feeRecipient: quote.feeRecipient, executions: quote.executions,
+        ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode, sponsorshipHash: quote.sponsorshipHash } : {}) });
 }
 /** Validate each quote independently; convergence and final G=N+F are separate checks. */
 export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasless_quote_invalid") {
-    const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash"], reason);
+    const sponsored = value !== null && typeof value === "object" && "feeMode" in value;
+    const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
+        ...(sponsored ? ["feeMode", "sponsorshipHash"] : [])], reason);
     const { row } = mmRegistry(request.chainId), economics = mmEconomics(request);
     const net = mmUint(q.netAtomic, true, reason), fee = mmUint(q.feeAtomic, false, reason);
     if ((request.fixedNet && q.netAtomic !== request.fixedNet.netAtomic) || q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic))
         mmFail(reason);
     if (fee > economics.cap)
         mmFail(reason === "mm_gasless_state_corrupt" ? reason : "mm_gasless_fee_cap");
-    const feeRecipient = mmCanonicalAddress(q.feeRecipient, reason);
+    if (sponsored && (q.feeMode !== "sponsored" || q.feeAtomic !== "0" || q.feeRecipient !== null))
+        mmFail(reason);
+    if (sponsored)
+        mmHash(q.sponsorshipHash, reason);
+    const feeRecipient = sponsored ? null : mmCanonicalAddress(q.feeRecipient, reason);
     const excluded = [MM_ZERO_ADDRESS, binding.address, row.token, ...Object.values(row.protocol).map(p => p.address)];
-    if (excluded.includes(request.recipient) || excluded.includes(feeRecipient) || feeRecipient === request.recipient)
+    if (excluded.includes(request.recipient) || (feeRecipient !== null && (excluded.includes(feeRecipient) || feeRecipient === request.recipient)))
         mmFail(reason);
-    if (!Array.isArray(q.executions) || q.executions.length !== 2)
+    if (!Array.isArray(q.executions) || q.executions.length !== (sponsored ? 1 : 2))
         mmFail(reason);
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < (sponsored ? 1 : 2); i++) {
         const e = mmExact(q.executions[i], ["target", "value", "callData"], reason);
         const expected = encodeFunctionData({ abi: transferAbi, functionName: "transfer",
             args: [i === 0 ? request.recipient : feeRecipient, i === 0 ? net : fee] });
@@ -63,7 +70,8 @@ export function mmAssertStableQuote(request, quote, reason = "mm_gasless_quote_i
  * stays inside the effective cap, the recipient still clears the floor and the gross still splits exactly.
  */
 export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless_quote_invalid") {
-    const candidate = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash"], reason);
+    const candidate = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
+        ...(value !== null && typeof value === "object" && "feeMode" in value ? ["feeMode", "sponsorshipHash"] : [])], reason);
     const netAtomic = typeof candidate.netAtomic === "string" ? candidate.netAtomic : mmFail(reason);
     const quote = mmQuote(candidate, request, binding, netAtomic, reason);
     mmAssertStableQuote(request, quote, reason);

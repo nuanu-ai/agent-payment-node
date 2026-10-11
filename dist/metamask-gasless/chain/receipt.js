@@ -2,12 +2,13 @@ import { mmAssertStableQuote } from "../economics.js";
 import { mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { addressWord, MM_APPROVAL_TOPIC, MM_INCREASED_COUNT_TOPIC, MM_TRANSFER_TOPIC, rpcAddress, rpcHex, rpcQuantity, topicAddress, twoWords } from "./abi.js";
-/** Validate complete receipt logs against the exact one-root/two-USDC-call settlement. */
+/** Validate complete receipt logs against the exact one-root/mode-bound USDC settlement. */
 export function verifyMetaMaskReceiptAccounting(intent, outerSender, logs) {
     const row = mmRegistry(intent.request.chainId).row;
     const tokenLogs = logs.filter(log => log.address === row.token);
     const countLogs = logs.filter(log => log.address === row.protocol.limitedCalls.address);
-    if (tokenLogs.length !== 2 || countLogs.length !== 1)
+    const sponsored = intent.quote.feeMode === "sponsored";
+    if (tokenLogs.length !== (sponsored ? 1 : 2) || countLogs.length !== 1)
         mmFail("mm_gasless_evidence_invalid");
     for (const log of logs) {
         if (log.topics[0] === MM_TRANSFER_TOPIC && log.topics.length === 3 &&
@@ -38,13 +39,13 @@ export function verifyMetaMaskReceiptAccounting(intent, outerSender, logs) {
     }
     const [limit, callCount] = twoWords(count.data);
     if (limit !== 1n || callCount !== 1n || BigInt(count.logIndexAtomic) >= BigInt(transferIndexes[0]) ||
-        BigInt(transferIndexes[0]) >= BigInt(transferIndexes[1]))
+        (!sponsored && BigInt(transferIndexes[0]) >= BigInt(transferIndexes[1])))
         mmFail("mm_gasless_evidence_invalid");
     const delivered = BigInt(intent.quote.netAtomic), fee = BigInt(intent.quote.feeAtomic);
     mmAssertStableQuote(intent.request, intent.quote, "mm_gasless_evidence_invalid");
     return { deliveredAtomic: delivered.toString(), feeAtomic: fee.toString(),
         debitAtomic: (delivered + fee).toString(), firstTransferIndexAtomic: transferIndexes[0],
-        secondTransferIndexAtomic: transferIndexes[1], counterIndexAtomic: count.logIndexAtomic };
+        secondTransferIndexAtomic: sponsored ? null : transferIndexes[1], counterIndexAtomic: count.logIndexAtomic };
 }
 /** Validate one scan log before treating its transaction hash as a candidate. */
 export function verifyScanLog(value, intent, from, to) {
