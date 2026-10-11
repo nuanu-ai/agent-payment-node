@@ -41,7 +41,9 @@ test("malformed or overflowing Sentinel fee quantities cannot reach a payment re
     const response = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
       { homeDirectory: home.home, now: () => NOW, exchange });
     assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } });
+      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" },
+      diagnostic: { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+        httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_fee_quantity" } });
     assert.equal(exchange.requests.length, 5);
     assert.equal(exchange.requests.some((request) => request.url.includes("transaction-requests")), false);
     assert.equal(exchange.beforeSends, 0);

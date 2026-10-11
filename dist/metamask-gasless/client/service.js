@@ -1,3 +1,5 @@
+import { ApnError } from "../../errors.js";
+import { readDiagnostic } from "./read-diagnostic.js";
 import { agentSdk, agentEvm, foxEvm, foxKeyring, ethereumControllers } from "./sdk-vendor.js";
 import { homedir } from "node:os";
 import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
@@ -28,6 +30,7 @@ export async function executeHelperRequest(input, options = {}) {
     const now = options.now ?? (() => new Date());
     const home = options.homeDirectory ?? homedir();
     let policy;
+    const phase = { stage: "private_state" };
     const originalFetch = globalThis.fetch;
     const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
     const consoleMethods = saveConsole();
@@ -47,21 +50,24 @@ export async function executeHelperRequest(input, options = {}) {
             if (request.mode === "submit")
                 policy.primeSubmitClock(firstObservedAt);
             globalThis.fetch = policy.fetch;
-            const result = request.mode === "quote" ? await quote(request.input, state, policy) : request.mode === "submit" ?
+            const result = request.mode === "quote" ? await quote(request.input, state, policy, phase) : request.mode === "submit" ?
                 await submit(request.intent, state, home, now, policy, firstObservedAt) : await observe(request.intent, state, policy, now);
             policy.assertComplete();
             return { version: MM_HELPER_VERSION, ok: true, result };
         }
         globalThis.fetch = policy.fetch;
-        const result = request.mode === "inspect" ? await inspect(home, request.expected, now()) : await buildUnsigned(request.input);
+        const result = request.mode === "inspect" ? await inspect(home, request.expected, now(), phase) : await buildUnsigned(request.input);
         policy.assertComplete();
         return { version: MM_HELPER_VERSION, ok: true, result };
     }
     catch (error) {
         const fixedFailure = policy?.fixedFailure();
-        if (fixedFailure)
-            return { version: MM_HELPER_VERSION, ok: false, failure: mmFailure(fixedFailure) };
-        return { version: MM_HELPER_VERSION, ok: false, failure: mmClassify(error, fallback(request.mode)) };
+        const failure = fixedFailure ? mmFailure(fixedFailure) : mmClassify(error, fallback(request.mode));
+        if (request.mode === "inspect" || request.mode === "quote") {
+            const context = policy?.readFailureContext(error);
+            return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage, context?.validationFailed ? "network_validation" : error instanceof ApnError ? "closed_failure" : "unclassified_exception", context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate) };
+        }
+        return { version: MM_HELPER_VERSION, ok: false, failure };
     }
     finally {
         globalThis.fetch = originalFetch;
@@ -69,18 +75,25 @@ export async function executeHelperRequest(input, options = {}) {
         restoreConsole(consoleMethods);
     }
 }
-async function inspect(home, expected, now) {
-    const state = await readPrivateState(home, expected, now), hydrated = await hydrateSdkState(state);
+async function inspect(home, expected, now, phase) {
+    phase.stage = "private_state";
+    const state = await readPrivateState(home, expected, now);
+    phase.stage = "hydrate";
+    const hydrated = await hydrateSdkState(state);
+    phase.stage = "inspect";
     if (hydrated.writes() !== 0 || hydrated.session.walletMode !== "server-wallet" ||
         !isPlainRecord(hydrated.walletState.selectedWallet))
         mmFail("mm_gasless_state_corrupt");
     return state.binding;
 }
-async function quote(input, state, policy) {
+async function quote(input, state, policy, phase) {
+    phase.stage = "sdk_load";
     const sdk = await agentSdk();
     sdk.disableAnalytics();
     const evm = await agentEvm();
+    phase.stage = "hydrate";
     const hydrated = await hydrateSdkState(state);
+    phase.stage = "inventory";
     let cacheWrites = 0;
     let cache = null;
     const registry = new sdk.NetworkRegistry({ env: "prod", storage: { read: () => cache,
@@ -91,6 +104,7 @@ async function quote(input, state, policy) {
     if (cacheWrites !== 1 || cache === null)
         mmFail("mm_gasless_provider_unavailable");
     policy.assertQuoteInventories();
+    phase.stage = "chain_override";
     const baseChain = evm.getAgenticEvmChains().find((chain) => chain.chainId === input.chainId);
     if (!baseChain)
         mmFail("mm_gasless_unsupported_chain");
@@ -108,12 +122,15 @@ async function quote(input, state, policy) {
         infuraRpcBaseUrl: INFURA_URL, priceService: new sdk.PriceService("prod", () => state.token), networkRegistry: registry,
         logger: logger() });
     const relay = { host: PROXY_URL, env: "prod", getHeaders: () => ({ Authorization: `Bearer ${state.token}` }) };
+    phase.stage = "relay_support";
     if (!await service.isGaslessRelaySupported({ chainId: input.chainId, relay }))
         mmFail("mm_gasless_capability_unavailable");
+    phase.stage = "fee_quote";
     const raw = await service.quoteGaslessTransfer({ state: walletState, chainId: input.chainId, recipient: input.recipient,
         amount: formatSix(input.netAtomic), token: input.token, gasToken: input.token, relay });
     if (resolverCalls !== 0 || hydrated.writes() !== 0)
         mmFail("mm_gasless_state_security");
+    phase.stage = "quote_output";
     return validateSdkQuote(raw, input, state.address);
 }
 async function buildUnsigned(input) {

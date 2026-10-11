@@ -9,6 +9,15 @@ import { MM_CHAINS } from "../../src/metamask-gasless/registry.js";
 import { expectedQuote, intent, NOW, OWNER, PROJECT, quoteInput, SECRET, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
 
+const inspectPrivateDiagnostic = { mode: "inspect", stage: "private_state", invariant: "closed_failure",
+  network: "none", httpStatus: null, exitCode: null, signal: "none", timedOut: false } as const;
+const quotePrivateDiagnostic = { mode: "quote", stage: "private_state", invariant: "closed_failure",
+  network: "none", httpStatus: null, exitCode: null, signal: "none", timedOut: false } as const;
+const quoteInventoryDiagnostic = { mode: "quote", stage: "inventory", invariant: "network_validation",
+  network: "mimir-networks", httpStatus: 200, exitCode: null, signal: "none", timedOut: false } as const;
+const quoteAuthDiagnostic = { mode: "quote", stage: "inventory", invariant: "closed_failure",
+  network: "mimir-networks", httpStatus: 401, exitCode: null, signal: "none", timedOut: false } as const;
+
 function identity(binding: Awaited<ReturnType<typeof syntheticHome>>["binding"]): MetaMaskGaslessProfileIdentity {
   return { profile: "fixture", profileHash: "e".repeat(64), address: binding.address,
     accountBindingHash: binding.accountBindingHash, capabilityHash: binding.capabilityHash, revision: binding.revision };
@@ -56,7 +65,7 @@ test("remote type compatibility retains closed shape, payer, namespace, referenc
     const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
       expected: identity(home.binding) }, { homeDirectory: home.home, now: () => NOW, exchange });
     assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_STATE_CORRUPT", reason: row.reason } });
+      failure: { code: "APN_STATE_CORRUPT", reason: row.reason }, diagnostic: inspectPrivateDiagnostic });
     assert.deepEqual(exchange.requests, []);
     assert.equal(await readFile(join(home.directory, "wallets.json"), "utf8"), home.walletBytes);
   });
@@ -66,7 +75,7 @@ test("remote type compatibility retains closed shape, payer, namespace, referenc
     expected: { ...identity(home.binding), address: "0x4444444444444444444444444444444444444444" } },
     { homeDirectory: home.home, now: () => NOW });
   assert.deepEqual(drift, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_binding_changed" } });
+    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_binding_changed" }, diagnostic: inspectPrivateDiagnostic });
   const duplicate = await syntheticHome({ ref: { name: "primary" }, remoteWallets: [
     { address: OWNER, name: "primary", namespace: "evm", type: "inert" },
     { address: "0x4444444444444444444444444444444444444444", name: "primary", namespace: "evm", type: "inert" },
@@ -74,7 +83,7 @@ test("remote type compatibility retains closed shape, payer, namespace, referenc
   const ambiguous = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
     expected: identity(duplicate.binding) }, { homeDirectory: duplicate.home, now: () => NOW });
   assert.deepEqual(ambiguous, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_identity" } });
+    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_identity" }, diagnostic: inspectPrivateDiagnostic });
 });
 
 test("client inspect hydrates official managers and resolves exact address/name while preserving unrelated records", async (t) => {
@@ -99,7 +108,7 @@ test("client inspect rejects id fallback, duplicate selected matches, unsafe fil
   const idResult = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect", expected: identity(idHome.binding) },
     { homeDirectory: idHome.home, now: () => NOW });
   assert.deepEqual(idResult, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_identity" } });
+    failure: { code: "APN_PROFILE_DRIFT", reason: "mm_gasless_identity" }, diagnostic: inspectPrivateDiagnostic });
 
   const duplicate = await syntheticHome({ ref: { name: "primary" }, remoteWallets: [{ address: OWNER, name: "primary", namespace: "evm" },
     { address: "0x4444444444444444444444444444444444444444", name: "primary", namespace: "evm" }] }); t.after(duplicate.cleanup);
@@ -111,7 +120,7 @@ test("client inspect rejects id fallback, duplicate selected matches, unsafe fil
   const staleResult = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect", expected: identity(stale.binding) },
     { homeDirectory: stale.home, now: () => NOW });
   assert.deepEqual(staleResult, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" } });
+    failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" }, diagnostic: inspectPrivateDiagnostic });
 
   const linked = await syntheticHome(); t.after(linked.cleanup);
   const original = join(linked.directory, "wallets-original.json"); await rename(join(linked.directory, "wallets.json"), original);
@@ -119,14 +128,14 @@ test("client inspect rejects id fallback, duplicate selected matches, unsafe fil
   const linkedResult = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect", expected: identity(linked.binding) },
     { homeDirectory: linked.home, now: () => NOW });
   assert.deepEqual(linkedResult, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_STATE_SECURITY", reason: "mm_gasless_state_security" } });
+    failure: { code: "APN_STATE_SECURITY", reason: "mm_gasless_state_security" }, diagnostic: inspectPrivateDiagnostic });
 
   const carrier = await syntheticHome(); t.after(carrier.cleanup);
   await symlink(dirname(linked.home), join(carrier.home, "linked-parent"));
   const ancestorResult = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect", expected: identity(linked.binding) },
     { homeDirectory: join(carrier.home, "linked-parent", basename(linked.home)), now: () => NOW });
   assert.deepEqual(ancestorResult, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_STATE_SECURITY", reason: "mm_gasless_state_security" } });
+    failure: { code: "APN_STATE_SECURITY", reason: "mm_gasless_state_security" }, diagnostic: inspectPrivateDiagnostic });
   assert.equal(JSON.stringify([idResult, staleResult, linkedResult, ancestorResult]).includes(SECRET), false);
 });
 
@@ -160,7 +169,7 @@ test("public helper enforces JWT NumericDate millisecond boundaries before provi
     const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote",
       input: quoteInput(home.binding, 8453) }, { homeDirectory: home.home, now: () => row.now, exchange });
     assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" } });
+      failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" }, diagnostic: quotePrivateDiagnostic });
     assert.deepEqual(exchange.requests, [], "invalid claims must not reach refresh, authenticated SDK, RPC, or payment calls");
     assert.equal(exchange.beforeSends, 0);
   });
@@ -203,7 +212,7 @@ test("client denies incomplete inventory success instead of using public fallbac
   const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
     { homeDirectory: home.home, now: () => NOW, exchange });
   assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } });
+    failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic: quoteInventoryDiagnostic });
   assert.equal(exchange.requests.filter((request) => request.url.includes("rpc.example.test")).length, 0);
 });
 
@@ -267,7 +276,7 @@ test("client preserves fixed auth failures without retry and maps one 404 observ
   const deniedQuote = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, chainId) },
     { homeDirectory: home.home, now: () => NOW, exchange: quoteAuth });
   assert.deepEqual(deniedQuote, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" } });
+    failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" }, diagnostic: quoteAuthDiagnostic });
   assert.ok(quoteAuth.requests.length <= 3); assert.equal(quoteAuth.requests.some((request) => request.url.includes("rpc.example.test")), false);
 
   const built = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "buildUnsigned",

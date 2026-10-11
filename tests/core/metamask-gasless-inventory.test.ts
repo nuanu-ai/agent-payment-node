@@ -61,7 +61,9 @@ test("SDK malformed network inventories cannot reach quote RPC or a transaction 
     const response = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
       { homeDirectory: home.home, now: () => NOW, exchange });
     assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } });
+      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" },
+      diagnostic: { mode: "quote", stage: "inventory", invariant: "closed_failure", network: "none",
+        httpStatus: null, exitCode: null, signal: "none", timedOut: false } });
     assert.equal(exchange.requests.length, 3);
     assert.equal(exchange.requests.some((request) => request.method === "POST"), false);
     assert.equal(exchange.beforeSends, 0);
@@ -79,7 +81,9 @@ test("SDK disabled relay capability stays unavailable even with rich valid metad
   const response = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
     { homeDirectory: home.home, now: () => NOW, exchange });
   assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_capability_unavailable" } });
+    failure: { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_capability_unavailable" },
+    diagnostic: { mode: "quote", stage: "relay_support", invariant: "closed_failure", network: "none",
+      httpStatus: null, exitCode: null, signal: "none", timedOut: false } });
   assert.equal(exchange.requests.length, 3);
   assert.equal(exchange.requests.some((request) => request.method === "POST"), false);
   });
