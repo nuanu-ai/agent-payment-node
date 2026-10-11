@@ -59,7 +59,7 @@ function reader(mutation?: Mutation, limits: { maxHttpRequests?: number; deadlin
           }
           if (mutation === "receipt" && request.method === "eth_getTransactionReceipt") result.transactionHash = `0x${"ff".repeat(32)}`;
           if (mutation === "canonical" && request.method === "eth_getBlockByNumber" && request.params[0] === capture.receiptBlock.number) result.transactions = [];
-          if (mutation === "reanchor" && role === "archive" && request.method === "eth_getBlockByNumber" && request.params[0] === capture.receiptBlock.number) result.hash = `0x${"ff".repeat(32)}`;
+          if (mutation === "reanchor" && role === "primary" && posts.some(row => row.role === "archive" && row.methods.includes("debug_traceTransaction")) && request.method === "eth_getBlockByNumber" && request.params[0] === capture.receiptBlock.number) result.hash = `0x${"ff".repeat(32)}`;
           return { jsonrpc: "2.0", id: request.id, result };
         });
         return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? responses : responses[0]) };
