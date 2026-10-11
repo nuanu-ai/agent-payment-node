@@ -1,3 +1,4 @@
+import { safeCanonicalRetirementReason, type HistoricalRetirementDiagnostic, type HistoricalRetirementStage } from "./historical-retirement-diagnostic-types.js";
 import { constants } from "node:fs";
 import { lstat, open, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -35,7 +36,11 @@ import { PROFILE, NATIVE_IDENTITY, USDC_IDENTITY, assertNoOrphanPostCommit, JOUR
   retirementFileStatValid, projectionFileStatValid, fileStatFacts, decodeRetirementBytes,
   type RetirementPublicationFrame, type RetirementJournal, type RetirementReceipt,
   type RetirementProjectionNamespace, type ProjectionTempCleanup } from "./historical-retirement-validation.js";
-
+const diagnostics = new WeakMap<object, HistoricalRetirementDiagnostic>();
+/** Read-only provenance lookup; no diagnostic issuer is exported. */
+export function historicalRetirementConsumerDiagnostic(error: unknown): HistoricalRetirementDiagnostic | undefined {
+  return typeof error === "object" && error !== null ? diagnostics.get(error) : undefined;
+}
 const RPC_ORIGINS = Object.freeze(["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"] as const);
 const MAX_RPC_PHYSICAL_POSTS = 64 as const;
 /** Create-only, separately namespaced durability after the accounting record commits. */
@@ -44,7 +49,6 @@ class HistoricalRetirementStore extends SecureStateStore {
     private readonly publication?: RetirementPublicationFrame) {
     super(root);
   }
-
   async read(relativePath: string): Promise<unknown | null> {
     await this.guard.check();
     const value = await this.readJson(relativePath);
@@ -52,7 +56,6 @@ class HistoricalRetirementStore extends SecureStateStore {
     await this.guard.check();
     return value;
   }
-
   async entries(relativePath: string): Promise<readonly import("node:fs").Dirent[]> {
     await this.guard.check();
     const value = await this.readDirectory(relativePath);
@@ -60,7 +63,6 @@ class HistoricalRetirementStore extends SecureStateStore {
     await this.guard.check();
     return value;
   }
-
   async createOnly(relativePath: string, value: unknown): Promise<void> {
     const parent = dirname(relativePath);
     await this.guard.check();
@@ -69,7 +71,6 @@ class HistoricalRetirementStore extends SecureStateStore {
     await this.writeJson(relativePath, value, true);
     await this.guard.check([parent]);
   }
-
   protected override async beforeCreateOnlyPublication(relativePath: string, value: unknown): Promise<void> {
     if (!relativePath.startsWith(`${HISTORICAL_RETIREMENT_NAMESPACE}/`)) return;
     const frame = this.publication;
@@ -78,7 +79,6 @@ class HistoricalRetirementStore extends SecureStateStore {
     if (canonicalJson(record) !== canonicalJson(frame.record)) corrupt();
     await assertAccountingPublication(frame.token, frame.context, record);
   }
-
   /** Reconcile only the exact staged inode that the create-only writer can leave at a crash boundary. */
   async recoverExactAccountingTemp(operationId: string, rows: readonly AssetUsageReservation[]): Promise<void> {
     if (!HISTORICAL_JUPITER_IDS.some(id => id === operationId)) refuse();
@@ -122,7 +122,6 @@ class HistoricalRetirementStore extends SecureStateStore {
     finally { await directory.close(); }
     await this.guard.check([HISTORICAL_RETIREMENT_NAMESPACE]);
   }
-
   /** Recover only the two deterministic projections for a book whose immutable bindings already passed. */
   async recoverExactProjectionTemps(operationId: string, record: HistoricalRetirementRecord): Promise<void> {
     if (!HISTORICAL_JUPITER_IDS.some(id => id === operationId) || record.operationId !== operationId) corrupt();
@@ -157,7 +156,6 @@ class HistoricalRetirementStore extends SecureStateStore {
       await this.guard.check([cleanup.namespace]);
     }
   }
-
   private async readOwnedRetirementFile(path: string, parentDev: bigint, expectedLinks: bigint): Promise<{
     readonly record: HistoricalRetirementRecord; readonly dev: bigint; readonly ino: bigint;
     readonly bytes: Buffer;
@@ -179,7 +177,6 @@ class HistoricalRetirementStore extends SecureStateStore {
       await handle.close();
     }
   }
-
   private async inspectProjectionTemp(operationId: string, namespace: RetirementProjectionNamespace,
     expected: RetirementJournal | RetirementReceipt): Promise<ProjectionTempCleanup | null> {
     const entries = await this.entries(namespace);
@@ -225,7 +222,6 @@ class HistoricalRetirementStore extends SecureStateStore {
     return { namespace, targetPath, temporaryPath, parentPath, parentDev: parent.dev,
       tempDev: temporary.dev, tempIno: temporary.ino, targetIno: targetStat?.ino ?? null, expectedBytes };
   }
-
   private async readOwnedProjectionFile(path: string, parentDev: bigint, expectedLinks: bigint,
     expectedBytes: Buffer): Promise<{ readonly dev: bigint; readonly ino: bigint; readonly bytes: Buffer }> {
     await this.assertNoSymlinkAncestors(path);
@@ -242,7 +238,6 @@ class HistoricalRetirementStore extends SecureStateStore {
       await handle.close();
     }
   }
-
   private async pinIfPresent(relativePath: string): Promise<void> {
     if (relativePath === ".") return;
     try {
@@ -253,14 +248,12 @@ class HistoricalRetirementStore extends SecureStateStore {
     }
   }
 }
-
 async function assertScope(token: OwnedJupiterHistoricalRetirementAuthority,
   context: OwnedJupiterHistoricalRetirementContext): Promise<void> {
   scopeDeadline(context);
   await assertOwnedJupiterRetirementScope(token, context);
   scopeDeadline(context);
 }
-
 async function activePolicy(root: string, context: OwnedJupiterHistoricalRetirementContext,
   at: Date): Promise<ActiveAssetPolicy> {
   const guard = context.state.directoryGuard(), profileHash = allowlistProfileHash(PROFILE);
@@ -273,7 +266,6 @@ async function activePolicy(root: string, context: OwnedJupiterHistoricalRetirem
       canonicalJson(policy) !== canonicalJson(context.activePolicy) || Date.parse(context.deadline) > Date.parse(policy.registry.expiresAt)) refuse();
   return policy;
 }
-
 async function createOrVerify(store: HistoricalRetirementStore, path: string, expected: RetirementJournal | RetirementReceipt): Promise<void> {
   const existing = await store.read(path);
   if (existing !== null) {
@@ -283,7 +275,6 @@ async function createOrVerify(store: HistoricalRetirementStore, path: string, ex
   }
   await store.createOnly(path, expected);
 }
-
 async function finishPostCommit(record: HistoricalRetirementRecord, store: HistoricalRetirementStore,
   checkpoint: () => Promise<void> = async () => {}): Promise<void> {
   await checkpoint();
@@ -292,7 +283,6 @@ async function finishPostCommit(record: HistoricalRetirementRecord, store: Histo
   await createOrVerify(store, `${RECEIPT_NAMESPACE}/${record.operationId}.json`, receiptFor(record));
   await checkpoint();
 }
-
 async function assertAccountingPublication(token: OwnedJupiterHistoricalRetirementAuthority,
   context: OwnedJupiterHistoricalRetirementContext, record: HistoricalRetirementRecord): Promise<void> {
   await assertScope(token, context);
@@ -328,11 +318,9 @@ async function assertAccountingPublication(token: OwnedJupiterHistoricalRetireme
   await assertScope(token, context);
   const rawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
   assertHistoricalRetirementBindings(record, rootSnapshot, operation, row, rawHash);
-  // The raw lease hash is deliberately the final asynchronous read before link(2) publication.
   scopeDeadline(context);
   if (record.accountingAt.slice(0, 10) !== new Date().toISOString().slice(0, 10)) refuse();
 }
-
 async function canonicalProof(token: OwnedJupiterHistoricalRetirementAuthority,
   context: OwnedJupiterHistoricalRetirementContext): Promise<HistoricalRetirementCanonicalWitness> {
   await assertScope(token, context);
@@ -374,26 +362,35 @@ async function canonicalProof(token: OwnedJupiterHistoricalRetirementAuthority,
       },
     }, providers, { signal: controller.signal, deadlineMs: remainingMs });
     await assertScope(token, context);
-    if (budget.physicalRequests > MAX_RPC_PHYSICAL_POSTS || witness.outcome !== "future_invalidity_witness") refuse();
+    if (witness.outcome === "inconclusive") {
+      const error = new ApnError("APN_OPERATION_BLOCKED", "Historical Jupiter conservative retirement is unavailable.");
+      diagnostics.set(error, Object.freeze({ stage: "canonical_proof", reason: safeCanonicalRetirementReason(witness.reason) }));
+      throw error;
+    }
+    if (budget.physicalRequests > MAX_RPC_PHYSICAL_POSTS) refuse();
     return canonicalWitness(witness);
   } finally {
     clearTimeout(stop);
   }
 }
-
 /** The accounting record is the sole linearization point; no old operation/lease/receipt is rewritten. */
 export async function consumeJupiterHistoricalRetirement(
   token: OwnedJupiterHistoricalRetirementAuthority,
   context: OwnedJupiterHistoricalRetirementContext,
 ): Promise<JupiterHistoricalRetirementPublicResult> {
+  let stage: HistoricalRetirementStage = "frame";
+  try {
   // C1's private phase changes synchronously before this first await yields.
   await claimOwnedJupiterRetirementScope(token, context);
   await assertScope(token, context);
   assertContext(context);
+  stage = "signed_material_verification";
   await verifySignedJupiterV1Transaction(context.effect, context.binding);
   await assertScope(token, context);
+  stage = "canonical_proof";
   const proof = await canonicalProof(token, context);
   await assertScope(token, context);
+  stage = "accounting_admission";
   const state = context.state, root = state.root, guard = state.directoryGuard();
   const store = new HistoricalRetirementStore(root, guard);
   const opId = context.operation.operationId;
@@ -452,6 +449,7 @@ export async function consumeJupiterHistoricalRetirement(
     assertHistoricalRetirementBindings(record, rootSnapshot, finalOperation, finalRow, finalRawHash);
     await assertScope(token, context);
     const accountingStore = new HistoricalRetirementStore(root, guard, { token, context, record });
+    stage = "publication";
     await accountingStore.createOnly(`${HISTORICAL_RETIREMENT_NAMESPACE}/${opId}.json`, record);
     await assertScope(token, context);
     await finishPostCommit(record, store, () => assertScope(token, context));
@@ -460,8 +458,13 @@ export async function consumeJupiterHistoricalRetirement(
   }, { waitMs: lockWaitMs });
   await assertScope(token, context);
   return result;
+  } catch (error) {
+    const diagnostic = historicalRetirementConsumerDiagnostic(error) ?? Object.freeze({ stage, reason: "stage_refused" as const });
+    if (typeof error === "object" && error !== null) diagnostics.set(error, diagnostic);
+    else { const refusal = new ApnError("APN_OPERATION_BLOCKED", "Historical Jupiter conservative retirement is unavailable."); diagnostics.set(refusal, diagnostic); throw refusal; }
+    throw error;
+  }
 }
-
 /** Record-first restart repair. Reads no current policy, private material, RPC or owner key. */
 export async function recoverCommittedJupiterHistoricalRetirement(
   operationId: string,

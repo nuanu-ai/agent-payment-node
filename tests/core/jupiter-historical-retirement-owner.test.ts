@@ -11,6 +11,7 @@ import { temporaryState } from "./helpers.js";
 // custody imports are static. These doubles never mint or consume authority.
 const calls = {recovery: 0, consumption: 0, keys: 0};
 const consumer = test.mock.module("../../src/swap/jupiter-solana/historical-retirement-consumer.js", {namedExports: {
+  historicalRetirementConsumerDiagnostic: () => undefined,
   recoverCommittedJupiterHistoricalRetirement: async () => {calls.recovery++; return null;},
   consumeJupiterHistoricalRetirement: async () => {calls.consumption++; assert.fail("Counterfeit cannot reach consumer");},
 }});

@@ -36,6 +36,7 @@ let currentContext: any;
 let currentActive: ActiveAssetPolicy | undefined;
 let currentWitness: any;
 let canonicalCalls = 0;
+let signatureFailure: unknown;
 let exerciseRealCanonical = false;
 let realReadCalls = 0;
 let realVerifierInput: JupiterFutureInvalidityInput | undefined;
@@ -80,7 +81,7 @@ mock.module("../../src/allowlist-active-policy.js", { namedExports: {
 } });
 mock.module("../../src/swap/jupiter-solana/v1-effects.js", { namedExports: {
   validateJupiterV1ExecutionBinding: (binding: unknown) => binding,
-  async verifySignedJupiterV1Transaction(): Promise<void> {},
+  async verifySignedJupiterV1Transaction(): Promise<void> { if (signatureFailure !== undefined) throw signatureFailure; },
 } });
 mock.module("../../src/swap/jupiter-solana/v1-material.js", { namedExports: {
   validateJupiterV1Material: (value: unknown) => value,
@@ -89,7 +90,7 @@ mock.module("../../src/swap/jupiter-solana/v1-material.js", { namedExports: {
 mock.module("../../src/swap/jupiter-solana/historical-wire.js", { namedExports: {
   assertHistoricalOrdinaryRecentBlockhash(): void {},
 } });
-const { consumeJupiterHistoricalRetirement, recoverCommittedJupiterHistoricalRetirement } =
+const { consumeJupiterHistoricalRetirement, recoverCommittedJupiterHistoricalRetirement, historicalRetirementConsumerDiagnostic } =
   await import("../../src/swap/jupiter-solana/historical-retirement-consumer.js");
 
 const H = (digit: string): string => digit.repeat(64);
@@ -531,5 +532,42 @@ test("production lifetime provenance/minimum-context checks and canonical unknow
   for (const extra of ["source", "rpcOriginHash", "minimumContextSlot"]) {
     assert.throws(() => realParseLifetime({ ...projected, [extra]: valid[extra as keyof typeof valid] }),
       (error: unknown) => error instanceof Error && "reason" in error && error.reason === "invalid_input");
+  }
+});
+
+// Diagnostic-only storage/proof doubles; no production authority or owner cryptographic positive.
+for (const reason of ["archive_data_missing", "empty_or_missing_history", "PRIVATE_BODY:https://secret/key"]) {
+  test(`C2 diagnostic allowlist preserves only canonical reason ${reason.startsWith("PRIVATE") ? "unknown-redacted" : reason}`, async t => {
+    const temp = await temporaryState(); t.after(temp.cleanup);
+    const f = await fixture(temp.root); activate(f);
+    const before = await persistentSnapshot(temp.root);
+    currentWitness = { outcome: "inconclusive", reason, body: "PRIVATE_CIPHERTEXT" };
+    await assert.rejects(consumeJupiterHistoricalRetirement(f.token as never, f.context as never), error => {
+      assert.deepEqual(historicalRetirementConsumerDiagnostic(error), { stage: "canonical_proof", reason: reason.startsWith("PRIVATE") ? "stage_refused" : reason });
+      assert.equal(JSON.stringify(historicalRetirementConsumerDiagnostic(error)).includes("PRIVATE"), false);
+      return true;
+    });
+    assert.deepEqual(await persistentSnapshot(temp.root), before);
+  });
+}
+test("C2 diagnostic separates signature verification and accounting failures without exception contents", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const f = await fixture(temp.root);
+  signatureFailure = Object.assign(Error("PRIVATE_KEY"), { stage: "canonical_proof", reason: "archive_data_missing", details: { body: "PRIVATE_BODY" } });
+  try {
+    await assert.rejects(runConsumer(f), error => {
+      assert.deepEqual(historicalRetirementConsumerDiagnostic(error), { stage: "signed_material_verification", reason: "stage_refused" });
+      return true;
+    });
+  } finally { signatureFailure = undefined; }
+  policyDecodeHook = () => { throw Error("PRIVATE_POLICY_BODY"); };
+  try {
+    await assert.rejects(runConsumer(f), error => {
+      assert.deepEqual(historicalRetirementConsumerDiagnostic(error), { stage: "accounting_admission", reason: "stage_refused" });
+      return true;
+    });
+  } finally { policyDecodeHook = undefined; }
+  for (const fake of [{stage:"canonical_proof",reason:"archive_data_missing"}, Object.assign(Error("PRIVATE"), {details:{stage:"publication",reason:"stage_refused"}})]) {
+    assert.equal(historicalRetirementConsumerDiagnostic(fake), undefined);
   }
 });

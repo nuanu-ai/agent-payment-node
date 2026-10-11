@@ -1,3 +1,4 @@
+import { safeCanonicalRetirementReason } from "./historical-retirement-diagnostic-types.js";
 import { constants } from "node:fs";
 import { lstat, open, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -22,6 +23,11 @@ import { historicalRetirementRootSnapshot, JupiterHistoricalRetirementReader } f
 import { assertOwnedJupiterRetirementScope, claimOwnedJupiterRetirementScope } from "./historical-retirement-owner.js";
 import { SwapOperationRepository } from "../repository.js";
 import { PROFILE, NATIVE_IDENTITY, USDC_IDENTITY, assertNoOrphanPostCommit, JOURNAL_NAMESPACE, RECEIPT_NAMESPACE, loadHistoricalUsageBucket, loadHistoricalUsageBuckets, lockKey, assertContext, canonicalWitness, journalFor, receiptFor, validateJournal, validateReceipt, publicResult, bucketRowsOriginal, lstatOptional, corrupt, refuse, scopeDeadline, loadRetirements, readRowsAndRetirements, retirementFileStatValid, projectionFileStatValid, fileStatFacts, decodeRetirementBytes } from "./historical-retirement-validation.js";
+const diagnostics = new WeakMap();
+/** Read-only provenance lookup; no diagnostic issuer is exported. */
+export function historicalRetirementConsumerDiagnostic(error) {
+    return typeof error === "object" && error !== null ? diagnostics.get(error) : undefined;
+}
 const RPC_ORIGINS = Object.freeze(["https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com"]);
 const MAX_RPC_PHYSICAL_POSTS = 64;
 /** Create-only, separately namespaced durability after the accounting record commits. */
@@ -345,7 +351,6 @@ async function assertAccountingPublication(token, context, record) {
     await assertScope(token, context);
     const rawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
     assertHistoricalRetirementBindings(record, rootSnapshot, operation, row, rawHash);
-    // The raw lease hash is deliberately the final asynchronous read before link(2) publication.
     scopeDeadline(context);
     if (record.accountingAt.slice(0, 10) !== new Date().toISOString().slice(0, 10))
         refuse();
@@ -393,7 +398,12 @@ async function canonicalProof(token, context) {
             },
         }, providers, { signal: controller.signal, deadlineMs: remainingMs });
         await assertScope(token, context);
-        if (budget.physicalRequests > MAX_RPC_PHYSICAL_POSTS || witness.outcome !== "future_invalidity_witness")
+        if (witness.outcome === "inconclusive") {
+            const error = new ApnError("APN_OPERATION_BLOCKED", "Historical Jupiter conservative retirement is unavailable.");
+            diagnostics.set(error, Object.freeze({ stage: "canonical_proof", reason: safeCanonicalRetirementReason(witness.reason) }));
+            throw error;
+        }
+        if (budget.physicalRequests > MAX_RPC_PHYSICAL_POSTS)
             refuse();
         return canonicalWitness(witness);
     }
@@ -403,86 +413,104 @@ async function canonicalProof(token, context) {
 }
 /** The accounting record is the sole linearization point; no old operation/lease/receipt is rewritten. */
 export async function consumeJupiterHistoricalRetirement(token, context) {
-    // C1's private phase changes synchronously before this first await yields.
-    await claimOwnedJupiterRetirementScope(token, context);
-    await assertScope(token, context);
-    assertContext(context);
-    await verifySignedJupiterV1Transaction(context.effect, context.binding);
-    await assertScope(token, context);
-    const proof = await canonicalProof(token, context);
-    await assertScope(token, context);
-    const state = context.state, root = state.root, guard = state.directoryGuard();
-    const store = new HistoricalRetirementStore(root, guard);
-    const opId = context.operation.operationId;
-    const deadline = scopeDeadline(context);
-    const lockWaitMs = Math.max(0, Math.min(5_000, deadline - Date.now() - 1));
-    const result = await state.withLocks([lockKey(NATIVE_IDENTITY), lockKey(USDC_IDENTITY)], async () => {
+    let stage = "frame";
+    try {
+        // C1's private phase changes synchronously before this first await yields.
+        await claimOwnedJupiterRetirementScope(token, context);
         await assertScope(token, context);
-        const rootSnapshot = await historicalRetirementRootSnapshot(root);
-        await assertScope(token, context);
-        const first = await readRowsAndRetirements(root, context);
-        await assertScope(token, context);
-        if (first.retirements.some(record => record.operationId === opId))
-            refuse();
-        await assertNoOrphanPostCommit(store, opId);
-        const currentOperation = await new SwapOperationRepository(root).loadAny(opId);
-        if (currentOperation === null || canonicalJson(currentOperation) !== canonicalJson(context.operation))
-            corrupt();
-        const lease = context.operation.usageLease;
-        if (lease === null)
-            refuse();
-        const originalRow = bucketRowsOriginal(first.native, lease.reservationId, lease);
-        const originalHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
-        await assertScope(token, context);
-        const finalRows = await readRowsAndRetirements(root, context);
-        await assertScope(token, context);
-        if (finalRows.retirements.some(record => record.operationId === opId))
-            refuse();
-        const finalOperation = await new SwapOperationRepository(root).loadAny(opId);
-        if (finalOperation === null || canonicalJson(finalOperation) !== canonicalJson(context.operation))
-            corrupt();
-        const finalLease = context.operation.usageLease;
-        if (finalLease === null)
-            refuse();
-        const finalRow = bucketRowsOriginal(finalRows.native, finalLease.reservationId, finalLease);
-        const finalRawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, finalLease.reservationId);
-        await assertScope(token, context);
-        const finalAt = new Date();
-        const finalPolicy = await activePolicy(root, context, finalAt);
-        await assertScope(token, context);
-        const finalNativeUsage = historicalRetirementUsage(finalRows.native, finalRows.retirements, finalAt);
-        const finalUsdcUsage = sumUsage(finalRows.usdc, finalAt);
-        const finalAdmission = calculateHistoricalRetirementPolicy(finalPolicy, opId, finalNativeUsage, finalUsdcUsage, context.operation.quote.minimumOutputAtomic, finalAt);
-        await assertScope(token, context);
-        if (canonicalJson(originalRow) !== canonicalJson(finalRow) || originalHash !== finalRawHash ||
-            rootSnapshot !== await historicalRetirementRootSnapshot(root))
-            corrupt();
-        await assertScope(token, context);
+        assertContext(context);
+        stage = "signed_material_verification";
         await verifySignedJupiterV1Transaction(context.effect, context.binding);
-        assertHistoricalOrdinaryRecentBlockhash(context.effect.rawPayload, context.fresh.rawInstructions);
-        const record = sealHistoricalRetirementRecord({
-            schemaVersion: "apn.jupiter-historical-retirement.v1", kind: "retired_unknown", operationId: opId,
-            ownerProfileHash: context.operation.ownerProfileHash, rootSnapshotHash: rootSnapshot,
-            bucketHash: hashBucket(NATIVE_IDENTITY), originalOperation: context.operation,
-            originalReservationRawHash: finalRawHash, authentication: context.projection, canonicalProof: proof,
-            currentPolicy: { registry: finalPolicy.registry, activationDigest: finalPolicy.activationDigest,
-                revision: finalPolicy.revision, activatedAt: finalPolicy.activatedAt },
-            policyAdmission: finalAdmission, accountingAt: finalAdmission.accountingAt,
-            conservativeTotalAtomic: "6000000", additionalAdmissionAtomic: "5000000",
-            historicalOutcome: "unknown", transactionMayHaveBeenSubmitted: true,
-            actualNativeFeeAtomic: null, effectAt: null,
-        });
-        assertHistoricalRetirementBindings(record, rootSnapshot, finalOperation, finalRow, finalRawHash);
         await assertScope(token, context);
-        const accountingStore = new HistoricalRetirementStore(root, guard, { token, context, record });
-        await accountingStore.createOnly(`${HISTORICAL_RETIREMENT_NAMESPACE}/${opId}.json`, record);
+        stage = "canonical_proof";
+        const proof = await canonicalProof(token, context);
         await assertScope(token, context);
-        await finishPostCommit(record, store, () => assertScope(token, context));
+        stage = "accounting_admission";
+        const state = context.state, root = state.root, guard = state.directoryGuard();
+        const store = new HistoricalRetirementStore(root, guard);
+        const opId = context.operation.operationId;
+        const deadline = scopeDeadline(context);
+        const lockWaitMs = Math.max(0, Math.min(5_000, deadline - Date.now() - 1));
+        const result = await state.withLocks([lockKey(NATIVE_IDENTITY), lockKey(USDC_IDENTITY)], async () => {
+            await assertScope(token, context);
+            const rootSnapshot = await historicalRetirementRootSnapshot(root);
+            await assertScope(token, context);
+            const first = await readRowsAndRetirements(root, context);
+            await assertScope(token, context);
+            if (first.retirements.some(record => record.operationId === opId))
+                refuse();
+            await assertNoOrphanPostCommit(store, opId);
+            const currentOperation = await new SwapOperationRepository(root).loadAny(opId);
+            if (currentOperation === null || canonicalJson(currentOperation) !== canonicalJson(context.operation))
+                corrupt();
+            const lease = context.operation.usageLease;
+            if (lease === null)
+                refuse();
+            const originalRow = bucketRowsOriginal(first.native, lease.reservationId, lease);
+            const originalHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
+            await assertScope(token, context);
+            const finalRows = await readRowsAndRetirements(root, context);
+            await assertScope(token, context);
+            if (finalRows.retirements.some(record => record.operationId === opId))
+                refuse();
+            const finalOperation = await new SwapOperationRepository(root).loadAny(opId);
+            if (finalOperation === null || canonicalJson(finalOperation) !== canonicalJson(context.operation))
+                corrupt();
+            const finalLease = context.operation.usageLease;
+            if (finalLease === null)
+                refuse();
+            const finalRow = bucketRowsOriginal(finalRows.native, finalLease.reservationId, finalLease);
+            const finalRawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, finalLease.reservationId);
+            await assertScope(token, context);
+            const finalAt = new Date();
+            const finalPolicy = await activePolicy(root, context, finalAt);
+            await assertScope(token, context);
+            const finalNativeUsage = historicalRetirementUsage(finalRows.native, finalRows.retirements, finalAt);
+            const finalUsdcUsage = sumUsage(finalRows.usdc, finalAt);
+            const finalAdmission = calculateHistoricalRetirementPolicy(finalPolicy, opId, finalNativeUsage, finalUsdcUsage, context.operation.quote.minimumOutputAtomic, finalAt);
+            await assertScope(token, context);
+            if (canonicalJson(originalRow) !== canonicalJson(finalRow) || originalHash !== finalRawHash ||
+                rootSnapshot !== await historicalRetirementRootSnapshot(root))
+                corrupt();
+            await assertScope(token, context);
+            await verifySignedJupiterV1Transaction(context.effect, context.binding);
+            assertHistoricalOrdinaryRecentBlockhash(context.effect.rawPayload, context.fresh.rawInstructions);
+            const record = sealHistoricalRetirementRecord({
+                schemaVersion: "apn.jupiter-historical-retirement.v1", kind: "retired_unknown", operationId: opId,
+                ownerProfileHash: context.operation.ownerProfileHash, rootSnapshotHash: rootSnapshot,
+                bucketHash: hashBucket(NATIVE_IDENTITY), originalOperation: context.operation,
+                originalReservationRawHash: finalRawHash, authentication: context.projection, canonicalProof: proof,
+                currentPolicy: { registry: finalPolicy.registry, activationDigest: finalPolicy.activationDigest,
+                    revision: finalPolicy.revision, activatedAt: finalPolicy.activatedAt },
+                policyAdmission: finalAdmission, accountingAt: finalAdmission.accountingAt,
+                conservativeTotalAtomic: "6000000", additionalAdmissionAtomic: "5000000",
+                historicalOutcome: "unknown", transactionMayHaveBeenSubmitted: true,
+                actualNativeFeeAtomic: null, effectAt: null,
+            });
+            assertHistoricalRetirementBindings(record, rootSnapshot, finalOperation, finalRow, finalRawHash);
+            await assertScope(token, context);
+            const accountingStore = new HistoricalRetirementStore(root, guard, { token, context, record });
+            stage = "publication";
+            await accountingStore.createOnly(`${HISTORICAL_RETIREMENT_NAMESPACE}/${opId}.json`, record);
+            await assertScope(token, context);
+            await finishPostCommit(record, store, () => assertScope(token, context));
+            await assertScope(token, context);
+            return publicResult(record, false);
+        }, { waitMs: lockWaitMs });
         await assertScope(token, context);
-        return publicResult(record, false);
-    }, { waitMs: lockWaitMs });
-    await assertScope(token, context);
-    return result;
+        return result;
+    }
+    catch (error) {
+        const diagnostic = historicalRetirementConsumerDiagnostic(error) ?? Object.freeze({ stage, reason: "stage_refused" });
+        if (typeof error === "object" && error !== null)
+            diagnostics.set(error, diagnostic);
+        else {
+            const refusal = new ApnError("APN_OPERATION_BLOCKED", "Historical Jupiter conservative retirement is unavailable.");
+            diagnostics.set(refusal, diagnostic);
+            throw refusal;
+        }
+        throw error;
+    }
 }
 /** Record-first restart repair. Reads no current policy, private material, RPC or owner key. */
 export async function recoverCommittedJupiterHistoricalRetirement(operationId, state) {
