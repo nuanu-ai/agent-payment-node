@@ -22,10 +22,12 @@ export async function executeHistoricalJupiterRetirementCli(
     return { ...base, ok: false, proof_class: "classified_failure", data: null,
       error: { code: "APN_INVALID_INPUT", message: "Specify exactly one admitted historical Jupiter retirement operation." } };
   }
+  let diagnostic: typeof import("./historical-retirement-owner.js").historicalRetirementDiagnostic | undefined;
   try {
     const root = stateRoot();
-    const { executeJupiterHistoricalRetirement } = await import("./historical-retirement-owner.js");
-    const result = await executeJupiterHistoricalRetirement(argv[5]!, root);
+    const owner = await import("./historical-retirement-owner.js");
+    diagnostic = owner.historicalRetirementDiagnostic;
+    const result = await owner.executeJupiterHistoricalRetirement(argv[5]!, root);
     return { ...base, ok: true, proof_class: "conservative_historical_retirement_only", error: null,
       data: { operationId: argv[5]!, scope: "Conservative accounting only; actual transaction outcome and expense remain unknown.",
         retirement: { status: result.status, operationId: result.operationId, profile: result.profile,
@@ -34,8 +36,9 @@ export async function executeHistoricalJupiterRetirementCli(
           actualNativeFee: result.actualNativeFee, transactionOutcome: result.transactionOutcome,
           transactionMayHaveBeenSubmitted: result.transactionMayHaveBeenSubmitted,
           retirementRecordHash: result.retirementRecordHash, idempotentRecovered: result.idempotentRecovered } } };
-  } catch {
+  } catch (error) {
+    const details = diagnostic?.(error);
     return { ...base, ok: false, proof_class: "classified_failure", data: null,
-      error: { code: "APN_OPERATION_BLOCKED", message: "Historical Jupiter conservative retirement is unavailable." } };
+      error: { code: "APN_OPERATION_BLOCKED", message: "Historical Jupiter conservative retirement is unavailable.", ...(details === undefined ? {} : { details: { stage: details.stage, reason: details.reason } }) } };
   }
 }
