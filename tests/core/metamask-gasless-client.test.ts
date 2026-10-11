@@ -13,7 +13,7 @@ const inspectPrivateDiagnostic = { mode: "inspect", stage: "private_state", inva
   network: "none", httpStatus: null, exitCode: null, signal: "none", timedOut: false } as const;
 const quotePrivateDiagnostic = { mode: "quote", stage: "private_state", invariant: "closed_failure",
   network: "none", httpStatus: null, exitCode: null, signal: "none", timedOut: false } as const;
-const quoteInventoryDiagnostic = { mode: "quote", stage: "inventory", invariant: "closed_failure",
+const quoteInventoryDiagnostic = { mode: "quote", stage: "inventory", invariant: "network_validation",
   network: "mimir-networks", httpStatus: 200, exitCode: null, signal: "none", timedOut: false } as const;
 const quoteAuthDiagnostic = { mode: "quote", stage: "inventory", invariant: "closed_failure",
   network: "mimir-networks", httpStatus: 401, exitCode: null, signal: "none", timedOut: false } as const;

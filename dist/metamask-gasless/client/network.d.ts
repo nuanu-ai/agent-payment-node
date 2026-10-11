@@ -50,6 +50,7 @@ export declare class HelperNetworkPolicy {
     readFailureContext(error: unknown): {
         readonly network: ReadNetwork;
         readonly httpStatus: number | null;
+        readonly validationFailed: boolean;
     };
     constructor(context: ModeContext, exchange?: FetchExchange);
     didObserveNotFound(): boolean;

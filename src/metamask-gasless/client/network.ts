@@ -44,11 +44,11 @@ export class HelperNetworkPolicy {
   private lastClockMs: number | undefined;
   private deadlineFailure: "mm_gasless_expired" | "mm_gasless_clock" | undefined;
   private sessionFailure = false;
-  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null }>();
+  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean }>();
   /** Transient fixed metadata, never response content or permission. */
-  readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null } {
-    return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null }
-      : { network: "none", httpStatus: null };
+  readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean } {
+    return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
+      : { network: "none", httpStatus: null, validationFailed: false };
   }
   constructor(private readonly context: ModeContext, private readonly exchange: FetchExchange = new HttpsFetchExchange()) {
     this.fetch = this.handle.bind(this) as typeof globalThis.fetch;
@@ -78,7 +78,7 @@ export class HelperNetworkPolicy {
     if (this.context.mode === "quote" && expected.some((key) => !this.successes.has(key))) mmFail("mm_gasless_provider_unavailable");
   }
   private async handle(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-    let readNetwork: ReadNetwork = "none", readStatus: number | null = null;
+    let readNetwork: ReadNetwork = "none", readStatus: number | null = null, validationFailed = false;
     try {
     const url = input instanceof Request ? input.url : String(input);
     const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
@@ -102,12 +102,16 @@ export class HelperNetworkPolicy {
     if (typeof response.body !== "string" || Buffer.byteLength(response.body) > MAX_RESPONSE) mmFail("mm_gasless_provider_unavailable");
     if (response.status === 401 || response.status === 403) { this.sessionFailure = true; mmFail("mm_gasless_session_unavailable"); }
     if (this.context.mode === "observe" && response.status === 404) this.notFound = true;
-    if (response.status >= 200 && response.status < 300) { validateResponse(key, response.body, body, this.context); this.successes.add(key); }
+    if (response.status >= 200 && response.status < 300) {
+      try { validateResponse(key, response.body, body, this.context); }
+      catch (error) { validationFailed = true; throw error; }
+      this.successes.add(key);
+    }
     const outputHeaders = new Headers(response.headers); if (!outputHeaders.has("content-type")) outputHeaders.set("content-type", "application/json");
     return new Response(response.body, { status: response.status, headers: outputHeaders });
     } catch (error) {
       if (this.context.mode === "quote" && error !== null && typeof error === "object")
-        this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus });
+        this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed });
       throw error;
     }
   }

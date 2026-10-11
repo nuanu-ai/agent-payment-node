@@ -26,8 +26,8 @@ export class HelperNetworkPolicy {
     readFailures = new WeakMap();
     /** Transient fixed metadata, never response content or permission. */
     readFailureContext(error) {
-        return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null }
-            : { network: "none", httpStatus: null };
+        return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
+            : { network: "none", httpStatus: null, validationFailed: false };
     }
     constructor(context, exchange = new HttpsFetchExchange()) {
         this.context = context;
@@ -62,7 +62,7 @@ export class HelperNetworkPolicy {
             mmFail("mm_gasless_provider_unavailable");
     }
     async handle(input, init) {
-        let readNetwork = "none", readStatus = null;
+        let readNetwork = "none", readStatus = null, validationFailed = false;
         try {
             const url = input instanceof Request ? input.url : String(input);
             const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
@@ -96,7 +96,13 @@ export class HelperNetworkPolicy {
             if (this.context.mode === "observe" && response.status === 404)
                 this.notFound = true;
             if (response.status >= 200 && response.status < 300) {
-                validateResponse(key, response.body, body, this.context);
+                try {
+                    validateResponse(key, response.body, body, this.context);
+                }
+                catch (error) {
+                    validationFailed = true;
+                    throw error;
+                }
                 this.successes.add(key);
             }
             const outputHeaders = new Headers(response.headers);
@@ -106,7 +112,7 @@ export class HelperNetworkPolicy {
         }
         catch (error) {
             if (this.context.mode === "quote" && error !== null && typeof error === "object")
-                this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus });
+                this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed });
             throw error;
         }
     }

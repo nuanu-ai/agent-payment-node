@@ -65,7 +65,7 @@ export async function executeHelperRequest(input, options = {}) {
         const failure = fixedFailure ? mmFailure(fixedFailure) : mmClassify(error, fallback(request.mode));
         if (request.mode === "inspect" || request.mode === "quote") {
             const context = policy?.readFailureContext(error);
-            return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage, error instanceof ApnError ? "closed_failure" : "unclassified_exception", context?.network, context?.httpStatus) };
+            return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage, context?.validationFailed ? "network_validation" : error instanceof ApnError ? "closed_failure" : "unclassified_exception", context?.network, context?.httpStatus) };
         }
         return { version: MM_HELPER_VERSION, ok: false, failure };
     }

@@ -108,8 +108,8 @@ test("concurrent policy reads associate fixed HTTP status with the actual thrown
     policy.fetch("https://agentic-proxy.workers.cx.metamask.io/proxy/prd/accounts/v2/supportedNetworks"),
   ]);
   assert.ok(caught instanceof ApnError);
-  assert.deepEqual(policy.readFailureContext(caught), { network: "mimir-networks", httpStatus: 200 });
-  assert.deepEqual(policy.readFailureContext(new Error(SECRET)), { network: "none", httpStatus: null });
+  assert.deepEqual(policy.readFailureContext(caught), { network: "mimir-networks", httpStatus: 200, validationFailed: true });
+  assert.deepEqual(policy.readFailureContext(new Error(SECRET)), { network: "none", httpStatus: null, validationFailed: false });
 });
 
 test("normal successful inspect and quote retain exact old envelopes and no diagnostic", async (t) => {
@@ -146,4 +146,35 @@ test("real launcher validation failure occurs before a child and exposes fixed l
     assert.equal(e.details?.mm_read_stage, "launch"); assert.equal(e.details?.mm_read_invariant, "runner_launch");
     return true;
   });
+});
+
+
+test("normal malformed 2xx parser and schema failures carry trusted validation boundary", async (t) => {
+  for (const body of ["{", JSON.stringify({ unexpected: SECRET })]) await t.test(body === "{" ? "parser" : "schema", async (t) => {
+    const home = await syntheticHome(); t.after(home.cleanup); const exchange = new SdkExchange(8453);
+    const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
+      { homeDirectory: home.home, now: () => NOW, exchange: { async request(r) {
+        return r.url.includes("mimir") ? { status: 200, body } : await exchange.request(r);
+      } } });
+    assert.equal(result.ok, false); if (result.ok) return;
+    assert.equal(result.failure.code, "APN_PROVIDER_UNAVAILABLE");
+    assert.equal(result.failure.reason, "mm_gasless_provider_unavailable");
+    assert.deepEqual(result.diagnostic, { mode: "quote", stage: "inventory", invariant: "network_validation",
+      network: "mimir-networks", httpStatus: 200, exitCode: null, signal: "none", timedOut: false });
+    assert.equal(JSON.stringify(result).includes(SECRET), false);
+  });
+});
+
+test("HTTP authentication and unbound errors cannot manufacture network validation provenance", async (t) => {
+  const home = await syntheticHome(); t.after(home.cleanup);
+  const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
+    { homeDirectory: home.home, now: () => NOW, exchange: new SdkExchange(8453, 401) });
+  assert.equal(result.ok, false); if (result.ok) return;
+  assert.deepEqual(result.diagnostic, { mode: "quote", stage: "inventory", invariant: "closed_failure",
+    network: "mimir-networks", httpStatus: 401, exitCode: null, signal: "none", timedOut: false });
+  const policy = new HelperNetworkPolicy(networkContextQuote(quoteInput(home.binding, 8453), home.binding.address, SECRET),
+    { async request() { return { status: 500, body: "{" }; } });
+  const response = await policy.fetch("https://agentic-mimir-service.api.cx.metamask.io/v1/supportedNetworks");
+  assert.equal(response.status, 500);
+  assert.deepEqual(policy.readFailureContext(new Error(SECRET)), { network: "none", httpStatus: null, validationFailed: false });
 });
