@@ -18,6 +18,8 @@ export declare class CircleFundingEffectStore extends SecureStateStore {
     private readonly wrapping;
     constructor(root: string, wrapping: WrappingSecretPort);
     private path;
+    /** Presence-only refusal; this never decrypts material or loads a wrapping secret. */
+    assertExternalAbsent(op: CircleFundingOperationV2): Promise<void>;
     load(op: CircleFundingOperationV2, effect: CircleEffect, guard?: () => void): Promise<CircleFundingMaterial | null>;
     claim(op: CircleFundingOperationV2, effect: CircleEffect, kind: "sign" | "send", guard: () => void): Promise<void>;
     private snapshot;

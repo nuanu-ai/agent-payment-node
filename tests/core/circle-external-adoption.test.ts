@@ -81,3 +81,91 @@ test("crash after operation tombstone before nonce/source indexes blocks owned m
  const owned=await runCli(["circle","evm","approve-mint","--operation",f.op.operationId],{},{stateRoot:f.root,circleEvm:f.service,wrappingSecret:f.secret});assert.equal(owned.ok,false);assert.match(JSON.stringify(owned),/external_mint_claimed_owned_entry_forbidden/);assert.equal(f.calls.length,calls);
  assert.equal((await invoke(f)).ok,true);assert.equal((await f.repo.load(f.op.operationId))!.state,"external_fulfilled");
 });
+
+import { fundingExternalFixture } from "./circle-funding-external-fixtures.js";
+import { CircleFundingExternalStore } from "../../src/circle-v2-evm/funding-external-store.js";
+import { validateCircleFundingOperation, advanceCircleFundingOperation } from "../../src/circle-v2-evm/funding-operation.js";
+async function invokeFundingExternal(f:Awaited<ReturnType<typeof fundingExternalFixture>>) { return runCli(command(f.op.operationId,f.txHash),{}, {stateRoot:f.root,circleFundingEvm:f.service,wrappingSecret:f.secret}); }
+test("finite funding V2 explicit external mint uses exact510000 fee71 net509929 and zero controlled destination gas",async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));const frozen=canonicalJson(f.op),result=await invokeFundingExternal(f);assert.equal(result.ok,true,JSON.stringify(result));
+ const done=(await f.repo.loadAny(f.op.operationId))!;assert.equal(done.schemaVersion,"apn.circle-v2-evm-operation.v2");if(done.schemaVersion!=="apn.circle-v2-evm-operation.v2")throw Error("schema");validateCircleFundingOperation(done);
+ assert.equal(done.state,"external_fulfilled");assert.equal(done.destination,null);assert.equal(done.effects.some(e=>e.role==="mint"),false);assert.deepEqual(done.effects,f.op.effects);assert.equal(done.fingerprint,f.op.fingerprint);assert.deepEqual(done.policies,f.op.policies);
+ assert.equal(done.externalFulfillment!.netAtomic,"509929");assert.equal(done.externalFulfillment!.grossAtomic,"510000");assert.equal(done.externalFulfillment!.issuerFeeAtomic,"71");assert.equal(done.externalFulfillment!.controlledDestinationNativeAtomic,"0");assert.equal(done.externalFulfillment!.caller,actor.address);
+ assert.deepEqual(done.usage.map(r=>r.state),["finalized","finalized","finalized","released_unsubmitted","released_unsubmitted"]);const ledger=new AssetUsageLedger(f.root);assert.equal((await ledger.usageReadOnly(done.usage[1]!,new Date(Date.parse(done.preparedAt)+3000))).amountAtomic,"60000000000000");assert.equal((await ledger.usageReadOnly(done.usage[4]!,new Date(Date.parse(done.preparedAt)+3000))).amountAtomic,"0");
+ assert.equal(canonicalJson(f.op),frozen);assert.ok(!f.calls.some(m=>/estimate|send|maxPriority/u.test(m)));const count=f.calls.length;assert.equal((await invokeFundingExternal(f)).ok,true);assert.equal(f.calls.length,count);
+});
+for(const variant of ["nonce","body","token","fee","receipt","header","pin","net","source_allowance","recipient","reorg","source_finality","destination_finality","material","sign","send","controlled"] as const)test(`funding V2 external refuses ${variant}, preserves all full holds`,async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));const receipt=f.dest.receipt as any;
+ if(variant==="nonce")receipt.logs[3].topics[2]=`0x${"aa".repeat(32)}`;if(variant==="body")receipt.logs[3].data=receipt.logs[3].data.slice(0,-2)+"01";if(variant==="token")receipt.logs[0].address=CIRCLE_RECIPIENT;if(variant==="fee")receipt.logs[2].data=`0x${(509929n).toString(16).padStart(64,"0")}${(72n).toString(16).padStart(64,"0")}`;if(variant==="receipt")receipt.status="0x0";if(variant==="header")(f.dest.canonicalBlock as any).stateRoot=`0x${"ff".repeat(32)}`;
+ if(variant==="net")receipt.logs[0].data=`0x${(509928n).toString(16).padStart(64,"0")}`;if(variant==="recipient")receipt.logs[0].topics[2]=`0x${"0".repeat(24)}${"88".repeat(20)}`;
+ if(["material","sign","send"].includes(variant)){await mkdir(join(f.root,"circle-v2-evm-funding-effects"),{recursive:true,mode:0o700});await writeFile(join(f.root,"circle-v2-evm-funding-effects",`${f.op.operationId}-mint${variant==="material"?"":`-${variant}`}.json`),"{}",{mode:0o600});}
+ if(variant==="controlled"){const {sealWallet}=await import("../../src/state.js"),{projectLegacyLocalProfile}=await import("../../src/provider-profile.js");const profile="funding-external-controlled";const wallet=sealWallet({schemaVersion:"apn.state.v1",profile,profileHash:f.state.profileHash(profile),address:actor.address,createdAt:f.op.preparedAt,bindingHash:"a".repeat(64)});await f.state.writeWallet(wallet);await f.state.writeProviderProfile(projectLegacyLocalProfile(wallet));}
+ if(["pin","source_allowance","reorg","source_finality","destination_finality"].includes(variant)){const original=f.publicNetwork.request.bind(f.publicNetwork);t.mock.method(f.publicNetwork,"request",async(...args:Parameters<typeof original>)=>{const response=await original(...args),q=JSON.parse(args[2]!),x=JSON.parse(response.body);if(variant==="source_allowance"&&String(args[0]).includes("arbitrum")&&q.method==="eth_call"&&q.params[0].data.startsWith("0xdd62ed3e")&&BigInt(x.result)===0n)x.result=`0x${"0".repeat(63)}1`;if(variant==="reorg"&&q.method==="eth_getBlockByNumber"&&q.params[0]==="0xa")x.result={...x.result,stateRoot:`0x${"ff".repeat(32)}`};if((variant==="destination_finality"&&q.params[0]==="safe"||variant==="source_finality"&&q.params[0]==="finalized")&&q.method==="eth_getBlockByNumber")x.result={...x.result,number:"0x0"};if(variant==="pin"&&q.method==="eth_getCode")x.result="0x01";return {...response,body:JSON.stringify(x)};});}
+ const result=await invokeFundingExternal(f);assert.equal(result.ok,false,JSON.stringify(result));for(const row of f.op.usage)assert.equal((await new AssetUsageLedger(f.root).load(row,row.reservationId))!.state,"unknown_finality");assert.ok(!f.calls.includes("eth_sendRawTransaction"));
+});
+for(const crash of ["claim",0,1,2,3,4] as const)test(`funding V2 explicit proof crash ${crash} resumes without new effects`,async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));let armed=true,count=0;
+ if(crash==="claim"){const original=CircleFundingExternalStore.prototype.claim;t.mock.method(CircleFundingExternalStore.prototype,"claim",async function(this:CircleFundingExternalStore,...args:Parameters<typeof original>){await original.apply(this,args);if(armed){armed=false;throw Error("CRASH");}});}
+ else{const original=AssetUsageLedger.prototype.transition;t.mock.method(AssetUsageLedger.prototype,"transition",async function(this:AssetUsageLedger,...args:Parameters<typeof original>){const value=await original.apply(this,args);if(armed&&count++===crash){armed=false;throw Error("CRASH");}return value;});}
+ assert.equal((await invokeFundingExternal(f)).ok,false);assert.equal((await invokeFundingExternal(f)).ok,true);const done=(await f.repo.loadAny(f.op.operationId))!;assert.equal(done.state,"external_fulfilled");
+});
+test("funding V2 durable external nonce claim blocks restored owned mint before network/consent/key",async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));assert.equal((await invokeFundingExternal(f)).ok,true);await writeFile(join(f.root,"circle-v2-evm",`${f.op.operationId}.json`),canonicalJson(f.op)+"\n",{mode:0o600});const calls=f.calls.length;const result=await runCli(["circle","evm","approve-mint","--operation",f.op.operationId],{}, {stateRoot:f.root,circleFundingEvm:f.service,wrappingSecret:f.secret});assert.equal(result.ok,false);assert.equal(f.calls.length,calls);assert.equal((await f.repo.loadAny(f.op.operationId))!.integrityHash,f.op.integrityHash);
+});
+
+for(const role of ["mint","cleanup"] as const)for(const suffix of ["","-sign","-send"] as const)test(`funding V2 secure absence refuses ${role}${suffix} before public RPC or key`,async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));await mkdir(join(f.root,"circle-v2-evm-funding-effects"),{recursive:true,mode:0o700});await writeFile(join(f.root,"circle-v2-evm-funding-effects",`${f.op.operationId}-${role}${suffix}.json`),"{}",{mode:0o600});assert.equal((await invokeFundingExternal(f)).ok,false);assert.equal(f.calls.length,0);for(const row of f.op.usage)assert.equal((await new AssetUsageLedger(f.root).load(row,row.reservationId))!.state,"unknown_finality");
+});
+test("funding V2 prior mint signing fence cannot be adopted even without material or hash",async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));const e=circleEnvelope({chainId:143,from:f.op.destinationCustody.walletAddress,to:"0x81D40F21F12A8F0E3252Bccb954D722d4c464B64",data:encodeCircleMint(f.op.attestation!),valueAtomic:"0",nonceAtomic:"3",gasLimitAtomic:"500000",maxFeePerGasAtomic:"20000000",maxPriorityFeePerGasAtomic:"0"});const changed=advanceCircleFundingOperation(f.op,{effects:[...f.op.effects,{role:"mint",phase:"signing_started",envelope:e,transactionHash:null,materialHash:null,proof:null}]},"mint_signing_fence",Date.parse(f.op.preparedAt));await f.repo.saveFunding(changed);assert.equal((await invokeFundingExternal(f)).ok,false);assert.equal(f.calls.length,0);
+});
+
+test("funding V2 canonical SAFE external credit remains adoptable after recipient spends funds",async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));let balanceReads=0;const original=f.publicNetwork.request.bind(f.publicNetwork);
+ t.mock.method(f.publicNetwork,"request",async(...args:Parameters<typeof original>)=>{const q=JSON.parse(args[2]!);if(q.method==="eth_call"&&q.params[0].data.startsWith("0x70a08231")){balanceReads++;throw new Error("historical or current balance state unavailable after legitimate spend");}return original(...args);});
+ const result=await invokeFundingExternal(f);assert.equal(result.ok,true,JSON.stringify(result));assert.equal(balanceReads,0);const done=await f.repo.loadAny(f.op.operationId);assert.equal(done!.schemaVersion,"apn.circle-v2-evm-operation.v2");assert.equal((done as import("../../src/circle-v2-evm/funding-operation.js").CircleFundingOperationV2).externalFulfillment!.recipientCredit.amountAtomic,"509929");
+});
+
+for(const window of ["evidence","operation","message","nonce"] as const)test(`funding V2 resumes publication stopped immediately after ${window}`,async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));let armed=true;
+ const proto=CircleFundingExternalStore.prototype as unknown as {writeJson(path:string,value:unknown,createOnly?:boolean):Promise<void>},original=proto.writeJson;
+ t.mock.method(proto,"writeJson",async function(this:typeof proto,...args:Parameters<typeof original>){await original.apply(this,args);const path=args[0];const matches=window==="evidence"?path.startsWith("circle-external-evidence/"):window==="operation"?path.startsWith("circle-external-claims/operation-"):window==="message"?path.startsWith("circle-external-claims/message-"):path.startsWith("circle-external-claims/")&&!path.includes("/operation-")&&!path.includes("/message-");if(armed&&matches){armed=false;throw Error("PUBLICATION_CRASH");}});
+ assert.equal((await invokeFundingExternal(f)).ok,false);for(const row of f.op.usage)assert.equal((await new AssetUsageLedger(f.root).load(row,row.reservationId))!.state,"unknown_finality");
+ assert.equal((await invokeFundingExternal(f)).ok,true);const done=await f.repo.loadAny(f.op.operationId);assert.equal(done!.state,"external_fulfilled");assert.ok(!f.calls.some(x=>/send|estimate/u.test(x)));const calls=f.calls.length;assert.equal((await invokeFundingExternal(f)).ok,true);assert.equal(f.calls.length,calls);
+});
+for(const tamper of ["conflicting","malformed"] as const)test(`funding V2 evidence-only ${tamper} occupancy refuses without ledger closure`,async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));let evidencePath="",armed=true;
+ const proto=CircleFundingExternalStore.prototype as unknown as {writeJson(path:string,value:unknown,createOnly?:boolean):Promise<void>},original=proto.writeJson;
+ t.mock.method(proto,"writeJson",async function(this:typeof proto,...args:Parameters<typeof original>){await original.apply(this,args);if(armed&&args[0].startsWith("circle-external-evidence/")){armed=false;evidencePath=join(f.root,args[0]);throw Error("EVIDENCE_ONLY_CRASH");}});
+ assert.equal((await invokeFundingExternal(f)).ok,false);assert.notEqual(evidencePath,"");const occupied=tamper==="conflicting"?canonicalJson({chain:143,result:"wrong canonical receipt"})+"\n":"{";await writeFile(evidencePath,occupied,{mode:0o600});
+ assert.equal((await invokeFundingExternal(f)).ok,false);assert.equal(await readFile(evidencePath,"utf8"),occupied);for(const row of f.op.usage)assert.equal((await new AssetUsageLedger(f.root).load(row,row.reservationId))!.state,"unknown_finality");assert.equal((await f.repo.loadAny(f.op.operationId))!.integrityHash,f.op.integrityHash);
+});
+
+import {readFile} from "node:fs/promises";
+
+import {block as fundingExternalBlock} from "./circle-funding-external-fixtures.js";
+test("funding V2 partial claim reproof permits advancing FINALIZED and SAFE witnesses without changing stored proof",async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));let armed=true;const claim=CircleFundingExternalStore.prototype.claim;
+ t.mock.method(CircleFundingExternalStore.prototype,"claim",async function(this:CircleFundingExternalStore,...args:Parameters<typeof claim>){await claim.apply(this,args);if(armed){armed=false;throw Error("AFTER_ALL_CLAIMS");}});
+ assert.equal((await invokeFundingExternal(f)).ok,false);const prior=await new CircleFundingExternalStore(f.root).readClaim(f.op);assert.notEqual(prior,null);
+ const request=f.publicNetwork.request.bind(f.publicNetwork);t.mock.method(f.publicNetwork,"request",async(...args:Parameters<typeof request>)=>{const response=await request(...args),q=JSON.parse(args[2]!),x=JSON.parse(response.body);if(q.method==="eth_getBlockByNumber"&&["safe","finalized","0x15"].includes(q.params[0]))x.result=fundingExternalBlock(21);return {...response,body:JSON.stringify(x)};});
+ assert.equal((await invokeFundingExternal(f)).ok,true);const done=await f.repo.loadAny(f.op.operationId);assert.equal(canonicalJson((done as import("../../src/circle-v2-evm/funding-operation.js").CircleFundingOperationV2).externalFulfillment),canonicalJson(prior));assert.ok(!f.calls.includes("eth_sendRawTransaction"));
+});
+test("funding V2 partial claim refuses changed canonical receipt identity before accounting",async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));let armed=true;const claim=CircleFundingExternalStore.prototype.claim;
+ t.mock.method(CircleFundingExternalStore.prototype,"claim",async function(this:CircleFundingExternalStore,...args:Parameters<typeof claim>){await claim.apply(this,args);if(armed){armed=false;throw Error("AFTER_ALL_CLAIMS");}});
+ assert.equal((await invokeFundingExternal(f)).ok,false);const before=await new CircleFundingExternalStore(f.root).readClaim(f.op);(f.dest.receipt as Record<string,unknown>).effectiveGasPrice="0x121eac0";
+ assert.equal((await invokeFundingExternal(f)).ok,false);assert.equal(canonicalJson(await new CircleFundingExternalStore(f.root).readClaim(f.op)),canonicalJson(before));for(const row of f.op.usage)assert.equal((await new AssetUsageLedger(f.root).load(row,row.reservationId))!.state,"unknown_finality");
+});
+
+test("funding V2 primary nonce crash fences a different operation with the same canonical message",async t=>{
+ const f=await fundingExternalFixture();t.after(()=>rm(f.root,{recursive:true,force:true}));let armed=true;
+ const proto=CircleFundingExternalStore.prototype as unknown as {writeJson(path:string,value:unknown,createOnly?:boolean):Promise<void>},write=proto.writeJson;
+ t.mock.method(proto,"writeJson",async function(this:typeof proto,...args:Parameters<typeof write>){await write.apply(this,args);if(armed&&args[0].startsWith("circle-external-claims/")){armed=false;assert.ok(!args[0].includes("/operation-")&&!args[0].includes("/message-"));throw Error("AFTER_PRIMARY_NONCE");}});
+ assert.equal((await invokeFundingExternal(f)).ok,false);const store=new CircleFundingExternalStore(f.root),prior=await store.readClaim(f.op);assert.notEqual(prior,null);
+ const other=advanceCircleFundingOperation(f.op,{operationId:hashObject({differentOperation:true})},"synthetic_distinct_operation_same_message",Date.parse(f.op.preparedAt));validateCircleFundingOperation(other);
+ const {proofHash:_hash,...body}={...prior!,operationId:other.operationId},different={...body,proofHash:hashObject(body)},evidence=await store.evidence(prior!);
+ await assert.rejects(()=>store.claim(other,different,evidence));await assert.rejects(()=>store.assertOwnedMintAvailable(other));await assert.rejects(()=>store.assertOwnedMintAvailable(f.op));assert.equal(canonicalJson(await store.readClaim(f.op)),canonicalJson(prior));
+ for(const row of f.op.usage)assert.equal((await new AssetUsageLedger(f.root).load(row,row.reservationId))!.state,"unknown_finality");assert.equal((await f.repo.loadAny(f.op.operationId))!.integrityHash,f.op.integrityHash);
+ assert.equal((await invokeFundingExternal(f)).ok,true);const done=await f.repo.loadAny(f.op.operationId);assert.equal(done!.state,"external_fulfilled");assert.ok(!f.calls.some(x=>/send|estimate/u.test(x)));const calls=f.calls.length;assert.equal((await invokeFundingExternal(f)).ok,true);assert.equal(f.calls.length,calls);
+});

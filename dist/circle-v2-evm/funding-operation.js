@@ -1,3 +1,4 @@
+import { validateFundingExternalFulfillment } from "./funding-external-proof.js";
 import { getAddress } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -40,7 +41,7 @@ export function validateCircleFundingEnvelope(e, role, chain, attestation, desti
         circleCorrupt("envelope_fee_cap");
 }
 export function validateCircleFundingOperation(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "funding", "feeQuote", "operationId", "profile", "profileHash", "destinationProfile", "destinationProfileHash", "idempotencyHash", "requestHash", "fingerprint", "destinationChain", "sourceCustody", "destinationCustody", "policies", "preparedAt", "expiresAt", "deploymentDigest", "feeQuoteAtomic", "state", "terminal", "effects", "source", "attestation", "destination", "residualAllowanceAtomic", "usage", "usageFinalized", "transitions", "integrityHash"]))
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "funding", "feeQuote", "operationId", "profile", "profileHash", "destinationProfile", "destinationProfileHash", "idempotencyHash", "requestHash", "fingerprint", "destinationChain", "sourceCustody", "destinationCustody", "policies", "preparedAt", "expiresAt", "deploymentDigest", "feeQuoteAtomic", "state", "terminal", "effects", "source", "attestation", "destination", "residualAllowanceAtomic", "usage", "usageFinalized", "transitions", "integrityHash", ...(value.externalFulfillment === undefined ? [] : ["externalFulfillment"])]))
         circleCorrupt("shape");
     const op = value, { integrityHash, ...body } = op;
     if (op.schemaVersion !== "apn.circle-v2-evm-operation.v2" || hashObject(body) !== integrityHash || ![op.operationId, op.profileHash, op.destinationProfileHash, op.idempotencyHash, op.requestHash, op.fingerprint, op.deploymentDigest].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)))
@@ -55,7 +56,7 @@ export function validateCircleFundingOperation(value) {
     validateEvmNativeCustody(op.destinationCustody);
     if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||
         op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > BigInt(funding.maxFeeAtomic) ||
-        !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted"].includes(op.state) ||
+        !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"].includes(op.state) ||
         !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
         !["0", funding.amountAtomic].includes(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies))
         circleCorrupt("intent");
@@ -80,8 +81,15 @@ export function validateCircleFundingOperation(value) {
         if (u.account !== expected.account || u.chain !== expected.chain || u.asset.kind !== expected.kind || u.asset.identifier !== expected.identifier || u.amountAtomic !== expected.amount || u.rail !== "bridge" || !op.policies.some(p => p.policyDigest === u.policyDigest))
             circleCorrupt("usage_binding");
     }
-    if (op.usageFinalized && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => u.state !== "failed_before_effect") : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state))))
+    if (op.usageFinalized && op.state !== "external_fulfilled" && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => u.state !== "failed_before_effect") : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state))))
         circleCorrupt("usage_finality");
+    if (op.externalFulfillment !== undefined) {
+        validateFundingExternalFulfillment(op.externalFulfillment, op);
+        if (op.destination !== null || op.effects.some(e => ["mint", "cleanup"].includes(e.role) && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)))
+            circleCorrupt("external_owned_effect");
+    }
+    if (op.state === "external_fulfilled" && (op.externalFulfillment === undefined || !op.usageFinalized || op.usage.length !== 5 || op.usage.some((u, i) => u.state !== (i < 3 ? "finalized" : "released_unsubmitted"))))
+        circleCorrupt("external_terminal_binding");
     if (new Set(op.usage.map(u => u.reservationId)).size !== op.usage.length)
         circleCorrupt("duplicate_usage");
     if (!Array.isArray(op.effects) || op.effects.length < 2 || op.effects.length > 4 || op.effects[0]?.role !== "approval" || op.effects[1]?.role !== "burn" || new Set(op.effects.map(x => x.role)).size !== op.effects.length)
@@ -135,8 +143,9 @@ export function publicCircleFundingOperation(op) {
         source_profile: op.profile, destination_profile: op.destinationProfile, destination_chain: op.destinationChain,
         amount_atomic: op.funding.amountAtomic, minimum_output_atomic: op.funding.minMintAtomic, maximum_issuer_fee_atomic: op.funding.maxFeeAtomic, recipient: op.funding.recipient,
         effects: op.effects.map(e => ({ role: e.role, phase: e.phase, transaction_hash: e.transactionHash, actual_fee_atomic: e.proof?.actualFeeAtomic ?? null })),
-        source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? null,
+        source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? op.externalFulfillment?.destinationReceipt.finalityTag ?? null,
         residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash,
+        ...(op.externalFulfillment === undefined ? {} : { external_fulfillment: op.externalFulfillment, proof_class: "circle_funding_external_mint_fulfillment", controlled_destination_native_atomic: "0", external_destination_fee_payer: op.externalFulfillment.caller }),
         next_actions: op.terminal ? [] : [`apn circle evm observe --operation ${op.operationId}`] };
 }
 function shape(value, keys) { return isPlainRecord(value) && exactKeys(value, keys); }

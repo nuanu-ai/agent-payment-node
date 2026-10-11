@@ -142,6 +142,8 @@ export function validateCircleFundingAdvance(previous, next) {
     if (previous.attestation !== null && (next.attestation === null || previous.attestation.nonce !== next.attestation.nonce || previous.attestation.sourceMessageHash !== next.attestation.sourceMessageHash ||
         previous.effects.some(e => e.role === "mint" && e.phase !== "prepared") && !circleSame(previous.attestation, next.attestation)))
         circleCorrupt("attestation_replacement");
+    if (previous.externalFulfillment !== undefined && !circleSame(previous.externalFulfillment, next.externalFulfillment))
+        circleCorrupt("external_fulfillment_replacement");
     if (previous.destination !== null && !circleSame(previous.destination, next.destination))
         circleCorrupt("destination_replacement");
     if (previous.usage.length > 0 && !circleSame(previous.usage.map(x => ({ id: x.reservationId, account: x.account, amount: x.amountAtomic })), next.usage.map(x => ({ id: x.reservationId, account: x.account, amount: x.amountAtomic }))))

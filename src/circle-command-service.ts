@@ -1,6 +1,6 @@
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { deriveCircleFundingParameters } from "./circle-v2-evm/funding-binding.js";
-import { publicKnownCircle, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
+import { publicKnownCircle, publicCircleFundingOperation, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import type { CommandRequest, CommandOutcome } from "./commands.js";
 import type { RuntimeContext } from "./runtime.js";
@@ -15,7 +15,7 @@ import { confirmCircleApproval } from "./lifi/circle-v2-approval-tty.js";
 export async function executeCircleCommand(request: Extract<CommandRequest, { command: `circle.${string}` }>,
   context: RuntimeContext): Promise<CommandOutcome> {
   switch (request.command) {
-      case "circle.evm.adopt-external-mint": {if ((await checkedOperation(context, request.operationId)).schemaVersion !== "apn.circle-v2-evm-operation.v1") legacyOnly();const service=context.circleEvm;if(service===undefined)throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE","Circle EVM runtime unavailable.");const op=await service.adoptExternalMint(request.operationId,request.transactionHash);return {...operationOutcome(publicCircle(op)),proofClass:"circle_external_mint_fulfillment",receipt:op.externalFulfillment??null};}
+      case "circle.evm.adopt-external-mint": {if ((await checkedOperation(context, request.operationId)).schemaVersion === "apn.circle-v2-evm-operation.v2") { const service=context.circleFundingEvm;if(service===undefined)unavailable();const op=await service.adoptExternalMint(request.operationId,request.transactionHash);return {...operationOutcome(publicCircleFundingOperation(op)),proofClass:"circle_funding_external_mint_fulfillment",receipt:op.externalFulfillment??null}; }const service=context.circleEvm;if(service===undefined)throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE","Circle EVM runtime unavailable.");const op=await service.adoptExternalMint(request.operationId,request.transactionHash);return {...operationOutcome(publicCircle(op)),proofClass:"circle_external_mint_fulfillment",receipt:op.externalFulfillment??null};}
 
       case "circle.evm.cleanup85-prepare": case "circle.evm.cleanup85-cancel": case "circle.evm.cleanup86-approve": {
         if ((await checkedOperation(context, request.operationId)).schemaVersion !== "apn.circle-v2-evm-operation.v1") legacyOnly();
