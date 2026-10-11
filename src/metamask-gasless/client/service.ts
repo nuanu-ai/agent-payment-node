@@ -121,8 +121,17 @@ async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], 
   phase.stage = "relay_support";
   if (!await service.isGaslessRelaySupported({ chainId: input.chainId, relay })) mmFail("mm_gasless_capability_unavailable");
   phase.stage = "fee_quote";
-  const raw = await service.quoteGaslessTransfer({ state: walletState as never, chainId: input.chainId, recipient: input.recipient,
-    amount: formatSix(input.netAtomic), token: input.token, gasToken: input.token, relay });
+  let raw: unknown;
+  try {
+    raw = await service.quoteGaslessTransfer({ state: walletState as never, chainId: input.chainId, recipient: input.recipient,
+      amount: formatSix(input.netAtomic), token: input.token, gasToken: input.token, relay });
+  } catch (error) {
+    const sponsored = policy.takeSponsoredQuote(error);
+    if (sponsored === undefined) throw error;
+    if (resolverCalls !== 0 || hydrated.writes() !== 0) mmFail("mm_gasless_state_security");
+    phase.stage = "quote_output";
+    return sponsored;
+  }
   if (resolverCalls !== 0 || hydrated.writes() !== 0) mmFail("mm_gasless_state_security");
   phase.stage = "quote_output";
   return validateSdkQuote(raw, input, state.address);

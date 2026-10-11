@@ -2,6 +2,7 @@ import { keccak256 } from "viem";
 import type { Address, Hex } from "../../model.js";
 import type { MetaMaskGaslessBlock, MetaMaskGaslessChainId, MetaMaskGaslessChainState,
   MetaMaskGaslessDeploymentRow, MetaMaskGaslessSnapshot } from "../model.js";
+import { mmProtocolPins } from "../single-protocol.js";
 import { mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { mmEvidenceFail, mmEvidenceStateAt } from "./diagnostic.js";
@@ -12,10 +13,9 @@ type BalanceState = Omit<MetaMaskGaslessChainState, "counterAtomic">;
 
 /** Read every protocol, proxy, implementation, owner, token and counter value at one EIP-1898 block. */
 export async function readMetaMaskChainState(call: MmRpcCall, deployment: MetaMaskGaslessDeploymentRow,
-  owner: Address, block: MetaMaskGaslessBlock, delegationHash: Hex | null): Promise<MetaMaskGaslessChainState | BalanceState> {
+  owner: Address, block: MetaMaskGaslessBlock, delegationHash: Hex | null, feeMode?: "sponsored"): Promise<MetaMaskGaslessChainState | BalanceState> {
   const pinned = { blockHash: block.hash, requireCanonical: true } as const;
-  const protocolEntries = Object.entries(deployment.protocol) as Array<
-    [keyof typeof deployment.protocol, (typeof deployment.protocol)[keyof typeof deployment.protocol]]>;
+  const protocolEntries = Object.entries(mmProtocolPins(deployment, feeMode));
   const protocolPromise = Promise.all(protocolEntries.map(async ([name, pin]) => {
     const code = rpcHex(await call("eth_getCode", [pin.address, pinned]), 256 * 1024);
     if (code === "0x" || keccak256(code) !== pin.codeHash) mmEvidenceFail("mm_gasless_evidence_invalid", "protocol_code_pin", "eth_getCode");
@@ -65,6 +65,7 @@ export function validateMetaMaskGaslessSnapshot(value: unknown, expected: {
   readonly endpointHash: string;
   readonly endpointOrigin: string;
   readonly grossAtomic: string;
+  readonly feeMode?: "sponsored";
 }): MetaMaskGaslessSnapshot {
   const snapshot = mmExact(value, ["chainId", "endpointHash", "endpointOrigin", "observedAt", "safeBlock",
     "headBlock", "safeState", "headState"], "mm_gasless_evidence_invalid");
@@ -78,8 +79,8 @@ export function validateMetaMaskGaslessSnapshot(value: unknown, expected: {
     mmEvidenceFail("mm_gasless_evidence_invalid", "snapshot_block_order");
   }
   const gross = mmUint(expected.grossAtomic, true, "mm_gasless_evidence_invalid"), row = mmRegistry(expected.chainId).row;
-  const safeState = mmEvidenceStateAt("safe", () => validateState(snapshot.safeState, row, gross));
-  const headState = mmEvidenceStateAt("latest", () => validateState(snapshot.headState, row, gross));
+  const safeState = mmEvidenceStateAt("safe", () => validateState(snapshot.safeState, row, gross, expected.feeMode));
+  const headState = mmEvidenceStateAt("latest", () => validateState(snapshot.headState, row, gross, expected.feeMode));
   return { chainId: expected.chainId, endpointHash: expected.endpointHash, endpointOrigin: expected.endpointOrigin,
     observedAt: snapshot.observedAt as string, safeBlock, headBlock, safeState, headState };
 }
@@ -91,14 +92,15 @@ function validateBlock(value: unknown): MetaMaskGaslessBlock {
     timestampAtomic: mmUint(block.timestampAtomic, false, "mm_gasless_evidence_invalid").toString() };
 }
 
-function validateState(value: unknown, row: MetaMaskGaslessDeploymentRow, gross: bigint): MetaMaskGaslessChainState {
+function validateState(value: unknown, row: MetaMaskGaslessDeploymentRow, gross: bigint, feeMode?: "sponsored"): MetaMaskGaslessChainState {
   const state = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress",
     "tokenImplementationCodeHash", "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic",
     "counterAtomic"], "mm_gasless_evidence_invalid");
-  const protocol = mmExact(state.protocolCodeHashes, ["manager", "delegate", "limitedCalls", "exactBatch"],
+  const pins = mmProtocolPins(row, feeMode);
+  const protocol = mmExact(state.protocolCodeHashes, Object.keys(pins),
     "mm_gasless_evidence_invalid");
-  for (const name of ["manager", "delegate", "limitedCalls", "exactBatch"] as const) {
-    if (mmHex(protocol[name], 32, "mm_gasless_evidence_invalid") !== row.protocol[name].codeHash) {
+  for (const [name, pin] of Object.entries(pins)) {
+    if (mmHex(protocol[name], 32, "mm_gasless_evidence_invalid") !== pin.codeHash) {
       mmEvidenceFail("mm_gasless_evidence_invalid", "protocol_code_pin");
     }
   }

@@ -1,10 +1,11 @@
 import type { ReadNetwork, ReadValidationPredicate, TokenFeesKind } from "./read-diagnostic.js";
 import { request as httpsRequest } from "node:https";
-import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
+import { canonicalJson, hashObject, sha256, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
-import { MM_MAX_UINT, type MetaMaskGaslessIntent } from "../model.js";
+import { MM_MAX_UINT, type MetaMaskGaslessIntent, type MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
+import { mmQuoteHash } from "../economics.js";
 import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
 
@@ -40,18 +41,30 @@ export class HelperNetworkPolicy {
   private readonly counts = new Map<string, number>();
   private readonly successes = new Set<string>();
   private notFound = false;
+  #sponsoredProof: MetaMaskGaslessQuote | undefined;
+  #sponsoredAccepted = false;
   private expectedSubmitBody: unknown;
   private lastClockMs: number | undefined;
   private deadlineFailure: "mm_gasless_expired" | "mm_gasless_clock" | undefined;
   private sessionFailure = false;
-  private readonly readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate; readonly tokenFeesShape?: TokenFeesKind }>();
+  readonly #readFailures = new WeakMap<object, { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate; readonly tokenFeesShape?: TokenFeesKind }>();
   /** Transient fixed metadata, never response content or permission. */
   readFailureContext(error: unknown): { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean; readonly validationPredicate?: ReadValidationPredicate; readonly tokenFeesShape?: TokenFeesKind } {
-    return error !== null && typeof error === "object" ? this.readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
+    return error !== null && typeof error === "object" ? this.#readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
       : { network: "none", httpStatus: null, validationFailed: false };
   }
   constructor(private readonly context: ModeContext, private readonly exchange: FetchExchange = new HttpsFetchExchange()) {
     this.fetch = this.handle.bind(this) as typeof globalThis.fetch;
+  }
+  /** Only the exact failed original quote exchange may supply this private one-use capture. */
+  takeSponsoredQuote(error: unknown): MetaMaskGaslessQuote | undefined {
+    const failure = error !== null && typeof error === "object" ? this.#readFailures.get(error) : undefined;
+    if (failure?.validationPredicate !== "sentinel_token_fees" || failure.tokenFeesShape !== "missing" ||
+      this.context.mode !== "quote" || this.#sponsoredAccepted || this.#sponsoredProof === undefined || this.counts.size !== 5 ||
+      ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals"].some(key => this.counts.get(key) !== 1 || !this.successes.has(key)) ||
+      this.counts.get("sentinel-quote") !== 1) return undefined;
+    const quote = this.#sponsoredProof; this.#sponsoredProof = undefined; this.#sponsoredAccepted = true;
+    return quote;
   }
   didObserveNotFound(): boolean { return this.notFound; }
   fixedFailure(): "mm_gasless_expired" | "mm_gasless_clock" | "mm_gasless_session_unavailable" | undefined {
@@ -70,12 +83,13 @@ export class HelperNetworkPolicy {
       this.counts.get(key) !== 1 || !this.successes.has(key))) mmFail("mm_gasless_provider_unavailable");
   }
   assertComplete(): void {
-    const expected = this.context.mode === "quote" ? ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals", "rpc-balance", "sentinel-quote"] :
+    const expected = this.context.mode === "quote" ? ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals",
+      ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
       this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] : [];
     if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1)) {
       mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     }
-    if (this.context.mode === "quote" && expected.some((key) => !this.successes.has(key))) mmFail("mm_gasless_provider_unavailable");
+    if (this.context.mode === "quote" && expected.some((key) => !this.successes.has(key) && !(key === "sentinel-quote" && this.#sponsoredAccepted))) mmFail("mm_gasless_provider_unavailable");
   }
   private async handle(input: string | URL | Request, init?: RequestInit): Promise<Response> {
     let readNetwork: ReadNetwork = "none", readStatus: number | null = null, validationFailed = false;
@@ -103,7 +117,11 @@ export class HelperNetworkPolicy {
     if (response.status === 401 || response.status === 403) { this.sessionFailure = true; mmFail("mm_gasless_session_unavailable"); }
     if (this.context.mode === "observe" && response.status === 404) this.notFound = true;
     if (response.status >= 200 && response.status < 300) {
-      try { validateResponse(key, response.body, body, this.context); }
+      try {
+        if (key === "sentinel-quote" && response.status === 200 && this.context.mode === "quote" && body !== null)
+          this.#sponsoredProof = captureSponsoredQuote(response.body, body, this.context);
+        validateResponse(key, response.body, body, this.context);
+      }
       catch (error) { validationFailed = true; throw error; }
       this.successes.add(key);
     }
@@ -111,7 +129,7 @@ export class HelperNetworkPolicy {
     return new Response(response.body, { status: response.status, headers: outputHeaders });
     } catch (error) {
       if (this.context.mode === "quote" && error !== null && typeof error === "object")
-        this.readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
+        this.#readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
           ...(validationFailed && readNetwork === "sentinel-quote" && validationPredicates.has(error)
             ? { validationPredicate: validationPredicates.get(error)!,
                 ...(tokenFeesShapes.has(error) ? { tokenFeesShape: tokenFeesShapes.get(error)! } : {}) } : {}) });
@@ -244,11 +262,11 @@ function validateSubmitBody(body: string, intent: MetaMaskGaslessIntent, expecte
   if (!exactKeys(value, ["requestId", "method", "encoding", "tx", "executions", "delegation"]) || value.requestId !== intent.requestId ||
     value.method !== "eth_sendRelayTransaction" || value.encoding !== "redeemDelegations" || !isPlainRecord(value.tx) ||
     !exactKeys(value.tx, ["from", "chainId"]) || String(value.tx.from).toLowerCase() !== intent.binding.address ||
-    value.tx.chainId !== intent.request.chainId || !Array.isArray(value.executions) || value.executions.length !== 2 ||
+    value.tx.chainId !== intent.request.chainId || !Array.isArray(value.executions) || value.executions.length !== (intent.quote.feeMode === "sponsored" ? 1 : 2) ||
     !isPlainRecord(value.delegation) || Object.hasOwn(value.delegation, "signature") ||
     !exactKeys(value.delegation, ["delegator", "delegate", "authority", "salt", "caveats"]) || !Array.isArray(value.delegation.caveats) ||
     value.delegation.caveats.length !== 2) mmFail("mm_gasless_submit_unknown");
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < intent.quote.executions.length; i++) {
     const wire = value.executions[i], original = intent.quote.executions[i]!;
     if (!isPlainRecord(wire) || !exactKeys(wire, ["target", "callData"]) || String(wire.target).toLowerCase() !== original.target ||
       (wire.callData ?? "0x") !== original.callData || BigInt(String(wire.value ?? "0")) !== BigInt(original.value)) mmFail("mm_gasless_submit_unknown");
@@ -356,6 +374,27 @@ function validateSentinelResponse(value: Record<string, unknown>, context: ModeC
   sentinelRequire(tokenFeeQuantity(entry.balanceNeededToken), "sentinel_fee_quantity");
   sentinelRequire(typeof entry.feeRecipient === "string" && /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient), "sentinel_fee_recipient");
 }
+/** Parse only a successful principal simulation from the already validated original request. */
+function captureSponsoredQuote(body: string, request: string, context: Extract<ModeContext, { mode: "quote" }>): MetaMaskGaslessQuote | undefined {
+  let value: unknown;
+  try { value = JSON.parse(body); } catch { return undefined; }
+  if (!isPlainRecord(value) || !exactKeys(value, ["jsonrpc", "id", "result"]) || value.jsonrpc !== "2.0" ||
+    value.id !== 10 || !isPlainRecord(value.result)) return undefined;
+  const result = value.result;
+  if (Object.hasOwn(result, "error") || !isPlainRecord(result.sponsorship) || result.sponsorship.isSponsored !== true ||
+    !(result.sponsorship.error === null || result.sponsorship.error === "" || !Object.hasOwn(result.sponsorship, "error")) ||
+    !Array.isArray(result.transactions) || result.transactions.length !== 1) return undefined;
+  const tx = result.transactions[0];
+  if (!isPlainRecord(tx) || tx.status !== "0x1" || Object.hasOwn(tx, "error") || !Array.isArray(tx.fees) ||
+    tx.fees.length < 1 || tx.fees.length > 8 || !isPlainRecord(tx.fees[0]) || Object.hasOwn(tx.fees[0], "tokenFees")) return undefined;
+  const material = { netAtomic: context.input.netAtomic, feeAtomic: "0", feeRecipient: null, feeMode: "sponsored" as const,
+    sponsorshipHash: hashObject({ purpose: "apn.metamask.sponsored-simulation.v1", input: context.input,
+      requestHash: hashObject(JSON.parse(request)), responseHash: sha256(body) }),
+    executions: [{ target: context.input.token, value: "0", callData: encodeFunctionData({ abi: transferAbi,
+      functionName: "transfer", args: [context.input.recipient, BigInt(context.input.netAtomic)] }) }] as const };
+  return Object.freeze({ ...material, executions: Object.freeze(material.executions.map(e => Object.freeze(e))) as unknown as typeof material.executions,
+    hash: mmQuoteHash(material) });
+}
 function tokenFeeQuantity(value: unknown): boolean {
   // Sentinel emits hex quantities; the SDK also accepts decimal strings through BigInt.
   return typeof value === "string" && /^(?:0|[1-9][0-9]{0,77}|0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63}))$/u.test(value) &&
@@ -404,7 +443,7 @@ function sendHttps(url: URL, input: FetchExchangeRequest, addresses: readonly Pi
 }
 
 export function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string): ModeContext {
-  return { mode: "quote", input, owner, authToken };
+  return { mode: "quote", input: structuredClone(input), owner, authToken };
 }
 export function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessIntent, projectId: string,
   token: string, now: () => Date): ModeContext { return { mode, intent, projectId, token, now }; }

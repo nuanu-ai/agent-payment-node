@@ -83,8 +83,8 @@ function quoteInput(value) {
         mmFail("mm_gasless_input");
     return q;
 }
-function executions(value, reason) {
-    if (!Array.isArray(value) || value.length !== 2)
+function executions(value, reason, sponsored = false) {
+    if (!Array.isArray(value) || value.length !== (sponsored ? 1 : 2))
         mmFail(reason);
     for (const item of value) {
         const e = mmExact(item, ["target", "value", "callData"], reason);
@@ -94,18 +94,28 @@ function executions(value, reason) {
     }
 }
 function unsignedInput(value) {
-    const u = mmExact(value, ["owner", "chainId", "executions"], "mm_gasless_input");
+    const tagged = isPlainRecord(value) && Object.hasOwn(value, "feeMode");
+    const u = mmExact(value, ["owner", "chainId", "executions", ...(tagged ? ["feeMode"] : [])], "mm_gasless_input");
+    if (tagged && u.feeMode !== "sponsored")
+        mmFail("mm_gasless_input");
     mmCanonicalAddress(u.owner, "mm_gasless_input");
     mmChain(u.chainId);
-    executions(u.executions, "mm_gasless_input");
+    executions(u.executions, "mm_gasless_input", tagged);
     return u;
 }
 function quoteResult(value) {
-    const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash"], "mm_gasless_provider_unavailable");
+    const sponsored = isPlainRecord(value) && Object.hasOwn(value, "feeMode");
+    const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
+        ...(sponsored ? ["feeMode", "sponsorshipHash"] : [])], "mm_gasless_provider_unavailable");
+    if (sponsored && (q.feeMode !== "sponsored" || q.feeAtomic !== "0" || q.feeRecipient !== null))
+        mmFail("mm_gasless_provider_unavailable");
+    if (sponsored)
+        mmHash(q.sponsorshipHash, "mm_gasless_provider_unavailable");
     mmUint(q.netAtomic, true, "mm_gasless_provider_unavailable");
     mmUint(q.feeAtomic, false, "mm_gasless_provider_unavailable");
-    mmCanonicalAddress(q.feeRecipient, "mm_gasless_provider_unavailable");
-    executions(q.executions, "mm_gasless_provider_unavailable");
+    if (!sponsored)
+        mmCanonicalAddress(q.feeRecipient, "mm_gasless_provider_unavailable");
+    executions(q.executions, "mm_gasless_provider_unavailable", sponsored);
     mmHash(q.hash, "mm_gasless_provider_unavailable");
     return q;
 }
@@ -142,9 +152,9 @@ function intent(value) {
     mmQuote(quote, request, binding, quote.netAtomic, "mm_gasless_state_corrupt");
     mmAssertStableQuote(request, quote, "mm_gasless_state_corrupt");
     const unsigned = mmValidateUnsigned({ unsignedDelegation: i.unsignedDelegation, delegationHash: i.delegationHash,
-        signingDigest: i.signingDigest, relayTo: i.relayTo, mode: i.mode }, { owner: binding.address, chainId: request.chainId, executions: quote.executions }, "mm_gasless_state_corrupt");
+        signingDigest: i.signingDigest, relayTo: i.relayTo, mode: i.mode }, { owner: binding.address, chainId: request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
     void unsigned;
-    snapshot(i.initialSnapshot, request.chainId);
+    snapshot(i.initialSnapshot, request.chainId, quote.feeMode);
     return typed;
 }
 function block(value, reason) {
@@ -153,7 +163,7 @@ function block(value, reason) {
     mmHex(b.hash, 32, reason);
     mmUint(b.timestampAtomic, false, reason);
 }
-function snapshot(value, chainId) {
+function snapshot(value, chainId, feeMode) {
     const s = mmExact(value, ["chainId", "endpointHash", "endpointOrigin", "observedAt", "safeBlock", "headBlock", "safeState", "headState"], "mm_gasless_state_corrupt");
     if (s.chainId !== chainId || typeof s.endpointOrigin !== "string" || s.endpointOrigin.length > 2048)
         mmFail("mm_gasless_state_corrupt");
@@ -161,14 +171,15 @@ function snapshot(value, chainId) {
     mmIso(s.observedAt, "mm_gasless_state_corrupt");
     block(s.safeBlock, "mm_gasless_state_corrupt");
     block(s.headBlock, "mm_gasless_state_corrupt");
-    chainState(s.safeState);
-    chainState(s.headState);
+    chainState(s.safeState, feeMode);
+    chainState(s.headState, feeMode);
 }
-function chainState(value) {
+function chainState(value, feeMode) {
     const s = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress", "tokenImplementationCodeHash",
         "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic", "counterAtomic"], "mm_gasless_state_corrupt");
-    const hashes = mmExact(s.protocolCodeHashes, ["manager", "delegate", "limitedCalls", "exactBatch"], "mm_gasless_state_corrupt");
-    for (const key of ["manager", "delegate", "limitedCalls", "exactBatch"])
+    const keys = ["manager", "delegate", "limitedCalls", feeMode === "sponsored" ? "exactSingle" : "exactBatch"];
+    const hashes = mmExact(s.protocolCodeHashes, keys, "mm_gasless_state_corrupt");
+    for (const key of keys)
         mmHex(hashes[key], 32, "mm_gasless_state_corrupt");
     mmHex(s.tokenProxyCodeHash, 32, "mm_gasless_state_corrupt");
     mmCanonicalAddress(s.tokenImplementationAddress, "mm_gasless_state_corrupt");

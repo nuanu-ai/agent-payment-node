@@ -17,6 +17,7 @@ import type {
 import { MM_MIN_REMAINING_MS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
 import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
+import { mmProtocolPins } from "../single-protocol.js";
 import { mmRegistry } from "../registry.js";
 import { MM_REASON_CODES, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
@@ -51,13 +52,13 @@ function blockOrder(first: MetaMaskGaslessBlock, second: MetaMaskGaslessBlock): 
   if (BigInt(second.numberAtomic) < BigInt(first.numberAtomic) ||
     (second.numberAtomic === first.numberAtomic && !mmSame(first, second))) corrupt();
 }
-function chainState(value: unknown, chainId: MetaMaskGaslessIntent["request"]["chainId"]): MetaMaskGaslessChainState {
+function chainState(value: unknown, chainId: MetaMaskGaslessIntent["request"]["chainId"], feeMode?: "sponsored"): MetaMaskGaslessChainState {
   const s = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress",
     "tokenImplementationCodeHash", "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic", "counterAtomic"]);
-  const codes = mmExact(s.protocolCodeHashes, ["manager", "delegate", "limitedCalls", "exactBatch"]);
-  const row = mmRegistry(chainId).row;
-  for (const name of ["manager", "delegate", "limitedCalls", "exactBatch"] as const) {
-    if (mmHex(codes[name], 32) !== row.protocol[name].codeHash) corrupt();
+  const row = mmRegistry(chainId).row, pins = mmProtocolPins(row, feeMode);
+  const codes = mmExact(s.protocolCodeHashes, Object.keys(pins));
+  for (const [name, pin] of Object.entries(pins)) {
+    if (mmHex(codes[name], 32) !== pin.codeHash) corrupt();
   }
   if (mmHex(s.tokenProxyCodeHash, 32) !== row.tokenProxyCodeHash ||
     mmCanonicalAddress(s.tokenImplementationAddress) !== row.tokenImplementationAddress ||
@@ -69,13 +70,13 @@ function chainState(value: unknown, chainId: MetaMaskGaslessIntent["request"]["c
   mmUint(s.usdcBalanceAtomic);
   return s as unknown as MetaMaskGaslessChainState;
 }
-function snapshot(value: unknown, chainId: MetaMaskGaslessIntent["request"]["chainId"]): MetaMaskGaslessIntent["initialSnapshot"] {
+function snapshot(value: unknown, chainId: MetaMaskGaslessIntent["request"]["chainId"], feeMode?: "sponsored"): MetaMaskGaslessIntent["initialSnapshot"] {
   const s = mmExact(value, ["chainId", "endpointHash", "endpointOrigin", "observedAt", "safeBlock", "headBlock",
     "safeState", "headState"]);
   if (s.chainId !== chainId) corrupt();
   mmHash(s.endpointHash); origin(s.endpointOrigin); mmIso(s.observedAt);
   const safeBlock = block(s.safeBlock), headBlock = block(s.headBlock); blockOrder(safeBlock, headBlock);
-  chainState(s.safeState, chainId); chainState(s.headState, chainId);
+  chainState(s.safeState, chainId, feeMode); chainState(s.headState, chainId, feeMode);
   return s as unknown as MetaMaskGaslessIntent["initialSnapshot"];
 }
 
@@ -87,7 +88,7 @@ export function mmJournalIntent(value: unknown, profileHash: string): MetaMaskGa
   if (typeof i.profile !== "string" || !PROFILE.test(i.profile)) corrupt();
   const request = mmRequest(i.request, "mm_gasless_state_corrupt"), binding = mmBinding(i.binding, "mm_gasless_state_corrupt");
   mmCanonicalAddress(i.token); mmHash(i.deploymentEvidenceHash); mmUuid(i.requestId);
-  const initial = snapshot(i.initialSnapshot, request.chainId);
+  const initial = snapshot(i.initialSnapshot, request.chainId, (i.quote as MetaMaskGaslessQuote).feeMode);
   const preparedAt = mmIso(i.preparedAt), expiresAt = mmIso(i.expiresAt);
   if (time(expiresAt) - time(preparedAt) !== MM_TTL_MS || time(initial.observedAt) > time(preparedAt)) corrupt();
   const gross = mmUint(mmActualGross(i.quote as MetaMaskGaslessQuote, "mm_gasless_state_corrupt"), true, "mm_gasless_state_corrupt");
@@ -100,7 +101,7 @@ export function mmJournalIntent(value: unknown, profileHash: string): MetaMaskGa
   mmAssertIntentEconomics(intent, profileHash);
   mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,
     signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode },
-  { owner: binding.address, chainId: request.chainId, executions: intent.quote.executions }, "mm_gasless_state_corrupt");
+  { owner: binding.address, chainId: request.chainId, executions: intent.quote.executions, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
   return intent;
 }
 
@@ -114,7 +115,7 @@ function approval(value: unknown, fingerprint: string, expiresAt: string, at: st
 /**
  * The repriced batch and its re-derived delegation, checked by exactly the rules the prepared material passed:
  * inside the owner's effective cap, above the recipient's floor, an exact split of the gross, and a delegation
- * derived from those two executions alone. `undefined` is a record written before this field existed.
+ * derived from those exact executions alone. `undefined` is a record written before this field existed.
  */
 function dispatchMaterial(value: unknown, intent: MetaMaskGaslessIntent): MetaMaskGaslessDispatch | null | undefined {
   if (value === undefined) return undefined;
@@ -124,7 +125,7 @@ function dispatchMaterial(value: unknown, intent: MetaMaskGaslessIntent): MetaMa
   const quote = mmRepriceWithinCap(d.quote, intent.request, intent.binding, "mm_gasless_state_corrupt");
   mmValidateUnsigned({ unsignedDelegation: d.unsignedDelegation, delegationHash: d.delegationHash,
     signingDigest: d.signingDigest, relayTo: d.relayTo, mode: d.mode },
-  { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions }, "mm_gasless_state_corrupt");
+  { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
   return d as unknown as MetaMaskGaslessDispatch;
 }
 function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, at: string): MetaMaskGaslessProviderObservation | null {
@@ -187,9 +188,9 @@ function settlement(value: unknown, intent: MetaMaskGaslessIntent, dispatched: M
   mmHash(s.transactionProofHash); mmHash(s.receiptHash); mmHash(s.protocolHash); mmHash(s.tokenImplementationHash);
   const deployment = mmRegistry(intent.request.chainId), row = deployment.row;
   const protocolHash = hashObject({ deploymentEvidenceHash: deployment.deploymentEvidenceHash,
-    receipt: { block: transaction, code: Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) =>
+    receipt: { block: transaction, code: Object.fromEntries(Object.entries(mmProtocolPins(row, intent.quote.feeMode)).map(([name, pin]) =>
       [name, pin.codeHash])) },
-    finality: { block: finality, code: Object.fromEntries(Object.entries(row.protocol).map(([name, pin]) =>
+    finality: { block: finality, code: Object.fromEntries(Object.entries(mmProtocolPins(row, intent.quote.feeMode)).map(([name, pin]) =>
       [name, pin.codeHash])) } });
   const tokenState = { address: row.tokenImplementationAddress, codeHash: row.tokenImplementationCodeHash,
     proxyCodeHash: row.tokenProxyCodeHash };
