@@ -1,4 +1,4 @@
-import type { CircleKnownOperation } from "./funding-operation.js";
+import type { CircleFundingOperationV2, CircleKnownOperation } from "./funding-operation.js";
 import { type HeldCleanup85Scope } from "../circle-cleanup85-financial-scope.js";
 import type { Cleanup85CancellationRequest } from "../circle-cleanup85-cancellation-contract.js";
 import { type VerifiedHistoricalPaidClosure } from "./historical-paid-closure.js";
@@ -34,6 +34,8 @@ export declare class CircleUsage {
     /** Finite historical completion consumes fresh private source+destination provenance before ledger access. */
     closeHistoricalPaid(op: CircleOperationV1, authority: VerifiedHistoricalPaidClosure): Promise<readonly AssetUsageReservation[]>;
     followExternalFulfillment(op: CircleOperationV1): Promise<readonly AssetUsageReservation[]>;
+    /** V2 explicit public settlement: source caps remain USED; owned never-entered effects consume zero. */
+    followFundingExternalFulfillment(op: CircleFundingOperationV2): Promise<readonly AssetUsageReservation[]>;
     /** Only a fully verified versioned recovery chooses the new86 fee; old cleanup85 stays unknown. */
     closeCleanup85Recovery(op: CircleOperationV1, proof: CircleNonceRetirementProof, authority: VerifiedCleanup85Settlement): Promise<readonly AssetUsageReservation[]>;
     follow(op: CircleKnownOperation, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<readonly AssetUsageReservation[]>;

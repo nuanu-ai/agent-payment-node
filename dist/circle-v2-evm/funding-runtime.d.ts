@@ -1,3 +1,4 @@
+import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { BridgeHttps } from "../lifi/https.js";
 import type { StateStore } from "../state.js";
@@ -29,11 +30,17 @@ export declare class CircleFundingEvmService {
     private readonly custody;
     private readonly operations;
     constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number, ttyOptions?: CircleFundingApprovalOptions, https?: Pick<BridgeHttps, "request">);
+    adoptExternalMint(id: string, transactionHash: Hex): Promise<CircleFundingOperationV2>;
     prepare(input: CircleFundingPrepareInput): Promise<CircleFundingOperationV2>;
     status(id: string): Promise<{
+        next_actions: string[];
+        external_fulfillment?: import("./funding-external-proof.js").CircleFundingExternalFulfillment;
+        proof_class?: string;
+        controlled_destination_native_atomic?: string;
+        external_destination_fee_payer?: `0x${string}`;
         operation_id: string;
         kind: string;
-        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted";
+        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled";
         terminal: boolean;
         source_profile: string;
         destination_profile: string;
@@ -53,7 +60,6 @@ export declare class CircleFundingEvmService {
         residual_allowance_atomic: string;
         usage_finalized: boolean;
         integrity_hash: string;
-        next_actions: string[];
     }>;
     approveSource(id: string): Promise<CircleFundingOperationV2>;
     approveMint(id: string): Promise<CircleFundingOperationV2>;

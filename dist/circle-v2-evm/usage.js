@@ -1,3 +1,4 @@
+import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { validateCircleFundingBinding } from "./funding-binding.js";
 import { assertHeldCleanup85Scope } from "../circle-cleanup85-financial-scope.js";
 import { consumeHistoricalPaidClosure } from "./historical-paid-closure.js";
@@ -206,6 +207,39 @@ export class CircleUsage {
                 circleCorrupt("external_usage_missing");
             const state = index < 3 ? "finalized" : "released_unsubmitted";
             const outcomeDigest = hashObject({ kind: "circle_external_mint_fulfillment", operationId: op.operationId, fingerprint: op.fingerprint, proofHash: op.externalFulfillment.proofHash, reservationId: row.reservationId, index, state });
+            if (current.state === state) {
+                if (current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== undefined)
+                    circleBlocked("external_usage_outcome_changed");
+                result.push(current);
+                continue;
+            }
+            result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state, now: new Date(this.now()), outcomeDigest, expectedCurrentStates: index < 3 ? ["reserved", "submitted", "unknown_finality"] : ["reserved", "unknown_finality"] }));
+        }
+        return result;
+    }
+    /** V2 explicit public settlement: source caps remain USED; owned never-entered effects consume zero. */
+    async followFundingExternalFulfillment(op) {
+        if (op.externalFulfillment === undefined || op.source?.finalityTag !== "finalized" || op.residualAllowanceAtomic !== "0" || op.usage.length !== 5)
+            circleBlocked("external_settlement_proof_required");
+        const durable = await new CircleRepository(this.state.root).loadAny(op.operationId), claim = await new CircleFundingExternalStore(this.state.root).readClaim(op);
+        if (durable?.schemaVersion !== "apn.circle-v2-evm-operation.v2" || durable.externalFulfillment === undefined || claim === null || hashObject(durable.externalFulfillment) !== hashObject(op.externalFulfillment) || hashObject(claim) !== hashObject(op.externalFulfillment))
+            circleBlocked("external_durable_settlement_binding");
+        const result = [];
+        for (const [index, row] of op.usage.entries()) {
+            const current = await this.ledger.load(row, row.reservationId);
+            if (current === null)
+                circleCorrupt("external_usage_missing");
+            for (const key of ["schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "rail", "amountAtomic", "account", "chain", "reservedAt"])
+                if (current[key] !== row[key])
+                    circleBlocked("external_usage_binding");
+            if (canonicalJson(current.asset) !== canonicalJson(row.asset))
+                circleBlocked("external_usage_binding");
+            const state = index < 3 ? "finalized" : "released_unsubmitted";
+            const outcomeDigest = hashObject({ kind: "circle_funding_external_mint_fulfillment", operationId: op.operationId, fingerprint: op.fingerprint, proofHash: op.externalFulfillment.proofHash, reservationId: row.reservationId, index, state });
+            if (index < 3 && current.state === "finalized" && canonicalJson(current) === canonicalJson(row)) {
+                result.push(current);
+                continue;
+            }
             if (current.state === state) {
                 if (current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== undefined)
                     circleBlocked("external_usage_outcome_changed");
