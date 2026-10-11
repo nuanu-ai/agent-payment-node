@@ -1,3 +1,4 @@
+import type { CircleFundingBindingV2 } from "./funding-binding.js";
 /** Pure finite preflight admission. Runtime must obtain all inputs from bounded canonical RPC/API reads under account locks. */
 import { type Address, type Hex } from "viem";
 import { type CircleDestinationChain } from "./catalog.js";
@@ -76,6 +77,6 @@ export declare function verifyCircleMintPreflight(source: CircleSourceProof, att
     readonly attesterConfigurationHash: string;
     readonly transactionSimulationResult: Hex;
     readonly previousNonce?: Hex;
-}): void;
+}, binding?: CircleFundingBindingV2): void;
 /** Finalization is independent of the issuer's fast attestation threshold. */
-export declare function verifyCircleClosureFinality(source: CircleSourceProof, finalizedSource: CircleSourceProof): void;
+export declare function verifyCircleClosureFinality(source: CircleSourceProof, finalizedSource: CircleSourceProof, binding?: CircleFundingBindingV2): void;

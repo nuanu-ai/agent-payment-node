@@ -1,0 +1,73 @@
+import type { WrappingSecretPort } from "../macos-keychain.js";
+import { BridgeHttps } from "../lifi/https.js";
+import type { StateStore } from "../state.js";
+import { type CircleDestinationChain } from "./catalog.js";
+import { type CircleEffect } from "./operation-model.js";
+import { type CircleFundingParameters } from "./funding-binding.js";
+import { type CircleFundingOperationV2 } from "./funding-operation.js";
+/** Assertion only: authority is issued privately after production foreground consent inside the locked service. */
+export declare function assertCircleFundingRuntimeAuthority(state: StateStore, input: CircleFundingOperationV2, effectInput: CircleEffect): void;
+export interface CircleFundingApprovalOptions {
+    readonly deadlineMs?: number;
+    readonly signal?: AbortSignal;
+}
+export interface CircleFundingPrepareInput {
+    readonly profile: string;
+    readonly destinationProfile: string;
+    readonly destinationChain: CircleDestinationChain;
+    readonly idempotencyKey: string;
+    readonly funding: CircleFundingParameters;
+}
+export declare class CircleFundingEvmService {
+    private readonly state;
+    private readonly env;
+    private readonly now;
+    private readonly https;
+    private readonly ttyOptions;
+    private readonly repo;
+    private readonly usage;
+    private readonly custody;
+    private readonly operations;
+    constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number, ttyOptions?: CircleFundingApprovalOptions, https?: Pick<BridgeHttps, "request">);
+    prepare(input: CircleFundingPrepareInput): Promise<CircleFundingOperationV2>;
+    status(id: string): Promise<{
+        operation_id: string;
+        kind: string;
+        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted";
+        terminal: boolean;
+        source_profile: string;
+        destination_profile: string;
+        destination_chain: CircleDestinationChain;
+        amount_atomic: string;
+        minimum_output_atomic: string;
+        maximum_issuer_fee_atomic: string;
+        recipient: `0x${string}`;
+        effects: {
+            role: import("./operation-model.js").CircleRole;
+            phase: import("./operation-model.js").CircleEffectPhase;
+            transaction_hash: `0x${string}` | null;
+            actual_fee_atomic: string | null;
+        }[];
+        source_finality: "safe" | "included" | "finalized" | null;
+        destination_finality: "safe" | "included" | "finalized" | null;
+        residual_allowance_atomic: string;
+        usage_finalized: boolean;
+        integrity_hash: string;
+        next_actions: string[];
+    }>;
+    approveSource(id: string): Promise<CircleFundingOperationV2>;
+    approveMint(id: string): Promise<CircleFundingOperationV2>;
+    observe(id: string): Promise<CircleFundingOperationV2>;
+    refreshAttestation(id: string): Promise<CircleFundingOperationV2>;
+    cleanup(id: string): Promise<CircleFundingOperationV2>;
+    private required;
+    private run;
+    private assertPriorSourcesCanonical;
+    private preflightDeployments;
+    private preflightAttesters;
+    private remotes;
+    private api;
+    private fee;
+    private sourceAccount;
+    private ports;
+}

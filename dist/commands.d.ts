@@ -1,3 +1,4 @@
+import type { CircleFundingParameters } from "./circle-v2-evm/funding-binding.js";
 import type { Address } from "./model.js";
 import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
@@ -42,6 +43,7 @@ export type CommandRequest = {
     readonly destinationProfile: string;
     readonly destinationChain: 1329 | 59144 | 143;
     readonly idempotencyKey: string;
+    readonly funding?: CircleFundingParameters;
 } | {
     readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.cleanup85-prepare" | "circle.evm.cleanup85-cancel" | "circle.evm.cleanup86-approve" | "circle.evm.status";
     readonly operationId: string;
