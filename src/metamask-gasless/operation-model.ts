@@ -54,7 +54,8 @@ export interface MetaMaskGaslessPublicOperation {
   readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_correlated" | "owner_acknowledgement_only";
   readonly transfer: {
     readonly chain_id: MetaMaskGaslessChainId; readonly token: Address; readonly symbol: "USDC"; readonly decimals: 6;
-    readonly sender: Address; readonly recipient: Address; readonly fee_recipient: Address;
+    readonly sender: Address; readonly recipient: Address; readonly fee_recipient: Address | null;
+    readonly fee_mode?: "sponsored";
     readonly requested_fixed_net_atomic?: string; readonly maximum_gross_atomic?: string;
     readonly gross_atomic: string; readonly user_max_fee_atomic: string; readonly minimum_received_atomic: string;
     readonly frozen_net_atomic: string; readonly frozen_fee_atomic: string;

@@ -78,7 +78,7 @@ async function inspectCandidate(context, intent, transactionHash) {
     if (status !== 0n && status !== 1n)
         mmFail("mm_gasless_evidence_invalid");
     const accounting = status === 1n ? verifyMetaMaskReceiptAccounting(intent, outer.from, logs) : null;
-    const receiptState = await readMetaMaskChainState(context.call, context.deployment.row, intent.binding.address, included, intent.delegationHash);
+    const receiptState = await readMetaMaskChainState(context.call, context.deployment.row, intent.binding.address, included, intent.delegationHash, intent.quote.feeMode);
     if (!("counterAtomic" in receiptState) || receiptState.designation !== "pinned") {
         mmFail("mm_gasless_evidence_invalid");
     }
@@ -89,7 +89,7 @@ async function inspectCandidate(context, intent, transactionHash) {
         return { kind: "pending", evidenceHash: hashObject({ transactionHash, included, finality }),
             usableCandidate: accounting !== null && receiptState.counterAtomic === "1" };
     }
-    const finalityState = await readMetaMaskChainState(context.call, context.deployment.row, intent.binding.address, finality, intent.delegationHash);
+    const finalityState = await readMetaMaskChainState(context.call, context.deployment.row, intent.binding.address, finality, intent.delegationHash, intent.quote.feeMode);
     if (!("counterAtomic" in finalityState) || finalityState.designation !== "pinned")
         mmFail("mm_gasless_evidence_invalid");
     await recheckBlock(context.call, included);

@@ -167,17 +167,17 @@ export class MetaMaskGaslessExecution {
     }
     /** The provider builds the unsigned delegation over the repriced batch; APN verifies it independently. */
     async redelegate(op, binding, quote) {
-        const input = { owner: binding.address, chainId: op.intent.request.chainId, executions: quote.executions };
+        const input = { owner: binding.address, chainId: op.intent.request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) };
         const unsigned = mmValidateUnsigned(await this.provider.buildUnsigned(input), input);
         this.clock.check(op);
         return unsigned;
     }
     async chainState(op, rpc, delegationHash, grossAtomic) {
         const snapshot = await rpc.snapshot({ owner: op.intent.binding.address, delegationHash,
-            grossAtomic });
+            grossAtomic, ...(op.intent.quote.feeMode === "sponsored" ? { feeMode: op.intent.quote.feeMode } : {}) });
         this.clock.check(op);
         const current = validateMetaMaskGaslessSnapshot(snapshot, { chainId: op.intent.request.chainId,
-            endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic });
+            endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic, ...(op.intent.quote.feeMode === "sponsored" ? { feeMode: op.intent.quote.feeMode } : {}) });
         this.clock.beforeDispatchAtCurrent(op, current.observedAt);
         for (const key of ["safeState", "headState"]) {
             if (current[key].ownerCodeHash !== op.intent.initialSnapshot[key].ownerCodeHash ||
