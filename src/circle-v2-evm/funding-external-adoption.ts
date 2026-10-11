@@ -58,7 +58,7 @@ export async function adoptCircleFundingExternalMint(state:StateStore,repo:Circl
   const destinationHead=circleRecord(destinationObservation.finalityHead);circleExternalHeader(destinationHead);
   const [sourceDeploy,destinationDeploy,historicalSourceDeploy,historicalDeploy]=await Promise.all([readCircleDeployment(source,op.destinationChain,sourceHead),readCircleDeployment(destination,op.destinationChain,destinationHead),readCircleDeployment(source,op.destinationChain,circleRecord(burnObservation.canonicalBlock)),readCircleDeployment(destination,op.destinationChain,destBlock)]);
   verifyCircleDeployments(sourceDeploy,destinationDeploy);const historicalDeploymentDigest=verifyCircleDeployments(historicalSourceDeploy,historicalDeploy);
-  const attesters=await readCircleAttesters(destination,historicalDeploymentDigest,destBlock),signers=await verifyCircleAttestationSigners(op.attestation!,op.attestation!.attestation,attesters);
+  const attesters=await readCircleAttesters(destination,historicalDeploymentDigest,destBlock),signers=await verifyCircleAttestationSigners(op.attestation!,op.attestation!.attestation,attesters,op.funding);
   if(circleAttesterConfigurationHash(attesters)!==op.attestation!.attesterConfigurationHash||hashObject(signers)!==hashObject(op.attestation!.signers))circleBlocked("external_frozen_attester_configuration_changed");
   const used=await destination.read(CIRCLE_TRANSMITTER,"usedNonces",[op.attestation!.nonce],canonicalTag(destBlock));
   const feeRecipient=BigInt(op.attestation!.feeExecutedAtomic)>0n?await readCircleMintFeeRecipient(destination,destinationObservation):undefined;
