@@ -218,7 +218,7 @@ export class CircleEvmService {
         if (intent !== null && !isSealedBurnRetirement(op) && await allowance() !== "0") circleBlocked("retirement_zero_allowance_changed");
         if (effect.role === "approval" && await allowance() !== "0" || effect.role === "burn" && await allowance() !== "40100") circleBlocked("exact_source_allowance_changed");
         if (effect.role === "approval" || effect.role === "burn") { const quote = await this.fee(op.destinationChain); assertCircleFeeQuote(quote, op.destinationChain, this.now()); }
-        const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction])); if (estimate > BigInt(e.gasLimitAtomic)) circleBlocked("simulation_exceeds_gas_ceiling");
+        const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction, "pending"])); if (estimate > BigInt(e.gasLimitAtomic)) circleBlocked("simulation_exceeds_gas_ceiling");
         const simulated = circleHex(await remote.call("eth_call", [transaction, "pending"]));
         if (effect.role === "mint") {
           const sourceObservation = await source.observation(op.source!.transactionHash, op.source!.finalityTag === "finalized" ? "finalized" : "included");

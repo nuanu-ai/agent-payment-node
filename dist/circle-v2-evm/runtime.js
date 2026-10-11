@@ -312,7 +312,7 @@ export class CircleEvmService {
                     const quote = await this.fee(op.destinationChain);
                     assertCircleFeeQuote(quote, op.destinationChain, this.now());
                 }
-                const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction]));
+                const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction, "pending"]));
                 if (estimate > BigInt(e.gasLimitAtomic))
                     circleBlocked("simulation_exceeds_gas_ceiling");
                 const simulated = circleHex(await remote.call("eth_call", [transaction, "pending"]));
