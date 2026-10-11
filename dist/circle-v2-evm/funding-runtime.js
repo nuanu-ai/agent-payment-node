@@ -245,7 +245,7 @@ export class CircleFundingEvmService {
                     if (circleUint(String(await source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], "pending"))) < BigInt(op.funding.amountAtomic))
                         circleBlocked("funding_source_principal_changed");
                 }
-                const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction]));
+                const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction, "pending"]));
                 if (estimate > BigInt(e.gasLimitAtomic))
                     circleBlocked("simulation_exceeds_gas_ceiling");
                 const simulated = circleHex(await remote.call("eth_call", [transaction, "pending"]));

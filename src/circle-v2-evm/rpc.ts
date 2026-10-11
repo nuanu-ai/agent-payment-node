@@ -85,7 +85,7 @@ export class CircleRpc {
   }
   async envelope(from: Address, to: Address, data: Hex, nonceAtomic: string, gasLimit?: string): Promise<CircleEnvelope> {
     await this.identity(); const block = await this.block("latest"), tip = this.chainId === 42161 ? 0n : circleUint(await this.call("eth_maxPriorityFeePerGas", []));
-    const estimated = gasLimit === undefined ? circleUint(await this.call("eth_estimateGas", [{ from, to, data, value: "0x0" }])) : BigInt(gasLimit), gas = gasLimit === undefined ? estimated * 12n / 10n + 1n : estimated;
+    const estimated = gasLimit === undefined ? circleUint(await this.call("eth_estimateGas", [{ from, to, data, value: "0x0" }, "latest"])) : BigInt(gasLimit), gas = gasLimit === undefined ? estimated * 12n / 10n + 1n : estimated;
     return circleEnvelope({ chainId: this.chainId, from, to, data, valueAtomic: "0", nonceAtomic, gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: (circleUint(block.baseFeePerGas) * 2n + tip).toString(), maxPriorityFeePerGasAtomic: tip.toString() });
   }
 }
