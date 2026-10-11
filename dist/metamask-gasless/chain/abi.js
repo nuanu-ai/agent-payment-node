@@ -1,6 +1,7 @@
 import { getAddress, toEventSelector, toFunctionSelector } from "viem";
 import { hashObject, isPlainRecord } from "../../canonical.js";
 import { mmFail } from "../reasons.js";
+import { mmEvidenceFail } from "./diagnostic.js";
 export const MM_ZERO_HEX_HASH = `0x${"0".repeat(64)}`;
 export const MM_TRANSFER_TOPIC = toEventSelector("Transfer(address,address,uint256)");
 export const MM_APPROVAL_TOPIC = toEventSelector("Approval(address,address,uint256)");
@@ -34,18 +35,18 @@ export const MM_DELEGATION_PARAMETER = {
 };
 export function rpcRecord(value, reason = "mm_gasless_evidence_invalid") {
     if (!isPlainRecord(value))
-        mmFail(reason);
+        mmEvidenceFail(reason, "rpc_record");
     return value;
 }
 export function rpcQuantity(value, reason = "mm_gasless_evidence_invalid") {
     if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63})$/u.test(value))
-        mmFail(reason);
+        mmEvidenceFail(reason, "rpc_quantity");
     return BigInt(value);
 }
 export function rpcHex(value, maximumBytes = 256 * 1024, bytes, reason = "mm_gasless_evidence_invalid") {
     if (typeof value !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/u.test(value) ||
         value.length > 2 + maximumBytes * 2 || (bytes !== undefined && value.length !== 2 + bytes * 2))
-        mmFail(reason);
+        mmEvidenceFail(reason, "rpc_hex");
     return value.toLowerCase();
 }
 export function rpcAddress(value, reason = "mm_gasless_evidence_invalid") {
@@ -74,7 +75,7 @@ export async function rpcBlock(call, tag, fullTransactions = false) {
     const raw = rpcRecord(await call("eth_getBlockByNumber", [tag, fullTransactions]));
     const number = rpcQuantity(raw.number), hash = rpcHex(raw.hash, 32, 32);
     if (hash === MM_ZERO_HEX_HASH || (tag.startsWith("0x") && number !== rpcQuantity(tag))) {
-        mmFail("mm_gasless_evidence_invalid");
+        mmEvidenceFail("mm_gasless_evidence_invalid", "header_identity", "eth_getBlockByNumber");
     }
     return { block: { numberAtomic: number.toString(), hash, timestampAtomic: rpcQuantity(raw.timestamp).toString() },
         raw, tag: quantity(number) };
@@ -82,7 +83,7 @@ export async function rpcBlock(call, tag, fullTransactions = false) {
 export async function recheckBlock(call, block, reason = "mm_gasless_scan_reorg") {
     const current = await rpcBlock(call, quantity(BigInt(block.numberAtomic)));
     if (!sameBlock(current.block, block))
-        mmFail(reason);
+        mmEvidenceFail(reason, "header_recheck", "eth_getBlockByNumber");
 }
 export function sameBlock(left, right) {
     return left.numberAtomic === right.numberAtomic && left.hash === right.hash &&
