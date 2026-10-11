@@ -18,3 +18,6 @@ export declare function decodeCircleFundingExternalDestination(op: CircleFunding
 }>;
 export declare function fundingExternalClaimKey(op: CircleFundingOperationV2): string;
 export declare function validateFundingExternalFulfillment(p: CircleFundingExternalFulfillment, op: CircleFundingOperationV2): void;
+/** Both full proofs are validated before comparing identity. Only advancing finality witnesses and their
+ * derived digests are excluded; included transactions, receipts, events, economics and pins stay exact. */
+export declare function fundingExternalStableIdentity(p: CircleFundingExternalFulfillment): unknown;
