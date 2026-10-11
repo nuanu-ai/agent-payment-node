@@ -7,12 +7,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const base = pathToFileURL(process.argv[2] + '/');
 const moduleUrl = name => new URL(name, base).href;
-const payer='0xf41170df51aab52aaa04fbc3ff325cf051644aca', vendor='e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a';
+const scenario=process.argv[3] ?? "positive", custom=scenario.startsWith('profile-');
+const payer=custom?'0x1111111111111111111111111111111111111111':'0xf41170df51aab52aaa04fbc3ff325cf051644aca', profile=custom?'mm-owned-test':'metamask-live-v042', vendor='e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a';
 let projectHash="d".repeat(64), effects=0, selectedQuote, lastScope, lastContext, beforeGuard=async()=>{};
-const scenario=process.argv[3] ?? "positive";
 const newVendor='7e5d5899170740ccaa05fb45415c9ef5320815e446788719f3523eb0fd58ee37',primaryChain=scenario==='newpolicy-op'?10:1;
 let vendorHash=scenario.startsWith('newpolicy')||scenario==='mismatch-new'?newVendor:vendor,policyBytes=scenario.startsWith('newpolicy')||scenario==='mismatch-old'?945:866,policyReads=0, requestReads=0;
-const acknowledgedScenarios=['positive','native-crosschain','alias-otherchain','newpolicy','newpolicy-op'];
+if(custom){const {metaMaskNativePolicyVariants}=await import(moduleUrl('metamask-native-policy.js'));vendorHash=metaMaskNativePolicyVariants(payer)[0].vendorPolicyHash;}
+const acknowledgedScenarios=['profile-positive','profile-alias','profile-tamper','positive','native-crosschain','alias-otherchain','newpolicy','newpolicy-op'];
 await mock.module(moduleUrl('metamask-native-transfer-adapter.js'), {namedExports:{
   readFixedMetaMaskNativePolicy:async chain=>{policyReads++;if(scenario==='newpolicy-pre-drift'&&policyReads===2){vendorHash=vendor;policyBytes=866;}return {selectedAddress:payer,vendorPolicyHash:vendorHash,policyBytes,tradingMode:'guard',vendorProjectHash:projectHash,observedAt:new Date().toISOString()};},
   readFixedMetaMaskNativeRequest:async(id,hash)=>{requestReads++;assert.equal(id,"TEST-pending-request");assert.equal(hash,projectHash);return {disposition:"acknowledged",transactionHash:"0x"+"e".repeat(64),readObservation:Object.freeze({stage:"complete",guard_step:null,request_id:id,watch_returned:true,before_guard_verified:true,after_guard_verified:true,request_identity_verified:true,provider_status:"CONFIRMED",transaction_hash:"0x"+"e".repeat(64),chain_id:primaryChain,response_hash:"1".repeat(64),reason:null,error_code:null,diagnostic:null})};},
@@ -29,11 +30,12 @@ try {
  const {StateStore}=await import(moduleUrl('state.js'));
  const {metamaskDirectCapabilitySnapshot,capabilityHash,accountBindingHash}=await import(moduleUrl('provider-profile.js'));
  const {getAddress}=await import('viem');
- const state=new StateStore(root),profile='metamask-live-v042',address=getAddress(payer),caps=metamaskDirectCapabilitySnapshot();await state.initialize();
+ const state=new StateStore(root),address=getAddress(payer),caps=metamaskDirectCapabilitySnapshot();await state.initialize();
  await state.writeProviderProfile({schema_version:'apn.provider-profile.v1',profile,profile_hash:state.profileHash(profile),provider_id:'metamask-agent-wallet',public_address:address,account_binding_hash:accountBindingHash('metamask-agent-wallet',address),capability_snapshot:caps,capability_hash:capabilityHash(caps),revision:1,trust_class:'provider_managed_non_custodial_signer',observed_at:new Date().toISOString(),drift:{state:'bound',reason:'none'}});
  const {AllowlistPolicyStore}=await import(moduleUrl('allowlist-policy-store.js'));
  const policies=new AllowlistPolicyStore(root),token=primaryChain===10?'0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85':'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',at=new Date().toISOString();
- const record=await policies.stage({profile,now:new Date(),policy:{schemaVersion:'apn.allowlist-policy-file.v1',overlayVersion:'native-test-1',accounts:{evm:address},effectiveAt:at,admissions:[{chain:`eip155:${primaryChain}`,kind:'native',rail:'direct',maximumPerTransferAtomic:'100000000',dailyLimitAtomic:'100000000'},{chain:`eip155:${primaryChain}`,kind:'token',identifier:token,rail:'direct',maximumPerTransferAtomic:'10000',dailyLimitAtomic:'10000'},...(scenario==='native-crosschain'?[{chain:'eip155:1329',kind:'native',rail:'direct',maximumPerTransferAtomic:'100000000',dailyLimitAtomic:'100000000'},{chain:'eip155:1329',kind:'token',identifier:'0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392',rail:'direct',maximumPerTransferAtomic:'10000',dailyLimitAtomic:'10000'}]:[]),...(scenario==='op'?[{chain:'eip155:10',kind:'native',rail:'direct',maximumPerTransferAtomic:'100000000',dailyLimitAtomic:'100000000'}]:[])]}});
+ const policyFile={schemaVersion:'apn.allowlist-policy-file.v1',overlayVersion:'native-test-1',accounts:{evm:address},effectiveAt:at,admissions:[{chain:`eip155:${primaryChain}`,kind:'native',rail:'direct',maximumPerTransferAtomic:'100000000',dailyLimitAtomic:'100000000'},{chain:`eip155:${primaryChain}`,kind:'token',identifier:token,rail:'direct',maximumPerTransferAtomic:'10000',dailyLimitAtomic:'10000'},...(scenario==='native-crosschain'?[{chain:'eip155:1329',kind:'native',rail:'direct',maximumPerTransferAtomic:'100000000',dailyLimitAtomic:'100000000'},{chain:'eip155:1329',kind:'token',identifier:'0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392',rail:'direct',maximumPerTransferAtomic:'10000',dailyLimitAtomic:'10000'}]:[]),...(scenario==='op'?[{chain:'eip155:10',kind:'native',rail:'direct',maximumPerTransferAtomic:'100000000',dailyLimitAtomic:'100000000'}]:[])]};
+ const record=await policies.stage({profile,now:new Date(),policy:policyFile});
  const activation=await policies.appendDecision(profile,null,{status:'active',revision:record.revision,stagedRecordDigest:record.recordDigest,policyDigest:record.registry.policyDigest,registry:record.registry,approvalFingerprint:'a'.repeat(64),decidedAt:new Date().toISOString()});
  if(scenario==='newpolicy-drift')beforeGuard=async()=>{vendorHash=vendor;policyBytes=866;};
  if(scenario==='expired')beforeGuard=async()=>{mock.timers.enable({apis:['Date'],now:Date.now()});mock.timers.tick(61000);};
@@ -56,16 +58,28 @@ try {
  }
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
  if(scenario==='newpolicy-pre-drift'){
-   const result=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-refused-0001');assert.equal(result.state,'unknown');assert.equal(result.effect_attempts,1);assert.equal(effects,0);
+   const result=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-refused-0001',profile);assert.equal(result.state,'unknown');assert.equal(result.effect_attempts,1);assert.equal(effects,0);
    const saved=JSON.parse(await readFile(join(root,'metamask-native-operations',result.operation_id+'.json'),'utf8'));assert.equal(saved.reservations.length,2);assert.equal(saved.context.vendorPolicyHash,newVendor);assert.equal(saved.diagnostic.stage,'sdk_read');
-   const replay=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-refused-0001');assert.deepEqual(replay,result);assert.equal(effects,0);process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
+   const replay=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-refused-0001',profile);assert.deepEqual(replay,result);assert.equal(effects,0);process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
  } else if(['policy','wrongcustody','fees','balance','op','alias-samechain','sameprofile','mismatch-old','mismatch-new'].includes(scenario)){
-   await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,scenario==='op'?10:1,'native-test-refused-0001'));assert.equal(effects,0);process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
+   await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,scenario==='op'?10:1,'native-test-refused-0001',profile));assert.equal(effects,0);process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
  } else {
- const result=await owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-positive-0001');assert.equal(result.state,acknowledgedScenarios.includes(scenario)?'acknowledged':'unknown');assert.equal(result.transaction_hash,['pending','no-rid'].includes(scenario)?null:'0x'+'e'.repeat(64));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(lastScope,lastContext));
- const replay=await owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-positive-0001');assert.equal(replay.operation_id,result.operation_id);assert.equal(effects,1);
- await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-second-key-0002'));assert.equal(effects,1);
- if(scenario==='native-crosschain'){const other=await owner.runFixedMetaMaskNativeTransfer(root,1329,'native-test-other-chain-0002');assert.equal(other.state,'acknowledged');assert.equal(effects,2);}
+ const result=await owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-positive-0001',profile);assert.equal(result.operation_id,state.operationId(profile,`metamask-native:${primaryChain}:native-test-positive-0001`));assert.equal(lastContext.profile,profile);assert.equal(lastContext.quote.sender.toLowerCase(),payer);assert.equal(result.state,acknowledgedScenarios.includes(scenario)?'acknowledged':'unknown');assert.equal(result.transaction_hash,['pending','no-rid'].includes(scenario)?null:'0x'+'e'.repeat(64));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(lastScope,lastContext));
+ const replay=await owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-positive-0001',profile);assert.equal(replay.operation_id,result.operation_id);assert.equal(effects,1);
+ await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-second-key-0002',profile));assert.equal(effects,1);
+ if(scenario==='native-crosschain'){const other=await owner.runFixedMetaMaskNativeTransfer(root,1329,'native-test-other-chain-0002',profile);assert.equal(other.state,'acknowledged');assert.equal(effects,2);}
+ if(scenario==='profile-alias'){
+   const alias='mm-owned-alias',current=await state.loadProviderProfile(state.profileHash(profile));await state.writeProviderProfile({...current,profile:alias,profile_hash:state.profileHash(alias)});
+   const staged=await policies.stage({profile:alias,now:new Date(),policy:{...policyFile,overlayVersion:'native-alias-test'}});
+   await policies.appendDecision(alias,null,{status:'active',revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,registry:staged.registry,approvalFingerprint:'a'.repeat(64),decidedAt:new Date().toISOString()});
+   await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,primaryChain,'native-test-alias-0002',alias),{code:'APN_OPERATION_BLOCKED'});assert.equal(effects,1);
+ }
+ if(scenario==='profile-tamper'){
+   const path=join(root,'metamask-native-operations',result.operation_id+'.json'),original=await readFile(path),saved=JSON.parse(original);
+   const {hashObject}=await import(moduleUrl('canonical.js'));
+   const changed={...saved,context:{...saved.context,profile:'wrong-profile'}};delete changed.recordHash;await writeFile(path,JSON.stringify({...changed,recordHash:hashObject(changed)})+'\n');
+   await assert.rejects(()=>owner.readFixedMetaMaskNativeTransfer(root,result.operation_id,false));await writeFile(path,original);
+ }
  const {OperationService}=await import(moduleUrl('operation-service.js')),normalOperations=new OperationService(state);
  for(const conflictProfile of [state.profileHash(profile),state.profileHash('native-test-unbound-alias')]){
    await assert.rejects(()=>normalOperations.assertEvmAccountAvailable(conflictProfile,primaryChain,address),{code:'APN_OPERATION_BLOCKED'});
@@ -88,6 +102,16 @@ try {
  const observed=await owner.readFixedMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(observed.state,scenario==='reverted'?'confirmed_reverted':'confirmed');assert.equal(observed.receipt.transferAccepted,scenario!=='reverted');if(scenario!=="pending")assert.equal(observed.read_observation.stage,"not_requested");else {assert.equal(requestReads,1);assert.equal(observed.read_observation.stage,"complete");assert.equal(observed.read_observation.provider_status,"CONFIRMED");}assert.ok(!JSON.stringify(await owner.readFixedMetaMaskNativeTransfer(root,result.operation_id,false)).includes("read_observation"));assert.equal(observed.receipt.nativeFeeAtomic,primaryChain===10?'7500550':'7500000');
  assert.equal((await ledger.usage({account:address,chain:`eip155:${primaryChain}`,asset:{kind:'native',identifier:null}},new Date())).amountAtomic,primaryChain===10?'7500550':'7500000');
  assert.equal((await ledger.usage({account:address,chain:`eip155:${primaryChain}`,asset:{kind:'token',identifier:token}},new Date())).amountAtomic,scenario==='reverted'?'0':'1000');
+ if(scenario==='profile-tamper'){
+   // A structurally valid different EVM payer cannot authenticate this journal's hold or actual fee.
+   const savedBytes=await readFile(holdPath),saved=JSON.parse(savedBytes),wrong=getAddress('0x3333333333333333333333333333333333333333');
+   const changed={...withoutDigest(saved),account:wrong};changed.reservationId=assetUsageReservationId(changed,`apn.metamask-native:${result.operation_id}:native`);
+   const forged=seal(changed);const {validateAssetUsageReservation}=await import(moduleUrl('asset-usage-ledger-record.js'));validateAssetUsageReservation(forged);
+   await writeFile(holdPath,JSON.stringify(forged)+'\n');await assert.rejects(()=>ledger.settleMetaMaskNativeActual(result.operation_id,new Date()));await writeFile(holdPath,savedBytes);
+   const path=join(root,'metamask-native-operations',result.operation_id+'.json'),journalBytes=await readFile(path),journal=JSON.parse(journalBytes),{hashObject}=await import(moduleUrl('canonical.js'));
+   const body={...journal,reservations:[forged,journal.reservations[1]]};delete body.recordHash;await writeFile(path,JSON.stringify({...body,recordHash:hashObject(body)})+'\n');
+   await assert.rejects(()=>owner.readMetaMaskNativeSettlement(root,result.operation_id));await writeFile(path,journalBytes);
+ }
  await owner.readFixedMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(effects,scenario==='native-crosschain'?2:1);
  await normalOperations.assertEvmAccountAvailable(state.profileHash('native-test-unbound-alias'),primaryChain,address);
  process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
