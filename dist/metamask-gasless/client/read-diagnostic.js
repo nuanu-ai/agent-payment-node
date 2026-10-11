@@ -36,7 +36,8 @@ export function validateReadDiagnostic(value, mode) {
     const d = readDataRecord(value);
     const bounded = (v, low, high) => v === null ||
         typeof v === "number" && Number.isSafeInteger(v) && v >= low && v <= high;
-    if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
+    const hasShape = Object.hasOwn(d, "tokenFeesKind");
+    if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) + (hasShape ? 1 : 0) || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
         typeof d.stage !== "string" || !stages.includes(d.stage) || typeof d.invariant !== "string" || !invariants.includes(d.invariant) ||
         typeof d.network !== "string" || !networks.includes(d.network) ||
         !bounded(d.httpStatus, 100, 599) || !bounded(d.exitCode, 0, 255) ||
@@ -54,13 +55,19 @@ export function validateReadDiagnostic(value, mode) {
         d.invariant !== "network_validation" || d.network !== "sentinel-quote" || d.httpStatus === null ||
         d.httpStatus < 200 || d.httpStatus >= 300))
         mmFail("mm_gasless_provider_unavailable");
+    if (hasShape && (typeof d.tokenFeesKind !== "string" ||
+        !["missing", "null", "object", "string", "number", "boolean"].includes(d.tokenFeesKind) ||
+        d.validationPredicate !== "sentinel_token_fees" || d.stage !== "fee_quote"))
+        mmFail("mm_gasless_provider_unavailable");
     // Construct a new closed object; never retain caller-owned properties.
     return Object.freeze(Object.fromEntries([...keys.map(key => [key, d[key]]),
-        ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : [])]));
+        ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : []),
+        ...(hasShape ? [["tokenFeesKind", d.tokenFeesKind]] : [])]));
 }
-export function readDiagnostic(mode, stage, invariant, network = "none", httpStatus = null, exitCode = null, signal = "none", timedOut = false, validationPredicate) {
+export function readDiagnostic(mode, stage, invariant, network = "none", httpStatus = null, exitCode = null, signal = "none", timedOut = false, validationPredicate, shape) {
     return validateReadDiagnostic({ mode, stage, invariant, network, httpStatus, exitCode, signal, timedOut,
-        ...(validationPredicate === undefined ? {} : { validationPredicate }) }, mode);
+        ...(validationPredicate === undefined ? {} : { validationPredicate }),
+        ...(shape === undefined ? {} : { tokenFeesKind: shape }) }, mode);
 }
 export function readFailureError(reason, d) {
     const plain = readDataRecord(d);
@@ -70,6 +77,7 @@ export function readFailureError(reason, d) {
     return new ApnError(base.code, base.message, { reason,
         mm_read_mode: diagnostic.mode, mm_read_stage: diagnostic.stage, mm_read_invariant: diagnostic.invariant,
         ...(diagnostic.validationPredicate === undefined ? {} : { mm_read_validation_predicate: diagnostic.validationPredicate }),
+        ...(diagnostic.tokenFeesKind === undefined ? {} : { mm_read_token_fees_kind: diagnostic.tokenFeesKind }),
         mm_read_network: diagnostic.network, mm_read_signal: diagnostic.signal, mm_read_timed_out: diagnostic.timedOut,
         ...(diagnostic.httpStatus === null ? {} : { mm_read_http_status: diagnostic.httpStatus }),
         ...(diagnostic.exitCode === null ? {} : { mm_read_exit_code: diagnostic.exitCode }) });
