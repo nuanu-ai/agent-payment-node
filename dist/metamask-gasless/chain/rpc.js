@@ -92,11 +92,11 @@ export class MetaMaskGaslessRpc {
         const sameBlock = safe.block.numberAtomic === head.block.numberAtomic &&
             safe.block.hash === head.block.hash && safe.block.timestampAtomic === head.block.timestampAtomic;
         const [safeState, headState] = sameBlock
-            ? await mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash))
+            ? await mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash, input.feeMode))
                 .then(state => [state, state])
             : await Promise.all([
-                mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash)),
-                mmEvidenceAt("latest", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, head.block, delegationHash)),
+                mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash, input.feeMode)),
+                mmEvidenceAt("latest", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, head.block, delegationHash, input.feeMode)),
             ]);
         if (!("counterAtomic" in safeState) || !("counterAtomic" in headState))
             mmFail("mm_gasless_internal");
@@ -107,7 +107,7 @@ export class MetaMaskGaslessRpc {
             endpointOrigin: this.endpointOrigin, observedAt: this.clock.now().toISOString(),
             safeBlock: safe.block, headBlock: head.block, safeState, headState };
         return validateMetaMaskGaslessSnapshot(snapshot, { chainId: this.chainId, endpointHash: this.endpointHash,
-            endpointOrigin: this.endpointOrigin, grossAtomic });
+            endpointOrigin: this.endpointOrigin, grossAtomic, ...(input.feeMode === "sponsored" ? { feeMode: input.feeMode } : {}) });
     }
     async observe(intent, cursor, provider) {
         this.assertIntent(intent);
@@ -125,11 +125,11 @@ export class MetaMaskGaslessRpc {
             intent.relayTo !== this.deployment.row.protocol.manager.address)
             mmFail("mm_gasless_rpc_binding");
         validateMetaMaskGaslessSnapshot(intent.initialSnapshot, { chainId: this.chainId,
-            endpointHash: frozen.endpointHash, endpointOrigin: frozen.endpointOrigin, grossAtomic: intent.preparedGrossAtomic ?? intent.request.grossAtomic });
+            endpointHash: frozen.endpointHash, endpointOrigin: frozen.endpointOrigin, grossAtomic: intent.preparedGrossAtomic ?? intent.request.grossAtomic, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) });
         mmQuote(intent.quote, intent.request, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt");
         mmAssertStableQuote(intent.request, intent.quote, "mm_gasless_state_corrupt");
         mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,
-            signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode }, { owner: intent.binding.address, chainId: intent.request.chainId, executions: intent.quote.executions }, "mm_gasless_state_corrupt");
+            signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode }, { owner: intent.binding.address, chainId: intent.request.chainId, executions: intent.quote.executions, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
     }
     async assertChain() {
         if (rpcQuantity(await this.callRpc("eth_chainId", [])) !== BigInt(this.chainId))

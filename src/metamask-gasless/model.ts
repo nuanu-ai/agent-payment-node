@@ -50,11 +50,14 @@ export interface MetaMaskGaslessExecution {
   readonly value: string;
   readonly callData: Hex;
 }
-export type MetaMaskGaslessExecutions = readonly [MetaMaskGaslessExecution, MetaMaskGaslessExecution];
+export type MetaMaskGaslessExecutions = readonly [MetaMaskGaslessExecution] | readonly [MetaMaskGaslessExecution, MetaMaskGaslessExecution];
 export interface MetaMaskGaslessQuoteMaterial {
   readonly netAtomic: string;
   readonly feeAtomic: string;
-  readonly feeRecipient: Address;
+  readonly feeRecipient: Address | null;
+  /** Absent on legacy paid quotes; explicit on principal-only sponsored quotes. */
+  readonly feeMode?: "sponsored";
+  readonly sponsorshipHash?: string;
   readonly executions: MetaMaskGaslessExecutions;
 }
 export interface MetaMaskGaslessQuote extends MetaMaskGaslessQuoteMaterial { readonly hash: string }
@@ -105,7 +108,8 @@ export interface MetaMaskGaslessDeployment {
   readonly deploymentEvidenceHash: string;
 }
 export interface MetaMaskGaslessChainState {
-  readonly protocolCodeHashes: Readonly<Record<MetaMaskGaslessProtocolName, Hex>>;
+  readonly protocolCodeHashes: Readonly<Record<MetaMaskGaslessProtocolName, Hex> |
+    Record<"manager" | "delegate" | "limitedCalls" | "exactSingle", Hex>>;
   readonly tokenProxyCodeHash: Hex;
   readonly tokenImplementationAddress: Address;
   readonly tokenImplementationCodeHash: Hex;

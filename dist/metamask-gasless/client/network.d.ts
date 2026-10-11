@@ -1,5 +1,5 @@
 import type { ReadNetwork, ReadValidationPredicate, TokenFeesKind } from "./read-diagnostic.js";
-import { type MetaMaskGaslessIntent } from "../model.js";
+import { type MetaMaskGaslessIntent, type MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 export interface FetchExchangeRequest {
     readonly url: string;
@@ -35,6 +35,7 @@ type ModeContext = {
     readonly now: () => Date;
 };
 export declare class HelperNetworkPolicy {
+    #private;
     private readonly context;
     private readonly exchange;
     readonly fetch: typeof globalThis.fetch;
@@ -45,7 +46,6 @@ export declare class HelperNetworkPolicy {
     private lastClockMs;
     private deadlineFailure;
     private sessionFailure;
-    private readonly readFailures;
     /** Transient fixed metadata, never response content or permission. */
     readFailureContext(error: unknown): {
         readonly network: ReadNetwork;
@@ -55,6 +55,8 @@ export declare class HelperNetworkPolicy {
         readonly tokenFeesShape?: TokenFeesKind;
     };
     constructor(context: ModeContext, exchange?: FetchExchange);
+    /** Only the exact failed original quote exchange may supply this private one-use capture. */
+    takeSponsoredQuote(error: unknown): MetaMaskGaslessQuote | undefined;
     didObserveNotFound(): boolean;
     fixedFailure(): "mm_gasless_expired" | "mm_gasless_clock" | "mm_gasless_session_unavailable" | undefined;
     setExpectedSubmitBody(value: unknown): void;

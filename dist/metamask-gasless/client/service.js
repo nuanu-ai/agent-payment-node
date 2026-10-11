@@ -126,8 +126,20 @@ async function quote(input, state, policy, phase) {
     if (!await service.isGaslessRelaySupported({ chainId: input.chainId, relay }))
         mmFail("mm_gasless_capability_unavailable");
     phase.stage = "fee_quote";
-    const raw = await service.quoteGaslessTransfer({ state: walletState, chainId: input.chainId, recipient: input.recipient,
-        amount: formatSix(input.netAtomic), token: input.token, gasToken: input.token, relay });
+    let raw;
+    try {
+        raw = await service.quoteGaslessTransfer({ state: walletState, chainId: input.chainId, recipient: input.recipient,
+            amount: formatSix(input.netAtomic), token: input.token, gasToken: input.token, relay });
+    }
+    catch (error) {
+        const sponsored = policy.takeSponsoredQuote(error);
+        if (sponsored === undefined)
+            throw error;
+        if (resolverCalls !== 0 || hydrated.writes() !== 0)
+            mmFail("mm_gasless_state_security");
+        phase.stage = "quote_output";
+        return sponsored;
+    }
     if (resolverCalls !== 0 || hydrated.writes() !== 0)
         mmFail("mm_gasless_state_security");
     phase.stage = "quote_output";

@@ -14,6 +14,7 @@ export interface MetaMaskGaslessUnsignedInput {
     readonly owner: Address;
     readonly chainId: MetaMaskGaslessChainId;
     readonly executions: MetaMaskGaslessExecutions;
+    readonly feeMode?: "sponsored";
 }
 export interface MetaMaskGaslessProviderPort {
     inspect(expected: MetaMaskGaslessProfileIdentity): Promise<MetaMaskGaslessBinding>;
@@ -32,6 +33,7 @@ export interface MetaMaskGaslessRpcPort {
         readonly owner: Address;
         readonly delegationHash: Hex;
         readonly grossAtomic: string;
+        readonly feeMode?: "sponsored";
     }): Promise<MetaMaskGaslessSnapshot>;
     observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
 }

@@ -5,7 +5,7 @@ export declare function mmEconomics(request: MetaMaskGaslessRequest): {
     cap: bigint;
     initialNet: bigint;
 };
-/** Actual debit always equals the exact two-transfer batch, independent of the owner ceiling. */
+/** Actual debit always equals the exact mode-bound batch, independent of the owner ceiling. */
 export declare function mmActualGross(quote: MetaMaskGaslessQuoteMaterial, reason?: MetaMaskGaslessFailureReason): string;
 export declare function mmUnusedGross(request: MetaMaskGaslessRequest, quote: MetaMaskGaslessQuoteMaterial): string;
 export declare function mmQuoteHash(quote: MetaMaskGaslessQuoteMaterial): string;
