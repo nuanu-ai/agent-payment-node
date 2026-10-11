@@ -336,3 +336,18 @@ passed the initial material guard. That observation did not demonstrate a
 financial bypass; exact simulation and receipt authority checks were still
 required. The relationship now refuses in the shared quote/build binder before
 resolver reads or guard admission. Valid same-pool layouts remain unchanged.
+
+## 2026-10-11 C3-04 generic Jupiter closure
+
+The 23 September reconciled C3-04 criterion covered a generic Jupiter/Solana operative signer and observer path, no-money evidence, and paid acceptance; it did not specify Quantum or all Jupiter routes. This record closes the generic row through the existing V1 direct Whirlpool lane. The historical V2 Quantum prototype remains dormant and `signable:false`; its separate paid criterion remains open and is not waived. Its eleven route-dependent account roles and deployed provenance remain unresolved. No Quantum paid, all-route, Source29, new release, or installed-consumer acceptance is claimed.
+
+The saved Source26 v0.5.37 normal operation used source commit `9f26cae91910216aae7c2702bc4f56f5efd59450`, policy r27 digest `75ae6a1a467a74dabf8e8cfe3a1f28ae9deac2d4d6e9bb23a0492c34659f3745`, and the `jupiter-v1-whirlpool-runtime.2026-10-09` registry. Its phase record shows a fresh quote at 16:17:36 UTC and prepare at 16:17:51, before genuine foreground approval, one acknowledged dispatch, and one APN status at 16:18:35. Operation `848aecec2c6958974f72ff3739aee57e17fd6a7bfb26742a065219d8c69f36c5` is `finalized`. This demonstrates the no-money quote/prepare prefix before the paid effect in one operative path; it does not represent a separate no-send operation.
+
+The quote hash is `97498ff5639dd79dd129c40e536331b1de9407748a333dd5873fcc25043985c3`: 1,000,000 lamports input, expected output 110,338 and minimum 109,787 USDC atomic. The independent saved canonical receipt is a single anonymous `getTransaction` POST with finalized commitment and no authorization header. It returned HTTP 200, transaction status `Ok`, `meta.err=null`, slot 455318569, actual fee 6,400 lamports, payer debit 1,006,400 lamports, and payer-owned USDC credit of 110,335 atomic. The receipt hash is `3e29254795507a6e4f446f858f43442cea788cb85eceaabbeedc50667969cfb1` for signature `3vy9USCBGFbpf25xN5HeRK3niNi6f18LzRhqyPtFigaXVJcA9fqdnBaSePZzvYhhyY6fwhu9Sy72WnyAUN9RdFPx`.
+
+Immutable evidence anchors:
+
+- Normal operation report, workspace-root path `reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/jupiter-source26-beta-policy27-distinct-new-normal-financial2-20261010/report.json`, SHA-256 `31eea93e9d9a3cf9241e4bf2ac3517caff0a46e0c9b0d4ddd80a2683607298ad`; finalized operation snapshot at `reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/jupiter-source26-beta-policy27-distinct-new-normal-financial2-20261010/normal-finalized-operation.json`, SHA-256 `e2592e89dd52dca3469058b3eb174b3fa214736b443e8b8726e6c7fecc1031c5`.
+- Canonical receipt decoded summary, workspace-root path `reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/source26-normal-finalized-receipt-one-public-readonly-post-20261011/decoded-summary.json`, SHA-256 `2236f96e0da90383459187dc05b5a07536d69718ec5e70d5c95f40fcc566b7fd`; raw response body SHA-256 `6f42261bf9ca0c32f515088c74168e407437db669403601e39f34d9fb3b30045`; packet manifest `SHA256SUMS.txt` SHA-256 `d699544e221f033b541fe0305060d4e95d6958ec6dd20b7e31eea4a99508edbf`.
+
+The original Quantum V2 obligations remain route-specific and open. This generic-row closure does not change them.
