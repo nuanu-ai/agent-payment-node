@@ -1,3 +1,5 @@
+import { adoptCircleFundingExternalMint } from "./funding-external-adoption.js";
+import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { types } from "node:util";
 import { verifyCircleFinalizedRevert } from "./revert-proof.js";
@@ -51,6 +53,7 @@ export interface CircleFundingPrepareInput { readonly profile: string; readonly 
 export class CircleFundingEvmService {
   private readonly ttyOptions: CircleFundingApprovalOptions; private readonly repo: CircleRepository; private readonly usage: CircleUsage; private readonly custody: LocalCircleFundingCustody; private readonly operations: OperationService;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly env: Readonly<Record<string, string | undefined>>, private readonly now: () => number = Date.now, ttyOptions: CircleFundingApprovalOptions = {}, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps()) { this.ttyOptions = fundingApprovalOptions(ttyOptions); this.repo = new CircleRepository(state.root); this.usage = new CircleUsage(state, now); this.custody = new LocalCircleFundingCustody(state, wrapping); this.operations = new OperationService(state); }
+  async adoptExternalMint(id: string, transactionHash: Hex) { return adoptCircleFundingExternalMint(this.state,this.repo,this.usage,this.env,this.now,this.https,id,transactionHash); }
   async prepare(input: CircleFundingPrepareInput): Promise<CircleFundingOperationV2> {
     const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile), route = circleRoute(input.destinationChain, destinationProfile);
     if (profile !== "evm-live-buyer" || destinationProfile !== route.gasPayerProfile || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(input.idempotencyKey)) circleBlocked("finite_route_profile_or_idempotency");
@@ -100,6 +103,7 @@ export class CircleFundingEvmService {
     return this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
       evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
       let op = await this.required(id);
+      if (action === approveCircleFundingMint || action === cleanupCircleFunding || action === refreshCircleFundingAttestation) await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
       if (action !== cleanupCircleFunding && op.usage.length === 0 && op.effects.every(e => e.phase === "prepared")) { op = advanceCircle(op, { usage: await this.usage.reserve(op) }, "interrupted_prepare_reserves_repaired", this.now()); await this.repo.saveFunding(op); }
       const scope: FundingRuntimeScope = { state: this.state, fingerprint: op.fingerprint, now: this.now, grants: new Map(), active: true };
       return fundingRuntimeScope.run(scope, async () => { try { return await action(op, this.ports(op)); } finally { scope.active = false; scope.grants.clear(); } });
@@ -137,6 +141,7 @@ export class CircleFundingEvmService {
       assertOwnerPolicyAndConflicts: async (op, role) => { await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody); await assertEvmNativeCustody(this.state, op.destinationProfile, op.destinationCustody); await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash); await this.operations.assertCircleAccountsAvailable(op, true, role); await this.usage.confirm(op); },
       approve: async (input, role, deadline) => {
         const op = snapshotCircleFundingOperation(input);
+        if (role === "mint" || role === "cleanup") await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
         const scope = fundingRuntimeScope.getStore();
         if (scope === undefined || !scope.active || scope.state !== this.state || scope.fingerprint !== op.fingerprint) circleBlocked("private_funding_runtime_scope_required");
         const end = Date.parse(deadline); if (!Number.isFinite(end) || end > this.now() + 60_000 || end > Date.now() + 60_000) circleBlocked("funding_authority_deadline");
@@ -149,6 +154,7 @@ export class CircleFundingEvmService {
       },
       preflight: async (input, effectInput) => {
         const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput);
+        if (effect.role === "mint" || effect.role === "cleanup") await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
         const freshDeployments = await deployments(); if (effect.role !== "mint") await this.assertPriorSourcesCanonical(source, op.operationId);
         const remote = rpc(effect), e = effect.envelope; verifyCircleGasEnvelope(e, e.chainId as 42161 | CircleDestinationChain); await remote.identity();
         const [latest, pending, balance] = await Promise.all([remote.call("eth_getTransactionCount", [e.from, "latest"]), remote.call("eth_getTransactionCount", [e.from, "pending"]), remote.call("eth_getBalance", [e.from, "pending"])]);
@@ -160,7 +166,7 @@ export class CircleFundingEvmService {
         const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction, "pending"])); if (estimate > BigInt(e.gasLimitAtomic)) circleBlocked("simulation_exceeds_gas_ceiling"); const simulated = circleHex(await remote.call("eth_call", [transaction, "pending"]));
         if (effect.role === "mint") { if (op.source === null || op.attestation === null) circleCorrupt("mint_without_source"); const observation = await source.observation(op.source.transactionHash, op.source.finalityTag === "finalized" ? "finalized" : "included"); if (observation === null) circleBlocked("source_reorg_before_mint"); assertObservedEnvelope(op.effects[1]!, observation.transaction); const proof = decodeCircleSource(observation, op.destinationChain, op.funding); if (proof.blockHash !== op.source.blockHash || proof.receiptHash !== op.source.receiptHash || proof.sourceMessageHash !== op.source.sourceMessageHash || await allowance() !== "0") circleBlocked("source_reorg_before_mint"); const snapshot = await this.preflightAttesters(destination, freshDeployments.digest); await verifyCircleAttestationSigners(op.attestation, op.attestation.attestation, snapshot, op.funding); const block = await destination.block("latest"), used = String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(block.number))); verifyCircleMintPreflight(op.source, op.attestation, { destinationBlockAtomic: circleUint(block.number).toString(), usedNonceAtomic: used, attesterConfigurationHash: circleAttesterConfigurationHash(snapshot), transactionSimulationResult: simulated }, op.funding); }
       }, seal: (op, e, guard) => this.custody.seal(op, e, guard), loadMaterial: (op, e) => this.custody.load(op, e),
-      broadcast: async (e, raw, guard) => { guard(); const current = await this.required(initial.operationId); const effect = snapshotCircleFundingEffect(current, e); await this.custody.claimSend(current, effect, guard); guard(); if (keccak256(raw) !== e.transactionHash) circleBlocked("sealed_broadcast_hash_changed"); const returned = circleHex(await rpc(e).call("eth_sendRawTransaction", [raw], guard), 32); if (returned !== keccak256(raw)) circleBlocked("broadcast_hash_changed"); return returned; },
+      broadcast: async (e, raw, guard) => { guard(); const current = await this.required(initial.operationId); if (e.role === "mint" || e.role === "cleanup") await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(current); guard(); const effect = snapshotCircleFundingEffect(current, e); await this.custody.claimSend(current, effect, guard); guard(); if (keccak256(raw) !== e.transactionHash) circleBlocked("sealed_broadcast_hash_changed"); const returned = circleHex(await rpc(e).call("eth_sendRawTransaction", [raw], guard), 32); if (returned !== keccak256(raw)) circleBlocked("broadcast_hash_changed"); return returned; },
       observeEffect: async (op, effect) => {
         if (effect.transactionHash === null) return null;
         const tag = effect.role === "mint" ? "safe" : effect.role === "cleanup" ? "finalized" : "included", observation = await rpc(effect).observation(effect.transactionHash, tag); if (observation === null) return null;
@@ -196,9 +202,9 @@ export class CircleFundingEvmService {
         const snapshot = await readCircleAttesters(destination, (await deployments()).digest);
         return bindCircleAttestation(op.source, { ...response, sourceTxHash: op.source.transactionHash }, snapshot, op.funding);
       },
-      mintEnvelope: async op => { if (op.attestation === null) circleCorrupt("attestation_missing"); const account = await destination.account(route.gasPayer, route.token, CIRCLE_TRANSMITTER), nonce = verifyCircleDestinationAccount(account, op.destinationChain, op.destinationProfile);
+      mintEnvelope: async op => { await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); if (op.attestation === null) circleCorrupt("attestation_missing"); const account = await destination.account(route.gasPayer, route.token, CIRCLE_TRANSMITTER), nonce = verifyCircleDestinationAccount(account, op.destinationChain, op.destinationProfile);
         return destination.envelope(route.gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(op.attestation), nonce); },
-      cleanupEnvelope: async op => { const nonce = circleUint(await source.call("eth_getTransactionCount", [CIRCLE_SOURCE_OWNER, "pending"])).toString(); return source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true, op.funding), nonce); },
+      cleanupEnvelope: async op => { await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); const nonce = circleUint(await source.call("eth_getTransactionCount", [CIRCLE_SOURCE_OWNER, "pending"])).toString(); return source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true, op.funding), nonce); },
       usage: (op, target) => this.usage.follow(op, target),
     };
   }

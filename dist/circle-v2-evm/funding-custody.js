@@ -1,3 +1,4 @@
+import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { assertCircleFundingRuntimeAuthority } from "./funding-runtime.js";
 import { lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -19,6 +20,14 @@ export class CircleFundingEffectStore extends SecureStateStore {
         this.wrapping = wrapping;
     }
     path(op, role) { validateCircle(op); return `circle-v2-evm-funding-effects/${op.operationId}-${role}.json`; }
+    /** Presence-only refusal; this never decrypts material or loads a wrapping secret. */
+    async assertExternalAbsent(op) {
+        validateCircle(op);
+        for (const role of ["mint", "cleanup"])
+            for (const suffix of ["", "-sign", "-send"])
+                if (await this.readJson(`circle-v2-evm-funding-effects/${op.operationId}-${role}${suffix}.json`) !== null)
+                    circleBlocked("external_owned_private_entry");
+    }
     async load(op, effect, guard) {
         const value = await this.readJson(this.path(op, effect.role));
         if (value === null)
@@ -67,6 +76,9 @@ export class CircleFundingEffectStore extends SecureStateStore {
     }
     async claim(op, effect, kind, guard) {
         validateCircle(op);
+        guard();
+        if (effect.role === "mint" || effect.role === "cleanup")
+            await new CircleFundingExternalStore(this.root).assertOwnedMintAvailable(op);
         guard();
         await this.initialize();
         await this.ensureDirectory("circle-v2-evm-funding-effects");
@@ -145,6 +157,9 @@ export class LocalCircleFundingCustody {
     async seal(input, effectInput, guard) {
         const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput);
         const gate = () => { assertCircleFundingEffectGuard(op, effect, guard); assertCircleFundingRuntimeAuthority(this.state, op, effect); };
+        gate();
+        if (effect.role === "mint" || effect.role === "cleanup")
+            await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
         gate();
         if (op.terminal || effect.phase !== "signing_started")
             circleBlocked("signing_gate");
