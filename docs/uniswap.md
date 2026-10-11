@@ -44,7 +44,27 @@ that exact pin.
   exact inverse of the strict decoder. It then simulates the unsigned
   transaction with `eth_call` and `eth_estimateGas` at the same block, and
   saves the quote, the unsigned transaction and the chain evidence under the
-  state root, keyed by the quote hash. It needs `APN_ETHEREUM_RPC_URL`.
+  state root, keyed by the quote hash. Configure both the primary and archive
+  Ethereum RPCs:
+
+  ```sh
+  export APN_ETHEREUM_RPC_URL='https://ethereum-rpc.publicnode.com'
+  export APN_ETHEREUM_ARCHIVE_RPC_URL='https://eth.drpc.org'
+  ```
+
+  These are public endpoints and do not require an account or API key. APN
+  reads the latest block from the primary, then verifies code and pool state
+  using that block's exact numeric tag. The shared RPC transport treats
+  exact-tag `eth_getCode`, `eth_getStorageAt` and `eth_call` reads as historical
+  state, even when the selected block was just reported as latest, and requires
+  the archive endpoint's origin to differ from the primary. dRPC lists
+  `https://eth.drpc.org/` as its public Ethereum endpoint
+  ([API overview](https://drpc.org/docs/ethereum-api)). Its `eth_getCode`
+  reference limits that method to latest state
+  ([method constraints](https://drpc.org/docs/ethereum-api/accountinfo/eth_getCode));
+  APN has verified a recent exact-tag quote with this pair, but that does not
+  guarantee access to arbitrary historical state. The quote's exact pinned
+  reads must succeed before it can be saved.
   Set `APN_UNISWAP_NATIVE_BATCH_READS=1` to group independent native quote reads into
   strict JSON-RPC batches of at most three requests. A provider batch error aborts the
   quote; APN does not fall back to scalar reads. The modeled successful ETH to USDT
@@ -73,7 +93,8 @@ that exact pin.
   state. After a reorg they are read again.
 - Run `status` within about 25 minutes of sending. If the first observation
   comes later, `status` fails with `APN_PROVIDER_UNAVAILABLE` /
-  `uniswap_pre_state_unavailable`. Re-run it with an archive-capable
+  `uniswap_pre_state_unavailable`. Re-run it with a distinct archive reader in
+  `APN_ETHEREUM_ARCHIVE_RPC_URL`, alongside the primary
   `APN_ETHEREUM_RPC_URL`. Any other observation failure is also reported by
   `status`, never hidden behind an unchanged `submitted`.
 
