@@ -514,6 +514,9 @@ export declare const failureSchema: z.ZodObject<{
             unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
             operator_fee_formula: "operator_fee_formula";
             operator_receipt_parameters: "operator_receipt_parameters";
+            distinct_archive_RPC_required: "distinct_archive_RPC_required";
+            explicit_archive_RPC_required: "explicit_archive_RPC_required";
+            historical_receipt_unavailable: "historical_receipt_unavailable";
             request_deadline: "request_deadline";
             DNS_deadline: "DNS_deadline";
             request_interrupted: "request_interrupted";
@@ -1143,6 +1146,9 @@ export declare const transitionSchema: z.ZodObject<{
                 unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
                 operator_fee_formula: "operator_fee_formula";
                 operator_receipt_parameters: "operator_receipt_parameters";
+                distinct_archive_RPC_required: "distinct_archive_RPC_required";
+                explicit_archive_RPC_required: "explicit_archive_RPC_required";
+                historical_receipt_unavailable: "historical_receipt_unavailable";
                 request_deadline: "request_deadline";
                 DNS_deadline: "DNS_deadline";
                 request_interrupted: "request_interrupted";
@@ -1921,6 +1927,9 @@ export declare const operationSchema: z.ZodObject<{
                     unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
                     operator_fee_formula: "operator_fee_formula";
                     operator_receipt_parameters: "operator_receipt_parameters";
+                    distinct_archive_RPC_required: "distinct_archive_RPC_required";
+                    explicit_archive_RPC_required: "explicit_archive_RPC_required";
+                    historical_receipt_unavailable: "historical_receipt_unavailable";
                     request_deadline: "request_deadline";
                     DNS_deadline: "DNS_deadline";
                     request_interrupted: "request_interrupted";
@@ -2266,6 +2275,9 @@ export declare const operationSchema: z.ZodObject<{
                 unsupported_Base_blob_transaction: "unsupported_Base_blob_transaction";
                 operator_fee_formula: "operator_fee_formula";
                 operator_receipt_parameters: "operator_receipt_parameters";
+                distinct_archive_RPC_required: "distinct_archive_RPC_required";
+                explicit_archive_RPC_required: "explicit_archive_RPC_required";
+                historical_receipt_unavailable: "historical_receipt_unavailable";
                 request_deadline: "request_deadline";
                 DNS_deadline: "DNS_deadline";
                 request_interrupted: "request_interrupted";
