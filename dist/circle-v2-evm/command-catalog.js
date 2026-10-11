@@ -13,7 +13,7 @@ export const CIRCLE_EVM_COMMANDS = [
         option("--max-issuer-fee-atomic", "atomic_usdc", ["positive_less_than_gross", "all_four_funding_options_or_none"], false),
         option("--min-mint-atomic", "atomic_usdc", ["positive_at_most_gross_minus_max_fee", "all_four_funding_options_or_none"], false)], "Freeze V1 fixed 40100/100/40000 intent when all funding options are absent; all four explicit options select finite V2 funding with exact circle-cctp-v2 / circle-v2-evm-fast-42161-<destination>.v2 policy admission.", "payment_prepare"),
     command("approve-source", [operation], "Foreground-confirm, sign and send exact bounded approval and burn at most once.", "payment_submit"),
-    command("adopt-external-mint", [operation, option("--transaction-hash", "string", ["0x_64_lowercase_hex_characters"])], "Verify one explicit third-party mint and close unused holds without signing or sending.", "recovery"),
+    command("adopt-external-mint", [operation, option("--transaction-hash", "string", ["0x_64_lowercase_hex_characters"])], "Verify one explicit V1 or finite V2 third-party mint, preserve source charges and close only never-entered owned holds without signing or sending.", "recovery"),
     command("approve-mint", [operation], "Foreground-confirm the destination gas owner and mint the issuer-verified same burn nonce once.", "payment_submit"),
     command("observe", [operation], "Observe canonical source, issuer signature, destination mint and independent finality without signing or resending.", "network_read"),
     command("refresh-attestation", [operation], "Read-only issuer refresh for the same burn and nonce before mint; never reburn.", "network_read"),

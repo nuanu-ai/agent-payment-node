@@ -1,3 +1,4 @@
+import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { assertCircleFundingRuntimeAuthority } from "./funding-runtime.js";
 import { lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -22,6 +23,12 @@ interface EncryptedMaterial extends Header { readonly ciphertext: string; readon
 export class CircleFundingEffectStore extends SecureStateStore {
   constructor(root: string, private readonly wrapping: WrappingSecretPort) { super(root); }
   private path(op: CircleFundingOperationV2, role: CircleRole) { validateCircle(op); return `circle-v2-evm-funding-effects/${op.operationId}-${role}.json`; }
+  /** Presence-only refusal; this never decrypts material or loads a wrapping secret. */
+  async assertExternalAbsent(op: CircleFundingOperationV2): Promise<void> {
+    validateCircle(op);
+    for (const role of ["mint", "cleanup"] as const) for (const suffix of ["", "-sign", "-send"] as const)
+      if (await this.readJson(`circle-v2-evm-funding-effects/${op.operationId}-${role}${suffix}.json`) !== null) circleBlocked("external_owned_private_entry");
+  }
   async load(op: CircleFundingOperationV2, effect: CircleEffect, guard?: () => void): Promise<CircleFundingMaterial | null> {
     const value = await this.readJson(this.path(op, effect.role)); if (value === null) return null;
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"])) circleCorrupt("material_envelope");
@@ -40,7 +47,7 @@ export class CircleFundingEffectStore extends SecureStateStore {
     } finally { wrapping.fill(0); salt.fill(0); nonce.fill(0); ciphertext.fill(0); tag.fill(0); key.fill(0); plaintext.fill(0); }
   }
   async claim(op: CircleFundingOperationV2, effect: CircleEffect, kind: "sign" | "send", guard: () => void): Promise<void> {
-    validateCircle(op); guard(); await this.initialize(); await this.ensureDirectory("circle-v2-evm-funding-effects"); guard();
+    validateCircle(op); guard(); if (effect.role === "mint" || effect.role === "cleanup") await new CircleFundingExternalStore(this.root).assertOwnedMintAvailable(op); guard(); await this.initialize(); await this.ensureDirectory("circle-v2-evm-funding-effects"); guard();
     const path = `circle-v2-evm-funding-effects/${op.operationId}-${effect.role}-${kind}.json`;
     if (await this.readJson(path) !== null) circleBlocked("funding_effect_permanently_claimed");
     guard(); const body = { schemaVersion: "apn.circle-v2-evm-effect-claim.v2", operationId: op.operationId, role: effect.role, kind, fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash };
@@ -81,7 +88,7 @@ export class LocalCircleFundingCustody {
   async seal(input: CircleFundingOperationV2, effectInput: CircleEffect, guard: () => void): Promise<CircleFundingMaterial> {
     const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput);
     const gate = () => { assertCircleFundingEffectGuard(op, effect, guard); assertCircleFundingRuntimeAuthority(this.state, op, effect); };
-    gate(); if (op.terminal || effect.phase !== "signing_started") circleBlocked("signing_gate");
+    gate(); if (effect.role === "mint" || effect.role === "cleanup") await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); gate(); if (op.terminal || effect.phase !== "signing_started") circleBlocked("signing_gate");
     const destination = effect.role === "mint", profile = destination ? op.destinationProfile : op.profile, custody = destination ? op.destinationCustody : op.sourceCustody;
     return this.state.withLocks([`custody:${custody.profileHash}`], async () => {
       gate(); await assertEvmNativeCustody(this.state, profile, custody); gate(); const existing = await this.material.load(op, effect, gate); gate(); if (existing !== null) return existing;

@@ -1,3 +1,4 @@
+import { type CircleFundingExternalFulfillment } from "./funding-external-proof.js";
 import { type CircleDestinationChain } from "./catalog.js";
 import { type CircleAttestation } from "./protocol.js";
 import { type CircleOperationV1, type CircleRole, type CircleEnvelope } from "./operation-model.js";
@@ -6,7 +7,8 @@ export interface CircleFundingOperationV2 extends Omit<CircleOperationV1, "schem
     readonly schemaVersion: "apn.circle-v2-evm-operation.v2";
     readonly funding: CircleFundingBindingV2;
     readonly feeQuote: CircleFundingFeeV2;
-    readonly state: Exclude<CircleOperationV1["state"], "nonce_retired" | "external_fulfilled">;
+    readonly state: Exclude<CircleOperationV1["state"], "nonce_retired">;
+    readonly externalFulfillment?: CircleFundingExternalFulfillment;
 }
 /** Initial source envelopes and the economic/authority context remain immutable through every transition. */
 export declare function circleFundingFingerprint(op: Pick<CircleFundingOperationV2, "requestHash" | "funding" | "feeQuote" | "sourceCustody" | "destinationCustody" | "policies" | "deploymentDigest" | "effects" | "preparedAt" | "expiresAt">): string;
@@ -15,9 +17,14 @@ export declare function advanceCircleFundingOperation(op: CircleFundingOperation
 export declare function validateCircleFundingEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, destinationProfile: string, funding: CircleFundingBindingV2): void;
 export declare function validateCircleFundingOperation(value: unknown): CircleFundingOperationV2;
 export declare function publicCircleFundingOperation(op: CircleFundingOperationV2): {
+    next_actions: string[];
+    external_fulfillment?: CircleFundingExternalFulfillment;
+    proof_class?: string;
+    controlled_destination_native_atomic?: string;
+    external_destination_fee_payer?: `0x${string}`;
     operation_id: string;
     kind: string;
-    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted";
+    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;
@@ -37,7 +44,6 @@ export declare function publicCircleFundingOperation(op: CircleFundingOperationV
     residual_allowance_atomic: string;
     usage_finalized: boolean;
     integrity_hash: string;
-    next_actions: string[];
 };
 /** Closed internal dispatcher; historical validators remain v1-only. */
 export type CircleKnownOperation = CircleOperationV1 | CircleFundingOperationV2;
@@ -74,9 +80,14 @@ export declare function publicKnownCircle(op: CircleKnownOperation): {
     usage_finalized: boolean;
     integrity_hash: string;
 } | {
+    next_actions: string[];
+    external_fulfillment?: CircleFundingExternalFulfillment;
+    proof_class?: string;
+    controlled_destination_native_atomic?: string;
+    external_destination_fee_payer?: `0x${string}`;
     operation_id: string;
     kind: string;
-    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted";
+    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;
@@ -96,5 +107,4 @@ export declare function publicKnownCircle(op: CircleKnownOperation): {
     residual_allowance_atomic: string;
     usage_finalized: boolean;
     integrity_hash: string;
-    next_actions: string[];
 };
