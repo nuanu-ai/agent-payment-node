@@ -175,7 +175,7 @@ test("SolanaRpc batch scan counts one physical POST per batch and aggregates the
     assert.ok(result.providers.every(provider => provider.readCount === 72));
     assert.equal(harness.budget.logicalCalls, operation * 144);
     assert.equal(harness.budget.physicalRequests, operation * 32);
-    assert.equal(harness.posts.filter(post => post.isBatch).length, operation * 18);
+    assert.equal(harness.posts.filter(post => post.isBatch).length, operation * 20);
     assert.ok(harness.posts.every(post => post.batchSize <= 8));
   }
   const exhausted = await verify(harness.providers, inputFor());
@@ -420,4 +420,66 @@ test("caller abort and one absolute deadline stop further reads without per-call
   const timeout = await verify(rpcPair({ hang: true }), inputFor(), { deadlineMs: 2 });
   assert.equal(timeout.outcome, "inconclusive");
   assert.equal(timeout.reason, "deadline_exceeded");
+});
+
+
+test("historical height uses one real correlated singleton batch with unchanged finalized params", async () => {
+  const posts: unknown[] = [];
+  const budget = new SolanaRpcBudget({ maxPhysicalRequests: 2, minimumIntervalMs: 500, wait: async ms => { await new Promise(resolve => setTimeout(resolve, ms)); } });
+  const rpc = new SolanaRpc("https://solana-rpc.publicnode.com", async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as JsonRpcRequest | JsonRpcRequest[];
+    posts.push(body);
+    const request = Array.isArray(body) ? body[0]! : body;
+    const response = { jsonrpc: "2.0", id: request.id, result: request.method === "getBlockHeight" ? 2000 : SOLANA_GENESIS };
+    return new Response(JSON.stringify(Array.isArray(body) ? [response] : response), { headers: { "content-type": "application/json" } });
+  }, budget);
+  const port = adaptJupiterFutureInvalidityReadPort(rpc), signal = new AbortController().signal;
+  assert.equal(await port.read("getBlockHeight", [{ commitment: "finalized" }], signal), 2000n);
+  const batch = posts[0] as JsonRpcRequest[];
+  assert.equal(batch.length, 1);
+  assert.equal(batch[0]!.method, "getBlockHeight");
+  assert.deepEqual(batch[0]!.params, [{ commitment: "finalized" }]);
+  assert.match(batch[0]!.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+  assert.equal(budget.logicalCalls, 1);
+  assert.equal(budget.physicalRequests, 1);
+  assert.equal(await port.read("getGenesisHash", [], signal), SOLANA_GENESIS);
+  assert.equal(Array.isArray(posts[1]), false, "non-height calls retain scalar transport");
+  assert.equal(budget.logicalCalls, 2);
+  assert.equal(budget.physicalRequests, 2);
+  await assert.rejects(port.read("getBlockHeight", [{ commitment: "finalized" }], signal));
+  assert.equal(posts.length, 2, "budget refusal never retries or resets");
+});
+
+test("historical singleton height rejects wrong UUID, missing result and RPC error without scalar retry", async t => {
+  for (const failure of ["wrong-id", "empty", "error"] as const) await t.test(failure, async () => {
+    let posts = 0;
+    const budget = new SolanaRpcBudget({ maxPhysicalRequests: 1, minimumIntervalMs: 500 });
+    const rpc = new SolanaRpc("https://api.mainnet-beta.solana.com", async (_url, init) => {
+      posts += 1;
+      const body = JSON.parse(String(init?.body)) as JsonRpcRequest[];
+      assert.equal(Array.isArray(body), true);
+      assert.equal(body.length, 1);
+      const request = body[0]!;
+      const response = failure === "empty" ? [] : failure === "error"
+        ? [{ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "TEST refusal" } }]
+        : [{ jsonrpc: "2.0", id: "different-request", result: 2000 }];
+      return new Response(JSON.stringify(response), { headers: { "content-type": "application/json" } });
+    }, budget);
+    await assert.rejects(adaptJupiterFutureInvalidityReadPort(rpc).read("getBlockHeight", [{ commitment: "finalized" }], new AbortController().signal));
+    assert.equal(posts, 1);
+    assert.equal(budget.logicalCalls, 1);
+    assert.equal(budget.physicalRequests, 1);
+  });
+});
+
+test("historical height fails closed on absent batch or invalid singleton cardinality", async () => {
+  let scalarCalls = 0;
+  const call = async (_method: SolanaMethod, _params: readonly unknown[]) => { scalarCalls += 1; return 2000; };
+  const signal = new AbortController().signal;
+  await assert.rejects(adaptJupiterFutureInvalidityReadPort({ originHash: "a".repeat(64), call })
+    .read("getBlockHeight", [{ commitment: "finalized" }], signal));
+  for (const results of [[], [2000, 2001]]) await assert.rejects(adaptJupiterFutureInvalidityReadPort({
+    originHash: "a".repeat(64), call, batch: async () => results,
+  }).read("getBlockHeight", [{ commitment: "finalized" }], signal));
+  assert.equal(scalarCalls, 0);
 });

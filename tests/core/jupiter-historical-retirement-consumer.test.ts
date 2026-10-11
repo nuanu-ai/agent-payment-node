@@ -94,10 +94,11 @@ const { consumeJupiterHistoricalRetirement, recoverCommittedJupiterHistoricalRet
 
 const H = (digit: string): string => digit.repeat(64);
 const blockhash = "1".repeat(32);
-function policy(): ActiveAssetPolicy {
+function policy(now: Date): ActiveAssetPolicy {
+  const effectiveAt = new Date(now.getTime() - 60_000).toISOString();
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v1", registryVersion: "test-retirement.1",
-    publishedAt: "2026-10-09T00:00:00.000Z", effectiveDate: "2026-10-09", effectiveAt: "2026-10-09T00:00:00.000Z",
-    expiresAt: "2026-10-12T00:00:00.000Z", chains: [{ chain: identity.chain, family: "solana", name: "Solana", assets: [
+    publishedAt: effectiveAt, effectiveDate: effectiveAt.slice(0, 10), effectiveAt,
+    expiresAt: new Date(Date.parse(effectiveAt) + 3 * 86_400_000).toISOString(), chains: [{ chain: identity.chain, family: "solana", name: "Solana", assets: [
       { kind: "native", identifier: null, symbol: "SOL", decimals: 9,
         rails: { direct: false, gasless: false, x402: false, bridge: false, swap: true },
         caps: { maximumPerTransferAtomic: "6000000", dailyLimitAtomic: "30000000" }, mechanismPins: { swap: JUPITER_V1_OLD_ROUTE.mechanismPin } },
@@ -106,7 +107,7 @@ function policy(): ActiveAssetPolicy {
         caps: { maximumPerTransferAtomic: "500000", dailyLimitAtomic: "500000" }, mechanismPins: { swap: JUPITER_V1_OLD_ROUTE.mechanismPin } },
     ] }] });
   return { profile: "solana-local", registry, digest: registry.policyDigest, revision: 1,
-    accounts: { solana: HISTORICAL_JUPITER_PAYER }, activationDigest: H("a"), activatedAt: "2026-10-09T00:00:00.000Z" };
+    accounts: { solana: HISTORICAL_JUPITER_PAYER }, activationDigest: H("a"), activatedAt: effectiveAt };
 }
 
 class TestScopeState extends StateStore {
@@ -116,12 +117,13 @@ class TestScopeState extends StateStore {
 }
 
 async function fixture(root: string) {
-  const active = policy(), ledger = new AssetUsageLedger(root), operationId = HISTORICAL_JUPITER_IDS[0]!, idempotencyHash = H("1");
   const now = new Date();
+  const active = policy(now), ledger = new AssetUsageLedger(root), operationId = HISTORICAL_JUPITER_IDS[0]!, idempotencyHash = H("1");
   const q = createSwapQuote({ profile: "solana-local", account: identity.account, recipient: identity.account,
     sourceAsset: { ...identity.asset, chain: identity.chain }, destinationAsset: { chain: identity.chain, kind: "token", identifier: SOLANA_USDC_MINT },
     inputAmountAtomic: "1000000", expectedOutputAtomic: "100000", minimumOutputAtomic: "99500", slippageBps: 50,
-    effectiveAt: "2026-10-09T00:00:00.000Z", expiresAt: "2026-10-10T23:59:59.000Z",
+    effectiveAt: new Date(now.getTime() - 60_000).toISOString(),
+    expiresAt: new Date(now.getTime() - 60_000 + 2 * 86_400_000 - 1_000).toISOString(),
     providerResponseHash: H("b"), routeHash: H("c"), unsignedTransactionPayloadHash: H("d"),
     simulation: { requestHash: H("e"), resultHash: H("f"), success: true, blockNumber: "100",
       blockHash: `0x${H("1")}`, headBlockNumber: "100", maxHeadDrift: 0, gasEstimate: "1000" } });
