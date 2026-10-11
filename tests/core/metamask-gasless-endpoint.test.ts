@@ -145,6 +145,8 @@ import { mmQuoteHash } from "../../src/metamask-gasless/economics.js";
 import { encodeFunctionData, parseAbi } from "viem";
 import type { MetaMaskGaslessProviderPort } from "../../src/metamask-gasless/ports.js";
 
+import type { MetaMaskReadDiagnostic } from "../../src/metamask-gasless/client/read-diagnostic.js";
+
 type SentinelMutation = (value: ReturnType<typeof JSON.parse>) => void;
 class SelectedTierExchange extends SdkExchange {
   constructor(readonly mutate: SentinelMutation) { super(8453); }
@@ -184,16 +186,20 @@ test("observed valid LOW tier with an unused fourth tier lacking tokenFees passe
 });
 
 test("earlier transaction and higher fee tiers cannot replace the exact last LOW selection", async (t) => {
-  const cases: [string, SentinelMutation][] = [
-    ["earlier valid last missing", v => { const good = v.result.transactions[0]; v.result.transactions = [good, { fees: [{}] }]; }],
-    ["LOW missing HIGH valid", v => { const good = v.result.transactions[0].fees[0]; v.result.transactions[0].fees = [{}, good]; }],
-    ["LOW token absent HIGH matching", v => { const good = structuredClone(v.result.transactions[0].fees[0]); v.result.transactions[0].fees[0].tokenFees[0].token.address = OWNER; v.result.transactions[0].fees.push(good); }],
-    ["last transaction missing", v => { v.result.transactions.push(null); }],
+  const cases: [string, SentinelMutation, MetaMaskReadDiagnostic][] = [
+    ["earlier valid last missing", v => { const good = v.result.transactions[0]; v.result.transactions = [good, { fees: [{}] }]; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_fees", tokenFeesKind: "missing" }],
+    ["LOW missing HIGH valid", v => { const good = v.result.transactions[0].fees[0]; v.result.transactions[0].fees = [{}, good]; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_fees", tokenFeesKind: "missing" }],
+    ["LOW token absent HIGH matching", v => { const good = structuredClone(v.result.transactions[0].fees[0]); v.result.transactions[0].fees[0].tokenFees[0].token.address = OWNER; v.result.transactions[0].fees.push(good); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_match" }],
+    ["last transaction missing", v => { v.result.transactions.push(null); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_last_transaction" }],
   ];
-  for (const [name, mutate] of cases) await t.test(name, async sub => {
+  for (const [name, mutate, diagnostic] of cases) await t.test(name, async sub => {
     const { response, exchange } = await syntheticSelectedQuote(sub, mutate);
     assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } });
+      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic });
     assert.equal(exchange.requests.length, 5);
   });
   const good = await syntheticSelectedQuote(t, v => { observedShape(v); v.result.transactions.unshift({ fees: [{}], unused: SECRET }); });
@@ -201,30 +207,48 @@ test("earlier transaction and higher fee tiers cannot replace the exact last LOW
 });
 
 test("selected requested-token fee entry retains required fields and rejects ambiguity or provider errors", async (t) => {
-  const cases: [string, SentinelMutation][] = [
-    ["duplicate requested token", v => { const a = v.result.transactions[0].fees[0].tokenFees; a.push(structuredClone(a[0])); }],
-    ["truthy selected error", v => { v.result.transactions[0].fees[0].tokenFees[0].error = SECRET; }],
-    ["missing token", v => { delete v.result.transactions[0].fees[0].tokenFees[0].token; }],
-    ["missing address", v => { delete v.result.transactions[0].fees[0].tokenFees[0].token.address; }],
-    ["malformed candidate address before matching", v => { v.result.transactions[0].fees[0].tokenFees.unshift({ token: { address: "wrong" } }); }],
-    ["wrong decimals", v => { v.result.transactions[0].fees[0].tokenFees[0].token.decimals = 5; }],
-    ["missing symbol", v => { delete v.result.transactions[0].fees[0].tokenFees[0].token.symbol; }],
-    ["empty symbol", v => { v.result.transactions[0].fees[0].tokenFees[0].token.symbol = ""; }],
-    ["oversize symbol", v => { v.result.transactions[0].fees[0].tokenFees[0].token.symbol = "s".repeat(33); }],
-    ["missing quantity", v => { delete v.result.transactions[0].fees[0].tokenFees[0].balanceNeededToken; }],
-    ["noncanonical quantity", v => { v.result.transactions[0].fees[0].tokenFees[0].balanceNeededToken = "0x00"; }],
-    ["missing fee recipient", v => { delete v.result.transactions[0].fees[0].tokenFees[0].feeRecipient; }],
-    ["malformed fee recipient", v => { v.result.transactions[0].fees[0].tokenFees[0].feeRecipient = "wrong"; }],
-    ["empty transactions", v => { v.result.transactions = []; }],
-    ["transactions bound", v => { v.result.transactions = Array(9).fill(v.result.transactions[0]); }],
-    ["fee tier bound", v => { v.result.transactions[0].fees = Array(9).fill(v.result.transactions[0].fees[0]); }],
-    ["token bound", v => { v.result.transactions[0].fees[0].tokenFees = Array(33).fill(v.result.transactions[0].fees[0].tokenFees[0]); }],
-    ["wrong envelope id", v => { v.id = 11; }],
+  const cases: [string, SentinelMutation, MetaMaskReadDiagnostic][] = [
+    ["duplicate requested token", v => { const a = v.result.transactions[0].fees[0].tokenFees; a.push(structuredClone(a[0])); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_match" }],
+    ["truthy selected error", v => { v.result.transactions[0].fees[0].tokenFees[0].error = SECRET; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_entry_error" }],
+    ["missing token", v => { delete v.result.transactions[0].fees[0].tokenFees[0].token; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token" }],
+    ["missing address", v => { delete v.result.transactions[0].fees[0].tokenFees[0].token.address; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_address" }],
+    ["malformed candidate address before matching", v => { v.result.transactions[0].fees[0].tokenFees.unshift({ token: { address: "wrong" } }); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_address" }],
+    ["wrong decimals", v => { v.result.transactions[0].fees[0].tokenFees[0].token.decimals = 5; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_decimals" }],
+    ["missing symbol", v => { delete v.result.transactions[0].fees[0].tokenFees[0].token.symbol; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_symbol" }],
+    ["empty symbol", v => { v.result.transactions[0].fees[0].tokenFees[0].token.symbol = ""; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_symbol" }],
+    ["oversize symbol", v => { v.result.transactions[0].fees[0].tokenFees[0].token.symbol = "s".repeat(33); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_symbol" }],
+    ["missing quantity", v => { delete v.result.transactions[0].fees[0].tokenFees[0].balanceNeededToken; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_fee_quantity" }],
+    ["noncanonical quantity", v => { v.result.transactions[0].fees[0].tokenFees[0].balanceNeededToken = "0x00"; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_fee_quantity" }],
+    ["missing fee recipient", v => { delete v.result.transactions[0].fees[0].tokenFees[0].feeRecipient; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_fee_recipient" }],
+    ["malformed fee recipient", v => { v.result.transactions[0].fees[0].tokenFees[0].feeRecipient = "wrong"; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_fee_recipient" }],
+    ["empty transactions", v => { v.result.transactions = []; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_transactions_length" }],
+    ["transactions bound", v => { v.result.transactions = Array(9).fill(v.result.transactions[0]); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_transactions_length" }],
+    ["fee tier bound", v => { v.result.transactions[0].fees = Array(9).fill(v.result.transactions[0].fees[0]); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_fees_length" }],
+    ["token bound", v => { v.result.transactions[0].fees[0].tokenFees = Array(33).fill(v.result.transactions[0].fees[0].tokenFees[0]); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_fees_length" }],
+    ["wrong envelope id", v => { v.id = 11; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_id" }],
   ];
-  for (const [name, mutate] of cases) await t.test(name, async sub => {
+  for (const [name, mutate, diagnostic] of cases) await t.test(name, async sub => {
     const { response, exchange } = await syntheticSelectedQuote(sub, mutate);
     assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } });
+      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic });
     assert.equal(exchange.requests.length, 5);
   });
 });
