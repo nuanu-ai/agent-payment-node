@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-for(const scenario of ["static-positive","resolver-late","rpc-late","send-refused","nonce-advanced"]) test(`TEST ${scenario} pseudoTTY follows normal private owner issuer, one claim, replay refusal and authentic full fee settlement`,{timeout:60000},async()=>{
+for(const scenario of ["profile-static-positive","static-positive","resolver-late","rpc-late","send-refused","nonce-advanced"]) test(`TEST ${scenario} pseudoTTY follows normal private owner issuer, one claim, replay refusal and authentic full fee settlement`,{timeout:60000},async()=>{
   const fixture=fileURLToPath(new URL("../fixtures/metamask-native-owner/deadline-driver.mjs",import.meta.url));
   const source=fileURLToPath(new URL("../../src/",import.meta.url));
   const ptyProgram=`import os, pty, select, signal, sys

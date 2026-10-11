@@ -7,16 +7,17 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const base = pathToFileURL(process.argv[2] + '/');
 const moduleUrl = name => new URL(name, base).href;
-const payer='0xf41170df51aab52aaa04fbc3ff325cf051644aca', vendor='e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a';
+const scenario=process.argv[3] ?? "positive",custom=scenario==='profile-static-positive';
+const payer=custom?'0x1111111111111111111111111111111111111111':'0xf41170df51aab52aaa04fbc3ff325cf051644aca',profile=custom?'mm-owned-static':'metamask-live-v042', vendor='e3e44343da17c1912c2da0ce5b58f9c804b53d3715b8a2756c0b035fd50d288a';
 let projectHash="d".repeat(64), effects=0, selectedQuote, lastScope, lastContext, beforeGuard=async()=>{};
-const scenario=process.argv[3] ?? "positive";
 const newVendor='7e5d5899170740ccaa05fb45415c9ef5320815e446788719f3523eb0fd58ee37',primaryChain=scenario==='newpolicy-op'?10:1;
 let vendorHash=scenario.startsWith('newpolicy')||scenario==='mismatch-new'?newVendor:vendor,policyBytes=scenario.startsWith('newpolicy')||scenario==='mismatch-old'?945:866,policyReads=0;
 const acknowledgedScenarios=['positive','native-crosschain','alias-otherchain','newpolicy','newpolicy-op'];
 const temp=await realpath(await mkdtemp(join(tmpdir(),'apn-mm-deadline-TEST-'))),script=join(temp,'sdk.cjs'),log=join(temp,'children.jsonl');
 const project='TEST-fixed-project';
 const {sha256}=await import(moduleUrl('canonical.js'));projectHash=sha256(project);
-const policy="# Mimir Wallet Policy\nschema_version: 1\nwallet_address: \"0xf41170df51aab52aaa04fbc3ff325cf051644aca\"\n\naddresses:\n  allowlist:\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1329\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 137\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 143\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 59144\n    - address: \"0x823a3a5bab1186141b32fc65f8e25ca24c679ce7\"\n      chain_id: 8453\n  blocklist: []\n\nevm:\n  allowed_chains:\n    - 1\n    - 10\n    - 56\n    - 137\n    - 143\n    - 999\n    - 1329\n    - 4326\n    - 4663\n    - 8453\n    - 42161\n    - 43114\n    - 46630\n    - 59144\n    - 84532\n    - 11155111\n  outflow_limits_usd:\n    rolling_24h: 0.5\n";
+const legacyPolicy="# Mimir Wallet Policy\nschema_version: 1\nwallet_address: \"0xf41170df51aab52aaa04fbc3ff325cf051644aca\"\n\naddresses:\n  allowlist:\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 1329\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 137\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 143\n    - address: \"0x991e254b5c8e0aaf6c244eaa2706bad059809b04\"\n      chain_id: 59144\n    - address: \"0x823a3a5bab1186141b32fc65f8e25ca24c679ce7\"\n      chain_id: 8453\n  blocklist: []\n\nevm:\n  allowed_chains:\n    - 1\n    - 10\n    - 56\n    - 137\n    - 143\n    - 999\n    - 1329\n    - 4326\n    - 4663\n    - 8453\n    - 42161\n    - 43114\n    - 46630\n    - 59144\n    - 84532\n    - 11155111\n  outflow_limits_usd:\n    rolling_24h: 0.5\n";
+const policy=custom?legacyPolicy.replace('wallet_address: "0xf41170df51aab52aaa04fbc3ff325cf051644aca"',`wallet_address: "${payer}"`):legacyPolicy;
 let stateRoot,guardBalances=0,nonceReads=0;
 const originalPackage=await import(moduleUrl('metamask-package.js'));
 await mock.module(moduleUrl('metamask-package.js'),{namedExports:{...originalPackage,resolveMetaMaskBin:async()=>{
@@ -34,7 +35,7 @@ try {
  const {StateStore}=await import(moduleUrl('state.js'));
  const {metamaskDirectCapabilitySnapshot,capabilityHash,accountBindingHash}=await import(moduleUrl('provider-profile.js'));
  const {getAddress}=await import('viem');
- const state=new StateStore(root),profile='metamask-live-v042',address=getAddress(payer),caps=metamaskDirectCapabilitySnapshot();await state.initialize();
+ const state=new StateStore(root),address=getAddress(payer),caps=metamaskDirectCapabilitySnapshot();await state.initialize();
  await state.writeProviderProfile({schema_version:'apn.provider-profile.v1',profile,profile_hash:state.profileHash(profile),provider_id:'metamask-agent-wallet',public_address:address,account_binding_hash:accountBindingHash('metamask-agent-wallet',address),capability_snapshot:caps,capability_hash:capabilityHash(caps),revision:1,trust_class:'provider_managed_non_custodial_signer',observed_at:new Date().toISOString(),drift:{state:'bound',reason:'none'}});
  const {AllowlistPolicyStore}=await import(moduleUrl('allowlist-policy-store.js'));
  const policies=new AllowlistPolicyStore(root),token=primaryChain===10?'0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85':'0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',at=new Date().toISOString();
@@ -60,21 +61,21 @@ try {
    await state.writeOperation(sealOperation({...body,state:started.state,reason:started.reason,proofClass:started.proofClass,transitions:appendTransition(saved.transitions,started)}));
  }
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
- const result=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001');
+ const result=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001',profile);
  const children=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse),sent=children.filter(a=>a[1]==='send-transaction');
  assert.equal(result.effect_attempts,1);assert.equal(result.state,['resolver-late','rpc-late','send-refused','nonce-advanced'].includes(scenario)?'unknown':'acknowledged');
  assert.equal(sent.length,['resolver-late','rpc-late'].includes(scenario)?0:1);
  if(sent.length){const first=children.findIndex(a=>a[1]==='send-transaction');assert.equal(first,12,'initial six READs and ONE final six READs before send');const payload=JSON.parse(sent[0][sent[0].indexOf('--payload')+1]);assert.equal(payload.nonce,'0x7');assert.equal(payload.gas,'0xfde8');assert.equal(payload.value,'0x0');assert.deepEqual(Object.keys(payload),['to','data','value','gas','nonce','maxFeePerGas','maxPriorityFeePerGas']);}
  const journalFile=join(root,'metamask-native-operations',result.operation_id+'.json'),bytes=await readFile(journalFile),journal=JSON.parse(bytes);
- assert.equal(journal.effectAttempts,1);assert.ok(journal.diagnostic);assert.ok(!JSON.stringify(result).includes('TEST secret'));
+ assert.equal(journal.context.profile,profile);assert.equal(journal.context.quote.sender.toLowerCase(),payer);assert.equal(journal.effectAttempts,1);assert.ok(journal.diagnostic);assert.ok(!JSON.stringify(result).includes('TEST secret'));
  if(scenario==='send-refused'){assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.diagnostic.providerCode,'policy');assert.equal(result.diagnostic.stage,'sdk_send');}
  if(scenario==='resolver-late')assert.equal(result.diagnostic.stage,'sdk_resolver');
  if(scenario==='rpc-late')assert.equal(result.diagnostic.stage,'rpc_balance');
- const count=children.length,replay=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001');assert.deepEqual(replay,result);assert.deepEqual(await readFile(journalFile),bytes);assert.equal((await readFile(log,'utf8')).trim().split('\n').length,count);
+ const count=children.length,replay=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001',profile);assert.deepEqual(replay,result);assert.deepEqual(await readFile(journalFile),bytes);assert.equal((await readFile(log,'utf8')).trim().split('\n').length,count);
  const {AssetUsageLedger}=await import(moduleUrl('asset-usage-ledger.js'));const ledger=new AssetUsageLedger(root);assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'native',identifier:null}},new Date())).amountAtomic,'13000000');assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'token',identifier:token}},new Date())).amountAtomic,'1000');
- await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-second-0002'));
- if(scenario==='nonce-advanced'){
-   assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.transaction_hash,null);assert.equal(result.diagnostic.stage,'post_handoff');
+ await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-second-0002',profile));
+ if(scenario==='nonce-advanced'||custom){
+   if(!custom){assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.transaction_hash,null);assert.equal(result.diagnostic.stage,'post_handoff');}
    const nonceBefore=nonceReads,balanceBefore=guardBalances;
    mock.timers.enable({apis:['Date'],now:Date.now()});mock.timers.tick(61000);
    const observed=await owner.readFixedMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(observed.state,'confirmed');assert.equal(observed.transaction_hash,'0x'+'e'.repeat(64));assert.equal(observed.receipt.nativeFeeAtomic,'7500000');

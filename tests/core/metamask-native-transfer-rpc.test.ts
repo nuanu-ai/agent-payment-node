@@ -82,3 +82,14 @@ test("read-only transport runtime allowlist rejects write methods",async()=>{
   await assert.rejects(w.rpc().nativeFeeRead("eth_sendRawTransaction" as never,[]),{code:"APN_INVALID_INPUT"});
   assert.equal(w.methods.length,0);
 });
+
+test("configured read-only payer binds nonce, estimate and canonical receipt without a fixed-address override",async()=>{
+  const w=new Wire(1),payer=`0x${"1".repeat(40)}` as const;
+  const captured: {method:string;params:readonly unknown[]}[]=[];
+  const rpc=new EvmRpc(async(method,params)=>{captured.push({method,params});return w.call(method,params);},"https://fixed.example");
+  w.quote=await prepareWithRpc(rpc,{chainId:1,maximumNativeFeeWei:"1000",sender:payer});
+  assert.equal(w.quote.sender,payer);assert.equal(captured.find(c=>c.method==="eth_getTransactionCount")?.params[0],payer);
+  assert.equal((captured.find(c=>c.method==="eth_estimateGas")?.params[0] as {from:string}).from,payer);
+  assert.equal((await w.observe()).kind,"accepted");
+  w.mutateTx={from:METAMASK_NATIVE_FIXED_SENDER};await assert.rejects(w.observe());
+});
