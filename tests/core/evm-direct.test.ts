@@ -3,7 +3,7 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../../src/canonical.js";
-import { keccak256, parseTransaction } from "viem";
+import { keccak256, pad, parseTransaction } from "viem";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import { evmAmount, MAX_EVM_UINT, resolveEvmAsset } from "../../src/evm-asset.js";
@@ -11,6 +11,7 @@ import { observeEvmTransfer } from "../../src/evm-transfer-evidence.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import type { Address } from "../../src/model.js";
 import { sealReceipt } from "../../src/state-integrity.js";
+import { assertDirectTerminalReceiptAuthority } from "../../src/direct-terminal-receipt.js";
 import { publicReceipt } from "../../src/transfer-policy.js";
 import { EVM_BLOCK_HASH, EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { EVM_USDC, activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
@@ -331,20 +332,9 @@ test("all EVM chains keep the frozen signed envelope across harmless live fee an
   }
 });
 
-test("Ethereum signed funding refusal recovers by same-hash observation without custody or first-send retry", async (context) => {
+test("a post-sign Ethereum funding drop no longer strands the signature: approve dispatches it once with one fee quote", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const rpc = new EvmTestRpc(); rpc.chainId = 1; rpc.l1Fee = 0n; rpc.operatorFee = 0n;
-  const nonceReads = context.mock.method(rpc.evm, "nonce");
-  const evidenceReads = context.mock.method(rpc.evm, "evidence");
-  const originalReceipt = rpc.evm.receipt;
-  let receiptReads = 0, observedHash: `0x${string}` | null = null;
-  rpc.evm.receipt = async (...args) => {
-    receiptReads += 1;
-    if (observedHash === null) return await originalReceipt(...args);
-    // Independent fixture observation, never a simulated first dispatch.
-    return { transactionHash: observedHash, blockNumberAtomic: "12346", blockHash: EVM_BLOCK_HASH,
-      status: "success", observedAt: new Date().toISOString(), rpcOrigin: rpc.rpcOrigin, logs: [] };
-  };
   const originalQuote = rpc.evm.feeQuote;
   let quoteReads = 0;
   Object.assign(rpc.evm, { feeQuote: async (...args: Parameters<typeof originalQuote>) => {
@@ -359,127 +349,44 @@ test("Ethereum signed funding refusal recovers by same-hash observation without 
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" },
     amount: "0.000001" }) as { operation_id: string };
   assert.equal(quoteReads, 1);
-  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_INSUFFICIENT_ASSET" });
-  assert.equal(quoteReads, 2, "the signed Ethereum envelope reuses its validated frozen quote");
-  assert.equal((await setup.core.transfer.status(prepared.operation_id) as { state: string }).state, "signed_not_submitted");
-  assert.equal(rpc.broadcastCount, 0);
-  rpc.nativeAtomic = "1000000000000000000";
+  // Every refusable check ran before signing; nothing after the signature re-reads funding or fees.
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  assert.equal(quoteReads, 2); assert.equal(rpc.broadcastCount, 1);
   const signed = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.ok(signed.transactionHash); assert.ok(signed.rawTransactionHash); assert.ok(signed.allowlistLease);
-  const recovery = evmCore(temporary.root, rpc, setup.wrapping);
-  const nativeRequests = context.mock.method(recovery.local, "request");
-  const before = { loads: setup.wrapping.loads, nonce: nonceReads.mock.callCount(), receipt: receiptReads };
-  const resumed = await recovery.core.transfer.resume(prepared.operation_id) as { state: string; terminal: boolean; reason: string };
-  assert.equal(resumed.state, "unknown_finality"); assert.equal(resumed.terminal, false);
-  assert.equal(resumed.reason, "signed_recovery_observation_only");
-  assert.equal(receiptReads, before.receipt + 1);
-  const retained = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(retained.transactionHash, signed.transactionHash); assert.equal(retained.rawTransactionHash, signed.rawTransactionHash);
-  assert.equal(retained.fingerprint, signed.fingerprint);
-  assert.equal(retained.allowlistLease!.reservation.reservationId, signed.allowlistLease.reservation.reservationId);
-  const { directUsage } = await import("./direct-allowlist-helpers.js");
-  const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js");
-  const ledger = new AssetUsageLedger(temporary.root), reservation = signed.allowlistLease.reservation;
-  const identity = { account: reservation.account, chain: reservation.chain, asset: reservation.asset };
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "unknown_finality");
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  const readsAfterResume = receiptReads;
-  assert.equal((await recovery.core.transfer.status(prepared.operation_id) as { state: string }).state, "unknown_finality");
-  assert.equal(receiptReads, readsAfterResume, "public status is local and never observes or opens custody");
-  assert.equal(nativeRequests.mock.callCount(), 0); assert.equal(setup.wrapping.loads, before.loads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-  assert.equal(recovery.approval.intents.length, 0);
-  assert.equal(evidenceReads.mock.callCount(), 0);
-  observedHash = `0x${"f".repeat(64)}`;
-  assert.notEqual(observedHash, signed.transactionHash);
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string; reason: string }).state, "unknown_finality");
-  assert.equal((await setup.state.findOperation(prepared.operation_id))!.reason, "receipt_hash_mismatch");
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  assert.equal(evidenceReads.mock.callCount(), 0, "wrong-hash receipt cannot reach effect proof");
-  observedHash = signed.transactionHash;
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  const final = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(evidenceReads.mock.callCount(), 1); assert.equal(receiptReads, before.receipt + 3);
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "finalized");
-  assert.equal(final.transactionHash, signed.transactionHash); assert.equal(final.rawTransactionHash, signed.rawTransactionHash);
-  assert.equal(final.fingerprint, signed.fingerprint);
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  const finalReads = receiptReads;
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  assert.equal(receiptReads, finalReads); assert.equal(nativeRequests.mock.callCount(), 0); assert.equal(setup.wrapping.loads, before.loads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-  assert.equal(recovery.approval.intents.length, 0);
-  assert.equal(quoteReads, 2, "observation never retries funding or fee quote reads");
+  assert.equal(keccak256(rpc.submissions[0]!), signed.transactionHash);
 });
 
-test("post-sign response loss recovers public same-hash evidence without private custody or first-send retry", async (context) => {
+test("post-sign response loss: resume dispatches the persisted signature exactly once, then only observes", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const rpc = new EvmTestRpc();
-  const nonceReads = context.mock.method(rpc.evm, "nonce");
-  const evidenceReads = context.mock.method(rpc.evm, "evidence");
-  const originalReceipt = rpc.evm.receipt;
-  let receiptReads = 0, observedHash: `0x${string}` | null = null;
-  rpc.evm.receipt = async (...args) => {
-    receiptReads += 1;
-    if (observedHash === null) return await originalReceipt(...args);
-    // Independent fixture observation, never a simulated first dispatch.
-    return { transactionHash: observedHash, blockNumberAtomic: "12346", blockHash: EVM_BLOCK_HASH,
-      status: "success", observedAt: new Date().toISOString(), rpcOrigin: rpc.rpcOrigin, logs: [] };
-  };
-  let signedEffect: { transactionHash: `0x${string}`; rawTransactionHash: `0x${string}` } | undefined;
+  let signedEffect: { transactionHash: `0x${string}`; rawTransaction: `0x${string}` } | undefined;
   const setup = evmCore(temporary.root, rpc, undefined, undefined, native => ({ request: async request => {
     const result = await native.request(request);
     if (request.operation === "directTransfer.approveAndSign") {
-      signedEffect = result as { transactionHash: `0x${string}`; rawTransactionHash: `0x${string}` };
+      signedEffect = result as { transactionHash: `0x${string}`; rawTransaction: `0x${string}` };
       throw new Error("simulated process loss after encrypted save");
     }
     return result;
   } }));
-  await ensureDirectWallet(setup);
+  rpc.sender = (await ensureDirectWallet(setup)).address;
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   await assert.rejects(setup.core.transfer.approve(prepared.operation_id), /simulated process loss/u);
   assert.equal((await setup.core.transfer.status(prepared.operation_id) as { state: string }).state, "started");
   assert.equal(rpc.submissions.length, 0); assert.ok(signedEffect);
-  const started = (await setup.state.findOperation(prepared.operation_id))!; assert.ok(started.allowlistLease);
   const recovery = evmCore(temporary.root, rpc, setup.wrapping);
   const nativeRequests = context.mock.method(recovery.local, "request");
-  const before = { loads: setup.wrapping.loads, nonce: nonceReads.mock.callCount(), receipt: receiptReads };
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id) as { state: string }).state, "unknown_finality");
-  // This requirement intentionally fails on 7f6 until authenticated public started recovery is integrated.
-  assert.equal(nativeRequests.mock.callCount(), 0, "started recovery must use public proof, never effectMaterial.get");
-  assert.equal(setup.wrapping.loads, before.loads);
-  const retained = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(retained.transactionHash, signedEffect.transactionHash); assert.equal(retained.rawTransactionHash, signedEffect.rawTransactionHash);
-  assert.equal(retained.fingerprint, started.fingerprint);
-  assert.equal(retained.allowlistLease!.reservation.reservationId, started.allowlistLease.reservation.reservationId);
-  const { directUsage } = await import("./direct-allowlist-helpers.js");
-  const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js");
-  const ledger = new AssetUsageLedger(temporary.root), reservation = started.allowlistLease.reservation;
-  const identity = { account: reservation.account, chain: reservation.chain, asset: reservation.asset };
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "unknown_finality");
-  assert.equal(await directUsage(temporary.root, started.walletAddress, `eip155:${started.chainId}`, null, setup.clock.now()), started.amountAtomic);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
+  const resumed = await recovery.core.transfer.resume(prepared.operation_id) as { state: string };
+  assert.equal(resumed.state, "completed");
+  assert.deepEqual(rpc.submissions, [signedEffect.rawTransaction], "the exact persisted bytes, never a new signature");
+  assert.deepEqual(nativeRequests.mock.calls.map(call => (call.arguments[0] as { operation: string }).operation), ["directTransfer.signedMaterial.get"]);
   assert.equal(recovery.approval.intents.length, 0);
-  const readsAfterResume = receiptReads;
-  assert.equal((await recovery.core.transfer.status(prepared.operation_id) as { state: string }).state, "unknown_finality");
-  assert.equal(receiptReads, readsAfterResume); assert.equal(nativeRequests.mock.callCount(), 0);
-  assert.equal(evidenceReads.mock.callCount(), 0);
-  observedHash = `0x${"f".repeat(64)}`; assert.notEqual(observedHash, signedEffect.transactionHash);
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "unknown_finality");
-  assert.equal((await setup.state.findOperation(prepared.operation_id))!.reason, "receipt_hash_mismatch");
-  assert.equal(await directUsage(temporary.root, started.walletAddress, `eip155:${started.chainId}`, null, setup.clock.now()), started.amountAtomic);
-  assert.equal(evidenceReads.mock.callCount(), 0, "wrong-hash receipt cannot reach effect proof");
-  observedHash = signedEffect.transactionHash;
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
   const final = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(evidenceReads.mock.callCount(), 1); assert.equal(receiptReads, before.receipt + 3);
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "finalized");
-  assert.equal(final.transactionHash, signedEffect.transactionHash); assert.equal(final.rawTransactionHash, signedEffect.rawTransactionHash);
-  assert.equal(final.fingerprint, started.fingerprint);
-  assert.equal(await directUsage(temporary.root, started.walletAddress, `eip155:${started.chainId}`, null, setup.clock.now()), started.amountAtomic);
-  assert.equal(nativeRequests.mock.callCount(), 0); assert.equal(setup.wrapping.loads, before.loads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-  assert.equal(recovery.approval.intents.length, 0); assert.equal(evidenceReads.mock.callCount(), 1);
+  assert.equal(final.transactionHash, signedEffect.transactionHash);
+  const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js");
+  const reservation = final.allowlistLease!.reservation;
+  assert.equal((await new AssetUsageLedger(temporary.root).load(reservation, reservation.reservationId))!.state, "finalized");
+  assert.equal((await recovery.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
+  assert.equal(rpc.broadcastCount, 1); assert.equal(nativeRequests.mock.callCount(), 1);
 });
 
 test("refused foreground approval never loads the key and missing signature recovery terminates without payment", async (context) => {
@@ -540,18 +447,31 @@ test("ambiguous EVM broadcast terminalizes from receipt when custody material is
   assert.equal(restarted.approval.intents.length, 0);
 });
 
-test("ERC-20 receipt success is insufficient without exact log AND balance deltas", async (context) => {
+test("ERC-20 completes from its sole exact Transfer log without balance deltas; a missing log or a second sender debit stays unknown", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   const wallet = await ensureDirectWallet(setup); setup.rpc.sender = wallet.address;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_USDC[8453] }, amount: "1" }) as { operation_id: string };
   setup.rpc.deltasVerified = false;
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  const original = setup.rpc.evm.receipt;
+  setup.rpc.evm.receipt = async (...args) => {
+    const receipt = await original(...args), log = receipt?.logs[0];
+    return receipt === null || log === undefined ? receipt : { ...receipt, logs: [...receipt.logs, { ...log, topics: [log.topics[0]!, log.topics[1]!, pad(EVM_TOKEN, { size: 32 })] }] };
+  };
   assert.equal((await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "unknown_finality");
-  setup.rpc.deltasVerified = true; setup.rpc.transferLogEnabled = false;
+  setup.rpc.evm.receipt = original; setup.rpc.transferLogEnabled = false;
   assert.equal((await setup.core.transfer.resume(prepared.operation_id) as { state: string }).state, "unknown_finality");
   setup.rpc.transferLogEnabled = true;
-  assert.equal((await setup.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
+  const completed = await setup.core.transfer.resume(prepared.operation_id) as { state: string; proof_class: string };
+  assert.equal(completed.state, "completed"); assert.equal(completed.proof_class, "included_exact_transfer_event");
+  assert.equal((await setup.core.execute({ command: "receipt.get", operationId: prepared.operation_id })).ok, true);
+  // A token transfer completed by 0.5.41 keeps loading through its stored balance-delta proof, and only through it.
+  const operation = (await setup.state.findOperation(prepared.operation_id))!, receipt = (await setup.state.loadReceipt(operation.profileHash, operation.operationId))!;
+  const legacy = { ...operation, proofClass: "included_transfer_event_and_block_balance_deltas" };
+  const deltas = { ...receipt.evmEvidence!, tokenBalanceDeltasVerified: true, senderDeltaAtomic: operation.amountAtomic, recipientDeltaAtomic: operation.amountAtomic };
+  assertDirectTerminalReceiptAuthority(legacy, { ...receipt, proofClass: legacy.proofClass, evmEvidence: deltas });
+  assert.throws(() => assertDirectTerminalReceiptAuthority(legacy, { ...receipt, proofClass: legacy.proofClass }), { code: "APN_STATE_CORRUPT" });
 });
 
 test("terminal EVM operation with missing or forged receipt fails closed even when hashes are resealed", async (context) => {
@@ -664,158 +584,28 @@ for (const scenario of [
   assert.equal(setup.rpc.broadcastCount, 1); assert.equal(restarted.approval.intents.length, 0);
 });
 
-test("Arbitrum inclusive-gas refusal recovers by same-hash observation without custody or first-send retry", async (context) => {
-  const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const rpc = new EvmTestRpc();
-  const nonceReads = context.mock.method(rpc.evm, "nonce");
-  const evidenceReads = context.mock.method(rpc.evm, "evidence");
-  const originalReceipt = rpc.evm.receipt;
-  let receiptReads = 0, observedHash: `0x${string}` | null = null;
-  rpc.evm.receipt = async (...args) => {
-    receiptReads += 1;
-    if (observedHash === null) return await originalReceipt(...args);
-    // Independent fixture observation, never a simulated first dispatch.
-    return { transactionHash: observedHash, blockNumberAtomic: "12346", blockHash: EVM_BLOCK_HASH,
-      status: "success", observedAt: new Date().toISOString(), rpcOrigin: rpc.rpcOrigin, logs: [] };
-  };
-  const setup = evmCore(temporary.root, rpc, undefined, undefined, native => ({ request: async request => {
-    const result = await native.request(request);
-    if (request.operation === "directTransfer.approveAndSign") rpc.fees = { ...rpc.fees, gasLimitAtomic: "99999" };
-    return result;
-  } }));
-  rpc.chainId = 42161; rpc.l1Fee = 0n; rpc.operatorFee = 0n;
-  await ensureDirectWallet(setup);
-  const previousFees = rpc.fees;
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
-  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
-  assert.equal((await setup.state.findOperation(prepared.operation_id))!.state, "signed_not_submitted"); assert.equal(rpc.broadcastCount, 0);
-  rpc.fees = previousFees;
-  const signed = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.ok(signed.transactionHash); assert.ok(signed.rawTransactionHash); assert.ok(signed.allowlistLease);
-  const recovery = evmCore(temporary.root, rpc, setup.wrapping);
-  const nativeRequests = context.mock.method(recovery.local, "request");
-  const before = { loads: setup.wrapping.loads, nonce: nonceReads.mock.callCount(), receipt: receiptReads };
-  const resumed = await recovery.core.transfer.resume(prepared.operation_id) as { state: string; terminal: boolean; reason: string };
-  assert.equal(resumed.state, "unknown_finality"); assert.equal(resumed.terminal, false);
-  assert.equal(resumed.reason, "signed_recovery_observation_only");
-  assert.equal(receiptReads, before.receipt + 1);
-  const retained = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(retained.transactionHash, signed.transactionHash); assert.equal(retained.rawTransactionHash, signed.rawTransactionHash);
-  assert.equal(retained.fingerprint, signed.fingerprint);
-  assert.equal(retained.allowlistLease!.reservation.reservationId, signed.allowlistLease.reservation.reservationId);
-  const { directUsage } = await import("./direct-allowlist-helpers.js");
-  const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js");
-  const ledger = new AssetUsageLedger(temporary.root), reservation = signed.allowlistLease.reservation;
-  const identity = { account: reservation.account, chain: reservation.chain, asset: reservation.asset };
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "unknown_finality");
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  const readsAfterResume = receiptReads;
-  assert.equal((await recovery.core.transfer.status(prepared.operation_id) as { state: string }).state, "unknown_finality");
-  assert.equal(receiptReads, readsAfterResume, "public status is local and never observes or opens custody");
-  assert.equal(nativeRequests.mock.callCount(), 0); assert.equal(setup.wrapping.loads, before.loads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-  assert.equal(recovery.approval.intents.length, 0);
-  assert.equal(evidenceReads.mock.callCount(), 0);
-  observedHash = `0x${"f".repeat(64)}`;
-  assert.notEqual(observedHash, signed.transactionHash);
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string; reason: string }).state, "unknown_finality");
-  assert.equal((await setup.state.findOperation(prepared.operation_id))!.reason, "receipt_hash_mismatch");
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  assert.equal(evidenceReads.mock.callCount(), 0, "wrong-hash receipt cannot reach effect proof");
-  observedHash = signed.transactionHash;
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  const final = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(evidenceReads.mock.callCount(), 1); assert.equal(receiptReads, before.receipt + 3);
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "finalized");
-  assert.equal(final.transactionHash, signed.transactionHash); assert.equal(final.rawTransactionHash, signed.rawTransactionHash);
-  assert.equal(final.fingerprint, signed.fingerprint);
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  const finalReads = receiptReads;
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  assert.equal(receiptReads, finalReads); assert.equal(nativeRequests.mock.callCount(), 0); assert.equal(setup.wrapping.loads, before.loads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-  assert.equal(recovery.approval.intents.length, 0); assert.equal(evidenceReads.mock.callCount(), 1);
+for (const movement of ["gas", "price"] as const) test(`Arbitrum post-sign ${movement} movement no longer refuses: approve dispatches the frozen envelope once`, async () => {
+  const temporary = await temporaryState();
+  try {
+    const rpc = new EvmTestRpc();
+    const setup = evmCore(temporary.root, rpc, undefined, undefined, native => ({ request: async request => {
+      const result = await native.request(request);
+      if (request.operation === "directTransfer.approveAndSign") rpc.fees = movement === "gas" ? { ...rpc.fees, gasLimitAtomic: "99999" } : { ...rpc.fees,
+        maxFeePerGasAtomic: (2n * BigInt(rpc.fees.maxFeePerGasAtomic) + BigInt(rpc.fees.maxPriorityFeePerGasAtomic) + 2n).toString() };
+      return result;
+    } }));
+    rpc.chainId = 42161; rpc.l1Fee = 0n; rpc.operatorFee = 0n;
+    await ensureDirectWallet(setup);
+    const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
+    const frozen = (await setup.state.findOperation(prepared.operation_id))!.economics!;
+    assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
+    assert.equal(rpc.broadcastCount, 1);
+    const sent = parseTransaction(rpc.submissions[0]!);
+    assert.equal(sent.gas?.toString(), frozen.gasLimitAtomic); assert.equal(sent.maxFeePerGas?.toString(), frozen.maxFeePerGasAtomic);
+  } finally { await temporary.cleanup(); }
 });
 
-test("Arbitrum signed-ceiling refusal observes the same hash without fee retry, custody or first send", async (context) => {
-  const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const rpc = new EvmTestRpc();
-  const nonceReads = context.mock.method(rpc.evm, "nonce");
-  const evidenceReads = context.mock.method(rpc.evm, "evidence");
-  const originalReceipt = rpc.evm.receipt;
-  let receiptReads = 0, observedHash: `0x${string}` | null = null;
-  rpc.evm.receipt = async (...args) => {
-    receiptReads += 1;
-    if (observedHash === null) return await originalReceipt(...args);
-    // Independent fixture observation, never a simulated first dispatch.
-    return { transactionHash: observedHash, blockNumberAtomic: "12346", blockHash: EVM_BLOCK_HASH,
-      status: "success", observedAt: new Date().toISOString(), rpcOrigin: rpc.rpcOrigin, logs: [] };
-  };
-  const setup = evmCore(temporary.root, rpc, undefined, undefined, native => ({ request: async request => {
-    const result = await native.request(request);
-    if (request.operation === "directTransfer.approveAndSign") rpc.fees = { ...rpc.fees,
-      maxFeePerGasAtomic: (2n * BigInt(rpc.fees.maxFeePerGasAtomic) + BigInt(rpc.fees.maxPriorityFeePerGasAtomic) + 2n).toString() };
-    return result;
-  } }));
-  rpc.chainId = 42161; rpc.l1Fee = 0n; rpc.operatorFee = 0n;
-  await ensureDirectWallet(setup);
-  const frozenFees = rpc.fees;
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: "native" } }) as { operation_id: string };
-  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
-  assert.equal((await setup.state.findOperation(prepared.operation_id))!.state, "signed_not_submitted"); assert.equal(rpc.broadcastCount, 0);
-  // Resume observes even while fees still exceed the signed ceiling. It has no send authority.
-  const signed = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.ok(signed.transactionHash); assert.ok(signed.rawTransactionHash); assert.ok(signed.allowlistLease);
-  const recovery = evmCore(temporary.root, rpc, setup.wrapping);
-  const nativeRequests = context.mock.method(recovery.local, "request");
-  const before = { loads: setup.wrapping.loads, nonce: nonceReads.mock.callCount(), receipt: receiptReads };
-  const resumed = await recovery.core.transfer.resume(prepared.operation_id) as { state: string; terminal: boolean; reason: string };
-  assert.equal(resumed.state, "unknown_finality"); assert.equal(resumed.terminal, false);
-  assert.equal(resumed.reason, "signed_recovery_observation_only");
-  assert.equal(receiptReads, before.receipt + 1);
-  const retained = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(retained.transactionHash, signed.transactionHash); assert.equal(retained.rawTransactionHash, signed.rawTransactionHash);
-  assert.equal(retained.fingerprint, signed.fingerprint);
-  assert.equal(retained.allowlistLease!.reservation.reservationId, signed.allowlistLease.reservation.reservationId);
-  const { directUsage } = await import("./direct-allowlist-helpers.js");
-  const { AssetUsageLedger } = await import("../../src/asset-usage-ledger.js");
-  const ledger = new AssetUsageLedger(temporary.root), reservation = signed.allowlistLease.reservation;
-  const identity = { account: reservation.account, chain: reservation.chain, asset: reservation.asset };
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "unknown_finality");
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  const readsAfterResume = receiptReads;
-  assert.equal((await recovery.core.transfer.status(prepared.operation_id) as { state: string }).state, "unknown_finality");
-  assert.equal(receiptReads, readsAfterResume, "public status is local and never observes or opens custody");
-  assert.equal(nativeRequests.mock.callCount(), 0); assert.equal(setup.wrapping.loads, before.loads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-  assert.equal(recovery.approval.intents.length, 0);
-  assert.equal(evidenceReads.mock.callCount(), 0);
-  observedHash = `0x${"f".repeat(64)}`;
-  assert.notEqual(observedHash, signed.transactionHash);
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string; reason: string }).state, "unknown_finality");
-  assert.equal((await setup.state.findOperation(prepared.operation_id))!.reason, "receipt_hash_mismatch");
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  assert.equal(evidenceReads.mock.callCount(), 0, "wrong-hash receipt cannot reach effect proof");
-  observedHash = signed.transactionHash;
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  const final = (await setup.state.findOperation(prepared.operation_id))!;
-  assert.equal(evidenceReads.mock.callCount(), 1); assert.equal(receiptReads, before.receipt + 3);
-  assert.equal((await ledger.load(identity, reservation.reservationId))!.state, "finalized");
-  assert.equal(final.transactionHash, signed.transactionHash); assert.equal(final.rawTransactionHash, signed.rawTransactionHash);
-  assert.equal(final.fingerprint, signed.fingerprint);
-  assert.equal(await directUsage(temporary.root, signed.walletAddress, `eip155:${signed.chainId}`, null, setup.clock.now()), signed.amountAtomic);
-  const finalReads = receiptReads;
-  assert.equal((await recovery.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  assert.equal(receiptReads, finalReads); assert.equal(nativeRequests.mock.callCount(), 0); assert.equal(setup.wrapping.loads, before.loads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-  assert.equal(recovery.approval.intents.length, 0);
-  rpc.fees = frozenFees;
-  const replay = evmCore(temporary.root, rpc, setup.wrapping);
-  const replayNative = context.mock.method(replay.local, "request"), replayLoads = setup.wrapping.loads;
-  assert.equal((await replay.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
-  assert.equal(replayNative.mock.callCount(), 0); assert.equal(setup.wrapping.loads, replayLoads);
-  assert.equal(nonceReads.mock.callCount(), before.nonce); assert.equal(rpc.broadcastCount, 0); assert.equal(rpc.submissions.length, 0);
-});
+
 
 for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18]) test(`chain ${chainId} list USDC keeps the list's decimals; a contract reporting ${decimals} decimals ${decimals === 6 ? "preserves exact accounting" : "is refused"}`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);

@@ -5,7 +5,7 @@ import { evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEv
 import { directEvmChain, directEvmListRows, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
-import type { EvmBalanceSnapshot, EvmFeeQuote, EvmNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
+import type { EvmBalanceSnapshot, EvmFeeQuote, EvmNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence, EvmUnlandedEvidence } from "./evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, evmTokenBalance, recheckEvmBlock } from "./evm-rpc-codec.js";
 import { observeEvmTransfer } from "./evm-transfer-evidence.js";
 
@@ -390,6 +390,21 @@ export class EvmRpc implements EvmRpcPort {
     const evidence = await observeEvmTransfer(this.call, operation, receipt);
     await this.assertChain(operation.chainId);
     return evidence;
+  }
+
+  /** A finalized nonce past the frozen one, with no receipt for this hash from the same node, proves another transaction took it. */
+  async unlandedEvidence(chainId: DirectEvmChainId, address: Address, transactionHash: Hex): Promise<EvmUnlandedEvidence> {
+    if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Unlanded-transfer evidence requires one batched RPC read.");
+    const [identity, nonce, receipt, transaction] = await this.batchCall([
+      { method: "eth_chainId", params: [] }, { method: "eth_getTransactionCount", params: [address, "finalized"] },
+      { method: "eth_getTransactionReceipt", params: [transactionHash] }, { method: "eth_getTransactionByHash", params: [transactionHash] },
+    ]);
+    if (evmRpcQuantity(identity) !== BigInt(directEvmChain(chainId))) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+    if (receipt !== null) evmRpcRecord(receipt);
+    if (transaction !== null && evmRpcHex(evmRpcRecord(transaction).hash, 32) !== transactionHash.toLowerCase()) {
+      throw new ApnError("APN_RPC_PROTOCOL", "EVM transaction lookup returned a different hash.");
+    }
+    return { finalizedNonce: evmRpcQuantity(nonce).toString(), receiptFound: receipt !== null, transactionKnown: transaction !== null };
   }
 
   async confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null> {

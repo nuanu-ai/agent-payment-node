@@ -228,6 +228,7 @@ export class TransferService {
     return await this.observation.recoverProviderRequest(operationId, providerRequestId);
   }
   async status(operationId: string): Promise<unknown> { return await this.observation.status(operationId); }
+  async abandonUndispatched(operationId: string): Promise<unknown> { return await this.observation.abandonUndispatched(operationId); }
   async receipt(operationId: string): Promise<unknown> { return await this.observation.receipt(operationId); }
   private async inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord> {
     return await this.observation.inspectReceipt(operation, rpc);

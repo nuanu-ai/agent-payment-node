@@ -191,6 +191,8 @@ if (mode === "verification-race") {
   };
 }
 const beforeKeys = wrapping.loads, beforeSends = physicalSends, beforeSigns = signCalls;
+// A signature sealed but never dispatched is sent once, as its exact bytes read back from custody; nothing is ever signed anew.
+const sealedDispatch = ["lost-response", "generic-started", "restart-crash-signed"].includes(mode) ? 1 : 0;
 const blocked = ["missing-old", "tamper", "custody-change", "before-public", "dispatch-custody-change", "forged-attestation", "clone-wrong-op", "clone-wrong-wallet", "verification-race", "dispatch-verification-race", "old-intent-mutation", "restart-crash-approval-started"].includes(mode);
 for (let repeat = 0; repeat < 2; repeat++) {
   if (blocked) await assert.rejects(core.transfer.resume(id));
@@ -202,9 +204,10 @@ for (let repeat = 0; repeat < 2; repeat++) {
   await core.transfer.status(id);
   await assert.rejects(core.transfer.approve(id), { code: "APN_OPERATION_BLOCKED" });
 }
-assert.equal(wrapping.loads, beforeKeys); assert.equal(physicalSends, beforeSends); assert.equal(signCalls, beforeSigns);
+assert.equal(wrapping.loads, beforeKeys + sealedDispatch); assert.equal(physicalSends, beforeSends + sealedDispatch); assert.equal(signCalls, beforeSigns);
+if (sealedDispatch === 1) assert.equal(keccak256(rpc.submissions.at(-1)!), (await state.findOperation(id))!.transactionHash);
 await assert.rejects(native.request({ requestId: "reject-repeat-signing", version: "apn.native.v1", operation: "directTransfer.approveAndSign", payload: directCustodyPayload((await state.findOperation(id))!) }));
-assert.equal(wrapping.loads, beforeKeys);
+assert.equal(wrapping.loads, beforeKeys + sealedDispatch);
 assert.equal((await state.findOperation(id))!.terminal, false);
 const stored = (await state.findOperation(id))!;
 assert.equal(stored.economics!.nonceAtomic, op.economics!.nonceAtomic);
@@ -221,12 +224,12 @@ else {
   const probe = await native.request(probeRequest);
   assert.deepEqual(Object.keys(probe as object).sort(), ["rawTransactionHash", "transactionHash"]);
 }
-assert.equal(wrapping.loads, beforeKeys);
+assert.equal(wrapping.loads, beforeKeys + sealedDispatch);
 if (!blocked) {
   const publicProof = await new DirectPublicEffectJournal(state).effect(stored);
   assert.deepEqual(Object.keys(publicProof).sort(), ["rawTransactionHash", "transactionHash"]);
 }
 const describe = () => native.request({ requestId: "public-description-test", version: "apn.native.v1", operation: "wallet.describe", payload: { profile: "default" } });
 if (["custody-change", "dispatch-custody-change"].includes(mode)) await assert.rejects(describe()); else await describe();
-assert.equal(wrapping.loads, beforeKeys);
+assert.equal(wrapping.loads, beforeKeys + sealedDispatch);
 console.log("RESULT:"+JSON.stringify({ mode, physicalSends, signCalls, recoveryKeyLoads: wrapping.loads-beforeKeys, recoverySends: physicalSends-beforeSends, recoverySigns: signCalls-beforeSigns, state: stored.state }));

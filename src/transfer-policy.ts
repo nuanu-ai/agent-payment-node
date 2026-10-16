@@ -136,6 +136,14 @@ export function hasExactTransfer(receipt: RpcReceipt, operation: OperationRecord
   );
 }
 
+/** The token's only Transfer out of the sender in this receipt is the exact one, so no fee or extra debit hides beside it. */
+export function hasSoleExactTransfer(receipt: RpcReceipt, operation: OperationRecord): boolean {
+  const senderTopic = addressTopic(operation.walletAddress);
+  const debits = receipt.logs.filter((log) => log.address.toLowerCase() === operation.token.toLowerCase() &&
+    log.topics[0]?.toLowerCase() === TRANSFER_TOPIC && log.topics[1]?.toLowerCase() === senderTopic);
+  return debits.length === 1 && hasExactTransfer({ ...receipt, logs: debits }, operation);
+}
+
 export function publicOperation(operation: OperationRecord): unknown {
   const coinbaseGasless = operation.providerDirect?.coinbaseGasless;
   return {
