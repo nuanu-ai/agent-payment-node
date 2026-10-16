@@ -9,6 +9,7 @@ import {
 } from "./allowlist-inventory.js";
 import {
   allowlistProfileHash,
+  assertStoredAllowlistCompilation,
   canonicalAllowlistAccount,
   isoInstant,
   validateAllowlistAdmission,
@@ -161,15 +162,8 @@ export function validateAllowlistPolicyRecordV2(value: unknown): AllowlistPolicy
   if (domainHash(ALLOWLIST_POLICY_RECORD_SCHEMA_V2, canonicalJson(body)) !== recordDigest) {
     corrupt("Allowlist policy record integrity validation failed.");
   }
-  const overlay = value.overlay;
-  if (!isPlainRecord(overlay) || overlay.schemaVersion !== ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2) corrupt("Allowlist policy overlay schema is invalid.");
-  const { schemaVersion: _schema, profileHash: _profileHash, overlayDigest: _digest, ...input } = overlay;
-  let compiled: ReturnType<typeof compileAllowlistPolicyOverlayV2>;
-  try { compiled = compileAllowlistPolicyOverlayV2(input as unknown as AllowlistPolicyOverlayV2Input); }
-  catch { return corrupt("Allowlist policy record no longer compiles against the frozen inventory."); }
-  if (canonicalJson(compiled.overlay) !== canonicalJson(overlay) || canonicalJson(compiled.registry) !== canonicalJson(value.registry)) {
-    corrupt("Allowlist policy record does not match its frozen inventory compilation.");
-  }
+  // Checked against itself; staging is where the shipped dataset and inventory apply (see assertStoredAllowlistCompilation).
+  assertStoredAllowlistCompilation(ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2, value.overlay, value.registry);
   return value as unknown as AllowlistPolicyRecordV2;
 }
 

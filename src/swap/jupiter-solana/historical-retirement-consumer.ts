@@ -58,7 +58,7 @@ class HistoricalRetirementStore extends SecureStateStore {
   }
   async entries(relativePath: string): Promise<readonly import("node:fs").Dirent[]> {
     await this.guard.check();
-    const value = await this.readDirectory(relativePath);
+    const value = await this.readDirectoryWithStagedWrites(relativePath); // recovery inspects its own staged inode
     await this.pinIfPresent(relativePath);
     await this.guard.check();
     return value;

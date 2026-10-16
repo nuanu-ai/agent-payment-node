@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { loadAllowlistInventory, } from "./allowlist-inventory.js";
-import { allowlistProfileHash, canonicalAllowlistAccount, isoInstant, validateAllowlistAdmission, } from "./allowlist-policy-overlay.js";
+import { allowlistProfileHash, assertStoredAllowlistCompilation, canonicalAllowlistAccount, isoInstant, validateAllowlistAdmission, } from "./allowlist-policy-overlay.js";
 import { ASSET_POLICY_REGISTRY_SCHEMA_V2, sealAssetPolicyRegistry, } from "./asset-policy-registry.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
@@ -87,20 +87,8 @@ export function validateAllowlistPolicyRecordV2(value) {
     if (domainHash(ALLOWLIST_POLICY_RECORD_SCHEMA_V2, canonicalJson(body)) !== recordDigest) {
         corrupt("Allowlist policy record integrity validation failed.");
     }
-    const overlay = value.overlay;
-    if (!isPlainRecord(overlay) || overlay.schemaVersion !== ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2)
-        corrupt("Allowlist policy overlay schema is invalid.");
-    const { schemaVersion: _schema, profileHash: _profileHash, overlayDigest: _digest, ...input } = overlay;
-    let compiled;
-    try {
-        compiled = compileAllowlistPolicyOverlayV2(input);
-    }
-    catch {
-        return corrupt("Allowlist policy record no longer compiles against the frozen inventory.");
-    }
-    if (canonicalJson(compiled.overlay) !== canonicalJson(overlay) || canonicalJson(compiled.registry) !== canonicalJson(value.registry)) {
-        corrupt("Allowlist policy record does not match its frozen inventory compilation.");
-    }
+    // Checked against itself; staging is where the shipped dataset and inventory apply (see assertStoredAllowlistCompilation).
+    assertStoredAllowlistCompilation(ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2, value.overlay, value.registry);
     return value;
 }
 export function sealAllowlistPolicyRecordV2(body) {
