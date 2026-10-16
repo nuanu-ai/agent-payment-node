@@ -1,4 +1,4 @@
-import { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_DEFAULT_LOGICAL_ITEMS, RPC_DEFAULT_HTTP_REQUESTS, RPC_DEFAULT_HTTP_ATTEMPTS, RPC_DEFAULT_DEADLINE_MS, rpcEndpointIdentity, invalidRpcReadMethod, assertRpcReadMethod, approvedTransportReason, parseRetryAfter, telemetryDetails, rpcMethodClass, positiveBound, identity, decodeRpcValue, cloneRpcValue, isSessionCacheable, } from "./rpc-session-helpers.js";
+import { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_DEFAULT_LOGICAL_ITEMS, RPC_DEFAULT_HTTP_REQUESTS, RPC_DEFAULT_HTTP_ATTEMPTS, RPC_DEFAULT_DEADLINE_MS, rpcEndpointIdentity, invalidRpcReadMethod, assertRpcReadMethod, approvedTransportReason, parseRetryAfter, telemetryDetails, rpcMethodClass, positiveBound, identity, decodeRpcValue, cloneRpcValue, isSessionCacheable, jsonRpcRateLimit, } from "./rpc-session-helpers.js";
 export { BridgeRpcPhysicalBudget, BRIDGE_INVOCATION_RPC_POST_LIMIT, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { isDeepStrictEqual } from "node:util";
@@ -261,6 +261,8 @@ export class RpcReadSession {
                     if (provider !== null && [-32600, -32601].includes(provider.code)) {
                         throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", details);
                     }
+                    if (jsonRpcRateLimit(provider))
+                        throw this.rateLimit(details.rpcMethod, undefined, "json_rpc_rate_limit", details.providerCode);
                     throw new ApnError("APN_RPC_PROTOCOL", "Bridge RPC batch contains a JSON-RPC sub-error.", details);
                 }
                 if (!Object.hasOwn(row, "result") || Object.keys(row).some((key) => !["jsonrpc", "id", "result"].includes(key))) {
@@ -395,9 +397,11 @@ export class RpcReadSession {
         this.budgetRejectedBeforeTransport += 1;
         throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC command budget exhausted.", telemetryDetails(this.telemetry(), method, reason));
     }
-    rateLimit(method, retryAfterMs) {
+    rateLimit(method, retryAfterMs, reason = "http_429", providerCode) {
         this.retryAfterMs = retryAfterMs;
-        return new ApnError("APN_RPC_RATE_LIMITED", "Bridge RPC provider requested a cooldown.", telemetryDetails(this.telemetry(), method, "http_429"));
+        return new ApnError("APN_RPC_RATE_LIMITED", "Bridge RPC provider requested a cooldown.", {
+            ...telemetryDetails(this.telemetry(), method, reason), ...(providerCode === undefined ? {} : { providerCode })
+        });
     }
     httpError(error, attempts) {
         return new ApnError("APN_RPC_PROTOCOL", "Bridge validation failed: bridge_RPC_HTTP_status.", { ...telemetryDetails(this.telemetry(), error.method, "http_status"), httpStatus: error.status.toString(), attempts: attempts.toString() });

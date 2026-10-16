@@ -39,7 +39,7 @@ export class BridgeExecution {
             await this.guard(op, op.effects[0].role);
         }
         catch (error) {
-            return budgetExhausted(error) ? op : await this.haltUnsent(op, error);
+            return budgetExhausted(error) ? op : rateLimited(error) ? await this.deferRateLimited(op) : await this.haltUnsent(op, error);
         }
         if (guardedWbtc(op))
             return await withBridgeEffectAuthority(op, this.now, async () => await this.confirmForeground(op, approval), async () => await this.save(op, { state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } }), async (current) => await this.authorityPolicy(current), async (authority, approvedAt) => {
@@ -133,7 +133,7 @@ export class BridgeExecution {
                     await this.guard(op, effect.role);
                 }
                 catch (error) {
-                    return budgetExhausted(error) ? op : await this.haltUnsent(op, error);
+                    return budgetExhausted(error) ? op : rateLimited(error) ? await this.deferRateLimited(op) : await this.haltUnsent(op, error);
                 }
                 // Signing commits an effect; leave room for a fresh guard and its single raw send.
                 if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2)
@@ -142,7 +142,7 @@ export class BridgeExecution {
                     await authority.check(op);
                     await new BridgeEffectClaims(this.state.root).claim(op, effect.role, "sign");
                 }
-                op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "signing_started" }) });
+                op = await this.save(op, { ...clearedRateLimit(op), effects: replaceEffect(op, { ...effect, phase: "signing_started" }) });
                 // The marker is durable before entering custody. A recovered marker only loads its original seal.
                 try {
                     await this.custody.seal(op, effect.role, op.intent.owner, authority?.sign(op, effect.role));
@@ -167,7 +167,7 @@ export class BridgeExecution {
                 await this.guard(op, effect.role);
             }
             catch (error) {
-                return budgetExhausted(error) ? op : await this.haltUnsent(op, error);
+                return budgetExhausted(error) ? op : rateLimited(error) ? await this.deferRateLimited(op) : await this.haltUnsent(op, error);
             }
             // Preserve a sealed effect for a later invocation when its one permitted send cannot fit.
             if (this.physicalBudget?.remaining() === 0)
@@ -176,7 +176,7 @@ export class BridgeExecution {
                 await authority.check(op);
                 await new BridgeEffectClaims(this.state.root).claim(op, effect.role, "send", material);
             }
-            op = await this.save(op, { state: "source_pending", effects: replaceEffect(op, { ...effect, phase: "submitting",
+            op = await this.save(op, { ...clearedRateLimit(op), state: "source_pending", effects: replaceEffect(op, { ...effect, phase: "submitting",
                     submittedAt: new Date(this.now()).toISOString(), submissionAttempts: 1 }) });
             effect = op.effects.find((e) => e.role === effect.role);
             let sent = false;
@@ -231,6 +231,15 @@ export class BridgeExecution {
     allowlist() {
         return new BridgeAllowlistGate({ state: this.state, clock: { now: () => new Date(this.now()) } }, true);
     }
+    /**
+     * A provider rate limit during a guard is transient: nothing is sealed, signed or sent, the operation keeps its state with a
+     * visible reason, and the next resume repeats the full guard, which ends the operation on the normal expiry path once late.
+     */
+    async deferRateLimited(op) {
+        if (op.failure?.reason === BRIDGE_GUARD_RATE_LIMITED || retainedUnsentBridgeRpcFailure(op) !== null)
+            return op;
+        return await this.save(op, { failure: { reason: BRIDGE_GUARD_RATE_LIMITED, residualAllowance: null } });
+    }
     async haltUnsent(op, error, existingReason) {
         const retained = retainedUnsentBridgeRpcFailure(op);
         const reason = retained?.reason ?? existingReason ?? `unsent_${error instanceof ApnError ? error.code.toLowerCase() : "guard_unavailable"}`;
@@ -268,6 +277,13 @@ export class BridgeExecution {
 }
 function budgetExhausted(error) {
     return error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED";
+}
+const BRIDGE_GUARD_RATE_LIMITED = "pre_sign_rpc_rate_limited";
+function rateLimited(error) {
+    return error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED";
+}
+function clearedRateLimit(op) {
+    return op.failure?.reason === BRIDGE_GUARD_RATE_LIMITED ? { failure: null } : {};
 }
 function preSignRpcFailure(error) {
     if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS")

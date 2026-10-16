@@ -393,7 +393,8 @@ Operators must not run a separate synthetic RPC capability preflight before the
 real `bridge prepare`. The prepare command performs the exact chain, deployment,
 configuration and block identity checks that its materialized operation needs.
 HTTP 429 is a typed cooldown (`APN_RPC_RATE_LIMITED`) with a sanitized
-`retryAfterMs`; APN does not retry it. HTTP 408, 5xx and approved transport
+`retryAfterMs`; APN does not retry it. JSON-RPC rate-limit codes (-32005, the
+official Base endpoint's -32007 and -32011, and 429) are typed the same way. HTTP 408, 5xx and approved transport
 timeouts may receive one retry after at least two seconds when the command
 deadline still permits it. Permanent HTTP errors, JSON-RPC errors and malformed
 JSON fail immediately. A command budget or deadline failure is typed and occurs
@@ -1170,6 +1171,15 @@ cap is raised to that step plus four retry POSTs: Base USDC to Arbitrum Across
 sends at POST 24 of 28 (it had been 24 of 24), and its foreground approval step
 fits in 30. Guards, the sign-before-send room check and continuation caps are
 unchanged; an exhausted budget still stops before signing and resumes cleanly.
+
+A provider rate limit during a pre-sign guard is not terminal. Nothing is sealed,
+signed or sent; the operation keeps its state with reason
+`pre_sign_rpc_rate_limited` and `apn operation resume` as next action, and the
+next resume repeats the full guard (an expired quote then ends on the usual
+`failed_after_approval` / `unsent_apn_reprepare_required` path). Deterministic
+refusals (identity, deployment, fee, allowance, nonce, balance) and transport
+ambiguity keep their terminal outcomes. Source, destination and residual
+observation already keep any RPC failure, including rate limits, recoverable.
 
 ## Finite Base to Mega native funding
 
