@@ -37,8 +37,8 @@ function publicPort(batched: boolean, change?: (key: string, data: Buffer) => vo
 }
 test("batched public resolution retains the complete frozen message and full executable byte proof", async () => {
  const ordinary = publicPort(false), batched = publicPort(true);
- const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse);
- const b = await new JupiterV1MaterialResolver(batched.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse);
+ const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
+ const b = await new JupiterV1MaterialResolver(batched.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
  assert.deepEqual(b, a); assert.equal(b.messageHash, m.messageHash);
  assert.deepEqual(b.programPins, m.programPins);
  assert.equal(batched.reads.length, ordinary.reads.length);
@@ -53,8 +53,8 @@ test("batched public resolution retains the complete frozen message and full exe
 test("PublicNode-sized reads preserve all accounts and frozen executable proof without exceeding eight keys", async () => {
  const ordinary = publicPort(false), bounded = publicPort(true);
  const rpc = { ...bounded.rpc, maximumAccountsPerRead: 8 as const };
- const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse);
- const b = await new JupiterV1MaterialResolver(rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse);
+ const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
+ const b = await new JupiterV1MaterialResolver(rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
  assert.deepEqual(b, a);
  const accountReads = bounded.reads.filter(r => r.method === "getMultipleAccounts");
  assert.equal(accountReads.length, 3);
@@ -68,7 +68,7 @@ test("the durable Jupiter RPC forwards the endpoint account-read bound", async t
  assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc("https://api.mainnet-beta.solana.com"), temp.root, "quote").maximumAccountsPerRead, 16);
 });
 test("public ProgramData resolution retains every byte in ten bounded chunks without header-only reads",async()=>{
- const p=publicPort(false),resolved=await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse);
+ const p=publicPort(false),resolved=await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse,m.maximumNativeExpenseLamports);
  const reads=p.reads.filter(r=>r.method==="getAccountInfo");assert.equal(reads.length,10);
  assert.ok(reads.every(r=>{const slice=(r.params[1] as any).dataSlice;return slice.length>45&&slice.length<=1500000;}));
  for(const pin of resolved.programPins.filter(p=>p.programDataAddress!==null)){
@@ -90,17 +90,17 @@ for(const mutation of ["short-first","short-later","changed-owner","changed-lamp
    if(mutation==="stale-first"&&first===1)row.context.slot=1n;
   }return value;
  };
- await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse));
+ await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse,m.maximumNativeExpenseLamports));
  assert.equal(p.reads.some(r=>r.method==="getFeeForMessage"),false);
 });
 test("batched public proof still refuses a changed deployed executable payload", async () => {
  const p = publicPort(true, (key, bytes) => {if (key === m.programPins.find(p => p.programDataAddress !== null)!.programDataAddress) bytes[45] = bytes[45]! ^ 1;});
- await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse), /runtime executable pin changed/);
+ await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports), /runtime executable pin changed/);
  assert.equal(p.reads.some(r => r.method === "getFeeForMessage"), false);
 });
 test("an incomplete public batch refuses before any executable chunk or fee proof", async () => {
  const p = publicPort(true); p.rpc.batch = async () => [];
- await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse), /batch is incomplete/);
+ await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports), /batch is incomplete/);
  assert.deepEqual(p.reads.map(r => r.method), ["getGenesisHash"]);
 });
 const small: readonly SolanaBatchRead[] = [{method: "getBlockHeight", params: []}, {method: "getMinimumBalanceForRentExemption", params: [165]}];

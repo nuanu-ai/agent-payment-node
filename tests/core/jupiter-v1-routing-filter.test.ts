@@ -39,7 +39,7 @@ async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1Ro
  class Resolver extends JupiterV1MaterialResolver {override async resolve():Promise<never>{resolved++;throw selected;}}
  const resolver=new Resolver({originHash:"0".repeat(64),async call(){throw Error("RPC forbidden in discovery test");}});
  const store={async save(){saved++;}} as unknown as SavedJupiterV1MaterialStore;
- const builder=new JupiterV1QuoteBuilder(provider,resolver,store,{resolvePayer:async()=>m.payer,resolveRouteId:async()=>routeId,maximumNativeExpenseLamports:"6000000",computeUnitPriceMicroLamports:1000,proveQuote:async()=>{proof++;throw Error("Proof forbidden in discovery test");}});
+ const builder=new JupiterV1QuoteBuilder(provider,resolver,store,{resolvePayer:async()=>m.payer,resolveRouteId:async()=>routeId,computeUnitPriceMicroLamports:1000,proveQuote:async()=>{proof++;throw Error("Proof forbidden in discovery test");}});
  let error:unknown;try{await builder.quote({command:"swap.jupiter.quote",profile:"TEST-only",account:m.payer,recipient:m.payer,amountAtomic:"1000000",slippageBps:50,ownerSlippageCapBps:50,now:new Date("2026-09-20T00:00:00.000Z")});}catch(e){error=e;}
  for(const url of urls.filter(url=>url.pathname.endsWith("/quote"))){assert.equal(url.origin,"https://api.jup.ag");assert.equal(url.searchParams.get("amount"),"1000000");assert.equal(url.searchParams.get("slippageBps"),"50");assert.equal(url.searchParams.get("dexes"),"Whirlpool");assert.equal(url.searchParams.get("onlyDirectRoutes"),"true");assert.equal(url.searchParams.get("platformFeeBps"),"0");}
  assert.equal(proof,0);assert.equal(saved,0);return {urls,posted,resolved,error};

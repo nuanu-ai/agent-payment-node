@@ -6,6 +6,8 @@ import type { GuardedSwapService } from "../service.js";
 import type { JupiterV1OwnerAdmission } from "./v1-admission.js";
 import { type JupiterV1ExecutionBindingStore, JupiterV1LocalSigner } from "./v1-effects.js";
 import { type SavedJupiterV1MaterialStore } from "./v1-material.js";
+import { type JupiterV1SimulationProof } from "./v1-proof.js";
+import type { JupiterV1ResolvedMaterial } from "./v1-material.js";
 import { type SwapUnlandedProof } from "../unlanded.js";
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export declare class JupiterV1SingleSender {
@@ -18,6 +20,19 @@ export declare class JupiterV1SingleSender {
     constructor(core: GuardedSwapService, materials: SavedJupiterV1MaterialStore, bindings: JupiterV1ExecutionBindingStore, native: JupiterV1LocalSigner, rpc: SolanaRpc, clock: ClockPort);
     sendOnce(operationId: string): Promise<SwapOperationRecord>;
 }
+/** Executable bytes, exact-message simulation and balance deltas proved before the owner's prompt, for the send after it. */
+export interface JupiterV1PreconsentProof {
+    readonly operationId: string;
+    readonly materialDigest: string;
+    readonly fresh: JupiterV1ResolvedMaterial;
+    readonly simulation: JupiterV1SimulationProof;
+}
+/**
+ * Every program-byte, account and simulation check that can fail runs before consent, against the same frozen message.
+ * After the prompt only the lifetime reserve, the local owner re-check, the marker, the signature and the one send remain,
+ * so the frozen blockhash is not spent on bulky public reads after the human typed the code.
+ */
+export declare function proveJupiterV1Preconsent(rpc: SolanaRpc, clock: ClockPort, op: SwapOperationRecord, materialValue: unknown): Promise<JupiterV1PreconsentProof>;
 export interface JupiterV1ExecutionDependencies {
     readonly core: GuardedSwapService;
     readonly materials: SavedJupiterV1MaterialStore;
@@ -27,6 +42,8 @@ export interface JupiterV1ExecutionDependencies {
     readonly sender: JupiterV1SingleSender;
     readonly rpc: SolanaRpc;
     readonly clock: ClockPort;
+    /** Filled by the foreground approval of this process before its prompt; consumed once by the first execution. */
+    readonly preconsent: Map<string, JupiterV1PreconsentProof>;
 }
 export declare class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
     private readonly d;
