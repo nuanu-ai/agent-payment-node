@@ -9,7 +9,8 @@ import { GaslessHttps } from "./https.js";
 import { observeGasless } from "./rpc-observe.js";
 import { rpcAddress, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, recheckBlock } from "./rpc-codec.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "./rpc-state.js";
-import { bundlerGasPrices } from "./rpc-gas-prices.js";
+import { gaslessPostBudget } from "./rpc-budget.js";
+import { assertBundlerFeesCover, bundlerGasPrices } from "./rpc-gas-prices.js";
 import { gaslessDeployment, gaslessIntentAsset, gaslessProtocolHash } from "./registry.js";
 import { GASLESS_ESTIMATE_SIGNATURE, verifyGaslessBootstrap, verifyGaslessUserOperation } from "./signature.js";
 import { assertGaslessExecutionChain, gaslessChain, gaslessFailure } from "./validation.js";
@@ -20,7 +21,6 @@ const RPC_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBala
 const BUNDLER_METHODS = new Set(["eth_chainId", "eth_supportedEntryPoints",
     "eth_estimateUserOperationGas", "eth_sendUserOperation", "eth_getUserOperationReceipt", "eth_getUserOperationByHash"]);
 const MAX_RESPONSE = 2 * 1024 * 1024;
-const MAX_INVOCATION_POSTS = 24;
 const invocation = new AsyncLocalStorage();
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
 export class GaslessRpcRequestSession {
@@ -29,15 +29,18 @@ export class GaslessRpcRequestSession {
     verifiedChains = new Set();
     protocolAnchors = new Map();
     maxBatchItems;
-    constructor(maxBatchItems) {
+    /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
+    maxPosts;
+    constructor(plan, maxBatchItems) {
         if (maxBatchItems !== undefined && (!Number.isSafeInteger(maxBatchItems) || maxBatchItems < 2 || maxBatchItems > 30)) {
             gaslessFailure("APN_INVALID_INPUT", "gasless_RPC_batch_cap");
         }
         this.maxBatchItems = maxBatchItems ?? Number.POSITIVE_INFINITY;
+        this.maxPosts = gaslessPostBudget(plan, this.maxBatchItems);
     }
     reserve() {
         this.assertActive();
-        if (this.posts >= MAX_INVOCATION_POSTS)
+        if (this.posts >= this.maxPosts)
             gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
         this.posts += 1;
     }
@@ -65,13 +68,13 @@ export class GaslessRpcRequestSession {
         return proof;
     }
 }
-/** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
-export async function withGaslessRpcInvocation(work, maxBatchItems) {
-    return await invocation.run(new GaslessRpcRequestSession(maxBatchItems), work);
+/** Wrap a public APN command so a reused RPC factory receives a fresh budget derived from the command's plan. */
+export async function withGaslessRpcInvocation(work, plan, maxBatchItems) {
+    return await invocation.run(new GaslessRpcRequestSession(plan, maxBatchItems), work);
 }
-/** Reuse the public command's budget, or start one for a directly invoked observation port. */
+/** Reuse the public command's budget, or start one observation step for a directly invoked observation port. */
 export async function withinGaslessRpcInvocation(work) {
-    return invocation.getStore() === undefined ? await withGaslessRpcInvocation(work) : await work();
+    return invocation.getStore() === undefined ? await withGaslessRpcInvocation(work, "observe") : await work();
 }
 export function gaslessRpcInvocation() {
     const session = invocation.getStore();
@@ -81,7 +84,7 @@ export function gaslessRpcInvocation() {
 }
 export function gaslessRpcFactory(environment) {
     const cache = new Map(), transport = new GaslessHttps();
-    const fallbackSession = new GaslessRpcRequestSession();
+    const fallbackSession = new GaslessRpcRequestSession("observe");
     return (chainId) => {
         const selected = gaslessChain(chainId, "APN_RPC_CONFIG"), existing = cache.get(selected);
         if (existing !== undefined)
@@ -111,7 +114,7 @@ export class GaslessRpc {
     rpcCall;
     bundlerCall;
     pendingReads = new Map();
-    constructor(chainId, rpcUrl, bundlerUrl, transport = new GaslessHttps(), fallbackSession = new GaslessRpcRequestSession()) {
+    constructor(chainId, rpcUrl, bundlerUrl, transport = new GaslessHttps(), fallbackSession = new GaslessRpcRequestSession("observe")) {
         this.transport = transport;
         this.fallbackSession = fallbackSession;
         this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
@@ -134,9 +137,13 @@ export class GaslessRpc {
         this.validateChain(rpcChain, bundlerChain, supported);
     }
     validateChain(rpcChain, bundlerChain, supported) {
-        if (rpcQuantity(rpcChain) !== BigInt(this.chainId) || rpcQuantity(bundlerChain) !== BigInt(this.chainId)) {
+        if (rpcQuantity(rpcChain) !== BigInt(this.chainId))
             gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
-        }
+        this.validateBundler(bundlerChain, supported);
+    }
+    validateBundler(bundlerChain, supported) {
+        if (rpcQuantity(bundlerChain) !== BigInt(this.chainId))
+            gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
         if (!Array.isArray(supported) || supported.length < 1 || supported.length > 16 ||
             !supported.some((value) => {
                 try {
@@ -174,6 +181,12 @@ export class GaslessRpc {
             allowanceAtomic: account.allowanceAtomic, permitNonceAtomic: account.permitNonceAtomic,
             entryPointNonceAtomic: account.entryPointNonceAtomic, eoaNonceAtomic: account.eoaNonceAtomic,
             pendingEoaNonceAtomic: account.pendingEoaNonceAtomic, delegation: account.delegation, feeConfiguration, ...prices };
+    }
+    async assertSignedFees(fees) {
+        assertGaslessExecutionChain(this.chainId);
+        const [bundlerChain, supported, prices] = await this.bundlerState();
+        this.validateBundler(bundlerChain, supported);
+        assertBundlerFeesCover(prices, fees);
     }
     /** One bounded, read-only HTTP batch; no effect call can enter this batch. */
     async bundlerState() {

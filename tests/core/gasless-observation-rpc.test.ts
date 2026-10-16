@@ -263,7 +263,7 @@ test("explicit observer serializes and spaces calls without retrying an unavaila
   }
 });
 
-test("explicit observation shares the 24 physical POST invocation cap", async t => {
+test("explicit observation shares the 24 physical POST resume invocation cap", async t => {
   const { operation } = await prepared(t, "final", "expected");
   const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
   const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
@@ -272,7 +272,7 @@ test("explicit observation shares the 24 physical POST invocation cap", async t 
     for (let index = 0; index < 24; index += 1) await call("eth_chainId", []);
     await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor), (error: any) =>
       error.code === "APN_RPC_AMBIGUOUS" && error.details?.reason === "gasless_observation_rpc_unavailable");
-  });
+  }, "resume");
   assert.equal(transport.calls.length, 24);
 });
 

@@ -14,7 +14,8 @@ import { observeGasless } from "./rpc-observe.js";
 import { rpcAddress, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, recheckBlock,
   type GaslessRpcCall, type GaslessRpcMethod } from "./rpc-codec.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "./rpc-state.js";
-import { bundlerGasPrices } from "./rpc-gas-prices.js";
+import { gaslessPostBudget, type GaslessInvocationPlan } from "./rpc-budget.js";
+import { assertBundlerFeesCover, bundlerGasPrices } from "./rpc-gas-prices.js";
 import { gaslessDeployment, gaslessIntentAsset, gaslessProtocolHash } from "./registry.js";
 import { GASLESS_ESTIMATE_SIGNATURE, verifyGaslessBootstrap, verifyGaslessUserOperation } from "./signature.js";
 import { assertGaslessExecutionChain, gaslessChain, gaslessFailure } from "./validation.js";
@@ -26,7 +27,6 @@ const RPC_METHODS = new Set<GaslessRpcMethod>(["eth_chainId", "eth_getBlockByNum
 const BUNDLER_METHODS = new Set<GaslessRpcMethod>(["eth_chainId", "eth_supportedEntryPoints",
   "eth_estimateUserOperationGas", "eth_sendUserOperation", "eth_getUserOperationReceipt", "eth_getUserOperationByHash"]);
 const MAX_RESPONSE = 2 * 1024 * 1024;
-const MAX_INVOCATION_POSTS = 24;
 const invocation = new AsyncLocalStorage<GaslessRpcRequestSession>();
 
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
@@ -36,15 +36,18 @@ export class GaslessRpcRequestSession {
   private readonly verifiedChains = new Set<GaslessRpc>();
   private readonly protocolAnchors = new Map<GaslessRpc, { hash: Hex; proof: Promise<void> }>();
   readonly maxBatchItems: number;
-  constructor(maxBatchItems?: number) {
+  /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
+  readonly maxPosts: number;
+  constructor(plan: GaslessInvocationPlan, maxBatchItems?: number) {
     if (maxBatchItems !== undefined && (!Number.isSafeInteger(maxBatchItems) || maxBatchItems < 2 || maxBatchItems > 30)) {
       gaslessFailure("APN_INVALID_INPUT", "gasless_RPC_batch_cap");
     }
     this.maxBatchItems = maxBatchItems ?? Number.POSITIVE_INFINITY;
+    this.maxPosts = gaslessPostBudget(plan, this.maxBatchItems);
   }
   reserve(): void {
     this.assertActive();
-    if (this.posts >= MAX_INVOCATION_POSTS) gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
+    if (this.posts >= this.maxPosts) gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
     this.posts += 1;
   }
   assertActive(): void {
@@ -76,14 +79,15 @@ interface PendingRead {
   readonly reject: (error: unknown) => void;
 }
 
-/** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
-export async function withGaslessRpcInvocation<T>(work: () => Promise<T>, maxBatchItems?: number): Promise<T> {
-  return await invocation.run(new GaslessRpcRequestSession(maxBatchItems), work);
+/** Wrap a public APN command so a reused RPC factory receives a fresh budget derived from the command's plan. */
+export async function withGaslessRpcInvocation<T>(work: () => Promise<T>, plan: GaslessInvocationPlan,
+  maxBatchItems?: number): Promise<T> {
+  return await invocation.run(new GaslessRpcRequestSession(plan, maxBatchItems), work);
 }
 
-/** Reuse the public command's budget, or start one for a directly invoked observation port. */
+/** Reuse the public command's budget, or start one observation step for a directly invoked observation port. */
 export async function withinGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T> {
-  return invocation.getStore() === undefined ? await withGaslessRpcInvocation(work) : await work();
+  return invocation.getStore() === undefined ? await withGaslessRpcInvocation(work, "observe") : await work();
 }
 
 export function gaslessRpcInvocation(): GaslessRpcRequestSession {
@@ -94,7 +98,7 @@ export function gaslessRpcInvocation(): GaslessRpcRequestSession {
 
 export function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>): GaslessRpcFactory {
   const cache = new Map<GaslessChainId, GaslessRpcPort>(), transport = new GaslessHttps();
-  const fallbackSession = new GaslessRpcRequestSession();
+  const fallbackSession = new GaslessRpcRequestSession("observe");
   return (chainId) => {
     const selected = gaslessChain(chainId, "APN_RPC_CONFIG"), existing = cache.get(selected);
     if (existing !== undefined) return existing;
@@ -124,7 +128,7 @@ export class GaslessRpc implements GaslessRpcPort {
 
   constructor(chainId: GaslessChainId, rpcUrl: string, bundlerUrl?: string,
     private readonly transport: GaslessTransport = new GaslessHttps(),
-    private readonly fallbackSession: GaslessRpcRequestSession = new GaslessRpcRequestSession()) {
+    private readonly fallbackSession: GaslessRpcRequestSession = new GaslessRpcRequestSession("observe")) {
     this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
     this.deployment = gaslessDeployment(this.chainId);
     const rpc = endpoint(rpcUrl), bundler = endpoint(bundlerUrl ?? this.deployment.publicBundlerUrl);
@@ -144,9 +148,12 @@ export class GaslessRpc implements GaslessRpcPort {
   }
 
   private validateChain(rpcChain: unknown, bundlerChain: unknown, supported: unknown): void {
-    if (rpcQuantity(rpcChain) !== BigInt(this.chainId) || rpcQuantity(bundlerChain) !== BigInt(this.chainId)) {
-      gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
-    }
+    if (rpcQuantity(rpcChain) !== BigInt(this.chainId)) gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
+    this.validateBundler(bundlerChain, supported);
+  }
+
+  private validateBundler(bundlerChain: unknown, supported: unknown): void {
+    if (rpcQuantity(bundlerChain) !== BigInt(this.chainId)) gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
     if (!Array.isArray(supported) || supported.length < 1 || supported.length > 16 ||
       !supported.some((value) => {
         try { return rpcAddress(value) === this.deployment.entryPoint; } catch { return false; }
@@ -179,6 +186,13 @@ export class GaslessRpc implements GaslessRpcPort {
       allowanceAtomic: account.allowanceAtomic, permitNonceAtomic: account.permitNonceAtomic,
       entryPointNonceAtomic: account.entryPointNonceAtomic, eoaNonceAtomic: account.eoaNonceAtomic,
       pendingEoaNonceAtomic: account.pendingEoaNonceAtomic, delegation: account.delegation, feeConfiguration, ...prices };
+  }
+
+  async assertSignedFees(fees: GaslessFees): Promise<void> {
+    assertGaslessExecutionChain(this.chainId);
+    const [bundlerChain, supported, prices] = await this.bundlerState();
+    this.validateBundler(bundlerChain, supported);
+    assertBundlerFeesCover(prices, fees);
   }
 
   /** One bounded, read-only HTTP batch; no effect call can enter this batch. */

@@ -126,13 +126,24 @@ status are the preparation quote.
 
 A quote above your maximum fee is refused at preparation.
 
-After approval, every check retries a transient failure inside the approval
-window: a quote above your maximum fee, bundler price drift, a rate limit, a
-provider error, an RPC transport failure, or a mirror estimate the bundler
-could not run. A retry waits 5 seconds, takes at most 18 checks, and stops
-while the window still leaves room for the remaining steps. Interrupting the
-command stops the wait at once. A retry never re-signs, never re-discloses and
-never re-sends.
+An approval runs three full guard snapshots: before the approval screen (with
+the throwaway-key mirror estimate), before the bootstrap signature and before
+the UserOperation signature. Only a local signature follows each of the last
+two, so the bootstrap disclosure uses the bootstrap guard's prices and the send
+is preceded by one bundler batch that proves the bundler chain, EntryPoint
+support and that the signed prices still cover its slow tier. A seal from an
+earlier invocation is always guarded by a full snapshot before its disclosure
+or send. The whole approval takes 17 HTTP requests; its request budget is
+derived from these steps plus one more guard's worth of requests for retries.
+
+Every check retries a transient failure inside the approval window while that
+retry allowance still pays for the step: a quote above your maximum fee,
+bundler price drift, a provider error, an RPC transport failure, or a mirror
+estimate the bundler could not run. One guard retry, two mirror retries or four
+pre-send price checks fit. A retry waits 5 seconds and stops while the window
+still leaves room for the remaining steps. Interrupting the command stops the
+wait at once. A retry never re-signs, never re-discloses and never re-sends.
+An HTTP refusal (such as 429) ends the invocation at once.
 
 These refusals are never retried: an expired window, a changed owner binding,
 nonce or paymaster allowance, a balance below the transfer, and a mirror

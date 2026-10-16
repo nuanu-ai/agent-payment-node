@@ -2,6 +2,7 @@ import type { Address, Hex } from "../model.js";
 import { type GaslessTransport } from "./https.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessFees, GaslessGas, GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
 import type { GaslessBootstrapMaterial, GaslessRpcFactory, GaslessRpcPort, GaslessUserOperationMaterial } from "./ports.js";
+import { type GaslessInvocationPlan } from "./rpc-budget.js";
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
 export declare class GaslessRpcRequestSession {
     private posts;
@@ -9,7 +10,9 @@ export declare class GaslessRpcRequestSession {
     private readonly verifiedChains;
     private readonly protocolAnchors;
     readonly maxBatchItems: number;
-    constructor(maxBatchItems?: number);
+    /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
+    readonly maxPosts: number;
+    constructor(plan: GaslessInvocationPlan, maxBatchItems?: number);
     reserve(): void;
     assertActive(): void;
     rejectHttp(status: number): never;
@@ -17,9 +20,9 @@ export declare class GaslessRpcRequestSession {
     verifyChain(rpc: GaslessRpc): void;
     protocolAt(rpc: GaslessRpc, hash: Hex, verify: () => Promise<void>): Promise<void>;
 }
-/** Wrap a public APN command so a reused RPC factory receives a fresh 24-POST budget. */
-export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>, maxBatchItems?: number): Promise<T>;
-/** Reuse the public command's budget, or start one for a directly invoked observation port. */
+/** Wrap a public APN command so a reused RPC factory receives a fresh budget derived from the command's plan. */
+export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>, plan: GaslessInvocationPlan, maxBatchItems?: number): Promise<T>;
+/** Reuse the public command's budget, or start one observation step for a directly invoked observation port. */
 export declare function withinGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T>;
 export declare function gaslessRpcInvocation(): GaslessRpcRequestSession;
 export declare function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>): GaslessRpcFactory;
@@ -41,7 +44,9 @@ export declare class GaslessRpc implements GaslessRpcPort {
     constructor(chainId: GaslessChainId, rpcUrl: string, bundlerUrl?: string, transport?: GaslessTransport, fallbackSession?: GaslessRpcRequestSession);
     assertChain(): Promise<void>;
     private validateChain;
+    private validateBundler;
     snapshot(owner: Address, approvedGas?: GaslessGas): Promise<GaslessSnapshot>;
+    assertSignedFees(fees: GaslessFees): Promise<void>;
     /** One bounded, read-only HTTP batch; no effect call can enter this batch. */
     private bundlerState;
     mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;

@@ -108,7 +108,7 @@ export async function bundledGaslessFixture(root: string) {
   const core = new ApnCore({ state: s.state, gasless: { ...s.dependencies, rpcFor: () => rpc },
     clock: { now: () => new Date(s.now) }, wait: s.wait });
   const execute = core.execute.bind(core);
-  core.execute = async request => await withGaslessRpcInvocation(async () => await execute(request));
+  core.execute = async request => await withGaslessRpcInvocation(async () => await execute(request), "resume");
   return { ...s, core, rpc, calls, estimates, setLimit: (value: number) => { limit = value; },
     setFault: (value: typeof fault) => { fault = value; },
     setBlockHash: (hash: string) => { at.hash = hash; },
