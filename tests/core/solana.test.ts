@@ -21,6 +21,7 @@ import { railAllowlistSubject } from "../../src/rail-direct-allowlist.js";
 import { freezeRelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
+import { ApnError } from "../../src/errors.js";
 
 async function writeDurableSolanaClaim(root: string, s: Awaited<ReturnType<typeof solanaFixture>>,
   input: { readonly profile: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string },
@@ -335,31 +336,48 @@ test("local SOL first submit releases money locks and a concurrent resume does n
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
 });
 
-test("local SOL signed-effect revalidation releases locks and rejects policy drift before send", async (t) => {
+test("local SOL policy drift after sealing is refused before the one send, from local policy alone", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare("sol", "solana-signed-rpc-drift-0001");
   const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
-  let entered!: () => void; const started = new Promise<void>((resolve) => { entered = resolve; });
-  let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
-  const batch = s.rpc.batch.bind(s.rpc);
-  Object.assign(s.rpc, { batch: async (...args: Parameters<typeof batch>) => {
-    if ((await s.core.rails.records.findOperation(id))?.state === "signed_not_submitted") { entered(); await blocked; }
-    return await batch(...args);
-  } });
-  const approving = s.core.rails.approve(id);
-  await started;
-  try {
+  const seal = s.adapter.sealRevalidated!.bind(s.adapter);
+  let readsAtSeal = -1;
+  Object.assign(s.adapter, { sealRevalidated: async (...args: Parameters<typeof seal>) => {
+    const effect = await seal(...args);
     const { policyHash: _old, ...body } = policy;
-    await Promise.race([
-      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => {
-        await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
-      }),
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("signed-effect RPC held money-operation locks")), 2000)),
-    ]);
-  } finally { release(); }
-  assert.equal((await approving as { state: string }).state, "failed_before_effect");
+    await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+    readsAtSeal = s.rpc.calls.length;
+    return effect;
+  } });
+  assert.equal((await s.core.rails.approve(id) as { state: string }).state, "failed_before_effect");
+  assert.equal(s.rpc.calls.length, readsAtSeal, "a signature sealed seconds ago is not re-read from the chain before its send");
   assert.ok(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint));
   assert.equal(s.rpc.submissions.length, 0);
+});
+
+test("local SOL recovered signature stays sealed and resumable when its one revalidation read fails", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
+  const id = await s.prepare("sol", "solana-recovered-read-failure-0001");
+  const persist = s.core.rails.records.persist.bind(s.core.rails.records);
+  let crash = true;
+  Object.assign(s.core.rails.records, { persist: async (record: Parameters<typeof persist>[0]) => {
+    if (crash && record.state === "signed_not_submitted") { crash = false; throw new Error("synthetic crash after custody seal"); }
+    return await persist(record);
+  } });
+  await assert.rejects(s.core.rails.approve(id), /synthetic crash/);
+  Object.assign(s.core.rails.records, { persist });
+  const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
+  const batch = s.rpc.batch.bind(s.rpc);
+  let fail = true;
+  Object.assign(s.rpc, { batch: async (...args: Parameters<typeof batch>) => {
+    if (fail) { fail = false; throw new ApnError("APN_RPC_RATE_LIMITED", "synthetic provider cooldown"); }
+    return await batch(...args);
+  } });
+  await assert.rejects(restarted.core.rails.resume(id), { code: "APN_RPC_RATE_LIMITED" });
+  assert.equal((await s.core.rails.records.findOperation(id))!.state, "signed_not_submitted", "a failed read proves nothing about the sealed bytes");
+  assert.equal(s.rpc.submissions.length, 0);
+  assert.equal((await restarted.core.rails.resume(id) as { state: string }).state, "completed");
+  assert.equal(s.rpc.submissions.length, 1);
 });
 
 test("local SOL resumes a sealed effect after crash before the signed journal without signing twice", async (t) => {

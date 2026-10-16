@@ -68,8 +68,8 @@ export class DirectPublicEffectJournal extends SecureStateStore {
         await this.assertCustody(operation, custody);
         return value.binding;
     }
+    /** One custody read: the public wallet and provider binding and the encrypted envelope's identity, all against the frozen custody. */
     async assertCustody(operation, custody) {
-        await assertEvmNativeCustody(this.state, operation.profile, custody);
         const envelope = await this.state.loadEncryptedWalletEnvelope(operation.profile);
         if (envelope === null)
             missing();
@@ -194,15 +194,10 @@ export class DirectPublicEffectJournal extends SecureStateStore {
         }
     }
     async attestationMessage(operation, effect) {
-        const binding = await this.prepared(operation);
-        const body = { domain: "APN_DIRECT_PUBLIC_EFFECT_PROOF_V1", binding, chainId: operation.chainId,
-            nonceAtomic: operation.economics?.nonceAtomic, transactionHash: effect.transactionHash, rawTransactionHash: effect.rawTransactionHash };
-        const message = canonicalJson(body);
-        if (Buffer.byteLength(message, "utf8") > 4096 || operation.economics === undefined)
-            corrupt();
-        return message;
+        return attestationMessage(operation, effect, await this.prepared(operation));
     }
-    async verifyAttestation(operation, effect, signature) {
+    /** The caller verified `binding` under the locks it still holds; nothing is re-read after the signature check. */
+    async verifyAttestation(operation, effect, signature, binding) {
         if (typeof signature !== "string" || !/^0x[a-f0-9]{130}$/u.test(signature))
             corrupt();
         const s = BigInt(`0x${signature.slice(66, 130)}`), v = signature.slice(130);
@@ -210,15 +205,13 @@ export class DirectPublicEffectJournal extends SecureStateStore {
             corrupt();
         let recovered;
         try {
-            recovered = await recoverMessageAddress({ message: await this.attestationMessage(operation, effect), signature: signature });
+            recovered = await recoverMessageAddress({ message: attestationMessage(operation, effect, binding), signature: signature });
         }
         catch {
             corrupt();
         }
         if (recovered.toLowerCase() !== operation.walletAddress.toLowerCase())
             corrupt();
-        // Crypto is asynchronous. Re-read authoritative public material and custody after it resolves.
-        await this.prepared(operation);
     }
     async publish(operation, effect, attestation) {
         if (await this.readJson(this.path(operation, "no-private-entry")) !== null)
@@ -226,7 +219,7 @@ export class DirectPublicEffectJournal extends SecureStateStore {
         const binding = await this.prepared(operation);
         if (effect.payloadHash !== binding.payloadHash || effect.transactionHash !== effect.rawTransactionHash)
             corrupt();
-        await this.verifyAttestation(operation, effect, attestation);
+        await this.verifyAttestation(operation, effect, attestation, binding);
         if (await this.readJson(this.path(operation, "no-private-entry")) !== null)
             noPrivateBlocked();
         const body = { schemaVersion: "apn.direct-public-signed.v1", binding, attestation, transactionHash: effect.transactionHash, rawTransactionHash: effect.rawTransactionHash };
@@ -247,10 +240,18 @@ export class DirectPublicEffectJournal extends SecureStateStore {
             operation.rawTransactionHash !== undefined && operation.rawTransactionHash !== value.rawTransactionHash)
             corrupt();
         const effect = { transactionHash: value.transactionHash, rawTransactionHash: value.rawTransactionHash };
-        await this.verifyAttestation(operation, effect, value.attestation);
+        await this.verifyAttestation(operation, effect, value.attestation, binding);
         return Object.freeze(effect);
     }
     async hasSigned(operation) { return await this.readJson(this.path(operation, "signed")) !== null; }
+}
+function attestationMessage(operation, effect, binding) {
+    const body = { domain: "APN_DIRECT_PUBLIC_EFFECT_PROOF_V1", binding, chainId: operation.chainId,
+        nonceAtomic: operation.economics?.nonceAtomic, transactionHash: effect.transactionHash, rawTransactionHash: effect.rawTransactionHash };
+    const message = canonicalJson(body);
+    if (Buffer.byteLength(message, "utf8") > 4096 || operation.economics === undefined)
+        corrupt();
+    return message;
 }
 function missing() { throw new ApnError("APN_OPERATION_BLOCKED", "Public direct effect evidence is missing; retain this operation for manual resolution.", { reason: "direct_public_evidence_missing" }); }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "Public direct effect evidence does not bind the saved operation."); }

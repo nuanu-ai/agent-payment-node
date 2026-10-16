@@ -1,15 +1,27 @@
 import { ApnError } from "./errors.js";
-import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, recheckEvmBlock } from "./evm-rpc-codec.js";
+import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "./evm-rpc-codec.js";
 import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
-export async function observeEvmTransfer(call, operation, receipt) {
+/**
+ * One POST after the receipt: the receipt's block by number (canonical at this node), the transaction, and the safe
+ * head where finality is `safe`. Nothing is re-read around them: the block hash binds the receipt, the safe head only
+ * has to have reached it, and a reorg seen by a later observation simply yields no completion here.
+ */
+export async function observeEvmTransfer(read, operation, receipt) {
     const binding = operation.evm;
     if (binding === undefined || operation.transactionHash === undefined || operation.economics === undefined || receipt.blockHash === undefined) {
         throw new ApnError("APN_RPC_PROTOCOL", "Generic transfer evidence requires its frozen transaction and receipt block.");
     }
-    const block = await evmRpcBlock(call, `0x${BigInt(receipt.blockNumberAtomic).toString(16)}`);
+    const safeRequired = directEvmRequiresSafeHead(operation.chainId);
+    const tag = `0x${BigInt(receipt.blockNumberAtomic).toString(16)}`;
+    const values = await read([
+        { method: "eth_getBlockByNumber", params: [tag, false] },
+        { method: "eth_getTransactionByHash", params: [operation.transactionHash] },
+        ...(safeRequired ? [{ method: "eth_getBlockByNumber", params: ["safe", false] }] : []),
+    ]);
+    const block = evmRpcBlockResult(values[0], tag);
     if (block.hash !== receipt.blockHash)
         throw new ApnError("APN_RPC_PROTOCOL", "Transfer receipt is not on the observed canonical block.", { reason: "evm_block_identity_changed" });
-    const safe = directEvmRequiresSafeHead(operation.chainId) ? await evmRpcBlock(call, "safe") : undefined;
+    const safe = safeRequired ? evmRpcBlockResult(values[2], "safe") : undefined;
     if (safe !== undefined && BigInt(safe.number) < BigInt(block.number)) {
         throw new ApnError("APN_RPC_PROTOCOL", "The receipt has not reached the selected RPC canonical safe head.", { reason: "evm_safe_head_lag" });
     }
@@ -17,17 +29,7 @@ export async function observeEvmTransfer(call, operation, receipt) {
         throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC safe head conflicts with the receipt block.", { reason: "evm_block_identity_changed" });
     }
     const safeEvidence = safe === undefined ? {} : { safeBlockNumberAtomic: safe.number, safeBlockHash: safe.hash };
-    const recheck = async () => {
-        await recheckEvmBlock(call, block);
-        if (safe !== undefined) {
-            await recheckEvmBlock(call, safe);
-            const current = await evmRpcBlock(call, "safe");
-            if (BigInt(current.number) < BigInt(safe.number) || (current.number === safe.number && current.hash !== safe.hash)) {
-                throw new ApnError("APN_RPC_PROTOCOL", "Safe-head evidence changed during receipt verification.", { reason: "evm_block_identity_changed" });
-            }
-        }
-    };
-    const transaction = evmRpcRecord(await call("eth_getTransactionByHash", [operation.transactionHash]));
+    const transaction = evmRpcRecord(values[1]);
     const transactionVerified = evmRpcHex(transaction.hash, 32) === operation.transactionHash.toLowerCase() &&
         evmRpcHex(transaction.blockHash, 32) === block.hash && evmRpcQuantity(transaction.blockNumber).toString() === block.number &&
         evmRpcQuantity(transaction.chainId) === BigInt(operation.chainId) && evmRpcAddress(transaction.from) === operation.walletAddress &&
@@ -40,7 +42,6 @@ export async function observeEvmTransfer(call, operation, receipt) {
         evmRpcQuantity(transaction.nonce).toString() === operation.economics.nonceAtomic;
     // The exact Transfer log in this transaction's own receipt proves a token transfer; no historical balance read is needed,
     // so keyless RPCs without archive state can complete it and other same-block transfers of a busy address cannot mask it.
-    await recheck();
     return { ...safeEvidence, blockHash: block.hash, transactionVerified, tokenBalanceDeltasVerified: false };
 }
 //# sourceMappingURL=evm-transfer-evidence.js.map

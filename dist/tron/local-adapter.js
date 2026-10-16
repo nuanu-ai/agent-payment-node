@@ -155,11 +155,13 @@ export class TronLocalAdapter {
         if (BigInt(this.now().getTime()) + 10000n >= atomic(snapshot.expirationMsAtomic))
             tronReprepare();
     }
+    /** The lifecycle revalidated immediately before calling this; signing reads no chain state of its own. */
     async sign(binding) {
         const previous = await this.recoverEffect(binding);
         if (previous !== null)
             return previous;
-        await this.revalidate(binding.account, binding.prepared);
+        if (this.now().getTime() + 10_000 >= Date.parse(binding.prepared.expiresAt))
+            tronReprepare();
         const effect = await this.storage.withSeed(binding.account, async (seed) => {
             const transaction = signTronTransaction(binding.prepared, seed);
             const rawPayload = canonicalJson(transaction);
@@ -182,8 +184,8 @@ export class TronLocalAdapter {
         const stored = await this.recoverEffect(binding);
         if (stored === null || canonicalJson(stored) !== canonicalJson(effect))
             mismatch();
+        // The lifecycle's one revalidation already ran for this send; TRON itself refuses an expired or unfunded transaction.
         const transaction = validateTronEffect(binding.prepared, effect);
-        await this.revalidate(binding.account, binding.prepared);
         const result = tronRecord(await this.rpc.call("wallet/broadcasttransaction", transaction));
         if (result.result !== true || result.txid !== effect.transactionId)
             throw new ApnError("APN_RPC_AMBIGUOUS", "TRON did not acknowledge the exact frozen transaction identity.");

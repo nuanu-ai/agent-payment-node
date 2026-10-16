@@ -6,9 +6,9 @@ import { APPROVAL_WINDOW_MS, STATE_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { EVM_NETWORKS, evmAmount, evmDecimals, evmUint, type EvmAssetSelection, type EvmChainId } from "./evm-asset.js";
-import { directEvmListRows, directEvmNetwork, type DirectEvmChainId } from "./evm-direct-networks.js";
+import { directEvmNetwork, type DirectEvmChainId } from "./evm-direct-networks.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
-import { evmDirectFingerprint, evmTransaction, requireEvmFunding, requireEvmRpc, type EvmDirectBinding } from "./evm-direct.js";
+import { armDirectEvmStep, evmDirectFingerprint, evmTransaction, requireDirectEvmReads, requireEvmFunding, type EvmDirectBinding } from "./evm-direct.js";
 import type { OperationRecord } from "./model.js";
 import type { OperationService } from "./operation-service.js";
 import type { FeeEstimate } from "./ports.js";
@@ -45,24 +45,6 @@ export async function prepareEvmTransfer(
   const listed = listedEvmAsset(request.asset.chainId, request.asset.token,
     request.asset.decimals === undefined ? undefined : evmDecimals(request.asset.decimals));
   const selection: EvmAssetSelection = listed.selection;
-  const ethereumUsdc = selection.chainId === 1 && directEvmListRows(1).some((row) =>
-    row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6);
-  const ethereumWeth = selection.chainId === 1 && directEvmListRows(1).some((row) =>
-    row.kind === "token" && row.symbol === "WETH" && row.identifier === selection.token && row.decimals === 18);
-  const baseWeth = selection.chainId === 8453 && directEvmListRows(8453).some((row) =>
-    row.kind === "token" && row.symbol === "WETH" && row.identifier === selection.token && row.decimals === 18);
-  const baseUsdc = selection.chainId === 8453 && directEvmListRows(8453).some((row) =>
-    row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6);
-  const arbitrumUsdt0 = selection.chainId === 42161 && directEvmListRows(42161).some((row) =>
-    row.kind === "token" && row.symbol === "USDT0" && row.identifier === selection.token && row.decimals === 6);
-  const arbitrumUsdc = selection.chainId === 42161 && directEvmListRows(42161).some((row) =>
-    row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6);
-  if (request.batchRpcReads && !(((selection.chainId === 1 || selection.chainId === 59144 || selection.chainId === 56 || selection.chainId === 8453 || selection.chainId === 42161 || selection.chainId === 1329) && selection.token === "native") ||
-      ethereumUsdc || ethereumWeth || baseWeth || baseUsdc || arbitrumUsdt0 || arbitrumUsdc || ((selection.chainId === 130 || selection.chainId === 137) &&
-        (selection.chainId === 130 && selection.token === "native" || directEvmListRows(selection.chainId).some((row) =>
-          row.kind === "token" && row.symbol === "USDC" && row.identifier === selection.token && row.decimals === 6))))) {
-    throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require Ethereum native, canonical USDC or WETH, Base USDC, WETH or native, Arbitrum USDC, USD₮0 or native, BNB, Linea or Sei native, Unichain native or USDC, or Polygon USDC.");
-  }
   const maximumFeeWei = evmUint(request.maxFeeWei, true).toString();
   const priorityFeeWei = request.priorityFeeWei === undefined ? undefined : evmUint(request.priorityFeeWei).toString();
   if (priorityFeeWei !== undefined && directEvmNetwork(selection.chainId).feeModel === "arbitrum-inclusive") {
@@ -95,17 +77,9 @@ export async function prepareEvmTransfer(
       chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
       asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
     const rpcPort = context.requireRpc();
-    if (selection.chainId === 1 || selection.chainId === 56 || selection.chainId === 8453 || selection.chainId === 42161 || selection.chainId === 1329) rpcPort.armEvmDirectRpcGuard?.();
-    const rpc = requireEvmRpc(rpcPort);
-    const ethereumNative = selection.chainId === 1 && selection.token === "native";
-    const baseNative = selection.chainId === 8453 && selection.token === "native";
-    const arbitrumNative = selection.chainId === 42161 && selection.token === "native";
-    const seiNative = selection.chainId === 1329 && selection.token === "native";
-    const grouped = request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || baseUsdc || arbitrumUsdt0 || arbitrumUsdc || baseNative || arbitrumNative || seiNative || selection.chainId === 56 ? (ethereumNative ? rpc.prepareEthereumNative?.() : ethereumUsdc ? rpc.prepareEthereumUsdc?.() : ethereumWeth ? rpc.prepareEthereumWeth?.() : baseWeth ? rpc.prepareBaseWeth?.() : baseUsdc ? rpc.prepareBaseUsdc?.() : arbitrumUsdt0 ? rpc.prepareArbitrumUsdt0?.() : arbitrumUsdc ? rpc.prepareArbitrumUsdc?.() : baseNative ? rpc.prepareBaseNative?.() : arbitrumNative ? rpc.prepareArbitrumNative?.() : seiNative ? rpc.prepareSeiNative?.() : selection.chainId === 56 ? rpc.prepareBnbNative?.() : selection.chainId === 130
-      ? (selection.token === "native" ? rpc.prepareUnichainNative?.() : rpc.prepareUnichainUsdc?.())
-      : selection.chainId === 137 ? rpc.preparePolygonUsdc?.() : rpc.prepareLineaNative?.()) : undefined;
-    if ((request.batchRpcReads || ethereumNative || ethereumUsdc || ethereumWeth || baseWeth || baseUsdc || arbitrumUsdt0 || arbitrumUsdc || baseNative || arbitrumNative || seiNative || selection.chainId === 56) && grouped === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
-    const balance = await (grouped ?? rpc).balance(wallet.address, { ...selection, decimals: listed.decimals });
+    armDirectEvmStep(rpcPort, selection.chainId, "prepare");
+    const reads = requireDirectEvmReads(rpcPort, selection.chainId);
+    const balance = await reads.balance(wallet.address, { ...selection, decimals: listed.decimals });
     if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
         (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
       throw new ApnError("APN_ASSET_MISMATCH", "Balance does not belong to the exact selected wallet, network and asset.");
@@ -113,13 +87,11 @@ export async function prepareEvmTransfer(
     // An amount above the balance is an economic refusal before any gas estimate, which would fail on the same shortfall.
     if (evmUint(balance.assetAtomic) < BigInt(amount.atomic)) throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
     const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
-    const { nonce: rpcNonce, estimated } = grouped === undefined
-      ? await Promise.all([rpc.nonce(selection.chainId, wallet.address, "pending"), rpc.estimate(transaction)]).then(([nonce, fee]) => ({ nonce, estimated: fee }))
-      : await grouped.nonceEstimate(wallet.address, transaction);
+    const { nonce: rpcNonce, estimated } = await reads.nonceEstimate(wallet.address, transaction);
     let nonce = BigInt(rpcNonce); if (selection.chainId === 1) { const owned = new Set((await occupiedUniswapTokenNonces(state.root, wallet.address)).map(String));
       while (owned.has(nonce.toString())) nonce += 1n; }
     const economics = validateEconomics(nonce.toString(), priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
-    const quote = grouped === undefined ? await rpc.feeQuote(selection.chainId, economics) : await grouped.feeQuote(economics);
+    const quote = await reads.feeQuote(economics);
     requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
     const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
     const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();

@@ -284,7 +284,8 @@ export class RailOperationService {
                 await this.lifecycle.revalidate(operation, adapter);
                 await approval.approve({ account: operation.account, operationId, fingerprint: operation.fingerprint, policyHash: operation.policyHash,
                     prepared: operation.prepared, allowlist: claim.allowlist });
-                await this.lifecycle.revalidate(operation, adapter);
+                // Drift during the prompt is refused here without RPC; the send guard below re-reads the chain with a fresh reference.
+                await this.lifecycle.assertCurrentRailPolicy(operation);
             }
             catch (error) {
                 await this.failApprovalClaim(operation, claim, claims, "approval_or_pre_effect_validation_refused");

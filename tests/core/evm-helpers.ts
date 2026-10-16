@@ -55,89 +55,12 @@ export class EvmTestRpc extends TestRpc {
   receiptStatus: "success" | "reverted" = "success";
   broadcastCount = 0;
   readonly evm: EvmRpcPort = {
-    ethereumNativeFundingReads: () => this.evm.prepareEthereumNative!(),
-    ethereumUsdcFundingReads: () => this.evm.prepareEthereumUsdc!(),
-    ethereumWethFundingReads: () => this.evm.prepareEthereumWeth!(),
-    baseWethFundingReads: () => this.evm.prepareBaseWeth!(),
-    baseUsdcFundingReads: () => this.evm.prepareBaseUsdc!(),
-    arbitrumUsdt0FundingReads: () => this.evm.prepareArbitrumUsdt0!(),
-    arbitrumUsdcFundingReads: () => this.evm.prepareArbitrumUsdc!(),
-    prepareEthereumUsdc: () => ({
+    directReads: (chainId) => ({
       balance: (address, selection) => this.evm.balance(address, selection),
       nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(1, address, "pending"), estimated: await this.evm.estimate(transaction),
+        nonce: await this.evm.nonce(chainId, address, "pending"), estimated: await this.evm.estimate(transaction),
       }),
-      feeQuote: economics => this.evm.feeQuote(1, economics),
-    }),
-    prepareEthereumWeth: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(1, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(1, economics),
-    }),
-    prepareBaseWeth: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(8453, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(8453, economics),
-    }),
-    prepareBaseUsdc: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(8453, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(8453, economics),
-    }),
-    prepareArbitrumUsdt0: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(42161, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(42161, economics),
-    }),
-    prepareArbitrumUsdc: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(42161, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(42161, economics),
-    }),
-    prepareEthereumNative: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(1, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(1, economics),
-    }),
-    prepareBaseNative: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(8453, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(8453, economics),
-    }),
-    prepareArbitrumNative: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(42161, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(42161, economics),
-    }),
-    prepareBnbNative: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(56, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(56, economics),
-    }),
-    prepareSeiNative: () => ({
-      balance: (address, selection) => this.evm.balance(address, selection),
-      nonceEstimate: async (address, transaction) => ({
-        nonce: await this.evm.nonce(1329, address, "pending"), estimated: await this.evm.estimate(transaction),
-      }),
-      feeQuote: economics => this.evm.feeQuote(1329, economics),
+      feeQuote: economics => this.evm.feeQuote(chainId, economics),
     }),
     assertChain: async (chainId) => { if (chainId !== this.chainId) throw new ApnError("APN_CHAIN_MISMATCH", "Wrong selected chain."); },
     balance: async (address, selection) => {
@@ -170,7 +93,7 @@ export class EvmTestRpc extends TestRpc {
     confirmedAtNonce: async () => this.confirmedAtNonce,
   };
   async seiNativeBalance(address: Address, selection: Parameters<EvmRpcPort["balance"]>[1]) {
-    return await this.evm.prepareSeiNative!().balance(address, selection);
+    return await this.evm.directReads!(1329).balance(address, selection);
   }
   sender: Address = RECIPIENT;
 
