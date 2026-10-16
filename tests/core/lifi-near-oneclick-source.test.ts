@@ -127,14 +127,17 @@ test("provider status binds the live quote shape despite a different outer corre
   }
 });
 
-test("post approval permits bounded L1 oracle movement but rejects nonce, gas, fee and cap drift", () => {
+test("post approval permits bounded L1 oracle movement and base-fee ticks inside the signed cap but rejects nonce, gas, fee and cap drift", () => {
   const initial = { nonce: 141n, gas: 75572n, fee: 11000000n, tip: 1000000n };
-  const fresh = { ...initial, nativeDebit: 851597280174n };
+  const fresh = { nonce: initial.nonce, gas: initial.gas, baseFee: 5000000n, nativeDebit: 851597280174n };
   const deadline = now + 120000;
   assert.doesNotThrow(() => assertOneClickPostApproval(initial, fresh, 20000000000000n, deadline, now));
+  // A one-wei tick (or any base fee the signed max fee still covers with the signed tip) never aborts after consent.
+  assert.doesNotThrow(() => assertOneClickPostApproval(initial, { ...fresh, baseFee: 5000001n }, 20000000000000n, deadline, now));
+  assert.doesNotThrow(() => assertOneClickPostApproval(initial, { ...fresh, baseFee: 10000000n }, 20000000000000n, deadline, now));
   assert.throws(() => assertOneClickPostApproval(initial, { ...fresh, nonce: 142n }, 20000000000000n, deadline, now));
   assert.throws(() => assertOneClickPostApproval(initial, { ...fresh, gas: 75573n }, 20000000000000n, deadline, now));
-  assert.throws(() => assertOneClickPostApproval(initial, { ...fresh, fee: 11000001n }, 20000000000000n, deadline, now));
+  assert.throws(() => assertOneClickPostApproval(initial, { ...fresh, baseFee: 10000001n }, 20000000000000n, deadline, now));
   assert.throws(() => assertOneClickPostApproval(initial, fresh, 850018837265n, deadline, now));
   assert.throws(() => assertOneClickPostApproval(initial, fresh, 20000000000000n, deadline, deadline - 20000));
 });

@@ -1,6 +1,7 @@
 import { SecureStateStore } from "../secure-state-store.js";
 import { type Hex } from "viem";
 import { type OneClickLane, type OneClickLaneId } from "./near-oneclick-lanes.js";
+import type { OneClickDestinationProof } from "./near-oneclick-destination.js";
 export interface OneClickSourceRecord {
     readonly schemaVersion: "apn.oneclick-source.v1" | "apn.oneclick-source.v2" | "apn.oneclick-source.v3";
     /** Present only in v3. v1 and v2 records are the legacy Base USDC to TRON USDT lane. */
@@ -37,7 +38,8 @@ export interface OneClickSourceRecord {
     readonly submissionAttempts: 0 | 1;
     readonly sourceReceiptStatus: "success" | "reverted" | null;
     readonly sourceReceiptHash: string | null;
-    readonly destinationStatus: null;
+    /** The finalized destination proof once status proved it after a successful safe source receipt; it ends the operation. */
+    readonly destinationStatus: OneClickDestinationProof | null;
     readonly updatedAt: string;
     readonly integrityHash: string;
 }
@@ -54,5 +56,16 @@ export declare class OneClickSourceJournal extends SecureStateStore {
     stage(body: Omit<OneClickSourceRecord, "schemaVersion" | "phase" | "rawTransaction" | "transactionHash" | "submissionAttempts" | "sourceReceiptStatus" | "sourceReceiptHash" | "destinationStatus" | "updatedAt" | "integrityHash"> & {
         readonly lane: OneClickLaneId;
     }): Promise<OneClickSourceRecord>;
-    advance(id: string, expectedHash: string, phase: OneClickSourceRecord["phase"], changes?: Partial<OneClickSourceRecord>): Promise<OneClickSourceRecord>;
+    /** The operation that sealed a transaction at this payer nonce, if any. */
+    nonceHolder(lane: OneClickLane, profileHash: string, payer: string, nonce: bigint): Promise<{
+        operationId: string;
+        transactionHash: Hex;
+    } | null>;
+    /** Stores the finalized destination proof once; later status answers come from the journal. */
+    recordDestination(id: string, expectedHash: string, proof: OneClickDestinationProof): Promise<OneClickSourceRecord>;
+    /**
+     * `releasedReservation` names an earlier operation whose nonce reservation the caller proved dead before consent: its
+     * deadline passed and the chain does not know its hash. At most one of the two signed transactions can use the nonce.
+     */
+    advance(id: string, expectedHash: string, phase: OneClickSourceRecord["phase"], changes?: Partial<OneClickSourceRecord>, releasedReservation?: string): Promise<OneClickSourceRecord>;
 }
