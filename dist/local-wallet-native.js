@@ -396,7 +396,7 @@ export class LocalWalletNative {
         if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
             hashObject(directCustodyPayload(frozen)) !== hashObject(payload))
             throw protocol("Native request differs from its saved fresh operation.");
-        await journal.prepared(frozen);
+        // beginSigning proves the prepared binding and custody itself; nothing else needs them first.
         if (await journal.hasSigned(frozen))
             throw protocol("A signed direct effect cannot be approved or recovered through signing.");
         const attempt = await journal.beginSigning(frozen);

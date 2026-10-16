@@ -4,6 +4,7 @@ import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { evmUint, validateEvmAmount, validateEvmAsset } from "./evm-asset.js";
 import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel } from "./evm-direct-networks.js";
+import { directEvmStepBudget } from "./evm-direct-reads.js";
 import { canonicalAddress } from "./wallet-policy.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { validateEvmNativeCustody } from "./evm-native-custody.js";
@@ -12,6 +13,17 @@ export function requireEvmRpc(rpc) {
     if (rpc.evm === undefined)
         throw new ApnError("APN_RPC_CONFIG", "RPC adapter does not implement explicit EVM assets.");
     return rpc.evm;
+}
+/** The one batched reader every direct EVM transfer uses on every listed network; there is no scalar or per-lane variant. */
+export function requireDirectEvmReads(rpc, chainId) {
+    const reads = requireEvmRpc(rpc).directReads?.(chainId);
+    if (reads === undefined)
+        throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched direct reads.");
+    return reads;
+}
+/** Arm the command's POST cap from the step's own read plan; every listed network is capped and paced the same way. */
+export function armDirectEvmStep(rpc, chainId, step) {
+    rpc.armEvmDirectRpcGuard?.(directEvmStepBudget(chainId, step));
 }
 export function evmTransaction(asset, from, recipient, amountAtomic) {
     evmUint(amountAtomic, true);

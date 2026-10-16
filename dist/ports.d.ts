@@ -161,8 +161,8 @@ export interface X402RpcPort {
 }
 export interface RpcPort {
     /** Arm the command-scoped public BNB transport cap before any direct BNB network read. */
-    armBnbDirectRpcGuard?(): void;
-    armEvmDirectRpcGuard?(): void;
+    /** Arms this command's physical POST cap; a direct EVM step passes the cap derived from its read plan. */
+    armEvmDirectRpcGuard?(maxPhysicalRequests?: number): void;
     /** Command-scoped, bounded public read for native Sei balance. */
     seiNativeBalance?(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
     forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;

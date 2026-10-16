@@ -74,16 +74,18 @@ export class SolanaLocalAdapter implements DirectRailPort {
     if (send !== null && sha256(message.unsignedPayload) !== send.simulation.payloadHash) mismatch();
     if (this.now().getTime() >= Date.parse(prepared.expiresAt)) expired();
     const addresses = await transferAddresses(account, prepared.asset, prepared.recipient);
+    // Before the send guard the rent of a frozen recipient-account creation is read in the same batch.
+    const rentRead = send === null && prepared.createsRecipientAccount;
     const reads = [{ method: "getGenesisHash" as const, params: [] },
       ...(send === null ? [] : [{ method: "getBlockHeight" as const, params: [{ commitment: "confirmed" }] }]),
+      ...(rentRead ? [{ method: "getMinimumBalanceForRentExemption" as const, params: [165, { commitment: "confirmed" }] }] : []),
       accountRead(addresses)];
     const values = await solanaReadBatch(this.rpc, reads);
     assertSolanaNetworkValue(values[0]);
     if (send !== null) this.validBlockValue(prepared, send, values[1]);
     const snapshot = transferSnapshotValue(values[values.length - 1], addresses, account, prepared.asset, prepared.recipient);
     if (snapshot.createsRecipientAccount && !prepared.createsRecipientAccount) expired();
-    const rent = snapshot.createsRecipientAccount && send === null
-      ? rpcAtomic(await this.rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }])) : 0n;
+    const rent = snapshot.createsRecipientAccount && rentRead ? rpcAtomic(values[1]) : 0n;
     // A reference the network has already forgotten cannot be priced at all: getFeeForMessage answers null for it.
     // Before the send guard runs, that says nothing about this transfer, because the guard prices the reference it
     // acquires and nothing can be sealed without its binding. Pricing the frozen message here would put the owner's
@@ -124,11 +126,8 @@ export class SolanaLocalAdapter implements DirectRailPort {
     const simulation = await simulateSolanaSend(this.rpc, message.unsignedPayload);
     return validateRailSendBinding({ ...candidate, simulation }, prepared);
   }
+  /** The lifecycle revalidated immediately before calling this; sealing re-proves only the simulated bytes, never the chain. */
   async sign(binding: RailEffectBinding): Promise<RailSignedEffect> {
-    const existing = await this.recoverEffect(binding);
-    if (existing !== null) return existing;
-    if (binding.send === null) mismatch();
-    await this.revalidate(binding.account, binding.prepared, binding.send);
     return await this.sealRevalidated(binding);
   }
   async sealRevalidated(binding: RailEffectBinding): Promise<RailSignedEffect> {
@@ -162,7 +161,7 @@ export class SolanaLocalAdapter implements DirectRailPort {
     if (effect === null) mismatch();
     const stored = await this.recoverEffect(binding);
     if (stored === null || canonicalJson(stored) !== canonicalJson(effect)) mismatch();
-    await this.revalidate(binding.account, binding.prepared, binding.send);
+    // The lifecycle's one revalidation already ran for this send; the network itself refuses an expired blockhash.
     const result = await this.rpc.call("sendTransaction", [effect.rawPayload, { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 0 }]);
     if (solanaSignature(result) !== effect.transactionId) throw new ApnError("APN_RPC_AMBIGUOUS", "Solana submission returned a different effect identity.");
     return { transactionId: effect.transactionId };

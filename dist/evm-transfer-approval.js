@@ -1,6 +1,5 @@
 import { ApnError } from "./errors.js";
-import { requireEvmFunding, requireEvmRpc, evmTransaction, validateEvmFeeQuote } from "./evm-direct.js";
-import { directEvmNetwork } from "./evm-direct-networks.js";
+import { requireDirectEvmReads, requireEvmFunding, evmTransaction } from "./evm-direct.js";
 import { validateEconomics } from "./transfer-policy.js";
 import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
 /** The frozen signed envelope still lands: same nonce, gas within the signed limit, and today's base fee within the signed max fee. */
@@ -15,71 +14,35 @@ export function frozenEconomicsRemainExecutable(current, frozen) {
         BigInt(current.gasLimitAtomic) <= BigInt(frozen.gasLimitAtomic) &&
         freshBaseFee <= BigInt(frozen.maxFeePerGasAtomic);
 }
-export async function checkEvmTransferFunding(rpcPort, operation, beforeSigning, stateRoot) {
+/**
+ * The one pre-sign check of a frozen transfer: balance, pending nonce, estimate and the fee quote, read in two POSTs
+ * (three on OP-stack networks). It runs before signing only; nothing re-reads funding once a signature exists, because the
+ * chain itself enforces nonce and balance and the signed gas limit and max fee bound what the transaction may cost.
+ */
+export async function checkEvmTransferFunding(rpcPort, operation, stateRoot) {
     const binding = operation.evm;
     if (binding === undefined || operation.economics === undefined)
         throw new ApnError("APN_STATE_CORRUPT", "Generic operation has no frozen asset economics.");
-    if (operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329)
-        rpcPort.armEvmDirectRpcGuard?.();
-    const rpc = requireEvmRpc(rpcPort), asset = binding.asset;
-    const ethereumUsdc = operation.chainId === 1 && asset.kind === "erc20" &&
-        asset.address.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
-    const ethereumWeth = operation.chainId === 1 && asset.kind === "erc20" &&
-        asset.address.toLowerCase() === "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2";
-    const baseWeth = operation.chainId === 8453 && asset.kind === "erc20" &&
-        asset.address.toLowerCase() === "0x4200000000000000000000000000000000000006";
-    const baseUsdc = operation.chainId === 8453 && asset.kind === "erc20" &&
-        asset.address.toLowerCase() === "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
-    const arbitrumUsdt0 = operation.chainId === 42161 && asset.kind === "erc20" &&
-        asset.address.toLowerCase() === "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9";
-    const arbitrumUsdc = operation.chainId === 42161 && asset.kind === "erc20" &&
-        asset.address.toLowerCase() === "0xaf88d065e77c8cc2239327c5edb3a432268e5831";
-    const grouped = ethereumUsdc ? rpc.ethereumUsdcFundingReads?.() : ethereumWeth ? rpc.ethereumWethFundingReads?.() : baseWeth ? rpc.baseWethFundingReads?.() : baseUsdc ? rpc.baseUsdcFundingReads?.() : arbitrumUsdt0 ? rpc.arbitrumUsdt0FundingReads?.() : arbitrumUsdc ? rpc.arbitrumUsdcFundingReads?.() : asset.kind === "native" ? operation.chainId === 1 ? rpc.ethereumNativeFundingReads?.() :
-        operation.chainId === 56 ? rpc.prepareBnbNative?.() : operation.chainId === 8453 ? rpc.prepareBaseNative?.() :
-            operation.chainId === 42161 ? rpc.prepareArbitrumNative?.() : operation.chainId === 1329 ? rpc.prepareSeiNative?.() : undefined : undefined;
-    if (((operation.chainId === 1 || operation.chainId === 56 || operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329) && asset.kind === "native" || ethereumUsdc || ethereumWeth || baseWeth || baseUsdc || arbitrumUsdt0 || arbitrumUsdc) && grouped === undefined) {
-        throw new ApnError("APN_RPC_CONFIG", "Selected approval requires batched RPC reads.");
-    }
-    // The balance reader checks the selected chain before and after its pinned reads.
-    const balance = await (grouped ?? rpc).balance(operation.walletAddress, {
+    const asset = binding.asset, reads = requireDirectEvmReads(rpcPort, operation.chainId);
+    const balance = await reads.balance(operation.walletAddress, {
         chainId: operation.chainId, token: asset.kind === "native" ? "native" : asset.address, decimals: asset.decimals,
     });
     if (balance.address !== operation.walletAddress || balance.asset.chainId !== asset.chainId ||
         balance.asset.kind !== asset.kind || balance.asset.address !== asset.address || balance.asset.decimals !== asset.decimals) {
         throw new ApnError("APN_ASSET_MISMATCH", "Current balance does not match the approved frozen asset.");
     }
-    if (beforeSigning) {
-        const [nonce, fees] = grouped === undefined ? await Promise.all([
-            rpc.nonce(operation.chainId, operation.walletAddress, "pending"),
-            rpc.estimate(evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)),
-        ]) : await grouped.nonceEstimate(operation.walletAddress, evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic)).then(({ nonce, estimated }) => [nonce, estimated]);
-        let executableNonce = BigInt(nonce);
-        if (operation.chainId === 1 && stateRoot !== undefined) {
-            const owned = new Set((await occupiedUniswapTokenNonces(stateRoot, operation.walletAddress)).map(String));
-            while (owned.has(executableNonce.toString()))
-                executableNonce += 1n;
-        }
-        const current = validateEconomics(executableNonce.toString(), fees);
-        if (!frozenEconomicsRemainExecutable(current, operation.economics)) {
-            throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen nonce or transaction fee envelope is no longer executable before approval.");
-        }
+    const { nonce, estimated } = await reads.nonceEstimate(operation.walletAddress, evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic));
+    let executableNonce = BigInt(nonce);
+    if (operation.chainId === 1 && stateRoot !== undefined) {
+        const owned = new Set((await occupiedUniswapTokenNonces(stateRoot, operation.walletAddress)).map(String));
+        while (owned.has(executableNonce.toString()))
+            executableNonce += 1n;
     }
-    if (!beforeSigning && directEvmNetwork(operation.chainId).feeModel === "arbitrum-inclusive") {
-        const transaction = evmTransaction(asset, operation.walletAddress, operation.recipient, operation.amountAtomic);
-        // Re-estimate after signing. The pending nonce may share the physical batch but cannot replace the frozen nonce.
-        const fees = grouped === undefined ? await rpc.estimate(transaction) :
-            (await grouped.nonceEstimate(operation.walletAddress, transaction)).estimated;
-        const current = validateEconomics(operation.economics.nonceAtomic, fees);
-        if (!frozenEconomicsRemainExecutable({ ...current, nonceAtomic: operation.economics.nonceAtomic }, operation.economics)) {
-            throw new ApnError("APN_FEE_BUDGET_EXCEEDED", "Current Arbitrum inclusive gas or price exceeds the frozen signed envelope; retain this operation without replacement.");
-        }
+    const current = validateEconomics(executableNonce.toString(), estimated);
+    if (!frozenEconomicsRemainExecutable(current, operation.economics)) {
+        throw new ApnError("APN_REPREPARE_REQUIRED", "The frozen nonce or transaction fee envelope is no longer executable before approval.");
     }
-    // On Ethereum the signed max fee times gas limit is already the on-chain upper bound.
-    // There are no separate L1/operator charges to refresh after the signature exists.
-    const quote = !beforeSigning && operation.chainId === 1 && asset.kind === "native"
-        ? validateEvmFeeQuote(binding.feeQuote, operation.economics)
-        : await (grouped === undefined ? rpc.feeQuote(operation.chainId, operation.economics) : grouped.feeQuote(operation.economics));
-    requireEvmFunding(balance, operation.amountAtomic, quote, binding.maxFeeWei);
+    requireEvmFunding(balance, operation.amountAtomic, await reads.feeQuote(operation.economics), binding.maxFeeWei);
 }
 export function evmCustodyPayload(operation) {
     const binding = operation.evm, economics = operation.economics;

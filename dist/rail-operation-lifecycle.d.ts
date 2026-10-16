@@ -35,7 +35,11 @@ export declare class RailOperationLifecycle {
     patientBind(operation: RailOperationRecord, bind: NonNullable<DirectRailPort["bindSend"]>): Promise<RailSendBinding>;
     revalidate(operation: RailOperationRecord, adapter: DirectRailPort): Promise<void>;
     assertCurrentRailPolicy(operation: RailOperationRecord): Promise<RailOperationRecord["account"]>;
-    firstLocalSubmit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect): Promise<RailOperationRecord>;
+    /**
+     * The first send of a never-sent signature. A signature sealed in this invocation re-checks only owner policy (no RPC);
+     * a recovered one is revalidated against the chain once. Only proof that it can no longer be sent ends it unsent.
+     */
+    firstLocalSubmit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect, sealedNow?: boolean): Promise<RailOperationRecord>;
     submit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect | null, allowlistLease?: DirectAssetUsageLease): Promise<RailOperationRecord>;
     inspect(operation: RailOperationRecord, adapter: DirectRailPort): Promise<RailOperationRecord>;
     inspectEvidence(operation: RailOperationRecord, adapter: DirectRailPort): Promise<RailInspection | null>;

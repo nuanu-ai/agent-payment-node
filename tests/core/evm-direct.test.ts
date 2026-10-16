@@ -8,6 +8,7 @@ import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import { evmAmount, MAX_EVM_UINT, resolveEvmAsset } from "../../src/evm-asset.js";
 import { observeEvmTransfer } from "../../src/evm-transfer-evidence.js";
+import { directEvmStepBudget } from "../../src/evm-direct-reads.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import type { Address } from "../../src/model.js";
 import { sealReceipt } from "../../src/state-integrity.js";
@@ -35,20 +36,23 @@ for (const chainId of [8453, 1, 56, 42161, 1329] as const) test(`chain ${chainId
   assert.equal(armed, beforeResume + 1);
 });
 
-test("adding Arbitrum guard does not arm unrelated direct Polygon route", async (context) => {
+test("Polygon direct route is capped and paced like every listed network, with caps derived from each step's read plan", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = 137;
   setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
-  let armed = 0;
-  Object.assign(setup.rpc, { armEvmDirectRpcGuard: () => { armed += 1; } });
+  const caps: (number | undefined)[] = [];
+  Object.assign(setup.rpc, { armEvmDirectRpcGuard: (cap?: number) => { caps.push(cap); } });
   const wallet = await ensureDirectWallet(setup);
   await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
     admissions: [...evmDirectAdmissions(), directAdmission("eip155:137", null)], now: setup.clock.now() });
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 137, token: "native" } }) as { operation_id: string };
-  assert.equal(armed, 0);
   await setup.core.transfer.approve(prepared.operation_id);
-  await setup.core.transfer.resume(prepared.operation_id);
-  assert.equal(armed, 0);
+  setup.rpc.receiptEnabled = false;
+  const pending = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 137, token: "native" }, idempotencyKey: "evm-direct-polygon-2" }) as { operation_id: string };
+  await setup.core.transfer.approve(pending.operation_id);
+  await setup.core.transfer.resume(pending.operation_id);
+  assert.deepEqual(caps, [directEvmStepBudget(137, "prepare"), directEvmStepBudget(137, "approve"), directEvmStepBudget(137, "prepare"),
+    directEvmStepBudget(137, "approve"), directEvmStepBudget(137, "resume")]);
 });
 
 test("generic CLI and MCP bind the same explicit core request without changing legacy commands", () => {
@@ -66,14 +70,14 @@ test("generic CLI and MCP bind the same explicit core request without changing l
   assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"));
 });
 
-for (const chainId of [1, 8453, 42161, 59144, 130, 1329] as const) test(`chain ${chainId} batched native prepare refuses insufficient balance before nonce and estimate`, async (context) => {
+for (const chainId of [1, 8453, 42161, 59144, 130, 1329] as const) test(`chain ${chainId} native prepare refuses insufficient balance before nonce and estimate`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = chainId; setup.rpc.nativeAtomic = "1";
   const wallet = await ensureDirectWallet(setup);
   await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
     admissions: [...evmDirectAdmissions(), ...(chainId === 1 || chainId === 8453 || chainId === 42161 ? [] : [directAdmission(`eip155:${chainId}`, null)])], now: setup.clock.now() });
   let downstreamReads = 0;
-  Object.assign(setup.rpc.evm, { [chainId === 1 ? "prepareEthereumNative" : chainId === 8453 ? "prepareBaseNative" : chainId === 42161 ? "prepareArbitrumNative" : chainId === 130 ? "prepareUnichainNative" : chainId === 1329 ? "prepareSeiNative" : "prepareLineaNative"]: () => ({
+  Object.assign(setup.rpc.evm, { directReads: () => ({
     balance: setup.rpc.evm.balance,
     nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
     feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
@@ -82,7 +86,7 @@ for (const chainId of [1, 8453, 42161, 59144, 130, 1329] as const) test(`chain $
   assert.equal(downstreamReads, 0);
 });
 
-test("Unichain USDC opt-in routes through grouped token reads and refuses insufficient balance before gas reads", async (context) => {
+test("Unichain USDC routes through the batched direct reader and refuses insufficient balance before gas reads", async (context) => {
   const token = "0x078D782b760474a361dDA0AF3839290b0EF57AD6" as const;
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = 130; setup.rpc.assetAtomic = "1";
@@ -90,7 +94,7 @@ test("Unichain USDC opt-in routes through grouped token reads and refuses insuff
   await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
     admissions: [...evmDirectAdmissions(), directAdmission("eip155:130", token)], now: setup.clock.now() });
   let groupedReads = 0, downstreamReads = 0;
-  Object.assign(setup.rpc.evm, { prepareUnichainUsdc: () => ({
+  Object.assign(setup.rpc.evm, { directReads: () => ({
     balance: async (address: Address, selection: Parameters<typeof setup.rpc.evm.balance>[1]) => {
       groupedReads += 1; return await setup.rpc.evm.balance(address, selection);
     },
@@ -102,7 +106,7 @@ test("Unichain USDC opt-in routes through grouped token reads and refuses insuff
   assert.equal(groupedReads, 1); assert.equal(downstreamReads, 0);
 });
 
-test("Polygon USDC opt-in routes through grouped token reads and refuses insufficient balance before gas reads", async (context) => {
+test("Polygon USDC routes through the batched direct reader and refuses insufficient balance before gas reads", async (context) => {
   const token = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" as const;
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = 137; setup.rpc.assetAtomic = "1";
@@ -110,7 +114,7 @@ test("Polygon USDC opt-in routes through grouped token reads and refuses insuffi
   await activateDirectPolicy(setup.state.root, "default", { accounts: { evm: wallet.address },
     admissions: [...evmDirectAdmissions(), directAdmission("eip155:137", token)], now: setup.clock.now() });
   let groupedReads = 0, downstreamReads = 0;
-  Object.assign(setup.rpc.evm, { preparePolygonUsdc: () => ({
+  Object.assign(setup.rpc.evm, { directReads: () => ({
     balance: async (address: Address, selection: Parameters<typeof setup.rpc.evm.balance>[1]) => {
       groupedReads += 1; return await setup.rpc.evm.balance(address, selection);
     },
@@ -122,12 +126,12 @@ test("Polygon USDC opt-in routes through grouped token reads and refuses insuffi
   assert.equal(groupedReads, 1); assert.equal(downstreamReads, 0);
 });
 
-test("Ethereum canonical USDC uses grouped token reads for default and explicit batch prepare", async (context) => {
+test("Ethereum canonical USDC uses the batched direct reader with or without the compatibility batch flag", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = 1; setup.rpc.assetAtomic = "1";
   await ensureDirectWallet(setup);
   let groupedReads = 0, downstreamReads = 0;
-  Object.assign(setup.rpc.evm, { prepareEthereumUsdc: () => ({
+  Object.assign(setup.rpc.evm, { directReads: () => ({
     balance: async (address: Address, selection: Parameters<typeof setup.rpc.evm.balance>[1]) => {
       groupedReads += 1; return await setup.rpc.evm.balance(address, selection);
     },
@@ -153,8 +157,10 @@ test("Ethereum canonical WETH9 signs once and completes only through exact obser
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: weth },
     amount: "0.0000000001", batchRpcReads: true }) as { operation_id: string; state: string };
   assert.equal(prepared.state, "awaiting_approval");
+  setup.rpc.receiptEnabled = false;
   const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };
-  assert.equal(approved.state, "submitted_pending");
+  assert.equal(approved.state, "submitted_pending", "the receipt is inspected in the same invocation; none exists yet");
+  setup.rpc.receiptEnabled = true;
   assert.equal(setup.rpc.submissions.length, 1);
   const signed = parseTransaction(setup.rpc.submissions[0]!);
   assert.equal(signed.chainId, 1); assert.equal(signed.to?.toLowerCase(), weth.toLowerCase()); assert.equal(signed.value ?? 0n, 0n);
@@ -199,8 +205,8 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.rpc.genericBalanceCalls, calls);
   await assert.rejects(setup.core.transfer.prepare({ ...request, amount: "2" }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };
-  const deferredReceipt = chainId === 1 || (asset !== "native" && (chainId === 8453 || chainId === 42161));
-  assert.equal(approved.state, deferredReceipt ? "submitted_pending" : "completed");
+  // Every network inspects the receipt in the approving invocation; completion needs no second command.
+  assert.equal(approved.state, "completed");
   const raw = setup.rpc.submissions[0]!;
   const transaction = parseTransaction(raw);
   assert.equal(transaction.chainId, chainId);
@@ -209,9 +215,6 @@ for (const chainId of [8453, 1, 42161] as const) for (const kind of ["native", "
   assert.equal(setup.approval.intents.length, 1);
   const restarted = evmCore(temporary.root, setup.rpc, setup.wrapping);
   assert.deepEqual(await restarted.core.transfer.status(prepared.operation_id), approved);
-  if (deferredReceipt) {
-    assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  }
   const receipt = await restarted.core.transfer.receipt(prepared.operation_id) as { state: string; finality: string };
   assert.equal(receipt.state, "completed");
   assert.equal(receipt.finality, chainId === 42161 ? "rpc_safe_inclusion" : "inclusion_only");
@@ -322,8 +325,7 @@ test("all EVM chains keep the frozen signed envelope across harmless live fee an
         maxFeePerGasAtomic: (BigInt(setup.rpc.fees.maxFeePerGasAtomic) + 1_000_000_000n).toString(),
       };
 
-      assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state,
-        chainId === 1 ? "submitted_pending" : "completed");
+      assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
       assert.equal(setup.approval.intents.length, 1);
       assert.equal(setup.rpc.submissions.length, 1);
     } finally {
@@ -350,7 +352,7 @@ test("a post-sign Ethereum funding drop no longer strands the signature: approve
     amount: "0.000001" }) as { operation_id: string };
   assert.equal(quoteReads, 1);
   // Every refusable check ran before signing; nothing after the signature re-reads funding or fees.
-  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
   assert.equal(quoteReads, 2); assert.equal(rpc.broadcastCount, 1);
   const signed = (await setup.state.findOperation(prepared.operation_id))!;
   assert.equal(keccak256(rpc.submissions[0]!), signed.transactionHash);
@@ -452,8 +454,9 @@ test("ERC-20 completes from its sole exact Transfer log without balance deltas; 
   const setup = evmCore(temporary.root);
   const wallet = await ensureDirectWallet(setup); setup.rpc.sender = wallet.address;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 8453, token: EVM_USDC[8453] }, amount: "1" }) as { operation_id: string };
-  setup.rpc.deltasVerified = false;
+  setup.rpc.deltasVerified = false; setup.rpc.receiptEnabled = false;
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  setup.rpc.receiptEnabled = true;
   const original = setup.rpc.evm.receipt;
   setup.rpc.evm.receipt = async (...args) => {
     const receipt = await original(...args), log = receipt?.logs[0];
@@ -532,7 +535,10 @@ for (const scenario of [
   const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
   setup.rpc.sender = (await ensureDirectWallet(setup)).address;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: EVM_USDC[42161] }, amount: "1" }) as { operation_id: string };
+  // The approving invocation finds no receipt yet, so the observer below is the first to read evidence.
+  setup.rpc.receiptEnabled = false;
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  setup.rpc.receiptEnabled = true;
   const evidence = setup.rpc.evm.evidence;
   let evidenceCalls = 0;
   setup.rpc.evm.evidence = async () => { evidenceCalls += 1; throw scenario.error; };
@@ -561,16 +567,20 @@ for (const scenario of [
   const setup = evmCore(temporary.root); setup.rpc.chainId = 42161; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
   setup.rpc.sender = (await ensureDirectWallet(setup)).address;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 42161, token: EVM_USDC[42161] }, amount: "1" }) as { operation_id: string };
+  // The approving invocation finds no receipt yet, so the observer below is the first to read evidence.
+  setup.rpc.receiptEnabled = false;
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  setup.rpc.receiptEnabled = true;
   const originalEvidence = setup.rpc.evm.evidence;
   let blockReads = 0;
-  setup.rpc.evm.evidence = async (operation, receipt) => await observeEvmTransfer(async (method, params) => {
+  setup.rpc.evm.evidence = async (operation, receipt) => await observeEvmTransfer(async calls => calls.map(({ method, params }) => {
+    if (method === "eth_getTransactionByHash") return { hash: operation.transactionHash };
     assert.equal(method, "eth_getBlockByNumber");
     blockReads += 1;
     if (params[0] === "safe") return { number: scenario.safeNumber, hash: `0x${"a".repeat(64)}` };
     assert.equal(params[0], "0x303a");
     return { number: "0x303a", hash: EVM_BLOCK_HASH };
-  }, operation, receipt);
+  }), operation, receipt);
   const observed = await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string; reason: string; proof_class: string };
   const status = await setup.core.transfer.status(prepared.operation_id) as { state: string; reason: string; proof_class: string };
   const receipt = await setup.core.transfer.receipt(prepared.operation_id) as { state: string; reason: string; proof_class: string };
@@ -621,11 +631,7 @@ for (const chainId of [8453, 1, 42161] as const) for (const decimals of [6, 18])
   const operation = (await setup.state.findOperation(prepared.operation_id))!;
   const atomic = decimals === 6 ? "1000001" : "1000001000000000000";
   assert.equal(operation.amountAtomic, atomic); assert.equal(operation.evm?.asset.decimals, decimals);
-  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state,
-    "submitted_pending");
-  {
-    assert.equal((await setup.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  }
+  assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "completed");
   const receipt = await setup.core.transfer.receipt(prepared.operation_id) as { amount_atomic: string };
   assert.equal(receipt.amount_atomic, atomic); assert.equal(setup.rpc.submissions.length, 1);
 });

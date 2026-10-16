@@ -83,3 +83,27 @@ test("create binds both find and add to the exact login Keychain using security'
     for (const call of calls) call.input?.fill(0);
   }
 });
+
+test("one command instance spawns security once and hands every caller its own zeroable copy", async () => {
+  const secret = Buffer.alloc(32, 7).toString("base64");
+  let spawns = 0, present = false;
+  const runner: SecurityRunner = async (args) => {
+    spawns += 1;
+    if (args[0] === "add-generic-password") { present = true; return { code: 0, stdout: Buffer.alloc(0) }; }
+    return present ? { code: 0, stdout: Buffer.from(`${secret}\n`) } : { code: 44, stdout: Buffer.alloc(0) };
+  };
+  const absent = new MacOSLoginKeychainSecret({ identity: { homedir: HOME, username: "apn-test-user" }, runSecurity: runner });
+  assert.equal(await absent.load(), null);
+  assert.equal(await absent.load(), null, "an absent secret is never cached");
+  assert.equal(spawns, 2);
+  present = true; spawns = 0;
+  const wrapping = new MacOSLoginKeychainSecret({ identity: { homedir: HOME, username: "apn-test-user" }, runSecurity: runner });
+  const first = await wrapping.load(); assert.ok(first);
+  first.fill(0);
+  const second = await wrapping.load(); assert.ok(second);
+  assert.equal(second.toString("base64"), secret, "zeroing a caller's copy leaves the cached secret intact");
+  assert.notEqual(first.buffer === second.buffer && first.byteOffset === second.byteOffset, true);
+  assert.equal(spawns, 1, "later reads in the same command spawn no security process");
+  assert.equal((await new MacOSLoginKeychainSecret({ identity: { homedir: HOME, username: "apn-test-user" }, runSecurity: runner }).load())?.toString("base64"), secret);
+  assert.equal(spawns, 2, "a new command instance reads the Keychain again");
+});

@@ -27,10 +27,17 @@ export declare class SecureStateStore {
     protected readDirectory(relativePath: string): Promise<readonly Dirent[]>;
     /** Raw listing that still shows atomic-write stages; only for code that inspects its own in-flight stage. */
     protected readDirectoryWithStagedWrites(relativePath: string): Promise<readonly Dirent[]>;
+    /**
+     * The read-side boundary: the root (its ancestors proven once per process) and every directory below it down to
+     * `target` is a real, owner-only directory. False when one is absent. Writes keep their full atomic-write checks.
+     */
+    private readableDirectories;
     protected resolveRelative(relativePath: string): string;
     protected assertNoSymlinkAncestors(target: string): Promise<void>;
-    private directorySnapshot;
-    private assertSameDirectorySnapshot;
+    /**
+     * One protected read: the directory boundary above, then `O_NOFOLLOW`, `fstat` owner/mode/single-link and the size cap
+     * on the opened file itself, then strict UTF-8, JSON and canonical-bytes checks of the content.
+     */
     protected readJson(relativePath: string): Promise<unknown | null>;
     /** Optional internal assertion seam for specialized create-only stores. */
     protected beforeCreateOnlyPublication(_relativePath: string, _value: unknown): Promise<void>;

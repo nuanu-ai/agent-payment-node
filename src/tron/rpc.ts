@@ -26,10 +26,19 @@ export interface TronRpcPort {
 }
 export class TronRpc implements TronRpcPort {
   readonly originHash: string;
+  /** Block 0 is immutable and this client's endpoint fixed: one read proves the network for the whole invocation. */
+  private genesisBlock: unknown;
   constructor(private readonly endpoint?: string, private readonly fetcher: typeof fetch = tronHttpsFetch) {
     this.originHash = sha256(endpoint ?? "tron_rpc_unconfigured");
   }
   async call(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown> {
+    const genesisRead = method === "wallet/getblockbynum" && Object.keys(body).length === 1 && body.num === 0;
+    if (genesisRead && this.genesisBlock !== undefined) return this.genesisBlock;
+    const value = await this.post(method, body);
+    if (genesisRead) { try { if (tronBlock(value).id === TRON_GENESIS) this.genesisBlock = value; } catch { /* The caller's own check reports it. */ } }
+    return value;
+  }
+  private async post(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown> {
     if (this.endpoint === undefined || !TRON_RPC_METHODS.includes(method)) configFailure();
     let base: URL;
     try { base = parsePublicHttpsUrl(this.endpoint, "APN_RPC_CONFIG", "TRON RPC endpoint", 2048); } catch { return configFailure(); }
@@ -53,7 +62,7 @@ export class TronRpc implements TronRpcPort {
       return value;
     } catch (error) {
       if (error instanceof ApnError) {
-        if (error.code !== "APN_RPC_PROTOCOL") throw error;
+        if (error.code !== "APN_RPC_PROTOCOL" && error.code !== "APN_RPC_RATE_LIMITED") throw error;
         throw new ApnError(error.code, error.message, { ...error.details, rpcMethod: method });
       }
       throw new ApnError(method === "wallet/broadcasttransaction" ? "APN_RPC_AMBIGUOUS" : "APN_RPC_PROTOCOL",

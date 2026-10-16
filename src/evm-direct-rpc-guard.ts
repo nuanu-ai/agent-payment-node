@@ -12,6 +12,7 @@ export class EvmDirectRpcGuard {
     private readonly wait: (milliseconds: number) => Promise<void> = milliseconds =>
       new Promise(resolve => setTimeout(resolve, milliseconds)),
     remainingWaitMs?: () => number) {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new ApnError("APN_RPC_CONFIG", "The direct EVM POST cap must be a positive integer.");
     const coordinator: RpcProviderPacingCoordinator = { coordinate: async <T>(family: string,
       work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
         saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {

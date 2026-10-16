@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
-import { chmod, link, lstat, mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, readFile, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { canonicalJson, sha256 } from "../../src/canonical.js";
 import type { AdvisoryLockPort } from "../../src/macos-advisory-lock.js";
@@ -9,6 +9,7 @@ import { EncryptedWalletStore, walletEnvelopeIdentity } from "../../src/encrypte
 import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import { EvmWrappingSecret } from "./evm-helpers.js";
 import { StateStore } from "../../src/state.js";
+import { SecureStateStore } from "../../src/secure-state-store.js";
 import { WALLET, RECIPIENT, TestNative, TestRpc, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
 
 test("state root rejects wrong mode and symlinked ancestors", async (t) => {
@@ -312,3 +313,30 @@ async function childReady(child: ReturnType<typeof spawn>): Promise<string> {
     child.stdout?.once("data", (chunk: Buffer) => finish(chunk.toString("utf8").trim()));
   });
 }
+
+test("a protected read proves the root's ancestry once, then re-checks the root and every directory below it on each read", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  class Probe extends SecureStateStore {
+    async put(path: string, value: unknown): Promise<void> { await this.ensureDirectory(dirname(path)); await this.writeJson(path, value); }
+    async get(path: string): Promise<unknown> { return await this.readJson(path); }
+  }
+  const store = new Probe(temporary.root); await store.initialize();
+  await store.put("records/inner/value.json", { kept: true });
+  assert.deepEqual(await store.get("records/inner/value.json"), { kept: true });
+  await writeFile(join(temporary.root, "records/inner/spaced.json"), '{ "kept" : true }\n', { mode: 0o600 });
+  await assert.rejects(store.get("records/inner/spaced.json"), { code: "APN_STATE_CORRUPT" }, "content still has to be the canonical bytes APN writes");
+  await chmod(join(temporary.root, "records"), 0o777);
+  await assert.rejects(store.get("records/inner/value.json"), { code: "APN_STATE_SECURITY" });
+  await chmod(join(temporary.root, "records"), 0o700);
+  await chmod(temporary.root, 0o755);
+  await assert.rejects(store.get("records/inner/value.json"), { code: "APN_STATE_SECURITY" });
+  await chmod(temporary.root, 0o700);
+  const outside = join(temporary.base, "outside");
+  await mkdir(join(outside, "inner"), { recursive: true, mode: 0o700 });
+  await writeFile(join(outside, "inner", "value.json"), canonicalJson({ kept: false }), { mode: 0o600 });
+  await rename(join(temporary.root, "records"), join(temporary.base, "moved"));
+  await symlink(outside, join(temporary.root, "records"));
+  await assert.rejects(store.get("records/inner/value.json"), { code: "APN_STATE_SECURITY" });
+  assert.equal(await store.get("absent/value.json"), null);
+});
