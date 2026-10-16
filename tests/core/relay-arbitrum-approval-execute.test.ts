@@ -105,10 +105,10 @@ function memoryJournal(op: RelayUnsignedOperation) {
 function harness(state: StateStore, op: RelayUnsignedOperation, options: {
   allowances?: readonly bigint[]; send?: (raw: Hex) => Promise<Hex>; failReadAt?: number;
   storedPolicy?: boolean; onSign?: () => Promise<void>; onConfirm?: () => Promise<void>;
-  revokeAtPolicyRead?: number;
+  revokeAtPolicyRead?: number; journal?: ReturnType<typeof memoryJournal>;
 } = {}) {
   let reads = 0, signs = 0, sends = 0, confirmations = 0, policyReads = 0;
-  const journal = memoryJournal(op);
+  const journal = options.journal ?? memoryJournal(op);
   const allowances = options.allowances ?? [0n, 0n, 0n];
   const reader = { read: async () => {
     const index = reads++;
@@ -120,6 +120,7 @@ function harness(state: StateStore, op: RelayUnsignedOperation, options: {
   } } as unknown as Pick<RelayArbitrumApprovalPreflightReader, "read">;
   const service = new RelayArbitrumApprovalExecuteService(state, reader, {
     confirm: async summary => { confirmations++; assert.equal(summary.approvalValueAtomic, "500000");
+      assert.equal(summary.recipient, op.recipient); assert.equal(summary.minimumOutputAtomic, op.minOutputAtomic);
       await options.onConfirm?.(); return true; },
     signer: { sign: async (operation, nonce) => {
       signs++; await options.onSign?.();
@@ -156,10 +157,10 @@ test("approval executes one exact signed transaction; replay is observation-only
   assert.equal(first.approvalPhase, "submitted");
   assert.equal(first.depositPhase, "pending");
   assert.equal("rawTransaction" in first, false);
-  assert.deepEqual(h.counts(), { reads: 3, signs: 1, sends: 1, confirmations: 1 });
+  assert.deepEqual(h.counts(), { reads: 2, signs: 1, sends: 1, confirmations: 1 });
   assert.equal((await lease(state, op))?.state, "submitted");
   assert.equal((await h.service.execute("default", op.operationId)).state, "observation_only");
-  assert.deepEqual(h.counts(), { reads: 3, signs: 1, sends: 1, confirmations: 1 });
+  assert.deepEqual(h.counts(), { reads: 2, signs: 1, sends: 1, confirmations: 1 });
 });
 
 test("buyer approval execution reads its selected profile policy and rejects profile mismatch", async t => {
@@ -186,7 +187,7 @@ test("uncertain send and HTTP 429 each retain a single durable attempt", async t
   }
 });
 
-test("approval already sufficient and pre-send reorg never dispatch", async t => {
+test("approval already sufficient and a pre-signing reorg never sign or dispatch", async t => {
   const first = await setup(); t.after(first.temporary.cleanup);
   const covered = harness(first.state, first.op, { allowances: [500_000n] });
   assert.equal((await covered.service.execute("default", first.op.operationId)).state, "approval_not_needed");
@@ -194,22 +195,52 @@ test("approval already sufficient and pre-send reorg never dispatch", async t =>
   assert.equal(covered.counts().signs, 0);
   assert.equal(await lease(first.state, first.op), null);
   const second = await setup(); t.after(second.temporary.cleanup);
-  const reorg = harness(second.state, second.op, { failReadAt: 2 });
-  const result = await reorg.service.execute("default", second.op.operationId);
-  assert.equal(result.state, "observation_only");
-  assert.equal(result.approvalPhase, "sealed");
+  const reorg = harness(second.state, second.op, { failReadAt: 1 });
+  await assert.rejects(reorg.service.execute("default", second.op.operationId), /canonical block reorg/);
+  assert.equal(reorg.journal.current(), null);
+  assert.equal(reorg.counts().signs, 0);
   assert.equal(reorg.counts().sends, 0);
-  assert.equal((await lease(second.state, second.op))?.state, "reserved");
+  assert.equal(await lease(second.state, second.op), null);
 });
 
-test("final policy read refuses a revoked policy before send", async t => {
+test("a revoked policy at the pre-signing read refuses before signing", async t => {
   const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
-  const h = harness(state, op, { revokeAtPolicyRead: 3 });
-  const result = await h.service.execute("default", op.operationId);
-  assert.equal(result.state, "observation_only");
-  assert.equal(result.reason, "active_policy_revoked_or_changed");
+  const h = harness(state, op, { revokeAtPolicyRead: 2 });
+  await assert.rejects(h.service.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(h.counts().signs, 0);
   assert.equal(h.counts().sends, 0);
-  assert.equal(h.counts().signs, 1);
+});
+
+test("an approval sealed before an interrupted send resumes under fresh consent and sends the sealed bytes once", async t => {
+  const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
+  const journal = memoryJournal(op), transition = journal.repository.transitionUnderLocks;
+  let interrupt = true;
+  journal.repository.transitionUnderLocks = (async (...args: Parameters<typeof transition>) => {
+    if (args[3].kind === "mark_submitting" && interrupt) { interrupt = false; throw new Error("disk full"); }
+    return transition(...args);
+  }) as typeof transition;
+  const sent: Hex[] = [];
+  const h = harness(state, op, { journal, send: async raw => { sent.push(raw); return (await import("viem")).keccak256(raw); } });
+  await assert.rejects(h.service.execute("default", op.operationId), /disk full/);
+  assert.equal(journal.current()?.effects[0].phase, "sealed");
+  const sealedRaw = journal.current()!.effects[0].attempt!.rawTransaction;
+  const resumed = await h.service.execute("default", op.operationId);
+  assert.equal(resumed.state, "approval_submitted");
+  assert.deepEqual(sent, [sealedRaw]);
+  assert.deepEqual(h.counts(), { reads: 4, signs: 1, sends: 1, confirmations: 2 });
+  assert.equal((await lease(state, op))?.state, "submitted");
+});
+
+test("a signer failure before the seal keeps the approval resumable and signs once on retry", async t => {
+  const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
+  let fail = true;
+  const h = harness(state, op, { onSign: async () => { if (fail) { fail = false; throw new Error("keychain locked"); } } });
+  const first = await h.service.execute("default", op.operationId);
+  assert.equal(first.state, "signing_resumable");
+  assert.equal(first.approvalPhase, "signing_started");
+  const resumed = await h.service.execute("default", op.operationId);
+  assert.equal(resumed.state, "approval_submitted");
+  assert.equal(h.counts().sends, 1);
 });
 
 test("authenticated policy revocation during owner challenge blocks signing without a lock wait", async t => {

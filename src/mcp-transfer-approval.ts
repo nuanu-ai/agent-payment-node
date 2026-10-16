@@ -58,7 +58,7 @@ export class RejectingMcpTransferApproval implements TransferApprovalPort {
 export class RejectingMcpRailApproval implements RailApprovalPort {
   async approve(input: Parameters<RailApprovalPort["approve"]>[0]): Promise<void> {
     const handoff = createCliHandoff(["apn", "pay", "transfer", "approve", "--operation", input.operationId]);
-    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Run this exact direct-rail approval command in a foreground terminal with APN_SOLANA_RPC_URL configured.", {
+    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Run this exact direct-rail approval command in a foreground terminal with ${input.account.rail === "tron" ? "APN_TRON_RPC_URL" : "APN_SOLANA_RPC_URL"} configured.`, {
       approval_boundary: "foreground_tty", operation_id: input.operationId, profile: input.account.profile, ...cliHandoffDetails(handoff),
     });
   }

@@ -6,6 +6,7 @@ import type { EvmRpcCall } from "../../evm-ports.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { parseAtomic } from "../../money.js";
 import { swapMechanismDigest } from "../pin.js";
+import { swapRouteDigest, swapRouteOf } from "../route-admission.js";
 import { UNISWAP_V3_QUOTER_V2 } from "./pins.js";
 import { createUniswapTokenMaterial, type SavedUniswapTokenMaterialStore } from "./token-material.js";
 import { createUniswapTokenRoute, encodeUniswapTokenApproval, UNISWAP_TOKEN_MECHANISM_PIN, UNISWAP_V3_SWAP_ROUTER, verifyUniswapTokenRoutePins } from "./token-route.js";
@@ -21,7 +22,8 @@ export class UniswapTokenQuoteBuilder {
         private readonly verifyPins: (call: EvmRpcCall, tag: Hex) => Promise<void> = verifyUniswapTokenRoutePins) { }
     inventory() {
         return { chain: "eip155:1", router: UNISWAP_V3_SWAP_ROUTER, pair: "USDC/USDT", fee: 100,
-            mechanism: UNISWAP_TOKEN_MECHANISM_PIN, approval: "exact_input_only", transactionValue: "0" };
+            mechanism: UNISWAP_TOKEN_MECHANISM_PIN, route: swapRouteOf(UNISWAP_TOKEN_MECHANISM_PIN), routeDigest: swapRouteDigest(UNISWAP_TOKEN_MECHANISM_PIN),
+            approval: "exact_input_only", transactionValue: "0" };
     }
     async quote(input: UniswapTokenQuoteRequest): Promise<unknown> {
         const request = valid(input), at = this.now(), seconds = Math.floor(at.getTime() / 1000);

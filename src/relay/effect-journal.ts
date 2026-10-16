@@ -6,7 +6,8 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import type { RelayQuoteTransaction } from "./quote.js";
 
 export type RelayEffectRole = "approval" | "deposit";
-export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submission_marked" | "tx_known" | "confirmed" | "failed";
+export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submission_marked" | "tx_known" | "confirmed" | "failed" |
+  "abandoned_unsent";
 export interface RelayEffect {
   readonly role: RelayEffectRole;
   readonly phase: RelayEffectPhase;
@@ -34,7 +35,9 @@ export type RelayEffectEvent =
   | Readonly<{ kind: "mark_submitting"; role: RelayEffectRole; at: string }>
   | Readonly<{ kind: "mark_submission"; role: RelayEffectRole; marker: string; at: string }>
   | Readonly<{ kind: "record_transaction"; role: RelayEffectRole; transactionHash: string }>
-  | Readonly<{ kind: "observe"; role: RelayEffectRole; outcome: "confirmed" | "failed"; at: string }>;
+  | Readonly<{ kind: "observe"; role: RelayEffectRole; outcome: "confirmed" | "failed"; at: string }>
+  /** Sealed bytes that never crossed `submitting` and provably can never land (their nonce was consumed at safe depth). */
+  | Readonly<{ kind: "record_never_landed"; role: RelayEffectRole; at: string }>;
 
 function corrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT", `Relay effect journal is invalid: ${reason}.`); }
 function blocked(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", `Relay effect transition refused: ${reason}.`); }
@@ -51,7 +54,8 @@ function prepared(op: RelayUnsignedOperation): asserts op is RelayUnsignedOperat
   if (op.quote === undefined || op.quote.quoteDigest !== op.quoteDigest) blocked("prepared quote required");
 }
 function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
-  if (effect.role !== role || !["pending", "signing_started", "sealed", "submitting", "submission_marked", "tx_known", "confirmed", "failed"].includes(effect.phase)) corrupt("effect role or phase");
+  if (effect.role !== role || !["pending", "signing_started", "sealed", "submitting", "submission_marked", "tx_known", "confirmed", "failed",
+    "abandoned_unsent"].includes(effect.phase)) corrupt("effect role or phase");
   if (effect.phase === "pending") {
     if (effect.attempt !== null || effect.observedAt !== null) corrupt("pending attempt");
     return;
@@ -63,8 +67,9 @@ function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
     effect.attempt.attemptNumber !== 1) corrupt("effect attempt number");
   if ((effect.phase === "signing_started" || effect.phase === "submission_marked") && (effect.attempt.transactionHash !== null || effect.observedAt !== null)) corrupt("marked state");
   if (["sealed", "submitting", "tx_known"].includes(effect.phase) && (effect.attempt.transactionHash === null || effect.observedAt !== null)) corrupt("known transaction");
-  if ((effect.phase === "confirmed" || effect.phase === "failed") &&
+  if ((effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent") &&
     (!iso(effect.observedAt) || Date.parse(effect.observedAt) < Date.parse(effect.attempt.markedAt))) corrupt("observation");
+  if (effect.phase === "abandoned_unsent" && (effect.attempt.transactionHash === null || effect.attempt.attemptNumber !== 1)) corrupt("never landed attempt");
 }
 export function validateRelayEffectJournal(value: unknown, op: RelayUnsignedOperation): RelayEffectJournal {
   prepared(op);
@@ -125,6 +130,10 @@ export function advanceRelayEffectJournal(journal: RelayEffectJournal, op: Relay
       if (current.phase !== "submission_marked" || !TX.test(event.transactionHash)) blocked("transaction hash requires one marked attempt");
       next = { ...current, phase: "tx_known", attempt: { ...current.attempt!, transactionHash: event.transactionHash } };
       break;
+    case "record_never_landed":
+      if (current.phase !== "sealed" || !iso(event.at) || Date.parse(event.at) < Date.parse(current.attempt!.markedAt)) blocked("never landed requires a sealed effect");
+      next = { ...current, phase: "abandoned_unsent", observedAt: event.at };
+      break;
     case "observe":
       if ((current.phase !== "submission_marked" && current.phase !== "tx_known" && current.phase !== "submitting") || !iso(event.at) ||
         Date.parse(event.at) < Date.parse(current.attempt!.markedAt)) blocked("observation requires a marked attempt");
@@ -140,7 +149,8 @@ export function relayRecoveryClass(journal: RelayEffectJournal, op: RelayUnsigne
   "not_started" | "observation_only" | "approval_confirmed" | "completed" | "failed" {
   validateRelayEffectJournal(journal, op);
   const [approval, deposit] = journal.effects;
-  if (approval.phase === "failed" || deposit.phase === "failed") return "failed";
+  if (approval.phase === "failed" || deposit.phase === "failed" ||
+    approval.phase === "abandoned_unsent" || deposit.phase === "abandoned_unsent") return "failed";
   if (deposit.phase === "confirmed") return "completed";
   if (deposit.phase !== "pending" || ["signing_started", "sealed", "submitting", "submission_marked", "tx_known"].includes(approval.phase)) return "observation_only";
   return approval.phase === "confirmed" ? "approval_confirmed" : "not_started";

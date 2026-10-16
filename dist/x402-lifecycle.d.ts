@@ -2,10 +2,14 @@ import { OperationService } from "./operation-service.js";
 import type { RuntimeContext } from "./runtime.js";
 import type { PaidHttpResult } from "./x402-http.js";
 import { type X402Attempt, type X402OperationRecord, type X402State, type X402TerminalState } from "./x402-state-integrity.js";
+import { X402Usage } from "./x402-usage.js";
 export declare class X402Lifecycle {
     protected readonly context: RuntimeContext;
     protected readonly operations: OperationService;
+    protected readonly usage: X402Usage;
     constructor(context: RuntimeContext);
+    /** Moves the shared usage hold forward to the durable journal state; callers hold the operation lock. */
+    protected followUsage(profileHash: string, operationId: string): Promise<void>;
     protected beginPaidAttempt(operation: X402OperationRecord, purpose: "payment" | "result_recovery"): Promise<X402OperationRecord>;
     protected finishPaidAttempt(operation: X402OperationRecord, phase: "observed" | "ambiguous", observation?: X402Attempt["observation"], state?: "settlement_pending" | "effect_unknown" | "seller_result_recovery_pending", additions?: Partial<Pick<X402OperationRecord, "settlementResponseObservation" | "transactionHint">>): Promise<X402OperationRecord>;
     protected markInterruptedPaidAttempt(operation: X402OperationRecord, state: "effect_unknown" | "seller_result_recovery_pending"): Promise<X402OperationRecord>;

@@ -49,7 +49,8 @@ export interface RelayBnbProofPorts {
   /** null when trace support or exhaustive success semantics are unavailable. */
   nativeTrace(hash: string): Promise<RelayBnbNativeTrace | null>;
   /** Exhaustive canonical callTracer plus adjacent balance proof for the finite Base→Polygon lane. */
-  polygonNativeTrace?(hash: string): Promise<RelayBnbNativeTrace | null>;
+  /** Proves the payout to the operation's own recorded recipient, never a fixed account. */
+  polygonNativeTrace?(hash: string, recipient: string): Promise<RelayBnbNativeTrace | null>;
   /** Base only: bytecode identity and two balances from one pinned inclusion window. */
   routerCodeHash?(address: string, block: bigint): Promise<string>;
   tokenIdentityAndBalances?(token: string, recipient: string, block: bigint, blockHash: string): Promise<Readonly<{ proxyHash: string; implementation: string; implementationHash: string; before: bigint; after: bigint }>>;
@@ -240,7 +241,7 @@ async function inspectCandidate(op: RelayUnsignedOperation, sourceHash: string, 
     method = "direct_native_transaction";
   } else {
     let trace: RelayBnbNativeTrace | null;
-    try { trace = await (op.sourceChainId === 8453 && expectedChainId === 137 ? ports.polygonNativeTrace?.(hash) ?? Promise.resolve(null) : ports.nativeTrace(hash)); } catch { return unproven("destination_trace_unavailable"); }
+    try { trace = await (op.sourceChainId === 8453 && expectedChainId === 137 ? ports.polygonNativeTrace?.(hash, op.recipient) ?? Promise.resolve(null) : ports.nativeTrace(hash)); } catch { return unproven("destination_trace_unavailable"); }
     if (trace === null && expectedChainId === 8453) {
       if (!ports.routerCodeHash || !ports.adjacentBalances || receipt.blockNumber === 0n ||
         tx.to === null || !same(tx.to, BASE_RELAY_ROUTER_V3)) return unproven("base_router_fallback_unavailable");

@@ -20,11 +20,11 @@ The adapter requires an Avalanche `finalized` block no older than 30 seconds at 
 
 Ethereum USDT and native coins remain refused by the capability matrix when no keyless facilitator and token authorization path are proven. The fixtures under `docs/evidence/x402-non-usdc-2026-09-18/` are read-only observations collected without `/settle`.
 
-## Existing intent status
+## Operation status
 
-`apn x402 permit2 status --profile <profile> --operation <operation-id>` and MCP `apn_x402_permit2_status` read the same checked existing local intent. They return only operation ID, requested profile, chain, token, owner, recipient, `execution_blocked` capability/state and blocker codes. A missing root, directory or record returns `not_found` without creating anything. Wrong profile, malformed records, invalid operation IDs, unsafe permissions and symlinks fail closed.
+`apn x402 permit2 status --profile <profile> --operation <operation-id>` and MCP `apn_x402_permit2_status` read the operation from the Permit2 production journal (`permit2-production/`), the same record `x402 permit2 approve` and `observe` write. They return the redacted public projection: production state, lifecycle, terminal flag, chain, payer, recipient, token, amount, deadline and resource origin. A missing record returns `not_found` without creating anything. Wrong profile, malformed records, invalid operation IDs, unsafe permissions and symlinks fail closed.
 
-Status uses the existing secure state's non-mutating checked JSON reader directly: no initialization, locks, repair, fsync, RPC, wallet, policy activation, usage reservation, signature or send. Typed data, authorization material, digests and secrets are omitted from output. The original internal `load()` remains an initializing journal API and is not used by status.
+Status uses the secure state's non-mutating checked JSON reader directly: no initialization, locks, repair, fsync, RPC, wallet, policy activation, usage reservation, signature or send. Typed data, authorization material, signatures and secrets are omitted from output. The earlier blocked-intent generation (`permit2-intents/`, `permit2-exposures/`) never had a production writer and was removed.
 
 ## Current-owner CLI preflight
 

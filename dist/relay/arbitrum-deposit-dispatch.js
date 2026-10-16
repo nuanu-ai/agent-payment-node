@@ -16,6 +16,8 @@ import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 import { RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } from "./arbitrum-usdc-source-draft.js";
 import { ETHEREUM_DEPOSITORY } from "./quote.js";
 const HASH = /^[a-f0-9]{64}$/u;
+/** Deposit phases that never crossed the submission fence: resumable under fresh consent (R3). */
+const RESUMABLE = ["pending", "signing_started", "sealed"];
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay Arbitrum deposit dispatch is blocked.", { reason }); }
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 /** Unlocks local custody only after a durable signing marker exists. */
@@ -161,14 +163,14 @@ export class RelayArbitrumDepositDispatchService {
         if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
             blocked("operation_retired");
         const previous = await this.journals.load(profileHash, operationId);
-        if (previous !== null && (previous.effects[1].phase !== "pending"))
+        if (previous !== null && !RESUMABLE.includes(previous.effects[1].phase))
             return this.result(op, previous, "observation_only", "deposit_effect_already_started");
         if (previous === null || !["confirmed", "approval_skipped"].includes(previous.effects[0].phase))
             blocked("approval_not_confirmed_or_verified_skipped");
         const summary = { operationId, sourceChainId: 42161, destinationChainId: 1,
             owner: op.sourceAccount, token: RELAY_ARBITRUM_USDC, spender: ETHEREUM_DEPOSITORY,
-            depositAmountAtomic: op.amountAtomic, quoteDigest: op.quoteDigest, deadline: op.deadline,
-            depositNetworkFeeCeilingWei: op.depositNetworkFeeCeilingWei };
+            depositAmountAtomic: op.amountAtomic, recipient: op.recipient, minimumOutputAtomic: op.minOutputAtomic,
+            quoteDigest: op.quoteDigest, deadline: op.deadline, depositNetworkFeeCeilingWei: op.depositNetworkFeeCeilingWei };
         if (!await this.ports.confirm(summary))
             blocked("foreground_authorization_declined");
         // No terminal wait occurs under a policy lock. Every effect-side lock is then acquired together
@@ -179,7 +181,7 @@ export class RelayArbitrumDepositDispatchService {
             if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
                 blocked("operation_retired");
             let journal = await this.journals.load(profileHash, operationId);
-            if (journal !== null && (journal.effects[1].phase !== "pending"))
+            if (journal !== null && !RESUMABLE.includes(journal.effects[1].phase))
                 return this.result(op, journal, "observation_only", "deposit_effect_already_started");
             if (journal === null || !["confirmed", "approval_skipped"].includes(journal.effects[0].phase))
                 blocked("approval_not_confirmed_or_verified_skipped");
@@ -189,40 +191,33 @@ export class RelayArbitrumDepositDispatchService {
             const first = await this.snapshot(op, firstPolicy);
             if (!first.readOnlyConditionsSatisfied)
                 blocked(`preflight:${first.reasons.join(",")}`);
-            // A second canonical read closes the gap between owner consent and the irreversible marker.
+            // A second canonical read closes the gap between owner consent and signing. Every refusable check runs here,
+            // before signing (R3); the profile, policy and owner-address locks stay held until the send settles.
             const freshPolicy = await this.lockedPolicy(profile);
             if (freshPolicy === null)
                 blocked("active_owner_policy_required");
             const fresh = await this.snapshot(op, freshPolicy);
-            if (!fresh.readOnlyConditionsSatisfied ||
-                fresh.confirmedNonce !== fresh.pendingNonce)
+            if (!fresh.readOnlyConditionsSatisfied || fresh.confirmedNonce !== fresh.pendingNonce ||
+                this.now().getTime() - Date.parse(fresh.observedAt) > 30_000)
                 blocked("deposit_preflight_changed");
+            const sealedNonce = journal.effects[1].phase === "sealed" ? journal.effects[1].attempt.nonce : null;
+            if (sealedNonce !== null && sealedNonce !== fresh.confirmedNonce)
+                blocked("sealed_deposit_nonce_unavailable");
             const leaseState = await this.reserve(op, freshPolicy, journal);
-            journal = await this.journals.beginSigningUnderLocks(profileHash, operationId, journal.integrityHash, "deposit", this.now().toISOString());
-            let raw;
-            try {
-                raw = await this.ports.signer.sign(op, fresh.confirmedNonce, journal);
+            if (journal.effects[1].phase === "pending")
+                journal = await this.journals.beginSigningUnderLocks(profileHash, operationId, journal.integrityHash, "deposit", this.now().toISOString());
+            if (journal.effects[1].phase === "signing_started") {
+                // Nothing signed was saved or sent: signing the frozen envelope again at the fresh nonce is safe.
+                let signed;
+                try {
+                    signed = await this.ports.signer.sign(op, fresh.confirmedNonce, journal);
+                }
+                catch {
+                    return this.result(op, journal, "signing_resumable", "signing_failed_before_seal");
+                }
+                journal = await this.journals.transitionUnderLocks(profileHash, operationId, journal.integrityHash, { kind: "seal_signed", role: "deposit", rawTransaction: signed, nonce: fresh.confirmedNonce });
             }
-            catch {
-                return this.result(op, journal, "observation_only", "signing_outcome_uncertain");
-            }
-            journal = await this.journals.transitionUnderLocks(profileHash, operationId, journal.integrityHash, { kind: "seal_signed", role: "deposit", rawTransaction: raw, nonce: fresh.confirmedNonce });
-            // Re-read the authenticated policy head under the same profile lock and keep it until the send settles.
-            const finalPolicy = await this.lockedPolicy(profile);
-            if (finalPolicy === null || finalPolicy.profile !== profile || finalPolicy.digest !== op.policyDigest ||
-                finalPolicy.revision !== op.policyRevision || !same(finalPolicy.accounts.evm ?? "", op.sourceAccount))
-                return this.result(op, journal, "observation_only", "active_policy_revoked_or_changed");
-            try {
-                const final = await this.snapshot(op, finalPolicy);
-                if (!final.readOnlyConditionsSatisfied ||
-                    final.confirmedNonce !== fresh.confirmedNonce || final.pendingNonce !== fresh.confirmedNonce ||
-                    this.now().getTime() - Date.parse(final.observedAt) > 30_000)
-                    blocked("pre_send_conditions_changed");
-            }
-            catch {
-                return this.result(op, journal, "observation_only", "pre_send_conditions_unavailable");
-            }
-            await this.owner(op);
+            const raw = journal.effects[1].attempt.rawTransaction;
             journal = await this.journals.transitionUnderLocks(profileHash, operationId, journal.integrityHash, { kind: "mark_submitting", role: "deposit", at: this.now().toISOString() });
             const expectedHash = journal.effects[1].attempt.transactionHash;
             let outcome = "uncertain";

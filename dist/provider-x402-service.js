@@ -1,4 +1,4 @@
-import { canonicalJson, sha256 } from "./canonical.js";
+import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
 import { effectiveX402Cap, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
@@ -9,6 +9,7 @@ import { providerX402SettledWithoutResultProof } from "./provider-x402-proof.js"
 import { providerX402TerminalReceipt, transitionProviderX402Operation, } from "./provider-x402-state.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { stagedProviderX402Operation } from "./provider-x402-stage.js";
+import { resolveProviderPrepare } from "./provider-prepare-identity.js";
 import { isCode } from "./secure-state-store.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
@@ -18,7 +19,7 @@ import { assertProviderHttpRequest } from "./provider-x402-http-request.js";
 import { assertProviderAtomicAmount, assertProviderPolicyBalance, sameFrozenProviderPolicy, sameFrozenProviderProfile, soleProviderOffer, } from "./provider-x402-policy.js";
 import { waitForProviderSettlement } from "./provider-x402-wait.js";
 import { boundedX402ReadPort } from "./x402-service-rpc.js";
-import { assertFrozenProviderX402Policy, assertProviderX402RpcBinding, canonicalProviderX402RpcUrl, observeProviderX402Balance, requireProviderX402Adapter, requireProviderX402Profile, } from "./provider-x402-preconditions.js";
+import { assertFrozenProviderX402Policy, canonicalProviderX402RpcUrl, observeProviderX402Balance, requireProviderX402Adapter, requireProviderX402Profile, } from "./provider-x402-preconditions.js";
 const SETTLEMENT_OBSERVATION_REASONS = new Set([
     "provider_evidence_capability_gap",
     "settlement_block_mismatch",
@@ -31,6 +32,8 @@ const SETTLEMENT_OBSERVATION_REASONS = new Set([
 const RETRYABLE_SETTLEMENT_OBSERVATION_REASONS = new Set([
     "provider_evidence_capability_gap",
     "settlement_receipt_missing",
+    // Before frozen-hash mismatches were told apart, one HTTP 429/5xx was recorded as a contradiction.
+    "settlement_evidence_contradiction",
 ]);
 const EVIDENCE_WINDOW_MS = 240_000;
 export class ProviderX402Service {
@@ -66,10 +69,11 @@ export class ProviderX402Service {
         const profileHash = state.profileHash(profile);
         const operationId = state.operationId(profile, key);
         const idempotencyHash = state.idempotencyHash(key);
-        const requestHash = providerX402RequestHash({
-            profile, canonicalUrl, rpcUrl, ...requestFields, ...(callerCap === undefined ? {} : { callerCapAtomic: callerCap }),
-        });
-        const replay = await this.operations.resolvePrepare({ kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash });
+        const requestInput = { profile, canonicalUrl, ...requestFields, ...(callerCap === undefined ? {} : { callerCapAtomic: callerCap }) };
+        // The RPC is not part of the request identity: any Base endpoint may prepare, approve and observe it.
+        const requestHash = providerX402RequestHash(requestInput);
+        const legacyRequestHash = providerX402RequestHash({ ...requestInput, legacyRpcUrl: rpcUrl });
+        const replay = await resolveProviderPrepare(this.operations, { kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash }, legacyRequestHash);
         if (replay !== null) {
             if (replay.kind !== "x402_fetch" || replay.strategy !== "provider_atomic")
                 throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to a different operation strategy.");
@@ -80,9 +84,9 @@ export class ProviderX402Service {
             `profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
             `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`,
         ], async () => {
-            const existing = await this.operations.resolvePrepare({
+            const existing = await resolveProviderPrepare(this.operations, {
                 kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash,
-            });
+            }, legacyRequestHash);
             if (existing !== null) {
                 if (existing.kind !== "x402_fetch" || existing.strategy !== "provider_atomic") {
                     throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to a different operation strategy.");
@@ -146,11 +150,9 @@ export class ProviderX402Service {
                     accountBindingHash: balance.account_binding_hash,
                 } });
         }
-        assertProviderX402RpcBinding(this.context, current);
         const rpcIdentity = await this.context.requireRpc().assertBaseChain();
-        if (rpcIdentity.chainId !== 8453 || sha256(rpcIdentity.rpcOrigin) !== current.rpcOriginHash) {
-            throw new ApnError("APN_CHAIN_MISMATCH", "Provider x402 settlement RPC is not the frozen Base endpoint.");
-        }
+        if (rpcIdentity.chainId !== 8453)
+            throw new ApnError("APN_CHAIN_MISMATCH", "Provider x402 settlement RPC is not Base.");
         return await this.transition(current, "awaiting_approval", "x402_awaiting_authorization", "x402_frozen_offer");
     }
     async approve(operationIdInput) {
@@ -178,11 +180,8 @@ export class ProviderX402Service {
                 const balance = await observeProviderX402Balance(this.context, bound, adapter);
                 const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(bound)));
                 assertFrozenProviderX402Policy(operation, policy, balance);
-                assertProviderX402RpcBinding(this.context, operation);
                 const rpc = providerX402ReadPort(this.context.requireRpc());
                 const lower = await captureProviderEvidenceLowerBlock(rpc);
-                if (lower.rpcOriginHash !== operation.rpcOriginHash)
-                    await this.failBeforeEffect(operation, "rpc_origin_changed");
                 const challenge = await freshChallenge(this.context.requireHttp(), operation.request.canonicalUrl, operation.request.httpRequest);
                 const selected = soleProviderOffer(challenge);
                 if (selected.digest !== operation.requirement.digest || selected.payee !== operation.requirement.payee ||
@@ -323,7 +322,6 @@ export class ProviderX402Service {
         if (operation.state === "ambiguous_effect" && SETTLEMENT_OBSERVATION_REASONS.has(operation.reason) &&
             !RETRYABLE_SETTLEMENT_OBSERVATION_REASONS.has(operation.reason))
             return operation;
-        assertProviderX402RpcBinding(this.context, operation);
         const remaining = deadline === undefined ? undefined : Math.floor(deadline - this.context.wait.nowMs());
         if (remaining !== undefined && remaining < 1)
             return operation;
@@ -378,8 +376,8 @@ export class ProviderX402Service {
         }
         if (receipt === null)
             return operation;
-        if (receipt.terminalState === "failed_before_effect") {
-            return await this.transition(operation, "failed_before_effect", receipt.reason, receipt.proofClass);
+        if (receipt.terminalState === "failed_before_effect" || receipt.terminalState === "abandoned_unknown") {
+            return await this.transition(operation, receipt.terminalState, receipt.reason, receipt.proofClass);
         }
         if (operation.settlementEvidence === undefined || (receipt.terminalState === "completed" ? operation.sellerResult === undefined : operation.sellerResult !== undefined)) {
             throw new ApnError("APN_STATE_CORRUPT", "Provider x402 terminal receipt has no matching durable evidence.");

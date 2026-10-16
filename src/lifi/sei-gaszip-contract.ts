@@ -1,4 +1,4 @@
-import { inspectGaszipNativeDelivery } from "./gaszip-native-delivery.js";
+import { gaszipProviderFlags, inspectGaszipNativeDelivery, type GaszipProviderFailure } from "./gaszip-native-delivery.js";
 import { getAddress, type Hex } from "viem";
 import { ApnError } from "../errors.js";
 import { hashObject } from "../canonical.js";
@@ -52,23 +52,28 @@ export function inspectSeiFundingQuote(value: unknown, now: number): SeiFundingQ
 }
 export interface SeiCorrelatedDelivery { readonly hash: Hex; readonly amount: string; readonly signer: string; readonly nonce: string; readonly providerDigest: string; readonly grossNative?: true }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
-export function inspectSeiDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): SeiCorrelatedDelivery | null {
+export function inspectSeiDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): SeiCorrelatedDelivery | GaszipProviderFailure | null {
   const v=seiObject(value); seiExact(v,["deposit","txs"]); const d=seiObject(v.deposit);
-  if(Object.hasOwn(d,"seen"))return inspectGaszipNativeDelivery(value,sourceHash,owner,amount,sourceBlock,1329,246,SEI_FUNDING.minimumOutput,
+  if(Object.hasOwn(d,"seen"))return inspectGaszipNativeDelivery(value,sourceHash,owner,amount,sourceBlock,1329,246,0n,
     {fail:seiFail,object:seiObject,uint:seiUint,quantity:seiQuantity,hash:seiHash,address:seiAddress,exact:seiExact});
   seiExact(d,["block","chain","hash","log","sender","shorts","status","time","to","usd","value"]);
   if (seiHash(d.hash)!==sourceHash || seiUint(d.chain)!==8453n || seiAddress(d.sender)!==owner || seiUint(d.value)!==seiUint(amount) ||
     seiAddress(d.to)!==owner || !Array.isArray(d.shorts) || d.shorts.length!==1 || seiUint(d.shorts[0])!==246n) seiFail("deposit_binding");
   if (sourceBlock!==undefined && seiUint(d.block).toString()!==sourceBlock)seiFail("deposit_block_binding");
   if (!["SEEN","PENDING","CONFIRMED","PRIORITY","CANCELLED"].includes(String(d.status)))seiFail("deposit_status");
+  if (d.status==="CANCELLED") return { providerFailure:"provider_cancelled", providerDigest:hashObject(value) };
   if (d.status!=="CONFIRMED") return null;
   if (!Array.isArray(v.txs) || v.txs.length>8) seiFail("delivery_count");
-  const rows=v.txs.map(seiObject);if(rows.some(t => seiUint(t.chain)!==1329n))seiFail("unexpected_outbound_chain");
+  const rows=v.txs.map(seiObject), failed=rows.map(t => gaszipProviderFlags(t,seiFail)).find(x => x!==null);
+  if (failed!==undefined) return { providerFailure:failed, providerDigest:hashObject(value) };
+  if(rows.some(t => seiUint(t.chain)!==1329n))seiFail("unexpected_outbound_chain");
   if (rows.length===0) return null; if (rows.length!==1) seiFail("delivery_ambiguous");
   const t=rows[0]!; seiExact(t,["chain","hash","nonce","refund","cancelled","signer","status","time","to","usd","value"]);
-  if (t.refund!==false || t.cancelled!==false || seiAddress(t.to)!==owner) seiFail("delivery_binding");
+  if (seiAddress(t.to)!==owner) seiFail("delivery_binding");
   if (!["SEEN","PENDING","CONFIRMED","PRIORITY","CANCELLED"].includes(String(t.status)))seiFail("outbound_status");
+  if (t.status==="CANCELLED") return { providerFailure:"provider_cancelled", providerDigest:hashObject(value) };
   if (t.status!=="CONFIRMED") return null;
-  const output=seiUint(t.value); if (output<SEI_FUNDING.minimumOutput) seiFail("delivery_floor");
+  // The owner's floor is applied after the payout is proved on chain; a lower payout is a terminal destination failure.
+  const output=seiUint(t.value);
   return { hash:seiHash(t.hash), amount:output.toString(), signer:seiAddress(t.signer), nonce:seiUint(t.nonce).toString(), providerDigest:hashObject(value) };
 }

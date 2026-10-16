@@ -227,6 +227,7 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
       value: this.authorizationStateValue,
       blockNumber: identity.number,
       blockHash: identity.hash,
+      blockTimestamp: identity.timestamp,
       blockTag: "tag" in block ? block.tag : "number",
       observedAt: identity.observedAt,
       rpcOrigin: this.rpcOrigin,

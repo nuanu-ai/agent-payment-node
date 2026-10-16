@@ -8,7 +8,7 @@ import { directCustodyPayload } from "./direct-public-effect.js";
 import type { Hex, OperationRecord } from "./model.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 
-/** Permanent dispatch fence. Absence of a receipt never grants another send. */
+/** Permanent dispatch fence: these exact bytes may have been sent, so recovery observes before any re-send of them and never signs anew. */
 export class EvmDirectSubmissionJournal extends SecureStateStore {
   async exists(operation: OperationRecord): Promise<boolean> {
     const value = await this.readJson(this.path(operation));

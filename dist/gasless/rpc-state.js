@@ -3,9 +3,14 @@ import { addressWord, rpcBool, rpcHex, rpcQuantity, rpcWord } from "./rpc-codec.
 import { GASLESS_MAX_UINT120, gaslessAddress, gaslessFailure, gaslessUint } from "./validation.js";
 const callData = (signature, words = []) => `${toFunctionSelector(signature)}${words.map((word) => word.slice(2)).join("")}`;
 const ZERO_WORD = `0x${"0".repeat(64)}`;
-export async function verifyProtocolAt(call, deployment, block) {
+/**
+ * Proxy implementation slots and one-word identity calls are read at `block` every time. Code at a pinned address
+ * cannot change after deployment (EIP-6780; upgrades move only the implementation slots read here), so a caller that
+ * already verified the code hashes in this invocation passes `withCode: false` and skips the bytecode downloads.
+ */
+export async function verifyProtocolAt(call, deployment, block, withCode) {
     const pinned = { blockHash: block.hash, requireCanonical: true };
-    const codes = deployment.code.map(async (row) => {
+    const codes = (withCode ? deployment.code : []).map(async (row) => {
         const code = rpcHex(await call("eth_getCode", [row.address, pinned]), 256 * 1024);
         if (code === "0x" || keccak256(code) !== row.codeHash) {
             gaslessFailure("APN_RPC_PROTOCOL", "gasless_protocol_identity");

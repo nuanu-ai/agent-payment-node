@@ -84,7 +84,8 @@ test("IPC closes the sole request writer and consumes one EOF-terminated respons
 
 test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no approval bypass", async () => {
   assert.deepEqual(parseArgv(["--version"]), { request: { command: "version" } });
-  assert.deepEqual(parseArgv(["doctor", "keychain"]), { request: { command: "doctor.keychain" } });
+  assert.deepEqual(parseArgv(["doctor", "keychain"]), { request: { command: "doctor.keychain", profile: "default" } });
+  assert.deepEqual(parseArgv(["doctor", "keychain", "--profile", "agent"]), { request: { command: "doctor.keychain", profile: "agent" } });
   assert.deepEqual(parseArgv(["wallet", "ensure"]), { request: { command: "wallet.ensure", profile: "default" } });
   assert.deepEqual(parseArgv(["wallet", "status", "--profile", "bot_1"]), { request: { command: "wallet.status", profile: "bot_1" } });
   assert.deepEqual(parseArgv(["wallet", "balance", "--rpc-url", "https://rpc.example/private?token=redacted"]), {

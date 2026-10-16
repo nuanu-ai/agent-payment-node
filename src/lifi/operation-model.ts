@@ -145,7 +145,7 @@ export interface BridgeMutable {
   readonly failure: BridgeFailure | null;
   /** Frozen reservation as first created; live lifecycle remains in the shared ledger. */
   readonly usageLease: AssetUsageReservation | null;
-  /** Append-only, redacted physical read accounting. Absent only on legacy records. */
+  /** Redacted physical read accounting of the latest observations, at most BRIDGE_TELEMETRY_ROWS. Absent only on legacy records. */
   readonly observationTelemetry?: readonly BridgeObservationTelemetry[];
 }
 export type BridgeEffectSnapshot = Omit<BridgeEffect, "envelope"> & { readonly envelopeHash: string };
@@ -181,7 +181,9 @@ export function retainedUnsentBridgeRpcFailure(op: Pick<BridgeOperationRecord, "
 /** Recoverable pre-sign guard outcomes: nothing was sealed, signed or sent, and the next resume repeats the full guard. */
 export const BRIDGE_PRE_SIGN_RPC_RATE_LIMITED = "pre_sign_rpc_rate_limited";
 export const BRIDGE_PRE_SIGN_RPC_UNAVAILABLE = "pre_sign_rpc_unavailable";
-export const BRIDGE_TERMINAL: readonly BridgeState[] = ["completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
+/** Telemetry is diagnostics, not evidence: a transition keeps only the latest rows and a telemetry-only change adds none. */
+export const BRIDGE_TELEMETRY_ROWS = 8;
+export const BRIDGE_TERMINAL: readonly BridgeState[] =["completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
 export function bridgeIntentBinding(operation: Pick<BridgeOperationRecord, "schemaVersion" | "kind" | "profileHash" | "operationId" | "idempotencyHash" | "requestHash" | "intent" | "effects">) {
   return { schemaVersion: operation.schemaVersion, kind: operation.kind, profileHash: operation.profileHash,
     operationId: operation.operationId, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash,

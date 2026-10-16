@@ -1010,6 +1010,20 @@ test("public stable execute uses persisted owner policy, factory RPC and one phy
   assert.equal(refusedRecovery.error?.details?.reason, "orca_stable_signed_effect_exists");
   assert.equal((await f.service.operations.loadAny(persisted.operationId))?.usageLease?.state, "reserved");
   assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, sendsBeforeFailure);
+  // SWAP-20: one consent. stable-approve reserves and executes in the same foreground command; no second prompt.
+  f.setTime(new Date(time));
+  const single = (await prepareOrcaStableGuardedCandidateCore(f.rpc, admission, f.service,
+    { ...f.request, policyRevision: staged.revision, idempotencyKey: "stable-candidate-single-consent" }, async () => [], f.clock)).operation;
+  let approveScreens = 0;
+  const singleResult = await runCli(["swap", "solana", "orca", "stable-approve", "--operation", single.operationId], {}, { ...options,
+    orcaStableApproveConsent: { confirm: async (lines: readonly string[]) => {
+      approveScreens++; assert.ok(lines.some(line => line.includes("authorizes the one execution that follows")));
+    } },
+    orcaStableExecuteConsent: { confirm: async () => { throw new Error("a second consent must not be requested"); } } });
+  assert.equal(singleResult.ok, true, JSON.stringify(singleResult));
+  assert.equal(approveScreens, 1);
+  assert.equal((singleResult.data as any).operation.state, "submitted");
+  assert.equal(posts.filter(post => post.methods.includes("sendTransaction")).length, sendsBeforeFailure + 1);
 });
 
 test("stable physical transport makes one 429 attempt and persists provider cooldown", async (t) => {

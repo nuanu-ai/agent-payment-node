@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-This source tree prepares an unreleased APN 0.5.41 candidate for Apple Silicon
+This source tree prepares an unreleased APN 0.5.42 candidate for Apple Silicon
 macOS. Published packages and the Homebrew Formula have separate provenance.
 A matching version number does not prove that an installed artifact contains
 these source changes: verify its release commit or artifact digest and installed
@@ -275,7 +275,12 @@ apn pay transfer approve --operation <operation-id> \
 ```
 
 For the default local wallet, prepare freezes recipient, amount, nonce, fees,
-calldata and expiry. For a bound Coinbase or MetaMask Agent Wallet profile it
+calldata and expiry. It needs an active owner allowlist policy that admits
+Base USDC on the direct rail (`docs/allowlist-direct-integration.md`): the
+amount counts against that policy's per-transfer and daily caps, and approval
+reserves it in the shared usage ledger before signing. Approval accepts any fee
+movement that keeps the frozen nonce, gas limit and max fee per gas
+executable; the consent screen shows that signed execution-fee cap. For a bound Coinbase or MetaMask Agent Wallet profile it
 instead freezes the public profile revision/capability/sender, provider
 execution ownership, recipient, integer atomic amount and canonical decimal,
 Base/canonical-USDC identity, foreground-approval policy and validated RPC
@@ -787,7 +792,7 @@ apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <nati
 apn --version
 apn mcp serve
 apn mcp config
-apn doctor keychain
+apn doctor keychain [--profile <profile>]
 apn wallet ensure [--profile <profile>]
 apn wallet import --profile <profile> --key-file <absolute-path> --key-name <env-name> --expected-address <checksummed-address>
 apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]

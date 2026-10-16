@@ -23,7 +23,8 @@ const EDGES: Readonly<Record<BridgeState, readonly BridgeState[]>> = {
   completed: [], destination_failed: [], failed_before_effect: [], failed_after_approval: [], failed_confirmed_revert: [],
 };
 const PHASE_EDGES: Readonly<Record<BridgeEffectPhase, readonly BridgeEffectPhase[]>> = {
-  unsealed: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
+  // signing_started returns to unsealed only when custody holds no sealed material and no SEND claim exists (execution.ts).
+  unsealed: ["signing_started"], signing_started: ["sealed", "unsealed"], sealed: ["submitting"],
   submitting: ["submitted_pending", "unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"],
   submitted_pending: ["unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"],
   unknown_finality: ["included_success", "included_revert", "safe_success", "safe_revert"],
@@ -137,7 +138,7 @@ export function validateEnvelopeProof(p: BridgeTransactionProof, e: BridgeEnvelo
   if (p.chainId !== e.chainId || p.transactionHash !== hash || p.from !== e.from || p.to !== e.to ||
     p.nonceAtomic !== c.nonceAtomic || p.valueAtomic !== e.valueAtomic || p.dataHash !== sha256(Buffer.from(e.data.slice(2), "hex")) ||
     p.gasLimitAtomic !== c.gasLimitAtomic || p.maxFeePerGasAtomic !== c.maxFeePerGasAtomic ||
-    p.maxPriorityFeePerGasAtomic !== c.maxPriorityFeePerGasAtomic || p.rpcOrigin !== e.feeQuote.rpcOrigin) bridgeCorrupt();
+    p.maxPriorityFeePerGasAtomic !== c.maxPriorityFeePerGasAtomic) bridgeCorrupt();
   if (BigInt(p.gasUsedAtomic) > BigInt(c.gasLimitAtomic) || BigInt(p.effectiveGasPriceAtomic) > BigInt(c.maxFeePerGasAtomic) ||
     BigInt(p.executionFeeWei) !== BigInt(p.gasUsedAtomic) * BigInt(p.effectiveGasPriceAtomic) ||
     BigInt(p.actualTotalFeeWei) !== BigInt(p.executionFeeWei) + BigInt(p.l1DataFeeWei) + BigInt(p.operatorFeeWei) ||
@@ -194,7 +195,7 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
     }
     if (s.sourceProof === null || p.correlationHash !== hashObject(s.sourceProof.correlation) || p.tool !== m.tool ||
       p.chainId !== m.request.toChainId || p.recipient !== m.request.recipient || p.token !== m.request.toToken ||
-      p.rpcOrigin !== op.intent.destinationRpcOrigin || BigInt(p.safeBlock.numberAtomic) < BigInt(p.blockNumberAtomic) ||
+      BigInt(p.safeBlock.numberAtomic) < BigInt(p.blockNumberAtomic) ||
       (op.intent.decoded.composite === undefined && (BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
         ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic)))) bridgeCorrupt();
   }
@@ -260,7 +261,7 @@ function validateEffect(e: BridgeEffectSnapshot, envelope: BridgeEnvelope, at: s
     if (p.status !== (e.phase.endsWith("success") ? "success" : "reverted")) bridgeCorrupt();
   }
   if (e.safeProof !== null && (e.safeProof.safeBlock === null || e.includedProof === null ||
-    !bridgeSame({ ...e.safeProof, safeBlock: null }, { ...e.includedProof, safeBlock: null }))) bridgeCorrupt();
+    !bridgeSame({ ...e.safeProof, safeBlock: null, rpcOrigin: null }, { ...e.includedProof, safeBlock: null, rpcOrigin: null }))) bridgeCorrupt();
 }
 function validateTransition(p: BridgeTransition, n: BridgeTransition, legacy = false): void {
   if (BRIDGE_TERMINAL.includes(p.state) || (p.state !== n.state && !EDGES[p.state].includes(n.state)) || n.at < p.at) bridgeCorrupt();

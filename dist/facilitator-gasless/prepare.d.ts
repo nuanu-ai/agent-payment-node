@@ -3,6 +3,7 @@ import type { StateStore } from "../state.js";
 import type { FacilitatorPort } from "./facilitator.js";
 import { type FacilitatorOperationRecord, type FacilitatorRequest } from "./operation-model.js";
 import type { FacilitatorGaslessRepositoryPort } from "./operation-repository.js";
+import type { FacilitatorGaslessPolicy } from "./policy.js";
 import type { FacilitatorRpcPort } from "./rpc.js";
 export interface FacilitatorPreparationOptions {
     readonly state: StateStore;
@@ -11,6 +12,7 @@ export interface FacilitatorPreparationOptions {
     readonly rpc: () => FacilitatorRpcPort;
     readonly facilitator: FacilitatorPort;
     readonly now: () => number;
+    readonly policy: FacilitatorGaslessPolicy;
 }
 export declare function facilitatorRequest(value: unknown): FacilitatorRequest;
 /** Freezes one exact Avalanche USDC transfer; nothing is signed and no payment material leaves APN here. */

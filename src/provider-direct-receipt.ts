@@ -165,13 +165,11 @@ function assertTerminalReceipt(receipt: ReceiptRecord, operation: OperationRecor
   if (receipt.state === "abandoned_unknown") {
     const prior = operation.terminal ? operation.transitions.at(-2) : operation.transitions.at(-1);
     if (
-      operation.providerDirect?.executionMode !== "provider_atomic_send" ||
-      operation.transactionHash !== undefined || operation.providerEffect !== undefined ||
-      prior?.state !== "ambiguous_effect" || prior.terminal ||
+      operation.providerDirect === undefined || prior === undefined || prior.terminal ||
+      !["ambiguous_effect", "evidence_pending", "provider_pending", "provider_acknowledged"].includes(prior.state) ||
       receipt.reason !== "owner_acknowledged_unresolved_effect" ||
       receipt.proofClass !== "owner_acknowledgement_only" ||
-      receipt.blockNumberAtomic !== undefined || receipt.exactTransferLog !== undefined ||
-      receipt.transactionHash !== undefined
+      receipt.blockNumberAtomic !== undefined || receipt.exactTransferLog !== undefined
     ) stateCorrupt("Provider direct owner-abandonment receipt is invalid.");
     return;
   }

@@ -2,7 +2,7 @@ import { ANY_BENEFICIARY, decodeAllowedCalldataTerms, decodeERC20TransferAmountT
 import { ALL_METAMASK_FACILITATOR_ADDRESSES } from "./metamask-smart-account-vendor.js";
 import { SIGNABLE_DELEGATION_TYPED_DATA, decodeDelegations, encodeDelegations, toDelegationStruct, } from "./metamask-smart-account-vendor.js";
 import { getAddress, keccak256, pad, recoverTypedDataAddress, toHex } from "viem";
-import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
+import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { assertMetaMaskSmartAccountPackageIdentity } from "./metamask-smart-account-package.js";
@@ -55,7 +55,7 @@ export class MetaMaskSmartAccountX402Adapter {
     }
     async prepare(input) {
         await assertMetaMaskSmartAccountPackageIdentity();
-        const record = await this.preflightRecord(input.profileHash, input.wallet, input.amountAtomic, input.rpcOriginHash);
+        const record = await this.preflightRecord(input.profileHash, input.wallet, input.amountAtomic);
         const facilitators = intersection(input.facilitatorAddresses, this.approvedFacilitators);
         if (facilitators.length === 0)
             incompatible("Seller facilitators do not intersect the approved MetaMask facilitator set.");
@@ -87,7 +87,7 @@ export class MetaMaskSmartAccountX402Adapter {
         const binding = delegatedBinding(operation);
         if (this.nowUnix() >= BigInt(binding.effectiveExpiryUnix))
             inactive();
-        const record = await this.preflightRecord(operation.profileHash, operation.wallet, operation.amountAtomic, binding.rpcOriginHash);
+        const record = await this.preflightRecord(operation.profileHash, operation.wallet, operation.amountAtomic);
         assertAuthorityBinding(operation, record);
         let payload;
         try {
@@ -146,7 +146,7 @@ export class MetaMaskSmartAccountX402Adapter {
             throw new ApnError("APN_STATE_CORRUPT", "Authorized ERC-7710 operation lost its sealed payment material.");
         }
         if (record.phase === "sealed") {
-            const authority = await this.preflightRecord(operation.profileHash, operation.wallet, operation.amountAtomic, binding.rpcOriginHash);
+            const authority = await this.preflightRecord(operation.profileHash, operation.wallet, operation.amountAtomic);
             assertAuthorityBinding(operation, authority);
         }
         return this.recovered(operation, record);
@@ -167,17 +167,15 @@ export class MetaMaskSmartAccountX402Adapter {
             throw new ApnError("APN_STATE_CORRUPT", "Sealed ERC-7710 material differs from the frozen operation.");
         return materialProjection(record);
     }
-    async preflightRecord(profileHash, wallet, amountAtomic, rpcOriginHash) {
+    async preflightRecord(profileHash, wallet, amountAtomic) {
         const record = await this.permissions.load(profileHash);
         if (record === null || !isGrantedPermissionRecord(record) || record.phase !== "active" ||
             this.nowUnix() >= BigInt(record.granted_expires_at_unix))
             inactive();
         if (record.owner_address.toLowerCase() !== wallet.toLowerCase())
             drift();
-        const chain = await this.rpc.assertBaseChain();
-        if (sha256(chain.rpcOrigin) !== rpcOriginHash) {
-            throw new ApnError("APN_RPC_PROTOCOL", "Smart Account x402 RPC origin changed during preparation.");
-        }
+        // Bound to Base, not to one endpoint: every value this preflight relies on is read again here.
+        await this.rpc.assertBaseChain();
         const amount = canonicalAtomic(amountAtomic);
         if (amount > BigInt(record.granted_cap_atomic) || amount > canonicalAtomic(await this.allowance.available(record))) {
             throw new ApnError("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "Current Smart Account allowance is insufficient for this x402 payment.");

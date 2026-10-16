@@ -92,14 +92,13 @@ function publicPort(changeHeader = false) {
  }};
  return {m,rpc,methods};
 }
-test("resolver rereads every upgraded byte only under the selected new generation",async () => {
+test("resolver identifies the upgraded generation from the bytes it rereads, whichever generation of the pool was requested",async () => {
  const p = publicPort(), m = await new JupiterV1MaterialResolver(p.rpc).resolve(p.m.payer,p.m.quoteResponse,p.m.rawBuildResponse,"6000000",undefined,NEW.routeId);
  assert.equal(routeConfigForMaterial(m),NEW);
  assert.equal(canonicalJson(m.programPins),canonicalJson(p.m.programPins));
  await guardJupiterV1WhirlpoolMaterial(m);
  const old = publicPort();
- await assert.rejects(new JupiterV1MaterialResolver(old.rpc).resolve(old.m.payer,old.m.quoteResponse,old.m.rawBuildResponse),/runtime executable pin changed/);
- assert.equal(old.methods.includes("getFeeForMessage"),false);
+ assert.equal(routeConfigForMaterial(await new JupiterV1MaterialResolver(old.rpc).resolve(old.m.payer,old.m.quoteResponse,old.m.rawBuildResponse,"6000000")),NEW);
 });
 test("resolver rejects unchanged payload with a changed deployment header before fee proof",async () => {
  const p = publicPort(true);

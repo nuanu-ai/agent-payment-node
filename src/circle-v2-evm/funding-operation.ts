@@ -80,11 +80,13 @@ export function validateCircleFundingOperation(value: unknown): CircleFundingOpe
   if (!Array.isArray(op.effects) || op.effects.length < 2 || op.effects.length > 4 || op.effects[0]?.role !== "approval" || op.effects[1]?.role !== "burn" || new Set(op.effects.map(x => x.role)).size !== op.effects.length) circleCorrupt("effects");
   for (const inputEffect of op.effects) {
     const e = inputEffect as CircleEffect;
-    if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted"].includes(e.phase)) circleCorrupt("effect_shape");
+    if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted", "abandoned_unsent"].includes(e.phase)) circleCorrupt("effect_shape");
     validateCircleFundingEnvelope(e.envelope, e.role, op.destinationChain, op.attestation, op.destinationProfile, funding);
     if ((e.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(e.transactionHash)) || (e.materialHash !== null && !/^[a-f0-9]{64}$/u.test(e.materialHash)) ||
       (["sealed", "submission_started", "submitted", "confirmed", "reverted"].includes(e.phase) && (e.materialHash === null || e.transactionHash === null)) ||
-      (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash))) circleCorrupt("effect_material");
+      (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash)) ||
+      // Never crossed its submission fence and can never be sent: no bytes were saved, or they were discarded after a never-lands proof.
+      (e.phase === "abandoned_unsent" && (e.proof !== null || (e.transactionHash === null) !== (e.materialHash === null)))) circleCorrupt("effect_material");
     if (e.phase === "reverted" && (e.proof?.finalityTag !== "finalized" || e.role === "mint")) circleCorrupt("revert_finality");
   }
   if (BigInt(op.effects[1]!.envelope.nonceAtomic) !== BigInt(op.effects[0]!.envelope.nonceAtomic) + 1n) circleCorrupt("source_nonce_order");
@@ -93,7 +95,7 @@ export function validateCircleFundingOperation(value: unknown): CircleFundingOpe
   if (op.destination !== null && (op.attestation === null || op.destination.nonce !== op.attestation.nonce || op.destination.attestedMessageHash !== op.attestation.hash || op.destination.transactionHash !== op.effects.find(e => e.role === "mint")?.transactionHash)) circleCorrupt("destination_binding");
   if (op.destination !== null && (op.destination.recipient !== funding.recipient || op.destination.token !== funding.destinationToken || op.destination.amountAtomic !== op.attestation?.receivedAtomic)) circleCorrupt("funding_destination_economics");
   if (op.state === "completed" && (op.source?.finalityTag !== "finalized" || op.destination?.finalityTag !== "safe" || op.residualAllowanceAtomic !== "0" || !op.usageFinalized)) circleCorrupt("completion_finality");
-  if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null))) circleCorrupt("cancel_private_entry");
+  if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "abandoned_unsent" && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)))) circleCorrupt("cancel_private_entry");
   if (op.state === "cleaned" && (op.residualAllowanceAtomic !== "0" || op.source !== null || !op.usageFinalized)) circleCorrupt("cleanup_completion");
   if (!Array.isArray(op.transitions) || op.transitions.length < 1 || op.transitions.length > 500) circleCorrupt("transitions");
   for (const [i, t] of op.transitions.entries()) if (!shape(t, ["sequence", "at", "reason", "previousHash", "snapshotHash"]) || t.sequence !== i || t.previousHash !== (i === 0 ? null : op.transitions[i - 1]!.snapshotHash) || !/^[a-f0-9]{64}$/u.test(t.snapshotHash) || !Number.isFinite(Date.parse(t.at)) || i > 0 && t.at < op.transitions[i - 1]!.at) circleCorrupt("transition_chain");

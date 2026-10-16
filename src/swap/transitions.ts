@@ -21,10 +21,12 @@ const ALLOWED: Readonly<Record<SwapOperationState, readonly SwapOperationState[]
   reserved: ["submitting", "failed_before_effect"],
   submitting: ["submitted", "unknown_finality"],
   submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"],
-  unknown_finality: ["finalized", "failed_confirmed_revert"],
+  unknown_finality: ["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"],
   finalized: [],
   failed_before_effect: [],
   failed_confirmed_revert: [],
+  expired_unlanded: [],
+  abandoned_unknown: [],
 };
 
 export function transitionSwapOperation(opValue: unknown, state: SwapOperationState, evidence: SwapTransitionEvidence, now: Date): SwapOperationRecord {
@@ -80,6 +82,17 @@ function transitionPatch(op: SwapOperationRecord, state: SwapOperationState, evi
       invalid("Confirmed swap revert requires a released lease and its finalized revert proof.");
     }
     return { usageLease: evidence.usageLease, receiptProof: evidence.receiptProof, failureProofHash: evidence.failureProofHash };
+  }
+  if (state === "expired_unlanded" || state === "abandoned_unknown") {
+    // Expired: the chain proved no landing, so the hold is released. Abandoned: no proof exists, so the input stays charged.
+    const leaseState = state === "expired_unlanded" ? "released_unsubmitted" : "finalized";
+    if (op.receiptProof !== null || op.submissionMarker === null || evidence.usageLease?.state !== leaseState ||
+        evidence.failureProofHash === undefined || !/^[a-f0-9]{64}$/u.test(evidence.failureProofHash) ||
+        evidence.usageLease.outcomeDigest !== evidence.failureProofHash || evidence.usageLease.reservationId !== op.usageLease?.reservationId ||
+        Object.keys(evidence).length !== 2) {
+      invalid("This terminal swap requires its proof or acknowledgement digest and the lease bound to it.");
+    }
+    return { usageLease: evidence.usageLease, failureProofHash: evidence.failureProofHash };
   }
   if (state === "failed_before_effect") {
     if (op.state === "submitting") {

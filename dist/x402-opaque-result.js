@@ -20,6 +20,58 @@ export function opaqueHttpResult(raw) {
         responseStatus: raw.status.toString(),
     };
 }
+/**
+ * The seller body after payment. A body APN cannot keep (oversized, compressed, truncated or with an
+ * unreadable media type) is withheld, never thrown: the PAYMENT-RESPONSE beside it must still be decoded.
+ * JSON and UTF-8 text keep their text form; any other 200 body is kept as exact bytes (base64).
+ */
+export function observedPaidResult(raw, opaque, maxBodyBytes) {
+    const kept = (read) => {
+        try {
+            return read();
+        }
+        catch {
+            return undefined;
+        }
+    };
+    const single = (name) => {
+        const values = raw.rawHeaderPairs.filter(([candidate]) => candidate.toLowerCase() === name).map(([, value]) => value);
+        if (values.length > 1)
+            throw invalid(`Seller result has duplicate ${name} headers.`);
+        return values[0];
+    };
+    let intact;
+    try {
+        const encoding = single("content-encoding");
+        const length = single("content-length");
+        intact = raw.bodyBytes.byteLength <= maxBodyBytes && (encoding === undefined || encoding === "identity") &&
+            (length === undefined || (/^(?:0|[1-9][0-9]*)$/u.test(length) && BigInt(length) === BigInt(raw.bodyBytes.byteLength)));
+    }
+    catch {
+        intact = false;
+    }
+    if (!intact)
+        return undefined;
+    if (opaque)
+        return kept(() => opaqueHttpResult(raw));
+    if (raw.status !== 200)
+        return undefined;
+    return kept(() => textHttpResult(raw, single("content-type"))) ?? kept(() => opaqueHttpResult(raw));
+}
+function textHttpResult(raw, contentType) {
+    if (contentType === undefined || contentType.trim() !== contentType || contentType.includes(","))
+        throw invalid("Seller result media type is not canonical.");
+    const mediaType = parseResultMediaType(contentType);
+    const bodyText = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw.bodyBytes);
+    if (mediaType === "application/json")
+        JSON.parse(bodyText);
+    return {
+        mediaType,
+        bodyText,
+        resultHash: domainHash("apn.x402.result-body.v1", raw.bodyBytes),
+        byteLength: raw.bodyBytes.byteLength.toString(),
+    };
+}
 export function parseResultMediaType(value) {
     if (Buffer.byteLength(value, "utf8") > 128)
         throw invalid("Seller result media type is unsupported or non-canonical.");

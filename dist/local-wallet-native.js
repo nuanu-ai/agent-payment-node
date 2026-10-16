@@ -12,6 +12,7 @@ import { reconstructPermit2ProductionMaterial } from "./x402-permit2/production-
 import { createPermit2ProductionSigned } from "./x402-permit2/production-signed.js";
 import { publicPermit2Production } from "./x402-permit2/production-repository.js";
 import { parseDirectIntent, parseDirectRecovery } from "./local-wallet-direct-payload.js";
+import { signedDirectTransaction } from "./local-wallet-direct-signed.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
 import { assertWallet, ensureX402Live, effectSlot, requestProfile, exactRecord, addressEqual, x402Address, protocol, rejected } from "./local-wallet-native-fields.js";
 import { performance } from "node:perf_hooks";
@@ -308,6 +309,7 @@ export class LocalWalletNative {
                 case "wallet.describe": return await this.describeWallet(profile);
                 case "directTransfer.approveAndSign": return await this.approveAndSign(payload);
                 case "effectMaterial.get": return await this.getEffect(payload);
+                case "directTransfer.signedMaterial.get": return await signedDirectTransaction(this.state, payload, this.withWallet.bind(this));
                 case "x402Exact.approveAndAuthorize": return await this.approveX402(payload);
                 case "x402Exact.authorizationMaterial.get": return await this.getX402(payload);
             }
@@ -448,7 +450,7 @@ export class LocalWalletNative {
                 throw protocol("Signed transaction exceeds its data-fee quote size bound.");
             const transactionHash = keccak256(rawTransaction);
             const effect = {
-                payloadHash,
+                payloadHash, operationId: intent.operationId,
                 transactionHash,
                 rawTransaction,
                 rawTransactionHash: transactionHash,
@@ -480,13 +482,12 @@ export class LocalWalletNative {
             const createPayloadHash = hashObject(payload);
             const recoveryBindingHash = hashObject(x402RecoveryBinding(intent));
             const existing = secret.x402Effects[slot];
-            if (existing !== undefined) {
-                if (existing.createPayloadHash !== createPayloadHash || existing.recoveryBindingHash !== recoveryBindingHash) {
-                    throw rejected("APN_X402_AUTHORIZATION_MISMATCH", "Stored x402 authorization differs from the frozen request.");
-                }
-                ensureX402Live(intent.authorization.validBefore);
-                return publicX402Effect(existing);
+            if (existing !== undefined && (existing.createPayloadHash !== createPayloadHash || existing.recoveryBindingHash !== recoveryBindingHash)) {
+                throw rejected("APN_X402_AUTHORIZATION_MISMATCH", "Stored x402 authorization differs from the frozen request.");
             }
+            ensureX402Live(intent.authorization.validBefore); // never sign, or return, an authorization no chain can settle
+            if (existing !== undefined)
+                return publicX402Effect(existing);
             const account = privateKeyToAccount(secret.privateKey);
             const signature = await account.signTypedData({
                 domain: {

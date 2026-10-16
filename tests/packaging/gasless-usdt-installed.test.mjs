@@ -202,7 +202,7 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   await assert.rejects(() => execution.markSubmitted(attempted, `0x${"56".repeat(32)}`, NOW),
     { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await reopenedUsage.load(usageIdentity, attemptedReservation.reservationId))?.state, "reserved");
-  let lookups = 0, canonicalReads = 0;
+  let lookups = 0, canonicalReads = 0, scans = 0;
   const observeArgs = ["gasless", "usdt", "observe", "--profile-hash", attempted.profileHash,
     "--operation", attempted.operationId];
   const observeOptions = { ...options, gaslessUsdtExecuteOptions: { ...executionDisabled, recoveryPort: {
@@ -211,6 +211,8 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
         entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
         success: true, transactionHash: `0x${"9a".repeat(32)}` }; },
     canonicalFinalizedReceipt: async () => { canonicalReads++; throw new Error("wrong locator must not be followed"); },
+    // The canonical scan has not reached a finalized block after validUntil, so absence is not yet proof.
+    scanUserOperation: async () => { scans++; return { status: "not_found", final: false, finalizedBlock: 1n, endBlock: 1n, endBlockHash: null }; },
   } } };
   const observed = await runCli(observeArgs, {}, observeOptions);
   assert.equal(observed.ok, true, JSON.stringify(observed.error));
@@ -219,6 +221,7 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   assert.equal(unknown.userOperationHash, syntheticHash);
   assert.equal(lookups, 1);
   assert.equal(canonicalReads, 0);
+  assert.equal(scans, 1);
   const repeatedObservation = await runCli(observeArgs, {}, observeOptions);
   assert.equal(repeatedObservation.ok, true, JSON.stringify(repeatedObservation.error));
   assert.deepEqual(repeatedObservation.operation, unknown);

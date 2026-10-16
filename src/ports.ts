@@ -26,6 +26,7 @@ export interface NativeRequest {
     | "wallet.import"
     | "directTransfer.approveAndSign"
     | "effectMaterial.get"
+    | "directTransfer.signedMaterial.get"
     | "x402Exact.approveAndAuthorize"
     | "x402Exact.authorizationMaterial.get";
   readonly payload: Readonly<Record<string, unknown>>;
@@ -133,6 +134,8 @@ export interface X402AuthorizationState {
   readonly value: boolean;
   readonly blockNumber: string;
   readonly blockHash: Hex;
+  /** Timestamp of the block the state was read at; it proves when an EIP-3009 validBefore has passed. */
+  readonly blockTimestamp: string;
   readonly blockTag: "safe" | "finalized" | "number";
   readonly observedAt: string;
   readonly rpcOrigin: string;

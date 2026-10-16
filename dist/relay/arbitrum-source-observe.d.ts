@@ -2,7 +2,7 @@
 import { type Hex } from "viem";
 import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
-import { type ArbitrumEffectRole, type ArbitrumSourceEffectJournal } from "./arbitrum-source-effect-journal.js";
+import { type ArbitrumEffectEvent, type ArbitrumEffectRole, type ArbitrumSourceEffectJournal } from "./arbitrum-source-effect-journal.js";
 import { RelayArbitrumSourceFinalityObserver } from "./arbitrum-source-finality.js";
 export interface RelayArbitrumSourceObservePorts {
     readonly operation?: (operationId: string) => Promise<RelayUnsignedOperation | null>;
@@ -11,21 +11,29 @@ export interface RelayArbitrumSourceObservePorts {
         operation: RelayUnsignedOperation;
         journal: ArbitrumSourceEffectJournal;
         role: ArbitrumEffectRole;
-        outcome: "confirmed" | "failed";
+        outcome: "confirmed" | "failed" | "never_landed";
         proofDigest: string;
-    }) => Promise<boolean>) => Promise<ArbitrumSourceEffectJournal>;
+    }) => Promise<boolean>, outcome: "confirmed" | "failed" | "never_landed") => Promise<ArbitrumSourceEffectJournal>;
     /** Synthetic seam; production finalizes the shared usage reservation from the saved safe source proof. */
     readonly finalizeUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
+    /** Synthetic seam for unverified fences (mark_submitting, record_send); production uses the CAS journal repository. */
+    readonly advance?: (profileHash: string, operationId: string, expectedHash: string, event: ArbitrumEffectEvent) => Promise<ArbitrumSourceEffectJournal>;
+    /** Synthetic seam; production releases the shared usage reservation after a safe source revert proof. */
+    readonly releaseRevertedUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
 }
 export declare class RelayArbitrumSourceObserveService {
     private readonly state;
     private readonly observer;
     private readonly ports;
-    constructor(state: StateStore, observer: Pick<RelayArbitrumSourceFinalityObserver, "observe">, ports?: RelayArbitrumSourceObservePorts);
+    constructor(state: StateStore, observer: Pick<RelayArbitrumSourceFinalityObserver, "observe" | "observeRevert" | "observeUnsent">, ports?: RelayArbitrumSourceObservePorts);
     private finalizeUsage;
+    /** Bytes already known on chain count as an uncertain send: the principal hold stays counted. */
+    private holdUncertainSend;
+    /** A reverted or never-landed approval or deposit moved no principal: the hold is released, never counted as spent. */
+    private releaseRevertedUsage;
     observe(operationId: string): Promise<{
         operationId: string;
-        state: "observation_only" | "approval_skipped" | "source_effect_not_recorded" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";
+        state: "source_effect_reverted" | "source_effect_never_landed" | "observation_only" | "approval_skipped" | "source_effect_not_recorded" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";
         reason: string;
         approvalPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;
         depositPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;
@@ -58,4 +66,6 @@ export declare class RelayArbitrumSourceObserveService {
         executionAdmitted: false;
         nextActions: readonly [];
     }>;
+    private recordRevert;
+    private recordNeverLanded;
 }

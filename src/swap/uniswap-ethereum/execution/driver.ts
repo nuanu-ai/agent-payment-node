@@ -6,6 +6,7 @@ import { validateSwapOperation, type SwapOperationRecord } from "../../model.js"
 import type { SwapProtocolRegistry } from "../../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../../runtime.js";
 import type { GuardedSwapService } from "../../service.js";
+import type { SwapUnlandedProof } from "../../unlanded.js";
 import { validateUniswapKeylessMaterial } from "../../uniswap-v3/material.js";
 import { assertInjectedProtocol, createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness } from "./binding.js";
 import type { UniswapExecutionBindingStore } from "./binding-store.js";
@@ -15,6 +16,7 @@ import type { UniswapEffectStorePort, UniswapExecutionBinding, UniswapExecutionG
 
 export interface UniswapOutcomeObserverPort {
   observeOutcome(operation: SwapOperationRecord, binding: UniswapExecutionBinding, transactionHash: Hex): Promise<UniswapObservedOutcome | null>;
+  proveUnlanded(deadlineSeconds: number, loadTransactionHash: () => Promise<string | null>): Promise<SwapUnlandedProof | null>;
 }
 export interface UniswapExecutionDriverDependencies {
   readonly core: GuardedSwapService;
@@ -72,7 +74,7 @@ export class UniswapEthereumExecutionDriver implements GuardedSwapExecutionDrive
     let operation = validateSwapOperation(input.operation);
     if (operation.submissionMarker === null) blocked("Uniswap observation is available only after the submission marker.", "uniswap_resume_before_marker");
     validateUniswapKeylessMaterial(input.material);
-    if (["finalized", "failed_confirmed_revert"].includes(operation.state)) return operation;
+    if (["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(operation.state)) return operation;
     const binding = await this.d.bindings.load(operation);
     const effect = binding === null ? null : await this.d.effects.load(operation, binding);
     if (binding === null || effect === null) {
@@ -82,6 +84,17 @@ export class UniswapEthereumExecutionDriver implements GuardedSwapExecutionDrive
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation,
       effect.phase === "send_accepted" ? "submitted" : "unknown_finality", this.d.clock.now());
     return await this.observeExact(operation, binding, effect.transactionHash, true);
+  }
+
+  /** The router deadline is the quote expiry; the signed hash, when one was ever sealed, is read after the finalized block. */
+  async proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null> {
+    const operation = validateSwapOperation(input.operation);
+    validateUniswapKeylessMaterial(input.material);
+    return await this.d.observer.proveUnlanded(Math.floor(Date.parse(operation.quote.expiresAt) / 1000), async () => {
+      const binding = await this.d.bindings.load(operation);
+      const effect = binding === null ? null : await this.d.effects.load(operation, binding);
+      return effect === null ? null : effect.transactionHash;
+    });
   }
 
   /**

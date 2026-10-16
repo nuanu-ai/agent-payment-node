@@ -1408,7 +1408,7 @@ test("provider receipt adversaries and unavailable evidence never complete or re
   }
 });
 
-test("receipt observation requires the full frozen RPC URL and never resends", async (t) => {
+test("receipt observation accepts any Base RPC URL after the effect and never resends", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const runner = new FixtureRunner();
@@ -1430,21 +1430,14 @@ test("receipt observation requires the full frozen RPC URL and never resends", a
   ], {}, { stateRoot: temporary.root, providerRegistry, rpc, approval: new FixtureApproval() });
   assert.equal((approved.operation as Record<string, unknown>).state, "evidence_pending");
   assert.equal(direct.calls.length, 1);
-  const receiptCallsBeforeDrift = rpc.receiptCalls;
-  const transitionHash = (approved.operation as Record<string, unknown>).transition_hash;
+  const receiptCallsBeforeRotation = rpc.receiptCalls;
   rpc.receipt = exactProviderReceipt();
-  const drifted = await runCli([
-    "operation", "resume", "--operation", operationId, "--rpc-url", `${rpcUrl}/changed`,
-  ], {}, { stateRoot: temporary.root, providerRegistry, rpc });
-  assert.equal((drifted.operation as Record<string, unknown>).state, "evidence_pending");
-  assert.equal((drifted.operation as Record<string, unknown>).transition_hash, transitionHash);
-  assert.equal(rpc.receiptCalls, receiptCallsBeforeDrift, "a changed raw RPC URL must not supply evidence");
-  assert.equal(direct.calls.length, 1);
+  // A rotated public endpoint of the same chain supplies the evidence; chain id and exact transfer still bind it.
   const completed = await runCli([
-    "operation", "resume", "--operation", operationId, "--rpc-url", rpcUrl,
+    "operation", "resume", "--operation", operationId, "--rpc-url", `${rpcUrl}/rotated`,
   ], {}, { stateRoot: temporary.root, providerRegistry, rpc });
   assert.equal((completed.operation as Record<string, unknown>).state, "completed");
-  assert.equal(rpc.receiptCalls, receiptCallsBeforeDrift + 1);
+  assert.equal(rpc.receiptCalls, receiptCallsBeforeRotation + 1);
   assert.equal(direct.calls.length, 1);
 });
 
@@ -1478,8 +1471,8 @@ test("exact independent evidence may resolve ambiguity without another provider 
   assert.equal(direct.calls.length, 1);
 });
 
-test("profile revision, capability, observed sender and RPC drift all stop before started and send", async () => {
-  for (const drift of ["revision", "capability", "sender", "rpc"] as const) {
+test("profile revision, capability, observed sender and chain drift all stop before started and send", async () => {
+  for (const drift of ["revision", "capability", "sender", "chain"] as const) {
     const temporary = await temporaryState();
     try {
       const runner = new FixtureRunner();
@@ -1518,19 +1511,21 @@ test("profile revision, capability, observed sender and RPC drift all stop befor
         await writeFile(profilePath, `${canonicalJson(record)}\n`, { mode: 0o600 });
       }
       if (drift === "sender") runner.address = ADDRESS_B;
+      // Another endpoint is fine; an endpoint of another chain is not.
+      if (drift === "chain") rpc.chainId = 1;
       const approval = new FixtureApproval();
       const approved = await runCli([
         "pay", "transfer", "approve", "--operation", operationId, "--rpc-url",
-        drift === "rpc" ? `${rpcUrl}/changed` : rpcUrl,
+        drift === "chain" ? `${rpcUrl}/changed` : rpcUrl,
       ], {}, { stateRoot: temporary.root, providerRegistry, rpc, approval });
       assert.equal(approved.ok, false, drift);
       assert.equal(direct.calls.length, 0, drift);
       const durable = JSON.parse(await readFile(join(
         temporary.root, "operations", sha256(`profile\0${profile}`), `${operationId}.json`,
       ), "utf8")) as { readonly state: string; readonly transitions: readonly { readonly state: string }[] };
-      assert.equal(durable.state, "failed_before_effect", drift);
+      assert.equal(durable.state, drift === "chain" ? "awaiting_approval" : "failed_before_effect", drift);
       assert.equal(durable.transitions.some((transition) => transition.state === "started"), false, drift);
-      if (drift === "revision" || drift === "capability" || drift === "rpc") assert.equal(approval.calls.length, 0, drift);
+      if (drift === "revision" || drift === "capability" || drift === "chain") assert.equal(approval.calls.length, 0, drift);
       if (drift === "sender") {
         assert.equal(approval.calls.length, 1, drift);
         const rebindHandoff = `apn wallet connect --profile ${profile} --provider ${AWAL_PROVIDER_ID} --expected-revision 1`;

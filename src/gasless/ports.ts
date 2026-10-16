@@ -49,6 +49,11 @@ export interface GaslessRpcPort extends GaslessObservationPort {
    * override whose storage layout the adapter proves against the chain before using it.
    */
   mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
+  /**
+   * The light pre-send check after a guard already ran in this invocation: one bundler batch proving its chain, the
+   * EntryPoint and that the signed fees still cover the bundler's slow tier.
+   */
+  assertSignedFees(fees: GaslessFees): Promise<void>;
   /** v4 intents need the `fees` their guard chose before disclosure; earlier intents use their frozen fees. */
   estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
   send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial, beforeSend?: () => void): Promise<Hex>;

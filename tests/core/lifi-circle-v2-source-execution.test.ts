@@ -29,6 +29,10 @@ import { BridgeHttps } from "../../src/lifi/https.js";
 import { CircleV2SourceService } from "../../src/lifi/circle-v2-source-service.js";
 import { TtyCircleV2SourceApproval } from "../../src/lifi/circle-v2-source-tty.js";
 import { temporaryState } from "./helpers.js";
+import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
+import { CIRCLE_V2_BASE_SOLANA_MECHANISM } from "../../src/lifi/circle-v2-source-admission.js";
 
 const key = `0x${"1".repeat(64)}` as const;
 const payer = privateKeyToAccount(key).address;
@@ -48,10 +52,27 @@ const request = { profile: "imported", expectedPayer: payer, recipientOwner: wal
   amountAtomic: "1000000", maxSourceFeeAtomic: "25000", maxAllowanceAtomic: "1020000", maxGasLimitAtomic: "130000",
   maxFeePerGasWei: "3000000000", maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "300000000000000",
   idempotencyKey: "circle-one-shot-test" };
-async function liveHarness(t: import("node:test").TestContext, ambiguous: boolean, unsupportedQuote = false) {
+async function activatePolicy(root: string, mechanism: { provider: string; reference: string }) {
+  const inventory = loadAllowlistInventory(), store = new AllowlistPolicyStore(root), now = new Date();
+  const staged = await store.prepare({ overlayVersion: "test.circle.base.solana.1", profile: "imported", account: payer,
+    datasetVersion: inventory.dataset.version, datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256,
+    effectiveAt: new Date(now.getTime() - 3_600_000).toISOString(), expiresAt: new Date(now.getTime() + 86_400_000).toISOString(),
+    admissions: [{ chain: "eip155:8453", kind: "token", identifier: usdc, rail: "bridge", maximumPerTransferAtomic: "5000000",
+      dailyLimitAtomic: "10000000", mechanism }], now });
+  await store.appendDecision("imported", null, { status: "active", revision: staged.revision, stagedRecordDigest: staged.recordDigest,
+    policyDigest: staged.registry.policyDigest, registry: staged.registry, approvalFingerprint: "a".repeat(64), decidedAt: now.toISOString() });
+}
+const hold = async (root: string) => {
+  const identity = { account: payer, chain: "eip155:8453", asset: { kind: "token" as const, identifier: usdc } };
+  return new AssetUsageLedger(root).load(identity, assetUsageReservationId(identity,
+    `circle-v2-base-source:${(await import("node:crypto")).createHash("sha256").update(`circle-v2-base-source\0${new StateStore(root).profileHash("imported")}\0${request.idempotencyKey}`).digest("hex")}`));
+};
+async function liveHarness(t: import("node:test").TestContext, ambiguous: boolean, unsupportedQuote = false,
+  mechanism: { provider: string; reference: string } | null = CIRCLE_V2_BASE_SOLANA_MECHANISM) {
   const tmp = await temporaryState(); t.after(tmp.cleanup);
   const state = new StateStore(tmp.root), wrapping = { async load() { return Buffer.alloc(32, 7); }, async create() { return Buffer.alloc(32, 7); } };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
+  if (mechanism !== null) await activatePolicy(tmp.root, mechanism);
   const blockTimestamp = `0x${Math.floor(Date.now() / 1000).toString(16)}`;
   let sends = 0, approvals = 0;
   t.mock.method(TtyCircleV2SourceApproval.prototype, "approve", async () => { approvals++; });
@@ -77,7 +98,7 @@ async function liveHarness(t: import("node:test").TestContext, ambiguous: boolea
     return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id, result }) };
   });
   return { service: new CircleV2SourceService(state, wrapping, { APN_BASE_RPC_URL: "https://base.example.org" }),
-    sends: () => sends, approvals: () => approvals };
+    sends: () => sends, approvals: () => approvals, root: tmp.root };
 }
 
 for (const ambiguous of [false, true]) test(`concrete Circle effect makes one durable ${ambiguous ? "ambiguous" : "accepted"} send`, async t => {
@@ -89,9 +110,17 @@ for (const ambiguous of [false, true]) test(`concrete Circle effect makes one du
   assert.equal(result.circleAttestationObserved, false);
   assert.equal(result.solanaDestinationFinalized, false);
   assert.equal(h.sends(), 1); assert.equal(h.approvals(), 1);
+  assert.equal((await hold(h.root))?.state, ambiguous ? "unknown_finality" : "submitted");
   await assert.rejects(h.service.submit(request));
   assert.equal(h.sends(), 1);
 });
+for (const mechanism of [null, { provider: "circle-cctp-v2", reference: "another-route.v1" }])
+  test(`Base to Solana CCTP without owner admission (${mechanism === null ? "no policy" : "other mechanism"}) is refused before consent`, async t => {
+    const h = await liveHarness(t, false, false, mechanism);
+    await assert.rejects(h.service.submit(request), { code: "APN_ALLOWLIST_REFUSED" });
+    assert.equal(h.approvals(), 0); assert.equal(h.sends(), 0);
+    assert.equal(await hold(h.root), null);
+  });
 test("concrete Circle effect keeps its pinned block timestamp across a clock second", async t => {
   let now = Date.now();
   t.mock.method(Date, "now", () => now);

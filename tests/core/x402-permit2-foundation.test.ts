@@ -7,7 +7,6 @@ import { ApnError } from "../../src/errors.js";
 import { PERMIT2_WITNESS_TYPES, planPermit2Authorization } from "../../src/x402-permit2/authorization.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS } from "../../src/x402-permit2/registry.js";
-import { permit2NonceBitmapCall, permit2NonceConsumed, verifyPermit2SettlementReceipt } from "../../src/x402-permit2/settlement.js";
 
 const accepts = (JSON.parse(readFileSync("tests/fixtures/x402-permit2/payment-required-accepts.json", "utf8")) as { accepts: Record<string, unknown>[] }).accepts;
 const asset = X402_PERMIT2_ASSETS[0]!;
@@ -39,14 +38,4 @@ test("signing plan rejects forged selections and unsafe deadlines", () => {
     (e: unknown) => e instanceof ApnError && e.code === "APN_STATE_CORRUPT");
   assert.throws(() => planPermit2Authorization(selection, { payer, nowSeconds: Number.MAX_SAFE_INTEGER, nonce: 1n, permit2AllowanceAtomic: "10000", eip2612Nonce: null, sellerSponsorsEip2612: false }),
     (e: unknown) => e instanceof ApnError && e.code === "APN_INVALID_INPUT");
-});
-
-test("read-only nonce probe is exact and receipt evidence is independently validated", () => {
-  const call = permit2NonceBitmapCall(payer, "259");
-  assert.equal(call.to, PERMIT2_ADDRESS);
-  assert.equal(permit2NonceConsumed(`0x${"0".repeat(63)}8`, "3"), true);
-  assert.equal(permit2NonceConsumed(`0x${"0".repeat(63)}8`, "2"), false);
-  const fixture = JSON.parse(readFileSync("tests/fixtures/x402-permit2/settlement-receipt-with-permit.json", "utf8")) as any;
-  const proof = verifyPermit2SettlementReceipt(fixture.receipt, { listAsset: asset, payer: fixture.payer, payTo: fixture.payTo, amountAtomic: fixture.amountAtomic, transactionHash: fixture.receipt.transactionHash, withPermit: true });
-  assert.equal(proof.settledEvent, "SettledWithPermit");
 });

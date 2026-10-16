@@ -13,12 +13,12 @@ export type JupiterV1QuoteProof = (material: JupiterV1ResolvedMaterial, input: J
     readonly now: Date;
 }) => Promise<ProducedJupiterV1QuoteProof>;
 export interface JupiterV1QuoteBuilderOptions {
-    readonly resolvePayer: (profile: string) => Promise<string>;
+    /** Resolved against the owner policy for this exact input amount. */
+    readonly resolvePayer: (profile: string, amountAtomic: string) => Promise<string>;
     readonly proveQuote: JupiterV1QuoteProof;
-    readonly maximumNativeExpenseLamports: string;
     readonly computeUnitPriceMicroLamports: number;
     /** Internal authoritative policy selection, never a caller-controlled pool selector. */
-    readonly resolveRouteId?: (profile: string) => Promise<JupiterV1RouteId>;
+    readonly resolveRouteId?: (profile: string, amountAtomic: string) => Promise<JupiterV1RouteId>;
     /** Canonical factory only: obtain the final official lifetime after bulky public code reads. */
     readonly refreshBuildAfterPublicReads?: boolean;
     readonly refreshRpcLifetimeBeforeFreeze?: boolean;

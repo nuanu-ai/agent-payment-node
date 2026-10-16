@@ -15,8 +15,9 @@ import { type UsdtPreparePort } from "./policy-prepare.js";
 import { preparePolicyBoundUsdtV2 } from "./policy-prepare-v2.js";
 import { attestUsdtSponsor } from "./sponsor-auth.js";
 import type { UsdtSponsorPort } from "./engine.js";
-import { usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
+import { UsdtCodePins, usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
+import { OperationService } from "../operation-service.js";
 
 type PrepareCommand = Extract<CommandRequest, { readonly command: "gasless.usdt.prepare" }>;
 export interface UsdtCommandPrepareOptions {
@@ -29,7 +30,12 @@ export interface UsdtCommandPrepareOptions {
   readonly pacingNow?: () => number;
 }
 
-/** Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. */
+/**
+ * Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. One observation
+ * pass permits ten: the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two
+ * batches when the locator is missing or contradicted, and the scanned receipt's three reads.
+ */
+const READ_ADMISSIONS = { "execute": 7, "prepare-v2": 8, "observe": 10 } as const;
 export class UsdtCommandReadBudget implements GaslessTransport {
   private readonly started: number;
   private attempts = 0;
@@ -38,7 +44,7 @@ export class UsdtCommandReadBudget implements GaslessTransport {
     private readonly now: () => number = Date.now,
     private readonly wait: (milliseconds: number) => Promise<void> = async (milliseconds) =>
       await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
-    private readonly scope: "execute" | "prepare-v2" = "execute") {
+    private readonly scope: keyof typeof READ_ADMISSIONS = "execute") {
     this.started = now();
     if (!Number.isFinite(this.started)) throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read clock is invalid.");
     const coordinator: RpcProviderPacingCoordinator = { coordinate: async <T>(family: string,
@@ -56,7 +62,7 @@ export class UsdtCommandReadBudget implements GaslessTransport {
   async request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number,
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG") {
     this.guard(0);
-    if (this.attempts >= (this.scope === "prepare-v2" ? 8 : 7)) throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read budget exhausted.",
+    if (this.attempts >= READ_ADMISSIONS[this.scope]) throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read budget exhausted.",
       { reason: "gasless_usdt_read_budget" });
     this.attempts += 1;
     const result = await this.scheduler.schedule(endpoint, this.now, this.wait, (milliseconds) => this.guard(milliseconds), async () => {
@@ -89,6 +95,13 @@ export class GaslessUsdtCommandPrepare {
     const profileHash = allowlistProfileHash(input.profile);
     const saved = await this.operations.forProfile(profileHash).replayBound(input.idempotencyKey, input);
     if (saved !== null) return saved;
+    // Every money family shares one idempotency key space; the lock is the one their prepares hold for the same key.
+    await this.state.initialize();
+    return await this.state.withLocks([`operation:idempotency:${this.state.idempotencyHash(input.idempotencyKey)}`],
+      async () => await this.prepareNew(input, profileHash));
+  }
+
+  private async prepareNew(input: PrepareCommand, profileHash: string) {
     const active = await (this.options.preparePort === undefined
       ? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile)
       : this.options.preparePort.activePolicy(input.profile));
@@ -96,6 +109,12 @@ export class GaslessUsdtCommandPrepare {
       throw new ApnError("APN_ALLOWLIST_REFUSED", "An active Ethereum owner asset policy is required.",
         { reason: "gasless_usdt_policy_required" });
     }
+    const sender = gaslessAddress(active.accounts.evm, "APN_ALLOWLIST_REFUSED"), operations = new OperationService(this.state);
+    if (await operations.findIdempotency(this.state.idempotencyHash(input.idempotencyKey)) !== null) {
+      throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to another money operation.",
+        { reason: "gasless_usdt_idempotency_other_family" });
+    }
+    await operations.assertEvmAccountAvailable(this.state.profileHash(input.profile), USDT_GASLESS.chainId, sender);
     const rpcUrl = this.options.rpcUrl ?? process.env.APN_ETHEREUM_RPC_URL;
     const needRpc = this.options.preparePort === undefined || this.options.sponsorPort === undefined;
     if (needRpc && (rpcUrl === undefined || rpcUrl === "")) {
@@ -103,17 +122,17 @@ export class GaslessUsdtCommandPrepare {
     }
     const budget = needRpc ? new UsdtCommandReadBudget(this.state, this.options.transport ?? new GaslessHttps(),
       this.options.pacingNow, this.options.wait, "prepare-v2") : undefined;
+    const codePins = new UsdtCodePins();
     const prepare: UsdtPreparePort = this.options.preparePort ?? {
       now: () => this.clock.now(),
       activePolicy: async (profile) => await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile),
       dailyUsage: async (sender: Address, at: Date) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
         chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
-      safeSnapshot: async (sender: Address) => await usdtSafeSnapshot(budget!, rpcUrl!, sender),
+      safeSnapshot: async (sender: Address) => await usdtSafeSnapshot(budget!, rpcUrl!, sender, codePins),
       sponsorAuth: async (op, snapshot) => await attestUsdtSponsor({ op, snapshot, expectedBlockHash: snapshot.blockHash, transport: budget!, rpcUrl: rpcUrl!, clock: this.clock }),
     };
     const sponsor = this.options.sponsorPort ?? usdtSponsorPort(budget!);
-    const policy = await preparePolicyBoundUsdtV2({ prepare, sponsor }, { profile: input.profile,
-      sender: gaslessAddress(active.accounts.evm, "APN_ALLOWLIST_REFUSED"),
+    const policy = await preparePolicyBoundUsdtV2({ prepare, sponsor }, { profile: input.profile, sender,
       recipient: input.recipient, grossAtomic: BigInt(input.grossAtomic), maxFeeAtomic: BigInt(input.maxFeeAtomic),
       minReceivedAtomic: BigInt(input.minReceivedAtomic), chain: USDT_GASLESS.chain, token: USDT_GASLESS.token,
       sponsorUrl: USDT_GASLESS.bundlerUrl });

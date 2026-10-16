@@ -20,7 +20,7 @@ import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
 import { UsdtExecutionJournal, usdtExecutionIntent } from "../../src/gasless-usdt/execution-journal.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
+import { TestRpc, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, temporaryState } from "./helpers.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import { createMcpServer } from "../../src/mcp-server.js";
@@ -245,18 +245,23 @@ test("CLI and MCP replay the first bound claim after time, policy, safe block an
   assert.equal(f.offered.length, 1);
 });
 
-test("the same key can independently prepare an older direct rail and the bound USDT journal", async t => {
+test("bound USDT shares the idempotency key space of every money family: a direct rail's key refuses before sponsor reads", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const key = "cross-family-local-001";
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
+  await activateBaseUsdcDirectPolicy(temporary.root);
   const directRpc = new TestRpc();
   const direct = await makeCore({ root: temporary.root, rpc: directRpc }).execute({ command: "transfer.prepare",
     profile: "default", recipient: RECIPIENT, amount: "1", idempotencyKey: key });
   assert.equal(direct.ok, true, JSON.stringify(direct.error));
-  const f = commandFixture(), usdt = await runCli(["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
-    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", key], {},
+  const f = commandFixture(), usdtWith = async (idempotencyKey: string) => await runCli(["gasless", "usdt", "prepare", "--profile", "owner",
+    "--to", RECIPIENT, "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", idempotencyKey], {},
   { stateRoot: temporary.root, clock: { now: () => NOW },
     gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } });
+  const shared = await usdtWith(key);
+  assert.equal(shared.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  assert.equal(f.offered.length, 0);
+  const usdt = await usdtWith("cross-family-local-002");
   assert.equal(usdt.ok, true, JSON.stringify(usdt.error));
   assert.notEqual((direct.operation as { operationId: string }).operationId,
     (usdt.operation as { operationId: string }).operationId);
@@ -374,6 +379,16 @@ test("bound journal persists the complete preparation and classifies revocation 
   assert.equal(saved.binding.account.entryPointNonce, "7");
   assert.equal((await service.statusBound(saved.operationId)).integrityHash, saved.integrityHash);
   assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare), { state: "prepared", operation: saved });
+  const preparedSnapshot = f.ports.prepare.safeSnapshot;
+  // The safe head moves every epoch and incoming USDT raises the balance; neither needs recovery.
+  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_982n, blockHash: `0x${"34".repeat(32)}`,
+    account: { usdtBalanceAtomic: 1_500_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
+  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare), { state: "prepared", operation: saved });
+  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n, blockHash: `0x${"34".repeat(32)}`,
+    account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
+  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare),
+    { state: "recovery_required", reason: "safe_block_changed", operation: saved });
+  f.ports.prepare.safeSnapshot = preparedSnapshot;
   const alternate = fixture();
   alternate.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n,
     blockHash: `0x${"14".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n,
@@ -551,9 +566,12 @@ test("USDT execution journal repairs reserve interruption and refuses binding, p
   await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), fresh.ports.prepare));
   const expired = fixture(); expired.ports.prepare.now = () => new Date(NOW.getTime() + 600_000);
   await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), expired.ports.prepare));
-  const drift = fixture(); drift.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_951n,
-    blockHash: `0x${"12".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
-  await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), drift.ports.prepare));
+  // A safe block behind the prepared one and a balance below the gross both refuse; a later block alone does not.
+  for (const [blockNumber, usdtBalanceAtomic] of [[26_002_949n, 1_000_000n], [26_002_951n, 999_999n]] as const) {
+    const drift = fixture(); drift.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber,
+      blockHash: `0x${"35".repeat(32)}`, account: { usdtBalanceAtomic, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
+    await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), drift.ports.prepare), /safe_snapshot_changed/u);
+  }
 });
 
 test("USDT execution intent survives a crash before usage reserve without consuming the cap", async t => {

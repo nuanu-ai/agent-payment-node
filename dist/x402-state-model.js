@@ -8,6 +8,10 @@ const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 export const ZERO_HASH = "0".repeat(64);
 export const X402_STATE_VERSION = "apn.x402.state.v1";
 export const TRANSITION_VERSION = "apn.x402.transition.v1";
+/** A seller body that arrives with a success or a pending settlement answer is the purchased result. */
+export function deliversX402Result(classification) {
+    return classification === "success" || classification === "settlement_pending";
+}
 export function x402RequestHash(input) {
     return hashObject({
         ...x402HttpRequestBinding(input.httpRequest),

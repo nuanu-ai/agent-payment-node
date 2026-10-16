@@ -16,6 +16,8 @@ import { RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } from "../../src/relay/arbitrum-
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
 import { RelayUnsignedOperationRepository, freezeRelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
 import { StateStore } from "../../src/state.js";
+import { OperationService } from "../../src/operation-service.js";
+import { RelayRetireService } from "../../src/relay/retire.js";
 import { temporaryState } from "./helpers.js";
 
 const owner = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
@@ -255,7 +257,7 @@ test("approval skip persists a canonical allowance proof and permits a separate 
   assert.equal(skipped.effects[0].skipProof?.operationIntegrityHash, op.integrityHash);
   assert.equal(await arbitrumSourceRecoveryClass(skipped, op), "approval_skipped");
   assert.deepEqual(await repository().load(op.profileHash, op.operationId), skipped);
-  const observe = new RelayArbitrumSourceObserveService(state, { observe: async () => {
+  const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async () => {
     throw new Error("skipped approval has no receipt to observe");
   } }, { operation: async () => op });
   const reported = await observe.observe(op.operationId);
@@ -276,4 +278,27 @@ test("approval skip persists a canonical allowance proof and permits a separate 
   const path = join(temporary.root, "relay-arbitrum-source-effect-journals", op.profileHash, `${op.operationId}.json`);
   await writeFile(path, JSON.stringify(tampered), { mode: 0o600 });
   await assert.rejects(repository().load(op.profileHash, op.operationId), { code: "APN_STATE_CORRUPT" });
+});
+
+test("an Arbitrum route with a skipped approval and no deposit is abandoned only under owner consent", async t => {
+  const { temporary, state, op } = await prepared(); t.after(temporary.cleanup);
+  const verified: ArbitrumVerifiedAllowanceRead = { policyDigest: op.policyDigest!, policyRevision: op.policyRevision!,
+    allowanceAtomic: op.amountAtomic, blockNumber: "293510000", blockHash: `0x${"b".repeat(64)}`, observedAt: t1 };
+  const repository = new ArbitrumSourceEffectJournalRepository(temporary.root, undefined, async () => verified, () => new Date(t1));
+  const initial = await repository.create(op.profileHash, op.operationId, t0);
+  const skipped = await repository.skipApproval(op.profileHash, op.operationId, initial.integrityHash);
+  const operations = new OperationService(state);
+  await assert.rejects(operations.assertEvmAccountAvailable(op.profileHash, 42161, owner), { code: "APN_OPERATION_BLOCKED" });
+  let prompts = 0;
+  const retire = (answer?: boolean) => new RelayRetireService(state, { now: () => new Date(t1) }, undefined,
+    answer === undefined ? undefined : { confirm: async summary => { prompts++;
+      assert.equal(summary.journalIntegrityHash, skipped.integrityHash); assert.equal(summary.sourceChainId, 42161); return answer; } })
+    .retire({ profile: "default", operationId: op.operationId });
+  await assert.rejects(retire(), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(retire(false), { code: "APN_OPERATION_BLOCKED" });
+  const retired = await retire(true);
+  assert.equal(retired.state, "retired"); assert.equal(prompts, 2);
+  await operations.assertEvmAccountAvailable(op.profileHash, 42161, owner);
+  await assert.rejects(repository.beginSigning(op.profileHash, op.operationId, skipped.integrityHash, "deposit", t1),
+    { code: "APN_OPERATION_BLOCKED" });
 });

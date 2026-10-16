@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Hex } from "../../src/model.js";
+import { BASE_USDC } from "../../src/constants.js";
+import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { CanonicalDirectTestNative as TestNative } from "./canonical-direct-native-fixture.js";
 import {
   OTHER_RECIPIENT,
@@ -8,7 +10,9 @@ import {
   RECIPIENT,
   TestClock,
   TestRpc,
-  ensureWallet,
+  WALLET,
+  activateBaseUsdcDirectPolicy,
+  ensureWallet as ensureLegacyWallet,
   exactReceipt,
   makeCore as legacyMakeCore,
   prepareTransfer,
@@ -23,6 +27,12 @@ function makeCore(options: Parameters<typeof legacyMakeCore>[0]) {
   return legacyMakeCore({ ...options, clock });
 }
 
+
+/** The local Base USDC transfer is gated by the owner's allowlist like every direct transfer. */
+async function ensureWallet(core: ReturnType<typeof makeCore>): Promise<void> {
+  await ensureLegacyWallet(core);
+  await activateBaseUsdcDirectPolicy(core.context.state.root);
+}
 
 type Envelope = Awaited<ReturnType<ReturnType<typeof makeCore>["execute"]>>;
 
@@ -188,7 +198,7 @@ test("gas shortage rejects prepare and fee drift durably requires reprepare befo
   });
   assert.equal(drift.ok, false);
   assert.equal(drift.error?.code, "APN_REPREPARE_REQUIRED");
-  assert.match(drift.next_actions[0] ?? "", /Prepare a new transfer/);
+  assert.match(drift.next_actions[0] ?? "", /^apn pay transfer prepare --profile default --idempotency-key retry-[0-9a-f]{16} /u);
   assert.equal(native.calls.length, 0, "native signer must not be called after economics drift");
   const status = await makeCore({ root: temporary.root }).execute({ command: "operation.status", operationId });
   assert.equal(operationRecord(status).state, "failed_before_effect");
@@ -203,6 +213,37 @@ test("gas shortage rejects prepare and fee drift durably requires reprepare befo
     amount: "1",
   });
   assert.equal(next.ok, true, "terminal pre-effect failure must make the reprepare action usable");
+});
+
+test("legacy Base USDC approval keeps the signed fee cap through a harmless fee move, is owner-capped and reserved", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
+  const rpc = new TestRpc();
+  const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), "fee-cap-001");
+  const frozen = (await makeCore({ root: temporary.root }).context.state.findOperation(operationId))!;
+  assert.ok(frozen.allowlist, "prepare binds the active owner allowlist policy");
+  // A lower base fee and gas estimate keep the frozen envelope executable; it is signed unchanged.
+  rpc.fees = { gasLimitAtomic: "60000", maxFeePerGasAtomic: "1800000000", maxPriorityFeePerGasAtomic: "1000000000" };
+  const approved = await makeCore({ root: temporary.root, rpc, native: new TestNative(temporary.root) }).execute({ command: "transfer.approve", operationId });
+  assert.equal(operationRecord(approved).state, "submitted_pending");
+  const signed = (await makeCore({ root: temporary.root }).context.state.findOperation(operationId))!;
+  assert.deepEqual(signed.economics, frozen.economics); assert.ok(signed.allowlistLease);
+  assert.equal(rpc.submissions.length, 1);
+
+
+  const other = await temporaryState();
+  t.after(other.cleanup);
+  await ensureLegacyWallet(makeCore({ root: other.root, native: new TestNative(other.root) }));
+  const otherRpc = new TestRpc(), request = { command: "transfer.prepare" as const, profile: "default", idempotencyKey: "fee-cap-over-001",
+    recipient: RECIPIENT, amount: "1.25" };
+  const unadmitted = await makeCore({ root: other.root, rpc: otherRpc }).execute(request);
+  assert.equal(unadmitted.error?.details?.reason, "allowlist_policy_required");
+  await activateDirectPolicy(other.root, "default", { accounts: { evm: WALLET }, effectiveAt: "2026-08-01T00:00:00.000Z", expiresAt: null,
+    admissions: [directAdmission("eip155:8453", BASE_USDC, { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "1000000" })] });
+  const capped = await makeCore({ root: other.root, rpc: otherRpc }).execute(request);
+  assert.equal(capped.error?.code, "APN_ALLOWLIST_REFUSED"); assert.equal(capped.error?.details?.reason, "allowlist_per_transfer_cap_exceeded");
+  assert.equal(otherRpc.balanceCalls, 0, "owner caps refuse before any RPC read");
 });
 
 test("ambiguous submission completes from an exact receipt without a second send", async (t) => {

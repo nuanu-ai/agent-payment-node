@@ -6,6 +6,8 @@ const MANIFEST_SHA256 = "ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece
 const MAX_BYTES = 4 * 1024 * 1024;
 const entries = new Set(["smart-utils", "smart-root", "smart-actions", "smart-contracts", "permission-types", "smart-experimental", "x402-client", "delegation-core"]);
 let verified = false;
+// The SDK posts usage analytics to MetaMask unless DO_NOT_TRACK is set before its first call; APN never sends them.
+process.env.DO_NOT_TRACK = "1";
 function reject() { throw new Error("APN Smart Account vendor integrity rejected"); }
 function read(name, maximum) {
     const path = fileURLToPath(new URL(name, root)), stat = lstatSync(path);

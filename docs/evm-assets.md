@@ -223,9 +223,9 @@ including with explicit `--rpc-read-mode batch`. The frozen allowlist address an
 six decimals, pinned token contract code and balance, native gas balance, chain
 identity, block rechecks, pending nonce, gas estimate and fee quote are checked
 before signing; both approval funding phases refresh grouped reads. A synthetic
-HTTPS transport test counted eight physical POSTs for prepare, eight for the
-pre-sign funding check, and five for the post-sign funding check. A successful
-raw send adds one POST, within the direct command's 24-POST guard. A rejected or
+HTTPS transport test counted eight physical POSTs for prepare and eight for the
+pre-sign funding check; nothing is re-read between signing and the send. A
+successful raw send adds one POST, within the direct command's 24-POST guard. A rejected or
 rate-limited batch does not retry through scalar reads. This is a local test
 budget, not proof that any live provider accepts batches or that a mainnet
 payment succeeded. Direct ERC-20 transfer calls the token contract itself and
@@ -233,9 +233,9 @@ does not use an allowance or spender approval.
 
 After the Ethereum USDC send, the durable state is `submitted_pending`. Use
 `apn operation resume --operation <id> --observe-only true --rpc-url <url>` to
-inspect the exact receipt and token effect; this never broadcasts again. A
-successful receipt alone is insufficient: completion still requires the exact
-Transfer log and sender/recipient balance deltas across the canonical block.
+inspect the exact receipt and token effect; observe-only never broadcasts. A
+successful receipt alone is insufficient: completion requires the receipt's
+sole exact `Transfer` log out of the sender, read from that receipt alone.
 
 Listed Arbitrum USD₮0 direct transfers use five grouped JSON-RPC POSTs for
 prepare and five for each approval funding check. The pinned balance read
@@ -279,12 +279,24 @@ this path.
 - A durable started record precedes signing. Encrypted signature material is
   saved before returning. Restart retrieves only that signature; if none exists,
   the operation fails before effect rather than signing a replacement.
+- Every check that can refuse (owner policy, funding, fees, nonce) runs before
+  signing. A persisted signature is then only dispatched, as its exact bytes, or
+  kept for `operation resume`: resume sends a signature APN never dispatched, and
+  after an ambiguous dispatch it re-sends the identical bytes only when the RPC
+  holds neither a receipt nor the pending transaction. A sender nonce finalized
+  past the frozen one with no receipt for this hash ends the transfer as
+  `failed_proven_superseded` and releases its usage hold. A signature APN never
+  dispatched can be closed with `apn operation abandon` after foreground owner
+  acknowledgement; APN then never sends it and the account's next transfer
+  reuses its nonce.
 - Native completion requires the exact included transaction and successful
-  receipt. ERC-20 completion additionally requires its exact `Transfer` log and
-  exact sender/recipient balance deltas across the receipt block. Reorgs,
-  concurrent token activity, fee-on-transfer/rebasing behavior, false-return
-  tokens, or unavailable historical reads can leave delivery unproven. A hash
-  or successful receipt alone never proves an exact generic token payment.
+  receipt. ERC-20 completion additionally requires that receipt's sole
+  `Transfer` log out of the sender to be the exact amount to the exact
+  recipient from the pinned token; it needs no historical balance read, so a
+  keyless RPC without archive state, or a busy recipient, still completes.
+  Fee-on-transfer behaviour (a second debit log) or a missing log leaves
+  delivery unproven. A hash or successful receipt alone never proves an exact
+  generic token payment.
 - Base/Ethereum completion reports **inclusion only**, not irrevocable finality;
   so do OP Mainnet, Unichain, Linea and Polygon. BNB, Avalanche, Monad and Sei
   use the Arbitrum `safe` rule below.

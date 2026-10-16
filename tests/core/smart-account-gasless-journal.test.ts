@@ -153,7 +153,6 @@ test("complete and unused terminal states require exact bounded proof and reject
   assert.equal(dto.transfer.actual_delivered_atomic, "0"); assert.equal(dto.permission.guard_held, false);
   for (const mutate of [
     (o: any) => { o.cursor.transferScanComplete = false; },
-    (o: any) => { o.cursor.transferAnomalies = [TX]; },
     (o: any) => { o.unusedProof.childSpentAtomic = "1"; },
     (o: any) => { o.unusedProof.expiryBlock.timestampAtomic = String(exposed.intent.beforeUnix - 1); },
     (o: any) => { o.unusedProof.childDelegationHash = hx("f"); },
@@ -161,6 +160,9 @@ test("complete and unused terminal states require exact bounded proof and reject
     const invalid = rewrite(terminal, o => { mutate(o); mutate(o.transitions.at(-1)); });
     assert.throws(() => validateSmartAccountGaslessOperation(invalid), { code: "APN_STATE_CORRUPT" });
   }
+  // Another owner-to-recipient transfer of the same amount is information; the child's spent amount is the proof.
+  const withAnomaly = rewrite(terminal, o => { o.cursor.transferAnomalies = [TX]; o.transitions.at(-1).cursor.transferAnomalies = [TX]; });
+  assert.equal(validateSmartAccountGaslessOperation(withAnomaly).state, "expired_unused");
   for (const key of ["debitAtomic", "deliveredAtomic", "feeAtomic", "ownerNativeDebitWei", "sessionNativeDebitWei"])
     assert.throws(() => validateSmartAccountGaslessOperation(rewrite(complete(exposed), o => {
       o.settlement[key] = "1"; o.transitions.at(-1).settlement[key] = "1";
@@ -255,6 +257,9 @@ test("file identities, duplicates, symbolic links and the 256 KiB family bound f
   await assert.rejects(() => repo.loadOperation(first.profileHash, "e".repeat(64)), { code: "APN_STATE_CORRUPT" });
   await writeCanonical(path, { payload: "x".repeat(SA_FILE_LIMIT + 1) });
   await assert.rejects(() => repo.loadOperation(first.profileHash, "e".repeat(64)), { code: "APN_STATE_CORRUPT" });
+  // A lookup reads only the record it names: one bad record never breaks `operation status` of another operation.
+  assert.deepEqual(await repo.findOperation(first.operationId), first);
+  await assert.rejects(() => repo.findOperation("e".repeat(64)), { code: "APN_STATE_CORRUPT" });
 });
 test("capacity exhaustion retains terminal space and the last guarded state", () => {
   let op = uncertain(stages()[4]!), stopped = false;

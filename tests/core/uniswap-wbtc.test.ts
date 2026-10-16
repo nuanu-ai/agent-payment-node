@@ -67,7 +67,7 @@ test('WBTC bound quote uses 8 decimals and refuses sub-1000 slippage floor witho
 test('routing preserves old prepared operations and recovers WBTC by saved digest without sending',async t=>{
  const tmp=await temporaryState();t.after(tmp.cleanup);const wrapping=new MemoryWrapping();const state=await keylessWallet(tmp.root,wrapping,NOW);
  let policy=await keylessPolicy(NOW,new Date(deadline*1000));const base=new KeylessRpc();
- const runtime=createUniswapKeylessRuntime({state,wrapping,clock:{now:()=>NOW},policy:async()=>policy,foreground:REFUSING_SWAP_APPROVAL,call:base.call,verifyPins:async()=>[]});
+ const runtime=createUniswapKeylessRuntime({state,wrapping,clock:{now:()=>NOW},policy:async()=>policy,foreground:REFUSING_SWAP_APPROVAL,call:base.call,verifyPins:async()=>[],verifySendPins:async()=>[]});
  const old:any=await runtime.quote({...request,amountAtomic:'1000000000000000',outputToken:UNISWAP_USDC},NOW);
  const oldOp=await runtime.prepare({profile:PROFILE,quoteHash:old.quoteHash,idempotencyKey:'old-wbtc-routing-1'},NOW);
  const inventory=loadAllowlistInventory();policy=compileAllowlistPolicyOverlayV2({overlayVersion:'wbtc.2',profile:PROFILE,accounts:{evm:ACCOUNT},

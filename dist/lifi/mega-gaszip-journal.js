@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import { GASZIP_TERMINAL_STATES } from "./gaszip-outcome.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { keccak256, parseTransaction, recoverTransactionAddress } from "viem";
 import { MEGA_FUNDING, megaFail, megaHash, megaUint } from "./mega-gaszip-contract.js";
@@ -24,8 +25,8 @@ export function validateMegaFunding(value) {
     if (megaUint(r.plan.feeUpper) !== megaUint(r.plan.gas) * megaUint(r.plan.maxFee) + megaUint(r.plan.l1FeeUpper) + megaUint(r.plan.operatorFeeUpper) ||
         megaUint(r.plan.feeUpper) > megaUint(r.maximumFeeAtomic) || megaUint(r.plan.tip) > megaUint(r.plan.maxFee))
         megaFail("record_fee");
-    const terminal = ["completed", "failed_before_effect", "failed_confirmed_revert"].includes(r.state);
-    if (terminal !== r.terminal || !["prepared", "signing_started", "sealed", "submitting", "submitted", "unknown_finality", "completed", "failed_before_effect", "failed_confirmed_revert"].includes(r.state))
+    const terminal = GASZIP_TERMINAL_STATES.includes(r.state);
+    if (terminal !== r.terminal || !["prepared", "signing_started", "sealed", "submitting", "submitted", "unknown_finality", ...GASZIP_TERMINAL_STATES].includes(r.state))
         megaFail("record_state");
     if (r.transactionHash === null ? r.rawTransaction !== null : r.rawTransaction === null || keccak256(r.rawTransaction) !== r.transactionHash)
         megaFail("record_transaction");
@@ -37,8 +38,8 @@ export function validateMegaFunding(value) {
             megaFail("record_envelope");
     }
     if ((r.state === "prepared" || r.state === "signing_started" || r.state === "failed_before_effect") && r.rawTransaction !== null ||
-        r.submissionAttempts !== 0 && r.submissionAttempts !== 1 || ["submitting", "submitted", "completed", "failed_confirmed_revert"].includes(r.state) && r.submissionAttempts !== 1 ||
-        r.state === "completed" && (r.sourceProof === null || r.destinationProof === null || r.outcomeDigest === null))
+        r.submissionAttempts !== 0 && r.submissionAttempts !== 1 || ["submitting", "submitted", "completed", "failed_confirmed_revert", "destination_failed"].includes(r.state) && r.submissionAttempts !== 1 ||
+        (r.state === "completed" || r.state === "destination_failed") && (r.sourceProof === null || r.destinationProof === null || r.outcomeDigest === null))
         megaFail("record_phase");
     return r;
 }
@@ -67,6 +68,8 @@ export class MegaFundingJournal extends SecureStateStore {
         if (await this.readJson(`mega-gaszip-first-sign/${r.operationId}.json`) !== null || await this.readJson(`mega-gaszip-first-send/${r.operationId}.json`) !== null)
             megaFail("effect_marker_blocks_retirement");
     }
+    /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */
+    async sendClaimedLocked(r) { return await this.readJson(`mega-gaszip-first-send/${r.operationId}.json`) !== null; }
     async claimSigningLocked(r) {
         await this.ensureDirectory("mega-gaszip-first-sign");
         await this.writeJson(`mega-gaszip-first-sign/${r.operationId}.json`, { operationId: r.operationId, fingerprint: r.integrityHash, nonce: r.plan.nonce }, true);

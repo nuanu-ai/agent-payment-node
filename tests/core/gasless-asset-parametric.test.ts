@@ -4,7 +4,7 @@ import { formatUnits, getAddress } from "viem";
 import { approvalCode } from "../../src/approval-code.js";
 import { hashObject } from "../../src/canonical.js";
 import { gaslessCapabilities } from "../../src/gasless/catalog.js";
-import { validateGaslessIntent } from "../../src/gasless/intent-validation.js";
+import { assertGaslessIntentCurrent, validateGaslessIntent } from "../../src/gasless/intent-validation.js";
 import type { GaslessIntent } from "../../src/gasless/model.js";
 import { publicGaslessOperation } from "../../src/gasless/receipt.js";
 import { GASLESS_DEPLOYMENTS, gaslessAsset, gaslessIntentAsset } from "../../src/gasless/registry.js";
@@ -65,7 +65,7 @@ test("every admitted row carries its asset as data, and the row's pins are that 
   assert.equal(new Set(GASLESS_DEPLOYMENTS.map((r) => r.assets[0]!.domain.name)).size, 2);
 });
 
-test("a stored intent is re-validated against the registry row it names, not against a baked literal", async (t) => {
+test("a stored intent is checked against the registry row it names before any effect, not against a baked literal", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { operation } = await s.prepare();
   const intent = operation.intent;
@@ -83,9 +83,15 @@ test("a stored intent is re-validated against the registry row it names, not aga
   for (const [label, candidate] of cases) {
     assert.throws(() => gaslessIntentAsset(candidate), { code: candidate.token === FOREIGN_TOKEN
       ? "APN_PROVIDER_CAPABILITY_UNAVAILABLE" : "APN_PROVIDER_PROTOCOL" }, label);
-    // Even with a consistent envelope hash the durable journal still refuses it.
-    assert.throws(() => validateGaslessIntent(candidate),
-      { code: "APN_STATE_CORRUPT", message: "Gasless validation failed: gasless_intent_binding." }, label);
+    // Even with a consistent envelope hash no new effect may run under it.
+    assert.throws(() => assertGaslessIntentCurrent(candidate),
+      { code: "APN_OPERATION_BLOCKED", message: "Gasless validation failed: gasless_protocol_upgraded." }, label);
+  }
+  // On load a saved record is checked only against its own fields (R2): a self-consistent domain an earlier registry
+  // admitted still loads, while a token or paymaster that disagrees with the record's own snapshot and policy binding is corrupt.
+  validateGaslessIntent(cases[0]![1]); validateGaslessIntent(cases[1]![1]);
+  for (const [label, candidate] of cases.slice(2)) {
+    assert.throws(() => validateGaslessIntent(candidate), { code: "APN_STATE_CORRUPT" }, label);
   }
 });
 

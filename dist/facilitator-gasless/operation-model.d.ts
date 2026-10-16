@@ -19,6 +19,17 @@ export interface FacilitatorRequest {
     readonly maxFeeAtomic: string;
     readonly minReceivedAtomic: string;
 }
+/** Owner admission frozen at prepare; absent only on records written before 0.5.42, which can no longer sign. */
+export interface FacilitatorAllowlistBinding {
+    readonly policyDigest: string;
+    readonly policyRevision: number;
+    readonly activationDigest: string;
+    readonly mechanism: Readonly<{
+        provider: string;
+        reference: string;
+    }>;
+    readonly reservationId: string;
+}
 export interface FacilitatorIntent {
     readonly profile: string;
     readonly request: FacilitatorRequest;
@@ -41,6 +52,7 @@ export interface FacilitatorIntent {
     readonly preparedAt: string;
     readonly expiresAt: string;
     readonly policyHash: string;
+    readonly allowlist?: FacilitatorAllowlistBinding;
 }
 export interface FacilitatorConsent {
     readonly policy: typeof FACILITATOR_POLICY;

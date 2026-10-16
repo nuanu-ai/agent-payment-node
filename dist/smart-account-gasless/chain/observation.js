@@ -59,22 +59,20 @@ export async function observeSmartAccountGasless(context, input) {
         return adverse(cursor, inspected, context.clock, discovered);
     }
     if (cursor.childScanComplete && cursor.transferScanComplete) {
-        if (cursor.transferAnomalies.length === 0) {
-            let unused;
-            try {
-                unused = await unusedSafely(context, input, cursor, finalized);
-            }
-            catch (error) {
-                if (error instanceof SaRpcBudgetError)
-                    return budgetPartial(cursor, null, context.clock);
-                throw error;
-            }
-            if (unused !== null)
-                return unused;
+        // Only this operation's child delegation can move its funds, and its spent amount at a finalized block after
+        // expiry is the proof. Other owner-to-recipient transfers of the same amount (another operation or a manual
+        // payment) are recorded in the proof as information; they no longer keep this operation pending for ever.
+        let unused;
+        try {
+            unused = await unusedSafely(context, input, cursor, finalized);
         }
-        else {
-            return observation(cursor, "pending", "sa_gasless_unknown", null, hashObject({ transferAnomalies: cursor.transferAnomalies }), null, null, context.clock);
+        catch (error) {
+            if (error instanceof SaRpcBudgetError)
+                return budgetPartial(cursor, null, context.clock);
+            throw error;
         }
+        if (unused !== null)
+            return unused;
     }
     if (input.transactionHint !== null) {
         // A completed zero-child scan contradicts a hinted positive receipt; never let the hint override it.

@@ -28,6 +28,8 @@ export declare const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_ROUTE: JupiterV1Rout
 export declare const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_ROUTE: JupiterV1RouteConfig;
 export declare const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_ROUTE: JupiterV1RouteConfig;
 export declare const JUPITER_V1_FINITE_ROUTES: readonly JupiterV1RouteConfig[];
+/** The newest registered generation of each pool, in registry order: the only routes whose executable pins can still match. */
+export declare const JUPITER_V1_CURRENT_ROUTES: readonly JupiterV1RouteConfig[];
 export declare function jupiterV1RegisteredProgramPins(route: JupiterV1RouteConfig): readonly JupiterV1RegisteredProgramPin[];
 /** Finite source-reviewed pool lookup, never a pin learned from a provider response. */
 export declare function routeConfigForQuote(quote: JupiterV1QuoteResponse, expectedRouteId?: JupiterV1RouteId): JupiterV1RouteConfig;

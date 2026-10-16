@@ -167,14 +167,11 @@ async function finalGuardStopped(root: string) {
   const s = await gaslessFixture(root, 1, { now: new Date(now), activatePolicy: false });
   await activate(root, s.profile, s.account.address, { daily: s.request.grossAtomic });
   const { id } = await s.prepare("eth-sealed-final-guard-failure");
-  const snapshot = s.rpc.snapshot.bind(s.rpc);
-  s.rpc.snapshot = async (...args) => {
-    if ((await s.record(id)).userOperation.phase === "sealed")
-      gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
-    return await snapshot(...args);
-  };
+  // The pre-send check after the final signature fails, leaving an exact sealed and never-sent UserOperation.
+  const feeCheck = s.rpc.assertSignedFees.bind(s.rpc);
+  s.rpc.assertSignedFees = async () => gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
-  s.rpc.snapshot = snapshot;
+  s.rpc.assertSignedFees = feeCheck;
   const before = await s.record(id), usage = new AssetUsageLedger(root);
   const identity = { account: s.account.address, chain, asset: { kind: "token" as const, identifier: token } };
   assert.equal(before.state, "unknown_finality");

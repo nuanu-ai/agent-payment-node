@@ -10,6 +10,7 @@ import { Permit2HttpObservationStore, permit2HttpLocatorHint, validatePermit2Htt
 import { reconstructPermit2ProductionMaterial } from "../../src/x402-permit2/production-material.js";
 import { observePermit2Production } from "../../src/x402-permit2/production-observer.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
+import { word } from "./x402-permit2-production-observer-fixture.js";
 
 const header = (value: unknown) => Buffer.from(canonicalJson(value)).toString("base64");
 async function ready(t: TestContext) {
@@ -43,7 +44,7 @@ test("real owned first sidecar writes only bounded digests/classification/locato
   for (const secret of [f.response(), "private-body", "private-secret-error", f.r.material.checked.request.url, f.r.exposureJournal!.signed!.permit2Signature]) assert.equal(bytes.includes(secret), false);
 });
 for (const fault of ["duplicate", "alias", "folded", "control", "wrong-network", "wrong-payer", "wrong-amount", "conflicting-tx"] as const)
-  test(`strict ${fault} payment response cannot produce a locator or terminal outcome`, async t => {
+  test(`strict ${fault} payment response cannot produce a locator; only the consumed nonce could settle`, async t => {
     const f = await ready(t), valid = f.response(); let pairs: Array<[string, string]> = [["payment-response", valid]];
     if (fault === "duplicate") pairs.push(["Payment-Response", valid]); if (fault === "alias") pairs.push(["x-payment-response", valid]);
     if (fault === "folded") pairs = [["payment-response", valid + "," + valid]]; if (fault === "control") pairs = [["payment-response", valid + "\n"]];
@@ -53,7 +54,9 @@ for (const fault of ["duplicate", "alias", "folded", "control", "wrong-network",
     if (fault === "conflicting-tx") pairs = [["payment-response", f.response({ txHash: `0x${"f".repeat(64)}` })]];
     const hint = permit2HttpLocatorHint(f.r, f.observation(pairs)); assert.equal(hint.classification, "invalid_response"); assert.equal(hint.locator, null);
     assert.equal((await f.service.recordHttp(f.id, f.observation(pairs))).code, "hint_saved"); const before = f.batches.length;
-    assert.equal((await f.service.observe(f.id, f.input.rpcUrl)).code, "held"); assert.equal(f.batches.length, before); await held(f);
+    f.wire.settledBitmap = word(0n);
+    assert.equal((await f.service.observe(f.id, f.input.rpcUrl)).code, "observed_hold"); await held(f);
+    assert.equal(f.batches.slice(before).flat().some((call: any) => call.method === "eth_getTransactionReceipt"), false, "no locator was used");
   });
 for (const state of ["200-no-header", "402", "pending", "failure"] as const) test(`${state} HTTP observation alone leaves genuine common usage held`, async t => {
   const f = await ready(t), extra = state === "pending" ? { success: false, errorReason: "settlement_pending" } : state === "failure" ? { success: false, errorReason: "private-secret-error" } : {};
@@ -80,15 +83,26 @@ test("forged proof/hint cannot finalize; explicit later candidate probes actual 
   const f = await ready(t), wrong = `0x${"f".repeat(64)}`;
   await f.service.recordHttp(f.id, f.observation([["payment-response", f.response({ transaction: wrong })]]));
   await assert.rejects(f.journal.finalize(f.id, { kind: "checked-permit2-production-observation" }, "settlement"));
+  f.wire.settledBitmap = word(0n);
   assert.equal((await f.service.observe(f.id, f.input.rpcUrl)).code, "observed_hold"); await held(f);
+  f.wire.settledBitmap = word(1n << 7n);
   const bytes = await readFile(f.path, "utf8"), result = await f.service.observe(f.id, f.input.rpcUrl, "settlement", f.input.locator);
   assert.equal(result.code, "finalized"); assert.equal(result.status?.state, "settled"); assert.equal((await f.lease()).state, "finalized");
   assert.equal(await readFile(f.path, "utf8"), bytes); assert.equal(JSON.stringify(result).includes(f.input.rpcUrl), false);
 });
 test("explicit candidate bypasses corrupt hint but still needs genuine canonical effect; no HTTP or resign path", async t => {
   const f = await ready(t); await f.service.recordHttp(f.id, f.observation()); await writeFile(f.path, "{corrupt", { mode: 0o600 });
-  f.wire.missing = true; assert.equal((await f.service.observe(f.id, f.input.rpcUrl, "settlement", f.input.locator)).code, "observed_hold"); await held(f);
-  f.wire.missing = false; assert.equal((await f.service.observe(f.id, f.input.rpcUrl, "settlement", f.input.locator)).code, "finalized");
+  f.wire.missing = true; f.wire.settledBitmap = word(0n);
+  assert.equal((await f.service.observe(f.id, f.input.rpcUrl, "settlement", f.input.locator)).code, "observed_hold"); await held(f);
+  f.wire.missing = false; f.wire.settledBitmap = word(1n << 7n);
+  const settled = await f.service.observe(f.id, f.input.rpcUrl, "settlement", f.input.locator);
+  assert.equal(settled.code, "finalized"); assert.equal(settled.observation?.transactionHash, f.input.locator);
+});
+test("a settlement whose transaction APN cannot attribute finalizes by the consumed nonce with no transaction hash", async t => {
+  const f = await ready(t); f.wire.tx.input = `${f.wire.tx.input}00`;
+  const result = await f.service.observe(f.id, f.input.rpcUrl, "settlement", f.input.locator);
+  assert.equal(result.code, "finalized"); assert.equal(result.status?.state, "settled");
+  assert.equal(result.observation?.transactionHash, null); assert.equal((await f.lease()).state, "finalized");
 });
 test("prepared/reserved and exposed unsigned rows return sanitized status without RPC", async t => {
   const f = await journalFixture(t), service = new Permit2ProductionResults(f.state, f.journal), before = f.batches.length;

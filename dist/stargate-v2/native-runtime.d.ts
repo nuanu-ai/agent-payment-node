@@ -25,6 +25,7 @@ export declare class StargateNativeService {
     private destination?;
     private readonly journal;
     private readonly local;
+    private readonly usage;
     constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, now?: () => number);
     prepare(input: Readonly<{
         profile: string;

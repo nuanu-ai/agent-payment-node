@@ -8,7 +8,13 @@ import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechani
 
 export const SWAP_OPERATION_SCHEMA = "apn.swap-operation.v1" as const;
 export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" |
-  "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
+  "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert" | "expired_unlanded" | "abandoned_unknown";
+/**
+ * Every state with no further transition. expired_unlanded: the chain proved the marked effect can never land.
+ * abandoned_unknown: no chain proof is possible and the owner accepted the unknown outcome; the input stays charged.
+ */
+export const SWAP_TERMINAL_STATES: readonly SwapOperationState[] = ["finalized", "failed_before_effect", "failed_confirmed_revert", "expired_unlanded",
+  "abandoned_unknown"];
 export interface SwapSubmissionMarker {
   readonly markerHash: string;
   readonly markedAt: string;
@@ -84,15 +90,17 @@ export function validateSwapOperation(value: unknown): SwapOperationRecord {
 }
 
 const STATES: readonly SwapOperationState[] = ["quoted", "prepared", "awaiting_approval", "reserved", "submitting", "submitted",
-  "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
+  "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"];
 function validateStateBindings(op: SwapOperationRecord): void {
   if (op.previousIntegrityHash !== null) hash(op.previousIntegrityHash, "stored");
-  const reserved = ["reserved", "submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state);
+  const reserved = ["reserved", "submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert", "expired_unlanded",
+    "abandoned_unknown"].includes(op.state);
   if (reserved && op.usageLease === null) corrupt("Swap operation usage lease phase is invalid.");
   if (["quoted", "prepared", "awaiting_approval"].includes(op.state) && op.usageLease !== null) corrupt("Swap operation usage lease phase is invalid.");
   const stableMarkedFailure = op.state === "failed_before_effect" &&
     isOrcaStableGuardedMechanismDigest(op.mechanismDigest) && op.submissionMarker !== null;
-  const exposed = ["submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state) || stableMarkedFailure;
+  const exposed = ["submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(op.state) ||
+    stableMarkedFailure;
   if (exposed !== (op.submissionMarker !== null)) corrupt("Swap submission marker phase is invalid.");
   if (op.submissionMarker !== null) {
     if (!isPlainRecord(op.submissionMarker) || !exactKeys(op.submissionMarker, ["markerHash", "markedAt", "operationIntegrityHash", "unsignedTransactionPayloadHash"]) ||
@@ -106,7 +114,8 @@ function validateStateBindings(op: SwapOperationRecord): void {
       corrupt("Swap submission marker integrity validation failed.");
     }
   }
-  const expectedLeaseState = op.state === "reserved" || op.state === "submitting" ? "reserved" : op.state;
+  const expectedLeaseState = op.state === "reserved" || op.state === "submitting" ? "reserved" :
+    op.state === "expired_unlanded" ? "released_unsubmitted" : op.state === "abandoned_unknown" ? "finalized" : op.state;
   if (op.usageLease !== null && reserved && op.usageLease.state !== expectedLeaseState) {
     corrupt("Swap usage lease state is inconsistent with the operation phase.");
   }
@@ -117,12 +126,15 @@ function validateStateBindings(op: SwapOperationRecord): void {
   if (op.receiptProof !== null && !["submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state)) corrupt("Swap receipt proof phase is invalid.");
   if (op.state === "finalized" && (op.receiptProof === null || !op.receiptProof.finalized)) corrupt("Finalized swap lacks final receipt proof.");
   if (op.failureProofHash !== null) hash(op.failureProofHash, "stored");
-  const failed = op.state === "failed_before_effect" || op.state === "failed_confirmed_revert";
+  const failed = op.state === "failed_before_effect" || op.state === "failed_confirmed_revert" || op.state === "expired_unlanded" ||
+    op.state === "abandoned_unknown";
   if (failed !== (op.failureProofHash !== null)) corrupt("Swap failure proof phase is invalid.");
   if (op.state === "failed_confirmed_revert" && (op.receiptProof === null || !op.receiptProof.finalized ||
       op.receiptProof.receiptHash !== op.failureProofHash)) corrupt("Confirmed swap revert lacks its finalized revert proof.");
   if (op.state === "failed_before_effect" && (op.submissionMarker !== null && !stableMarkedFailure ||
       (op.usageLease !== null && op.usageLease.state !== "failed_before_effect"))) corrupt("Pre-effect failure lease is not released.");
+  if ((op.state === "expired_unlanded" || op.state === "abandoned_unknown") && (op.usageLease === null ||
+      op.usageLease.outcomeDigest !== op.failureProofHash)) corrupt("Terminal swap lacks its lease bound to the expiry proof or owner acknowledgement.");
   if (stableMarkedFailure && (op.usageLease === null || op.usageLease.outcomeDigest !== op.failureProofHash ||
       op.receiptProof !== null)) corrupt("Marked stable no-send proof and lease are inconsistent.");
 }

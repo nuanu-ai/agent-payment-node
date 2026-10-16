@@ -17,13 +17,29 @@ export declare class TransferServiceObservation {
     private readonly lifecycle;
     private readonly providerDirectRecovery;
     constructor(context: RuntimeContext, providerDirect: ProviderDirectTransferService, lifecycle: TransferObserveLifecycle);
+    /**
+     * Every check that can refuse (policy, funding, fees, nonce) ran before signing. A persisted signature is only ever
+     * dispatched, as these exact bytes, or kept resumable; nothing after signing may strand it.
+     */
     submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord>;
     private dispatchAndInspect;
     resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
+    /**
+     * No receipt. A finalized sender nonce past the frozen one, read in the same POST as the missing receipt, proves another
+     * transaction consumed it: this one can never land. A hash the RPC does not hold at all is re-sent as the identical
+     * signed bytes; at most one copy of them can ever be included, so observing first and re-sending never adds an effect.
+     */
+    private settleUnlanded;
+    /** The persisted signed bytes, read back from encrypted custody and checked against the frozen transfer; never a new signature. */
+    private signedRawTransaction;
+    /** Signed but never dispatched by APN: after the owner's foreground acknowledgement it is closed and never sent. */
+    abandonUndispatched(operationIdInput: string): Promise<unknown>;
     recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;
     status(operationIdInput: string): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;
     inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord>;
+    private observeReceipt;
+    private classifyReceipt;
     requiredOperation(operationId: string): Promise<OperationRecord>;
 }
 export type LocalOperationRecord = OperationRecord & {

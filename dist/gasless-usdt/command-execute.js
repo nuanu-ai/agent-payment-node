@@ -11,12 +11,25 @@ import { USDT_GASLESS } from "./model.js";
 import { UsdtRecoveryService } from "./recovery.js";
 import { usdtPacedRecoveryPort } from "./recovery-port.js";
 import { mintUsdtSponsorPermit } from "./sponsor-permit.js";
-import { usdtSafeSnapshot, usdtSendPort } from "./rpc.js";
+import { UsdtCodePins, usdtSafeSnapshot, usdtSendPort } from "./rpc.js";
 import { GuardedUsdtSendService } from "./send.js";
 import { createInterface } from "node:readline/promises";
 import { approvalCode } from "../approval-code.js";
 import { decodeUsdtPaymasterData } from "./paymaster-data.js";
+import { OperationService } from "../operation-service.js";
 import { usdtEffectiveFeeCap } from "./quote.js";
+/**
+ * A saved operation loads against its own hashes (R2). Before any prompt, signature or send it must also match every
+ * current pin, address and bound; a record an earlier release wrote under other constants needs a new preparation.
+ */
+export function assertUsdtBoundCurrent(bound) {
+    try {
+        validateUsdtBoundOperation(bound);
+    }
+    catch {
+        throw new ApnError("APN_REPREPARE_REQUIRED", "This gasless USDT operation was prepared under different protocol pins; prepare it again.", { reason: "gasless_usdt_protocol_changed", rail: "gasless_usdt", operationId: bound.operationId });
+    }
+}
 /** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
 export function usdtApprovalPrompt(bound, now) {
     const b = validateUsdtBoundOperation(bound).binding;
@@ -107,12 +120,13 @@ export class GaslessUsdtCommandExecute {
         if (!rpcUrl)
             throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT execution.");
         const budget = new UsdtCommandReadBudget(this.state, this.options.transport ?? new GaslessHttps());
+        const codePins = new UsdtCodePins();
         return {
             now: () => this.clock.now(),
             activePolicy: async (profile) => await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile),
             dailyUsage: async (sender, at) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
                 chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
-            safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender),
+            safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender, codePins),
             sponsorPermit: async (bound, identity, snapshot) => await mintUsdtSponsorPermit({ bound, identity, snapshot, transport: budget, rpcUrl, clock: this.clock }),
         };
     }
@@ -127,12 +141,35 @@ export class GaslessUsdtCommandExecute {
             }
             throw new ApnError("APN_OPERATION_BLOCKED", "Gasless USDT execution already has a journal record; inspect status.");
         }
+        assertUsdtBoundCurrent(bound);
+        await this.assertAccountAvailable(bound);
         await (this.options.approval ?? new TtyUsdtApproval()).approve(bound);
+        // The foreground prompt can take minutes; another family may have started on this account meanwhile.
+        await this.assertAccountAvailable(bound);
         const signer = this.options.signer ?? new LocalUsdtSigningService(this.state, this.wrapping, () => this.clock.now());
         const send = this.options.sendTransport ?? { send: usdtSendPort(this.options.transport ?? new GaslessHttps()) };
         return await new GuardedUsdtSendService(this.journal, signer, send, this.preparePort()).send(bound, {
             profile: bound.binding.profile, profileHash, operationId, bindingHash: bound.binding.bindingHash,
         });
+    }
+    /** No other non-terminal money operation of any family may hold this Ethereum account (shared EntryPoint and EOA nonces). */
+    async assertAccountAvailable(bound) {
+        await new OperationService(this.state).assertEvmAccountAvailable(this.state.profileHash(bound.binding.profile), USDT_GASLESS.chainId, bound.binding.plan.request.sender);
+    }
+    /**
+     * Resume reads the live journal: a submitted hash is observed (never resent), an interrupted unsent attempt is retired
+     * and its usage hold released under the effect lock, and a terminal or never-executed operation is returned as saved.
+     */
+    async resume(profileHash, operationId) {
+        const bound = await this.load(profileHash, operationId), execution = await this.journal.load(operationId);
+        if (execution === null)
+            return bound;
+        if (execution.state === "planned" || execution.state === "reserved") {
+            return await this.journal.abortUnsent(bound, this.clock.now()) ?? (await this.journal.load(operationId));
+        }
+        if (["submitting", "submitted_pending", "unknown_finality"].includes(execution.state))
+            return await this.observe(profileHash, operationId);
+        return execution;
     }
     async status(profileHash, operationId) {
         await this.load(profileHash, operationId);
@@ -142,7 +179,7 @@ export class GaslessUsdtCommandExecute {
         const bound = await this.load(profileHash, operationId);
         const rpcUrl = this.options.rpcUrl ?? process.env.APN_ETHEREUM_RPC_URL;
         if (this.options.recoveryPort === undefined && !rpcUrl) {
-            throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT observation.");
+            throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT observation.", { nextActions: ["Set APN_ETHEREUM_RPC_URL to a public HTTPS Ethereum RPC endpoint."] });
         }
         const port = this.options.recoveryPort ?? usdtPacedRecoveryPort(this.state, this.options.transport ?? new GaslessHttps(), rpcUrl);
         return await new UsdtRecoveryService(this.journal, port, () => this.clock.now()).observe(bound);

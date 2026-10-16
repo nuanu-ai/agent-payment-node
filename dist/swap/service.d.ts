@@ -3,6 +3,7 @@ import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { type SwapQuoteInput } from "./quote.js";
 import { type SwapOperationRecord, type SwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
+import { type SwapUnlandedProof } from "./unlanded.js";
 export declare class GuardedSwapService {
     readonly operations: SwapOperationRepository;
     readonly usage: AssetUsageLedger;
@@ -14,6 +15,8 @@ export declare class GuardedSwapService {
         readonly idempotencyKey: string;
         readonly approvalCapAtomic: string;
         readonly now: Date;
+        /** Required only when the lane's registry holds several mechanisms of one route. */
+        readonly laneMechanismDigest?: string;
     }): Promise<SwapOperationRecord>;
     reserve(operation: SwapOperationRecord, policy: AssetPolicyRegistry, now: Date): Promise<SwapOperationRecord>;
     markSubmitting(operation: SwapOperationRecord, now: Date): Promise<SwapOperationRecord>;
@@ -22,6 +25,16 @@ export declare class GuardedSwapService {
     /** A finalized reverted receipt proves the input never left; only gas was spent. The principal lease is released. */
     failConfirmedRevert(operation: SwapOperationRecord, now: Date, revertProof: SwapReceiptProof): Promise<SwapOperationRecord>;
     failBeforeEffect(operation: SwapOperationRecord, now: Date, failureProofHash: string): Promise<SwapOperationRecord>;
+    /**
+     * The chain proved the marked effect can never land: its lifetime, deadline or expiration passed at finality with no
+     * inclusion. The principal lease is released and the operation is terminal. Nothing is re-signed or resent.
+     */
+    expireUnlanded(operation: SwapOperationRecord, now: Date, proof: SwapUnlandedProof): Promise<SwapOperationRecord>;
+    /**
+     * Owner exit when no chain proof is possible: the marked swap's outcome stays unknown, so its input stays charged as
+     * spent (the lease finalizes) and the operation is terminal. Nothing is signed or sent.
+     */
+    abandonUnknown(operation: SwapOperationRecord, now: Date, acknowledgementDigest: string): Promise<SwapOperationRecord>;
     resumeDirective(operation: SwapOperationRecord): "prepare_or_approve" | "observe_only" | "terminal";
 }
 export declare function swapIdempotencyHash(value: unknown): string;

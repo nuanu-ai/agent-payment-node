@@ -3,6 +3,7 @@ import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { rpcArray, rpcAtomic, rpcRecord, solanaSignature, type SolanaRpcPort } from "../../solana/rpc.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
+import { proveSolanaUnlanded, type SwapUnlandedProof } from "../unlanded.js";
 import type { OrcaExecutionBinding } from "./effects.js";
 import type { OrcaKeylessMaterial } from "./material.js";
 import { sha256Hex, USDC_MINT } from "./pins.js";
@@ -16,6 +17,11 @@ export type OrcaObservedOutcome = { readonly outcome: "succeeded" | "reverted"; 
  */
 export class OrcaReceiptObserver {
   constructor(private readonly rpc: SolanaRpcPort, private readonly now: () => Date) {}
+
+  /** Finalized height past the bound lifetime and no status for the persisted signature: it can never land. */
+  async proveUnlanded(lastValidBlockHeight: string, loadSignature: () => Promise<string | null>): Promise<SwapUnlandedProof | null> {
+    return await proveSolanaUnlanded(this.rpc, { lastValidBlockHeight, loadSignature });
+  }
 
   async observeOutcome(operationValue: SwapOperationRecord, binding: OrcaExecutionBinding, material: OrcaKeylessMaterial,
     signature: string): Promise<OrcaObservedOutcome | null> {

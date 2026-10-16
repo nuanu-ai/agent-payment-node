@@ -14,11 +14,7 @@ export async function reconcileX402Method(
   operation: X402OperationRecord,
 ): Promise<X402ReconciliationOutcome> {
   if (operation.selectedOffer.resolved.assetTransferMethod === "erc7710") {
-    return {
-      operation: await new X402Erc7710RpcReconciler(rpc, clock, store).reconcile(operation),
-      completeZeroScanValidated: false,
-      completeZeroScanRead: false,
-    };
+    return { operation: await new X402Erc7710RpcReconciler(rpc, clock, store).reconcile(operation), unusedAtSafe: false };
   }
   return await new X402RpcReconciler(rpc, clock, store).reconcile(operation);
 }

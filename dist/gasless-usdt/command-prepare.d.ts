@@ -17,7 +17,16 @@ export interface UsdtCommandPrepareOptions {
     readonly wait?: (milliseconds: number) => Promise<void>;
     readonly pacingNow?: () => number;
 }
-/** Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. */
+/**
+ * Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. One observation
+ * pass permits ten: the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two
+ * batches when the locator is missing or contradicted, and the scanned receipt's three reads.
+ */
+declare const READ_ADMISSIONS: {
+    readonly execute: 7;
+    readonly "prepare-v2": 8;
+    readonly observe: 10;
+};
 export declare class UsdtCommandReadBudget implements GaslessTransport {
     private readonly state;
     private readonly transport;
@@ -27,7 +36,7 @@ export declare class UsdtCommandReadBudget implements GaslessTransport {
     private readonly started;
     private attempts;
     private readonly scheduler;
-    constructor(state: StateStore, transport: GaslessTransport, now?: () => number, wait?: (milliseconds: number) => Promise<void>, scope?: "execute" | "prepare-v2");
+    constructor(state: StateStore, transport: GaslessTransport, now?: () => number, wait?: (milliseconds: number) => Promise<void>, scope?: keyof typeof READ_ADMISSIONS);
     count(): number;
     request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number, code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG"): Promise<{
         readonly status: number;
@@ -44,5 +53,6 @@ export declare class GaslessUsdtCommandPrepare {
     private readonly options;
     constructor(state: StateStore, clock: ClockPort, operations: GaslessUsdtOperationService, options?: UsdtCommandPrepareOptions);
     prepare(input: PrepareCommand): Promise<import("./bound-operation.js").UsdtAnyBoundOperation>;
+    private prepareNew;
 }
 export {};

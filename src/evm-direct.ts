@@ -122,13 +122,13 @@ export function validateEvmOperation(operation: OperationRecord): void {
   const allowed: Readonly<Record<string, readonly string[]>> = {
     awaiting_approval: ["started", "failed_before_effect"],
     started: ["signed_not_submitted", "failed_before_effect"],
-    signed_not_submitted: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded"],
+    signed_not_submitted: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"],
     submitted_pending: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded"],
     unknown_finality: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded"],
-    completed: [], failed_before_effect: [], failed_confirmed_revert: [], failed_proven_superseded: [],
+    completed: [], failed_before_effect: [], failed_confirmed_revert: [], failed_proven_superseded: [], abandoned_unknown: [],
   };
   if (operation.transitions[0]?.state !== "awaiting_approval" ||
-      operation.terminal !== ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded"].includes(operation.state)) {
+      operation.terminal !== ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"].includes(operation.state)) {
     throw new ApnError("APN_STATE_CORRUPT", "EVM operation state is invalid.");
   }
   for (let index = 1; index < operation.transitions.length; index += 1) {

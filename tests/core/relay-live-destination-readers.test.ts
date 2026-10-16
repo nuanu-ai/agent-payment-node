@@ -15,10 +15,11 @@ async function polygon() {
   return { trace, tx, block, parent, full: (await fixture("polygon-drpc-fullblock")).result,
     before: BigInt(result(balances, 1)), after: BigInt(result(balances, 2)) };
 }
+const buyer = "0x823a3a5bab1186141b32fc65f8e25ca24c679ce7";
 function credit(node: any): any { if (node.to === "0x823a3a5bab1186141b32fc65f8e25ca24c679ce7") return node;
   for (const child of node.calls ?? []) { const found = credit(child); if (found) return found; } }
 test("full untouched real Polygon callTracer binds exact payout and EIP1898 balance delta", async () => {
-  const f = await polygon(), decoded = decodePolygonPayoutTrace(f.trace, f.tx, f.tx.hash, f.block.hash, f.before, f.after);
+  const f = await polygon(), decoded = decodePolygonPayoutTrace(f.trace, f.tx, f.tx.hash, f.block.hash, buyer, f.before, f.after);
   assert.equal(f.after - f.before, BigInt("0xb6e922eb7e892e4"));
   assert.equal(decoded.transfers.filter(t => t.to.toLowerCase() === credit(f.trace).to).length, 1);
   assert.equal(decoded.complete, true); assert.equal(decoded.revertedCallsExcluded, true);
@@ -35,8 +36,16 @@ for (const mutation of ["hash", "chain", "receiver", "revert", "duplicate", "tru
     if (mutation === "unsupported") t.calls[0].type = "SELFDESTRUCT";
     if (mutation === "root-input") t.input = "0x";
     if (mutation === "negative-delta") after = f.before - 1n;
-    assert.throws(() => decodePolygonPayoutTrace(t, tx, f.tx.hash, f.block.hash, f.before, after));
+    assert.throws(() => decodePolygonPayoutTrace(t, tx, f.tx.hash, f.block.hash, buyer, f.before, after));
   });
+test("Polygon trace credits only the operation's own recorded recipient", async () => {
+  const f = await polygon(), other = "0x2222222222222222222222222222222222222222";
+  // The captured payout went to the buyer: proving it for any other recipient must fail closed.
+  assert.throws(() => decodePolygonPayoutTrace(f.trace, f.tx, f.tx.hash, f.block.hash, other, f.before, f.after));
+  const t = clone(f.trace); credit(t).to = other;
+  const decoded = decodePolygonPayoutTrace(t, f.tx, f.tx.hash, f.block.hash, other, f.before, f.after);
+  assert.equal(decoded.transfers.filter(x => x.to.toLowerCase() === other).length, 1);
+});
 test("finite Polygon adapter proves full real trace, parent membership and canonical state; legacy trace stays null", async () => {
   const f = await polygon(); let posts = 0, wrongParent = false, wrongBalance = false, wrongMembership = false;
   const rpc = { batchCall: async (calls: any[]) => calls.map(c => {
@@ -48,17 +57,17 @@ test("finite Polygon adapter proves full real trace, parent membership and canon
       if (c.params[1]) return wrongMembership ? { ...f.full, transactions: [] } : f.full;
       return f.block;
     }
-    if (c.method === "eth_getBalance") { assert.equal(c.params[1].requireCanonical, true);
+    if (c.method === "eth_getBalance") { assert.equal(c.params[1].requireCanonical, true); assert.equal(c.params[0], buyer);
       return `0x${(c.params[1].blockHash === f.parent.hash ? f.before : f.after + (wrongBalance ? 1n : 0n)).toString(16)}`; }
     throw Error(c.method);
   }) };
   const guard = { get physicalRequests() { return posts; }, post: async (_url: string, fn: () => Promise<any>) => { posts++; return fn(); } };
   const adapter = new RelayBnbReadOnlyRpc("https://polygon.drpc.org", {} as any, rpc as any, guard as any, 137);
   assert.equal(await adapter.nativeTrace(), null); await adapter.transaction(f.tx.hash);
-  assert.equal((await adapter.polygonNativeTrace(f.tx.hash)).transactionHash, f.tx.hash);
-  wrongParent = true; await assert.rejects(adapter.polygonNativeTrace(f.tx.hash)); wrongParent = false;
-  wrongBalance = true; await assert.rejects(adapter.polygonNativeTrace(f.tx.hash)); wrongBalance = false;
-  wrongMembership = true; await assert.rejects(adapter.polygonNativeTrace(f.tx.hash));
+  assert.equal((await adapter.polygonNativeTrace(f.tx.hash, buyer)).transactionHash, f.tx.hash);
+  wrongParent = true; await assert.rejects(adapter.polygonNativeTrace(f.tx.hash, buyer)); wrongParent = false;
+  wrongBalance = true; await assert.rejects(adapter.polygonNativeTrace(f.tx.hash, buyer)); wrongBalance = false;
+  wrongMembership = true; await assert.rejects(adapter.polygonNativeTrace(f.tx.hash, buyer));
 });
 test("Mega real fixed USDm state reader admits storage read and binds canonical parent/block/pins", async () => {
   const h = await fixture("mega-token-headers-public"), values = await fixture("mega-token-eip1898-public");

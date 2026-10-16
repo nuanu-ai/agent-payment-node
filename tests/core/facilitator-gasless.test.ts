@@ -8,7 +8,10 @@ import { approvalCode } from "../../src/approval-code.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { LocalFacilitatorSigner } from "../../src/facilitator-gasless/custody.js";
+import { FACILITATOR_GASLESS_MECHANISM } from "../../src/facilitator-gasless/policy.js";
 import { PayAiFacilitator, type FacilitatorPayment, type FacilitatorPort } from "../../src/facilitator-gasless/facilitator.js";
 import { facilitatorFail } from "../../src/facilitator-gasless/failure.js";
 import { AVALANCHE_FACILITATOR as R } from "../../src/facilitator-gasless/registry.js";
@@ -81,7 +84,7 @@ class Facilitator implements FacilitatorPort {
   }
 }
 
-async function fixture(root: string) {
+async function fixture(root: string, policy: { readonly active?: boolean; readonly maximum?: string; readonly daily?: string } = {}) {
   const key = generatePrivateKey(), account = privateKeyToAccount(key), profile = "avalanche-local", state = new StateStore(root);
   const wrapping = new GaslessWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
   await state.initialize();
@@ -90,6 +93,17 @@ async function fixture(root: string) {
   await wallets.save(identity, { version: "apn.wallet-secret.v1", privateKey: key, directEffects: {}, x402Effects: {} }, Buffer.alloc(32, 73));
   await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile, profileHash: state.profileHash(profile),
     address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash }));
+  if (policy.active !== false) {
+    const store = new AllowlistPolicyStore(root);
+    const record = await store.stage({ profile, now: NOW, policy: { schemaVersion: "apn.allowlist-policy-file.v1",
+      overlayVersion: "facilitator-fixture.1", accounts: { evm: account.address }, effectiveAt: new Date(NOW.getTime() - 1_000).toISOString(),
+      admissions: [{ chain: "eip155:43114", kind: "token", identifier: getAddress(R.token), rail: "gasless",
+        maximumPerTransferAtomic: policy.maximum ?? "100000000", dailyLimitAtomic: policy.daily ?? "1000000000",
+        mechanism: FACILITATOR_GASLESS_MECHANISM }] } });
+    await store.appendDecision(profile, null, { status: "active", revision: record.revision,
+      stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest, registry: record.registry,
+      approvalFingerprint: hashObject("facilitator-fixture-policy"), decidedAt: NOW.toISOString() });
+  }
   const rpc = new AvalancheRpc(), facilitator = new Facilitator(rpc), approval = new GaslessApproval();
   const abandonments: OperationAbandonIntent[] = [];
   let now = NOW.getTime();
@@ -105,8 +119,12 @@ async function fixture(root: string) {
     return (response.operation as { operation_id: string }).operation_id;
   };
   const record = async (id: string) => (await core.facilitatorGasless.records.findOperation(id))!;
+  const usage = new AssetUsageLedger(root);
+  const usageIdentity = { account: account.address, chain: "eip155:43114", asset: { kind: "token" as const, identifier: getAddress(R.token) } };
+  const lease = async (id: string) => await usage.load(usageIdentity, (await record(id)).intent.allowlist!.reservationId);
+  const charged = async () => (await usage.usage(usageIdentity, new Date(now))).amountAtomic;
   return { key, account, profile, state, wrapping, rpc, facilitator, approval, abandonments, core, prepareInput, prepare, record,
-    advance: (milliseconds: number) => { now += milliseconds; } };
+    lease, charged, advance: (milliseconds: number) => { now += milliseconds; } };
 }
 
 test("a Local profile on Avalanche settles once through the facilitator and completes from finalized evidence", async (t) => {
@@ -133,6 +151,8 @@ test("a Local profile on Avalanche settles once through the facilitator and comp
   assert.equal(payment.authorization.validBefore, String(SECONDS + R.validitySeconds));
   assert.equal(stored.signed!.digest, facilitatorAuthorizationDigest(payment.authorization));
   assert.equal(await recoverAddress({ hash: stored.signed!.digest, signature: payment.signature }), s.account.address);
+  // The owner's cap was charged before signing and stays consumed by the proven delivery.
+  assert.equal((await s.lease(id))?.state, "finalized"); assert.equal(await s.charged(), "1500000");
 
   const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
   assert.equal(receipt.ok, true, receipt.error?.message);
@@ -155,6 +175,7 @@ test("a refused Avalanche approval ends before signing or facilitator exposure",
   assert.equal((response.operation as any).state, "failed_before_effect");
   assert.equal((response.operation as any).reason, "facilitator_gasless_approval_rejected");
   assert.deepEqual(s.facilitator.calls, ["supported"]); assert.equal(s.wrapping.loads, 0);
+  assert.equal(await s.lease(id), null); assert.equal(await s.charged(), "0");
   assert.notEqual(await s.prepare("avalanche-facilitator-0002"), id);
 });
 
@@ -171,6 +192,8 @@ test("a rejected verification holds the account until a finalized block proves t
   assert.deepEqual(s.facilitator.calls, ["supported", "supported", "verify"]);
   const blocked = await s.core.execute(s.prepareInput("avalanche-facilitator-0002"));
   assert.equal(blocked.ok, false); assert.equal(blocked.error?.code, "APN_OPERATION_BLOCKED");
+  // An exposed authorization keeps the whole amount charged until the chain proves the outcome.
+  assert.equal((await s.lease(id))?.state, "unknown_finality"); assert.equal(await s.charged(), "1500000");
 
   let resumed = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal((resumed.operation as any).state, "verify_started");
@@ -181,6 +204,8 @@ test("a rejected verification holds the account until a finalized block proves t
   const closed = resumed.operation as any;
   assert.equal(closed.state, "expired_unused"); assert.equal(closed.terminal, true);
   assert.equal(closed.proof_class, "rpc_finalized_unused"); assert.equal(closed.transfer.unused_gross_atomic, "1500000");
+  // A finalized, expired and unused authorization can never execute, so the charge is released.
+  assert.equal((await s.lease(id))?.state, "released_unsubmitted"); assert.equal(await s.charged(), "0");
   assert.deepEqual(s.facilitator.calls, ["supported", "supported", "verify"]);
   assert.notEqual(await s.prepare("avalanche-facilitator-0002"), id);
 });
@@ -219,6 +244,7 @@ test("a used nonce without a matching receipt stays unresolved until the owner a
   assert.equal(closed.state, "abandoned_unknown"); assert.equal(closed.terminal, true);
   assert.equal(closed.proof_class, "owner_acknowledgement_only"); assert.equal(closed.transfer.actual_delivered_atomic, null);
   assert.equal(s.abandonments.length, 1); assert.equal(s.abandonments[0]!.chainLabel, "Avalanche (43114)");
+  assert.equal((await s.lease(id))?.state, "unknown_finality"); assert.equal(await s.charged(), "1500000");
   assert.deepEqual(s.facilitator.calls, ["supported", "supported", "verify", "settle"]);
   assert.notEqual(await s.prepare("avalanche-facilitator-0002"), id);
 });
@@ -231,6 +257,8 @@ test("an approval interrupted before exposure closes on resume without chain or 
     fingerprint: op.fingerprint, approvedAt: NOW.toISOString(), expiresAt: op.intent.expiresAt },
     signed: { authorization, digest: facilitatorAuthorizationDigest(authorization), startBlock: block(1000, SECONDS), signatureHash: null } },
     NOW.toISOString());
+  // Approval always charges the owner's cap before it records a chosen authorization.
+  await s.core.facilitatorGasless.policy.reserve(op);
   await s.core.facilitatorGasless.records.persist(approved);
   const rpcCalls = s.rpc.calls.length, facilitatorCalls = s.facilitator.calls.length;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
@@ -238,6 +266,48 @@ test("an approval interrupted before exposure closes on resume without chain or 
   assert.equal((resumed.operation as any).state, "failed_before_effect");
   assert.equal((resumed.operation as any).reason, "facilitator_gasless_unexposed");
   assert.equal(s.rpc.calls.length, rpcCalls); assert.equal(s.facilitator.calls.length, facilitatorCalls);
+  assert.equal((await s.lease(id))?.state, "failed_before_effect"); assert.equal(await s.charged(), "0");
+});
+
+test("an Avalanche facilitator transfer needs the owner's active policy and stays within its caps", async (t) => {
+  const none = await temporaryState(); t.after(none.cleanup);
+  const unadmitted = await fixture(none.root, { active: false });
+  const refused = await unadmitted.core.execute(unadmitted.prepareInput("avalanche-facilitator-0001"));
+  assert.equal(refused.ok, false); assert.equal(refused.error?.code, "APN_ALLOWLIST_REFUSED");
+  assert.deepEqual(unadmitted.rpc.calls, []); assert.deepEqual(unadmitted.facilitator.calls, []);
+
+  const small = await temporaryState(); t.after(small.cleanup);
+  const capped = await fixture(small.root, { maximum: "1000000" });
+  const over = await capped.core.execute(capped.prepareInput("avalanche-facilitator-0001"));
+  assert.equal(over.ok, false); assert.equal(over.error?.code, "APN_ALLOWLIST_REFUSED");
+
+  // A completed transfer consumes the daily cap: the next one is refused at prepare.
+  const daily = await temporaryState(); t.after(daily.cleanup);
+  const s = await fixture(daily.root, { maximum: "2000000", daily: "2000000" }), id = await s.prepare();
+  const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal((response.operation as any).state, "completed");
+  const second = await s.core.execute(s.prepareInput("avalanche-facilitator-0002"));
+  assert.equal(second.ok, false); assert.equal(second.error?.code, "APN_ALLOWLIST_REFUSED");
+});
+
+test("a policy revoked after prepare stops approval before the owner signs", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await fixture(temporary.root), id = await s.prepare();
+  const store = new AllowlistPolicyStore(s.state.root);
+  const revision = (await store.status(s.profile))?.revision;
+  const replaced = await store.stage({ profile: s.profile, now: NOW, ...(revision === undefined ? {} : { expectedRevision: revision }), policy: { schemaVersion: "apn.allowlist-policy-file.v1",
+    overlayVersion: "facilitator-fixture.2", accounts: { evm: s.account.address }, effectiveAt: new Date(NOW.getTime() - 1_000).toISOString(),
+    admissions: [{ chain: "eip155:43114", kind: "token", identifier: getAddress(R.token), rail: "gasless",
+      maximumPerTransferAtomic: "100000000", dailyLimitAtomic: "1000000000", mechanism: FACILITATOR_GASLESS_MECHANISM }] } });
+  const prior = (await store.read(s.profile)).entries.at(-1)?.entryDigest ?? null;
+  await store.appendDecision(s.profile, prior, { status: "active", revision: replaced.revision,
+    stagedRecordDigest: replaced.recordDigest, policyDigest: replaced.registry.policyDigest, registry: replaced.registry,
+    approvalFingerprint: hashObject("facilitator-fixture-policy-2"), decidedAt: NOW.toISOString() });
+  const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(response.ok, true, response.error?.message);
+  assert.equal((response.operation as any).state, "failed_before_effect");
+  assert.equal((response.operation as any).reason, "facilitator_gasless_allowlist_changed");
+  assert.equal(s.wrapping.loads, 0); assert.equal(s.facilitator.payments.length, 0);
 });
 
 test("a tampered Avalanche facilitator record fails closed", async (t) => {

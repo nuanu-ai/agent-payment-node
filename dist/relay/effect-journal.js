@@ -19,7 +19,8 @@ function prepared(op) {
         blocked("prepared quote required");
 }
 function validateEffect(effect, role) {
-    if (effect.role !== role || !["pending", "signing_started", "sealed", "submitting", "submission_marked", "tx_known", "confirmed", "failed"].includes(effect.phase))
+    if (effect.role !== role || !["pending", "signing_started", "sealed", "submitting", "submission_marked", "tx_known", "confirmed", "failed",
+        "abandoned_unsent"].includes(effect.phase))
         corrupt("effect role or phase");
     if (effect.phase === "pending") {
         if (effect.attempt !== null || effect.observedAt !== null)
@@ -37,9 +38,11 @@ function validateEffect(effect, role) {
         corrupt("marked state");
     if (["sealed", "submitting", "tx_known"].includes(effect.phase) && (effect.attempt.transactionHash === null || effect.observedAt !== null))
         corrupt("known transaction");
-    if ((effect.phase === "confirmed" || effect.phase === "failed") &&
+    if ((effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent") &&
         (!iso(effect.observedAt) || Date.parse(effect.observedAt) < Date.parse(effect.attempt.markedAt)))
         corrupt("observation");
+    if (effect.phase === "abandoned_unsent" && (effect.attempt.transactionHash === null || effect.attempt.attemptNumber !== 1))
+        corrupt("never landed attempt");
 }
 export function validateRelayEffectJournal(value, op) {
     prepared(op);
@@ -110,6 +113,11 @@ export function advanceRelayEffectJournal(journal, op, event) {
                 blocked("transaction hash requires one marked attempt");
             next = { ...current, phase: "tx_known", attempt: { ...current.attempt, transactionHash: event.transactionHash } };
             break;
+        case "record_never_landed":
+            if (current.phase !== "sealed" || !iso(event.at) || Date.parse(event.at) < Date.parse(current.attempt.markedAt))
+                blocked("never landed requires a sealed effect");
+            next = { ...current, phase: "abandoned_unsent", observedAt: event.at };
+            break;
         case "observe":
             if ((current.phase !== "submission_marked" && current.phase !== "tx_known" && current.phase !== "submitting") || !iso(event.at) ||
                 Date.parse(event.at) < Date.parse(current.attempt.markedAt))
@@ -125,7 +133,8 @@ export function advanceRelayEffectJournal(journal, op, event) {
 export function relayRecoveryClass(journal, op) {
     validateRelayEffectJournal(journal, op);
     const [approval, deposit] = journal.effects;
-    if (approval.phase === "failed" || deposit.phase === "failed")
+    if (approval.phase === "failed" || deposit.phase === "failed" ||
+        approval.phase === "abandoned_unsent" || deposit.phase === "abandoned_unsent")
         return "failed";
     if (deposit.phase === "confirmed")
         return "completed";

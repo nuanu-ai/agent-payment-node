@@ -23,6 +23,7 @@ import type { SmartAccountGaslessApprovalPort, SmartAccountGaslessMaterialPort,
   SmartAccountGaslessObserveInput, SmartAccountGaslessProviderPort, SmartAccountGaslessRpcPort } from "../../src/smart-account-gasless/ports.js";
 import { saError } from "../../src/smart-account-gasless/reasons.js";
 import { SmartAccountGaslessService } from "../../src/smart-account-gasless/service.js";
+import { abandonSmartAccountGasless } from "../../src/operation-abandon-provider.js";
 import { SA_TEST_AT, saTestIntent } from "./smart-account-gasless-fixtures.js";
 
 const PROFILE = "sa-synthetic", KEY = "service-fixture", TX = `0x${"6".repeat(64)}` as Hex;
@@ -128,9 +129,11 @@ async function fixture(root: string, create = true) {
     assert.equal(input.exactPhrase, approvalCode("gasless", input.operationId, input.fingerprint));
     assert.equal((input.summary.transfer as any).frozen_fee_atomic, "0"); await call("approval"); return accepted;
   } };
-  const context = () => new RuntimeContext({ state, clock, smartAccountGasless: { rpcFor: () => rpc, provider, material, approval, records } });
+  const abandonCalls: unknown[] = [];
+  const context = () => new RuntimeContext({ state, clock, smartAccountGasless: { rpcFor: () => rpc, provider, material, approval, records },
+    operationAbandonApproval: { approve: async intent => { abandonCalls.push(intent); } } });
   const restart = () => new SmartAccountGaslessService(context()), service = restart();
-  return { state, service, records, calls, restart, context, material, provider, rpc, binding,
+  return { state, service, records, calls, restart, context, material, provider, rpc, binding, abandonCalls,
     id: state.operationId(PROFILE, KEY), input: { profile: PROFILE, request: original.request, idempotencyKey: KEY },
     setHook(value: typeof hook) { hook = value; }, setNow(value: Date) { now = value; },
     phase(value: typeof observation) { observation = value; }, refuse() { accepted = false; }, noPermission() { failInspect = true; },
@@ -191,6 +194,23 @@ test("approved invocation writes every effect marker before one signature, verif
   const terminalCalls = { ...f.calls }, receipt = await f.service.receipt(f.id);
   assert.deepEqual(await f.restart().approve(f.id), done); assert.deepEqual(await f.restart().resume(f.id), done);
   assert.deepEqual(await f.service.receipt(f.id), receipt); assert.deepEqual(f.calls, terminalCalls);
+});
+test("an exposed transfer that stays unproven is owner-abandoned only after its child delegation expired (R4)", async t => {
+  const f = await fixture(await temporary(t)); await f.service.prepare(f.input);
+  assert.equal((await f.service.approve(f.id)).state, "unknown_finality");
+  const operations = new OperationService(f.state, undefined, undefined, undefined, undefined, undefined, f.records);
+  await assert.rejects(() => abandonSmartAccountGasless(f.context(), operations, f.id), { code: "APN_OPERATION_BLOCKED" });
+  const effects = { ...f.calls }; f.setNow(when(600));
+  const abandoned = await abandonSmartAccountGasless(f.context(), operations, f.id) as { state: string; proof_class: string;
+    permission: { guard_held: boolean }; transfer: { actual_delivered_atomic: string | null }; fees: { unused_gross_atomic: string | null } };
+  assert.equal(abandoned.state, "abandoned_unknown"); assert.equal(abandoned.proof_class, "owner_acknowledgement_only");
+  assert.equal(abandoned.permission.guard_held, false); assert.equal(f.abandonCalls.length, 1);
+  assert.equal(abandoned.transfer.actual_delivered_atomic, null, "an unknown outcome claims no zero delivery");
+  assert.equal(abandoned.fees.unused_gross_atomic, null);
+  for (const key of ["approval", "seal", "verify", "settle"] as const) assert.equal(f.calls[key], effects[key], key);
+  assert.equal((await abandonSmartAccountGasless(f.context(), operations, f.id) as { state: string }).state, "abandoned_unknown");
+  assert.equal(f.abandonCalls.length, 1);
+  assert.equal((await f.service.receipt(f.id)).state, "abandoned_unknown");
 });
 test("foreground rejection and expiration close before effect; unavailable foreground input remains awaiting", async t => {
   const root = await temporary(t);

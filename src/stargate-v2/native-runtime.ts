@@ -12,6 +12,7 @@ import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNat
   stargateV2NativeCanonicalReceipt, type StargateConfirmedReceipt, type StargateNativeExecutionPorts,
   type StargateNativeOperation } from "./native-execution.js";
 import { TtyStargateNativeApproval } from "./native-tty.js";
+import { StargateNativeUsage } from "./native-usage.js";
 
 const SOURCE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
@@ -88,11 +89,12 @@ export class StargateJsonRpc {
 
 export class StargateNativeService {
   private source?: StargateJsonRpc; private destination?: StargateJsonRpc;
-  private readonly journal: FileStargateNativeJournal; private readonly local: LocalStargateNativeSigner;
+  private readonly journal: FileStargateNativeJournal; private readonly local: LocalStargateNativeSigner; private readonly usage: StargateNativeUsage;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort,
     private readonly environment: Readonly<Record<string, string | undefined>>,
     private readonly now: () => number = Date.now) {
     this.journal = new FileStargateNativeJournal(state.root, state); this.local = new LocalStargateNativeSigner(state, wrapping);
+    this.usage = new StargateNativeUsage(state, now);
   }
   async prepare(input: Readonly<{ profile: string; amountAtomic: string; maxNativeDebitAtomic: string; idempotencyKey: string }>): Promise<StargateNativeOperation> {
     this.remote();
@@ -104,7 +106,8 @@ export class StargateNativeService {
   }
   async observe(operationId: string): Promise<StargateNativeOperation> {
     const operation = await this.required(operationId);
-    if (!["submission_started", "submitted", "unknown_finality"].includes(operation.phase))
+    // Terminal phases only settle their usage hold; they never sign or send.
+    if (!["submission_started", "submitted", "unknown_finality", "observed", "failed_confirmed_revert"].includes(operation.phase))
       throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate operation can be observed.");
     return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
   }
@@ -138,6 +141,8 @@ export class StargateNativeService {
         return { nonceAtomic: quantity(nonce).toString(), gasLimitAtomic: gasLimit.toString(), maxFeePerGasAtomic: maxFee.toString(),
           maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
       }, signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async operation => await new TtyStargateNativeApproval().approve(operation),
+      admitPolicy: async input => await this.usage.admitPolicy(input), reserveUsage: async operation => await this.usage.reserve(operation),
+      followUsage: async (operation, target) => await this.usage.follow(operation, target),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; },
       waitSourceReceipt: async (transactionHash, finalityTag) => await confirmedStargateSourceReceipt(source, transactionHash, finalityTag),
       observeDestination: async input => await observeStargateDestination(destination, input), now: this.now,

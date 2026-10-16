@@ -14,7 +14,7 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
             policy_digest: string;
             policy_revision: number;
             activation_digest: string;
-            chain: "eip155:1" | "eip155:8453";
+            chain: `eip155:${number}`;
             token: `0x${string}`;
             mechanism: Readonly<{
                 provider: "local";
@@ -121,7 +121,7 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
             policy_digest: string;
             policy_revision: number;
             activation_digest: string;
-            chain: "eip155:1" | "eip155:8453";
+            chain: `eip155:${number}`;
             token: `0x${string}`;
             mechanism: Readonly<{
                 provider: "local";
@@ -230,7 +230,7 @@ export declare function publicGaslessOperation(op: GaslessOperationRecord): {
             policy_digest: string;
             policy_revision: number;
             activation_digest: string;
-            chain: "eip155:1" | "eip155:8453";
+            chain: `eip155:${number}`;
             token: `0x${string}`;
             mechanism: Readonly<{
                 provider: "local";
@@ -346,7 +346,7 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
             policy_digest: string;
             policy_revision: number;
             activation_digest: string;
-            chain: "eip155:1" | "eip155:8453";
+            chain: `eip155:${number}`;
             token: `0x${string}`;
             mechanism: Readonly<{
                 provider: "local";
@@ -455,7 +455,7 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
             policy_digest: string;
             policy_revision: number;
             activation_digest: string;
-            chain: "eip155:1" | "eip155:8453";
+            chain: `eip155:${number}`;
             token: `0x${string}`;
             mechanism: Readonly<{
                 provider: "local";
@@ -566,7 +566,7 @@ export declare function gaslessReceipt(op: GaslessOperationRecord): {
             policy_digest: string;
             policy_revision: number;
             activation_digest: string;
-            chain: "eip155:1" | "eip155:8453";
+            chain: `eip155:${number}`;
             token: `0x${string}`;
             mechanism: Readonly<{
                 provider: "local";

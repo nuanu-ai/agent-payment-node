@@ -35,6 +35,7 @@ import {
   ensureWallet,
   makeCore,
   temporaryState,
+  activateBaseUsdcDirectPolicy,
 } from "./helpers.js";
 
 const PREPARE_REQUEST = {
@@ -533,6 +534,7 @@ test("global idempotency and active-operation scans cover direct and x402 stores
   const directFirst = await temporaryState();
   t.after(directFirst.cleanup);
   await ensureWallet(makeCore({ root: directFirst.root, native: new CanonicalDirectTestNative(directFirst.root) }));
+  await activateBaseUsdcDirectPolicy(directFirst.root);
   const directRpc = new TestRpc();
   const direct = await makeCore({ root: directFirst.root, rpc: directRpc }).execute({
     command: "transfer.prepare",
@@ -582,6 +584,7 @@ test("global idempotency and active-operation scans cover direct and x402 stores
   });
   assert.equal(directConflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
   assert.equal(directAfter.balanceCalls, 0);
+  // An open EIP-3009 purchase holds a shared account claim: a direct transfer on that account waits for it.
   const differentDirectRpc = new TestRpc();
   const differentDirect = await makeCore({ root: x402First.root, rpc: differentDirectRpc }).execute({
     command: "transfer.prepare",
@@ -592,6 +595,16 @@ test("global idempotency and active-operation scans cover direct and x402 stores
   });
   assert.equal(differentDirect.error?.code, "APN_OPERATION_BLOCKED");
   assert.equal(differentDirectRpc.balanceCalls, 0);
+  // Another purchase on the same account shares the claim and proceeds.
+  const secondPurchaseHttp = challenge();
+  const secondPurchaseRpc = new TestRpc();
+  const secondPurchase = await makeCore({ root: x402First.root, rpc: secondPurchaseRpc, http: secondPurchaseHttp }).execute({
+    ...PREPARE_REQUEST,
+    idempotencyKey: "second-x402-key",
+  });
+  assert.equal(secondPurchase.ok, true, JSON.stringify(secondPurchase));
+  assert.equal(secondPurchaseHttp.calls.length, 1);
+  assert.equal(secondPurchaseRpc.x402PrepareCalls, 1);
 
   const activeHttp = challenge();
   const activeRpc = new TestRpc();
@@ -608,6 +621,7 @@ test("direct and x402 concurrency shares profile then operation locks", async (t
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await ensureWallet(makeCore({ root: temporary.root, native: new CanonicalDirectTestNative(temporary.root) }));
+  await activateBaseUsdcDirectPolicy(temporary.root);
   const rpc = new TestRpc();
   const http = challenge();
   const [direct, x402] = await Promise.all([
@@ -620,7 +634,8 @@ test("direct and x402 concurrency shares profile then operation locks", async (t
     }),
     makeCore({ root: temporary.root, rpc, http }).execute({ ...PREPARE_REQUEST, idempotencyKey: "concurrent-x402" }),
   ]);
-  assert.equal([direct, x402].filter((result) => result.ok).length, 1);
+  // Both serialize on the profile lock; the direct transfer's exclusive claim and the purchase's shared claim exclude each other.
+  assert.equal([direct, x402].filter((result) => result.ok).length, 1, JSON.stringify([direct, x402]));
   assert.equal([direct, x402].filter((result) => result.error?.code === "APN_OPERATION_BLOCKED").length, 1);
   assert.equal(rpc.balanceCalls + rpc.x402PrepareCalls, 1);
   assert.ok(http.calls.length === 0 || http.calls.length === 1);

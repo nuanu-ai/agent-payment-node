@@ -12,6 +12,7 @@ import { planUsdtTransfer } from "./quote.js";
 import { usdtUserOperation } from "./userop.js";
 import { USDT_BOUND_V2_SCHEMA, validateUsdtBoundOperationV2 } from "./bound-v2-codec.js";
 import { consumeUsdtV2Prepared } from "./policy-prepare-v2.js";
+import { validateUsdtStoredBoundOperation } from "./bound-stored.js";
 export function validateUsdtAnyBoundOperation(value) {
     return isPlainRecord(value) && value.schemaVersion === USDT_BOUND_V2_SCHEMA ? validateUsdtBoundOperationV2(value) : validateUsdtBoundOperation(value);
 }
@@ -234,7 +235,8 @@ export class UsdtBoundOperationRepository {
         catch {
             fail("bound_json");
         }
-        return validateUsdtAnyBoundOperation(parsed);
+        // R2: a saved record loads against its own hashes and schema; signing and sending re-validate it against current pins.
+        return validateUsdtStoredBoundOperation(parsed);
     }
     async readClaim(idempotencyKey) {
         if (!await this.dir(this.claimsPath(), false))
@@ -425,7 +427,9 @@ export async function classifyUsdtBoundRecovery(operation, port) {
             snapshot.account.usdtBalanceAtomic < BigInt(b.plan.request.grossAtomic)) {
             return { state: "capability_unavailable", reason: "chain_state_drift", operation };
         }
-        if (snapshot.blockNumber !== BigInt(b.safeBlockNumber) || snapshot.blockHash !== b.safeBlockHash) {
+        // A later safe block is the normal case: execution re-guards at its own fresh safe block. Only a different block at
+        // the prepared height (the prepared anchor itself left the canonical chain) needs recovery.
+        if (snapshot.blockNumber === BigInt(b.safeBlockNumber) && snapshot.blockHash !== b.safeBlockHash) {
             return { state: "recovery_required", reason: "safe_block_changed", operation };
         }
         return { state: "prepared", operation };

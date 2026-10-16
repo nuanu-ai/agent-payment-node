@@ -180,6 +180,33 @@ test("refusal and ineligible direct families produce no state write, receipt rec
   assert.equal(refused.calls.length, 1, "ineligible operations never reach confirmation");
 });
 
+test("after its approval window a delegated send, a provider request or a known transaction can be abandoned (R4)", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  await state.initialize();
+  const approval = new Approval(), clock = new TestClock();
+  clock.value = new Date("2026-09-10T07:00:00.000Z");
+  const core = new ApnCore({ state, operationAbandonApproval: approval, clock });
+  const cases = [
+    await seedProviderOperation(state, { profile: "abandon-delegated", mode: "delegated_session_transaction" }),
+    await seedProviderOperation(state, { profile: "abandon-reference", providerEffect: true }),
+    await seedProviderOperation(state, { profile: "abandon-hash", transactionHash: true }),
+  ];
+  for (const operation of cases) {
+    const abandoned = await core.execute({ command: "operation.abandon", operationId: operation.operationId });
+    assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+    const stored = await state.findOperation(operation.operationId);
+    assert.equal(stored?.state, "abandoned_unknown");
+    assert.equal(stored?.transactionHash, operation.transactionHash, "the last known transaction stays on record");
+    assert.deepEqual(stored?.providerEffect, operation.providerEffect, "the provider request reference stays on record");
+    const status = await new ApnCore({ state: new StateStore(temporary.root), clock }).execute({ command: "operation.status", operationId: operation.operationId });
+    assert.equal((status.operation as { state?: unknown }).state, "abandoned_unknown", JSON.stringify(status));
+  }
+  assert.equal(approval.calls.length, cases.length);
+  assert.match(approval.calls[2]!.outcomeNote, /0xe{64} may still land/u);
+});
+
 test("authentic orphan receipt repairs once while forged abandonment state or proof is rejected", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);

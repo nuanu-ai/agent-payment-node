@@ -79,7 +79,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }, createAppr
     dailyUsage: async () => "0", executionAdmission: async operation => ({ requestId,
       operationIntegrityHash: operation.integrityHash, quoteDigest: operation.quoteDigest }),
     funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
-      tokenBalanceAtomic: 2500000n, allowanceAtomic: 2500000n, currentMaxFeePerGasWei: 1n, nextNonce: 8n }),
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 2500000n, baseFeePerGasWei: 1n, nextNonce: 8n }),
     observeApproval: async () => ({ transaction: { hash: approvalHash, from: owner,
       to: ETHEREUM_USDC, input: quote.approval.data, chainId: 1 }, receipt: {
         transactionHash: approvalHash, status: "success", blockNumber: 10n, blockHash,
@@ -119,7 +119,7 @@ test("saved request admission, approval receipt, and allowance are required befo
     { ...f.ports, executionAdmission: async () => null },
     { ...f.ports, observeApproval: async () => null },
     { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
-      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 8n }) },
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 8n }) },
   ];
   for (const ports of variants) await assert.rejects(new RelayDepositEffectService(f.state, ports).run(f.op.operationId),
     { code: "APN_OPERATION_BLOCKED" });
@@ -140,7 +140,7 @@ test("signed nonce mismatch fails before the first send", async t => {
   const wrongNonce = new RelayDepositEffectService(f.state, { ...f.ports,
     funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
       tokenBalanceAtomic: 2500000n, allowanceAtomic: 2500000n,
-      currentMaxFeePerGasWei: 1n, nextNonce: 9n }) });
+      baseFeePerGasWei: 1n, nextNonce: 9n }) });
   await assert.rejects(wrongNonce.run(f.op.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(f.counts.sends, 0);
 });

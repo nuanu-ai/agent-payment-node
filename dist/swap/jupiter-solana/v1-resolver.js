@@ -6,7 +6,7 @@ import { rawAccount } from "../orca-solana/accounts.js";
 import { ADDRESS_LOOKUP_TABLE_PROGRAM, SOLANA_MAINNET_GENESIS, canonicalAddress, invalid } from "./catalog.js";
 import { jupiterV1Instructions, jupiterV1Lifetime, jupiterV1ResponseHash, decodeJupiterV1Build, decodeJupiterV1Quote, freezeJson } from "./v1-codec.js";
 import { JUPITER_V1_MATERIAL_SCHEMA, jupiterV1MaterialDigest, assertJupiterV1RpcOrigin, checkedJupiterV1QuoteRpcLifetime } from "./v1-material.js";
-import { routeConfigForQuoteBuild, jupiterV1RegisteredProgramPins } from "./v1-route-config.js";
+import { routeConfigForQuoteBuild, jupiterV1RegisteredProgramPins, JUPITER_V1_FINITE_ROUTES } from "./v1-route-config.js";
 import { assertWhirlpoolV2Memo, validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { refreshJupiterV1QuoteBuild } from "./v1-quote-refresh.js";
 const UPGRADEABLE = "BPFLoaderUpgradeab1e11111111111111111111111";
@@ -20,11 +20,13 @@ export class JupiterV1MaterialResolver {
     async refreshQuoteBuild(material, build, useRpcLifetime = false) {
         return await refreshJupiterV1QuoteBuild(this.rpc, material, build, useRpcLifetime);
     }
-    async resolve(payer, quote, build, maximumNativeExpenseLamports = "6000000", frozenRpcLifetime, expectedRouteId) {
+    async resolve(payer, quote, build, maximumNativeExpenseLamports, frozenRpcLifetime, expectedRouteId) {
         canonicalAddress(payer);
         decodeJupiterV1Quote(quote);
         decodeJupiterV1Build(build);
-        const route = routeConfigForQuoteBuild(quote, build, expectedRouteId), registeredPins = jupiterV1RegisteredProgramPins(route);
+        // The owner admits the pool's route; the executable generation is identified from the bytes read below and must be
+        // exactly one registered generation of that pool. Unregistered bytes refuse as before.
+        const route = routeConfigForQuoteBuild(quote, build, expectedRouteId), generations = JUPITER_V1_FINITE_ROUTES.filter(r => r.pool === route.pool), registeredPins = generations.flatMap(g => jupiterV1RegisteredProgramPins(g));
         assertJupiterV1RpcOrigin(this.rpc.originHash, frozenRpcLifetime);
         await assertSolanaNetwork(this.rpc);
         const instructions = jupiterV1Instructions(build), keys = [...new Set([payer, ...instructions.flatMap(ix => [ix.programId, ...ix.accounts.map(a => a.pubkey)]), ...build.addressLookupTableAddresses])];
@@ -42,15 +44,15 @@ export class JupiterV1MaterialResolver {
             if (program.owner === UPGRADEABLE) {
                 if (bytes.length !== 36 || bytes.readUInt32LE(0) !== 2)
                     invalid("Jupiter V1 upgradeable Program metadata is invalid.");
-                const pointer = getAddressDecoder().decode(bytes.subarray(4, 36)), pin = registeredPins.find(p => p.programId === programId);
-                if (pin === undefined || pointer !== pin.programDataAddress)
+                const pointer = getAddressDecoder().decode(bytes.subarray(4, 36));
+                if (!registeredPins.some(p => p.programId === programId && p.programDataAddress === pointer))
                     invalid("Jupiter V1 ProgramData pointer is unpinned.");
                 const pd = await this.readProgramData(pointer, quote.contextSlot), data = Buffer.from(pd.dataBase64, "base64");
                 if (pd.owner !== UPGRADEABLE || pd.executable || data.length < 45 || data.readUInt32LE(0) !== 3 || ![0, 1].includes(data[12]))
                     invalid("Jupiter V1 ProgramData metadata is invalid.");
                 const payloadHash = sha256(data.subarray(45));
-                if (payloadHash !== pin.payloadHash || pin.programDataHash !== undefined && pd.dataHash !== pin.programDataHash)
-                    throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed.");
+                if (!registeredPins.some(p => p.programId === programId && p.payloadHash === payloadHash && (p.programDataHash === undefined || p.programDataHash === pd.dataHash)))
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed: an upstream program was upgraded or the RPC returned other bytes; nothing was signed. Only an APN release that registers the new bytes can quote this route; update APN.", { reason: "jupiter_v1_program_pin_drift", upstreamUpgradeNeedsApnRelease: true });
                 accounts.push(pd);
                 programPins.push({ programId, loader: program.owner, programDataAddress: pointer, deploymentSlot: data.readBigUInt64LE(4).toString(), upgradeAuthority: data[12] === 1 ? getAddressDecoder().decode(data.subarray(13, 45)) : null, accountHash: program.dataHash, programDataHash: pd.dataHash, storedPayloadHash: payloadHash, provenance: "runtime_bytes_only" });
             }
@@ -60,6 +62,10 @@ export class JupiterV1MaterialResolver {
                 programPins.push({ programId, loader: program.owner, programDataAddress: null, deploymentSlot: null, upgradeAuthority: null, accountHash: program.dataHash, programDataHash: null, storedPayloadHash: program.dataHash, provenance: "runtime_bytes_only" });
             }
         }
+        const generation = generations.filter(g => jupiterV1RegisteredProgramPins(g).every(pin => programPins.some(row => row.programId === pin.programId &&
+            row.storedPayloadHash === pin.payloadHash && row.programDataAddress === pin.programDataAddress && (pin.programDataHash === undefined || row.programDataHash === pin.programDataHash))));
+        if (generation.length !== 1)
+            throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed: an upstream program was upgraded or the RPC returned other bytes; nothing was signed. Only an APN release that registers the new bytes can quote this route; update APN.", { reason: "jupiter_v1_program_pin_drift", upstreamUpgradeNeedsApnRelease: true });
         const rpcLifetime = frozenRpcLifetime === undefined ? undefined : checkedJupiterV1QuoteRpcLifetime(frozenRpcLifetime);
         const compiled = assembleJupiterV1(payer, build, tables, rpcLifetime);
         const [feeValue, heightValue, rentValue] = await boundedPublicReads(this.rpc, [

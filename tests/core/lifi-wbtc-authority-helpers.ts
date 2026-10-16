@@ -7,7 +7,6 @@ import { decodeFunctionData, encodeFunctionData, getAddress, type Hex } from "vi
 import { acrossBridgeAbi, feeForwarderAbi, FEE_RECIPIENT } from "../../src/lifi/abi.js";
 import { hashObject } from "../../src/canonical.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
-import { bridgeRpcPhysicalPolicy } from "../../src/lifi/rpc-execution-budget.js";
 import { guardBridgeEffect } from "../../src/lifi/economics.js";
 import { BridgeRpcPhysicalBudget, RpcReadSession } from "../../src/lifi/rpc.js";
 import type { BridgeEnvelope } from "../../src/lifi/model.js";

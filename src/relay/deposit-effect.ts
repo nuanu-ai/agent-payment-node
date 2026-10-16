@@ -12,7 +12,8 @@ import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-re
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator } from "./quote.js";
 import { relayExecutionRoute } from "./execution-route.js";
-import { verifyApprovalObservation, type RelayApprovalObservation } from "./approval-effect.js";
+import { relayEnvelopeFeeAdmitted, relaySignedNonce, verifyApprovalObservation, type RelayApprovalObservation,
+  type RelayUnsentOutcomePort } from "./approval-effect.js";
 
 const DEPOSIT_ABI = parseAbi(["function depositErc20(address depositor, address token, uint256 amount, bytes32 id)"]);
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -23,6 +24,8 @@ export interface RelayDepositCustodyPort {
   /** Durable, operation-bound storage. An unreadable or missing sealed value must fail closed. */
   load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null>;
   seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void>;
+  /** Only after the journal records the sealed bytes as never landing. */
+  discard?(op: RelayUnsignedOperation): Promise<void>;
 }
 function depositBinding(op: RelayUnsignedOperation): string {
   return domainHash("apn.relay-deposit-envelope.v1", canonicalJson({ operationId: op.operationId,
@@ -48,6 +51,16 @@ export class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
         if (stored.payloadHash !== depositBinding(op) || stored.transactionHash !== stored.rawTransactionHash ||
           keccak256(stored.rawTransaction) !== stored.transactionHash) corrupt("deposit custody binding");
         return { rawTransaction: stored.rawTransaction, transactionHash: stored.transactionHash };
+      } finally { this.wallets.clear(wallet.secret); }
+    });
+  }
+  async discard(op: RelayUnsignedOperation): Promise<void> {
+    await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+      const wallet = await this.wallets.describe("default"); if (wallet === null) return;
+      try {
+        if (!same(wallet.identity.address, op.sourceAccount)) corrupt("deposit custody owner");
+        if (wallet.secret.directEffects[depositKey(op)] === undefined) return;
+        delete wallet.secret.directEffects[depositKey(op)]; await this.wallets.save(wallet.identity, wallet.secret);
       } finally { this.wallets.clear(wallet.secret); }
     });
   }
@@ -82,11 +95,12 @@ export interface RelayDepositPorts {
   /** Fresh canonical Ethereum state. The adapter must fail closed if chain or block cannot be verified. */
   funding(op: RelayUnsignedOperation): Promise<Readonly<{
     chainId: number; nativeBalanceWei: bigint; tokenBalanceAtomic: bigint; allowanceAtomic: bigint;
-    currentMaxFeePerGasWei: bigint; nextNonce: bigint;
+    baseFeePerGasWei: bigint; nextNonce: bigint;
   }>>;
   observeApproval(hash: Hex): Promise<RelayApprovalObservation | null>;
   sign(op: RelayUnsignedOperation): Promise<Hex>;
   readonly custody: RelayDepositCustodyPort;
+  readonly unsentOutcome?: RelayUnsentOutcomePort;
   send(rawTransaction: Hex): Promise<string>;
   observe(hash: Hex): Promise<RelayDepositObservation | null>;
 }
@@ -152,7 +166,8 @@ export class RelayDepositEffectService {
         journal.effects[0].attempt?.transactionHash === null) blocked("canonical_approval_effect_required");
       const approvalHash = journal.effects[0].attempt!.transactionHash as Hex;
       let effect = journal.effects[1];
-      if (effect.phase === "confirmed" || effect.phase === "failed") return journal;
+      if (effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent") return journal;
+      const resumedSeal = effect.phase === "sealed";
       if (effect.phase === "pending") {
         const nonce = await this.revalidate(op, approvalHash);
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
@@ -168,6 +183,21 @@ export class RelayDepositEffectService {
         await verifySignedEnvelope(op, signed.rawTransaction, signed.transactionHash);
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
           { kind: "seal_signed", role: "deposit", transactionHash: signed.transactionHash });
+        effect = journal.effects[1];
+      }
+      if (effect.phase === "sealed") {
+        // Resumed saved bytes that never crossed `submitting` end only when another transaction consumed their nonce at safe depth.
+        const saved = await this.ports.custody.load(op);
+        const outcome = saved === null || !resumedSeal || this.ports.unsentOutcome === undefined ? null : await this.ports.unsentOutcome({
+          account: op.sourceAccount, nonce: relaySignedNonce(saved.rawTransaction), transactionHash: saved.transactionHash });
+        if (outcome === "never_lands") {
+          journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
+            { kind: "record_never_landed", role: "deposit", at: this.ports.now().toISOString() });
+          await this.ports.custody.discard?.(op); return journal;
+        }
+        // The node already knows these exact bytes: never send them again; fence them as possibly sent and only observe.
+        if (outcome === "own_transaction_known") journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
+          { kind: "mark_submitting", role: "deposit", at: this.ports.now().toISOString() });
         effect = journal.effects[1];
       }
       if (effect.phase === "sealed") {
@@ -235,7 +265,7 @@ export class RelayDepositEffectService {
     const funding = await this.ports.funding(op);
     if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.depositNetworkFeeCeilingWei!) ||
       funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < BigInt(op.amountAtomic) ||
-      funding.currentMaxFeePerGasWei < 0n || funding.currentMaxFeePerGasWei > BigInt(op.quote!.deposit.maxFeePerGas) ||
+      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote!.deposit) ||
       funding.nextNonce < 0n) blocked("source_funding_or_fee");
     const after = this.ports.now();
     if (!Number.isFinite(after.getTime()) || after.getTime() + 60_000 >= Date.parse(op.deadline) ||

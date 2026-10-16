@@ -1,3 +1,4 @@
+import { type GaszipTerminalState } from "./gaszip-outcome.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { type Hex } from "viem";
 import type { BridgeOwner, BridgeProviderBinding } from "./model.js";
@@ -30,7 +31,7 @@ export interface MegaFundingRecord {
     readonly policyRevision: number;
     readonly activationDigest?: string;
     readonly plan: MegaFundingPlan;
-    readonly state: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert";
+    readonly state: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | GaszipTerminalState;
     readonly terminal: boolean;
     readonly rawTransaction: Hex | null;
     readonly transactionHash: Hex | null;
@@ -52,6 +53,10 @@ export declare class MegaFundingJournal extends SecureStateStore {
     saveLocked(r: MegaFundingRecord, create?: boolean): Promise<void>;
     sealTransaction(r: MegaFundingRecord, raw: Hex): Promise<MegaFundingRecord>;
     assertNoEffectClaimsLocked(r: MegaFundingRecord): Promise<void>;
+    /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */
+    sendClaimedLocked(r: {
+        operationId: string;
+    }): Promise<boolean>;
     claimSigningLocked(r: MegaFundingRecord): Promise<void>;
     claimSendLocked(r: MegaFundingRecord): Promise<void>;
     claimDestinationLocked(hash: Hex, id: string): Promise<void>;

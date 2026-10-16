@@ -6,7 +6,8 @@ import { saExact, saHash } from "./schema.js";
 import { smartAccountGaslessAtTransition, validateSmartAccountGaslessOperation } from "./transitions.js";
 export function publicSmartAccountGaslessOperation(operation) {
     const op = validateSmartAccountGaslessOperation(operation), i = op.intent, s = op.settlement;
-    const zero = op.terminal && s === null ? "0" : null;
+    // An owner-abandoned outcome is unknown: it never claims a zero delivery or an unused gross.
+    const zero = op.terminal && s === null && op.state !== "abandoned_unknown" ? "0" : null;
     const status = op.state === "completed" ? "consumed" :
         op.state === "expired_unused" ? "expired_unused" : op.exposureAttempts === 1 ? "possibly_live" :
             op.material !== null ? "sealed_local" : op.state === "failed_before_effect" ? "failed_before_effect" : "not_signed";
@@ -17,13 +18,14 @@ export function publicSmartAccountGaslessOperation(operation) {
         fingerprint: op.fingerprint, state: op.state, terminal: op.terminal,
         reason: op.failure?.reason ?? op.observation?.reason ?? (op.state === "awaiting_approval" ? "sa_gasless_approval" : null),
         proof_class: op.state === "completed" ? "rpc_safe_correlated" : op.state === "expired_unused" ? "rpc_finalized_unused" :
-            op.exposureAttempts === 1 ? "effect_observation_pending" : "durable_pre_effect",
+            op.state === "abandoned_unknown" ? "owner_acknowledgement_only" :
+                op.exposureAttempts === 1 ? "effect_observation_pending" : "durable_pre_effect",
         transfer: { chain_id: 8453, token: i.token, symbol: "USDC", decimals: 6, sender: i.binding.ownerAddress,
             recipient: i.request.recipient, gross_atomic: i.request.grossAtomic, user_max_fee_atomic: i.request.maxFeeAtomic,
             minimum_received_atomic: i.request.minReceivedAtomic, frozen_net_atomic: i.request.grossAtomic, frozen_fee_atomic: "0",
             actual_delivered_atomic: s?.deliveredAtomic ?? zero, actual_sender_debit_atomic: s?.debitAtomic ?? zero },
         fees: { token: i.token, actual_fee_atomic: s?.feeAtomic ?? zero, refund_atomic: s?.refundAtomic ?? zero,
-            unused_gross_atomic: s?.unusedGrossAtomic ?? (op.terminal ? i.request.grossAtomic : null),
+            unused_gross_atomic: s?.unusedGrossAtomic ?? (op.terminal && op.state !== "abandoned_unknown" ? i.request.grossAtomic : null),
             approved_sender_native_debit_wei: "0", proven_sender_native_debit_wei: s?.ownerNativeDebitWei ?? zero,
             proven_session_native_debit_wei: s?.sessionNativeDebitWei ?? zero, native_gas_payer: s?.outerSender ?? null },
         permission: { owner: i.binding.ownerAddress, session: i.binding.sessionAddress,

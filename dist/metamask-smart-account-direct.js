@@ -215,14 +215,34 @@ export class MetaMaskSmartAccountDirectAdapter {
         if (effect.phase === "submitted") {
             return { disposition: "acknowledged", transactionHash: effect.transaction_hash };
         }
-        if (effect.submission_attempts >= 2) {
-            return {
-                disposition: "pending",
-                recoveryToken: effect.operation_id,
-                providerState: "SUBMISSION_AMBIGUOUS",
-            };
+        if (effect.phase === "sealed")
+            return await this.submit(effect);
+        // The signed bytes are sealed and never re-signed, so their hash tells what happened to an ambiguous send.
+        const pending = { disposition: "pending", recoveryToken: effect.operation_id, providerState: "SUBMISSION_AMBIGUOUS" };
+        let landed, nonceUsed;
+        try {
+            nonceUsed = BigInt(await this.rpc.getPendingNonce(effect.session_address)) > BigInt(effect.nonce_atomic);
+            landed = await this.rpc.getReceipt(effect.transaction_hash) !== null;
         }
-        return await this.submit(effect);
+        catch {
+            return pending;
+        }
+        // Included, or its nonce is taken (mempool or chain): receipt observation of this exact hash decides the outcome.
+        if (landed || nonceUsed)
+            return await this.acknowledge(effect);
+        if (effect.submission_attempts < 2)
+            return await this.submit(effect);
+        try {
+            const returned = await this.rpc.submitRawTransaction(effect.raw_transaction);
+            return returned.toLowerCase() === effect.transaction_hash.toLowerCase() ? await this.acknowledge(effect) : pending;
+        }
+        catch {
+            return pending;
+        }
+    }
+    async acknowledge(effect) {
+        await this.effects.transition(effect.operation_id, "submitted", effect.submission_attempts, this.instant());
+        return { disposition: "acknowledged", transactionHash: effect.transaction_hash };
     }
     async preflightRecord(input) {
         const record = await this.permissions.load(input.profileHash);

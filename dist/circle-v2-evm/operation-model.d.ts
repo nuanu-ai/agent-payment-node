@@ -6,7 +6,7 @@ import { type AssetUsageReservation } from "../asset-usage-ledger.js";
 import { type CircleDestinationChain } from "./catalog.js";
 import { type CircleSourceProof, type CircleAttestation, type CircleReceiptProof, type decodeCircleDestination } from "./protocol.js";
 export type CircleRole = "approval" | "burn" | "mint" | "cleanup";
-export type CircleEffectPhase = "prepared" | "signing_started" | "sealed" | "submission_started" | "submitted" | "unknown" | "confirmed" | "reverted";
+export type CircleEffectPhase = "prepared" | "signing_started" | "sealed" | "submission_started" | "submitted" | "unknown" | "confirmed" | "reverted" | "abandoned_unsent";
 export interface CircleEnvelope {
     readonly chainId: number;
     readonly from: Address;

@@ -1,6 +1,7 @@
 import type { Address, Hex } from "../model.js";
 import type { MetaMaskGaslessBalance, MetaMaskGaslessBinding, MetaMaskGaslessChainId, MetaMaskGaslessCursor, MetaMaskGaslessExecutions, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity, MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot, MetaMaskGaslessUnsignedResult } from "./model.js";
 import type { MetaMaskGaslessOperationRecord, MetaMaskGaslessReceipt } from "./operation-model.js";
+import type { MmDeploymentView } from "./recorded.js";
 export interface MetaMaskGaslessQuoteInput {
     readonly binding: MetaMaskGaslessBinding;
     readonly chainId: MetaMaskGaslessChainId;
@@ -15,6 +16,8 @@ export interface MetaMaskGaslessUnsignedInput {
     readonly chainId: MetaMaskGaslessChainId;
     readonly executions: MetaMaskGaslessExecutions;
     readonly feeMode?: "sponsored";
+    /** A saved record's own frozen deployment; absent means today's registry, as when APN acts. */
+    readonly deployment?: MmDeploymentView;
 }
 export interface MetaMaskGaslessProviderPort {
     inspect(expected: MetaMaskGaslessProfileIdentity): Promise<MetaMaskGaslessBinding>;

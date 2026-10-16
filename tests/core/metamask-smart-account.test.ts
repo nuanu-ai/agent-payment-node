@@ -1283,6 +1283,61 @@ test("ambiguous submission rebroadcasts only the sealed bytes and exact receipt 
   } finally { await fixture.temporary.cleanup(); }
 });
 
+test("two ambiguous submissions do not wedge: the sealed hash is observed and only the same bytes are rebroadcast", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountRpc();
+    rpc.submitError = new Error("HTTP 429");
+    const allowance = new FixtureAllowance(), engine = new FixtureDelegationEngine(), approval = new FixtureApproval();
+    const runtime = directRuntime(fixture, rpc, allowance, engine, approval);
+    const prepared = await runtime.core.execute({
+      command: "transfer.prepare", profile: PROFILE, idempotencyKey: "smart-account-wedge-0001",
+      recipient: DIRECT_RECIPIENT, amount: "0.01",
+    });
+    const operationId = String((prepared.operation as any).operation_id);
+    assert.equal(((await runtime.core.execute({ command: "transfer.approve", operationId })).operation as any).state, "provider_pending");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const still = await runtime.core.execute({ command: "operation.resume", operationId });
+      assert.equal((still.operation as any).state, "provider_pending", JSON.stringify(still));
+    }
+    assert.equal((await runtime.effects.load(operationId))?.submission_attempts, 2);
+    rpc.submitError = null;
+    const resumed = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((resumed.operation as any).state, "evidence_pending", JSON.stringify(resumed));
+    assert.equal((resumed.operation as any).transaction_hash, keccak256(RAW_TRANSACTION));
+    assert.equal(new Set(rpc.submissions).size, 1, "only the sealed bytes are ever sent");
+    assert.equal(engine.signCalls, 1);
+    rpc.receipt = exactSmartAccountReceipt(keccak256(RAW_TRANSACTION), "10000");
+    const sends = rpc.submissions.length;
+    const completed = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((completed.operation as any).state, "completed");
+    assert.equal(rpc.submissions.length, sends);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("an ambiguous submission whose sealed nonce is taken is observed by hash without another send", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountRpc();
+    rpc.submitError = new Error("response lost");
+    const runtime = directRuntime(fixture, rpc, new FixtureAllowance(), new FixtureDelegationEngine(), new FixtureApproval());
+    const prepared = await runtime.core.execute({
+      command: "transfer.prepare", profile: PROFILE, idempotencyKey: "smart-account-nonce-used-0001",
+      recipient: DIRECT_RECIPIENT, amount: "0.01",
+    });
+    const operationId = String((prepared.operation as any).operation_id);
+    assert.equal(((await runtime.core.execute({ command: "transfer.approve", operationId })).operation as any).state, "provider_pending");
+    rpc.submitError = null;
+    rpc.nonceAtomic = "8";
+    const resumed = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((resumed.operation as any).state, "evidence_pending", JSON.stringify(resumed));
+    assert.equal((resumed.operation as any).transaction_hash, keccak256(RAW_TRANSACTION));
+    assert.equal(rpc.submissions.length, 1);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
 test("official MetaMask engine creates deterministic session-to-session exact child and redemption bytes", async () => {
   const fixture = await makeFixture();
   try {
@@ -1462,7 +1517,10 @@ test(`Smart Account ERC-7710 completes ${method} across restart without session 
     const sent = await restarted.core.execute({ command: "operation.resume", operationId });
     assert.equal(sent.ok, true, JSON.stringify(sent));
     assert.equal((sent.operation as any).state, "settlement_pending");
-    assert.equal(sent.data, null, "seller result remains protected before settlement proof");
+    // X402-08: the paid result is delivered at once; the operation stays non-terminal until settlement is proven.
+    const delivered = sent.data as any;
+    assert.deepEqual(method === "POST" ? JSON.parse(Buffer.from(delivered.body, "base64").toString("utf8")) : delivered.body,
+      { forecast: "sunny" }, "the paid result is delivered before settlement proof");
     assert.equal(engine.calls, 1);
     assert.equal(http.calls.length, 2);
     assert.equal(http.calls[1]?.paymentSignature, material.payment_header);
@@ -1472,8 +1530,10 @@ test(`Smart Account ERC-7710 completes ${method} across restart without session 
     assert.ok(resultPending?.resultLink !== undefined);
     assert.equal(resultPending?.settlementEvidence, undefined);
 
-    // Post-exposure recovery must not require the already-spent owner balance.
+    // Post-exposure recovery must not require the already-spent owner balance, nor the endpoint used at prepare:
+    // a rotated Base RPC reconciles the operation and its origin is recorded in the evidence as provenance.
     rpc.ownerUsdcAtomic = "0";
+    rpc.rpcOrigin = "https://rotated.example";
     armSmartAccountX402Settlement(rpc, resultPending!);
     const completedRuntime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
     const completed = await completedRuntime.core.execute({ command: "operation.resume", operationId });
@@ -1579,7 +1639,15 @@ test("Smart Account ERC-7710 reloads a legacy default facilitator binding after 
       ...unknownBody,
       fingerprint: x402Fingerprint(unknownBody as unknown as X402OperationRecord),
     });
-    assert.throws(() => validateX402Operation(unknownOperation), { code: "APN_STATE_CORRUPT" });
+    // R2: a saved binding is checked against its own frozen offer, never against today's facilitator constants.
+    assert.equal(validateX402Operation(unknownOperation).operationId, current.operationId);
+    // A binding that disagrees with the record's own resolved offer is still refused.
+    const splitBody = { ...legacyBody, delegatedMaterial: { ...legacyBody.delegatedMaterial, facilitatorAddresses: unknown } };
+    const splitOperation = sealX402Operation({
+      ...splitBody,
+      fingerprint: x402Fingerprint(splitBody as unknown as X402OperationRecord),
+    });
+    assert.throws(() => validateX402Operation(splitOperation), { code: "APN_STATE_CORRUPT" });
   } finally { await fixture.temporary.cleanup(); }
 });
 

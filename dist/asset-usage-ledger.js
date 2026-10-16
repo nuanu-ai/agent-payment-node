@@ -46,6 +46,30 @@ export class AssetUsageLedger extends SecureStateStore {
         });
     }
     async reserve(input) { return this.reserveBound(input); }
+    /** Local x402 runs under its profile x402 policy, not an allowlist registry. That policy's only cap is the
+     * per-request one; the reservation makes the spend count in this bucket's shared daily usage for every rail. */
+    async reserveWithinOwnerCap(input) {
+        const identity = validateIdentity(input), at = instant(input.now), idempotencyHash = idempotency(input.idempotencyKey);
+        const policyDigest = digest(input.policyDigest, "Policy digest"), amountAtomic = atomic(input.amountAtomic, true, false).toString();
+        if (input.rail !== "x402" || BigInt(amountAtomic) > atomic(input.maximumAtomic, true, false))
+            throw blocked("The payment exceeds the owner's per-request cap.");
+        const reservationId = reservationIdFor(identity, idempotencyHash);
+        await this.ready();
+        return await this.withLocks([this.bucketLock(identity)], async () => {
+            const records = await this.loadBucket(identity);
+            const existing = records.find((record) => record.reservationId === reservationId);
+            if (existing !== undefined) {
+                assertReplay(existing, policyDigest, input.registryVersion, input.rail, amountAtomic, idempotencyHash);
+                return existing;
+            }
+            assertBucketWindow(records, at);
+            const record = seal({ schemaVersion: ASSET_USAGE_RESERVATION_SCHEMA, reservationId, idempotencyHash, policyDigest,
+                registryVersion: input.registryVersion, ...identity, rail: input.rail, amountAtomic, state: "reserved",
+                reservedAt: at, updatedAt: at, effectAt: null, outcomeDigest: null });
+            await this.writeJson(this.recordPath(identity, reservationId), record, true);
+            return record;
+        });
+    }
     async reserveMetaMaskNative(operationId, kind, now) {
         const p = await readMetaMaskNativeReservation(this.root, operationId);
         if (kind !== "native" && kind !== "token")

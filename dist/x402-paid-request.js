@@ -4,9 +4,12 @@ import { ApnError } from "./errors.js";
 import { assertUnattendedX402Balance, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
 import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
 import { observePaidX402Response } from "./x402-http.js";
-import { publicX402Operation, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
+import { deliversX402Result, publicX402Operation, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
 import { isNativeNotFound, isNativeExpired, isTransientNativeFailure, requestX402Authorization, x402NativeRequest, } from "./x402-native.js";
 import { X402Lifecycle } from "./x402-lifecycle.js";
+import { readX402UnusedExpiryEvidence } from "./x402-expiry-proof.js";
+import { x402Network } from "./x402-network.js";
+import { isRecoverableX402RpcObservationFailure, x402ReadPort } from "./x402-service-rpc.js";
 import { ProviderX402AuthorizationService } from "./provider-x402-authorization.js";
 export class X402PaidRequest extends X402Lifecycle {
     async recoverPaymentMaterial(operation) {
@@ -46,6 +49,34 @@ export class X402PaidRequest extends X402Lifecycle {
     authorizationExpired(operation) {
         return BigInt(Math.floor(this.context.clock.now().getTime() / 1000)) >= BigInt(operation.authorization.validBefore);
     }
+    /**
+     * Zero attempts means APN never exposed the signed header. After validBefore the token itself proves
+     * that nobody else used it: the nonce still reads unused at a finalized block at or after validBefore.
+     * Returns null when the operation is not an expired, never-exposed EIP-3009 authorization or the chain
+     * cannot prove non-use yet; a used nonce is then left to settlement reconciliation.
+     */
+    async closeExpiredUnexposed(operation) {
+        if (operation.attempts.length !== 0 || operation.selectedOffer.resolved.assetTransferMethod !== "eip3009" ||
+            !["authorization_material_pending", "authorized_not_sent"].includes(operation.state) || !this.authorizationExpired(operation))
+            return null;
+        if (operation.unusedExpiryEvidence !== undefined)
+            return await this.finishReconciledEvidence(operation);
+        const rpc = x402ReadPort(this.context.requireRpc(), x402Network(operation.network).chainId);
+        if (rpc === null)
+            return null;
+        let evidence;
+        try {
+            evidence = await readX402UnusedExpiryEvidence(rpc, operation);
+        }
+        catch (error) {
+            if (isRecoverableX402RpcObservationFailure(error))
+                return null;
+            throw error;
+        }
+        if (evidence === null)
+            return null;
+        return await this.finishReconciledEvidence(await this.transition(operation, operation.state, { unusedExpiryEvidence: evidence }));
+    }
     async assertLegacySafeRead(operation) {
         if (operation.chainId !== "8453")
             throw new ApnError("APN_RPC_CONFIG", "Non-Base x402 requires network-bound settlement reads.");
@@ -65,7 +96,9 @@ export class X402PaidRequest extends X402Lifecycle {
             const current = await this.context.state.loadX402Operation(operation.profileHash, operation.operationId);
             if (current === null)
                 throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
-            return await callback(current);
+            const result = await callback(current);
+            await this.followUsage(operation.profileHash, operation.operationId);
+            return result;
         }, lockWaitMs === undefined ? {} : { waitMs: lockWaitMs });
     }
     async completeAuthorization(operation, kind) {
@@ -73,7 +106,7 @@ export class X402PaidRequest extends X402Lifecycle {
             if (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined) {
                 return publicX402Operation(await this.commitTerminal(operation, "failed_before_effect"));
             }
-            throw new ApnError("APN_OPERATION_BLOCKED", "Frozen x402 authorization validity has expired.");
+            return publicX402Operation(await this.closeExpiredUnexposed(operation) ?? operation);
         }
         await assertCurrentNetworkPolicy(this.context, operation);
         if (operation.delegatedMaterial !== undefined) {
@@ -225,22 +258,24 @@ export class X402PaidRequest extends X402Lifecycle {
                 sourceBindingHash: x402TransactionHintSourceBindingHash("payment_response", decoded.settlementResponseHash),
                 observedAt: paid.observation.observedAt,
             };
-            const conflictingHint = (operation.transactionHint !== undefined && operation.transactionHint.transactionHash !== decoded.transactionHash) || (purpose === "result_recovery" && decoded.transactionHash !== operation.settlementEvidence?.transactionHash);
+            const conflictingHint = (operation.transactionHint !== undefined && operation.transactionHint.transactionHash !== decoded.transactionHash) || (purpose === "result_recovery" && operation.settlementEvidence?.transactionHash !== undefined &&
+                decoded.transactionHash !== operation.settlementEvidence.transactionHash);
             if (conflictingHint) {
                 return publicX402Operation(await this.finishPaidAttempt(pending, "observed", paid.observation, "effect_unknown", operation.settlementResponseObservation === undefined
                     ? { settlementResponseObservation: response }
                     : {}));
             }
-            if (purpose === "result_recovery" && (decoded.classification !== "success" || paid.result === undefined)) {
+            const delivered = deliversX402Result(decoded.classification) && paid.result !== undefined;
+            if (purpose === "result_recovery" && !delivered) {
                 const observed = await this.finishPaidAttempt(pending, "observed", paid.observation, "seller_result_recovery_pending", terminalizeFromExistingEvidence ? { settlementResponseObservation: response, transactionHint: hint } : {});
                 return publicX402Operation(!terminalizeFromExistingEvidence || observed.settlementEvidence === undefined
                     ? observed
                     : await this.commitTerminal(observed, "failed_settled_without_result"));
             }
             const observed = await this.finishPaidAttempt(pending, "observed", paid.observation, purpose === "payment" ? "settlement_pending" : "seller_result_recovery_pending", { settlementResponseObservation: response, transactionHint: hint });
-            if (decoded.classification !== "success" || paid.result === undefined) {
+            // The purchased body is kept and returned now; on-chain settlement proof continues on resume.
+            if (!delivered || paid.result === undefined)
                 return publicX402Operation(observed);
-            }
             const linked = await this.persistAndLinkResult(observed, paid.result, paid.observation.observedAt);
             return publicX402Operation(terminalizeFromExistingEvidence
                 ? await this.finishReconciledEvidence(linked)

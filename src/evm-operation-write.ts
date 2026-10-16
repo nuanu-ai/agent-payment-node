@@ -8,7 +8,11 @@ export function validateEvmOperationWrite(next: OperationRecord, previousValue: 
     validateProviderOperationWrite(next, previousValue);
     return;
   }
-  if (next.evm === undefined && (previousValue === null || typeof previousValue !== "object" || !("evm" in previousValue))) return;
+  if (next.evm === undefined && (previousValue === null || typeof previousValue !== "object" || !("evm" in previousValue))) {
+    // The local Base USDC record carries the same owner allowlist binding and usage lease as a generic one; both stay frozen.
+    if (previousValue !== null && usageChanged(validateOperation(previousValue), next)) corrupt();
+    return;
+  }
   validateOperation(next);
   if (previousValue === null) {
     if (next.state !== "awaiting_approval" || next.transitions.length !== 1) corrupt();
@@ -19,16 +23,20 @@ export function validateEvmOperationWrite(next: OperationRecord, previousValue: 
       previous.requestHash !== next.requestHash || previous.operationId !== next.operationId || previous.profileHash !== next.profileHash ||
       previous.idempotencyHash !== next.idempotencyHash || previous.preparedBlockNumberAtomic !== next.preparedBlockNumberAtomic ||
       (previous.transactionHash !== undefined && (previous.transactionHash !== next.transactionHash || previous.rawTransactionHash !== next.rawTransactionHash)) ||
-      // The custody signer recomputes the fingerprint without it, so the prepare-time allowlist binding is frozen here instead.
-      (previous.allowlist === undefined) !== (next.allowlist === undefined) ||
-      (previous.allowlist !== undefined && canonicalJson(previous.allowlist) !== canonicalJson(next.allowlist)) ||
-      // The usage lease is written once, before signing, and can never be restated or dropped.
-      (previous.allowlistLease !== undefined && (next.allowlistLease === undefined ||
-        canonicalJson(previous.allowlistLease) !== canonicalJson(next.allowlistLease))) ||
+      usageChanged(previous, next) ||
       next.transitions.length < previous.transitions.length ||
       canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) ||
       (next.transitions.length === previous.transitions.length && previous.integrityHash !== next.integrityHash) ||
       (previous.terminal && previous.integrityHash !== next.integrityHash)) corrupt();
+}
+
+function usageChanged(previous: OperationRecord, next: OperationRecord): boolean {
+  // The custody signer recomputes the fingerprint without it, so the prepare-time allowlist binding is frozen here instead.
+  return (previous.allowlist === undefined) !== (next.allowlist === undefined) ||
+    (previous.allowlist !== undefined && canonicalJson(previous.allowlist) !== canonicalJson(next.allowlist)) ||
+    // The usage lease is written once, before signing, and can never be restated or dropped.
+    (previous.allowlistLease !== undefined && (next.allowlistLease === undefined ||
+      canonicalJson(previous.allowlistLease) !== canonicalJson(next.allowlistLease)));
 }
 
 function validateProviderOperationWrite(next: OperationRecord, previousValue: unknown): void {

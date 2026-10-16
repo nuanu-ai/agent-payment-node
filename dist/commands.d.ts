@@ -509,6 +509,7 @@ export type CommandRequest = {
     readonly command: "version";
 } | {
     readonly command: "doctor.keychain";
+    readonly profile: string;
 } | {
     readonly command: "wallet.ensure";
     readonly profile: string;

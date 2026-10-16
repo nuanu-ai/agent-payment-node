@@ -11,7 +11,9 @@ function toCanonical(value) {
     if (Array.isArray(value))
         return value.map(toCanonical);
     if (typeof value === "object") {
-        const output = {};
+        // A null prototype keeps an own "__proto__" member as data; an ordinary {} would route it to the
+        // prototype setter and drop it. Objects without that key serialize exactly as before.
+        const output = Object.create(null);
         for (const key of Object.keys(value).sort()) {
             const item = value[key];
             if (item === undefined)

@@ -21,6 +21,7 @@ import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256, type Hex } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -237,6 +238,10 @@ export class CircleEvmService {
         else if (effect.role === "cleanup" && await this.retirements.intent(op) !== null) { guard(); await this.custody.assertCleanupAbsent(op); guard(); await this.retirements.claim(op, "sign"); guard(); }
         return this.custody.seal(op, effect, guard);
       }, loadMaterial: (op, effect) => this.custody.load(op, effect),
+      unsent: { outcome: async (_op, effect) => { const remote = rpc(effect); await remote.identity();
+        return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+          nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") }); },
+        discard: (op, effect) => this.custody.discard(op, effect) },
       broadcast: async (effect, raw, guard) => { guard();
         if (effect.role === "approval" || effect.role === "burn") await this.retirements.assertOriginalEffectsAvailable(initial.operationId);
         else if (effect.role === "cleanup" && await this.retirements.intent(initial) !== null) { const current = await this.required(initial.operationId); guard(); await this.retirements.claim(current, "send"); guard(); }

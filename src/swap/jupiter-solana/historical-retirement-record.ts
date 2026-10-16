@@ -87,10 +87,12 @@ export function validateHistoricalRetirementRecord(value: unknown): HistoricalRe
  if (!isHash(recordHash) || recordHash!==hashObject(body)) corrupt();
  return value as unknown as HistoricalRetirementRecord;
 }
-export function assertHistoricalRetirementBindings(record: HistoricalRetirementRecord, rootSnapshotHash: string,
+/** Binds the record to its own hash, the original operation and the original row bytes. The state root's filesystem
+ * identity (path, device, inode) is deliberately not compared: a moved or restored ~/.apn keeps the same records. */
+export function assertHistoricalRetirementBindings(record: HistoricalRetirementRecord,
  operation: SwapOperationRecord | null, reservation: AssetUsageReservation | undefined, originalRowRawHash: string): void {
  validateHistoricalRetirementRecord(record);
- if (record.rootSnapshotHash!==rootSnapshotHash || operation===null || canonicalJson(operation)!==canonicalJson(record.originalOperation) ||
+ if (operation===null || canonicalJson(operation)!==canonicalJson(record.originalOperation) ||
    reservation===undefined || canonicalJson(reservation)!==canonicalJson(record.originalOperation.usageLease) || originalRowRawHash!==record.originalReservationRawHash) corrupt();
 }
 export function sameIdentity(a: AssetUsageIdentity,b: AssetUsageIdentity): boolean { return a.account===b.account && a.chain===b.chain && canonicalJson(a.asset)===canonicalJson(b.asset); }

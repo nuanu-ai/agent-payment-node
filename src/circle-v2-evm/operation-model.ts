@@ -9,7 +9,7 @@ import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRAN
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint,
   type CircleSourceProof, type CircleAttestation, type CircleReceiptProof, type decodeCircleDestination } from "./protocol.js";
 export type CircleRole = "approval" | "burn" | "mint" | "cleanup";
-export type CircleEffectPhase = "prepared" | "signing_started" | "sealed" | "submission_started" | "submitted" | "unknown" | "confirmed" | "reverted";
+export type CircleEffectPhase = "prepared" | "signing_started" | "sealed" | "submission_started" | "submitted" | "unknown" | "confirmed" | "reverted" | "abandoned_unsent";
 export interface CircleEnvelope { readonly chainId: number; readonly from: Address; readonly to: Address; readonly data: Hex;
   readonly valueAtomic: "0"; readonly nonceAtomic: string; readonly gasLimitAtomic: string;
   readonly maxFeePerGasAtomic: string; readonly maxPriorityFeePerGasAtomic: string; readonly envelopeHash: string; }
@@ -79,11 +79,13 @@ export function validateCircle(value: unknown): CircleOperationV1 {
   if (!Array.isArray(op.effects) || op.effects.length < 2 || op.effects.length > 4 || op.effects[0]?.role !== "approval" || op.effects[1]?.role !== "burn" || new Set(op.effects.map(x => x.role)).size !== op.effects.length) circleCorrupt("effects");
   for (const inputEffect of op.effects) {
     const e = inputEffect as CircleEffect;
-    if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted"].includes(e.phase)) circleCorrupt("effect_shape");
+    if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted", "abandoned_unsent"].includes(e.phase)) circleCorrupt("effect_shape");
     validateCircleEnvelope(e.envelope, e.role, op.destinationChain, op.attestation, op.destinationProfile);
     if ((e.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(e.transactionHash)) || (e.materialHash !== null && !/^[a-f0-9]{64}$/u.test(e.materialHash)) ||
       (["sealed", "submission_started", "submitted", "confirmed", "reverted"].includes(e.phase) && (e.materialHash === null || e.transactionHash === null)) ||
-      (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash))) circleCorrupt("effect_material");
+      (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash)) ||
+      // Never crossed its submission fence and can never be sent: no bytes were saved, or they were discarded after a never-lands proof.
+      (e.phase === "abandoned_unsent" && (e.proof !== null || (e.transactionHash === null) !== (e.materialHash === null)))) circleCorrupt("effect_material");
     if (e.phase === "reverted" && (e.proof?.finalityTag !== "finalized" || e.role === "mint")) circleCorrupt("revert_finality");
   }
   if (BigInt(op.effects[1]!.envelope.nonceAtomic) !== BigInt(op.effects[0]!.envelope.nonceAtomic) + 1n) circleCorrupt("source_nonce_order");
@@ -91,7 +93,7 @@ export function validateCircle(value: unknown): CircleOperationV1 {
   if (op.attestation !== null) { if (op.source === null) circleCorrupt("attestation_without_source"); assertCircleAttestation(op.source, op.attestation); }
   if (op.destination !== null && (op.attestation === null || op.destination.nonce !== op.attestation.nonce || op.destination.attestedMessageHash !== op.attestation.hash || op.destination.transactionHash !== op.effects.find(e => e.role === "mint")?.transactionHash)) circleCorrupt("destination_binding");
   if (op.state === "completed" && (op.source?.finalityTag !== "finalized" || op.destination?.finalityTag !== "safe" || op.residualAllowanceAtomic !== "0" || !op.usageFinalized)) circleCorrupt("completion_finality");
-  if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null))) circleCorrupt("cancel_private_entry");
+  if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "abandoned_unsent" && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)))) circleCorrupt("cancel_private_entry");
   if (op.externalFulfillment !== undefined) {
     validateExternalFulfillment(op.externalFulfillment, op);
     if (op.effects.some(e => ["mint", "cleanup"].includes(e.role) && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)) || op.destination !== null || op.source?.finalityTag !== "finalized" || op.residualAllowanceAtomic !== "0" || op.nonceRetirement !== undefined) circleCorrupt("external_private_or_source_binding");

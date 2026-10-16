@@ -3,7 +3,9 @@ import { type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operat
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtSettlement } from "./receipt.js";
 export declare const USDT_EXECUTION_SCHEMA: "apn.gasless-usdt-execution.v1";
-export type UsdtExecutionState = "planned" | "reserved" | "failed_before_effect" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert";
+export type UsdtExecutionState = "planned" | "reserved" | "failed_before_effect" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert" | "expired_never_landed";
+/** States that may still sign, send or land: they hold the sender's Ethereum account and its usage lease. */
+export declare const USDT_EXECUTION_OPEN_STATES: readonly UsdtExecutionState[];
 export interface UsdtExecutionIntent {
     readonly operationId: string;
     readonly profileHash: string;
@@ -33,6 +35,23 @@ export interface UsdtExecutionRecord extends UsdtExecutionIntent {
     readonly outcomeDigest?: string;
     readonly settlement?: UsdtSettlement | null;
 }
+/**
+ * Ethereum's safe head moves once per epoch, so execution takes a fresh safe snapshot instead of the prepared one. It must
+ * be at or after the prepared block (the same block only with the same hash), keep the exact EntryPoint and EOA nonces and
+ * delegation the signed UserOperation and authorization use, and hold at least the gross the batch can debit (N + F).
+ * The prepared block itself is deterministic state: a different balance reported for it is provider equivocation.
+ */
+export declare function usdtSafeSnapshotFresh(bound: UsdtBoundOperation, snapshot: {
+    readonly chainId: bigint;
+    readonly blockNumber: bigint;
+    readonly blockHash: string;
+    readonly account: {
+        readonly usdtBalanceAtomic: bigint;
+        readonly entryPointNonce: bigint;
+        readonly eoaNonce: bigint;
+        readonly delegation: string;
+    };
+}): boolean;
 export declare function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord;
 /** Separate v1 effect journal. It cannot sign or send; each phase is fsynced before returning. */
 export declare class UsdtExecutionJournal extends SecureStateStore {
@@ -48,6 +67,8 @@ export declare class UsdtExecutionJournal extends SecureStateStore {
     /** Caller holds the effect lock. The terminal marker is fsynced before releasing a reserved usage lease. */
     private abortUnsentLocked;
     load(operationId: string): Promise<UsdtExecutionRecord | null>;
+    /** Every saved execution record. A store's own in-flight atomic-write temporaries are not records. */
+    listAll(): Promise<readonly UsdtExecutionRecord[]>;
     private ready;
     protected syncExecutionDirectoryParent(): Promise<void>;
     private write;
@@ -64,6 +85,12 @@ export declare class UsdtExecutionJournal extends SecureStateStore {
     markSubmitted(boundValue: UsdtBoundOperation, userOperationHash: string, now: Date): Promise<UsdtExecutionRecord>;
     /** Explicit uncertainty classification only; there is no send or automatic retry path. */
     markUnknownFinality(boundValue: UsdtBoundOperation, now: Date): Promise<UsdtExecutionRecord>;
+    /**
+     * Terminal exit for an operation the chain proves can never land: no EntryPoint event for its hash through a finalized
+     * block after its signed paymaster `validUntil`. The usage lease is released; replaying the same proof repairs a crash
+     * between the ledger and journal writes.
+     */
+    recordNeverLanded(boundValue: UsdtBoundOperation, digest: string, now: Date): Promise<UsdtExecutionRecord>;
     /** Replaying the same observation repairs a crash between the ledger and journal writes. */
     recordObservedOutcome(boundValue: UsdtBoundOperation, outcome: {
         readonly state: "finalized" | "failed_confirmed_revert";

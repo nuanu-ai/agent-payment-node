@@ -126,8 +126,8 @@ export class SmartAccountGaslessExecution {
   }
   private rpc(op: SmartAccountGaslessOperationRecord): SmartAccountGaslessRpcPort {
     const rpc = this.rpcFor(op.intent.request.chainId);
-    if (rpc.chainId !== op.intent.request.chainId || rpc.endpointHash !== op.intent.initialSnapshot.endpointHash ||
-      rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin) saFail("sa_gasless_rpc_binding");
+    // Bound to the chain, not to one endpoint: every guard re-reads what it relies on from this RPC.
+    if (rpc.chainId !== op.intent.request.chainId) saFail("sa_gasless_rpc_binding");
     return rpc;
   }
   private async guard(op: SmartAccountGaslessOperationRecord, signing: boolean,

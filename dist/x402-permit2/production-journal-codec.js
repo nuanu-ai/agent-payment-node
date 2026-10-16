@@ -71,7 +71,9 @@ export function validateExposureJournal(value, record) {
             i.materialHash !== record.material.materialHash || i.requestHash !== record.material.checked.requestHash ||
             i.challengeHash !== record.material.checked.challengeHash || i.signedHash !== (j.signed?.signedHash ?? null) ||
             !/^(?:0|[1-9][0-9]*)$/u.test(i.blockNumber) || !HEX_HASH.test(i.blockHash) ||
-            (i.outcome === "settled" ? j.signed === null || !HEX_HASH.test(i.transactionHash ?? "") : i.transactionHash !== null) || !j.holdConfirmed)
+            // A settlement proven by the consumed Permit2 nonce bit may carry no transaction hash.
+            (i.outcome === "settled" ? j.signed === null || i.transactionHash !== null && !HEX_HASH.test(i.transactionHash)
+                : i.transactionHash !== null) || !j.holdConfirmed)
             corrupt();
         validateRetainedObservation(i.observation, i);
         const { outcomeDigest, ...body } = i;

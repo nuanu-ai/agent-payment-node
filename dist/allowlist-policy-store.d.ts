@@ -21,7 +21,8 @@ export interface AllowlistPolicyActivationEntry {
     readonly entryDigest: string;
 }
 export type AllowlistPolicyDecision = Pick<AllowlistPolicyActivationEntry, "status" | "revision" | "stagedRecordDigest" | "policyDigest" | "registry" | "approvalFingerprint" | "decidedAt">;
-/** One authenticated read of a profile: every staged revision and the complete activation chain. */
+/** One integrity-checked read of a profile: every staged revision and the complete activation chain.
+ * The digests are unkeyed (corruption detection only); owner TTY activation is the authority. */
 export interface AllowlistPolicyState {
     readonly profile: string;
     readonly profileHash: string;
@@ -40,7 +41,7 @@ export declare class AllowlistPolicyStore extends SecureStateStore {
     prepare(input: PrepareAllowlistPolicyInput): Promise<AllowlistPolicyRecord>;
     /** Stage one multi-admission, multi-family revision. Staging never grants execution authority. */
     stage(input: StageAllowlistPolicyInput): Promise<AllowlistPolicyRecordV2>;
-    /** The latest staged revision, authenticated. */
+    /** The latest staged revision, integrity-checked. */
     status(profile: string): Promise<StagedAllowlistPolicyRecord | null>;
     read(profile: string): Promise<AllowlistPolicyState>;
     /** Caller must already hold profile:<allowlistProfileHash(profile)>; used for an atomic policy-bound transition. */

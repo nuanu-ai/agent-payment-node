@@ -7,6 +7,7 @@ import { readCircleMintFeeRecipient } from "./mint-fee-recipient.js";
 import { getAddress, keccak256 } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import { OperationService } from "../operation-service.js";
@@ -274,6 +275,13 @@ export class CircleFundingEvmService {
                     verifyCircleMintPreflight(op.source, op.attestation, { destinationBlockAtomic: circleUint(block.number).toString(), usedNonceAtomic: used, attesterConfigurationHash: circleAttesterConfigurationHash(snapshot), transactionSimulationResult: simulated }, op.funding);
                 }
             }, seal: (op, e, guard) => this.custody.seal(op, e, guard), loadMaterial: (op, e) => this.custody.load(op, e),
+            unsent: { outcome: async (_op, effect) => {
+                    const remote = rpc(effect);
+                    await remote.identity();
+                    return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+                        nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
+                },
+                discard: (op, effect) => this.custody.discard(op, effect) },
             broadcast: async (e, raw, guard) => { guard(); const current = await this.required(initial.operationId); if (e.role === "mint" || e.role === "cleanup")
                 await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(current); guard(); const effect = snapshotCircleFundingEffect(current, e); await this.custody.claimSend(current, effect, guard); guard(); if (keccak256(raw) !== e.transactionHash)
                 circleBlocked("sealed_broadcast_hash_changed"); const returned = circleHex(await rpc(e).call("eth_sendRawTransaction", [raw], guard), 32); if (returned !== keccak256(raw))

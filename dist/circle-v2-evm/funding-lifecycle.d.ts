@@ -1,4 +1,5 @@
 import { type CircleFundingOperationV2 } from "./funding-operation.js";
+import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 import type { Hex } from "viem";
 import type { CircleFundingMaterial } from "./funding-custody.js";
 import { type CircleEffect, type CircleEnvelope, type CircleRole } from "./operation-model.js";
@@ -28,10 +29,17 @@ export interface CircleFundingLifecyclePorts {
     mintEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
     cleanupEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
     usage(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<CircleFundingOperationV2["usage"]>;
+    /** Never-lands proof and discard for signed-but-unsent bytes. Production runtimes always provide it; injected test ports may omit it. */
+    unsent?: Readonly<{
+        outcome(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
+        discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void>;
+    }>;
 }
 type Consent = () => void;
 export declare function approveCircleFundingSource(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
-/** Each marker is fsynced before crossing its boundary. Marked recovery never enters signing or broadcast again. */
+/** Each marker is fsynced before crossing its boundary. Every refusable check runs before signing; after the
+ * submission fence the effect is observed only, never signed or broadcast again. A failure before that fence
+ * keeps the effect signed-but-unsent and resumable instead of turning it into a permanent unknown. */
 export declare function executeCircleFundingEffect(input: CircleFundingOperationV2, role: CircleRole, ports: CircleFundingLifecyclePorts, token?: Consent): Promise<CircleFundingOperationV2>;
 export declare function approveCircleFundingMint(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 export declare function observeCircleFunding(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;

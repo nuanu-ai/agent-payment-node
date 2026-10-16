@@ -1,3 +1,4 @@
+import { type GaszipProviderFailure } from "./gaszip-native-delivery.js";
 import { type Hex } from "viem";
 /** A separate GasZip direct deposit; never grants LI.FI GasZip execution. */
 export declare const MEGA_FUNDING: Readonly<{
@@ -41,4 +42,4 @@ export interface MegaCorrelatedDelivery {
     readonly grossNative?: true;
 }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
-export declare function inspectMegaDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): MegaCorrelatedDelivery | null;
+export declare function inspectMegaDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): MegaCorrelatedDelivery | GaszipProviderFailure | null;

@@ -298,7 +298,7 @@ function validateNativeStargateDestinationPin(decoded: DecodedBridgeCall, receip
   const frozen = pin.frozenDeployment, observed = pin.observedDeployment;
   if (frozen.chainId !== 8453 || frozen.peerChainId !== 1 || frozen.tool !== "stargateV2" ||
     observed.chainId !== frozen.chainId || observed.peerChainId !== frozen.peerChainId || observed.tool !== frozen.tool ||
-    observed.rpcOrigin !== frozen.rpcOrigin || observed.block.numberAtomic !== receipt.blockNumberAtomic ||
+    observed.block.numberAtomic !== receipt.blockNumberAtomic ||
     observed.block.hash !== receipt.blockHash ||
     bridgeUint(frozen.block.numberAtomic, true, "APN_RPC_PROTOCOL") >
       bridgeUint(observed.block.numberAtomic, true, "APN_RPC_PROTOCOL") ||

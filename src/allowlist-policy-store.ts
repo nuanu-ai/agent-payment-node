@@ -48,7 +48,8 @@ export interface AllowlistPolicyActivationEntry {
 export type AllowlistPolicyDecision = Pick<AllowlistPolicyActivationEntry,
   "status" | "revision" | "stagedRecordDigest" | "policyDigest" | "registry" | "approvalFingerprint" | "decidedAt">;
 
-/** One authenticated read of a profile: every staged revision and the complete activation chain. */
+/** One integrity-checked read of a profile: every staged revision and the complete activation chain.
+ * The digests are unkeyed (corruption detection only); owner TTY activation is the authority. */
 export interface AllowlistPolicyState {
   readonly profile: string;
   readonly profileHash: string;
@@ -93,7 +94,7 @@ export class AllowlistPolicyStore extends SecureStateStore {
         status: "staged_unadmitted", preparedAt, overlay: compiled.overlay, registry: compiled.registry }));
   }
 
-  /** The latest staged revision, authenticated. */
+  /** The latest staged revision, integrity-checked. */
   async status(profile: string): Promise<StagedAllowlistPolicyRecord | null> {
     return (await this.read(profile)).records.at(-1) ?? null;
   }
@@ -215,7 +216,7 @@ export function validateStagedAllowlistPolicyRecord(value: unknown): StagedAllow
   try { return validateAllowlistPolicyRecord(value); }
   catch (error) {
     if (error instanceof ApnError && error.code === "APN_STATE_CORRUPT") throw error;
-    return corrupt("Allowlist policy record no longer compiles against the frozen inventory.");
+    return corrupt("Allowlist policy record is invalid.");
   }
 }
 

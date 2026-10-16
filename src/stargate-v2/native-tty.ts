@@ -22,6 +22,8 @@ export class TtyStargateNativeApproval implements Pick<StargateNativeExecutionPo
       `Minimum destination amount: ${operation.quote.quote.minimumOutputAtomic} wei`,
       `Nonce: ${operation.envelope.nonceAtomic}; gas limit: ${operation.envelope.gasLimitAtomic}`,
       `Max fee per gas: ${operation.envelope.maxFeePerGasAtomic}; priority fee: ${operation.envelope.maxPriorityFeePerGasAtomic}`,
+      "Network fee cap: the transaction is sent only while the current base fee plus its priority fee fits under that max fee per gas.",
+      ...(operation.policy === undefined ? [] : [`Owner policy digest/revision: ${operation.policy.policyDigest} / ${operation.policy.policyRevision}; mechanism: ${operation.policy.mechanism.provider} ${operation.policy.mechanism.reference}`]),
       `Quote: ${operation.quote.quoteHash}; source code: ${operation.sourceCodeHash}`,
       `Expires: ${operation.expiresAt}`,
       "APN records submission_started before one broadcast. An ambiguous result is observed and never resent.",

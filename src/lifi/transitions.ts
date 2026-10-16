@@ -1,5 +1,5 @@
 import { canonicalJson, hashObject } from "../canonical.js";
-import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, sealBridgeOperation,
+import { BRIDGE_TELEMETRY_ROWS, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, sealBridgeOperation,
   type BridgeEffect, type BridgeIntent, type BridgeMutable, type BridgeOperationRecord } from "./operation-model.js";
 import { validateBridgeContinuity, validateBridgeOperation } from "./operation-validation.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
@@ -18,10 +18,13 @@ export function newBridgeOperation(input: { readonly profileHash: string; readon
 }
 export function transitionBridge(op: BridgeOperationRecord, patch: Partial<BridgeMutable>, at: string): BridgeOperationRecord {
   validateBridgeOperation(op);
-  const next = { ...op, ...patch };
+  const merged = { ...op, ...patch };
+  // Telemetry is bounded and overwritten: the next transition keeps only the latest rows, so the journal cannot grow with polls.
+  const next = merged.observationTelemetry === undefined ? merged
+    : { ...merged, observationTelemetry: merged.observationTelemetry.slice(-BRIDGE_TELEMETRY_ROWS) };
   const oldMeaning = bridgeSnapshot(op), newMeaning = bridgeSnapshot(next);
-  // Poll timestamps alone are not evidence changes and cannot grow the journal.
-  const observationMeaning = (s: typeof oldMeaning) => ({ ...s, providerObservation: s.providerObservation === null ? null : {
+  // Poll timestamps and read telemetry alone are not evidence changes and cannot grow the journal.
+  const observationMeaning = (s: typeof oldMeaning) => ({ ...s, observationTelemetry: undefined, providerObservation: s.providerObservation === null ? null : {
     ...s.providerObservation, observedAt: "", responseHash: null,
   } });
   if (bridgeSame(observationMeaning(oldMeaning), observationMeaning(newMeaning))) return op;

@@ -50,7 +50,8 @@ export function cliWire(t: TestContext, f: Awaited<ReturnType<typeof permit2CliF
     if (c.method === "eth_getProof") return { address: c.params[0], codeHash: c.params[0] === PERMIT2_ADDRESS ? PERMIT2_CODE_HASH : asset.proxyCodeHash };
     if (c.method === "eth_getCode") return c.params[0] === f.record.material.wallet.account ? w.payerCode : c.params[0].toLowerCase() === PERMIT2_ADDRESS.toLowerCase() ? w.permit2Code : w.proxyCode;
     assert.equal(c.method, "eth_call"); const data = c.params[0].data;
-    return c.params[0].to.toLowerCase() === PERMIT2_ADDRESS.toLowerCase() ? w.bitmap : data.startsWith("0x7ecebe00") ? w.tokenNonce : data.startsWith("0x70a08231") ? w.balance : data.startsWith("0xdd62ed3e") ? w.allowance : w.domain;
+    // The nonce is consumed only once the facilitator settled after the paid request.
+    return c.params[0].to.toLowerCase() === PERMIT2_ADDRESS.toLowerCase() ? (options.settle && paid.length > 0 ? w.settledBitmap : w.bitmap) : data.startsWith("0x7ecebe00") ? w.tokenNonce : data.startsWith("0x70a08231") ? w.balance : data.startsWith("0xdd62ed3e") ? w.allowance : w.domain;
   };
   t.mock.method(https, "request", (endpoint: URL, requestOptions: any, receive: (r: any) => void) => {
     const req = new EventEmitter() as any, socket = new EventEmitter() as any;
@@ -71,7 +72,10 @@ export function cliWire(t: TestContext, f: Awaited<ReturnType<typeof permit2CliF
             const record = (await f.records.findOperation(f.id))!; assert.ok(record.exposureJournal?.signed);
             assert.ok(requestOptions.headers["PAYMENT-SIGNATURE"] === record.exposureJournal.signed.paymentSignatureHeader, "exact owned payment header");
             assert.equal(record.exposureJournal.request!.attempt, 1);
-            if (options.settle) f.wire.tx.input = await encodePermit2ProductionProxyCall(record, record.exposureJournal.signed);
+            if (options.settle) {
+              f.wire.tx.input = await encodePermit2ProductionProxyCall(record, record.exposureJournal.signed);
+              f.wire.settledBitmap = `0x${(1n << (BigInt(record.material.nonce) & 255n)).toString(16).padStart(64, "0")}`;
+            }
             const header = Buffer.from(canonicalJson({ success: true, transaction: f.input.locator, network: asset.chain,
               payer: record.material.wallet.account.toLowerCase(), amount: "10000" })).toString("base64");
             respond(200, options.hint ? ["payment-response", header] : [], Buffer.from("private-paid-body"));
