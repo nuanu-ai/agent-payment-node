@@ -1155,6 +1155,13 @@ Across needs 19 and Ethereum USDC Stargate 16; no check, chunk size or the share
 24-POST invocation cap changed. Tests compare every admitted source route and
 receipt route with its production trace.
 
+The destination observation cap, a fixed 16, is counted the same way from the
+destination deployment plan, plus five requests for a provider-bound native
+delivery (pre-delivery header, archive chain identity, two hash-pinned balances,
+trace). Ethereum or Arbitrum to Base USDC Across needs 17 with a scalar Base
+receipt reader and the Ethereum to BNB composite needs 19; both previously failed
+after the principal had left. Every admitted destination is tested the same way.
+
 ## Finite Base to Mega native funding
 
 `apn mega funding prepare`, `approve` and `status` use an independent GasZip

@@ -99,8 +99,9 @@ test("LI.FI observation phases use independent lazy bounded RPC sessions", async
   assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 5);
   const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.equal(s.rpcSessions[1], resumeSession);
   const resumeUnique = [...new Set(s.rpcSessions)]; assert.equal(resumeUnique.length, 4);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14, 16, 2]);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 16, 16, 3]);
+  // Ethereum USDC to Base USDC: derived source cap 14 and destination cap 17 (Base USDC deployment chunks), each with two retry attempts.
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14, 17, 2]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 16, 19, 3]);
   assert.notEqual(resumeSession, approvalSession);
 });
 

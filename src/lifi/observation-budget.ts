@@ -1,7 +1,8 @@
 import { hashObject } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
+import { bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import type { BridgeChainId } from "./chains.js";
-import type { BridgeBlock, BridgeTool } from "./model.js";
+import type { BridgeBlock, BridgeRouteRequest, BridgeTool } from "./model.js";
 import { basePinnedFeeReadPlan, bridgeDeploymentReadPlan } from "./rpc-deployment.js";
 
 /**
@@ -25,6 +26,27 @@ export function bridgeSourceObservationRequests(chainId: BridgeChainId, peerChai
   const deployment = [...readKeys(bridgeDeploymentReadPlan(chainId, peerChainId, tool, token, PLAN_INCLUDED, true).items)]
     .filter((key) => !fee.has(key));
   return BRIDGE_CANONICAL_OBSERVATION_REQUESTS + Math.ceil(fee.size / archiveBatchItems) + Math.ceil(deployment.length / archiveBatchItems);
+}
+/**
+ * A provider-bound native delivery adds the pre-delivery header, the archive chain identity, the two hash-pinned
+ * recipient balances and the delivery call trace to the canonical sequence.
+ */
+export const BRIDGE_NATIVE_DELIVERY_REQUESTS = 5;
+
+/**
+ * Worst-case clean HTTP requests of one destination observation, counted from the destination's historical deployment
+ * read plan in chunks of `archiveBatchItems`. A provider-bound native delivery reads its balances, and so the archive
+ * chain identity, before that proof. The BNB composite proves the receipt and the deployment first, then observes again
+ * with the delivery: the second pass reuses the cached receipt, headers and archive chain identity, so it sends the
+ * delivery reads without that identity plus its uncached header recheck, again five requests.
+ */
+export function bridgeDestinationObservationRequests(request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">,
+  tool: BridgeTool, composite: boolean, archiveBatchItems: number): number {
+  const deployment = readKeys(bridgeDeploymentReadPlan(request.toChainId, request.fromChainId, tool, request.toToken, PLAN_INCLUDED, true).items).size;
+  const chunks = (items: number) => Math.ceil(items / archiveBatchItems);
+  if (composite) return BRIDGE_CANONICAL_OBSERVATION_REQUESTS + chunks(deployment) + BRIDGE_NATIVE_DELIVERY_REQUESTS;
+  if (bridgeProviderBoundNativeDestination(request)) return BRIDGE_CANONICAL_OBSERVATION_REQUESTS + BRIDGE_NATIVE_DELIVERY_REQUESTS + chunks(deployment - 1);
+  return BRIDGE_CANONICAL_OBSERVATION_REQUESTS + chunks(deployment);
 }
 function readKeys(items: readonly { readonly method: string; readonly params: readonly unknown[] }[]): ReadonlySet<string> {
   return new Set(items.map((item) => hashObject({ method: item.method, params: item.params })));

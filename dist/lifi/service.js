@@ -19,7 +19,7 @@ import { LINEA_DEPLOYMENT_MIGRATION_CANDIDATE, assertLineaDeploymentMigrationPro
 import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation } from "./base-deployment-migration.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
-import { bridgeSourceObservationRequests } from "./observation-budget.js";
+import { bridgeDestinationObservationRequests, bridgeSourceObservationRequests } from "./observation-budget.js";
 import { sha256 } from "../canonical.js";
 export class BridgeService {
     context;
@@ -184,7 +184,10 @@ export class BridgeService {
         // Protocol code, proxy/facet/implementation storage and caller-sensitive calls stay fresh; two attempts retain the retry reserve.
         const sourceRequests = bridgeSourceObservationRequests(m.request.fromChainId, m.request.toChainId, m.tool, m.request.fromToken, common.archiveDeploymentBatchMaxItems);
         const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: sourceRequests, maxHttpAttempts: sourceRequests + 2 });
-        const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: 16, maxHttpAttempts: 16 });
+        // The destination proof is bounded the same way after the principal has left: canonical receipt, any provider-bound
+        // native delivery reads, and the destination deployment chunks (Base USDC needs 17, the BNB composite 19).
+        const destinationRequests = bridgeDestinationObservationRequests(m.request, m.tool, op.intent.decoded.composite !== undefined, common.archiveDeploymentBatchMaxItems);
+        const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: destinationRequests, maxHttpAttempts: destinationRequests + 2 });
         const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 2, maxHttpAttempts: 3 });
         return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation }, physicalBudget);
     }
