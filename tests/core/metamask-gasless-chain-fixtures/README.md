@@ -16,3 +16,10 @@ contains all eight admitted chain rows. SHA-256:
 
 These fixtures are static verifier inputs. They do not prove current mainnet
 state or live payment acceptance.
+
+`arbitrum-safe-counter-20261016.json` adds two actual read-only replies to the
+captured Arbitrum observer replay: the LimitedCalls enforcer code and its
+`callCounts(manager, delegationHash)` value (0) at the replay's safe block,
+pinned by block hash. They were read on 2026-10-16 through the public Tenderly
+Arbitrum gateway; the enforcer code equals the bytes captured at the inclusion
+block.

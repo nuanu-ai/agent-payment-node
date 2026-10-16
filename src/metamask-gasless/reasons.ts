@@ -16,6 +16,10 @@ export const MM_REASON_CODES = {
   mm_gasless_clock: "APN_REPREPARE_REQUIRED",
   mm_gasless_rpc_binding: "APN_RPC_PROTOCOL",
   mm_gasless_rpc_unavailable: "APN_RPC_AMBIGUOUS",
+  /** The RPC refused eth_getLogs as too wide even at the narrowest bounded window. */
+  mm_gasless_rpc_log_range: "APN_RPC_CONFIG",
+  /** The RPC asked APN to slow down (HTTP 429 or a request-limit error). */
+  mm_gasless_rpc_rate_limited: "APN_RPC_RATE_LIMITED",
   mm_gasless_scan_reorg: "APN_RPC_PROTOCOL",
   mm_gasless_evidence_invalid: "APN_RPC_PROTOCOL",
   mm_gasless_submit_unknown: "APN_OPERATION_BLOCKED",

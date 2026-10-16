@@ -278,3 +278,20 @@ test("a re-observation that changes only its read times is not a new transition"
       endpointOrigin: "https://archive.example", endpointHash: hashObject("archive") } } },
   ]) assert.equal(metaMaskGaslessObservationUnchanged(operation, material), false);
 });
+
+test("unavailable observations may name a refused log range or a rate limit, with their own next action", () => {
+  const marked = mark(approve(makeOperation("log-limits")));
+  for (const [reason, hint] of [["mm_gasless_rpc_log_range", /--observation-rpc-env APN_<NAME>_RPC_URL/u],
+    ["mm_gasless_rpc_rate_limited", /slow down/u]] as const) {
+    const at = "2026-09-09T00:02:00.000Z";
+    const observed = advanceMetaMaskGaslessOperation(marked, { state: "unknown_finality", providerObservation: null,
+      observation: { observedAt: at, phase: "unavailable", reason, candidateTxHash: null, transactionBlock: null,
+        finalityBlock: null, evidenceHash: null }, failure: mmFailure(reason) }, at);
+    assert.deepEqual(validateMetaMaskGaslessOperation(observed), observed);
+    const actions = publicMetaMaskGaslessOperation(observed).next_actions;
+    assert.match(actions[0]!, hint); assert.equal(actions[1], `apn operation resume --operation ${observed.operationId}`);
+    assert.throws(() => advanceMetaMaskGaslessOperation(marked, { state: "unknown_finality",
+      observation: { observedAt: at, phase: "pending", reason, candidateTxHash: null, transactionBlock: null,
+        finalityBlock: null, evidenceHash: null }, failure: mmFailure(reason) }, at), { code: "APN_STATE_CORRUPT" });
+  }
+});
