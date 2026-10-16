@@ -6,10 +6,10 @@ import { canonicalJson, sha256 } from "../../src/canonical.js";
 import { swapMechanismDigest, type SwapMechanismPin } from "../../src/swap/pin.js";
 import { JUPITER_V6_PROGRAM, ADDRESS_LOOKUP_TABLE_PROGRAM } from "../../src/swap/jupiter-solana/catalog.js";
 import { JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS } from "../../src/swap/jupiter-solana/v1-pins.js";
-import { routeConfigForQuote, routeConfigForMaterial, JUPITER_V1_FINITE_ROUTES,
+import { routeConfigForQuote, routeConfigForMaterial, JUPITER_V1_HISTORICAL_ROUTES,
  JUPITER_V1_WHIRLPOOL_V2_ROUTE as OLD_ESV, JUPITER_V1_WHIRLPOOL_4H_ROUTE as OLD_4H,
  JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_ROUTE as NEW_ESV,
- JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE as NEW_4H, JUPITER_V1_CURRENT_ROUTES } from "../../src/swap/jupiter-solana/v1-route-config.js";
+ JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE as NEW_4H, JUPITER_V1_ROUTES } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { jupiterV1MaterialDigest, validateJupiterV1Material, type JupiterV1ResolvedMaterial } from "../../src/swap/jupiter-solana/v1-material.js";
 import { assembleJupiterV1, decodeJupiterV1AddressTable } from "../../src/swap/jupiter-solana/v1-resolver.js";
 import { jupiterV1Instructions, jupiterV1Lifetime, jupiterV1ResponseHash } from "../../src/swap/jupiter-solana/v1-codec.js";
@@ -67,7 +67,7 @@ function upgraded(lane: "esv" | "4h"): JupiterV1ResolvedMaterial {
 const lanes = [{lane: "esv", old: OLD_ESV, fresh: NEW_ESV}, {lane: "4h", old: OLD_4H, fresh: NEW_4H}] as const;
 
 test("SwapV2 registrations append two generations without changing preceding route order or per-pool contracts", () => {
- assert.deepEqual(JUPITER_V1_FINITE_ROUTES.slice(0, 8).map(r => r.routeId), ["whirlpool-v1-83-sol-usdc", "whirlpool-swap-v2-esv-sol-usdc", "whirlpool-swap-v2-4h-sol-usdc", "whirlpool-v1-fp-sol-usdc", "whirlpool-v1-fp-sol-usdc-runtime-099da3", "whirlpool-v1-83-sol-usdc-runtime-099da3", NEW_ESV.routeId, NEW_4H.routeId]);
+ assert.deepEqual(JUPITER_V1_HISTORICAL_ROUTES.slice(0, 8).map(r => r.routeId), ["whirlpool-v1-83-sol-usdc", "whirlpool-swap-v2-esv-sol-usdc", "whirlpool-swap-v2-4h-sol-usdc", "whirlpool-v1-fp-sol-usdc", "whirlpool-v1-fp-sol-usdc-runtime-099da3", "whirlpool-v1-83-sol-usdc-runtime-099da3", NEW_ESV.routeId, NEW_4H.routeId]);
  for (const {old, fresh} of lanes) {
   assert.equal(fresh.runtimeProgramPins, JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS);
   const {routeId: _oldId, mechanismPin: _oldPin, protocolRegistry: _oldRegistry, ...oldContract} = old;
@@ -82,7 +82,7 @@ for (const {lane, old, fresh} of lanes) {
  test(`SYNTHETIC ${lane} selects only the exact registered old or upgraded generation`, async () => {
   const past = historical(lane), m = upgraded(lane);
   validateJupiterV1Material(past); validateJupiterV1Material(m);
-  assert.equal(routeConfigForQuote(m.quoteResponse), old);
+  assert.equal(routeConfigForQuote(m.quoteResponse), JUPITER_V1_ROUTES.find(route => route.pool === old.pool));
   assert.equal(routeConfigForQuote(m.quoteResponse, fresh.routeId), fresh);
   assert.equal(routeConfigForMaterial(past), old); assert.equal(routeConfigForMaterial(m), fresh);
   assert.equal(m.messageHash, past.messageHash);
@@ -129,7 +129,7 @@ for (const {lane, old, fresh} of lanes) {
   const registry = (inputPin: SwapMechanismPin, outputPin = inputPin) => {const now = new Date(); return sealAssetPolicyRegistry({schemaVersion: "apn.asset-policy-registry.v1", registryVersion: "synthetic-generation.1", publishedAt: now.toISOString(), effectiveDate: now.toISOString().slice(0, 10), effectiveAt: new Date(now.getTime()-1000).toISOString(), expiresAt: new Date(now.getTime()+3600000).toISOString(), chains: [{chain: fresh.mechanismPin.chain, family: "solana", name: "Solana", assets: [{kind: "native", identifier: null, symbol: "SOL", decimals: 9, rails: {direct: false, gasless: false, x402: false, bridge: false, swap: true}, caps: {maximumPerTransferAtomic: "6000000", dailyLimitAtomic: "6000000"}, mechanismPins: {swap: inputPin}}, {kind: "token", identifier: SOLANA_USDC_MINT, symbol: "USDC", decimals: 6, rails: {direct: false, gasless: false, x402: false, bridge: false, swap: true}, caps: {maximumPerTransferAtomic: "500000", dailyLimitAtomic: "500000"}, mechanismPins: {swap: outputPin}}]}]});};
   let active = registry(fresh.mechanismPin);
   const admission = new JupiterV1OwnerAdmission(store, async () => ({profile, registry: active, digest: active.policyDigest, revision: 1, accounts: {solana: payer}, activationDigest: "a".repeat(64), activatedAt: active.effectiveAt!}), new AssetUsageLedger(temp.root), () => new Date());
-  const current = JUPITER_V1_CURRENT_ROUTES.find(route => route.pool === fresh.pool)!;
+  const current = JUPITER_V1_ROUTES.find(route => route.pool === fresh.pool)!;
   assert.equal((await admission.resolveRoute(profile, "1000000", "115960", payer)).route, current);
   for (const pair of [[old.mechanismPin, old.mechanismPin], [old.mechanismPin, fresh.mechanismPin], [fresh.mechanismPin, old.mechanismPin]]) {
    active = registry(pair[0]!, pair[1]!); const resolved = await admission.resolveRoute(profile, "1000000", "115960", payer);

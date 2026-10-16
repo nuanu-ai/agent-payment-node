@@ -63,9 +63,10 @@ test("snapshot, ownership, amount, expiry and message mutations fail closed", as
     (error) => reason(error) === "orca_stable_quote_state");
   await assert.rejects(prepareOrcaStableUnsigned({ ...base, snapshot: { ...base.snapshot, oracle: raw(WHIRLPOOL_PROGRAM, Buffer.alloc(1)) } }),
     (error) => reason(error) === "orca_stable_pool_state");
+  // A fee rate other than the one the quote was priced with no longer reproduces the quote (SWAP-18: priced, not pinned).
   const changedPool = Buffer.from(base.snapshot.pool.data); changedPool.writeUInt16LE(101, 45);
   await assert.rejects(prepareOrcaStableUnsigned({ ...base, snapshot: { ...base.snapshot, pool: raw(WHIRLPOOL_PROGRAM, changedPool) } }),
-    (error) => reason(error) === "orca_stable_pool_state");
+    (error) => reason(error) === "orca_stable_quote_state");
   await assert.rejects(prepareOrcaStableUnsigned({ ...base, snapshot: { ...base.snapshot,
     vaultB: token(USDC_MINT, ORCA_STABLE_POOL, 379_676_358_729n) } }),
     (error) => reason(error) === "orca_stable_vault_state");

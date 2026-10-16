@@ -166,10 +166,13 @@ test("stable quote fails closed on pool drift, oracle state, caps and non-mainne
   const f = await fixture();
   await assert.rejects(quoteOrcaStableReadOnly(f.rpc, { amountAtomic: "1000000", slippageBps: 51,
     maximumPriceImpactBps: 50 }), (error) => error instanceof ApnError && error.code === "APN_INVALID_INPUT");
+  // A retuned fee rate is read and priced, not pinned (SWAP-18).
+  const before = await quoteOrcaStableReadOnly(f.rpc, { amountAtomic: "1000000", slippageBps: 50, maximumPriceImpactBps: 50 });
   f.pool.writeUInt16LE(101, 45);
   f.accounts.set(ORCA_STABLE_POOL, wire(WHIRLPOOL_PROGRAM, f.pool));
-  await assert.rejects(quoteOrcaStableReadOnly(f.rpc, { amountAtomic: "1000000", slippageBps: 50,
-    maximumPriceImpactBps: 50 }), (error) => reason(error) === "orca_pool_fee_drift");
+  const retuned = await quoteOrcaStableReadOnly(f.rpc, { amountAtomic: "1000000", slippageBps: 50, maximumPriceImpactBps: 50 });
+  assert.deepEqual([before.feeRate, retuned.feeRate], [100, 101]);
+  assert.ok(BigInt(retuned.feeAtomic) >= BigInt(before.feeAtomic) && BigInt(retuned.expectedOutputAtomic) <= BigInt(before.expectedOutputAtomic));
   f.pool.writeUInt16LE(100, 45);
   f.accounts.set(ORCA_STABLE_POOL, wire(WHIRLPOOL_PROGRAM, f.pool));
   f.accounts.set(f.oracle, wire(WHIRLPOOL_PROGRAM, Buffer.alloc(1)));

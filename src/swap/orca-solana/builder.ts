@@ -8,7 +8,7 @@ import type { GuardedSwapReadOnlyBuilder } from "../runtime.js";
 import { compileOrcaSwap, ORCA_MAX_COMPUTE_UNITS, type OrcaSwapLifetime, type OrcaSwapPlan } from "./instructions.js";
 import { blockhashHex, ORCA_KEYLESS_EXECUTION_SCHEMA, ORCA_MAX_SLOT_DRIFT, orcaEvidenceHash, orcaGasDisplay, orcaRouteHash,
   priorityFeeLamports, SOLANA_BASE_FEE_LAMPORTS_PER_SIGNATURE, type OrcaKeylessMaterial, type OrcaQuoteEvidence, type SavedOrcaQuoteStore } from "./material.js";
-import { ORCA_KEYLESS_MECHANISM_PIN, ORCA_POOL_FEE_RATE, ORCA_SOL_USDC_POOL, ORCA_SOLANA_CHAIN, USDC_MINT, WHIRLPOOL_PROGRAM,
+import { ORCA_KEYLESS_MECHANISM_PIN, ORCA_SOL_USDC_POOL, ORCA_SOLANA_CHAIN, USDC_MINT, WHIRLPOOL_PROGRAM,
   type OrcaProgramPinVerifier } from "./pins.js";
 import { readOrcaMarket } from "./market.js";
 import { simulateOrcaSwap } from "./simulation.js";
@@ -53,7 +53,7 @@ export class KeylessOrcaQuoteBuilder implements GuardedSwapReadOnlyBuilder<OrcaK
     const evidence: OrcaQuoteEvidence = { slot: market.slot.toString(), pool: market.poolView, accountDataSha256: market.accountDataSha256,
       tickArrayStarts: market.tickArrays.map((row) => row.startTickIndex), vaultSolLamports: market.vaultSolLamports,
       vaultUsdcAtomic: market.vaultUsdcAtomic, owner: market.owner, tokenAccountRentLamports: market.tokenAccountRentLamports.toString(),
-      programPins: pins.map((pin) => ({ role: pin.role, address: pin.address, dataSha256: pin.dataSha256 })), swap };
+      programPins: pins, swap };
     const quote = createSwapQuote({ profile: request.profile, account: request.account, recipient: request.account,
       sourceAsset: { chain: ORCA_SOLANA_CHAIN, kind: "native", identifier: null },
       destinationAsset: { chain: ORCA_SOLANA_CHAIN, kind: "token", identifier: USDC_MINT },
@@ -74,7 +74,7 @@ export class KeylessOrcaQuoteBuilder implements GuardedSwapReadOnlyBuilder<OrcaK
         "associated_token.create_idempotent(wSOL)", "associated_token.create_idempotent(USDC)", "system.transfer(wrap input)",
         "token.sync_native", "whirlpool.swap(exact_in, a_to_b)", "token.close_account(wSOL to owner)"] },
       approvalCapAtomic: "0", fees: material.gasOrEnergy,
-      price: { source: "orca_whirlpool_onchain_state", pool: ORCA_SOL_USDC_POOL, program: WHIRLPOOL_PROGRAM, feeRate: ORCA_POOL_FEE_RATE,
+      price: { source: "orca_whirlpool_onchain_state", pool: ORCA_SOL_USDC_POOL, program: WHIRLPOOL_PROGRAM, feeRate: market.pool.feeRate,
         slot: market.slot.toString(), sqrtPrice: swap.sqrtPriceBefore, tickCurrentIndex: swap.tickBefore,
         spotUsdcPerSolAtomic: swap.spotOutputPerSolAtomic, expectedOutputAtomic: expected.toString(), minimumOutputAtomic: minimum.toString(),
         slippageBps: request.slippageBps, priceImpactBps: swap.priceImpactBps, initializedTicksCrossed: swap.initializedTicksCrossed },

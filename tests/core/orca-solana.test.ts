@@ -13,13 +13,13 @@ import type { TtyTransferApprovalOptions } from "../../src/tty-approval.js";
 import { decodeTickArray, decodeWhirlpool, type RawSolanaAccount } from "../../src/swap/orca-solana/accounts.js";
 import { compileOrcaSwap, orcaSwapInstructions, validateOrcaSwapMessage, type OrcaSwapPlan } from "../../src/swap/orca-solana/instructions.js";
 import { quoteWhirlpoolExactInAToB } from "../../src/swap/orca-solana/math.js";
-import { ORCA_PROGRAM_PINS, ORCA_SOL_USDC_POOL, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, verifyOrcaProgramPins, WHIRLPOOL_ACCOUNT_DISCRIMINATOR,
+import { ORCA_SOL_USDC_POOL, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, verifyOrcaProgramPins, WHIRLPOOL_ACCOUNT_DISCRIMINATOR,
   WHIRLPOOL_PROGRAM, TOKEN_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { createOrcaKeylessRuntime } from "../../src/swap/orca-solana/runtime-factory.js";
 import { temporaryState } from "./helpers.js";
 import { AMOUNT_IN, FakeOrcaRpc, FIXTURE, orcaOwner, orcaPolicy, PROFILE, signatureOf, tickArrayBytes, wsolAccountBytes } from "./orca-solana-helpers.js";
 
-const pins = async () => ORCA_PROGRAM_PINS;
+const pins = async () => [];
 const raw = (data: Buffer): RawSolanaAccount => ({ owner: WHIRLPOOL_PROGRAM, lamports: 1n, executable: false, space: data.length, data });
 const snapshotPool = () => decodeWhirlpool(ORCA_SOL_USDC_POOL, raw(Buffer.from(FIXTURE.pool, "base64")), WHIRLPOOL_PROGRAM, WHIRLPOOL_ACCOUNT_DISCRIMINATOR);
 const arraysFrom = (rows: typeof FIXTURE.tickArrays) => rows.map((row) => decodeTickArray(row.address,
@@ -90,7 +90,7 @@ test("the instruction list is exact and every tampering is refused by the compil
   assert.throws(() => validateOrcaSwapMessage(bytes(base), plan, "dwxR9YF7WwnJJu7bPC4UNcWFpcSsooH6fxbpoa3fTbJ"), (error) => reason(error) === "orca_message_lifetime");
 });
 
-test("a simulation shortfall, an insufficient balance, and program byte drift refuse before anything is saved or signed", async (t) => {
+test("a simulation shortfall, an insufficient balance, and a changed program refuse before anything is saved or signed", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await flow(temporary.root);
   f.rpc.simulatedOut = 1_000n;
@@ -105,7 +105,7 @@ test("a simulation shortfall, an insufficient balance, and program byte drift re
     return { context: { slot: 1 }, value: (params[0] as string[]).map(() => ({ data: [Buffer.alloc(36).toString("base64"), "base64"], executable: true,
       lamports: 1, owner: "BPFLoaderUpgradeab1e11111111111111111111111", rentEpoch: 0, space: 36 })) };
   } };
-  await assert.rejects(verifyOrcaProgramPins(drifted), (error) => reason(error) === "orca_program_pin_drift");
+  await assert.rejects(verifyOrcaProgramPins(drifted), (error) => reason(error) === "solana_program_identity_changed");
 });
 
 test("prepare requires owner admission of SOL and USDC with the exact keyless pin and respects the per-transfer cap", async (t) => {

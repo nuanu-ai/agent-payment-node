@@ -3,7 +3,7 @@ import { ApnError } from "../../errors.js";
 import { rpcAtomic, solanaAddress } from "../../solana/rpc.js";
 import { associatedTokenAddress, decodeTickArray, decodeWhirlpool, readRawAccounts, TICK_ARRAY_ACCOUNT_BYTES, whirlpoolOracleAddress, whirlpoolTickArrayAddress } from "./accounts.js";
 import { quoteWhirlpoolExactInAToB, tickArrayStart } from "./math.js";
-import { ORCA_POOL_FEE_RATE, ORCA_POOL_TICK_SPACING, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT, sha256Hex, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_ACCOUNT_DISCRIMINATOR, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
+import { ORCA_POOL_TICK_SPACING, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT, sha256Hex, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_ACCOUNT_DISCRIMINATOR, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
 import { orcaOwnerBalances } from "./simulation.js";
 /**
  * Reads the pinned pool, its two vaults, the three downward tick arrays derived from the current tick, the oracle PDA
@@ -23,6 +23,8 @@ export async function readOrcaMarket(rpc, owner, amountIn) {
         blocked("The pool moved to another tick array between reads; quote again.", "orca_tick_array_moved");
     }
     const tickArrays = [a0, a1, a2].map((account, index) => decodeTickArray(arrays[index], account ?? null, WHIRLPOOL_PROGRAM, TICK_ARRAY_ACCOUNT_DISCRIMINATOR));
+    // The local swap math prices the fee rate read above. An adaptive-fee oracle would add a variable fee that math cannot
+    // reproduce, so it refuses; the pinned static-fee-tier pool cannot acquire one, and this costs no extra read.
     if (oracleAccount !== null)
         blocked("The pool has an adaptive-fee oracle; its variable fee is outside this pinned quote.", "orca_adaptive_fee");
     const vaultSol = vaultAmount(solVault ?? null, WSOL_MINT), vaultUsdc = vaultAmount(usdcVault ?? null, USDC_MINT);
@@ -66,8 +68,8 @@ function pinnedPool(account) {
         pool.vaultB !== ORCA_USDC_VAULT || pool.tickSpacing !== ORCA_POOL_TICK_SPACING || pool.feeTierIndexSeed !== ORCA_POOL_TICK_SPACING) {
         blocked("The Whirlpool config, mints, vaults or tick spacing differ from the pin.", "orca_pool_pin_drift");
     }
-    if (pool.feeRate !== ORCA_POOL_FEE_RATE)
-        blocked("The Whirlpool fee rate changed from the pinned 0.04%.", "orca_pool_fee_drift");
+    // No fee-rate pin (SWAP-18): the swap math prices pool.feeRate from this same read, the encoded minimum output follows
+    // from it, and the exact-message simulation and the receipt delta check enforce that minimum.
     return pool;
 }
 function vaultAmount(account, mint) {

@@ -6,7 +6,7 @@ import { SWAP_TERMINAL_STATES } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
 import { GuardedSwapService } from "./service.js";
 import { swapMechanismDigest } from "./pin.js";
-import { JUPITER_V1_FINITE_ROUTES } from "./jupiter-solana/v1-route-config.js";
+import { JUPITER_V1_KNOWN_ROUTES } from "./jupiter-solana/v1-route-config.js";
 import { OrcaExecutionBindingStore } from "./orca-solana/effects.js";
 import { SavedOrcaQuoteStore } from "./orca-solana/material.js";
 import { isOrcaKeylessMechanismDigest } from "./orca-solana/pins.js";
@@ -64,7 +64,7 @@ async function assertNoChainProof(root, operation) {
             return;
         return provable(operation, "the execution binding records the transaction's blockhash lifetime", "apn swap solana orca status");
     }
-    if (JUPITER_V1_FINITE_ROUTES.some((route) => swapMechanismDigest(route.mechanismPin) === digest)) {
+    if (JUPITER_V1_KNOWN_ROUTES.some((route) => swapMechanismDigest(route.mechanismPin) === digest)) {
         return provable(operation, "the frozen message records its blockhash lifetime", "apn swap solana jupiter status");
     }
     if (/^eip155:1$/u.test(chain))

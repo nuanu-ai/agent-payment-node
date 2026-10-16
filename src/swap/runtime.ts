@@ -172,6 +172,52 @@ export class GuardedSwapRuntime<Request> {
   }
 
   async approve(operationId: string, now: Date): Promise<SwapOperationRecord> {
+    return (await this.consent(operationId, now)).reserved;
+  }
+
+  /**
+   * The foreground CLI folds consent and the single send into one command. MCP never reaches this method. The consent's
+   * post-prompt owner and policy checks, the compare-and-swap reservation and the stored artifact all happened in this
+   * invocation, so execution uses that reserved record, material and artifact without reloading or re-proving them.
+   * A runtime that overrides approve keeps its own approve-then-execute path.
+   */
+  async approveAndExecute(operationId: string, now: Date): Promise<SwapOperationRecord> {
+    if (this.approve !== GuardedSwapRuntime.prototype.approve) {
+      const reserved = await this.approve(operationId, now);
+      return await this.execute(reserved.operationId, this.now());
+    }
+    const consented = await this.consent(operationId, now);
+    return await this.executeApproved(consented.reserved, consented.material, consented.artifact);
+  }
+
+  async execute(operationId: string, now: Date): Promise<SwapOperationRecord> {
+    const operation = await this.required(operationId);
+    instant(now);
+    if (operation.submissionMarker !== null) return await this.observe(operation);
+    const loadedArtifact = await this.dependencies.approvals.load(operation);
+    const artifact = loadedArtifact === null ? null : immutableSnapshot(loadedArtifact);
+    if (artifact === null || this.now().toISOString() >= operation.quote.expiresAt) return await this.executeApproved(operation, null, artifact);
+    // A separate execute command re-checks once what can change between commands: owner, active policy and consent.
+    const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
+    await this.dependencies.ownerAdmission.assert(operation, material);
+    await this.assertCurrentPolicy(operation);
+    validateGuardedSwapApprovalArtifact(artifact, operation, approvalIntent(operation, material), this.now());
+    return await this.executeApproved(operation, material, artifact);
+  }
+  async status(operationId: string, now: Date): Promise<SwapOperationRecord> {
+    const operation = await this.required(operationId);
+    instant(now);
+    return operation.submissionMarker === null ? operation : await this.observe(operation);
+  }
+
+  /**
+   * Pre-prompt checks refuse before the human is asked; after the prompt exactly one re-check runs: the stored operation
+   * and runtime caps still match the consent binding, the owner still controls the account and the active policy still
+   * admits the operation. The material is the immutable snapshot the screen was built from (its store is create-only and
+   * content-addressed by the quote hash), so it is not reloaded.
+   */
+  private async consent(operationId: string, now: Date): Promise<{ readonly reserved: SwapOperationRecord;
+    readonly material: GuardedSwapPreparedMaterial; readonly artifact: GuardedSwapApprovalArtifact }> {
     const caps = immutableSnapshot(this.dependencies.caps);
     const operation = await this.required(operationId);
     if (operation.state !== "awaiting_approval") blocked("Guarded swap is not awaiting foreground approval.", "swap_approval_state");
@@ -184,62 +230,38 @@ export class GuardedSwapRuntime<Request> {
     const answer = await this.dependencies.foregroundApproval.approve(intent);
     // The human may type for a while: validate against a fresh clock, and reserve at the sealed consent instant.
     const artifact = immutableSnapshot(validateGuardedSwapApprovalArtifact(immutableSnapshot(answer), operation, intent, this.now()));
+    const current = await this.required(operationId);
+    if (binding !== domainHash("apn.guarded-swap-consent-binding.v1", canonicalJson({ operation: current, material,
+      intent: approvalIntent(current, material), caps: immutableSnapshot(this.dependencies.caps) }))) {
+      blocked("Prepared swap approval binding changed during consent.", "swap_material_drift");
+    }
     await this.dependencies.ownerAdmission.assert(operation, material);
-    const current = await this.required(operationId), currentMaterial = await this.material(operation.quote.quoteHash);
-    bindMaterial(current, currentMaterial);
-    if (binding !== domainHash("apn.guarded-swap-consent-binding.v1", canonicalJson({ operation: current, material: currentMaterial, intent: approvalIntent(current, currentMaterial),
-      caps: immutableSnapshot(this.dependencies.caps) }))) blocked("Prepared swap approval binding changed during consent.", "swap_material_drift");
     const policy = await this.assertCurrentPolicy(operation);
-    validateGuardedSwapApprovalArtifact(artifact, operation, intent, this.now());
     const reserved = await this.service.reserve(operation, policy, new Date(artifact.approvedAt));
     await this.dependencies.approvals.store(reserved, artifact);
-    return reserved;
+    return { reserved, material, artifact };
   }
 
-  /** The foreground CLI folds consent and the single send into one command. MCP never reaches this method. */
-  async approveAndExecute(operationId: string, now: Date): Promise<SwapOperationRecord> {
-    const reserved = await this.approve(operationId, now);
-    return await this.execute(reserved.operationId, this.now());
-  }
-
-  async execute(operationId: string, now: Date): Promise<SwapOperationRecord> {
-    const operation = await this.required(operationId);
-    instant(now);
-    if (operation.submissionMarker !== null) return await this.observe(operation);
+  /** Releases an unconsented or expired reservation unsigned, or hands the exact approved reservation to the driver. */
+  private async executeApproved(operation: SwapOperationRecord, material: GuardedSwapPreparedMaterial | null,
+    artifact: GuardedSwapApprovalArtifact | null): Promise<SwapOperationRecord> {
     if (operation.state !== "reserved" || operation.usageLease?.state !== "reserved") {
       blocked("Guarded swap execution requires the exact approved reservation.", "swap_execution_lease");
     }
-    const loadedArtifact = await this.dependencies.approvals.load(operation), at = this.now();
-    const artifact = loadedArtifact === null ? null : immutableSnapshot(loadedArtifact);
-    if (artifact === null || at.toISOString() >= operation.quote.expiresAt) {
+    const at = this.now();
+    if (material === null || artifact === null || at.toISOString() >= operation.quote.expiresAt) {
       // Nothing was signed: without surviving consent, or past the deadline, the reservation is released, never kept.
       return await this.service.failBeforeEffect(operation, at, domainHash("apn.guarded-swap-unsent-release.v1", canonicalJson({
         operationId: operation.operationId, integrityHash: operation.integrityHash, reason: artifact === null ? "approval_missing" : "quote_expired" })));
     }
     validateGuardedSwapApprovalArtifact(artifact, operation, undefined, at);
-    const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);
-    const dependencies = effectDependencies(this.dependencies);
-    await this.dependencies.ownerAdmission.assert(operation, material);
-    const current = await this.required(operationId), currentMaterial = await this.material(operation.quote.quoteHash);
-    if (canonicalJson(current) !== canonicalJson(operation) || canonicalJson(currentMaterial) !== canonicalJson(material) ||
-        canonicalJson(dependencies.caps) !== canonicalJson(this.dependencies.caps))
-      blocked("Prepared swap execution binding changed.", "swap_material_drift");
-    await this.assertCurrentPolicy(operation);
-    validateGuardedSwapApprovalArtifact(artifact, operation, approvalIntent(operation, material), this.now());
     const result = validateSwapOperation(await this.dependencies.execution.execute({ operation, material, approval: artifact,
-      dependencies, now: this.now() }));
+      dependencies: effectDependencies(this.dependencies), now: at }));
     if (result.operationId !== operation.operationId || result.submissionMarker === null) {
       throw new ApnError("APN_STATE_CORRUPT", "Guarded swap execution returned without its durable submission marker.");
     }
     return result;
   }
-
-  async status(operationId: string, now: Date): Promise<SwapOperationRecord> {
-    const operation = await this.required(operationId);
-    instant(now);
-    return operation.submissionMarker === null ? operation : await this.observe(operation);
-  }
-
   private async observe(operation: SwapOperationRecord): Promise<SwapOperationRecord> {
     if (SWAP_TERMINAL_STATES.includes(operation.state)) return operation;
     const material = await this.material(operation.quote.quoteHash); bindMaterial(operation, material);

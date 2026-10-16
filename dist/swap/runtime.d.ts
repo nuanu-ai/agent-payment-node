@@ -121,10 +121,24 @@ export declare class GuardedSwapRuntime<Request> {
         readonly idempotencyKey: string;
     }, now: Date): Promise<SwapOperationRecord>;
     approve(operationId: string, now: Date): Promise<SwapOperationRecord>;
-    /** The foreground CLI folds consent and the single send into one command. MCP never reaches this method. */
+    /**
+     * The foreground CLI folds consent and the single send into one command. MCP never reaches this method. The consent's
+     * post-prompt owner and policy checks, the compare-and-swap reservation and the stored artifact all happened in this
+     * invocation, so execution uses that reserved record, material and artifact without reloading or re-proving them.
+     * A runtime that overrides approve keeps its own approve-then-execute path.
+     */
     approveAndExecute(operationId: string, now: Date): Promise<SwapOperationRecord>;
     execute(operationId: string, now: Date): Promise<SwapOperationRecord>;
     status(operationId: string, now: Date): Promise<SwapOperationRecord>;
+    /**
+     * Pre-prompt checks refuse before the human is asked; after the prompt exactly one re-check runs: the stored operation
+     * and runtime caps still match the consent binding, the owner still controls the account and the active policy still
+     * admits the operation. The material is the immutable snapshot the screen was built from (its store is create-only and
+     * content-addressed by the quote hash), so it is not reloaded.
+     */
+    private consent;
+    /** Releases an unconsented or expired reservation unsigned, or hands the exact approved reservation to the driver. */
+    private executeApproved;
     private observe;
     private now;
     private activePolicy;

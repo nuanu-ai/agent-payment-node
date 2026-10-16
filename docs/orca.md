@@ -91,36 +91,40 @@ accounts, a fixed tick-array layout and a stable vanity program id.
 | Whirlpool program (upgradeable loader) | `whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc` |
 | Whirlpool programdata | `CtXfPzz36dH5Ws4UYKZvrQ1Xqzn42ecDW6y8NKuiN8nD` |
 | WhirlpoolsConfig | `2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ` |
-| SOL/USDC pool (tick spacing 4, fee rate 400 = 0.04%) | `Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE` |
+| SOL/USDC pool (tick spacing 4, fee rate read at quote; 400 = 0.04% when reviewed) | `Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE` |
 | wSOL vault (token A) | `EUuUbDcafPrmVTD5M6qoJAoyyNbihBhugADAxRMn5he9` |
 | USDC vault (token B) | `2WLWEuKDgkDUccTpbwYp1GToYktiSB1cXvreHUwiSUVP` |
 | SPL Token (upgradeable loader, no upgrade authority) | `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`, programdata `3gvYRKWyXRR9xKWe1ZjPhLY5ZJRN7KDB4rFZFGoJfFk2` |
 | Associated Token (BPFLoader2, immutable) | `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` |
 
-Program bytes are verified at quote time and again before signing: one
-`getMultipleAccounts` read for the program accounts and seven 1,500,000-byte
-`dataSlice` reads for the Whirlpool programdata:
+Programs are verified at quote time and again before signing by one
+`getMultipleAccounts` of seven keys with `dataSlice {offset: 0, length: 45}`
+(about 2 KB): each program account and the two ProgramData loader headers.
+APN pins program identities and upgrade authorities, never executable bytes
+(owner decision, APN 0.5.43):
 
-- Whirlpool: the program account must point at the pinned programdata. The
-  SHA-256 of the programdata's 45-byte header (deployment slot 457152296,
-  upgrade authority `GwH3Hiv5mACLX3ufTw1pFsrhSPon5tdw252DBs4Rx4PV`) must be
-  `fabfdb12…3e7f1bdf`, and the SHA-256 of every byte after the header (the
-  executable payload) must be `c422b22f…24b8ee3f`. The first chunk carries the
-  header, so a header change refuses before the other six reads. The full
-  10 MiB programdata hashes to `a49ebc53…17abd04e`. See
-  [the 16 October re-pin](#whirlpool-upgrade-re-pin-16-october-2026); the
-  previous generation (slot 440170207, header `88fc1d0d…4ee1814`, full
-  `b5ee20ce…58048fa0`) pinned the header only.
-- SPL Token programdata (108,645 bytes, no upgrade authority): full SHA-256
-  `573971c9…1dde5fe3`.
-- Associated Token program (105,032 bytes): full SHA-256 `6804554e…d2f7374d`.
-- System and ComputeBudget: native loader with their exact loader names.
+- Whirlpool: the program account must point at ProgramData
+  `CtXfPzz36dH5Ws4UYKZvrQ1Xqzn42ecDW6y8NKuiN8nD`, and that header's upgrade
+  authority must be `GwH3Hiv5mACLX3ufTw1pFsrhSPon5tdw252DBs4Rx4PV` (Orca's Squads
+  v4 vault). A new deployment slot by that authority is accepted and recorded
+  in the quote evidence; another authority, a removed authority or another
+  ProgramData address refuses with `solana_program_authority_changed` or
+  `solana_program_identity_changed`.
+- SPL Token: ProgramData `3gvYRKWyXRR9xKWe1ZjPhLY5ZJRN7KDB4rFZFGoJfFk2` with no
+  upgrade authority, so its bytes can never change.
+- Associated Token (BPFLoader2), System and ComputeBudget (native): loader and
+  executable flag; none of them can be upgraded.
+
+Safety rests on the exact-message simulation against the programs as deployed
+now, the exact account list, the minimum output encoded in the swap
+instruction and the finalized receipt delta check.
 
 The pool must be owned by the Whirlpool program, carry the `Whirlpool`
-discriminator, the pinned config, mints (wSOL A, USDC B), vaults, tick spacing
-and fee rate. A fee change refuses with `orca_pool_fee_drift`. The pool's
-oracle PDA must be absent; an adaptive-fee pool refuses with
-`orca_adaptive_fee`.
+discriminator, the pinned config, mints (wSOL A, USDC B), vaults and tick
+spacing. The fee rate is read from the same account and priced by the local
+swap math, so a retuned fee changes the quote instead of refusing it. The
+pool's oracle PDA must be absent: an adaptive fee would add a variable fee the
+local math cannot reproduce, so such a pool refuses with `orca_adaptive_fee`.
 
 ## Quote
 
@@ -170,13 +174,16 @@ An existing owner wSOL account refuses with `orca_wsol_account_present`
 ## Keyless mechanism pin and owner admission
 
 `apn swap solana orca inventory` lists the pool, the program pins and, under
-`keyless`, the mechanism pin with its digest
-`3daa0909114ad86a7c4c95d17ddc9ecebbecd22e7b9b74452e3745500dc442cb` and the
+`keyless`, the route, the mechanism pin with its digest
+`bf55422e985eaa33dc1ee952e3d71dde28af0fc2092fb47041a8b5ffff5d6081` and the
 protocol registry digest
-`a154c98d2b3c36b51bedeb90750b7e279b10f0f577189f50eb1c11533c4e76e5`
-(`orca-whirlpool-keyless.2026-10-16`). The slot 440170207 pin
-(`7cef079e…0295928`) only identifies existing operations; a policy that
-admits it cannot prepare or approve a new swap. `prepare` needs the profile's active allowlist
+`83c4b5acac83b0a93a191f2fa8f7cd764660e4475a57ebfb1e4ebe7647e92d39`
+(`orca-whirlpool-keyless.2026-10-17`, protocol version
+`whirlpool-upgrade-authority.1`, which names no deployment). The slot 440170207
+pin (`7cef079e…0295928`) and the slot 457152296 pin (`3daa0909…00dc442cb`) only
+identify existing operations. Owners admit the route, which every generation
+shares, so a policy that names any of these pins admits the current one and no
+Whirlpool upgrade needs re-admission. `prepare` needs the profile's active allowlist
 policy to admit native SOL and canonical USDC on
 `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for the `swap` rail,
 both with exactly that pin:
@@ -332,3 +339,15 @@ pacing, `api.mainnet-beta.solana.com`), using the public account
 The guarded stable simulation needs an active owner policy and was not run.
 Nothing was signed or sent; there is no paid receipt for the new program
 bytes.
+
+## Program authority pins and the public-RPC diet (APN 0.5.43)
+
+The byte pins of the 16 October re-pin are retired. One keyless quote now sends
+8 Solana POSTs and receives about 46 KB (it was 15 POSTs and 14.3 MB: seven
+1.5 MB ProgramData slices); the pre-signing guard sends one header read
+instead of eight reads. Each Orca keyless command's physical request budget is
+derived from its read plan (`src/swap/solana-read-plan.ts`): quote 8,
+approve 12, status 4, plus 2 of headroom. The stable USDC→USDT route uses the
+same header verifier and no fee-rate pin; its mechanism is
+`whirlpool-stable-upgrade-authority.1`, with the slot 440170207 and 457152296
+generations kept for existing operations.

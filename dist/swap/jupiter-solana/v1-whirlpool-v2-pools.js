@@ -4,16 +4,16 @@ import { ApnError } from "../../errors.js";
 export const REVIEWED_WHIRLPOOL_V2_POOLS = Object.freeze([
     Object.freeze({ pool: "Esvfxt3jMDdtTZqLF1fqRhDjzM8Bpr7fZxJMrK69PB7e",
         config: "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ", bump: 255,
-        tickSpacing: 2, feeTierIndexSeed: 1027, feeRate: 200, protocolFeeRate: 1300,
+        tickSpacing: 2, feeTierIndexSeed: 1027,
         vaultA: "5fEq5SYpSpnDUDn8dmXUmZeHVaXpL14UirnGajF9QMor",
         vaultB: "iMH9YW3kAgk4kkB74ZHPHESHAQQWPeGWn6Rmty3WJnq",
-        oracle: "GLQdMoJ6RJzWSBLiguhKVqt5K7B6EBSk6xiRBxiLRpbz", adaptiveFeeControlFactor: 80000 }),
+        oracle: "GLQdMoJ6RJzWSBLiguhKVqt5K7B6EBSk6xiRBxiLRpbz" }),
     Object.freeze({ pool: "4HppGTweoGQ8ZZ6UcCgwJKfi5mJD9Dqwy6htCpnbfBLW",
         config: "2LecshUwdy9xi7meFgHtFJQNSKk4KdTrcpvaB56dP2NQ", bump: 251,
-        tickSpacing: 4, feeTierIndexSeed: 1028, feeRate: 400, protocolFeeRate: 1300,
+        tickSpacing: 4, feeTierIndexSeed: 1028,
         vaultA: "htf1KLePyGs8R6xUZ1oEYmkStQ21uP1Hq8GY5P5Mp2G",
         vaultB: "9ma53jxdWJ3RmumpJBJGSSmDJB9ENNEey6frh8iTGvM4",
-        oracle: "31HfnCJfkAmdiAqXTRPVCPo9uDXLRstpK7tU2kk5zYB7", adaptiveFeeControlFactor: 60000 }),
+        oracle: "31HfnCJfkAmdiAqXTRPVCPo9uDXLRstpK7tU2kk5zYB7" }),
 ]);
 export function reviewedWhirlpoolV2Pool(pool) {
     const found = REVIEWED_WHIRLPOOL_V2_POOLS.find(row => row.pool === pool);
