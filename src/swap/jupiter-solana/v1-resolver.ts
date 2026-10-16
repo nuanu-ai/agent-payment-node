@@ -9,6 +9,7 @@ import { JUPITER_V1_MATERIAL_SCHEMA, jupiterV1MaterialDigest, type JupiterV1Sema
 import { routeConfigForQuoteBuild, jupiterV1RouteProgramAuthorities, type JupiterV1RouteId } from "./v1-route-config.js";
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { PROGRAM_HEADER_SLICE, programAuthorityReadKeys, verifyProgramAuthorities } from "../solana-program-authority.js";
+import { readSolanaAccountPages } from "../solana-account-pages.js";
 import { assertJupiterV1RpcLifetimeWindow, readJupiterV1QuoteRpcLifetime } from "./v1-rpc-lifetime.js";
 export class JupiterV1MaterialResolver {
     constructor(private readonly rpc: SolanaRpcPort) { }
@@ -55,23 +56,20 @@ export class JupiterV1MaterialResolver {
         const body = { schemaVersion: JUPITER_V1_MATERIAL_SCHEMA, genesis: SOLANA_MAINNET_GENESIS, payer, quoteResponse: quote, rawBuildResponse: build, quoteResponseHash: jupiterV1ResponseHash(quote), rawBuildResponseHash: jupiterV1ResponseHash(build), lifetime: rpcLifetime === undefined ? jupiterV1Lifetime(build) : { blockhash: rpcLifetime.blockhash, lastValidBlockHeight: rpcLifetime.lastValidBlockHeight }, ...(rpcLifetime === undefined ? {} : { quoteRpcLifetime: rpcLifetime }), ...compiled, rawInstructions: instructions, semanticAccounts: accounts, addressTables: tables, programPins, accountSlot: accounts[0]!.slot, currentBlockHeight: height, networkFeeLamports: fee, tokenAccountRentLamports: rent, maximumNativeExpenseLamports };
         return freezeJson({ ...body, materialDigest: jupiterV1MaterialDigest(body) });
     }
+    /**
+     * Requests of at most eight keys (readSolanaAccountPages), every page pinned to the quote's context slot as its
+     * minContextSlot; each row keeps the slot its page answered at, and the guard requires every row at or after the quote.
+     */
     private async read(keys: readonly string[], minContextSlot: number, slice?: {
         offset: number;
         length: number;
-    }): Promise<JupiterV1SemanticAccount[]> { const result: JupiterV1SemanticAccount[] = [], batches: string[][] = [];
-    const readLimit = this.rpc.maximumAccountsPerRead ?? 16;
-    if (readLimit !== 8 && readLimit !== 16) invalid("Jupiter V1 account read limit is invalid.");
-    for (let offset = 0; offset < keys.length; offset += readLimit) batches.push(keys.slice(offset, offset + readLimit));
-    const responses = await boundedPublicReads(this.rpc, batches.map(batch => ({ method: "getMultipleAccounts", params: [batch, { encoding: "base64", commitment: "confirmed", minContextSlot, ...(slice === undefined ? {} : { dataSlice: slice }) }] })));
-    for (const [index, batch] of batches.entries()) {
-        const response = rpcRecord(responses[index]), slot = rpcAtomic(rpcRecord(response.context).slot).toString();
-        if (BigInt(slot) < BigInt(minContextSlot) || !Array.isArray(response.value) || response.value.length !== batch.length)
-            invalid("Jupiter V1 account snapshot is incomplete.");
-        response.value.forEach((v, i) => { const key = batch[i]!; if (v === null) {
-            result.push({ address: key, existence: "absent", owner: null, executable: false, lamports: "0", dataBase64: "", dataHash: sha256(Buffer.alloc(0)), slot });
-            return;
-        } const a = rawAccount(v, slice === undefined ? 1048576 : slice.length, slice); result.push({ address: key, existence: "present", owner: a.owner, executable: a.executable, lamports: a.lamports.toString(), dataBase64: a.data.toString("base64"), dataHash: sha256(a.data), slot }); });
-    } return result; }
+    }): Promise<JupiterV1SemanticAccount[]> {
+        const read = await readSolanaAccountPages(this.rpc, keys, { encoding: "base64", commitment: "confirmed", minContextSlot, ...(slice === undefined ? {} : { dataSlice: slice }) }, null);
+        return keys.map((key, i) => { const v = read.values[i], slot = read.keySlots[i]!.toString();
+            if (v === null) return { address: key, existence: "absent" as const, owner: null, executable: false, lamports: "0", dataBase64: "", dataHash: sha256(Buffer.alloc(0)), slot };
+            const a = rawAccount(v, slice === undefined ? 1048576 : slice.length, slice);
+            return { address: key, existence: "present" as const, owner: a.owner, executable: a.executable, lamports: a.lamports.toString(), dataBase64: a.data.toString("base64"), dataHash: sha256(a.data), slot }; });
+    }
 }
 async function boundedPublicReads(rpc: SolanaRpcPort, reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]> {
     if (reads.length < 1 || reads.length > 8) invalid("Jupiter V1 public read batch exceeds its finite bound.");

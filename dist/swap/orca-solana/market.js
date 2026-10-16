@@ -6,9 +6,11 @@ import { quoteWhirlpoolExactInAToB, tickArrayStart } from "./math.js";
 import { ORCA_POOL_TICK_SPACING, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT, sha256Hex, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_ACCOUNT_DISCRIMINATOR, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
 import { orcaOwnerBalances } from "./simulation.js";
 /**
- * Reads the pinned pool, its two vaults, the three downward tick arrays derived from the current tick, the oracle PDA
- * and the owner's accounts in one `getMultipleAccounts` at one slot, then prices the exact input with the local port of
- * the program's swap math. The tick arrays are derived from a first pool read and re-derived from the same-slot read.
+ * Reads the pinned pool, the three downward tick arrays derived from the current tick, the oracle PDA, its two vaults
+ * and the owner's accounts: the first eight keys (pool and tick arrays first) in one getMultipleAccounts at one slot,
+ * the owner's two token accounts in a second page no more than ORCA_MAX_SLOT_DRIFT slots away, then prices the exact
+ * input with the local port of the program's swap math. The tick arrays are derived from a first pool read and
+ * re-derived from the pool in the first page.
  */
 export async function readOrcaMarket(rpc, owner, amountIn) {
     solanaAddress(owner);

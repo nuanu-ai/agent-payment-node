@@ -67,7 +67,6 @@ export declare class JupiterV1BudgetedRpc extends SolanaRpc {
     readonly budget: SolanaRpc["budget"];
     constructor(base: SolanaRpc);
     get hasPersistentPacer(): boolean;
-    get maximumAccountsPerRead(): 16 | 8;
     call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
     batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
     sendTransactionAtStart(params: readonly unknown[], beforeStart: () => void | Promise<void>): Promise<unknown>;
