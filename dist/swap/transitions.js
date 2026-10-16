@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SWAP_OPERATION_SCHEMA, validateSwapOperation } from "./model.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
 import { validateOrcaStableNoSendProof } from "./orca-solana/stable-no-send-proof.js";
 const ALLOWED = {
     quoted: ["prepared", "failed_before_effect"],
@@ -26,7 +26,7 @@ export function transitionSwapOperation(opValue, state, evidence, now) {
     ]))
         invalid("Swap transition evidence is invalid.");
     const stableRecovery = op.state === "submitting" && state === "failed_before_effect" &&
-        op.mechanismDigest === ORCA_STABLE_GUARDED_MECHANISM_DIGEST;
+        isOrcaStableGuardedMechanismDigest(op.mechanismDigest);
     if (!ALLOWED[op.state].includes(state) && !stableRecovery)
         blocked("Swap operation transition is invalid.");
     const at = instant(now);
@@ -76,7 +76,7 @@ function transitionPatch(op, state, evidence, at) {
     }
     if (state === "failed_before_effect") {
         if (op.state === "submitting") {
-            if (op.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST || op.submissionMarker === null ||
+            if (!isOrcaStableGuardedMechanismDigest(op.mechanismDigest) || op.submissionMarker === null ||
                 op.receiptProof !== null || op.usageLease === null || evidence.usageLease === undefined ||
                 evidence.orcaStableNoSendProof === undefined || Object.keys(evidence).length !== 3) {
                 invalid("Marked stable failure requires its exact no-send proof and released lease.");

@@ -4,7 +4,7 @@ import { ApnError } from "../../errors.js";
 import { GuardedSwapService } from "../service.js";
 import { OrcaStableExecutionBindingStore } from "./stable-execution-journal.js";
 import { SavedOrcaStableMaterialStore } from "./stable-material.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "./stable-mechanism.js";
 import { orcaStableNoSendProof, OrcaStableNoSendProofStore } from "./stable-no-send-proof.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT } from "./pins.js";
 import { hasOrcaStableSendClaim } from "./stable-effect-runtime.js";
@@ -18,7 +18,7 @@ export async function recoverOrcaStableNoSend(service, materials, bindings, proo
         const operation = await service.operations.loadAny(operationId);
         if (operation === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
-        if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST)
+        if (!isOrcaStableGuardedMechanismDigest(operation.mechanismDigest))
             blocked("Wrong stable mechanism.", "orca_stable_mechanism_mismatch");
         if (!((operation.state === "submitting" || operation.state === "failed_before_effect") &&
             operation.submissionMarker !== null && operation.receiptProof === null && operation.usageLease !== null))

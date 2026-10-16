@@ -7,7 +7,7 @@ import { GuardedSwapService } from "../service.js";
 import { type SwapOperationRecord } from "../model.js";
 import { SavedOrcaStableMaterialStore, type OrcaStableMaterial } from "./stable-material.js";
 import { admitOrcaStableOwner, recheckOrcaStableOwner, type OrcaStableAdmissionPorts } from "./stable-admission.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest, ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT } from "./pins.js";
 import { ORCA_STABLE_POOL } from "./stable-readonly.js";
 import { stableReservationAdmissionPorts } from "./stable-reservation-admission.js";
@@ -126,7 +126,7 @@ export async function confirmOrcaStableNoSendRecovery(service: GuardedSwapServic
   operationId: string, consent: OrcaStableConsentPort, clock: () => Date): Promise<void> {
   const operation = await service.operations.loadAny(operationId);
   if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
-  if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
+  if (!isOrcaStableGuardedMechanismDigest(operation.mechanismDigest) ||
       !["submitting", "failed_before_effect"].includes(operation.state) ||
       operation.submissionMarker === null || operation.usageLease === null || operation.receiptProof !== null)
     blocked("Stable operation has no marked no-send recovery boundary.", "orca_stable_effect_boundary");
