@@ -21,8 +21,14 @@ const EIP1967_IMPLEMENTATION_SLOT =
 const USER_OPERATION_EVENT =
   "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f" as Hex;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
-const SCAN_WINDOW = 256n;
-const LOG_WINDOW = 10n;
+/**
+ * One resume scans from the cursor to the current safe head in eth_getLogs windows of up to 2,000 blocks. A range
+ * refusal (or an over-bound answer) halves the window; any other refusal stops the pass with the progress kept. The
+ * query budget is the read plan: one Transfer query per window plus one UserOperation query when a locator exists,
+ * and halvings spend from the same budget (24 queries = at least 12 windows, about 13 hours of Base, per resume).
+ */
+const LOG_WINDOW = 2_000n;
+const MAX_LOG_QUERIES_PER_PASS = 24;
 const ENTRY_POINT_SELECTOR = "0xb0d691fe" as Hex;
 const IMPLEMENTATION_SELECTOR = "0x5c60da1b" as Hex;
 
@@ -58,7 +64,8 @@ export async function coinbaseGaslessSnapshot(rpc: RpcPort, sender: Address): Pr
   const { rpcOrigin } = await rpc.assertBaseChain();
   const call = requiredCall(rpc);
   const safe = block(await call("eth_getBlockByNumber", ["safe", false]));
-  const tag = quantity(BigInt(safe.numberAtomic));
+  // EIP-1898: every read is pinned to this canonical safe block, so no header recheck follows them.
+  const tag = { blockHash: safe.hash, requireCanonical: true };
   const [balanceRaw, entryPointCode, accountCode, implementationWord, accountEntryPoint, accountImplementation] = await Promise.all([
     call("eth_call", [{ to: BASE_USDC, data: `0x70a08231${sender.slice(2).toLowerCase().padStart(64, "0")}` }, tag]),
     call("eth_getCode", [COINBASE_ENTRY_POINT, tag]), call("eth_getCode", [sender, tag]),
@@ -70,8 +77,6 @@ export async function coinbaseGaslessSnapshot(rpc: RpcPort, sender: Address): Pr
   const [implementationCode, implementationEntryPoint] = await Promise.all([
     call("eth_getCode", [implementation, tag]), call("eth_call", [{ to: implementation, data: ENTRY_POINT_SELECTOR }, tag]),
   ]);
-  const rechecked = block(await call("eth_getBlockByNumber", [tag, false]));
-  if (!sameBlock(safe, rechecked)) fail("coinbase_gasless_prepare_reorg");
   const epCode = nonemptyCode(entryPointCode), ownerCode = nonemptyCode(accountCode), implCode = nonemptyCode(implementationCode);
   if (keccak256(epCode) !== COINBASE_ENTRY_POINT_CODE_HASH || keccak256(ownerCode) !== COINBASE_ACCOUNT_CODE_HASH ||
     implementation !== COINBASE_ACCOUNT_IMPLEMENTATION || wordAddress(accountImplementation) !== implementation ||
@@ -96,7 +101,7 @@ export async function observeCoinbaseGasless(rpc: RpcPort, operation: OperationR
       if (identity.chainId !== CHAIN_ID || identity.rpcOrigin !== COINBASE_OBSERVATION_ORIGIN) fail("coinbase_gasless_logs_origin_changed");
       await assertBlock(logsCall!, binding.safeBlock);
     }
-    await verifyFrozenDeployment(call, binding, operation.walletAddress);
+    // No state is read at the prepare block: the effect is proven from the receipt of a transaction at or below safe.
     if (operation.coinbaseGaslessCursor?.previousEndBlock !== null && operation.coinbaseGaslessCursor?.previousEndBlock !== undefined) {
       await assertBlock(call, operation.coinbaseGaslessCursor.previousEndBlock);
     }
@@ -104,45 +109,69 @@ export async function observeCoinbaseGasless(rpc: RpcPort, operation: OperationR
     const start = BigInt(operation.coinbaseGaslessCursor?.nextBlockAtomic ??
       (BigInt(binding.safeBlock.numberAtomic) + 1n).toString());
     if (BigInt(safe.numberAtomic) < start) return { status: "pending", cursor: cursor(operation, null), reason: "coinbase_gasless_safe_head_before_cursor" };
-    const end = minimum(BigInt(safe.numberAtomic), start + SCAN_WINDOW - 1n);
-    const endBlock = block(await call("eth_getBlockByNumber", [quantity(end), false]));
-    if (logsCall !== undefined) { await assertBlock(logsCall, safe); await assertBlock(logsCall, endBlock); }
-    const candidates = new Set<Hex>();
+    // The logs endpoint must serve the same canonical safe block; safe blocks do not reorg, so nothing is rechecked later.
+    if (logsCall !== undefined) await assertBlock(logsCall, safe);
     const locator = operation.coinbaseGaslessLocator;
     let locatorTransaction: Hex | null = null;
-    let locatorUserOperationTransaction: Hex | null = null;
+    if (locator !== undefined && await call("eth_getTransactionByHash", [locator.hash]) !== null) locatorTransaction = locator.hash;
+    const scanned = await scanRange(logs, binding, operation, locator?.hash ?? null, start, BigInt(safe.numberAtomic));
+    const end = scanned.end;
+    const candidates = new Set<Hex>();
     if (locator !== undefined) {
-      const tx = await call("eth_getTransactionByHash", [locator.hash]);
-      if (tx !== null) locatorTransaction = locator.hash;
-      const located = await scanUserOperation(logs, binding, operation.walletAddress, locator.hash, start, end);
-      if (located.size === 1) locatorUserOperationTransaction = [...located][0]!;
-      if ((locatorTransaction !== null && locatorUserOperationTransaction !== null) || located.size > 1) {
+      const locatorUserOperationTransaction = scanned.located.size === 1 ? [...scanned.located][0]! : null;
+      if ((locatorTransaction !== null && locatorUserOperationTransaction !== null) || scanned.located.size > 1) {
         return ambiguous(operation, "coinbase_gasless_locator_namespace_ambiguous");
       }
       if (locatorTransaction !== null) candidates.add(locatorTransaction);
       if (locatorUserOperationTransaction !== null) candidates.add(locatorUserOperationTransaction);
     }
-    const transfers = await scanTransfers(logs, operation, start, end);
-    for (const candidate of transfers) candidates.add(candidate);
+    for (const candidate of scanned.transfers) candidates.add(candidate);
     if (candidates.size > 1) return ambiguous(operation, "coinbase_gasless_multiple_candidates");
     const candidate = [...candidates][0];
     if (candidate !== undefined) {
       const inspected = await inspectCandidate(call, operation, binding, candidate, safe);
       if (inspected !== null) {
-        await assertBlock(call, endBlock); await assertBlock(call, safe);
-        if (logsCall !== undefined) { await assertBlock(logsCall, binding.safeBlock); await assertBlock(logsCall, safe); await assertBlock(logsCall, endBlock); }
         const settlement = logsRpc === undefined ? inspected : withObservationSource(inspected, binding.rpcOrigin);
         return { status: "safe", cursor: cursor(operation, null), settlement };
       }
     }
-    await assertBlock(call, endBlock); await assertBlock(call, safe);
-    if (logsCall !== undefined) { await assertBlock(logsCall, binding.safeBlock); await assertBlock(logsCall, safe); await assertBlock(logsCall, endBlock); }
+    const endBlock = end === BigInt(safe.numberAtomic) ? safe : block(await call("eth_getBlockByNumber", [quantity(end), false]));
+    if (logsCall !== undefined && endBlock !== safe) await assertBlock(logsCall, endBlock);
     return { status: "not_found", cursor: { nextBlockAtomic: (end + 1n).toString(), previousEndBlock: endBlock },
       reason: "coinbase_gasless_no_positive_match" };
   } catch (error) {
     if (error instanceof CoinbaseObservationAmbiguity) return ambiguous(operation, error.message);
     return unresolved(operation, "coinbase_gasless_observation_unresolved");
   }
+}
+
+/**
+ * Scans [start, safeEnd] window by window. Each window is committed only when all of its queries succeeded; a
+ * candidate stops the pass. Throws the refusal when not even one window could be read.
+ */
+async function scanRange(logs: RawLogs, binding: CoinbaseGaslessBinding, operation: OperationRecord, locatorHash: Hex | null,
+  start: bigint, safeEnd: bigint): Promise<{ readonly end: bigint; readonly located: Set<Hex>; readonly transfers: Set<Hex> }> {
+  const located = new Set<Hex>(), transfers = new Set<Hex>();
+  let from = start, window = LOG_WINDOW, queries = 0, end: bigint | null = null, refusal: unknown;
+  while (from <= safeEnd && queries + (locatorHash === null ? 1 : 2) <= MAX_LOG_QUERIES_PER_PASS) {
+    const to = minimum(safeEnd, from + window - 1n);
+    let windowLocated: Set<Hex> = new Set(), windowTransfers: Set<Hex>;
+    try {
+      if (locatorHash !== null) { queries += 1; windowLocated = await scanUserOperation(logs, binding, operation.walletAddress, locatorHash, from, to); }
+      queries += 1; windowTransfers = await scanTransfers(logs, operation, from, to);
+    } catch (error) {
+      refusal = error;
+      // The log helper answers a range refusal, a pruned range or an over-bound result as APN_RPC_AMBIGUOUS.
+      if (error instanceof ApnError && error.code === "APN_RPC_AMBIGUOUS" && window > 1n) { window /= 2n; continue; }
+      break;
+    }
+    for (const hash of windowLocated) located.add(hash);
+    for (const hash of windowTransfers) transfers.add(hash);
+    end = to; from = to + 1n;
+    if (located.size > 0 || transfers.size > 0) break;
+  }
+  if (end === null) throw refusal ?? new ApnError("APN_RPC_AMBIGUOUS", "coinbase_gasless_log_budget", { reason: "coinbase_gasless_log_budget" });
+  return { end, located, transfers };
 }
 
 async function inspectCandidate(call: RawCall, operation: OperationRecord, binding: CoinbaseGaslessBinding,
@@ -155,13 +184,14 @@ async function inspectCandidate(call: RawCall, operation: OperationRecord, bindi
   if (rpcHash(tx.hash) !== transactionHash || rpcHash(receipt.transactionHash) !== transactionHash ||
     uint(receipt.status) !== 1n || address(tx.to) !== binding.entryPoint || uint(tx.value) !== 0n ||
     sameAddress(address(tx.from), operation.walletAddress)) throw new CoinbaseObservationAmbiguity("coinbase_gasless_outer_identity");
-  const blockNumber = uint(receipt.blockNumber), included = block(await call("eth_getBlockByNumber", [quantity(blockNumber), false]));
-  if (included.hash !== rpcHash(receipt.blockHash) || rpcHash(tx.blockHash) !== included.hash || uint(tx.blockNumber) !== blockNumber ||
-    BigInt(safe.numberAtomic) < blockNumber) return null;
+  const blockNumber = uint(receipt.blockNumber);
+  if (BigInt(safe.numberAtomic) < blockNumber) return null;
+  // One header read serves both the hash binding and the transaction-membership check.
+  const blockRaw = record(await call("eth_getBlockByNumber", [quantity(blockNumber), false])), included = block(blockRaw);
+  if (included.hash !== rpcHash(receipt.blockHash) || rpcHash(tx.blockHash) !== included.hash || uint(tx.blockNumber) !== blockNumber) return null;
   if (blockNumber <= BigInt(binding.safeBlock.numberAtomic)) {
     throw new CoinbaseObservationAmbiguity("coinbase_gasless_candidate_predates_safe_anchor");
   }
-  const blockRaw = record(await call("eth_getBlockByNumber", [quantity(blockNumber), false]));
   const transactionIndex = uint(receipt.transactionIndex);
   if (!Array.isArray(blockRaw.transactions) || transactionIndex >= BigInt(blockRaw.transactions.length) ||
     blockRaw.transactions[Number(transactionIndex)] !== transactionHash || uint(tx.transactionIndex) !== transactionIndex) {
@@ -195,71 +225,45 @@ async function inspectCandidate(call: RawCall, operation: OperationRecord, bindi
     uintWord(senderDebits[0]!.data).toString() !== operation.amountAtomic) {
     throw new CoinbaseObservationAmbiguity("coinbase_gasless_usdc_accounting");
   }
-  const tag = quantity(blockNumber), safeTag = quantity(BigInt(safe.numberAtomic));
-  const [entryPointCode, safeEntryPointCode, accountCode, implWord, implCode, paymasterCode, safePaymasterCode] = await Promise.all([
-    call("eth_getCode", [binding.entryPoint, tag]), call("eth_getCode", [binding.entryPoint, safeTag]),
-    call("eth_getCode", [operation.walletAddress, tag]), call("eth_getStorageAt", [operation.walletAddress, EIP1967_IMPLEMENTATION_SLOT, tag]),
-    call("eth_getCode", [binding.accountImplementation, tag]),
-    call("eth_getCode", [paymaster, tag]), call("eth_getCode", [paymaster, safeTag]),
-  ]);
-  if (keccak256(nonemptyCode(entryPointCode)) !== binding.entryPointCodeHash ||
-    keccak256(nonemptyCode(safeEntryPointCode)) !== binding.entryPointCodeHash ||
-    keccak256(nonemptyCode(accountCode)) !== binding.accountCodeHash || wordAddress(implWord) !== binding.accountImplementation ||
-    keccak256(nonemptyCode(implCode)) !== binding.accountImplementationCodeHash ||
-    keccak256(nonemptyCode(paymasterCode)) !== keccak256(nonemptyCode(safePaymasterCode))) {
-    throw new CoinbaseObservationAmbiguity("coinbase_gasless_deployment_drift");
-  }
-  await assertBlock(call, included); await assertBlock(call, safe);
+  // The effect is the receipt: EntryPoint v0.6 (immutable, fixed address) emitted the exact UserOperationEvent and USDC
+  // emitted exactly one sender debit to the recipient. No code or storage is read at the inclusion block (archive state);
+  // the paymaster's code is read once at the current head only to record its identity.
+  const paymasterCode = nonemptyCode(await call("eth_getCode", [paymaster, "latest"]));
   const body = { schemaVersion: "apn.coinbase-gasless-settlement.v1" as const, userOperationHash, transactionHash,
-    nonceAtomic: nonce.toString(), paymaster, paymasterCodeHash: keccak256(nonemptyCode(paymasterCode)), block: included,
+    nonceAtomic: nonce.toString(), paymaster, paymasterCodeHash: keccak256(paymasterCode), block: included,
     safeBlock: safe, grossAtomic: operation.amountAtomic, netAtomic: operation.amountAtomic, feeAtomic: "0" as const,
     senderNativeDebitWei: "0" as const };
   return { ...body, evidenceHash: hashObject(body) };
 }
 
-async function verifyFrozenDeployment(call: RawCall, binding: CoinbaseGaslessBinding, sender: Address): Promise<void> {
-  const tag = quantity(BigInt(binding.safeBlock.numberAtomic));
-  const [frozen, ep, account, implWord, implCode] = await Promise.all([
-    call("eth_getBlockByNumber", [tag, false]), call("eth_getCode", [binding.entryPoint, tag]),
-    call("eth_getCode", [sender, tag]), call("eth_getStorageAt", [sender, EIP1967_IMPLEMENTATION_SLOT, tag]),
-    call("eth_getCode", [binding.accountImplementation, tag]),
-  ]);
-  if (!sameBlock(block(frozen), binding.safeBlock) || keccak256(nonemptyCode(ep)) !== binding.entryPointCodeHash ||
-    keccak256(nonemptyCode(account)) !== binding.accountCodeHash || wordAddress(implWord) !== binding.accountImplementation ||
-    keccak256(nonemptyCode(implCode)) !== binding.accountImplementationCodeHash) fail("coinbase_gasless_frozen_deployment_changed");
-}
-
 async function scanUserOperation(logs: RawLogs, binding: CoinbaseGaslessBinding, sender: Address,
   hash: Hex, start: bigint, end: bigint): Promise<Set<Hex>> {
   const candidates = new Set<Hex>();
-  for (let from = start; from <= end; from += LOG_WINDOW) {
-    const to = minimum(end, from + LOG_WINDOW - 1n);
-    const rows = await logs({ address: binding.entryPoint, fromBlock: quantity(from), toBlock: quantity(to),
-      topics: [USER_OPERATION_EVENT, hash, addressWord(sender)] });
-    for (const item of rows) {
-      const log = rpcLog(item);
-      if (log.address !== binding.entryPoint || log.topics.length !== 4 || log.topics[0] !== USER_OPERATION_EVENT ||
-        log.topics[1] !== hash || log.topics[2] !== addressWord(sender)) fail("coinbase_gasless_userop_filter_identity");
-      candidates.add(log.transactionHash);
+  const rows = await logs({ address: binding.entryPoint, fromBlock: quantity(start), toBlock: quantity(end),
+    topics: [USER_OPERATION_EVENT, hash, addressWord(sender)] });
+  for (const item of rows) {
+    const log = rpcLog(item);
+    if (log.address !== binding.entryPoint || log.topics.length !== 4 || log.topics[0] !== USER_OPERATION_EVENT ||
+      log.topics[1] !== hash || log.topics[2] !== addressWord(sender) || !inRange(log.blockNumberAtomic, start, end)) {
+      fail("coinbase_gasless_userop_filter_identity");
     }
+    candidates.add(log.transactionHash);
   }
   return candidates;
 }
 
 async function scanTransfers(logs: RawLogs, operation: OperationRecord, start: bigint, end: bigint): Promise<Set<Hex>> {
   const candidates = new Set<Hex>();
-  for (let from = start; from <= end; from += LOG_WINDOW) {
-    const to = minimum(end, from + LOG_WINDOW - 1n);
-    const rows = await logs({ address: BASE_USDC, fromBlock: quantity(from), toBlock: quantity(to),
-      topics: [TRANSFER_TOPIC, addressWord(operation.walletAddress), addressWord(operation.recipient)] });
-    for (const item of rows) {
-      const log = rpcLog(item);
-      if (log.address !== BASE_USDC || log.topics.length !== 3 || log.topics[0] !== TRANSFER_TOPIC ||
-        log.topics[1] !== addressWord(operation.walletAddress) || log.topics[2] !== addressWord(operation.recipient)) {
-        fail("coinbase_gasless_transfer_filter_identity");
-      }
-      if (uintWord(log.data).toString() === operation.amountAtomic) candidates.add(log.transactionHash);
+  const rows = await logs({ address: BASE_USDC, fromBlock: quantity(start), toBlock: quantity(end),
+    topics: [TRANSFER_TOPIC, addressWord(operation.walletAddress), addressWord(operation.recipient)] });
+  for (const item of rows) {
+    const log = rpcLog(item);
+    if (log.address !== BASE_USDC || log.topics.length !== 3 || log.topics[0] !== TRANSFER_TOPIC ||
+      log.topics[1] !== addressWord(operation.walletAddress) || log.topics[2] !== addressWord(operation.recipient) ||
+      !inRange(log.blockNumberAtomic, start, end)) {
+      fail("coinbase_gasless_transfer_filter_identity");
     }
+    if (uintWord(log.data).toString() === operation.amountAtomic) candidates.add(log.transactionHash);
   }
   return candidates;
 }
@@ -383,6 +387,7 @@ function nonemptyCode(value: unknown): Hex { const code = rpcHex(value); if (cod
 function addressWord(value: Address): Hex { return `0x${value.slice(2).toLowerCase().padStart(64, "0")}`; }
 function quantity(value: bigint): Hex { if (value < 0n) fail("coinbase_gasless_quantity"); return `0x${value.toString(16)}`; }
 function minimum(a: bigint, b: bigint): bigint { return a < b ? a : b; }
+function inRange(numberAtomic: string, start: bigint, end: bigint): boolean { const n = BigInt(numberAtomic); return n >= start && n <= end; }
 class CoinbaseObservationAmbiguity extends Error {}
 function fail(reason: string, code: "APN_RPC_PROTOCOL" | "APN_RPC_CONFIG" | "APN_STATE_CORRUPT" = "APN_RPC_PROTOCOL"): never {
   throw new ApnError(code, reason, { reason });

@@ -55,16 +55,16 @@ export type MetaMaskScanResult =
 export async function scanMetaMaskRedemption(context: MetaMaskScanContext, intent: MetaMaskGaslessIntent,
   cursor: MetaMaskGaslessCursor): Promise<MetaMaskScanResult> {
   const { call, row } = context;
-  await recheckBlock(call, cursor.startBlock);
+  // The start block is the frozen safe anchor the observing endpoint re-anchored before this scan; a canonical prior
+  // window end proves its ancestors. Finality blocks do not reorg and the counter is read pinned by hash, so no
+  // header is read twice.
   if (cursor.previousEndBlock !== null) await recheckBlock(call, cursor.previousEndBlock);
   const finality = (await rpcBlock(call, row.finalityTag)).block;
   const start = BigInt(cursor.nextBlockAtomic), last = BigInt(finality.numberAtomic);
   if (last < start) {
-    await recheckBlock(call, finality);
     return { kind: "progress", cursor, evidenceHash: hashObject({ cursor, finality, empty: true }) };
   }
   const counter = await mmRedemptionCount(context, intent.delegationHash, finality);
-  await recheckBlock(call, finality);
   if (counter === 0n) {
     return { kind: "progress", cursor: { startBlock: cursor.startBlock, nextBlockAtomic: (last + 1n).toString(),
       previousEndBlock: finality }, evidenceHash: hashObject({ purpose: "apn.metamask-gasless.counter-scan.v1",
@@ -87,9 +87,9 @@ export async function mmRedemptionCount(context: MetaMaskScanContext, delegation
 }
 
 /**
- * Bounded windows from the cursor towards finality. A window the RPC refuses as too wide (or rate-limits) is halved
- * and asked again, down to the minimum width; every request counts against the per-resume budget. Each window's end
- * header is read before its logs and rechecked after them, so a window is only passed once it is proved empty.
+ * Bounded windows from the cursor towards finality. A window the RPC refuses as too wide is halved and asked again,
+ * down to the minimum width; a rate limit stops the pass. Every request counts against the per-resume budget. Each
+ * window ends at or below the finality block, which does not reorg, so its end header is read once.
  */
 async function scanLogs(context: MetaMaskScanContext, intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor,
   finality: MetaMaskGaslessBlock): Promise<MetaMaskScanResult> {
@@ -109,19 +109,19 @@ async function scanLogs(context: MetaMaskScanContext, intent: MetaMaskGaslessInt
       } catch (error) {
         const reason = limitReason(error);
         if (reason === null) throw error;
-        if (window / 2n < MM_MIN_SCAN_WINDOW) return { kind: "stopped", cursor: current, reason };
+        // A rate limit is the RPC asking APN to slow down: stop with the progress kept, never narrow and re-ask.
+        if (reason === "mm_gasless_rpc_rate_limited" || window / 2n < MM_MIN_SCAN_WINDOW) return { kind: "stopped", cursor: current, reason };
         window /= 2n;
         continue;
       }
       if (!Array.isArray(rawLogs) || rawLogs.length > MAX_SCAN_LOGS) mmFail("mm_gasless_evidence_invalid");
       const candidates = new Set<Hex>();
-      for (const raw of rawLogs) candidates.add(verifyScanLog(rpcRecord(raw), intent, from, to));
+      for (const raw of rawLogs) candidates.add(verifyScanLog(rpcRecord(raw), intent, from, to, row));
       if (candidates.size > MAX_SCAN_CANDIDATES) mmFail("mm_gasless_evidence_invalid");
       if (candidates.size > 0) {
         return { kind: "found", cursor: current, candidates: [...candidates], recheck: [end, finality],
           evidenceHash: hashObject({ cursor: current, from: from.toString(), to: to.toString(), end, finality }) };
       }
-      await recheckBlock(call, end);
       scanned.push({ from: from.toString(), to: to.toString(), end });
       current = { startBlock: cursor.startBlock, nextBlockAtomic: (to + 1n).toString(), previousEndBlock: end };
     }
@@ -130,7 +130,6 @@ async function scanLogs(context: MetaMaskScanContext, intent: MetaMaskGaslessInt
     if (reason === null || current === cursor) throw error;
     return { kind: "stopped", cursor: current, reason };
   }
-  await recheckBlock(call, finality);
   // The counter proved a redemption no later than finality, and every block before the cursor is proved free of
   // one. Reaching finality without its event means the RPC's answers contradict each other.
   if (BigInt(current.nextBlockAtomic) > last) mmEvidenceFail("mm_gasless_evidence_invalid", "counter", "eth_getLogs");

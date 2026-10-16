@@ -47,6 +47,7 @@ export declare class MetaMaskSmartAccountDirectAdapter implements DirectExecutio
     private readonly engine;
     private readonly now;
     readonly mode: "delegated_session_transaction";
+    private preflighted;
     constructor(permissions: SmartAccountPermissionStorePort, effects: SmartAccountDirectEffectStorePort, rpc: RpcPort, allowance: SmartAccountAllowancePort, engine?: SmartAccountDelegationEnginePort, now?: () => Date);
     prepare(input: ProviderDirectPrepareInput): Promise<ProviderDelegatedDirectPreparation>;
     preflight(input: ProviderDirectExecutionInput): Promise<void>;

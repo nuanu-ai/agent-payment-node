@@ -70,7 +70,8 @@ test("Smart Account RPC binds the full endpoint and performs a numeric-block uns
   const { fixture, safe, rpc, transport } = unspentRpc(0n);
   assert.equal(rpc.endpointOrigin, "https://rpc.example"); assert.equal(rpc.endpointHash, sha256(RPC_URL));
   await rpc.assertUnspent({ binding: fixture.intent.binding, material: fixture.material, safeBlock: safe });
-  assert.deepEqual(transport.calls.map(call => call.method), ["eth_chainId", "eth_call", "eth_getBlockByNumber"]);
+  // The guard's safe block does not reorg: the spent read at its number is not followed by a header recheck.
+  assert.deepEqual(transport.calls.map(call => call.method), ["eth_chainId", "eth_call"]);
   assert.ok(transport.calls.every(call => call.jsonrpc === "2.0" && typeof call.id === "string"));
 });
 
@@ -128,8 +129,14 @@ test("snapshot accepts every exact runtime preimage and canonical safe-state ABI
   assert.equal(snapshot.safeState.availableAtomic, "1000000"); assert.equal(snapshot.safeState.currentNonceAtomic, "0");
   assert.equal(snapshot.safeState.ownerCodeHash, registry.ownerDesignationCodeHash);
   assert.ok(transport.calls.length <= 64);
-  assert.equal(transport.calls.length, 27);
-  assert.equal(timeline.now(), 26_000);
+  assert.equal(transport.calls.length, 26, "the safe block is not rechecked after its reads (was 27)");
+  assert.equal(timeline.now(), 25_000);
+  // A later guard of the same operation reuses the code pins this snapshot proved: owner and session code, balances,
+  // allowance and nonce are read fresh, and no protocol or token code is downloaded again.
+  transport.calls.length = 0;
+  await rpc.snapshot(intent.binding, preparation);
+  assert.equal(transport.calls.length, 12, "later guard snapshot: 12 calls instead of 26");
+  assert.equal(transport.calls.filter(call => call.method === "eth_getCode").length, 2);
   assert.ok(transport.calls.filter(call => ["eth_getCode", "eth_getStorageAt", "eth_call", "eth_getBalance"]
     .includes(call.method)).every(call => call.params.at(-1) === "0x2faf06c"));
 });
@@ -172,9 +179,10 @@ test("one failed pass cancels its queued starts without retry and does not poiso
   assert.deepEqual(starts, [0, 1_000]);
 });
 
-test("bounded log-range reduction remains usable after a range rejection", async () => {
+test("bounded log-range reduction remains usable after a range rejection; a rate limit ends the pass", async () => {
   const fixture = saRedemptionFixture(), timeline = pacingTimeline();
-  const transport = new ReplyTransport((_request, call) => call === 1 ? { status: 429, body: "range rejected" } : "0x2105");
+  const transport = new ReplyTransport((request, call) => call === 1
+    ? { jsonrpc: "2.0", id: request.id, error: { code: -32005, message: "block range is too large" } } : "0x2105");
   const rpc = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
     validator: fixture.validator, transport, pacing: timeline.pacing });
   const pass = (rpc as unknown as { pass(): (method: "eth_getLogs" | "eth_chainId",
@@ -182,6 +190,15 @@ test("bounded log-range reduction remains usable after a range rejection", async
   await assert.rejects(pass("eth_getLogs", [{}]));
   assert.equal(await pass("eth_chainId", []), "0x2105");
   assert.equal(transport.calls.length, 2); assert.equal(timeline.now(), 1_000);
+
+  const limited = new ReplyTransport((_request, call) => call === 1 ? { status: 429, body: "slow down" } : "0x2105");
+  const paced = new SmartAccountGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock,
+    validator: fixture.validator, transport: limited, pacing: fastPacing() });
+  const limitedPass = (paced as unknown as { pass(): (method: "eth_getLogs" | "eth_chainId",
+    params: readonly unknown[]) => Promise<unknown> }).pass();
+  await assert.rejects(limitedPass("eth_getLogs", [{}]));
+  await assert.rejects(limitedPass("eth_chainId", []), "a rate limit is not a range signal: the pass stops");
+  assert.equal(limited.calls.length, 1);
 });
 
 test("Smart Account RPC rechecks the pass deadline at actual transport start", async () => {
@@ -210,8 +227,8 @@ test("observation returns its unchanged cursor when spacing exhausts the pass bu
   assert.equal(result.unusedProof, null); assert.equal(transport.calls.length, 1);
 });
 
-test("Smart Account unspent guard rejects nonzero spend, changed anchor and changed material identity", async () => {
-  for (const setup of [unspentRpc(1n), unspentRpc(0n, true)]) {
+test("Smart Account unspent guard rejects nonzero spend and changed material identity", async () => {
+  for (const setup of [unspentRpc(1n)]) {
     await assert.rejects(setup.rpc.assertUnspent({ binding: setup.fixture.intent.binding,
       material: setup.fixture.material, safeBlock: setup.safe }), rejected);
   }

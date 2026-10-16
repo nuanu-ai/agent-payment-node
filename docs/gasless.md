@@ -286,14 +286,18 @@ APN writes `started` before exactly one `awal@2.12.1 send ... --chain base
 in error text is only a locator. A missing hash is allowed. After `started`,
 approval replay and resume never invoke AWAL again.
 
-Recovery scans at most 256 safe Base blocks per resume, in log requests of at
-most ten blocks. Finite absence advances the durable cursor but never proves
-failure or permits redispatch. Completion requires one independently verified
-EntryPoint v0.6 UserOperation for the frozen account call, exact canonical-USDC
-sender debit and recipient credit, a unique native-fee sponsorship event,
-unchanged account deployment, transaction/block membership and safe inclusion.
-Multiple candidates, deployment drift, reorgs, nonzero token fees, extra account
-calls or unavailable evidence retain the guard. Keep the bound Coinbase account
+Recovery scans from the durable cursor to the current safe Base head in one
+resume, with `eth_getLogs` windows of up to 2,000 blocks that halve when the RPC
+refuses the range (24 log queries per resume). A rate limit stops the pass and
+keeps the windows already read. Finite absence advances the durable cursor but
+never proves failure or permits redispatch. Completion requires one
+independently verified EntryPoint v0.6 UserOperation for the frozen account
+call, exact canonical-USDC sender debit and recipient credit, a unique
+native-fee sponsorship event, transaction/block membership and safe inclusion,
+all from the receipt; no historical state is read, so a keyless non-archive RPC
+can close the operation. The Coinbase deployment pins gate prepare and approval
+only. Multiple candidates, reorgs, nonzero token fees, extra account calls or
+unavailable evidence retain the guard. Keep the bound Coinbase account
 exclusive to this operation until its positive settlement is terminal.
 
 ## Local wallet permissions and failures
