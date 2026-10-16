@@ -219,7 +219,7 @@ export interface SmartAccountGaslessRpcObservation {
 }
 export type SmartAccountGaslessState = "awaiting_approval" | "execution_pending" | "material_pending" |
   "material_sealed" | "exposure_pending" | "verified_pending" | "dispatch_pending" | "submitted_pending" |
-  "unknown_finality" | "failed_before_effect" | "expired_unused" | "completed";
+  "unknown_finality" | "failed_before_effect" | "expired_unused" | "completed" | "abandoned_unknown";
 export interface SmartAccountGaslessMutable {
   readonly state: SmartAccountGaslessState;
   readonly approval: SmartAccountGaslessApproval | null;

@@ -166,7 +166,7 @@ export function saStateCounters(value: unknown): Pick<SmartAccountGaslessMutable
     material_pending: [1, 0, [0]], material_sealed: [1, 0, [0]],
     exposure_pending: [1, 1, [0]], verified_pending: [1, 1, [0]],
     dispatch_pending: [1, 1, [1]], submitted_pending: [1, 1, [1]],
-    unknown_finality: [1, 1, [0, 1]], completed: [1, 1, [0, 1]], expired_unused: [1, 1, [0, 1]],
+    unknown_finality: [1, 1, [0, 1]], completed: [1, 1, [0, 1]], expired_unused: [1, 1, [0, 1]], abandoned_unknown: [1, 1, [0, 1]],
     failed_before_effect: [-1, 0, [0]],
   };
   for (const name of ["signingAttempts", "exposureAttempts", "submissionAttempts"] as const) {

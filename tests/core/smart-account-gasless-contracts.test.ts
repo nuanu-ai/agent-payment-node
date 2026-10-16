@@ -94,10 +94,10 @@ test("The real pinned allowance SDK uses UINT256_MAX duration and cannot become 
   (changed as any).policyHash = saPolicyHash(changed.binding, changed.request);
   rejected(() => validateSmartAccountGaslessIntent(changed), "APN_STATE_CORRUPT");
 });
-test("All 24 public reasons use actual ErrorCode members and discard untrusted error text", async () => {
+test("All 25 public reasons use actual ErrorCode members and discard untrusted error text", async () => {
   const source = await readFile(new URL("../../../src/errors.ts", import.meta.url), "utf8");
   const actual = new Set([...source.matchAll(/\|\s*"(APN_[A-Z0-9_]+)"/gu)].map(x => x[1]));
-  assert.equal(Object.keys(SA_REASON_CODES).length, 24);
+  assert.equal(Object.keys(SA_REASON_CODES).length, 25);
   for (const [reason, code] of Object.entries(SA_REASON_CODES)) {
     assert(actual.has(code), `${reason}: ${code}`);
     const error = saError(reason as keyof typeof SA_REASON_CODES);

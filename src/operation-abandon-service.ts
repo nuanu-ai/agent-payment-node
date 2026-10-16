@@ -14,7 +14,7 @@ import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless 
 import type { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
-import { abandonProviderX402 } from "./operation-abandon-provider.js";
+import { abandonProviderX402, abandonSmartAccountGasless } from "./operation-abandon-provider.js";
 import { abandonFixedMetaMaskNativeTransfer, metaMaskNativeOperationExists } from "./metamask-native-transfer-owner.js";
 
 export class OperationAbandonService {
@@ -46,6 +46,7 @@ export class OperationAbandonService {
       return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
     }
     if (found.kind === "x402_fetch" && found.strategy === "provider_atomic") return await abandonProviderX402(this.context, this.operations, operationId);
+    if (found.kind === "smart_account_gasless_transfer") return await abandonSmartAccountGasless(this.context, this.operations, operationId);
     if (found.kind !== "direct_transfer") return ineligible();
     const profileHash = found.record.profileHash;
     return await this.context.state.withLocks([

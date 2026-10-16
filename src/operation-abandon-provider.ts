@@ -5,6 +5,11 @@ import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { ProviderX402Service } from "./provider-x402-service.js";
 import { providerX402TerminalReceipt, transitionProviderX402Operation } from "./provider-x402-state.js";
 import type { RuntimeContext } from "./runtime.js";
+import { publicSmartAccountGaslessOperation } from "./smart-account-gasless/receipt.js";
+import { saFailure } from "./smart-account-gasless/reasons.js";
+import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
+import { advanceSmartAccountGaslessOperation } from "./smart-account-gasless/transitions.js";
+import type { SmartAccountGaslessOperationRecord } from "./smart-account-gasless/operation-model.js";
 
 const UNRESOLVED_X402: readonly string[] = ["ambiguous_effect", "settlement_pending"];
 
@@ -38,6 +43,51 @@ export async function abandonProviderX402(context: RuntimeContext, operations: O
     await repository.writeOperation(next);
     return publicProviderX402Operation(next);
   });
+}
+
+const EXPOSED_SA: readonly string[] = ["exposure_pending", "verified_pending", "dispatch_pending", "submitted_pending", "unknown_finality"];
+
+/**
+ * Owner release (R4) of an exposed Smart Account gasless transfer that stayed unproven after its child delegation
+ * expired on chain (for example several candidate redemptions). The expired child can no longer be redeemed.
+ */
+export async function abandonSmartAccountGasless(context: RuntimeContext, operations: OperationService,
+  operationId: string): Promise<unknown> {
+  const initial = await smartAccountRecord(operations, operationId);
+  if (initial.state === "abandoned_unknown" && initial.terminal) return publicSmartAccountGaslessOperation(initial);
+  assertSmartAccountExpired(context, initial);
+  const service = new SmartAccountGaslessService(context);
+  // One last ordinary observation: a completion or an unused proof closes the operation instead.
+  await service.resume(operationId).catch(() => undefined);
+  return await context.state.withLocks([`profile:${initial.profileHash}`, `operation:${operationId}`], async () => {
+    const op = await smartAccountRecord(operations, operationId);
+    if (op.terminal) return publicSmartAccountGaslessOperation(op);
+    assertSmartAccountExpired(context, op);
+    const i = op.intent;
+    await context.requireOperationAbandonApproval().approve({ operationId, fingerprint: op.fingerprint, profile: i.profile,
+      providerId: "metamask-smart-account", walletAddress: i.binding.ownerAddress, recipient: i.request.recipient,
+      amountAtomic: i.request.grossAtomic, amountDecimal: usdc(i.request.grossAtomic), chainLabel: "Base (8453)",
+      assetLabel: `USDC (${i.token})`, unit: "USDC",
+      outcomeNote: "Financial outcome: UNKNOWN. The child delegation has expired on chain, but APN could not prove whether it was redeemed before then." });
+    const next = advanceSmartAccountGaslessOperation(op, { state: "abandoned_unknown", failure: saFailure("sa_gasless_owner_abandoned") },
+      context.clock.now().toISOString());
+    await service.records.persist(next);
+    return publicSmartAccountGaslessOperation(next);
+  });
+}
+
+async function smartAccountRecord(operations: OperationService, operationId: string): Promise<SmartAccountGaslessOperationRecord> {
+  const found = await operations.required(operationId);
+  if (found.kind !== "smart_account_gasless_transfer") ineligible();
+  return found.record as SmartAccountGaslessOperationRecord;
+}
+
+function assertSmartAccountExpired(context: RuntimeContext, op: SmartAccountGaslessOperationRecord): void {
+  if (op.terminal || !EXPOSED_SA.includes(op.state) || op.settlement !== null ||
+    context.clock.now().getTime() < Date.parse(op.intent.expiresAt)) {
+    throw new ApnError("APN_OPERATION_BLOCKED",
+      "Only an exposed Smart Account gasless transfer with an unproven outcome can be abandoned, and only after its child delegation expired.");
+  }
 }
 
 async function providerX402Record(operations: OperationService, operationId: string): Promise<ProviderX402OperationRecord> {

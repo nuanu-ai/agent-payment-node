@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 export const SA_OPERATION_VERSION = "apn.smart-account-gasless-operation.v1";
 export const SA_OPERATION_KIND = "smart_account_gasless_transfer";
 export const SA_RECEIPT_VERSION = "apn.smart-account-gasless-receipt.v1";
-export const SA_TERMINAL = Object.freeze(["failed_before_effect", "expired_unused", "completed"]);
+export const SA_TERMINAL = Object.freeze(["failed_before_effect", "expired_unused", "completed", "abandoned_unknown"]);
 export const SA_HISTORY_LIMIT = 256;
 export const SA_FILE_LIMIT = 256 * 1024;
 export const SA_TERMINAL_RESERVE_TRANSITIONS = 2;
