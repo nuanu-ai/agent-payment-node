@@ -684,8 +684,16 @@ JSON-RPC errors and malformed evidence are not retried. Each network reports
 `rpc.calls` (including retries), `rpc.attempts`, `rpc.methods`, `rpc.mode` and
 `rpc.retried` (the classified reason of each retried attempt);
 `rpc_calls_total` is the sum. External (provider-managed) EVM profiles are
-reported as `external_provider_profile`, not guessed. There is no balance
-cache: every run reads the chains.
+reported as `external_provider_profile`, not guessed. These counts cover the
+current invocation only. A network served from the 15-second result cache
+described above, which is kept in APN state across invocations, reports
+`cache.hit: true` and zero `rpc` calls; its `provenance.observed_at` and
+`cache.captured_at` keep the original read time, `cache.age_ms` and
+`cache.expires_at` show its age and expiry, and `cache.source_rpc` keeps the
+calls of that read. Only a network whose rows are all `ok` is cached;
+`unavailable`, `no_account` and `rpc_not_configured` results are never cached,
+and a failed read never falls back to an older result. Pass `--refresh` (MCP
+`refresh: true`) to bypass the cache and read every configured network again.
 
 Relay prepare commands save only unsigned quotes; `relay preflight` is
 read-only and `relay retire` is local. Retire
