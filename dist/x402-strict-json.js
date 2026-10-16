@@ -67,7 +67,8 @@ export function parseJsonWithDuplicateRejection(text) {
             if (text[offset] !== ":")
                 throw protocol("x402 JSON object separator is invalid.");
             offset += 1;
-            object[key] = parseValue();
+            // Define, never assign: assigning "__proto__" would call the prototype setter and lose the member.
+            Object.defineProperty(object, key, { value: parseValue(), enumerable: true, writable: true, configurable: true });
             skipWhitespace();
             if (text[offset] === "}") {
                 offset += 1;
