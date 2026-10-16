@@ -7,7 +7,8 @@ export declare class FileStargateTokenJournal implements StargateTokenJournal {
     constructor(root: string, locks?: Pick<StateStore, "initialize" | "withLocks">);
     private path;
     withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
-    withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
+    /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
+    withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
     load(id: string): Promise<StargateTokenOperation | null>;
     save(nextInput: StargateTokenOperation): Promise<void>;
 }
