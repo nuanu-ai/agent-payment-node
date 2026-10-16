@@ -31,6 +31,10 @@ export function observerNonceCalls(material, block) {
         ...(p.plan.eip2612 === null ? [] : [{ method: "eth_call", params: [{ to: p.token,
                         data: encodeFunctionData({ abi: TOKEN, functionName: "nonces", args: [p.payer] }) }, pinned] }])];
 }
+/** Permit2 unordered nonces are single-use and APN signed one witness transfer with this nonce: a set bit is settlement. */
+export function nonceConsumed(material, value) {
+    return ((evmRpcWord(value) >> (BigInt(material.nonce) & 255n)) & 1n) === 1n;
+}
 export function assertExpiredUnused(material, block, values) {
     const p = reconstructPermit2ProductionMaterial(material), permit = p.plan.eip2612;
     if (block.timestamp <= BigInt(p.plan.authorization.deadline) || permit !== null && block.timestamp <= BigInt(permit.info.deadline) ||

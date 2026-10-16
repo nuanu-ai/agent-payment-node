@@ -164,9 +164,8 @@ test("a contradictory finalized settlement block holds the first durable termina
   const stub = t.mock.method(AssetUsageLedger.prototype, "transition", async () => { throw new Error("settlement ledger crash"); });
   await assert.rejects(f.journal.finalize(id, observed.proof, "settlement")); stub.mock.restore();
   const first = (await f.journal.findOperation(id))!.exposureJournal!.terminalIntent!;
-  const hash = `0x${"d".repeat(64)}` as const;
-  f.wire.block.hash = hash; f.wire.tx.blockHash = hash; f.wire.receipt.blockHash = hash;
-  for (const log of f.wire.receipt.logs) log.blockHash = hash;
+  // Settlement is pinned at the finalized block that shows the consumed nonce; a different one contradicts the first intent.
+  f.wire.finalized.hash = `0x${"d".repeat(64)}`;
   const contradictory = await f.observe("settlement"); assert.ok(contradictory.proof);
   await assert.rejects(f.journal.finalize(id, contradictory.proof, "settlement"));
   assert.deepEqual((await f.journal.findOperation(id))!.exposureJournal!.terminalIntent, first);

@@ -13,9 +13,11 @@ for (const sponsor of [false, true]) test(`finite observer attests finalized exa
   assert.equal(f.wire.receipt.from, f.wire.tx.from); assert.equal(f.wire.receipt.to, f.wire.tx.to);
   assert.equal(result.projection.outcome, "settled"); assert.ok(result.proof);
   assert.equal(result.projection.tokenPermitOutcome, sponsor ? "not_proven" : "not_requested");
-  assert.equal(result.projection.blockNumber, "42"); assert.equal(result.projection.blockHash, f.wire.block.hash);
-  assert.deepEqual(result.projection.rpc, { attempts: 4, admissions: 4, physicalDispatches: 4, logicalReads: 11, errors: 0,
-    methods: { eth_chainId: 2, eth_getBlockByNumber: 4, eth_getTransactionByHash: 1, eth_getTransactionReceipt: 1, eth_getCode: 2, eth_call: 1 } });
+  // Settlement is proven at the finalized head by the consumed nonce; the exact receipt only names the transaction.
+  assert.equal(result.projection.transactionHash, f.wire.tx.hash);
+  assert.equal(result.projection.blockNumber, "43"); assert.equal(result.projection.blockHash, f.wire.finalized.hash);
+  assert.deepEqual(result.projection.rpc, { attempts: 4, admissions: 4, physicalDispatches: 4, logicalReads: sponsor ? 12 : 11, errors: 0,
+    methods: { eth_chainId: 2, eth_getBlockByNumber: 3, eth_getTransactionByHash: 1, eth_getTransactionReceipt: 1, eth_getCode: 2, eth_call: sponsor ? 3 : 2 } });
   assert.equal(f.batches.length, 4);
   const exposed = JSON.stringify(result);
   for (const secret of ["private", f.permit2Signature, f.input.rpcUrl, f.wire.tx.input]) assert.equal(exposed.includes(secret), false);
@@ -34,9 +36,11 @@ for (const sponsor of [false, true]) test(`finite observer proves expired unused
   assert.equal((await consumePermit2ObservationProof(result.proof, f.record, null, "expired_unused")).outcome, "expired_unused");
 });
 
-const faults = ["value", "proxy", "sender", "suffix", "nonce", "recipient", "amount", "inner_from", "token", "deadline", "branch", "log_identity", "log_index", "duplicate",
-  "receipt_from", "receipt_to", "receipt_missing_from", "receipt_missing_to", "event", "reorg", "unfinalized", "missing", "chain", "proxy_code", "permit2_code", "domain", "canonical", "http"] as const;
-for (const fault of faults) test(`finite settlement observer holds ${fault} and never retries`, async t => {
+// A facilitator may batch, relay or suffix its call: the transaction is then not attributable byte for byte, but the
+// consumed nonce bit still proves settlement, so the operation settles with no transaction hash instead of holding.
+const shapes = ["value", "proxy", "sender", "suffix", "nonce", "recipient", "amount", "inner_from", "token", "deadline", "branch", "log_identity",
+  "log_index", "duplicate", "receipt_from", "receipt_to", "receipt_missing_from", "receipt_missing_to", "event", "missing"] as const;
+for (const fault of shapes) test(`settlement observer settles an unattributable ${fault} call by the consumed nonce`, async t => {
   const f = await observerFixture(t), w = f.wire;
   switch (fault) {
     case "value": w.tx.value = "0x1"; break;
@@ -63,9 +67,23 @@ for (const fault of faults) test(`finite settlement observer holds ${fault} and 
     case "receipt_missing_from": delete (w.receipt as any).from; break;
     case "receipt_missing_to": delete (w.receipt as any).to; break;
     case "event": w.receipt.logs[1]!.data = word(0n); break;
-    case "reorg": w.reorg = true; break;
-    case "unfinalized": w.finalized.number = "0x29"; break;
     case "missing": w.missing = true; break;
+  }
+  const settled = await observePermit2Production(f.input);
+  assert.equal(settled.projection.outcome, "settled"); assert.ok(settled.proof);
+  assert.equal(settled.projection.transactionHash, null, "an unattributed hash is never recorded");
+  assert.equal(f.batches.flat().filter(call => call.method === "eth_getTransactionReceipt").length, 1);
+  w.settledBitmap = word(0n);
+  const unused = await observePermit2Production(f.input);
+  assert.equal(unused.projection.outcome, "hold", "without the consumed nonce nothing settled"); assert.equal(unused.proof, null);
+});
+
+const faults = ["unfinalized", "chain", "proxy_code", "permit2_code", "domain", "canonical", "http"] as const;
+for (const fault of faults) test(`finite settlement observer holds ${fault} and never retries`, async t => {
+  const f = await observerFixture(t), w = f.wire;
+  switch (fault) {
+    // A transaction newer than the finalized head has not consumed the nonce at that head yet.
+    case "unfinalized": w.finalized.number = "0x29"; w.settledBitmap = word(0n); break;
     case "chain": w.chain = "0x1"; break;
     case "proxy_code": w.proxyCode = "0x6001"; break;
     case "permit2_code": w.permit2Code = "0x6001"; break;
@@ -78,6 +96,15 @@ for (const fault of faults) test(`finite settlement observer holds ${fault} and 
   assert.equal(result.projection.rpc.physicalDispatches, f.batches.length);
   assert.ok(f.batches.length <= 4); assert.equal(f.batches.flat().filter(call => call.method === "eth_getTransactionReceipt").length, 1);
   if (fault === "http") { assert.equal(f.batches.length, 1); assert.equal(result.projection.rpc.errors, 1); }
+});
+
+test("settlement without any transaction hash is proven by the consumed nonce alone", async t => {
+  const f = await observerFixture(t, true), input = { ...f.input, locator: null };
+  const result = await observePermit2Production(input);
+  assert.equal(result.projection.outcome, "settled"); assert.ok(result.proof);
+  assert.equal(result.projection.transactionHash, null); assert.equal(result.projection.blockHash, f.wire.finalized.hash);
+  assert.equal(f.batches.flat().some(call => call.method === "eth_getTransactionReceipt"), false);
+  assert.equal((await consumePermit2ObservationProof(result.proof, f.record, f.signed, "settlement")).outcome, "settled");
 });
 
 for (const fault of ["deadline_equal", "permit2_spent", "token_nonce", "canonical", "domain", "head_reorg"] as const)
@@ -94,10 +121,10 @@ for (const fault of ["deadline_equal", "permit2_spent", "token_nonce", "canonica
     assert.ok(f.batches.length <= 3);
   });
 
-test("finalized exact reverted locator never issues terminal failure authority while authorization can be reused", async t => {
-  const f = await observerFixture(t); f.wire.receipt.status = "0x0"; f.wire.receipt.logs = [];
+test("a reverted locator never issues terminal authority while the nonce is unused", async t => {
+  const f = await observerFixture(t); f.wire.receipt.status = "0x0"; f.wire.receipt.logs = []; f.wire.settledBitmap = word(0n);
   const result = await observePermit2Production(f.input); assert.equal(result.projection.outcome, "hold");
-  assert.equal(result.projection.reason, "reverted_locator"); assert.equal(result.proof, null);
+  assert.equal(result.projection.reason, "unavailable_or_mismatch"); assert.equal(result.proof, null);
 });
 
 test("observer snapshots private context, record, locator and bearer before await; proof clone/forgery/mismatch cannot consume", async t => {
