@@ -27,6 +27,7 @@ import {
 } from "./asset-policy-registry.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
+import { isRecipientPinRail, type RecipientPinRail } from "./allowlist-recipient-pins.js";
 
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2 = "apn.allowlist-policy-overlay.v2" as const;
 export const ALLOWLIST_POLICY_RECORD_SCHEMA_V2 = "apn.allowlist-policy-record.v2" as const;
@@ -83,6 +84,7 @@ interface MergedRow {
   readonly railCaps: Partial<Record<CandidateRail, AssetAtomicCaps>>;
   readonly pins: Partial<Record<CandidateRail, AllowlistAdmissionMechanismPin>>;
   gaslessRecipient?: string;
+  readonly recipients: Partial<Record<RecipientPinRail, readonly string[]>>;
   bridgeOptions?: NonNullable<AssetPolicyRow["mechanismOptions"]>["bridge"];
   swapOptions?: NonNullable<AssetPolicyRow["mechanismOptions"]>["swap"];
 }
@@ -103,7 +105,7 @@ export function compileAllowlistPolicyOverlayV2(
     const asset = resolveDirectPolicyAsset(admission, inventory);
     const key = `${asset.chain}\0${asset.kind}\0${asset.identifier ?? ""}`;
     const row = merged.get(key) ?? { asset, rails: { direct: false, gasless: false, x402: false, bridge: false, swap: false },
-      railCaps: {}, pins: {} };
+      railCaps: {}, pins: {}, recipients: {} };
     row.rails[admission.rail] = true;
     row.railCaps[admission.rail] = { maximumPerTransferAtomic: admission.maximumPerTransferAtomic ??
       (admission.mechanisms as NonNullable<MergedRow["bridgeOptions"]>).reduce((max, option) =>
@@ -111,6 +113,7 @@ export function compileAllowlistPolicyOverlayV2(
       dailyLimitAtomic: admission.dailyLimitAtomic };
     if (admission.mechanism !== undefined) row.pins[admission.rail] = admission.mechanism;
     if (admission.recipient !== undefined) row.gaslessRecipient = admission.recipient;
+    if (admission.recipients !== undefined && isRecipientPinRail(admission.rail)) row.recipients[admission.rail] = admission.recipients;
     if (admission.mechanisms !== undefined && admission.rail === "swap") row.swapOptions = admission.mechanisms as MergedRow["swapOptions"];
     else if (admission.mechanisms !== undefined) row.bridgeOptions = admission.mechanisms as MergedRow["bridgeOptions"];
     merged.set(key, row);
@@ -124,6 +127,7 @@ export function compileAllowlistPolicyOverlayV2(
       ...(row.bridgeOptions === undefined && row.swapOptions === undefined ? {} : { mechanismOptions: {
         ...(row.bridgeOptions === undefined ? {} : { bridge: row.bridgeOptions }), ...(row.swapOptions === undefined ? {} : { swap: row.swapOptions }) } }),
       ...(row.gaslessRecipient === undefined ? {} : { gaslessRecipient: row.gaslessRecipient }),
+      ...(Object.keys(row.recipients).length === 0 ? {} : { recipients: row.recipients }),
     };
     const current = chains.get(row.asset.chain);
     chains.set(row.asset.chain, current === undefined

@@ -36,7 +36,7 @@ async function writeDurableSolanaClaim(root: string, s: Awaited<ReturnType<typeo
   const idempotencyHash = state.idempotencyHash(input.idempotencyKey);
   const policyHash = options.policyHash ?? (await s.core.rails.policies.requiredPolicy(account, "sol")).policyHash;
   const allowlist = options.allowlist ?? await new DirectAllowlistGate({ state: { root }, clock: { now: () => s.now } })
-    .admit(railAllowlistSubject({ profile: input.profile, operationId, account, prepared: { asset, amountAtomic } }));
+    .admit(railAllowlistSubject({ profile: input.profile, operationId, account, prepared: { asset, amountAtomic, recipient: SOL_RECIPIENT } }));
   const body = { schemaVersion: "apn.rail-prepare-claim.v1", profileHash: account.profileHash, operationId,
     idempotencyHash, inputHash: hashObject({ kind: "rail_transfer", profile: input.profile, rail: "solana", asset,
       recipient: SOL_RECIPIENT, amountAtomic, maximumFeeAtomic }),

@@ -86,6 +86,8 @@ export interface Permit2PrepareReadPort {
         readonly amountAtomic: string;
         readonly nowSeconds: number;
         readonly nonceBitmapWordIndex: string;
+        /** The selected offer's payee; an owner recipient pin on the x402 row must list it. */
+        readonly payTo: Address;
     }): Promise<{
         readonly owner: Permit2OwnerAdmission;
         readonly evidence: Permit2PrepareEvidence;

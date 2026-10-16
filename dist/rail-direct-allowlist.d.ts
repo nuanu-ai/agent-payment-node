@@ -10,7 +10,7 @@ export declare function railAllowlistSubject(input: {
     readonly profile: string;
     readonly operationId: string;
     readonly account: ChainAccount;
-    readonly prepared: Pick<RailPreparedTransfer, "asset" | "amountAtomic">;
+    readonly prepared: Pick<RailPreparedTransfer, "asset" | "amountAtomic" | "recipient">;
 }): DirectAllowlistSubject;
 /** Optional on records written before the gate; once bound, the lease is mandatory from the first signing or send transition. */
 export declare function validateRailAllowlist(value: Record<string, unknown>, subject: DirectAllowlistSubject): void;
