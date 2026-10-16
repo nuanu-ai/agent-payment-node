@@ -24,6 +24,16 @@ import { OperationService } from "../operation-service.js";
 import { usdtEffectiveFeeCap } from "./quote.js";
 
 export interface UsdtForegroundApproval { approve(bound: UsdtBoundOperation): Promise<void> }
+/**
+ * A saved operation loads against its own hashes (R2). Before any prompt, signature or send it must also match every
+ * current pin, address and bound; a record an earlier release wrote under other constants needs a new preparation.
+ */
+export function assertUsdtBoundCurrent(bound: UsdtBoundOperation): void {
+  try { validateUsdtBoundOperation(bound); } catch {
+    throw new ApnError("APN_REPREPARE_REQUIRED", "This gasless USDT operation was prepared under different protocol pins; prepare it again.",
+      { reason: "gasless_usdt_protocol_changed", rail: "gasless_usdt", operationId: bound.operationId });
+  }
+}
 /** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
 export function usdtApprovalPrompt(bound: UsdtBoundOperation, now: number): { readonly text: string; readonly phrase: string; readonly validUntil: number } {
   const b = validateUsdtBoundOperation(bound).binding;
@@ -130,6 +140,7 @@ export class GaslessUsdtCommandExecute {
       }
       throw new ApnError("APN_OPERATION_BLOCKED", "Gasless USDT execution already has a journal record; inspect status.");
     }
+    assertUsdtBoundCurrent(bound);
     await this.assertAccountAvailable(bound);
     await (this.options.approval ?? new TtyUsdtApproval()).approve(bound);
     // The foreground prompt can take minutes; another family may have started on this account meanwhile.

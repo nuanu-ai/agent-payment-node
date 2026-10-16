@@ -1,7 +1,8 @@
 import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
-import { validateUsdtAnyBoundOperation as validateUsdtBoundOperation, type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
+import type { UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
+import { validateUsdtStoredBoundOperation } from "./bound-stored.js";
 import { UsdtExecutionJournal, type UsdtExecutionRecord } from "./execution-journal.js";
 import { USDT_GASLESS } from "./model.js";
 import { restoreUsdtPlan } from "./restored-plan.js";
@@ -48,7 +49,8 @@ export class UsdtRecoveryService {
     private readonly now: () => Date) {}
 
   async observe(value: UsdtBoundOperation): Promise<UsdtExecutionRecord> {
-    const bound = validateUsdtBoundOperation(value);
+    // Observation only reads the chain for an existing hash, so the saved record is checked against itself (R2).
+    const bound = validateUsdtStoredBoundOperation(value);
     const current = await this.journal.load(bound.operationId);
     if (current === null || current.bindingHash !== bound.binding.bindingHash ||
       current.profileHash !== bound.profileHash || current.sender !== bound.binding.plan.request.sender) {

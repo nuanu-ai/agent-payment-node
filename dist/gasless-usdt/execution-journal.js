@@ -5,6 +5,7 @@ import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger
 import { ApnError } from "../errors.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { validateUsdtAnyBoundOperation as validateUsdtBoundOperation } from "./bound-operation.js";
+import { validateUsdtStoredBoundOperation } from "./bound-stored.js";
 import { USDT_GASLESS } from "./model.js";
 import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-data.js";
 import { restoreUsdtPlan } from "./restored-plan.js";
@@ -19,8 +20,10 @@ const STATES = ["planned", "reserved", "failed_before_effect", "submitting", "su
 function fail(reason, code = "APN_OPERATION_BLOCKED") {
     throw new ApnError(code, `Gasless USDT execution refused: ${reason}.`, { rail: "gasless_usdt", reason });
 }
-function identity(sender) {
-    return { account: sender, chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } };
+/** The usage bucket the bound operation itself names; for every record written so far this is Ethereum USDT. */
+function identity(bound) {
+    const b = bound.binding;
+    return { account: b.plan.request.sender, chain: b.chain, asset: { kind: "token", identifier: b.token } };
 }
 function usageKey(operationId) { return `gasless-usdt-execution:${operationId}`; }
 /**
@@ -66,6 +69,11 @@ function exactIntent(record) {
     const { schemaVersion: _schema, reservationId: _reservation, state: _state, userOperationHash: _userOperationHash, createdAt: _created, updatedAt: _updated, integrityHash: _integrity, outcomeDigest: _outcome, settlement: _settlement, ...intent } = record;
     return intent;
 }
+/** A saved execution belongs to this bound operation: exact intent and the usage reservation its own bucket derives. */
+function matches(record, bound) {
+    return canonicalJson(exactIntent(record)) === canonicalJson(expected(bound)) &&
+        record.reservationId === assetUsageReservationId(identity(bound), usageKey(bound.operationId));
+}
 export function validateUsdtExecutionRecord(value) {
     const keys = ["schemaVersion", "reservationId", "state", "userOperationHash", "createdAt", "updatedAt", "integrityHash",
         "operationId", "profileHash", "bindingHash", "policyDigest", "policyRevision", "activationDigest", "sender",
@@ -94,8 +102,8 @@ export function validateUsdtExecutionRecord(value) {
         Date.parse(value.updatedAt) < Date.parse(value.createdAt))
         fail("execution_record_shape", "APN_STATE_CORRUPT");
     const record = value;
-    if (record.reservationId !== assetUsageReservationId(identity(record.sender), usageKey(record.operationId)) ||
-        record.integrityHash !== hashObject(recordBody(record)))
+    // R2: integrity only; the reservation binding is checked against the bound operation before any ledger use.
+    if (record.integrityHash !== hashObject(recordBody(record)))
         fail("execution_record_integrity", "APN_STATE_CORRUPT");
     return record;
 }
@@ -126,13 +134,13 @@ export class UsdtExecutionJournal extends SecureStateStore {
     }
     /** Caller holds the effect lock. The terminal marker is fsynced before releasing a reserved usage lease. */
     async abortUnsentLocked(boundValue, now) {
-        const bound = validateUsdtBoundOperation(boundValue);
+        const bound = validateUsdtStoredBoundOperation(boundValue);
         await this.ready();
         return await this.withLocks([this.lock(bound.operationId)], async () => {
             const current = await this.load(bound.operationId);
             if (current === null)
                 return null;
-            if (canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)))
+            if (!matches(current, bound))
                 fail("execution_binding_changed");
             if (!["planned", "reserved", "failed_before_effect"].includes(current.state))
                 return null;
@@ -140,12 +148,12 @@ export class UsdtExecutionJournal extends SecureStateStore {
                 state: "failed_before_effect", updatedAt: instant(now) });
             if (next !== current)
                 await this.write(next);
-            const lease = await this.usage.load(identity(current.sender), current.reservationId);
+            const lease = await this.usage.load(identity(bound), current.reservationId);
             if (lease !== null) {
                 if (lease.policyDigest !== current.policyDigest || lease.amountAtomic !== bound.binding.plan.request.grossAtomic ||
                     !["reserved", "failed_before_effect"].includes(lease.state))
                     fail("usage_reservation_mismatch", "APN_STATE_CORRUPT");
-                await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+                await this.usage.transition({ ...identity(bound), reservationId: current.reservationId,
                     policyDigest: current.policyDigest, state: "failed_before_effect", expectedCurrentStates: ["reserved", "failed_before_effect"],
                     outcomeDigest: hashObject({ operationId: bound.operationId, bindingHash: bound.binding.bindingHash, result: "failed_before_effect" }), now });
             }
@@ -203,7 +211,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
         await this.writeJson(this.path(record.operationId), record, createOnly);
     }
     async otherUsage(bound, at) {
-        const b = bound.binding, account = identity(b.plan.request.sender);
+        const b = bound.binding, account = identity(bound);
         const reservationId = assetUsageReservationId(account, usageKey(bound.operationId));
         const { snapshot, reservation: own } = await this.usage.usageWithReservation(account, reservationId, at);
         if (own === null)
@@ -246,7 +254,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
             this.exposureSnapshots.set(bound.operationId, { ...snapshot, pins: snapshot.pins });
         }
         const usage = await this.otherUsage(bound, at);
-        const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(b.plan.request.sender).asset,
+        const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(bound).asset,
             rail: "gasless", amountAtomic: b.plan.request.grossAtomic, dailyUsageAtomic: usage.amountAtomic,
             asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
         if (admission.asset.mechanismPins?.gasless === undefined ||
@@ -275,7 +283,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
             active.digest !== b.policyDigest || active.revision !== b.policyRevision || active.activationDigest !== b.activationDigest ||
             active.accounts.evm !== b.plan.request.sender)
             fail("policy_changed");
-        const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(b.plan.request.sender).asset,
+        const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: identity(bound).asset,
             rail: "gasless", amountAtomic: b.plan.request.grossAtomic, dailyUsageAtomic: usage.amountAtomic,
             asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
         if (admission.asset.mechanismPins?.gasless === undefined ||
@@ -292,13 +300,13 @@ export class UsdtExecutionJournal extends SecureStateStore {
         let current = await this.withLocks([this.lock(bound.operationId)], async () => {
             const found = await this.load(bound.operationId);
             if (found !== null) {
-                if (canonicalJson(exactIntent(found)) !== canonicalJson(wanted))
+                if (!matches(found, bound))
                     fail("execution_replay_conflict", "APN_IDEMPOTENCY_CONFLICT");
                 return found;
             }
             const checked = await this.guard(bound, port);
             const body = { schemaVersion: USDT_EXECUTION_SCHEMA, ...wanted,
-                reservationId: assetUsageReservationId(identity(wanted.sender), usageKey(wanted.operationId)),
+                reservationId: assetUsageReservationId(identity(bound), usageKey(wanted.operationId)),
                 state: "planned", userOperationHash: null, createdAt: instant(checked.now), updatedAt: instant(checked.now) };
             const next = seal(body);
             await this.write(next, true);
@@ -308,13 +316,13 @@ export class UsdtExecutionJournal extends SecureStateStore {
             return current;
         // The ledger is separately locked. A crash here leaves a planned record and a deterministic reservation to reconcile.
         const checked = await this.guard(bound, port);
-        const lease = await this.usage.reserve({ ...identity(wanted.sender), registry: checked.registry, rail: "gasless",
+        const lease = await this.usage.reserve({ ...identity(bound), registry: checked.registry, rail: "gasless",
             amountAtomic: bound.binding.plan.request.grossAtomic, idempotencyKey: usageKey(wanted.operationId), now: checked.now });
         if (lease.reservationId !== current.reservationId || lease.policyDigest !== wanted.policyDigest || lease.state !== "reserved")
             fail("usage_reservation_mismatch", "APN_STATE_CORRUPT");
         current = await this.withLocks([this.lock(bound.operationId)], async () => {
             const found = await this.load(bound.operationId);
-            if (found === null || canonicalJson(exactIntent(found)) !== canonicalJson(wanted))
+            if (found === null || !matches(found, bound))
                 fail("execution_lost", "APN_STATE_CORRUPT");
             if (found.state !== "planned")
                 return found;
@@ -332,12 +340,12 @@ export class UsdtExecutionJournal extends SecureStateStore {
             fail("user_operation_hash_invalid");
         return this.withLocks([this.lock(bound.operationId)], async () => {
             const current = await this.load(bound.operationId);
-            if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)))
+            if (current === null || !matches(current, bound))
                 fail("execution_binding_changed");
             if (current.state !== "reserved")
                 fail("execution_already_attempted");
             await this.guard(bound, port);
-            const lease = await this.usage.load(identity(current.sender), current.reservationId);
+            const lease = await this.usage.load(identity(bound), current.reservationId);
             if (lease === null || lease.state !== "reserved" || lease.policyDigest !== current.policyDigest ||
                 lease.amountAtomic !== bound.binding.plan.request.grossAtomic)
                 fail("usage_reservation_mismatch");
@@ -349,11 +357,11 @@ export class UsdtExecutionJournal extends SecureStateStore {
     }
     /** A matching bundler acknowledgement does not settle the transfer; observation remains required. */
     async markSubmitted(boundValue, userOperationHash, now) {
-        const bound = validateUsdtBoundOperation(boundValue);
+        const bound = validateUsdtStoredBoundOperation(boundValue);
         await this.ready();
         return this.withLocks([this.lock(bound.operationId)], async () => {
             const current = await this.load(bound.operationId);
-            if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+            if (current === null || !matches(current, bound) ||
                 current.state !== "submitting" || current.userOperationHash !== userOperationHash)
                 fail("submission_acknowledgement_mismatch");
             const next = seal({ ...recordBody(current), state: "submitted_pending", updatedAt: instant(now) });
@@ -363,14 +371,14 @@ export class UsdtExecutionJournal extends SecureStateStore {
     }
     /** Explicit uncertainty classification only; there is no send or automatic retry path. */
     async markUnknownFinality(boundValue, now) {
-        const bound = validateUsdtBoundOperation(boundValue);
+        const bound = validateUsdtStoredBoundOperation(boundValue);
         await this.ready();
         return this.withLocks([this.lock(bound.operationId)], async () => {
             const current = await this.load(bound.operationId);
-            if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+            if (current === null || !matches(current, bound) ||
                 !["submitting", "submitted_pending", "unknown_finality"].includes(current.state))
                 fail("unknown_finality_source");
-            await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+            await this.usage.transition({ ...identity(bound), reservationId: current.reservationId,
                 policyDigest: current.policyDigest, state: "unknown_finality", expectedCurrentStates: ["reserved", "unknown_finality"], now });
             const next = seal({ ...recordBody(current), state: "unknown_finality", updatedAt: instant(now) });
             await this.write(next);
@@ -383,13 +391,13 @@ export class UsdtExecutionJournal extends SecureStateStore {
      * between the ledger and journal writes.
      */
     async recordNeverLanded(boundValue, digest, now) {
-        const bound = validateUsdtBoundOperation(boundValue);
+        const bound = validateUsdtStoredBoundOperation(boundValue);
         await this.ready();
         if (!HASH.test(digest))
             fail("observation_outcome_invalid");
         return this.withLocks([this.lock(bound.operationId)], async () => {
             const current = await this.load(bound.operationId);
-            if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+            if (current === null || !matches(current, bound) ||
                 current.userOperationHash === null)
                 fail("observation_source_invalid");
             if (current.state === "expired_never_landed") {
@@ -402,11 +410,11 @@ export class UsdtExecutionJournal extends SecureStateStore {
             instant(now);
             if (BigInt(Math.floor(now.getTime() / 1000)) <= BigInt(current.paymasterValidUntil))
                 fail("paymaster_still_valid");
-            const lease = await this.usage.load(identity(current.sender), current.reservationId);
+            const lease = await this.usage.load(identity(bound), current.reservationId);
             if (lease === null || lease.policyDigest !== current.policyDigest || lease.amountAtomic !== bound.binding.plan.request.grossAtomic ||
                 !["reserved", "unknown_finality", "released_unsubmitted"].includes(lease.state))
                 fail("usage_reservation_mismatch", "APN_STATE_CORRUPT");
-            await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+            await this.usage.transition({ ...identity(bound), reservationId: current.reservationId,
                 policyDigest: current.policyDigest, state: "released_unsubmitted",
                 expectedCurrentStates: ["reserved", "unknown_finality", "released_unsubmitted"], outcomeDigest: digest, now });
             const next = seal({ ...recordBody(current), state: "expired_never_landed", outcomeDigest: digest, settlement: null,
@@ -417,13 +425,13 @@ export class UsdtExecutionJournal extends SecureStateStore {
     }
     /** Replaying the same observation repairs a crash between the ledger and journal writes. */
     async recordObservedOutcome(boundValue, outcome, now) {
-        const bound = validateUsdtBoundOperation(boundValue);
+        const bound = validateUsdtStoredBoundOperation(boundValue);
         await this.ready();
         if (!HASH.test(outcome.digest) || (outcome.state === "finalized") !== (outcome.settlement !== null))
             fail("observation_outcome_invalid");
         return this.withLocks([this.lock(bound.operationId)], async () => {
             const current = await this.load(bound.operationId);
-            if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+            if (current === null || !matches(current, bound) ||
                 current.userOperationHash === null || ["planned", "reserved"].includes(current.state))
                 fail("observation_source_invalid");
             if (current.state === "finalized" || current.state === "failed_confirmed_revert") {
@@ -432,15 +440,15 @@ export class UsdtExecutionJournal extends SecureStateStore {
                     fail("observation_replay_conflict", "APN_IDEMPOTENCY_CONFLICT");
                 return current;
             }
-            const lease = await this.usage.load(identity(current.sender), current.reservationId);
+            const lease = await this.usage.load(identity(bound), current.reservationId);
             if (lease === null || lease.policyDigest !== current.policyDigest || lease.amountAtomic !== bound.binding.plan.request.grossAtomic ||
                 !["reserved", "unknown_finality", outcome.state].includes(lease.state))
                 fail("usage_reservation_mismatch", "APN_STATE_CORRUPT");
             if (outcome.state === "failed_confirmed_revert" && lease.state === "reserved") {
-                await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+                await this.usage.transition({ ...identity(bound), reservationId: current.reservationId,
                     policyDigest: current.policyDigest, state: "unknown_finality", expectedCurrentStates: ["reserved"], now });
             }
-            await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+            await this.usage.transition({ ...identity(bound), reservationId: current.reservationId,
                 policyDigest: current.policyDigest, state: outcome.state,
                 expectedCurrentStates: ["reserved", "unknown_finality", outcome.state], outcomeDigest: outcome.digest, now });
             const next = seal({ ...recordBody(current), state: outcome.state, outcomeDigest: outcome.digest,
@@ -451,5 +459,5 @@ export class UsdtExecutionJournal extends SecureStateStore {
     }
 }
 /** Build the caller's exact execution intent from an authenticated bound operation. */
-export function usdtExecutionIntent(bound) { return expected(validateUsdtBoundOperation(bound)); }
+export function usdtExecutionIntent(bound) { return expected(validateUsdtStoredBoundOperation(bound)); }
 //# sourceMappingURL=execution-journal.js.map
