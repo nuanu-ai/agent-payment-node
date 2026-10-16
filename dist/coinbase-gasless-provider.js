@@ -11,6 +11,7 @@ import { canonicalProfile } from "./wallet-policy.js";
 import { COINBASE_ENTRY_POINT, coinbaseGaslessSnapshot, observeCoinbaseGasless } from "./coinbase-gasless-observer.js";
 import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
+import { AWAL_VERSION } from "./awal-package.js";
 import { resolveProviderPrepare } from "./provider-prepare-identity.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
@@ -70,7 +71,7 @@ export async function prepareCoinbaseGasless(context, operations, durable, loadP
             coinbaseGasless: { schemaVersion: "apn.coinbase-gasless.v1", chainId: CHAIN_ID, token: BASE_USDC,
                 grossAtomic: gross.toString(), netAtomic: gross.toString(), feeAtomic: "0", maxFeeAtomic: maximumFee.toString(), allowlist,
                 minReceivedAtomic: minimum.toString(), senderNativeDebitWei: "0", sponsorship: "coinbase_cdp_paymaster",
-                exclusiveAccountUseRequired: true, awalPackage: "awal", awalVersion: "2.12.1", awalCommand: "send_base_usdc",
+                exclusiveAccountUseRequired: true, awalPackage: "awal", awalVersion: AWAL_VERSION, awalCommand: "send_base_usdc",
                 rpcOrigin: snapshot.rpcOrigin, safeBlock: snapshot.safeBlock, entryPoint: COINBASE_ENTRY_POINT,
                 entryPointCodeHash: snapshot.entryPointCodeHash, accountCodeHash: snapshot.accountCodeHash,
                 accountImplementation: snapshot.accountImplementation, accountImplementationCodeHash: snapshot.accountImplementationCodeHash } };
@@ -91,6 +92,9 @@ export async function coinbaseGaslessPreconditionsMatch(context, operation) {
     const frozen = operation.providerDirect?.coinbaseGasless;
     if (frozen === undefined)
         return true;
+    // The AWAL release that executes must be the one the owner's operation was prepared and fingerprinted for.
+    if (frozen.awalVersion !== AWAL_VERSION)
+        return false;
     const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), operation.walletAddress);
     return snapshot.entryPointCodeHash === frozen.entryPointCodeHash &&
         snapshot.accountCodeHash === frozen.accountCodeHash && snapshot.accountImplementation === frozen.accountImplementation &&
