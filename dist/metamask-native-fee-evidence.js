@@ -4,23 +4,41 @@ import { ApnError } from "./errors.js";
 import { directEvmChain, directEvmListRows, directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { evmUint } from "./evm-asset.js";
 import { validateEvmFeeQuote } from "./evm-direct.js";
+/** Version 1 quotes (0.5.40 to 0.5.43) paid this one recipient this one amount; they stay readable, never prepared. */
 export const METAMASK_NATIVE_FEE_SELLER = "0x991e254b5c8e0aaf6c244eaa2706bad059809b04";
 export const METAMASK_NATIVE_FEE_AMOUNT_ATOMIC = "1000";
 export const METAMASK_NATIVE_FEE_QUOTE_SCHEMA = "apn.metamask-native-fee-quote.v1";
+/** Version 2 carries the operation's own recipient and amount (OWNR-23). */
+export const METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2 = "apn.metamask-native-fee-quote.v2";
+/** The receipt record names no recipient or amount; it binds to its quote by `quoteHash`, so one version serves both. */
 export const METAMASK_NATIVE_FEE_RECEIPT_SCHEMA = "apn.metamask-native-fee-receipt.v1";
-const CHAINS = [1, 10, 143, 59144, 1329];
+/** Networks where the native lane runs: protocol data (canonical USDC listed, Agent Wallet send support), not a person. */
+export const METAMASK_NATIVE_CHAINS = [1, 10, 143, 59144, 1329];
+const CHAINS = METAMASK_NATIVE_CHAINS;
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const USDC_TRANSFER_ABI = [{
         type: "function", name: "transfer", stateMutability: "nonpayable",
         inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }],
     }];
+/** The transfer a quote pays: its own recipient and amount, or the fixed pair of a version 1 quote. */
+export function metaMaskNativeQuoteTransfer(quote) {
+    return quote.schemaVersion === METAMASK_NATIVE_FEE_QUOTE_SCHEMA
+        ? { recipient: getAddress(METAMASK_NATIVE_FEE_SELLER), amountAtomic: METAMASK_NATIVE_FEE_AMOUNT_ATOMIC }
+        : { recipient: quote.recipient, amountAtomic: quote.amountAtomic };
+}
+/** The exact `transfer(recipient, amount)` calldata of a quote. */
+export function metaMaskNativeTransferData(recipient, amountAtomic) {
+    return encodeFunctionData({ abi: USDC_TRANSFER_ABI, functionName: "transfer", args: [getAddress(recipient), BigInt(amountAtomic)] });
+}
 export function validateMetaMaskNativeFeeQuote(value, now = new Date()) {
     return validateQuote(value, now);
 }
 function validateQuote(value, now) {
+    const v2 = isPlainRecord(value) && value.schemaVersion === METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2;
     if (!isPlainRecord(value) || !exactKeys(value, [
-        "schemaVersion", "chainId", "sender", "token", "tokenDecimals", "seller", "grossAtomic", "netAtomic",
-        "tokenFeeAtomic", "nativeFeeCapAtomic", "transaction", "feeQuote", "expiresAt", "quoteHash",
+        "schemaVersion", "chainId", "sender", "token", "tokenDecimals",
+        ...(v2 ? ["recipient", "amountAtomic"] : ["seller", "grossAtomic", "netAtomic", "tokenFeeAtomic"]),
+        "nativeFeeCapAtomic", "transaction", "feeQuote", "expiresAt", "quoteHash",
     ]))
         invalid("Native-fee quote schema is invalid.");
     const quote = value;
@@ -28,12 +46,20 @@ function validateQuote(value, now) {
     const network = directEvmNetwork(chainId);
     const sender = requireAddress(quote.sender, "sender");
     const token = canonicalUsdc(chainId);
-    if (quote.schemaVersion !== METAMASK_NATIVE_FEE_QUOTE_SCHEMA || quote.chainId !== chainId || quote.sender !== sender || quote.token !== token ||
-        quote.tokenDecimals !== 6 || quote.seller !== METAMASK_NATIVE_FEE_SELLER || quote.grossAtomic !== "1000" ||
-        quote.netAtomic !== "1000" || quote.tokenFeeAtomic !== "0") {
-        invalid("Native-fee quote differs from the fixed USDC transfer identity.");
+    if (quote.chainId !== chainId || quote.sender !== sender || quote.token !== token || quote.tokenDecimals !== 6) {
+        invalid("Native-fee quote differs from the canonical USDC transfer identity.");
     }
-    const transaction = validateTransaction(quote.transaction, token);
+    if (quote.schemaVersion === METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2) {
+        if (requireAddress(quote.recipient, "recipient") !== quote.recipient || BigInt(quote.recipient) === 0n ||
+            typeof quote.amountAtomic !== "string" || !/^[1-9][0-9]{0,77}$/u.test(quote.amountAtomic) || evmUint(quote.amountAtomic, true).toString() !== quote.amountAtomic) {
+            invalid("Native-fee quote recipient or amount is invalid.");
+        }
+    }
+    else if (quote.schemaVersion !== METAMASK_NATIVE_FEE_QUOTE_SCHEMA || quote.seller !== METAMASK_NATIVE_FEE_SELLER ||
+        quote.grossAtomic !== "1000" || quote.netAtomic !== "1000" || quote.tokenFeeAtomic !== "0") {
+        invalid("Native-fee quote differs from the version 1 USDC transfer identity.");
+    }
+    const transaction = validateTransaction(quote.transaction, token, metaMaskNativeQuoteTransfer(quote));
     const feeQuote = validateEvmFeeQuote(quote.feeQuote);
     if (feeQuote.chainId !== chainId || feeQuote.rpcOrigin.length === 0 || feeQuote.blockHash === undefined ||
         evmUint(feeQuote.maximumExecutionFeeWei, true) !== evmUint(transaction.gasLimitAtomic, true) * evmUint(transaction.maxFeePerGasAtomic, true)) {
@@ -158,14 +184,14 @@ export function validateMetaMaskNativeFeeReceipt(value, quoteValue) {
         finality,
     };
 }
-function validateTransaction(value, token) {
+function validateTransaction(value, token, transfer) {
     if (!isPlainRecord(value) || !exactKeys(value, [
         "type", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic",
         "maxPriorityFeePerGasAtomic", "authorizationList",
     ]))
         invalid("Native-fee transaction schema is invalid.");
     const transaction = value;
-    const expectedData = encodeFunctionData({ abi: USDC_TRANSFER_ABI, functionName: "transfer", args: [getAddress(METAMASK_NATIVE_FEE_SELLER), 1000n] });
+    const expectedData = metaMaskNativeTransferData(transfer.recipient, transfer.amountAtomic);
     if (transaction.type !== 2 || transaction.to !== token || transaction.valueAtomic !== "0" ||
         requireHex(transaction.data, "transaction calldata") !== expectedData.toLowerCase() ||
         !Array.isArray(transaction.authorizationList) || transaction.authorizationList.length !== 0) {
@@ -179,6 +205,8 @@ function validateTransaction(value, token) {
     }
     return transaction;
 }
+/** The one canonical USDC listed for a native-lane network. */
+export function metaMaskNativeUsdc(chainId) { return canonicalUsdc(chainId); }
 function canonicalUsdc(chainId) {
     const matches = directEvmListRows(chainId).filter((row) => row.kind === "token" && row.symbol === "USDC" && row.decimals === 6);
     if (matches.length !== 1 || typeof matches[0]?.identifier !== "string") {
@@ -203,15 +231,16 @@ function usdcTransferLogs(logs, quote) {
 function isExactUsdcTransfer(log, quote) {
     if (!Array.isArray(log.topics) || log.topics.length !== 3 || !/^0x[0-9a-fA-F]{64}$/u.test(log.data))
         return false;
+    const transfer = metaMaskNativeQuoteTransfer(quote);
     const senderTopic = `0x${quote.sender.slice(2).toLowerCase().padStart(64, "0")}`;
-    const sellerTopic = `0x${quote.seller.slice(2).toLowerCase().padStart(64, "0")}`;
-    return log.topics[1]?.toLowerCase() === senderTopic && log.topics[2]?.toLowerCase() === sellerTopic &&
-        BigInt(log.data).toString() === METAMASK_NATIVE_FEE_AMOUNT_ATOMIC;
+    const recipientTopic = `0x${transfer.recipient.slice(2).toLowerCase().padStart(64, "0")}`;
+    return log.topics[1]?.toLowerCase() === senderTopic && log.topics[2]?.toLowerCase() === recipientTopic &&
+        BigInt(log.data).toString() === transfer.amountAtomic;
 }
 function requireChain(value) {
     const chainId = directEvmChain(value);
     if (!CHAINS.includes(chainId))
-        inconclusive("chain_not_in_finite_native_fee_scope");
+        inconclusive("chain_not_in_native_fee_scope");
     return chainId;
 }
 function requireAddress(value, label) {

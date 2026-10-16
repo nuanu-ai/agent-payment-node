@@ -1,8 +1,5 @@
 import { publicKnownCircle, type CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
-import { assertMetaMaskNativeConflictDomainAvailable, assertMetaMaskNativeOwnedConflictDomainAvailable, assertMetaMaskNativeOwnedScope,
-  type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
-import { listLocalWallets, listEncryptedWalletEnvelopes } from "./wallet-import-collision.js";
-import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
+import { assertMetaMaskNativeConflictDomainAvailable } from "./metamask-native-journal.js";
 import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-resume.js";
 import { cleanup85ConflictExclusion, type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { circleNativeSourceIdentity, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
@@ -171,24 +168,9 @@ export class OperationService {
   async assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [sharedEvmConflictDomain(chainId, account)]);
   }
-  /** Only the real current foreground owner may exclude its exact own native journal claim. */
-  async assertMetaMaskNativeOwnedAccountAvailable(scope:MetaMaskNativeOwnedScope,context:MetaMaskNativeOwnedContext):Promise<void> {
-    assertMetaMaskNativeOwnedScope(scope,context);
-    if(this.state.root!==context.stateRoot)throw new ApnError("APN_OPERATION_BLOCKED","Native owner conflict guard root changed.");
-    const hashes=new Set([context.profileHash]),target=context.quote.sender.toLowerCase();
-    for(const item of await this.state.profileImportEntries()) {
-      if(!item.isDirectory()||item.isSymbolicLink()||!/^[a-f0-9]{64}$/.test(item.name))throw new ApnError("APN_STATE_CORRUPT","Profiles directory is invalid during native owner conflict guard.");
-      const profile=await this.state.loadProviderProfile(item.name);if(profile===null)throw new ApnError("APN_STATE_CORRUPT","Provider profile disappeared during native owner conflict guard.");
-      if(profile.public_address.toLowerCase()===target)hashes.add(item.name);
-    }
-    for(const wallet of await listLocalWallets(this.state))if(wallet.address.toLowerCase()===target)hashes.add(wallet.profileHash);
-    for(const envelope of await listEncryptedWalletEnvelopes(this.state)) {
-      const identity=walletEnvelopeIdentity(envelope.value,envelope.profile);if(identity.address.toLowerCase()===target)hashes.add(this.state.profileHash(identity.profile));
-    }
-    for(const operation of await this.state.listAllOperations())if(operation.walletAddress.toLowerCase()===target)hashes.add(operation.profileHash);
-    assertMetaMaskNativeOwnedScope(scope,context);
-    for(const hash of hashes)await this.assertConflictDomainsAvailable(hash,()=>[evmConflictDomain(context.quote.chainId,context.quote.sender)],undefined,false,undefined,undefined,{scope,context});
-    assertMetaMaskNativeOwnedScope(scope,context);
+  /** The account check of one saved operation, excluding only that operation's own claim; its owner holds the account locks. */
+  async assertEvmAccountAvailableExcept(profileHash: string, chainId: number | string, account: string, exceptOperationId: string): Promise<void> {
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)], canonicalOperationId(exceptOperationId));
   }
   async assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void> {
     const sources = verifiedCircleNativeSources(proof, profileHash, account);
@@ -212,18 +194,14 @@ export class OperationService {
     await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
   }
 
-  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>, cleanup85Parent?: { readonly operationId: string; readonly integrityHash: string }, nativeOwner?: { readonly scope:MetaMaskNativeOwnedScope; readonly context:MetaMaskNativeOwnedContext }): Promise<void> {
+  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>, cleanup85Parent?: { readonly operationId: string; readonly integrityHash: string }): Promise<void> {
     const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
     if (this.state.root !== undefined) await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
     if(this.state.root!==undefined) {
       for(const wantedKey of wanted) {
         const [family,network,account]=wantedKey.split(":");
         if(family!=="evm"||network===undefined||account===undefined)continue;
-        if(nativeOwner!==undefined) {
-          assertMetaMaskNativeOwnedScope(nativeOwner.scope,nativeOwner.context);
-          if(nativeOwner.context.stateRoot!==this.state.root||String(nativeOwner.context.quote.chainId)!==network||nativeOwner.context.quote.sender.toLowerCase()!==account)throw new ApnError("APN_OPERATION_BLOCKED","Native owner conflict domain changed.");
-          await assertMetaMaskNativeOwnedConflictDomainAvailable(nativeOwner.scope,nativeOwner.context);
-        } else await assertMetaMaskNativeConflictDomainAvailable(this.state.root,network,account);
+        await assertMetaMaskNativeConflictDomainAvailable(this.state.root,network,account,exceptOperationId);
       }
     }
     for (const operation of await this.profileOperations(profileHash)) {

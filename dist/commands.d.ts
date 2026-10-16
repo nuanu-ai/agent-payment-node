@@ -8,8 +8,10 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
     readonly command: "wallet.metamask.native-transfer";
-    readonly profile?: string;
+    readonly profile: string;
     readonly chainId: number;
+    readonly recipient: string;
+    readonly amountAtomic: string;
     readonly idempotencyKey: string;
 } | {
     readonly command: "wallet.metamask.native-transfer-status" | "wallet.metamask.native-transfer-observe";
