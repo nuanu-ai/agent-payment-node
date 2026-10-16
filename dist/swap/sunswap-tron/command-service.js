@@ -1,12 +1,12 @@
 import { ApnError } from "../../errors.js";
 import { swapMechanismDigest } from "../pin.js";
-import { swapRouteDigest, swapRouteOf } from "../route-admission.js";
+import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "../route-admission.js";
 import { SwapOperationRepository } from "../repository.js";
 import { SUNSWAP_PINNED_CONTRACTS, SUNSWAP_V2_CODE_HASHES, loadSunSwapPinCatalog } from "./catalog.js";
 import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN, SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY } from "./mechanism.js";
 export async function executeSunSwapCommand(request, context) {
     if (request.command === "swap.sunswap.inventory")
-        return data({ catalog: loadSunSwapPinCatalog(), admitted: false,
+        return data({ catalog: loadSunSwapPinCatalog(), ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION,
             execution: context.sunswapRuntime === undefined ? "dormant" : "foreground_cli_after_owner_admission",
             keyless: { route: swapRouteOf(SUNSWAP_V2_KEYLESS_MECHANISM_PIN), routeDigest: swapRouteDigest(SUNSWAP_V2_KEYLESS_MECHANISM_PIN),
                 mechanismPin: SUNSWAP_V2_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(SUNSWAP_V2_KEYLESS_MECHANISM_PIN),

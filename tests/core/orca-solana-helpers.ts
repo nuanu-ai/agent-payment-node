@@ -38,6 +38,11 @@ export function tickArrayBytes(startTickIndex: number, liquidityNet: readonly (r
   Buffer.from(bs58(ORCA_SOL_USDC_POOL)).copy(data, 9_956);
   return data;
 }
+/** The owner's own native wSOL account: a reused one keeps exactly this balance through the swap. */
+export function wsolAccountBytes(owner: string, amount: bigint, rent: bigint): Buffer {
+  return Buffer.from(getTokenEncoder().encode({ mint: WSOL_MINT as never, owner: owner as never, amount, delegate: { __option: "None" },
+    state: 1, isNative: { __option: "Some", value: rent }, delegatedAmount: 0n, closeAuthority: { __option: "None" } }));
+}
 export function usdcAccountBytes(owner: string, amount: bigint): Buffer {
   return Buffer.from(getTokenEncoder().encode({ mint: USDC_MINT as never, owner: owner as never, amount, delegate: { __option: "None" },
     state: 1, isNative: { __option: "None" }, delegatedAmount: 0n, closeAuthority: { __option: "None" } }));
@@ -93,7 +98,8 @@ export class FakeOrcaRpc implements SolanaRpcPort {
     if (this.simulationError !== null) return { context: { slot: this.slot + 1n }, value: { err: this.simulationError, logs: [], accounts: null, unitsConsumed: 0 } };
     const rent = this.usdcBefore === null ? this.rent : 0n;
     return { context: { slot: this.slot + 1n }, value: { err: null, logs: [], unitsConsumed: 49_012, accounts: [
-      wire({ owner: SYSTEM_PROGRAM, lamports: this.ownerLamports - AMOUNT_IN - this.fee - rent, executable: false, data: Buffer.alloc(0) }), null,
+      wire({ owner: SYSTEM_PROGRAM, lamports: this.ownerLamports - AMOUNT_IN - this.fee - rent, executable: false, data: Buffer.alloc(0) }),
+      this.accounts.has(this.wsol) ? wire(this.accounts.get(this.wsol)!) : null,
       wire({ owner: TOKEN_PROGRAM, lamports: this.rent, executable: false, data: usdcAccountBytes(this.owner, (this.usdcBefore ?? 0n) + this.simulatedOut) })] } };
   }
   private statuses(): unknown {

@@ -4,6 +4,10 @@ import { canonicalProgramIdentity, SWAP_MECHANISM_PIN_SCHEMA, SWAP_PROTOCOL_NETW
 import { validateSwapProtocolRegistry } from "./protocol-registry.js";
 export const SWAP_ROUTE_SCHEMA = "apn.swap-route.v1";
 export const MAX_SWAP_ADMISSION_OPTIONS = 16;
+/** Inventories take no profile, so they cannot say what an owner admitted; they say how admission is checked instead. */
+export const SWAP_INVENTORY_OWNER_ADMISSION = Object.freeze({ evaluated: false, reason: "inventory_has_no_profile",
+    checkedAt: "quote_and_prepare_against_the_profile_active_policy", admitBy: "route",
+    policyField: "swap admission mechanism or mechanisms: the route printed here (apn.swap-route.v1) or a mechanism pin" });
 export function validateSwapAdmissionMechanism(value) {
     if (isPlainRecord(value) && value.schemaVersion === SWAP_MECHANISM_PIN_SCHEMA)
         return validateSwapMechanismPin(value);

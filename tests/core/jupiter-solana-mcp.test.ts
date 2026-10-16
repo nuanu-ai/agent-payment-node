@@ -53,7 +53,8 @@ test("Jupiter MCP read-only surfaces retain dormant V2 and fail closed for V1 wi
   const snapshot = async () => (await readdir(temporary.root, { recursive: true })).sort();
   const before = await snapshot();
   const inventory = await call("apn_swap_solana_jupiter_inventory");
-  assert.equal(inventory.ok, true); assert.equal((inventory.data as any).admitted, false); assert.equal((inventory.data as any).execution, "dormant");
+  assert.equal(inventory.ok, true); assert.equal((inventory.data as any).ownerAdmission.evaluated, false);
+  assert.equal((inventory.data as any).execution, "foreground_cli_after_owner_admission");
   const quote = await call("apn_swap_solana_jupiter_quote", {
     profile: "mcp-test", account: payer, to: payer,
     amount: "1000000", slippage_bps: "50", owner_slippage_cap_bps: "50",

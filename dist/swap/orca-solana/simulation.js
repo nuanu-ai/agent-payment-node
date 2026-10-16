@@ -3,7 +3,7 @@ import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { rpcArray, rpcAtomic, rpcRecord, solanaAddress } from "../../solana/rpc.js";
 import { rawAccount } from "./accounts.js";
-import { SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT } from "./pins.js";
+import { SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WSOL_MINT } from "./pins.js";
 /**
  * Runs the exact unsigned bytes with `sigVerify: false` and reads back the owner's lamports, the wSOL account and the
  * USDC account. The Whirlpool program itself enforces `other_amount_threshold`; APN additionally requires the USDC
@@ -48,9 +48,19 @@ export async function simulateOrcaSwap(rpc, unsignedPayload, bounds, replaceRece
         const usdc = accounts[2] === null ? null : rawAccount(accounts[2], 165);
         if (owner === null || owner.owner !== SYSTEM_PROGRAM || owner.data.length !== 0 || owner.executable)
             throw new Error();
-        // A closed account simulates as absent or as an empty, zero-lamport system account.
-        if (wsol !== null && (wsol.lamports !== 0n || wsol.data.length !== 0 || wsol.owner !== SYSTEM_PROGRAM))
-            throw new Error();
+        if (bounds.wsolKept === null) {
+            // A closed account simulates as absent or as an empty, zero-lamport system account.
+            if (wsol !== null && (wsol.lamports !== 0n || wsol.data.length !== 0 || wsol.owner !== SYSTEM_PROGRAM))
+                throw new Error();
+        }
+        else {
+            // A kept account wraps exactly the input and swaps exactly the input: its own balance and lamports are unchanged.
+            if (wsol === null || wsol.owner !== TOKEN_PROGRAM || wsol.data.length !== 165 || wsol.lamports !== BigInt(bounds.wsolKept.lamports))
+                throw new Error();
+            const kept = getTokenDecoder().decode(wsol.data);
+            if (kept.owner !== bounds.owner || kept.mint !== WSOL_MINT || kept.state !== 1 || kept.amount !== BigInt(bounds.wsolKept.amountAtomic))
+                throw new Error();
+        }
         if (usdc === null || usdc.owner !== TOKEN_PROGRAM || usdc.data.length !== 165)
             throw new Error();
         const token = getTokenDecoder().decode(usdc.data);

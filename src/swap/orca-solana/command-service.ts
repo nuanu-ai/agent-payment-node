@@ -3,7 +3,7 @@ import { ApnError } from "../../errors.js";
 import { isPlainRecord } from "../../canonical.js";
 import type { RuntimeContext } from "../../runtime.js";
 import { swapMechanismDigest } from "../pin.js";
-import { swapRouteDigest, swapRouteOf } from "../route-admission.js";
+import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "../route-admission.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "./stable-mechanism.js";
 import { SwapOperationRepository } from "../repository.js";
 import { orcaStableInventory } from "./stable-readonly.js";
@@ -17,7 +17,7 @@ type Request = Extract<CommandRequest, { readonly command: `swap.orca.${string}`
 
 /** Inventory is the owner's source for the keyless pin and digest; nothing here admits or signs anything. */
 export function orcaInventory(runtimeInstalled: boolean): unknown {
-  return { chain: ORCA_SOLANA_CHAIN, admitted: false, execution: runtimeInstalled ? "foreground_cli_after_owner_admission" : "dormant",
+  return { chain: ORCA_SOLANA_CHAIN, ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION, execution: runtimeInstalled ? "foreground_cli_after_owner_admission" : "dormant",
     pool: { address: ORCA_SOL_USDC_POOL, program: WHIRLPOOL_PROGRAM, config: WHIRLPOOLS_CONFIG, tokenA: WSOL_MINT, tokenB: USDC_MINT,
       vaultA: ORCA_SOL_VAULT, vaultB: ORCA_USDC_VAULT, tickSpacing: ORCA_POOL_TICK_SPACING, feeRate: ORCA_POOL_FEE_RATE, direction: "SOL_to_USDC_exact_input" },
     allowedPrograms: [COMPUTE_BUDGET_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM], programPins: ORCA_PROGRAM_PINS,
@@ -43,13 +43,11 @@ export async function executeOrcaCommand(request: Request, context: RuntimeConte
     if (context.orcaStableStatus === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca status is unavailable.");
     return data(await context.orcaStableStatus(request.operationId), "stable_operation_status");
   }
-  if (request.command === "swap.orca.stable-approve") {
-    if (context.orcaStableApprove === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca approval is unavailable.");
-    return data(await context.orcaStableApprove(request.operationId), "stable_principal_reserved_unsigned");
-  }
-  if (request.command === "swap.orca.stable-execute") {
-    if (context.orcaStableExecute === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca execution is unavailable.");
-    const result = await context.orcaStableExecute(request.operationId);
+  if (request.command === "swap.orca.stable-approve" || request.command === "swap.orca.stable-execute") {
+    // One foreground consent: approve reserves and executes; execute (its own consent) serves a reservation left unexecuted.
+    const run = request.command === "swap.orca.stable-approve" ? context.orcaStableApprove : context.orcaStableExecute;
+    if (run === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca execution is unavailable.");
+    const result = await run(request.operationId);
     if (isPlainRecord(result) && result.signature === null) {
       throw new ApnError("APN_OPERATION_BLOCKED", "Stable execution stopped after its durable marker without a proved send. Principal remains held.",
         { reason: "orca_stable_marked_no_send_unproven", nextActions: [
