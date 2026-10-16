@@ -25,9 +25,9 @@ export interface GaslessObservationContext {
 }
 
 /**
- * Archive-free observation. Effects are proven by the authenticated receipt logs and header membership; account state
- * is read only at the current safe (Polygon: finalized) head and at the latest head, never at the prepare, inclusion or
- * scan-cursor block, whose state a keyless node with a ~128-block state window no longer serves.
+ * Archive-free observation. Effects are proven by the authenticated receipt logs and header membership; a settlement
+ * reads account state only at the latest head, and the permission-invalidation probe at the safe (Polygon: finalized)
+ * and latest heads; never at the prepare, inclusion or scan-cursor block, whose state a keyless node no longer serves.
  */
 export async function observeGasless(context: GaslessObservationContext, intent: GaslessIntent,
   identity: GaslessEffectIdentity, cursorInput: GaslessCursor): Promise<GaslessObservation> {
@@ -128,9 +128,12 @@ async function inspectSafely(context: GaslessObservationContext, intent: Gasless
 
 /**
  * Three requests: the transaction and its receipt; the inclusion header (with its transaction list), its parent (the
- * cursor anchor) and the safe head; then, once safe covers the inclusion, the account at the safe head together with
- * the inclusion header read again. Every success fact is in the receipt logs (UserOperationEvent, permit, transfers,
- * cleanup Approval(0)); the account read only records the residual allowance and the consumed nonces at a safe block.
+ * cursor anchor), the safe head and the latest head; then, once safe covers the inclusion, the account at the latest
+ * head together with the inclusion header read again. Every success fact is in the receipt logs (UserOperationEvent,
+ * permit, transfers, cleanup Approval(0)). The conclusion rests on the receipt at or below the safe header, re-checked
+ * by a header read at its height, never on safe-head state: on chains whose safe head trails latest by more than a
+ * keyless node's state window (Arbitrum, Unichain) that state is refused. The account is read at latest, every keyless
+ * node serves it: nonces only grow, so they show the consumed permission; the residual allowance is informational.
  */
 async function inspect(context: GaslessObservationContext, intent: GaslessIntent, userOperationHash: Hex,
   transactionHash: Hex, cursor: GaslessCursor): Promise<GaslessObservation> {
@@ -151,9 +154,9 @@ async function inspect(context: GaslessObservationContext, intent: GaslessIntent
     rpcQuantity(transaction.type) !== type) gaslessFailure("APN_RPC_PROTOCOL", "gasless_receipt_transaction_membership");
   const start = BigInt(cursor.startBlock.numberAtomic);
   if (blockNumber < start) gaslessFailure("APN_RPC_PROTOCOL", "gasless_receipt_before_prepare");
-  const [includedRaw, parentRaw, safeRaw] = await Promise.all([rpcBlock(context.rpc, quantity(blockNumber)),
+  const [includedRaw, parentRaw, safeRaw, latestRaw] = await Promise.all([rpcBlock(context.rpc, quantity(blockNumber)),
     blockNumber === start ? Promise.resolve(null) : rpcBlock(context.rpc, quantity(blockNumber - 1n)),
-    rpcFinalityBlock(context.rpc, context.chainId)]);
+    rpcFinalityBlock(context.rpc, context.chainId), rpcBlock(context.rpc, "latest")]);
   const included = includedRaw.block;
   if (included.hash !== blockHash || !Array.isArray(includedRaw.raw.transactions) || includedRaw.raw.transactions.length > 20_000 ||
     transactionIndex >= BigInt(includedRaw.raw.transactions.length) ||
@@ -172,7 +175,11 @@ async function inspect(context: GaslessObservationContext, intent: GaslessIntent
     : { startBlock: cursor.startBlock, nextBlockAtomic: included.numberAtomic, previousEndBlock: parentRaw.block };
   if (status === 0n) return unresolved(anchored, transactionHash, "gasless_receipt_unresolved",
     hashObject({ transactionHash, included, outer, status: "outer_reverted" }));
-  const safe = safeRaw.block;
+  const safe = safeRaw.block, latest = latestRaw.block;
+  if (BigInt(latest.numberAtomic) < BigInt(safe.numberAtomic) || BigInt(latest.timestampAtomic) < BigInt(safe.timestampAtomic)) {
+    gaslessFailure("APN_RPC_PROTOCOL", "gasless_head_behind_safe");
+  }
+  // Not yet safe: retry later, never a verdict.
   if (BigInt(safe.numberAtomic) < blockNumber) {
     return { status: "pending", transactionHash, settlement: null, cursor: anchored,
       evidenceHash: hashObject({ transactionHash, included, outer, receiptHash: receiptHash(context.chainId,
@@ -180,17 +187,18 @@ async function inspect(context: GaslessObservationContext, intent: GaslessIntent
   }
   const protocolReceipt: GaslessProtocolReceipt = { chainId: context.chainId, transactionHash, block: included, logs };
   const accounting = gaslessAccounting(intent, userOperationHash, protocolReceipt);
-  const [safeAccount, again] = await Promise.all([
-    readAccountAt(context.rpc, gaslessObservedContracts(intent), intent.owner.address, safe, true),
+  const [account, again] = await Promise.all([
+    readAccountAt(context.rpc, gaslessObservedContracts(intent), intent.owner.address, latest, true),
     rpcBlock(context.rpc, quantity(blockNumber)),
   ]);
+  // The anchor: the inclusion block is still canonical at its height (header read); a mismatch is a reorg, no verdict.
   if (!sameBlock(again.block, included)) gaslessFailure("APN_RPC_PROTOCOL", "gasless_block_reorg");
   const transactionProofHash = hashObject({ chainId: context.chainId, transactionHash, block: included,
     transactionIndexAtomic: transactionIndex.toString(), outer });
-  // `effectAccount` is the same safe-head read: nonces only grow, so it shows them consumed; the effect itself is the receipt.
+  // Both account fields are the one latest-head read at `accountBlock`; the effect itself is the receipt.
   const settlement = { chainId: context.chainId, userOperationHash, transactionHash, block: included, safeBlock: safe,
     outerSender: outer.from, transactionProofHash, receiptHash: receiptHash(context.chainId, transactionHash, included, status, logs),
-    protocolHash: intent.initialSnapshot.protocolHash, effectAccount: safeAccount, safeAccount, accounting };
+    protocolHash: intent.initialSnapshot.protocolHash, effectAccount: account, safeAccount: account, accountBlock: latest, accounting };
   return { status: "safe", transactionHash, settlement, cursor: anchored, evidenceHash: hashObject(settlement), reason: null };
 }
 

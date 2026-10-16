@@ -144,6 +144,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -154,8 +157,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -253,6 +254,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -263,8 +267,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -365,6 +367,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -375,8 +380,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -473,6 +476,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -483,8 +489,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -582,6 +586,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -592,8 +599,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -694,6 +699,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -704,8 +712,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -802,6 +808,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -812,8 +821,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -911,6 +918,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -921,8 +931,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1023,6 +1031,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1033,8 +1044,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1131,6 +1140,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1141,8 +1153,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1240,6 +1250,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1250,8 +1263,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1352,6 +1363,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1362,8 +1376,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1460,6 +1472,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1470,8 +1485,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1569,6 +1582,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1579,8 +1595,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1681,6 +1695,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1691,8 +1708,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1791,6 +1806,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1801,8 +1819,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -1902,6 +1918,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -1912,8 +1931,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {
@@ -2016,6 +2033,9 @@ export declare class GaslessService {
             native_paymaster_bill_capped_by_this_quote: boolean;
         };
         permission: {
+            guard_held: boolean;
+            automatic_revocation: boolean;
+            residual_allowance_read_at?: "latest";
             entry_point: `0x${string}`;
             paymaster: `0x${string}`;
             delegate: `0x${string}`;
@@ -2026,8 +2046,6 @@ export declare class GaslessService {
             permit_amount_atomic: string;
             initial_allowance_atomic: string;
             residual_allowance_atomic: string | null;
-            guard_held: boolean;
-            automatic_revocation: boolean;
         };
         gas: import("./model.js").GaslessGas;
         effects: {

@@ -50,10 +50,11 @@ export function validateGaslessMutable(op: GaslessOperationRecord, s: GaslessMut
   }
   if (s.settlement !== null && !gaslessSame(s.settlement, observed)) corrupt();
   const terminalProof = s.settlement;
+  // The residual allowance is informational: since 0.5.43 a safe receipt closes whatever it reads (older closes read 0).
   if (s.state === "completed" && (terminalProof === null || !terminalProof.accounting.success ||
-    terminalProof.safeAccount.allowanceAtomic !== "0" || s.userOperation.phase !== "safe_success" || s.failure !== null)) corrupt();
+    s.userOperation.phase !== "safe_success" || s.failure !== null)) corrupt();
   if (s.state === "failed_confirmed_revert" && (terminalProof === null || terminalProof.accounting.success ||
-    terminalProof.safeAccount.allowanceAtomic !== "0" || s.userOperation.phase !== "safe_revert" || s.failure === null)) corrupt();
+    s.userOperation.phase !== "safe_revert" || s.failure === null)) corrupt();
   if (s.state === "failed_effects_pending" && (observed === null || observed.accounting.success ||
     observed.safeAccount.allowanceAtomic === "0" || s.failure === null)) corrupt();
   if (s.state === "failed_before_effect" && (s.bootstrap.disclosureAttempts !== 0 || s.userOperation.disclosureAttempts !== 0 ||
