@@ -6,6 +6,7 @@ import { canonicalJson } from "../../src/canonical.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { Permit2ProductionRepository, publicPermit2Production, productionRecordBody, sealPermit2ProductionRecord } from "../../src/x402-permit2/production-repository.js";
 import { OperationService } from "../../src/operation-service.js";
+import { readPermit2ProductionStatus } from "../../src/x402-permit2/status.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
 
 test("risk and attempt races preserve one immutable exposure and private request marker", async t => {
@@ -190,4 +191,14 @@ test("historical exposure record remains readable and exposed without migration 
   assert.equal(publicPermit2Production(loaded!).lifecycle, "exposed_held");
   assert.equal(publicPermit2Production(loaded!).observeOnly, true);
   assert.equal(await readFile(path, "utf8"), before);
+});
+
+test("x402 permit2 status reads the production journal of a real operation", async t => {
+  const f = await journalFixture(t), id = f.record.operationId;
+  const status = await readPermit2ProductionStatus(f.root, "owner", id);
+  assert.equal(status.state, f.reserved.state);
+  assert.equal(status.operationId, id);
+  assert.equal((status as { readonly lifecycle?: unknown }).lifecycle, "unsigned");
+  assert.deepEqual(await readPermit2ProductionStatus(f.root, "owner", "f".repeat(64)), { operationId: "f".repeat(64), profile: "owner", state: "not_found" });
+  await assert.rejects(readPermit2ProductionStatus(f.root, "other", id), { code: "APN_OPERATION_BLOCKED" });
 });
