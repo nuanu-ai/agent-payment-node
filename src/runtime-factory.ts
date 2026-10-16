@@ -77,7 +77,7 @@ import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-facto
 import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
 import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
-import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
+import { verifyUniswapV3CodePins, verifyUniswapV3MutablePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
 import { createJupiterV1Runtime } from "./swap/jupiter-solana/v1-runtime-factory.js";
 import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
@@ -236,7 +236,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
   // MCP intercepts approve/execute with a CLI handoff before this factory runs.
   const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
-    ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, clock,
+    ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, verifySendPins: verifyUniswapV3MutablePins, clock,
       // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })

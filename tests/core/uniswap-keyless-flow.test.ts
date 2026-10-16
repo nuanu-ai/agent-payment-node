@@ -22,7 +22,7 @@ async function flow(root: string, options: { readonly typingMs?: number; readonl
   const terminal: NonNullable<TtyTransferApprovalOptions["openTerminal"]> = async () => ({ fd: 11, write: async (text: string) => { printed += text; },
     read: async function* () { clockMs += options.typingMs ?? 0; const code = /Type ([0-9a-f]{6}) and press Enter/u.exec(printed)?.[1] ?? "";
       yield Buffer.from(`${(options.typed ?? ((value: string) => value))(code)}\n`); }, close: async () => undefined });
-  const runtime = createUniswapKeylessRuntime({ state, wrapping, call: rpc.call, verifyPins: noPins, clock,
+  const runtime = createUniswapKeylessRuntime({ state, wrapping, call: rpc.call, verifyPins: noPins, verifySendPins: noPins, clock,
     policy: async (profile) => options.admitted === false || profile !== PROFILE ? null : policy, foreground: "tty",
     tty: { isTerminal: () => true, openTerminal: terminal } });
   const quoted: any = await runtime.quote({ profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT, outputToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
