@@ -2,6 +2,7 @@ import { approvalCode } from "./approval-code.js";
 import { canonicalJson, domainHash } from "./canonical.js";
 import { ASSET_POLICY_REGISTRY_SCHEMA_V2, } from "./asset-policy-registry.js";
 import { swapMechanismDigest } from "./swap/pin.js";
+import { swapRouteDigest } from "./swap/route-admission.js";
 import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS } from "./tty-approval.js";
 const FINGERPRINT_DOMAIN = "apn.allowlist-policy-decision-fingerprint.v1";
 const RAILS = ["direct", "gasless", "x402", "bridge", "swap"];
@@ -13,7 +14,8 @@ export function allowlistAdmissions(registry) {
             decimals: asset.decimals, rail, maximumPerTransferAtomic: caps.maximumPerTransferAtomic, dailyLimitAtomic: caps.dailyLimitAtomic,
             mechanism: mechanism ?? null,
             ...(rail === "gasless" && asset.gaslessRecipient !== undefined ? { recipient: asset.gaslessRecipient } : {}),
-            ...(rail === "bridge" && asset.mechanismOptions !== undefined ? { mechanismOptions: asset.mechanismOptions.bridge } : {}) };
+            ...(rail === "bridge" && asset.mechanismOptions?.bridge !== undefined ? { mechanismOptions: asset.mechanismOptions.bridge } : {}),
+            ...(rail === "swap" && asset.mechanismOptions?.swap !== undefined ? { swapMechanisms: asset.mechanismOptions.swap } : {}) };
     })));
 }
 export function allowlistDecisionFingerprint(input) {
@@ -49,6 +51,7 @@ export function allowlistDecisionLines(intent, approvalWindowClosesAt) {
             ...(row.mechanism === null ? [] : [`   Mechanism pin: ${mechanismText(row.mechanism)}`]),
             ...(row.recipient === undefined ? [] : [`   Exact recipient: ${row.recipient}`]),
             ...(row.mechanismOptions === undefined ? [] : row.mechanismOptions.map((option) => `   Mechanism pin: provider ${option.provider}; reference ${option.reference}; per operation ${display(option.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${option.maximumPerTransferAtomic} atomic)`)),
+            ...(row.swapMechanisms === undefined ? [] : row.swapMechanisms.map((mechanism) => `   Mechanism pin: ${mechanismText(mechanism)}`)),
         ]),
         "Daily caps count this asset's combined usage on every rail during the UTC day.",
         `Policy digest: ${registry.policyDigest}`,
@@ -70,6 +73,9 @@ export class TtyAllowlistPolicyApproval {
 function mechanismText(pin) {
     if (!("schemaVersion" in pin))
         return `provider ${pin.provider}; reference ${pin.reference}`;
+    if (!("protocolVersion" in pin))
+        return [`swap route ${pin.protocolFamily} on ${pin.chain}`, `router ${pin.routerProgramIdentity}`,
+            `contracts [${pin.auxiliaryContractProgramIdentities.join(", ")}]`, `route digest ${swapRouteDigest(pin)}`].join("; ");
     return [`swap ${pin.protocolFamily} ${pin.protocolVersion} on ${pin.chain}`, `router ${pin.routerProgramIdentity}`,
         `auxiliary [${pin.auxiliaryContractProgramIdentities.join(", ")}]`,
         `${pin.constructorKind} ${pin.constructorIdentity}@${pin.constructorVersion}`,

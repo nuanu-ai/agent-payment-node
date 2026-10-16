@@ -38,7 +38,7 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
  const admission=new JupiterV1OwnerAdmission({account:profile=>native.publicOwner(profile),ownerBinding:profile=>native.publicOwner(profile)},activePolicy,usage,()=>clock.now());
  const sender=new JupiterV1SingleSender(core,materials,bindings,native,rpc,clock),execution=new JupiterV1ExecutionDriver({core,materials,bindings,admission,native,sender,rpc,clock});
  const cached=new Map<string,GuardedSwapRuntime<JupiterV1QuoteRequest>>();
- async function selectedOwner(route:JupiterV1RouteConfig,profile:string,amount:string,minimum:string,account?:string){const result=await admission.resolveRoute(profile,amount,minimum,account);if(result.route.routeId!==route.routeId)blocked("Jupiter active policy differs from the finite runtime mechanism.");return result.owner;}
+ async function selectedOwner(route:JupiterV1RouteConfig,profile:string,amount:string,minimum:string,account?:string){const result=await admission.resolveRoute(profile,amount,minimum,account);if(!result.routes.some(r=>r.routeId===route.routeId))blocked("Jupiter active policy differs from the finite runtime mechanism.");return result.owner;}
  function make(route:JupiterV1RouteConfig):GuardedSwapRuntime<JupiterV1QuoteRequest> {
  const prior=cached.get(route.routeId);if(prior!==undefined)return prior;
  const builder=new JupiterV1QuoteBuilder(new JupiterV1ReadOnlyProvider(async(input,init)=>{await rpc.chargeOfficialRead();return await (options.providerFetch??jupiterV1HttpsFetch)(input,init);}),new JupiterV1MaterialResolver(rpc),materials,{

@@ -35,7 +35,9 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
             row.pins[admission.rail] = admission.mechanism;
         if (admission.recipient !== undefined)
             row.gaslessRecipient = admission.recipient;
-        if (admission.mechanisms !== undefined)
+        if (admission.mechanisms !== undefined && admission.rail === "swap")
+            row.swapOptions = admission.mechanisms;
+        else if (admission.mechanisms !== undefined)
             row.bridgeOptions = admission.mechanisms;
         merged.set(key, row);
     }
@@ -45,7 +47,9 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
             kind: row.asset.kind, identifier: row.asset.identifier, symbol: row.asset.symbol, decimals: row.asset.decimals,
             rails: row.rails, railCaps: row.railCaps,
             ...(Object.keys(row.pins).length === 0 ? {} : { mechanismPins: row.pins }),
-            ...(row.bridgeOptions === undefined ? {} : { mechanismOptions: { bridge: row.bridgeOptions } }),
+            ...(row.bridgeOptions === undefined && row.swapOptions === undefined ? {} : { mechanismOptions: {
+                    ...(row.bridgeOptions === undefined ? {} : { bridge: row.bridgeOptions }), ...(row.swapOptions === undefined ? {} : { swap: row.swapOptions })
+                } }),
             ...(row.gaslessRecipient === undefined ? {} : { gaslessRecipient: row.gaslessRecipient }),
         };
         const current = chains.get(row.asset.chain);
@@ -128,7 +132,8 @@ function overlayInput(value, inventory) {
         if (identities.has(identity))
             invalid("Allowlist policy contains a duplicate admission row.", "duplicate_admission");
         identities.add(identity);
-        if (row.rail === "swap" && (row.mechanism === undefined || !("chain" in row.mechanism) || row.mechanism.chain !== asset.chain)) {
+        const swapMechanisms = row.rail !== "swap" ? [] : row.mechanism !== undefined ? [row.mechanism] : (row.mechanisms ?? []);
+        if (row.rail === "swap" && (swapMechanisms.length === 0 || swapMechanisms.some((mechanism) => !isPlainRecord(mechanism) || mechanism.chain !== asset.chain))) {
             invalid("A swap admission must pin a swap mechanism for its exact network.", "swap_mechanism_chain_mismatch");
         }
     }

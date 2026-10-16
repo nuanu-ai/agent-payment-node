@@ -7,7 +7,7 @@ import { sealAssetPolicyRegistry, } from "./asset-policy-registry.js";
 import { parseAtomic } from "./money.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
-import { validateSwapMechanismPin } from "./swap/pin.js";
+import { MAX_SWAP_ADMISSION_OPTIONS, swapRouteDigest, validateSwapAdmissionMechanism } from "./swap/route-admission.js";
 import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA = "apn.allowlist-policy-overlay.v1";
 export const ALLOWLIST_POLICY_RECORD_SCHEMA = "apn.allowlist-policy-record.v1";
@@ -47,7 +47,8 @@ export function compileAllowlistPolicyOverlay(raw, inventory = loadAllowlistInve
             },
             ...(admission.mechanism === undefined ? {} : { mechanismPins: { [admission.rail]: admission.mechanism } }),
             ...(admission.recipient === undefined ? {} : { gaslessRecipient: admission.recipient }),
-            ...(admission.mechanisms === undefined ? {} : { mechanismOptions: { bridge: admission.mechanisms } }),
+            ...(admission.mechanisms === undefined ? {} : { mechanismOptions: admission.rail === "swap"
+                    ? { swap: admission.mechanisms } : { bridge: admission.mechanisms } }),
         };
         const current = chains.get(asset.chain);
         if (current === undefined) {
@@ -133,6 +134,8 @@ export function validateAllowlistAdmission(value) {
         invalid("Allowlist admission row is invalid.", "invalid_admission");
     }
     const alternatives = value.mechanisms;
+    if (alternatives !== undefined && value.rail === "swap")
+        return swapAlternatives(value);
     if (alternatives !== undefined && (value.rail !== "bridge" || value.mechanism !== undefined ||
         value.maximumPerTransferAtomic !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > 16)) {
         invalid("Bridge alternatives require two to sixteen exact pins and no legacy cap or pin.", "invalid_mechanisms");
@@ -182,6 +185,24 @@ export function validateAllowlistAdmission(value) {
         ...(mechanism === undefined ? {} : { mechanism }), ...(recipient === undefined ? {} : { recipient }),
         ...(mechanisms === undefined ? {} : { mechanisms }) };
 }
+/** Swap rows may admit several routes (for example Orca and Jupiter on one pool asset) under the row's own caps. */
+function swapAlternatives(value) {
+    const alternatives = value.mechanisms;
+    if (value.mechanism !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > MAX_SWAP_ADMISSION_OPTIONS) {
+        invalid("Swap alternatives require two to sixteen admitted routes and no single pin.", "invalid_mechanisms");
+    }
+    const mechanisms = alternatives.map((item) => swapMechanismPin(item));
+    if (new Set(mechanisms.map((item) => swapRouteDigest(item))).size !== mechanisms.length) {
+        invalid("Swap alternatives contain a duplicate route.", "duplicate_mechanism");
+    }
+    const maximum = positiveAtomic(value.maximumPerTransferAtomic, "maximum_per_transfer"), daily = positiveAtomic(value.dailyLimitAtomic, "daily_limit");
+    if (BigInt(maximum) > BigInt(daily))
+        invalid("Per-transfer cap cannot exceed daily cap.", "cap_order");
+    if (value.recipient !== undefined)
+        invalid("Recipient pins are available only for Ethereum/Base local or Base Coinbase gasless admissions.", "recipient_not_applicable");
+    return { chain: value.chain, kind: value.kind, ...(value.identifier === undefined ? {} : { identifier: value.identifier }),
+        rail: "swap", maximumPerTransferAtomic: maximum, dailyLimitAtomic: daily, mechanisms };
+}
 function maximumMechanismCap(value) {
     return value.reduce((max, item) => BigInt(item.maximumPerTransferAtomic) > BigInt(max) ? item.maximumPerTransferAtomic : max, "0");
 }
@@ -198,7 +219,7 @@ function swapMechanismPin(value) {
     if (value === undefined)
         return undefined;
     try {
-        return validateSwapMechanismPin(value);
+        return validateSwapAdmissionMechanism(value);
     }
     catch {
         return invalid("Pinned swap mechanism metadata is invalid.", "invalid_swap_mechanism");
