@@ -68,8 +68,9 @@ export async function advanceSmartAccountGaslessScan(call: SaRpcCall, intent: Sm
   safeHead: SmartAccountGaslessBlock): Promise<SmartAccountScanResult> {
   const cursor = validateSmartAccountGaslessCursor(intent, cursorInput);
   try {
-    await recheckBlock(call, cursor.startBlock, "sa_gasless_evidence", true);
-    if (cursor.previousEndBlock !== null) await recheckBlock(call, cursor.previousEndBlock, "sa_gasless_evidence", true);
+    // A canonical prior window end proves its ancestors, the start block among them.
+    if (cursor.previousEndBlock === null) await recheckBlock(call, cursor.startBlock, "sa_gasless_evidence", true);
+    else await recheckBlock(call, cursor.previousEndBlock, "sa_gasless_evidence", true);
     if (cursor.previousEndBlock !== null &&
       BigInt(safeHead.numberAtomic) < BigInt(cursor.previousEndBlock.numberAtomic)) throw new SaRpcReorgError();
     let expiry = cursor.expiryBlock;
@@ -81,8 +82,6 @@ export async function advanceSmartAccountGaslessScan(call: SaRpcCall, intent: Sm
     const next = BigInt(cursor.nextBlockAtomic);
     const last = expiry === null ? BigInt(safeHead.numberAtomic) : minimum(BigInt(safeHead.numberAtomic), BigInt(expiry.numberAtomic));
     if (next > last) {
-      await recheckBlock(call, safeHead, "sa_gasless_evidence", true);
-      if (expiry !== null) await recheckBlock(call, expiry, "sa_gasless_evidence", true);
       const complete = expiry !== null && next > BigInt(expiry.numberAtomic);
       const unchanged = { ...cursor, expiryBlock: expiry, childScanComplete: complete, transferScanComplete: complete };
       return { cursor: unchanged, partial: false, evidenceHash: hashObject({ cursor: unchanged, safeHead, empty: true }) };
@@ -112,15 +111,14 @@ async function scanRange(call: SaRpcCall, intent: SmartAccountGaslessIntent, chi
   cursor: SmartAccountGaslessCursor,
   expiry: SmartAccountGaslessBlock | null, safeHead: SmartAccountGaslessBlock, start: bigint,
   end: bigint): Promise<SmartAccountGaslessCursor> {
-  const [startBlock, endBlock] = await Promise.all([
-    rpcBlock(call, quantity(start)).then(result => result.block),
-    rpcBlock(call, quantity(end)).then(result => result.block),
-  ]);
-  // The child delegation hash is unique to this operation; any approved facilitator may be the redeemer.
+  // The window ends at or below the safe head, which does not reorg: its end header is read once, for the cursor.
+  const endBlock = (await rpcBlock(call, quantity(end))).block;
+  // The child delegation hash is unique to this operation; any approved facilitator may be the redeemer. The manager
+  // and token are the ones this operation froze (owner rule), not today's registry.
   const registry = saRegistry(8453);
   const childFilter = { address: registry.protocol.amount.address, fromBlock: quantity(start), toBlock: quantity(end),
-    topics: [SA_INCREASED_SPENT_TOPIC, addressWord(registry.protocol.manager.address), null, childHash] };
-  const transferFilter = { address: registry.token.address, fromBlock: quantity(start), toBlock: quantity(end),
+    topics: [SA_INCREASED_SPENT_TOPIC, addressWord(intent.binding.delegationManager), null, childHash] };
+  const transferFilter = { address: intent.token, fromBlock: quantity(start), toBlock: quantity(end),
     topics: [SA_TRANSFER_TOPIC, addressWord(intent.binding.ownerAddress), addressWord(intent.request.recipient)] };
   const childRaw = await call("eth_getLogs", [childFilter]);
   const transferRaw = await call("eth_getLogs", [transferFilter]);
@@ -139,10 +137,6 @@ async function scanRange(call: SaRpcCall, intent: SmartAccountGaslessIntent, chi
   if (candidateHashes.length > SA_SCAN_CANDIDATE_LIMIT || transferAnomalies.length > SA_SCAN_CANDIDATE_LIMIT) {
     throw new SaScanLimitError();
   }
-  await recheckBlock(call, startBlock, "sa_gasless_evidence", true);
-  await recheckBlock(call, endBlock, "sa_gasless_evidence", true);
-  await recheckBlock(call, safeHead, "sa_gasless_evidence", true);
-  if (expiry !== null) await recheckBlock(call, expiry, "sa_gasless_evidence", true);
   const next = end + 1n, complete = expiry !== null && next > BigInt(expiry.numberAtomic);
   return { startBlock: cursor.startBlock, nextBlockAtomic: next.toString(), previousEndBlock: endBlock,
     expiryBlock: expiry, candidateHashes, transferAnomalies, childScanComplete: complete, transferScanComplete: complete };
@@ -177,12 +171,11 @@ async function findExpiryBlock(call: SaRpcCall, start: SmartAccountGaslessBlock,
     if (BigInt(block.timestampAtomic) >= threshold) { answer = block; high = middle - 1n; }
     else low = middle + 1n;
   }
-  await recheckBlock(call, answer, "sa_gasless_evidence", true);
+  // Every block searched is at or below the safe head, so the answer and its predecessor are read once each.
   if (BigInt(answer.timestampAtomic) < threshold) saFail("sa_gasless_evidence");
   if (BigInt(answer.numberAtomic) > BigInt(start.numberAtomic)) {
     const prior = (await rpcBlock(call, quantity(BigInt(answer.numberAtomic) - 1n))).block;
     if (BigInt(prior.timestampAtomic) >= threshold) saFail("sa_gasless_evidence");
-    await recheckBlock(call, prior, "sa_gasless_evidence", true);
   }
   return answer;
 }
