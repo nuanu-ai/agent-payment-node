@@ -96,12 +96,13 @@ test("LI.FI observation phases use independent lazy bounded RPC sessions", async
   assert.deepEqual(approvalUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14]);
   s.source.safeApproval = true; s.rpcSessions.length = 0;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
-  assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 5);
+  assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 4);
   const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.equal(s.rpcSessions[1], resumeSession);
-  const resumeUnique = [...new Set(s.rpcSessions)]; assert.equal(resumeUnique.length, 4);
+  const resumeUnique = [...new Set(s.rpcSessions)]; assert.equal(resumeUnique.length, 3);
   // Ethereum USDC to Base USDC: derived source cap 14 and destination cap 17 (Base USDC deployment chunks), each with two retry attempts.
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14, 17, 2]);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 16, 19, 3]);
+  // Proven delivery derives its zero residual allowance, so completion opens no residual read session.
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14, 17]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 16, 19]);
   assert.notEqual(resumeSession, approvalSession);
 });
 
@@ -306,7 +307,12 @@ test("LI.FI pre-telemetry receipt integrity upgrades only the exact omitted-empt
     effectRole: "approval" as const, outcome: "failure" as const, physicalRequests: 1, httpAttempts: 1, logicalRpcItems: 1,
     batchCount: 0, maxBatchSize: 1, budgetRejectedBeforeTransport: 0,
     attemptsByEndpointRole: { primary: 1, receipt: 0, archive: 0 }, attemptsByMethodClass: { transaction: 1 } };
-  const observed = transitionBridge(historical, { observationTelemetry: [telemetry] }, new Date(Date.parse(historical.updatedAt) + 1).toISOString());
+  const later = new Date(Date.parse(historical.updatedAt) + 1).toISOString();
+  // Telemetry alone is diagnostics and never adds a transition; it rides along with the next real observation change.
+  assert.equal(transitionBridge(historical, { observationTelemetry: [telemetry] }, later), historical);
+  const observed = transitionBridge(historical, { observationTelemetry: [telemetry],
+    failure: { reason: "source_observation_unavailable", residualAllowance: null } }, later);
+  assert.equal(observed.transitions.length, historical.transitions.length + 1);
   await s.core.bridges.records.writeOperation(observed); await s.core.bridges.records.repairReceipt(observed);
   const exact = bridgeReceipt(observed) as any; assert.deepEqual((await s.core.bridges.records.loadReceipt(observed.profileHash, id) as any).observation_rpc_telemetry,
     exact.observation_rpc_telemetry);
