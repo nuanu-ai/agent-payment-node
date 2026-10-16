@@ -7,3 +7,5 @@ export declare function validateLegacyBridgeOperation(value: unknown): BridgeOpe
 export declare function validateEnvelope(e: BridgeEnvelope): void;
 export declare function validateEnvelopeProof(p: BridgeTransactionProof, e: BridgeEnvelope, hash: string): void;
 export declare function validateBridgeContinuity(previous: BridgeOperationRecord, next: BridgeOperationRecord): void;
+/** `next` equals `previous` or appends exactly one transition to it. Both records must already be validated. */
+export declare function assertBridgeAppend(previous: BridgeOperationRecord, next: BridgeOperationRecord): void;

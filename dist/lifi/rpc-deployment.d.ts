@@ -50,7 +50,6 @@ export declare const GAS_ORACLE_ABI: readonly [{
         readonly type: "uint256";
     }];
 }];
-export declare const BASE_ECOTONE_EIP6780_TIMESTAMP = 1710374401n;
 export declare function deploymentMulticallEligible(data: Hex): boolean;
 export type DeploymentReadRow = {
     readonly kind: "call" | "storage";
@@ -59,10 +58,11 @@ export type DeploymentReadRow = {
     readonly expected: Hex;
 };
 export declare function deploymentAggregateItem(rows: readonly DeploymentReadRow[], tag: unknown): Omit<RpcBatchReadItem, "batchAttempt">;
-export declare const LINEA_TRACE_PROBE_TRANSACTION: Hex;
-export declare const MONAD_TRACE_PROBE_TRANSACTION: Hex;
 type PlannedRead = Omit<RpcBatchReadItem, "batchAttempt">;
-/** The exact archive batch of one deployment proof. `BridgeRpc.deployment` sends it and the observation budget counts it. */
+/**
+ * The legacy full historical deployment proof at one block, on the archive role. Live bridges use the light check in
+ * deployment-check.ts; only the frozen historical migration proofs (`operation repair-deployment`) still replay this plan.
+ */
 export declare function bridgeDeploymentReadPlan(chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address, at: BridgeBlock, exactHashPin: boolean): {
     contract: import("./model.js").BridgeDeploymentContract;
     feeContract: {
@@ -130,39 +130,9 @@ export declare function bridgeDeploymentReadPlan(chainId: BridgeChainId, peerCha
         readonly data: Hex;
         readonly expected: Hex;
     }[][];
-    traceProbe: {
-        transaction: Hex;
-        from: string;
-        to: string;
-        value: bigint;
-    } | undefined;
     items: PlannedRead[];
 };
-/** Only Base Stargate, frozen after the Ecotone/EIP-6780 activation, may reuse its prepared ordinary-code proof on refresh. */
-export declare function bridgeRetainedRefreshEligible(chainId: BridgeChainId, tool: BridgeTool, frozen: BridgeBlock): boolean;
-/** The archive batch of a retained refresh: fresh fee code, every configuration read and both headers at the safe block. */
-export declare function bridgeRetainedDeploymentReadPlan(chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address, at: BridgeBlock, prepared: BridgeBlock): {
-    readRows: {
-        readonly kind: "call" | "storage";
-        readonly address: Address;
-        readonly data: Hex;
-        readonly expected: Hex;
-    }[];
-    directRows: {
-        readonly kind: "call" | "storage";
-        readonly address: Address;
-        readonly data: Hex;
-        readonly expected: Hex;
-    }[];
-    aggregateRows: {
-        readonly kind: "call" | "storage";
-        readonly address: Address;
-        readonly data: Hex;
-        readonly expected: Hex;
-    }[];
-    items: PlannedRead[];
-};
-/** The exact archive batch of the Base pinned fee proof, at the included block's canonical hash. */
+/** The legacy Base pinned fee proof at the included block's canonical hash, kept only for the frozen migration proofs. */
 export declare function basePinnedFeeReadPlan(gas: bigint, block: BridgeBlock, safe: BridgeBlock): {
     codeRows: {
         readonly address: `0x${string}`;

@@ -57,7 +57,8 @@ export class SeiFundingService {
     const profile=canonicalProfile(input.profile),idempotency=canonicalIdempotencyKey(input.idempotencyKey),bound=await bridgeOwner(this.state,profile);
     if(bound.owner.address!==input.expectedPayer)seiFail("expected_payer");
     const amount=seiUint(input.amountAtomic),floor=seiUint(input.minimumOutputAtomic),fee=seiUint(input.maximumFeeAtomic);
-    if(amount<=0n || amount>SEI_FUNDING.maximumAmount || floor<SEI_FUNDING.minimumOutput || fee<=0n || fee>SEI_FUNDING.maximumFee)seiFail("input_caps");
+    // The owner's own fee ceiling and delivery floor bound the effect; the asset policy and usage ledger cap the amount.
+    if(amount<=0n || floor<=0n || fee<=0n)seiFail("input_caps");
     const operationId=this.state.operationId(profile,idempotency),idempotencyHash=this.state.idempotencyHash(idempotency),requestHash=hashObject(input);
     const ops=new OperationService(this.state);const prior=await ops.resolvePrepare({kind:"sei_gaszip",profileHash:bound.owner.profileHash,operationId,idempotencyHash,requestHash});
     if(prior!==null){if(prior.kind!=="sei_gaszip")seiFail("idempotency_kind");return publicSeiFunding(prior.record);}

@@ -77,7 +77,8 @@ export class SeiFundingService {
         if (bound.owner.address !== input.expectedPayer)
             seiFail("expected_payer");
         const amount = seiUint(input.amountAtomic), floor = seiUint(input.minimumOutputAtomic), fee = seiUint(input.maximumFeeAtomic);
-        if (amount <= 0n || amount > SEI_FUNDING.maximumAmount || floor < SEI_FUNDING.minimumOutput || fee <= 0n || fee > SEI_FUNDING.maximumFee)
+        // The owner's own fee ceiling and delivery floor bound the effect; the asset policy and usage ledger cap the amount.
+        if (amount <= 0n || floor <= 0n || fee <= 0n)
             seiFail("input_caps");
         const operationId = this.state.operationId(profile, idempotency), idempotencyHash = this.state.idempotencyHash(idempotency), requestHash = hashObject(input);
         const ops = new OperationService(this.state);

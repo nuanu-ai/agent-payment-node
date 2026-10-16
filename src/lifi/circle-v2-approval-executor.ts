@@ -50,19 +50,21 @@ export function publicCircleApproval(record: CircleApprovalRecord) {
   return publicRecord;
 }
 
-/** Use APN's canonical Base RPC reader, which verifies receipt membership and safe block ancestry. */
-export function circleApprovalRpcFromBridge(rpc: BridgeRpcPort): CircleApprovalRpc {
-  if (rpc.chainId !== 8453) bridgeFailure("APN_RPC_CONFIG", "circle_approval_base_only");
+/**
+ * Use APN's canonical Base RPC reader, which verifies receipt membership and safe block ancestry. Each call reads through
+ * its own command session on the primary endpoint: a state read is one batch (chain identity, head, account, Base fee
+ * inputs and the approval's own simulation), and the estimate and fee quote reuse it.
+ */
+export function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort)): CircleApprovalRpc {
+  const rpcFor = typeof input === "function" ? input : () => input, first = rpcFor();
+  if (first.chainId !== 8453) bridgeFailure("APN_RPC_CONFIG", "circle_approval_base_only");
   return {
     chainId: 8453,
-    origin: rpc.origin,
+    origin: first.origin,
     read: async query => {
-      await rpc.assertChain();
-      const payer = bridgeAddress(query.payer), token = bridgeAddress(query.token), spender = bridgeAddress(query.spender);
-      const [account, estimate] = await Promise.all([
-        rpc.account(payer, spender, token),
-        rpc.estimate({ chainId: 8453, from: payer, to: token, data: bridgeHex(query.data), valueAtomic: "0", gasLimitAtomic: "0" }),
-      ]);
+      const rpc = rpcFor(), payer = bridgeAddress(query.payer), token = bridgeAddress(query.token), spender = bridgeAddress(query.spender);
+      const transaction = { chainId: 8453 as const, from: payer, to: token, data: bridgeHex(query.data), valueAtomic: "0", gasLimitAtomic: "0" };
+      const account = await rpc.account(payer, spender, token, [transaction]), estimate = await rpc.estimate(transaction);
       if (account.chainId !== 8453 || account.rpcOrigin !== rpc.origin || account.owner !== payer ||
         account.token !== token || account.spender !== spender) bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_account_identity");
       const maximumGasCostAtomic = (BigInt(estimate.gasLimitAtomic) * BigInt(estimate.maxFeePerGasAtomic)).toString();
@@ -77,9 +79,9 @@ export function circleApprovalRpcFromBridge(rpc: BridgeRpcPort): CircleApprovalR
         gasLimitAtomic: estimate.gasLimitAtomic, maxFeePerGasWei: estimate.maxFeePerGasAtomic,
         maxPriorityFeePerGasWei: estimate.maxPriorityFeePerGasAtomic, totalNativeDebitWei: quote.totalQuoteWei };
     },
-    send: async raw => await rpc.send(raw),
+    send: async raw => await rpcFor().send(raw),
     observe: async hash => {
-      const found = await rpc.observe(hash);
+      const rpc = rpcFor(), found = await rpc.observe(hash);
       if (found === null || found.transaction.safeBlock === null) return null;
       const tx = found.transaction, receipt = found.receipt;
       if (tx.chainId !== 8453 || tx.rpcOrigin !== rpc.origin || tx.transactionHash !== hash ||

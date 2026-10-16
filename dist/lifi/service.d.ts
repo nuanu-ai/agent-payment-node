@@ -12,7 +12,6 @@ export interface BridgeDependencies {
     readonly rpcFor: BridgeRpcFactory;
     readonly custody: BridgeCustodyPort;
     readonly approval?: BridgeApprovalPort;
-    readonly lineaArchiveDeploymentScalarCode?: boolean;
 }
 export interface BridgeDeploymentMigrationResult {
     readonly schema_version: (BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit)["schemaVersion"];

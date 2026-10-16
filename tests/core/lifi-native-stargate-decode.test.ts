@@ -140,8 +140,10 @@ test("native Stargate source rejects fee and msg.value mismatches and cannot use
   assert.throws(() => bridgeSourceProof(m, d, { ...good, logs: [good.logs[0]!,
     mutateEvent(good.logs[1]!, "FeesForwarded", { distributions: [{ recipient: FEE_RECIPIENT, amount: FIXED_FEE + 1n }] }),
     good.logs[2]!] }), { code: "APN_RPC_PROTOCOL" });
+  // The stored decode is re-derived from the materialization when the record loads; a changed materialization decodes
+  // (or refuses) differently and its decode cannot match the paid receipt.
   for (const bad of [fixture({ value: VALUE + 1n }), fixture({ nativeFee: LZ_FEE + 1n }), fixture({ feeRow: LZ_FEE + 1n })]) {
-    assert.throws(() => bridgeSourceProof(bad, d, good));
+    assert.throws(() => bridgeSourceProof(bad, decodeBridgeCall(bad), good));
   }
   assert.throws(() => bridgeSourceProof(m, d, { ...good, logs: good.logs.slice(0, 2) }),
     { code: "APN_RPC_PROTOCOL" });
@@ -160,12 +162,7 @@ test("native Stargate destination binds pinned Base pool, GUID, EIDs, recipient,
       beforeBlock: { numberAtomic: "122", hash: `0x${"55".repeat(32)}`, timestampAtomic: "1" },
       afterBlock: { numberAtomic: "123", hash: `0x${"44".repeat(32)}`, timestampAtomic: "2" },
       beforeBalanceAtomic: "100", afterBalanceAtomic: (100n + BigInt(amount)).toString(), deltaAtomic: amount } };
-  const observedDeployment = { chainId: 8453, peerChainId: 1, tool: "stargateV2",
-    block: result.nativeBalance!.afterBlock, rpcOrigin: "https://offline.example",
-    contractHash: "a".repeat(64), codeHash: "b".repeat(64), configurationHash: "c".repeat(64) } as const;
-  const pin: NativeStargateDestinationPin = { pool: BASE_NATIVE_POOL,
-    frozenDeployment: observedDeployment, observedDeployment,
-    frozenPoolCodeHash: `0x${"dd".repeat(32)}`, observedPoolCodeHash: `0x${"dd".repeat(32)}` };
+  const pin: NativeStargateDestinationPin = { pool: BASE_NATIVE_POOL, poolCodeHash: `0x${"dd".repeat(32)}` };
   const prove = (receipt: BridgeProtocolReceipt, deployment = pin) => bridgeDestinationProof(source, m, d, receipt, deployment);
   const proof = prove(result);
   assert.equal(proof.amountAtomic, amount);
@@ -186,11 +183,8 @@ test("native Stargate destination binds pinned Base pool, GUID, EIDs, recipient,
   assert.equal(netNegative.nativeBalance, null);
   assert.throws(() => bridgeDestinationProof(source, m, d, result), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove(result, { ...pin, pool: NATIVE_POOL }), { code: "APN_RPC_PROTOCOL" });
-  assert.throws(() => prove(result, { ...pin, observedPoolCodeHash: `0x${"ee".repeat(32)}` }), { code: "APN_RPC_PROTOCOL" });
-  assert.throws(() => prove(result, { ...pin, observedDeployment: { ...observedDeployment,
-    configurationHash: "e".repeat(64) } }), { code: "APN_RPC_PROTOCOL" });
-  assert.throws(() => prove(result, { ...pin, observedDeployment: { ...observedDeployment,
-    block: { ...observedDeployment.block, hash: `0x${"ee".repeat(32)}` } } }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove(result, { ...pin, poolCodeHash: `0x${"00".repeat(32)}` }), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => prove(result, { ...pin, poolCodeHash: "0xdd" }), { code: "APN_RPC_PROTOCOL" });
   assert.throws(() => prove({ ...result, logs: [{ ...received, address: NATIVE_POOL }] }), { code: "APN_RPC_PROTOCOL" });
   for (const change of [{ guid: `0x${"66".repeat(32)}` }, { srcEid: 30110 }, { toAddress: NATIVE_POOL },
     { amountReceivedLD: BigInt(amount) - 1n }]) {

@@ -1,7 +1,7 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress } from "viem";
 import { BNB_COMPOSITE, bnbPoolReadData } from "./bnb-composite.js";
 import { bridgeDeployment } from "./deployments.js";
-import { rpcBlockValue, rpcExpectedChainValue, rpcHexValue, rpcRecordValue } from "./rpc-batch-codec.js";
+import { rpcBlockValue, rpcExpectedChainValue, rpcHexValue } from "./rpc-batch-codec.js";
 import { BASE_FEE_CONTRACT } from "./rpc-fees.js";
 import { quantity } from "./rpc-support.js";
 import { BRIDGE_ZERO_ADDRESS, bridgeFailure } from "./validation.js";
@@ -13,7 +13,6 @@ export const GAS_ORACLE = "0x420000000000000000000000000000000000000F";
 export const L1_BLOCK = "0x4200000000000000000000000000000000000015";
 export const GAS_ORACLE_ABI = [{ type: "function", name: "getL1FeeUpperBound", stateMutability: "view", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
     { type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] }];
-export const BASE_ECOTONE_EIP6780_TIMESTAMP = 1710374401n;
 const DEPLOYMENT_MULTICALL_SELECTORS = new Set([
     "0x079bd2c7", "0x105d0b81", "0x2bc5114c", "0x313ce567", "0x54fd4d50", "0x57f6dcb8",
     "0x5e280f11", "0x5f6d9ae4", "0x72607537", "0x857749b0", "0x8da5cb5b", "0x9baf00f9", "0xb54501bc",
@@ -38,9 +37,10 @@ export function deploymentAggregateItem(rows, tag) {
             return decoded.map((row) => rpcHexValue(64 * 1024)(row.returnData));
         } };
 }
-export const LINEA_TRACE_PROBE_TRANSACTION = "0x4352433956109d31ab50db9547f16bcb90f3545f793ed40f75716ccd9a360efd";
-export const MONAD_TRACE_PROBE_TRANSACTION = "0x9ff1560ef67d7253df2663b897452abe6644f6d6cb746743253822c264d13440";
-/** The exact archive batch of one deployment proof. `BridgeRpc.deployment` sends it and the observation budget counts it. */
+/**
+ * The legacy full historical deployment proof at one block, on the archive role. Live bridges use the light check in
+ * deployment-check.ts; only the frozen historical migration proofs (`operation repair-deployment`) still replay this plan.
+ */
 export function bridgeDeploymentReadPlan(chainId, peerChainId, tool, token, at, exactHashPin) {
     const contract = bridgeDeployment(chainId, peerChainId, tool, token), compactDeployment = (tool === "stargateV2" && (chainId === 8453 || chainId === 42161)) ||
         (tool === "across" && chainId === 8453 && token === BRIDGE_ZERO_ADDRESS), tag = exactHashPin ? { blockHash: at.hash, requireCanonical: true } : quantity(BigInt(at.numberAtomic));
@@ -55,12 +55,6 @@ export function bridgeDeploymentReadPlan(chainId, peerChainId, tool, token, at, 
     if (chainId === 56 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
         extraItems.push({ method: "eth_call", params: [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.registration }, tag], cachePolicy: "immutable", decoder: rpcHexValue(256) }, { method: "eth_call", params: [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.tokens }, tag], cachePolicy: "immutable", decoder: rpcHexValue(2048) });
     }
-    let traceProbe;
-    if ((chainId === 143 || chainId === 59144) && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
-        traceProbe = chainId === 143 ? { transaction: MONAD_TRACE_PROBE_TRANSACTION, from: "0x6f49a8f621353f12378d0046e7d7e4b9b249dc9e", to: "0x0000000000000000000000000000000000001000", value: 18000000000000000000n }
-            : { transaction: LINEA_TRACE_PROBE_TRANSACTION, from: "0x9629fe86f04e735923e8542ddd9f265f576e7421", to: "0xbcc016e2a79d509d2b776827ed986568d9b56d59", value: 243939205000000000n };
-        extraItems.push({ method: "debug_traceTransaction", params: [traceProbe.transaction, { tracer: "callTracer", tracerConfig: { onlyTopCall: true, withLog: false } }], cachePolicy: "immutable", decoder: rpcRecordValue });
-    }
     const items = [
         { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(chainId) },
         ...verificationCodeRows.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable", decoder: rpcHexValue(128 * 1024) })),
@@ -71,33 +65,9 @@ export function bridgeDeploymentReadPlan(chainId, peerChainId, tool, token, at, 
         ...extraItems,
         { method: "eth_getBlockByNumber", params: [quantity(BigInt(at.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
     ];
-    return { contract, feeContract, verificationCodeRows, readRows, directRows, aggregateGroups, traceProbe, items };
+    return { contract, feeContract, verificationCodeRows, readRows, directRows, aggregateGroups, items };
 }
-/** Only Base Stargate, frozen after the Ecotone/EIP-6780 activation, may reuse its prepared ordinary-code proof on refresh. */
-export function bridgeRetainedRefreshEligible(chainId, tool, frozen) {
-    return tool === "stargateV2" && chainId === 8453 && BigInt(frozen.timestampAtomic) >= BASE_ECOTONE_EIP6780_TIMESTAMP;
-}
-/** The archive batch of a retained refresh: fresh fee code, every configuration read and both headers at the safe block. */
-export function bridgeRetainedDeploymentReadPlan(chainId, peerChainId, tool, token, at, prepared) {
-    const contract = bridgeDeployment(chainId, peerChainId, tool, token), feeContract = chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
-    const tag = quantity(BigInt(at.numberAtomic)), readRows = [...contract.reads, ...feeContract.reads];
-    const aggregateRows = readRows.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data));
-    const directRows = readRows.filter((row) => !aggregateRows.includes(row));
-    const items = [
-        { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(chainId) },
-        // Base fee machinery is system/predeploy code and is never covered by retained ordinary-code proof.
-        ...feeContract.code.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable",
-            decoder: rpcHexValue(128 * 1024) })),
-        ...directRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
-            params: row.kind === "storage" ? [row.address, row.data, tag] : [{ to: row.address, data: row.data }, tag],
-            cachePolicy: "immutable", decoder: rpcHexValue(64 * 1024) })),
-        ...(aggregateRows.length === 0 ? [] : [deploymentAggregateItem(aggregateRows, tag)]),
-        { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
-        { method: "eth_getBlockByNumber", params: [quantity(BigInt(prepared.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-    ];
-    return { readRows, directRows, aggregateRows, items };
-}
-/** The exact archive batch of the Base pinned fee proof, at the included block's canonical hash. */
+/** The legacy Base pinned fee proof at the included block's canonical hash, kept only for the frozen migration proofs. */
 export function basePinnedFeeReadPlan(gas, block, safe) {
     const tag = { blockHash: block.hash, requireCanonical: true }, multicallHash = PORTFOLIO_NETWORK_RPC.find((row) => row.evmChainId === 8453)?.multicall3CodeHash;
     if (multicallHash === undefined || multicallHash === null)

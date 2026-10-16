@@ -62,7 +62,9 @@ export async function usdcBudgetSpy(now: Date, op: import("../../src/lifi/operat
   const calls: Array<{ host: string; items: Request[] }> = [];
   const resultFor = (chainId: number, item: Request): unknown => {
     if (fault === "nonce" && item.method === "eth_getTransactionCount") return "0x63";
-    if (fault === "deployment" && item.method === "eth_getCode" && chainId === 42161) return "0x00";
+    // The source deployment check reads the Diamond's selector routing at the head: a re-routed Across selector refuses.
+    if (fault === "deployment" && item.method === "eth_call" && chainId === 1 &&
+      String((item.params[0] as { data?: unknown }).data).startsWith("0xcdffacc6")) return `0x${"0".repeat(64)}`;
     if (item.method === "eth_getTransactionByHash") return item.params[0] === hash ? approval.transaction : null;
     if (item.method === "eth_getTransactionReceipt") return item.params[0] === hash ? approval.receipt : null;
     if (chainId === 1 && item.method === "eth_getBlockByNumber" && (item.params[0] === "safe" || item.params[0] === block.number)) return approval.block;

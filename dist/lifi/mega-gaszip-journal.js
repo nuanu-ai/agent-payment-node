@@ -16,7 +16,7 @@ export function validateMegaFunding(value) {
     for (const s of [r.operationId, r.profileHash, r.idempotencyHash, r.requestHash, r.policyDigest, r.quoteDigest])
         stateIdentifier(s, "GasZip record identity");
     if (r.profile !== MEGA_FUNDING.profile || r.owner.address !== MEGA_FUNDING.owner || r.profileHash !== r.owner.profileHash || r.profile !== r.owner.profile || megaUint(r.amountAtomic) !== MEGA_FUNDING.maximumAmount ||
-        megaUint(r.maximumFeeAtomic) > MEGA_FUNDING.maximumFee || megaUint(r.minimumOutputAtomic) < MEGA_FUNDING.minimumOutput ||
+        megaUint(r.maximumFeeAtomic) <= 0n || megaUint(r.minimumOutputAtomic) <= 0n ||
         megaUint(r.quoteExpectedAtomic) < megaUint(r.minimumOutputAtomic) || !Number.isFinite(Date.parse(r.expiresAt)) || !Number.isSafeInteger(r.policyRevision) || r.policyRevision < 1)
         megaFail("record_terms");
     megaHash(r.plan.blockHash);

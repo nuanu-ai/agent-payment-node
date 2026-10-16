@@ -19,7 +19,7 @@ import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation } from "./base-deployment-migration.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { bridgeDestinationObservationRequests, bridgeSourceObservationRequests } from "./observation-budget.js";
-import { BRIDGE_RESIDUAL_OBSERVATION_REQUESTS, bridgeInvocationPostBudget } from "./send-budget.js";
+import { BRIDGE_OBSERVATION_RETRY_POSTS, BRIDGE_RESIDUAL_OBSERVATION_REQUESTS, bridgeInvocationPostBudget, bridgeSendStepPostBudget } from "./send-budget.js";
 import { sha256 } from "../canonical.js";
 export class BridgeService {
     context;
@@ -82,7 +82,7 @@ export class BridgeService {
             // and finality reads after a durable source checkpoint. Each command gets a fresh physical cap.
             const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 31, maxHttpAttempts: 33,
                 archiveDeploymentBatchMaxItems: 3,
-                providerScheduler: this.providerScheduler, physicalBudget: new BridgeRpcPhysicalBudget() });
+                providerScheduler: this.providerScheduler, physicalBudget: new BridgeRpcPhysicalBudget(24) });
             if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
                 if (!isLegacyBridgeOperation(op)) {
                     const eligible = migrateBaseDeploymentOperation(raw);
@@ -103,7 +103,7 @@ export class BridgeService {
                     bridgeFailure("APN_OPERATION_BLOCKED", "migration_source_transaction_missing");
                 const checkpoint = await this.records.baseMigrationSourceCheckpoint(raw);
                 if (checkpoint === null) {
-                    const sourceObserved = await source.observe(effect.transactionHash, effect.envelope);
+                    const sourceObserved = await source.observe(effect.transactionHash, effect.envelope, undefined, { legacyBaseFees: true });
                     if (sourceObserved === null)
                         bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
                     const sourceDeployment = await source.deployment("across", request.toChainId, request.fromToken, sourceObserved.transaction.block);
@@ -111,7 +111,7 @@ export class BridgeService {
                     return { status: "pending", proof_class: "local_journal_migration", operation_id: raw.operationId,
                         next_actions: [`apn operation repair-deployment --operation ${raw.operationId}`] };
                 }
-                const destinationObserved = await destination.observe(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationTransactionHash);
+                const destinationObserved = await destination.observe(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationTransactionHash, undefined, undefined, { legacyBaseFees: true });
                 if (destinationObserved === null)
                     bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
                 const destinationDeployment = await destination.deployment("across", request.fromChainId, request.toToken, destinationObserved.transaction.block);
@@ -162,36 +162,23 @@ export class BridgeService {
         const d = this.dependencies();
         return new BridgePreparation({ state: this.context.state, records: this.records, quotes: new BridgeQuoteRepository(this.context.state.root),
             operations: this.operations, provider: d.provider, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(),
-            providerScheduler: this.providerScheduler, lineaArchiveDeploymentScalarCode: d.lineaArchiveDeploymentScalarCode === true });
+            providerScheduler: this.providerScheduler });
     }
     execution(op) {
-        const d = this.dependencies(), m = op.intent.materialization;
-        // The invocation cap is derived from this operation's read plans for every route: the sign-and-send step with its retry
-        // headroom plus the source, destination and residual observation sessions. An exhausted cap defers to the next resume.
-        const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeInvocationPostBudget(op, 3));
-        // The command session serves every guard of the invocation. The first full guard is counted in send-budget.ts from its read
-        // plans (Base USDC with Ethereum or Arbitrum USDC Across: two safe heads, 10+7 archive chunks and two account batches = 21).
-        // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof; Arbitrum code remains fully fresh.
-        // Later guards reuse immutable evidence and read the two mutable account/simulation batches again.
-        const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
-            archiveDeploymentBatchMaxItems: 3, providerScheduler: this.providerScheduler, physicalBudget });
-        const lazy = (chainId, options) => {
+        const d = this.dependencies(), m = op.intent.materialization, now = () => this.context.clock.now().getTime();
+        // Every cap is derived from this operation's read plans (send-budget.ts): the send step of its unsent effects with retry
+        // headroom, and the source, destination and residual observation sessions. An exhausted cap defers to the next resume.
+        const physicalBudget = new BridgeRpcPhysicalBudget(bridgeInvocationPostBudget(op)), sendPosts = Math.max(1, bridgeSendStepPostBudget(op));
+        const session = new RpcReadSession({ now, maxHttpRequests: sendPosts, maxHttpAttempts: sendPosts, providerScheduler: this.providerScheduler, physicalBudget });
+        const lazy = (chainId, requests, retries) => {
             let rpc;
-            return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ ...options, providerScheduler: this.providerScheduler, physicalBudget }));
+            return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ now, maxHttpRequests: requests, maxHttpAttempts: requests + retries,
+                providerScheduler: this.providerScheduler, physicalBudget }));
         };
-        const common = { now: () => this.context.clock.now().getTime(), archiveDeploymentBatchMaxItems: 3 };
-        // One source effect observation is bounded by its exact read plans: the canonical receipt sequence, Base's pinned fee
-        // proof and the route's historical deployment proof after exact cache reuse (Base USDC to Arbitrum Across needs 19).
-        // Protocol code, proxy/facet/implementation storage and caller-sensitive calls stay fresh; two attempts retain the retry reserve.
-        const sourceRequests = bridgeSourceObservationRequests(m.request.fromChainId, m.request.toChainId, m.tool, m.request.fromToken, common.archiveDeploymentBatchMaxItems);
-        const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: sourceRequests, maxHttpAttempts: sourceRequests + 2 });
-        // The destination proof is bounded the same way after the principal has left: canonical receipt, any provider-bound
-        // native delivery reads, and the destination deployment chunks (Base USDC needs 17, the BNB composite 19).
-        const destinationRequests = bridgeDestinationObservationRequests(m.request, m.tool, op.intent.decoded.composite !== undefined, common.archiveDeploymentBatchMaxItems);
-        const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: destinationRequests, maxHttpAttempts: destinationRequests + 2 });
-        const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: BRIDGE_RESIDUAL_OBSERVATION_REQUESTS,
-            maxHttpAttempts: BRIDGE_RESIDUAL_OBSERVATION_REQUESTS + 1 });
-        return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation }, physicalBudget);
+        const sourceObservation = lazy(m.request.fromChainId, bridgeSourceObservationRequests(op.effects.length), BRIDGE_OBSERVATION_RETRY_POSTS);
+        const destinationObservation = lazy(m.request.toChainId, bridgeDestinationObservationRequests(m.request, op.intent.decoded.composite !== undefined), BRIDGE_OBSERVATION_RETRY_POSTS);
+        const residualObservation = lazy(m.request.fromChainId, BRIDGE_RESIDUAL_OBSERVATION_REQUESTS, 1);
+        return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, now, async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation }, physicalBudget);
     }
     async save(op, patch) {
         const next = transitionBridge(op, patch, this.context.clock.now().toISOString());

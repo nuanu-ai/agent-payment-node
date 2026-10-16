@@ -7,7 +7,7 @@ import { hashObject } from "../canonical.js";
 export const MEGA_FUNDING = Object.freeze({ sourceChain: 8453, destinationChain: 4326, short: 514,
   owner: getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"), profile: "default",
   target: getAddress("0x391E7C679d29bD940d63be94AD22A25d25b5A604"), data: "0x010202" as Hex,
-  maximumAmount: 10_000_000_000_000n, maximumFee: 1_000_000_000_000n, minimumOutput: 8_000_000_000_000n,
+  maximumAmount: 10_000_000_000_000n,
   mechanism: { provider: "gaszip", reference: "v2-direct-base-mega-self-010202.1" } });
 export function megaFail(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", `mega_gaszip_${reason}`, { reason: `mega_gaszip_${reason}` }); }
 export function megaObject(v: unknown): Record<string, unknown> {
@@ -37,7 +37,8 @@ export function megaJson(text: string): unknown {
   } catch { return megaFail("json"); }
 }
 export function megaExact(v: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []): void {
-  if (required.some(k => !Object.hasOwn(v,k)) || Object.keys(v).some(k => !required.includes(k) && !optional.includes(k))) megaFail("schema");
+  // Required provider fields must be present; fields GasZip adds later are ignored (the chain proves every effect itself).
+  if (required.some(k => !Object.hasOwn(v,k))) megaFail("schema");
 }
 export interface MegaFundingQuote { readonly digest: string; readonly expiresAt: string; readonly expectedAtomic: string; readonly body: unknown }
 export function inspectMegaFundingQuote(value: unknown, now: number): MegaFundingQuote {
@@ -45,7 +46,7 @@ export function inspectMegaFundingQuote(value: unknown, now: number): MegaFundin
   if (v.calldata !== MEGA_FUNDING.data || !Array.isArray(v.quotes) || v.quotes.length !== 1) megaFail("quote_lane");
   const q=megaObject(v.quotes[0]); megaExact(q,["chain","expected","gas","speed","usd"],["decimals","expectedNative"]);
   if (megaUint(q.chain) !== 4326n || (q.decimals !== undefined && megaUint(q.decimals) !== 18n) ||
-    (q.expectedNative !== undefined && megaUint(q.expectedNative) !== megaUint(q.expected)) || megaUint(q.expected)<MEGA_FUNDING.minimumOutput ||
+    (q.expectedNative !== undefined && megaUint(q.expectedNative) !== megaUint(q.expected)) ||
     typeof q.speed !== "number" && typeof q.speed !== "string" || typeof q.usd !== "number" && typeof q.usd !== "string") megaFail("quote_output");
   megaUint(q.gas); const expires=megaUint(v.expires);
   if (expires>BigInt(Number.MAX_SAFE_INTEGER) || Number(expires)*1000-now<30_000 || Number(expires)*1000-now>90_000) megaFail("quote_expiry");

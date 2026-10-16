@@ -2,19 +2,14 @@ import { ApnError } from "../errors.js";
 import type { RpcReadTelemetry } from "./rpc-session.js";
 export type RpcDecoder<T = unknown> = (value: unknown) => T;
 export declare const MAX_READ_ATTEMPTS = 2;
-export declare const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
-/** One invocation's physical transport gate, shared by every chain and read/observation session. */
+/**
+ * One invocation's physical POST counter, shared by every chain and read/observation session. The cap is the operation's
+ * read-plan budget (send-budget.ts) with its stated retry headroom; pacing belongs to the per-provider-family scheduler alone.
+ */
 export declare class BridgeRpcPhysicalBudget {
-    private readonly now;
-    private readonly wait;
-    /** The operation's invocation cap derived from its read plans (send-budget.ts); it raises the base cap, never lowers it. */
-    private readonly derivedPosts;
+    private readonly limit;
     private posts;
-    private lastStart;
-    private tail;
-    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>, 
-    /** The operation's invocation cap derived from its read plans (send-budget.ts); it raises the base cap, never lowers it. */
-    derivedPosts?: number);
+    constructor(limit: number);
     remaining(): number;
     require(posts: number, method: string): void;
     beforePost(method: string): Promise<void>;

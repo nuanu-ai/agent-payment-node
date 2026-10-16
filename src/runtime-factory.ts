@@ -350,7 +350,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
     ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
       circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state,
-        circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)),
+        circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)),
         new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits,
         () => options.clock?.now().getTime() ?? Date.now()),
     } : {}),
@@ -390,8 +390,6 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         options.gaslessUsdtExecuteOptions),
     } : {}),
     bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
-      lineaArchiveDeploymentScalarCode: bound.request.command === "bridge.prepare" &&
-        process.env.APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE === "1",
       custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...((bound.request.command === "bridge.approve" || (bound.request.command === "operation.resume" && bound.request.observeOnly !== true)) ? { approval: new TtyBridgeApproval() } : {}) },
     chainAccounts, directRails,

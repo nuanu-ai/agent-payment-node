@@ -93,16 +93,17 @@ test("LI.FI observation phases use independent lazy bounded RPC sessions", async
   assert.equal(first.ok, true, first.error?.message); assert.ok(s.rpcSessions.length >= 3);
   const approvalSession = s.rpcSessions[0]; assert.ok(approvalSession); assert.equal(s.rpcSessions[1], approvalSession);
   const approvalUnique = [...new Set(s.rpcSessions)]; assert.equal(approvalUnique.length, 2);
-  assert.deepEqual(approvalUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14]);
+  // Plan-derived caps: the approval invocation's send step (11) and two effects' source observation (16).
+  assert.deepEqual(approvalUnique.map((session) => session.telemetry().remainingHttpRequests), [11, 16]);
   s.source.safeApproval = true; s.rpcSessions.length = 0;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 4);
   const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.equal(s.rpcSessions[1], resumeSession);
   const resumeUnique = [...new Set(s.rpcSessions)]; assert.equal(resumeUnique.length, 3);
-  // Ethereum USDC to Base USDC: derived source cap 14 and destination cap 17 (Base USDC deployment chunks), each with two retry attempts.
+  // Ethereum USDC to Base USDC with both effects sent: no send step, source cap 16 and destination cap 4, each with two retries.
   // Proven delivery derives its zero residual allowance, so completion opens no residual read session.
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14, 17]);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 16, 19]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [1, 16, 4]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [1, 18, 6]);
   assert.notEqual(resumeSession, approvalSession);
 });
 
@@ -183,7 +184,8 @@ for (const reason of ["refusal", "expiry", "last-slot", "nonce", "allowance", "c
     if (reason === "last-slot") s.now.setTime(s.now.getTime() + 286_000);
     if (reason === "nonce") s.source.nonce++;
     if (reason === "allowance") s.source.allowance = "1";
-    if (reason === "code") s.destination.drift = true;
+    // The source deployment check (selector routing, spoke binding) changes after review; a destination reads nothing.
+    if (reason === "code") s.source.drift = true;
     if (reason === "fees") s.source.gasPrice = "9000000000";
     if (reason === "balance") s.source.native = 0n;
     return reason !== "refusal";

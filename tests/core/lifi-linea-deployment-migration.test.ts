@@ -32,8 +32,9 @@ test("recognized Linea historical deployment is refused before migration and exa
   const old = await fixture();
   const destination = { chainId: 59144, origin: deployment.rpcOrigin, deployment: async () => deployment } as never;
   const observer = new BridgeObservation({} as never, destination, {} as never, async () => old);
-  await assert.rejects(async () => await (observer as any).historicalDeployment(old, destination, proof, old.intent.destinationDeployment),
-    (error: unknown) => error instanceof ApnError && error.code === "APN_PROVIDER_PROTOCOL" && error.message.includes("historical_deployment_contract_hash"));
+  // Observation no longer re-proves a deployment after the money moved, so a re-pinned lane cannot wedge this operation again;
+  // the recognized migration still reseals the frozen record exactly.
+  assert.equal((observer as any).historicalDeployment, undefined);
   assertLineaDeploymentMigrationProof(proof, deployment);
   const migrated = migrateLineaDeploymentOperation(old, deployment);
   assert.equal(migrated.alreadyCurrent, false); validateBridgeOperation(migrated.operation);

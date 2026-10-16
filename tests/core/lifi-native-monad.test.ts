@@ -40,11 +40,7 @@ test("immutable Monad RPC baseline pins safe finality, Across, WMON, implementat
   const proof = await new BridgeRpc(143, capture.rpcOrigin, call).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block);
   assert.deepEqual({ chainId: proof.chainId, peerChainId: proof.peerChainId, blockHash: proof.block.hash },
     { chainId: 143, peerChainId: 1, blockHash: capture.safeBlock.hash });
-  const unavailable: EvmRpcCall = async (method, params) => {
-    if (method === "debug_traceTransaction") throw new Error("method unavailable");
-    return await call(method, params);
-  };
-  await assert.rejects(new BridgeRpc(143, capture.rpcOrigin, unavailable).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block));
+  // No trace capability probe on a fixed historical transaction (LIFI-13): the delivery's own trace fails closed instead.
 });
 
 test("Ethereum to Monad admits only the exact direct native Across self route and terminalizes usage", async (t) => {
