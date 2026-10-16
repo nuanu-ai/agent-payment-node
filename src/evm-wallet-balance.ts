@@ -6,6 +6,7 @@ import { directEvmChain, directEvmNetwork } from "./evm-direct-networks.js";
 import { requireEvmRpc } from "./evm-direct.js";
 import { formatAtomic } from "./money.js";
 import { policyBinding } from "./profile-policy.js";
+import { selectedAssetFundingGuidance } from "./funding-guidance.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalProfile } from "./wallet-policy.js";
 
@@ -49,14 +50,17 @@ export async function evmWalletBalance(context: RuntimeContext, profileInput: st
       const limit = snapshot.asset.kind === "native" ? policy?.maxBalanceEthWei :
         snapshot.asset.address === x402Token ? policy?.maxBalanceUsdcAtomic : undefined;
       const atomic = evmUint(snapshot.assetAtomic), native = evmUint(snapshot.nativeAtomic);
+      const guidance = selectedAssetFundingGuidance({ chainId: snapshot.asset.chainId, kind: snapshot.asset.kind, decimals: snapshot.asset.decimals,
+        nativeSymbol, assetAtomic: atomic, nativeAtomic: native, assetLimit: limit, nativeLimit: policy?.maxBalanceEthWei,
+        x402Token: snapshot.asset.kind !== "native" && snapshot.asset.address === x402Token });
       return {
         profile, funding_address: wallet.address, chain: `eip155:${snapshot.asset.chainId}`, asset: publicEvmAsset(snapshot.asset),
         balance: { atomic: atomic.toString(), decimal: formatAtomic(atomic.toString(), snapshot.asset.decimals) },
         native_gas_balance: { atomic: native.toString(), decimal: formatAtomic(native.toString(), 18), decimals: 18, symbol: nativeSymbol },
         provenance: { block_number_atomic: snapshot.blockNumberAtomic, block_hash: snapshot.blockHash, observed_at: snapshot.observedAt, rpc_origin: snapshot.rpcOrigin },
         funding_posture: { classification: limit === undefined ? "unassessed" : atomic > BigInt(limit) ? "overfunded" : "within_limit", asset_limit_atomic: limit ?? null, generic_unattended_permission_implied: false, inbound_balance_capped_by_apn: false },
-        funding_guidance: { action: `Fund this address manually on eip155:${snapshot.asset.chainId} with the exact selected asset and native ${nativeSymbol} for gas.`, warning: "Disposable local software wallet: no automatic funding, sweep, custody service or hardware backup." },
-        proof_class: "chain_verified_public_read", next_actions: ["apn pay transfer prepare-asset --help"],
+        funding_guidance: guidance.funding_guidance,
+        proof_class: "chain_verified_public_read", next_actions: guidance.next_actions,
       };
     }, deadlineAtMs === undefined ? {} : { waitMs: Math.min(context.state.lockWaitMs, remainingSeiBalanceMs(deadlineAtMs)) });
   };

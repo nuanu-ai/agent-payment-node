@@ -33,6 +33,7 @@ export declare function canonicalPolicyInput(input: ProfilePolicySetInput): Prof
 export declare function sealProfilePolicy(value: Omit<ProfilePolicyRecord, "integrityHash">): ProfilePolicyRecord;
 export declare function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBinding): ProfilePolicyRecord;
 export declare function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, chainId?: EvmChainId): unknown;
+export declare const REDUCE_EXCESS_ACTION = "Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically.";
 export interface FundingPosture {
     readonly classification: string;
     readonly next_actions: readonly string[];

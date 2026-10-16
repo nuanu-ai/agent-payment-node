@@ -53,7 +53,7 @@ test("core balance reads remain chain verified and read-only for all 11 direct E
       assert.equal(data.asset.chain, network.caip2);
       assert.equal(data.asset.kind, token === "native" ? "native" : "erc20");
       assert.equal(data.native_gas_balance.symbol, network.nativeSymbol);
-      assert.match(data.funding_guidance.action, new RegExp(`native ${network.nativeSymbol} for gas\\.`));
+      assert.match(data.funding_guidance.action, new RegExp(`native ${network.nativeSymbol} on ${network.caip2} for gas manually with a small amount only`));
     }
   }
   assert.equal(setup.rpc.broadcastCount, 0);

@@ -1,8 +1,9 @@
 import { ETH_DECIMALS, USDC_DECIMALS } from "./constants.js";
 import { formatAtomic, parseAtomic } from "./money.js";
-import type { ProfilePolicyRecord } from "./profile-policy.js";
+import { REDUCE_EXCESS_ACTION, type ProfilePolicyRecord } from "./profile-policy.js";
 
 const WARNING = "Only fund an amount you can afford to lose; this local-software wallet has no backup or hardware protection.";
+const ASSET_WARNING = "Disposable local software wallet: no automatic funding, sweep, custody service or hardware backup.";
 const UNCONFIGURED_ACTION = "No owner profile policy is configured, so APN cannot assess balance limits and unattended x402 is blocked. " +
   "Configure it with apn wallet policy set; fund this disposable wallet manually with only a small amount of Base ETH for gas and Base USDC for the payment.";
 
@@ -65,37 +66,71 @@ export function walletFundingGuidance(
   };
 }
 
+export interface SelectedAssetFunding {
+  readonly chainId: number;
+  readonly kind: "native" | "erc20";
+  readonly decimals: number;
+  readonly nativeSymbol: string;
+  readonly assetAtomic: bigint;
+  readonly nativeAtomic: bigint;
+  /** Owner limit of the selected asset: the network's ETH limit for native, its USDC limit for the x402 token. */
+  readonly assetLimit: string | undefined;
+  readonly nativeLimit: string | undefined;
+  readonly x402Token: boolean;
+}
+
+/** `wallet balance-asset` advice: the selected asset follows its posture; a token read also applies the rule to native gas. */
+export function selectedAssetFundingGuidance(input: SelectedAssetFunding): WalletFundingGuidance {
+  const chain = `eip155:${input.chainId}`;
+  const gas = assetAdvice(input.nativeAtomic, input.nativeLimit, {
+    label: `native ${input.nativeSymbol} on ${chain}`, purpose: " for gas", unit: "wei", symbol: input.nativeSymbol, decimals: 18,
+    atLimitEffect: "", overEffect: "unattended x402 is gated by the USDC limit only, so this native excess does not block it",
+  });
+  const selected = input.kind === "native" ? gas : assetAdvice(input.assetAtomic, input.assetLimit, {
+    label: `the selected ${input.x402Token ? "USDC" : "token"} on ${chain}`, purpose: "", unit: "atomic units",
+    symbol: input.x402Token ? "USDC" : "", decimals: input.decimals,
+    atLimitEffect: "; any further inbound USDC blocks new unattended x402 on this network",
+    overEffect: "new unattended x402 on this network is blocked until the owner reduces the excess manually",
+  });
+  const action = input.kind === "native" ? selected.sentence : `${selected.sentence} ${gas.sentence}`;
+  return {
+    funding_guidance: { action, warning: ASSET_WARNING },
+    next_actions: [...(selected.overfunded || gas.overfunded ? [REDUCE_EXCESS_ACTION] : []), "apn pay transfer prepare-asset --help"],
+  };
+}
+
 function assetAdvice(
   balance: bigint,
   limitInput: string | undefined,
   terms: AssetTerms,
-): { readonly fundable: boolean; readonly sentence: string } {
+): { readonly fundable: boolean; readonly overfunded: boolean; readonly sentence: string } {
   const { label, purpose, unit } = terms;
   if (limitInput === undefined) {
     return {
-      fundable: true,
-      sentence: `Fund ${label}${purpose} manually with a small amount only; no owner ${terms.symbol} balance limit is configured.`,
+      fundable: true, overfunded: false,
+      sentence: `Fund ${label}${purpose} manually with a small amount only; no owner ${terms.symbol === "" ? "" : `${terms.symbol} `}balance limit is configured.`,
     };
   }
   const limit = BigInt(limitInput);
   if (balance < limit) {
     return {
-      fundable: true,
+      fundable: true, overfunded: false,
       sentence: `Fund ${label}${purpose} manually with a small amount only: at most ${amount(limit - balance, terms)} more keeps it within the owner limit of ${limit} ${unit}.`,
     };
   }
   if (balance === limit) {
     return {
-      fundable: false,
+      fundable: false, overfunded: false,
       sentence: `Do not add ${label}: the balance is exactly at the owner limit of ${limit} ${unit}${terms.atLimitEffect}.`,
     };
   }
   return {
-    fundable: false,
+    fundable: false, overfunded: true,
     sentence: `Do not add ${label}: the balance exceeds the owner limit of ${limit} ${unit} by ${amount(balance - limit, terms)}; ${terms.overEffect}.`,
   };
 }
 
 function amount(value: bigint, terms: AssetTerms): string {
-  return `${value} ${terms.unit} (${formatAtomic(value.toString(), terms.decimals)} ${terms.symbol})`;
+  const display = formatAtomic(value.toString(), terms.decimals);
+  return `${value} ${terms.unit} (${terms.symbol === "" ? display : `${display} ${terms.symbol}`})`;
 }

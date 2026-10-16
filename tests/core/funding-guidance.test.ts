@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProfilePolicyBinding, ProfilePolicyPort, ProfilePolicyRecord, ProfilePolicySetInput } from "../../src/profile-policy.js";
+import { BASE_USDC } from "../../src/constants.js";
+import { EVM_TOKEN, EvmTestRpc } from "./evm-helpers.js";
 import { TestNative, TestProfilePolicy, TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
 
 const REDUCE = "Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically.";
@@ -130,4 +132,80 @@ test("mixed postures fund only the asset that still has room", async (t) => {
   }));
   assert.match(ethAtLimit.action, /^Fund Base USDC for payments .* Do not add Base ETH: the balance is exactly at the owner limit of 5 wei\.$/u);
   assert.deepEqual(ethAtLimit.dataActions, ["Fund only Base USDC, with low value only", RERUN]);
+});
+
+const HELP = "apn pay transfer prepare-asset --help";
+const BASE_LIMITS = { maxBalanceUsdcAtomic: "10000", maxX402AmountAtomic: "1000", maxBalanceEthWei: "1000000000000" };
+
+async function assetAdvice(
+  t: { after(fn: () => Promise<void>): void },
+  token: "native" | string,
+  balances: { readonly assetAtomic?: string; readonly nativeAtomic: string },
+  policy: ProfilePolicyPort,
+): Promise<{ readonly action: string; readonly classification: string; readonly actions: readonly string[] }> {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(), policy: new TestProfilePolicy() }));
+  const rpc = new EvmTestRpc();
+  rpc.nativeAtomic = balances.nativeAtomic;
+  if (balances.assetAtomic !== undefined) rpc.assetAtomic = balances.assetAtomic;
+  const result = await makeCore({ root: temporary.root, rpc, policy }).execute({
+    command: "wallet.balance", profile: "default", asset: { chainId: 8453, token: token as never } });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  const data = result.data as { funding_guidance: { action: string; warning: string }; funding_posture: { classification: string };
+    next_actions: string[] };
+  assert.match(data.funding_guidance.warning, /no automatic funding, sweep/u);
+  assert.deepEqual(result.next_actions, data.next_actions);
+  return { action: data.funding_guidance.action, classification: data.funding_posture.classification, actions: data.next_actions };
+}
+
+test("balance-asset guidance without an owner policy funds only small amounts", async (t) => {
+  const native = await assetAdvice(t, "native", { nativeAtomic: "1000000000000" }, new AbsentProfilePolicy());
+  assert.equal(native.classification, "unassessed");
+  assert.equal(native.action, "Fund native ETH on eip155:8453 for gas manually with a small amount only; no owner ETH balance limit is configured.");
+  assert.deepEqual(native.actions, [HELP]);
+  const usdc = await assetAdvice(t, BASE_USDC, { assetAtomic: "69000", nativeAtomic: "1000000000000" }, new AbsentProfilePolicy());
+  assert.equal(usdc.classification, "unassessed");
+  assert.match(usdc.action, /^Fund the selected USDC on eip155:8453 manually with a small amount only; no owner USDC balance limit is configured\. Fund native ETH/u);
+  assert.deepEqual(usdc.actions, [HELP]);
+});
+
+test("balance-asset within-limit guidance names the remaining room", async (t) => {
+  const advice = await assetAdvice(t, BASE_USDC, { assetAtomic: "4000", nativeAtomic: "400000000000" }, new TestProfilePolicy(BASE_LIMITS));
+  assert.equal(advice.classification, "within_limit");
+  assert.equal(advice.action,
+    "Fund the selected USDC on eip155:8453 manually with a small amount only: at most 6000 atomic units (0.006 USDC) more keeps it within the owner limit of 10000 atomic units. " +
+    "Fund native ETH on eip155:8453 for gas manually with a small amount only: at most 600000000000 wei (0.0000006 ETH) more keeps it within the owner limit of 1000000000000 wei.");
+  assert.deepEqual(advice.actions, [HELP]);
+  const other = await assetAdvice(t, EVM_TOKEN, { assetAtomic: "5", nativeAtomic: "400000000000" }, new TestProfilePolicy(BASE_LIMITS));
+  assert.equal(other.classification, "unassessed");
+  assert.match(other.action, /^Fund the selected token on eip155:8453 manually with a small amount only; no owner balance limit is configured\. /u);
+});
+
+test("balance-asset exact-limit guidance does not ask to add the selected asset or gas", async (t) => {
+  const advice = await assetAdvice(t, BASE_USDC, { assetAtomic: "10000", nativeAtomic: "1000000000000" }, new TestProfilePolicy(BASE_LIMITS));
+  assert.equal(advice.classification, "within_limit");
+  assert.equal(advice.action,
+    "Do not add the selected USDC on eip155:8453: the balance is exactly at the owner limit of 10000 atomic units; any further inbound USDC blocks new unattended x402 on this network. " +
+    "Do not add native ETH on eip155:8453: the balance is exactly at the owner limit of 1000000000000 wei.");
+  assert.deepEqual(advice.actions, [HELP]);
+  const native = await assetAdvice(t, "native", { nativeAtomic: "1000000000000" }, new TestProfilePolicy(BASE_LIMITS));
+  assert.equal(native.action, "Do not add native ETH on eip155:8453: the balance is exactly at the owner limit of 1000000000000 wei.");
+});
+
+test("balance-asset over-limit guidance names asset, excess and unattended x402 effect", async (t) => {
+  const usdc = await assetAdvice(t, BASE_USDC, { assetAtomic: "69000", nativeAtomic: "1000000000000" }, new TestProfilePolicy(BASE_LIMITS));
+  assert.equal(usdc.classification, "overfunded");
+  assert.equal(usdc.action,
+    "Do not add the selected USDC on eip155:8453: the balance exceeds the owner limit of 10000 atomic units by 59000 atomic units (0.059 USDC); " +
+    "new unattended x402 on this network is blocked until the owner reduces the excess manually. " +
+    "Do not add native ETH on eip155:8453: the balance is exactly at the owner limit of 1000000000000 wei.");
+  assert.deepEqual(usdc.actions, [REDUCE, HELP]);
+  assert.doesNotMatch(JSON.stringify(usdc), /policy set|raise|increase/iu);
+
+  const native = await assetAdvice(t, "native", { nativeAtomic: "1000000000001" }, new TestProfilePolicy(BASE_LIMITS));
+  assert.equal(native.classification, "overfunded");
+  assert.equal(native.action, "Do not add native ETH on eip155:8453: the balance exceeds the owner limit of 1000000000000 wei by 1 wei " +
+    "(0.000000000000000001 ETH); unattended x402 is gated by the USDC limit only, so this native excess does not block it.");
+  assert.deepEqual(native.actions, [REDUCE, HELP]);
 });
