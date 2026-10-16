@@ -13,7 +13,7 @@ import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
 import { GaslessPreparation } from "./prepare.js";
 import { withGaslessRpcInvocation } from "./rpc.js";
 import { publicGaslessOperation } from "./receipt.js";
-import { gaslessAsset, gaslessDeployment, gaslessIntentAsset } from "./registry.js";
+import { gaslessAsset, gaslessDeployment } from "./registry.js";
 import { snapshotSchema } from "./schema.js";
 import { transitionGasless } from "./transitions.js";
 import { GASLESS_ZERO_ADDRESS, assertGaslessExecutionChain, gaslessAddress, gaslessFailure, validateGaslessRequest } from "./validation.js";
@@ -104,7 +104,7 @@ export class GaslessService {
             if (this.legacyPolicyOperation(op))
                 return publicGaslessOperation(await this.save(op, { state: "failed_before_effect", failure: "gasless_legacy_observation_only" }));
             const approval = this.dependencies().approval;
-            const unit = gaslessIntentAsset(op.intent).symbol;
+            const unit = gaslessAsset(op.intent.request.chainId, op.intent.token).symbol;
             if (approval === undefined)
                 throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Approve this ${unit} fee transfer in a foreground terminal.`, {
                     nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
