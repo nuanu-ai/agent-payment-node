@@ -3,7 +3,9 @@ import { type UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operat
 import type { UsdtPreparePort } from "./policy-prepare.js";
 import type { UsdtSettlement } from "./receipt.js";
 export declare const USDT_EXECUTION_SCHEMA: "apn.gasless-usdt-execution.v1";
-export type UsdtExecutionState = "planned" | "reserved" | "failed_before_effect" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert";
+export type UsdtExecutionState = "planned" | "reserved" | "failed_before_effect" | "submitting" | "submitted_pending" | "unknown_finality" | "finalized" | "failed_confirmed_revert" | "expired_never_landed";
+/** States that may still sign, send or land: they hold the sender's Ethereum account and its usage lease. */
+export declare const USDT_EXECUTION_OPEN_STATES: readonly UsdtExecutionState[];
 export interface UsdtExecutionIntent {
     readonly operationId: string;
     readonly profileHash: string;
@@ -81,6 +83,12 @@ export declare class UsdtExecutionJournal extends SecureStateStore {
     markSubmitted(boundValue: UsdtBoundOperation, userOperationHash: string, now: Date): Promise<UsdtExecutionRecord>;
     /** Explicit uncertainty classification only; there is no send or automatic retry path. */
     markUnknownFinality(boundValue: UsdtBoundOperation, now: Date): Promise<UsdtExecutionRecord>;
+    /**
+     * Terminal exit for an operation the chain proves can never land: no EntryPoint event for its hash through a finalized
+     * block after its signed paymaster `validUntil`. The usage lease is released; replaying the same proof repairs a crash
+     * between the ledger and journal writes.
+     */
+    recordNeverLanded(boundValue: UsdtBoundOperation, digest: string, now: Date): Promise<UsdtExecutionRecord>;
     /** Replaying the same observation repairs a crash between the ledger and journal writes. */
     recordObservedOutcome(boundValue: UsdtBoundOperation, outcome: {
         readonly state: "finalized" | "failed_confirmed_revert";
