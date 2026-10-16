@@ -93,7 +93,7 @@ function serviceRecoveryHarness(phase: string, usageTarget?: string) {
     cleanupTransactionHash: OTHER_TX, policy: { policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM },
     ...(usageTarget === undefined ? {} : { usageTarget }), integrityHash: "b".repeat(64) };
   const journal: any = { value: operation, load: async () => structuredClone(journal.value), save: async (value: any) => { journal.value = structuredClone(value); },
-    withLock: async (_id: string, work: () => Promise<any>) => await work(), withOwnerChainLock: async (_owner: string, _chain: number, work: () => Promise<any>) => await work() };
+    withLock: async (_id: string, work: () => Promise<any>) => await work(), withOwnerLock: async (_owner: string, work: () => Promise<any>) => await work() };
   const ports: any = { signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async () => { signs++; throw new Error("must not sign"); } },
     sendRawTransaction: async () => { sends++; throw new Error("must not send"); }, reserveUsage: async () => "reserved",
     followUsage: async (_op: any, target: string) => target, waitSourceReceipt: async () => null, now: () => Date.parse("2026-09-20T10:00:01.000Z") };
@@ -118,6 +118,19 @@ test("service observe admits every read-only usage and cleanup recovery path wit
     const h = serviceRecoveryHarness(entry.phase, entry.target), result: any = await h.service.observe("f".repeat(64));
     assert.equal(result.phase, entry.phase); if (entry.state !== undefined) assert.equal(result.usageState, entry.state);
     assert.equal(result.usageTarget, undefined); assert.deepEqual(h.effects(), { signs: 0, sends: 0 });
+  }
+});
+
+test("BRDG-33: every phase that durably marks a usage target before reconciling it reconciles instead of APN_STATE_CORRUPT", async () => {
+  for (const [phase, target] of [["post_approval_quote_bound", "reserved"], ["unknown_finality", "submitted"],
+    ["cleaned", "failed_before_effect"], ["cleaned", "failed_confirmed_revert"]] as const) {
+    for (const entrypoint of ["status", "observe"] as const) {
+      const h = serviceRecoveryHarness(phase, target), result: any = await h.service[entrypoint]("f".repeat(64));
+      // observe also re-reads the source: with no safe receipt yet the hold follows the journal to unknown_finality.
+      assert.equal(result.phase, phase); assert.equal(result.usageState, entrypoint === "observe" && phase === "unknown_finality" ? "unknown_finality" : target);
+      assert.equal(result.usageTarget, undefined);
+      assert.deepEqual(h.effects(), { signs: 0, sends: 0 });
+    }
   }
 });
 
