@@ -155,11 +155,17 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
   };
 }
 
+export interface FundingPosture {
+  readonly classification: string;
+  readonly next_actions: readonly string[];
+  readonly [field: string]: unknown;
+}
+
 export function fundingPosture(
   usdcAtomic: string,
   ethAtomic: string,
   policy: ProfilePolicyRecord | null,
-): unknown {
+): FundingPosture {
   const usdc = parseAtomic(usdcAtomic);
   const eth = parseAtomic(ethAtomic);
   if (policy === null) {
