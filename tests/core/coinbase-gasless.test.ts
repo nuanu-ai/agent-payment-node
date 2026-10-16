@@ -7,6 +7,7 @@ import { encodeAbiParameters, encodeFunctionData, getAddress, keccak256, parseAb
 import { COINBASE_ACCOUNT_CODE_HASH, COINBASE_ACCOUNT_IMPLEMENTATION, COINBASE_ACCOUNT_IMPLEMENTATION_CODE_HASH,
   COINBASE_ENTRY_POINT, COINBASE_ENTRY_POINT_CODE_HASH, coinbaseGaslessSnapshot, observeCoinbaseGasless } from "../../src/coinbase-gasless-observer.js";
 import { BASE_USDC, TRANSFER_TOPIC } from "../../src/constants.js";
+import { ApnError } from "../../src/errors.js";
 import type { Address, Hex, OperationRecord } from "../../src/model.js";
 import type { RpcPort } from "../../src/ports.js";
 import { appendTransition, sealOperation, validateOperation } from "../../src/state-integrity.js";
@@ -352,7 +353,7 @@ test("secondary account calls, native value and frozen deployment tamper stay gu
     (error: unknown) => (error as { code?: string }).code === "APN_STATE_CORRUPT");
 });
 
-test("pre-anchor candidates and inclusion-time implementation drift stay guarded", async () => {
+test("pre-anchor candidates stay guarded and the receipt proof reads no historical state", async () => {
   const historical = new CoinbaseRpcFixture();
   historical.transactionBlock = BLOCK_80;
   historical.noCandidate = true;
@@ -364,11 +365,43 @@ test("pre-anchor candidates and inclusion-time implementation drift stay guarded
     schemaVersion: "apn.coinbase-gasless-locator.v1", hash: TX, provenance: "awal_success_transaction_hash_field",
   }))).status, "ambiguous", "a matching transfer in the safe-anchor block necessarily predates the dispatch");
 
+  // The settlement is proven from the receipt (EntryPoint event, exact USDC debit); no code or storage is read at the
+  // inclusion or prepare block, so a non-archive public RPC can close the operation.
   const drifted = new CoinbaseRpcFixture();
   drifted.implementationCodeDriftAtInclusion = true;
   assert.equal((await observeCoinbaseGasless(drifted, makeOperation(drifted, {
     schemaVersion: "apn.coinbase-gasless-locator.v1", hash: TX, provenance: "awal_success_transaction_hash_field",
-  }))).status, "ambiguous", "the account implementation code must match its saved pin at the canonical event block");
+  }))).status, "safe");
+  const stateReads = drifted.callLog.filter(row => ["eth_getCode", "eth_getStorageAt", "eth_call", "eth_getBalance"].includes(row.method));
+  assert.deepEqual(stateReads.map(row => [row.method, row.params[1]]), [["eth_getCode", "latest"]], "one paymaster code read at the head");
+});
+
+test("one resume scans to the safe head in 2,000-block windows, halves on range refusal and keeps progress on rate limits", async () => {
+  class WindowedRpc extends CoinbaseRpcFixture {
+    readonly windows: [bigint, bigint][] = [];
+    maxRange = 2_000n; rateLimitAfter = Infinity;
+    override async coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>) {
+      const from = BigInt(filter.fromBlock as string), to = BigInt(filter.toBlock as string);
+      if (this.windows.length >= this.rateLimitAfter) throw new Error("HTTP 429");
+      this.windows.push([from, to]);
+      if (to - from + 1n > this.maxRange) throw new ApnError("APN_RPC_AMBIGUOUS", "Coinbase gasless log observation is unavailable.");
+      return await super.coinbaseGaslessLogs(filter);
+    }
+  }
+  const wide = new WindowedRpc(); wide.locatorMode = "hashless"; wide.noCandidate = true;
+  wide.safeBlock = { numberAtomic: "5000", hash: `0x${"f".repeat(64)}` as Hex, timestampAtomic: "5000" };
+  const first = await observeCoinbaseGasless(wide, makeOperation(wide));
+  assert.equal(first.status, "not_found");
+  assert.deepEqual(wide.windows, [[91n, 2090n], [2091n, 4090n], [4091n, 5000n]]);
+  assert.deepEqual(first.cursor, { nextBlockAtomic: "5001", previousEndBlock: wide.safeBlock });
+  assert.deepEqual(wide.callLog.map(row => row.method), ["eth_getBlockByNumber"], "one safe header and three log queries");
+
+  const narrow = new WindowedRpc(); narrow.locatorMode = "hashless"; narrow.noCandidate = true; narrow.maxRange = 500n;
+  narrow.safeBlock = wide.safeBlock; narrow.rateLimitAfter = 5;
+  const partial = await observeCoinbaseGasless(narrow, makeOperation(narrow));
+  assert.deepEqual(narrow.windows, [[91n, 2090n], [91n, 1090n], [91n, 590n], [591n, 1090n], [1091n, 1590n]]);
+  assert.equal(partial.status, "not_found", "a rate limit keeps the windows already read and never retries inside the pass");
+  if (partial.status === "not_found") assert.equal(partial.cursor.nextBlockAtomic, "1591");
 });
 
 test("bounded absence advances only the durable scan cursor and never becomes terminal negative proof", async () => {
@@ -664,9 +697,9 @@ test("Coinbase fixed secondary scans complete bounded window despite primary 429
   assert.equal((await observeCoinbaseGasless(primary, operation)).status, "unresolved");
   const observed = await observeCoinbaseGasless(primary, operation, secondary);
   assert.equal(observed.status, "safe");
-  assert.equal(secondary.windows.length, 52, "both user-op and transfer scans cover all 26 windows");
-  assert.equal(secondary.windows.at(-1)!.toBlock, "0x15a");
-  assert.ok(secondary.windows.every(filter => BigInt(filter.toBlock as string) - BigInt(filter.fromBlock as string) < 10n));
+  assert.equal(secondary.windows.length, 2, "one user-op and one transfer query cover the range to the safe head");
+  assert.equal(secondary.windows.at(-1)!.toBlock, "0x190");
+  assert.ok(secondary.windows.every(filter => BigInt(filter.toBlock as string) - BigInt(filter.fromBlock as string) < 2_000n));
   assert.ok(secondary.callLog.every(row => row.method === "eth_getBlockByNumber"), "secondary never reads code, storage, transaction or receipt");
   if (observed.status !== "safe") return;
   assert.deepEqual(observed.settlement.observationSource, { policy: "apn.coinbase-gasless.observation-source.v1",
@@ -676,24 +709,25 @@ test("Coinbase fixed secondary scans complete bounded window despite primary 429
 });
 
 test("Coinbase secondary refuses duplicate, wrong amount, hint-only match, deployment and anchor drift", async () => {
-  for (const kind of ["duplicate", "amount", "hint", "code", "anchor", "safe", "end", "origin", "chain"] as const) {
+  // Deployment code is no longer an effect guard (the receipt is), and one pass scans to the safe head, so there is no
+  // separate window-end anchor to drift.
+  for (const kind of ["duplicate", "amount", "hint", "anchor", "safe", "origin", "chain"] as const) {
     const primary = new CoinbaseRpcFixture(), secondary = new SecondaryCoinbaseRpc();
     if (kind === "duplicate") secondary.extraCandidate = true;
     if (kind === "amount") primary.userOp.callData = encodeFunctionData({ abi: ACCOUNT_ABI, functionName: "executeBatch",
       args: [[{ target: BASE_USDC, value: 0n, data: encodeFunctionData({ abi: TOKEN_ABI, functionName: "transfer", args: [RECIPIENT, 999n] }) }]] });
     if (kind === "hint") { primary.noCandidate = true; secondary.noCandidate = true; }
-    if (kind === "code") primary.implementationCodeDriftAtInclusion = true;
     if (kind === "origin") secondary.assertBaseChain = async () => ({ chainId: 8453, rpcOrigin: "https://other.example" });
     if (kind === "chain") secondary.assertBaseChain = async () => ({ chainId: 1 as 8453, rpcOrigin: secondary.rpcOrigin });
-    if (kind === "safe" || kind === "end") {
+    if (kind === "safe") {
       primary.safeBlock = { numberAtomic: "400", hash: `0x${"f".repeat(64)}`, timestampAtomic: "400" };
       secondary.safeBlock = primary.safeBlock;
     }
-    if (["anchor", "safe", "end"].includes(kind)) {
+    if (["anchor", "safe"].includes(kind)) {
       const original = secondary.coinbaseGaslessCall.bind(secondary);
       secondary.coinbaseGaslessCall = async (method, params) => {
         const value = await original(method, params);
-        const target = kind === "anchor" ? "0x5a" : kind === "safe" ? "0x190" : "0x15a";
+        const target = kind === "anchor" ? "0x5a" : "0x190";
         return method === "eth_getBlockByNumber" && params[0] === target ? { ...(value as object), hash: `0x${"e".repeat(64)}` } : value;
       };
     }

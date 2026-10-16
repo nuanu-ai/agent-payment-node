@@ -22,7 +22,6 @@ export async function observeSmartAccountGasless(context, input) {
         ]);
         assertHeads(input.intent.initialSnapshot.preparationBlock, safe, finalized);
         if (BigInt(safe.numberAtomic) < BigInt(input.intent.initialSnapshot.preparationBlock.numberAtomic)) {
-            await recheckBlock(context.call, safe, "sa_gasless_evidence", true);
             return observation(originalCursor, "pending", "sa_gasless_unknown", input.transactionHint, hashObject({ preparation: input.intent.initialSnapshot.preparationBlock, safe }), null, null, context.clock);
         }
     }
@@ -155,12 +154,11 @@ async function inspectCandidate(context, input, transactionHash, safe, source) {
     const redemption = await verifySmartAccountRedemption(outer.input, input.operationId, input.fingerprint, input.intent, input.material, context.validator);
     const logs = parseReceiptLogs(receipt.logs, transactionHash, included, transactionIndex);
     const accounting = verifySmartAccountReceipt(input.intent, outer.from, redemption, logs);
-    const state = await readSmartAccountGaslessProofState(context.call, input.intent.binding, input.material.childDelegationHash, safe);
+    const state = await readSmartAccountGaslessProofState(context.call, input.intent, input.material.childDelegationHash, safe);
     if (state.childSpentAtomic !== input.intent.request.grossAtomic)
         saFail("sa_gasless_evidence");
-    await recheckBlock(context.call, included, "sa_gasless_evidence", true);
-    await recheckBlock(context.call, safe, "sa_gasless_evidence", true);
-    await recheckBlock(context.call, input.intent.initialSnapshot.preparationBlock, "sa_gasless_evidence", true);
+    // The included block is at or below safe with its hash bound to the receipt, and the preparation anchor was
+    // re-read at the start of this pass; neither is read again.
     const baseProof = { chainId: 8453, transactionHash, transactionBlock: included, finalityBlock: safe,
         transactionIndexAtomic: transactionIndex.toString(), outer };
     const settlement = {
@@ -182,14 +180,10 @@ async function unusedSafely(context, input, cursor, finalized) {
         BigInt(finalized.timestampAtomic) < BigInt(input.intent.beforeUnix))
         return null;
     try {
-        const state = await readSmartAccountGaslessProofState(context.call, input.intent.binding, input.material.childDelegationHash, finalized);
+        const state = await readSmartAccountGaslessProofState(context.call, input.intent, input.material.childDelegationHash, finalized);
         if (state.childSpentAtomic !== "0")
             return null;
-        await recheckBlock(context.call, cursor.startBlock, "sa_gasless_evidence", true);
-        if (cursor.previousEndBlock !== null)
-            await recheckBlock(context.call, cursor.previousEndBlock, "sa_gasless_evidence", true);
-        await recheckBlock(context.call, expiry, "sa_gasless_evidence", true);
-        await recheckBlock(context.call, finalized, "sa_gasless_evidence", true);
+        // Every anchor of this proof is at or below the finalized block just read, so none can reorg.
         const proof = { observedAt: instant(context.clock), startBlock: cursor.startBlock,
             expiryBlock: expiry, finalityBlock: finalized, childDelegationHash: input.material.childDelegationHash,
             childSpentAtomic: "0", childScanHash: hashObject({ start: cursor.startBlock, expiry,

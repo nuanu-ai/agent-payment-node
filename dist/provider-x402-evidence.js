@@ -1,6 +1,7 @@
 import { canonicalJson, hashObject, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+const MAX_UPPER_READS = 4;
 export function providerX402ReadPort(rpc) {
     const value = rpc;
     if (typeof value.getX402Head !== "function" || typeof value.getX402Block !== "function" ||
@@ -16,10 +17,13 @@ export async function captureProviderEvidenceLowerBlock(rpc) {
     assertHead(lowerBlock, identity.rpcOrigin);
     return { lowerBlock, rpcOriginHash: sha256(identity.rpcOrigin) };
 }
-export async function observeProviderSettlement(operation, rpc) {
+export async function observeProviderSettlement(operation, rpc, nowMs) {
     if (operation.evidenceLowerBlock === undefined || operation.evidenceDeadlineAt === undefined) {
         return { kind: "ambiguous", reason: "provider_evidence_capability_gap" };
     }
+    // A safe block is never later than now, so before the evidence deadline no read can close the window.
+    if (!Number.isFinite(nowMs) || nowMs < Date.parse(operation.evidenceDeadlineAt))
+        return { kind: "pending" };
     let upperBlock = operation.immutableUpperBlock;
     try {
         const identity = await rpc.assertBaseChain();
@@ -30,7 +34,7 @@ export async function observeProviderSettlement(operation, rpc) {
         const deadlineSeconds = BigInt(Math.ceil(Date.parse(operation.evidenceDeadlineAt) / 1_000));
         if (BigInt(safe.timestamp) < deadlineSeconds)
             return { kind: "pending" };
-        upperBlock = await immutableUpper(operation, rpc, safe.number, deadlineSeconds, identity.rpcOrigin);
+        upperBlock = await immutableUpper(operation, rpc, safe, deadlineSeconds, identity.rpcOrigin);
         const logs = await outgoingTransfers(rpc, operation.provider.payer, operation.evidenceLowerBlock.number, upperBlock.number);
         if (logs === null)
             return { kind: "ambiguous", reason: "provider_evidence_capability_gap", upperBlock };
@@ -80,7 +84,12 @@ export async function observeProviderSettlement(operation, rpc) {
         };
     }
 }
-async function immutableUpper(operation, rpc, safeNumber, deadline, rpcOrigin) {
+/**
+ * The first block at or after the evidence deadline closes the window. Any block with timestamp >= deadline is a
+ * sound upper bound; block times are near-constant, so interpolation between the frozen lower block and the safe
+ * head lands on the first one in about one header read (was a binary search of ~log2(range) reads plus a re-read).
+ */
+async function immutableUpper(operation, rpc, safe, deadline, rpcOrigin) {
     if (operation.immutableUpperBlock !== undefined) {
         const observed = await rpc.getX402Block(operation.immutableUpperBlock.number);
         assertBlock(observed, rpcOrigin);
@@ -89,30 +98,34 @@ async function immutableUpper(operation, rpc, safeNumber, deadline, rpcOrigin) {
         }
         return operation.immutableUpperBlock;
     }
-    let low = BigInt(operation.evidenceLowerBlock?.number ?? "0");
-    let high = BigInt(safeNumber);
-    if (low >= high)
-        throw protocol();
-    const lower = await rpc.getX402Block(low.toString());
-    assertBlock(lower, rpcOrigin);
     const frozenLower = operation.evidenceLowerBlock;
-    if (frozenLower === undefined || lower.number !== frozenLower.number || lower.hash !== frozenLower.hash ||
-        lower.timestamp !== frozenLower.timestamp)
+    const high = BigInt(safe.number);
+    if (frozenLower === undefined || BigInt(frozenLower.number) >= high)
+        throw protocol();
+    const lower = await rpc.getX402Block(frozenLower.number);
+    assertBlock(lower, rpcOrigin);
+    if (lower.number !== frozenLower.number || lower.hash !== frozenLower.hash || lower.timestamp !== frozenLower.timestamp) {
         throw new FrozenEvidenceContradiction();
+    }
     if (BigInt(lower.timestamp) >= deadline)
         throw protocol();
-    while (low + 1n < high) {
-        const middle = (low + high) / 2n;
-        const block = await rpc.getX402Block(middle.toString());
+    let low = { number: BigInt(lower.number), timestamp: BigInt(lower.timestamp) };
+    for (let reads = 0; reads < MAX_UPPER_READS && high - low.number > 1n; reads += 1) {
+        const span = high - low.number, elapsed = BigInt(safe.timestamp) - low.timestamp;
+        let guess = elapsed <= 0n ? high - 1n : low.number + ((deadline - low.timestamp) * span + elapsed - 1n) / elapsed;
+        if (guess >= high)
+            guess = high - 1n;
+        if (guess <= low.number)
+            guess = low.number + 1n;
+        const block = await rpc.getX402Block(guess.toString());
         assertBlock(block, rpcOrigin);
         if (BigInt(block.timestamp) >= deadline)
-            high = middle;
-        else
-            low = middle;
+            return block;
+        low = { number: guess, timestamp: BigInt(block.timestamp) };
     }
-    const upper = await rpc.getX402Block(high.toString());
+    const upper = await rpc.getX402Block(safe.number);
     assertBlock(upper, rpcOrigin);
-    if (BigInt(upper.timestamp) < deadline)
+    if (upper.hash !== safe.hash || BigInt(upper.timestamp) < deadline)
         throw protocol();
     return upper;
 }

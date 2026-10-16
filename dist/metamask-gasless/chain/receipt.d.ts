@@ -1,5 +1,6 @@
 import type { Address, Hex } from "../../model.js";
 import type { MetaMaskGaslessIntent } from "../model.js";
+import { type MmDeploymentView } from "../recorded.js";
 import { type MmReceiptLog } from "./abi.js";
 export interface MetaMaskGaslessAccounting {
     readonly deliveredAtomic: string;
@@ -10,6 +11,6 @@ export interface MetaMaskGaslessAccounting {
     readonly counterIndexAtomic: string;
 }
 /** Validate complete receipt logs against the exact one-root/mode-bound USDC settlement. */
-export declare function verifyMetaMaskReceiptAccounting(intent: MetaMaskGaslessIntent, outerSender: Address, logs: readonly MmReceiptLog[]): MetaMaskGaslessAccounting;
+export declare function verifyMetaMaskReceiptAccounting(intent: MetaMaskGaslessIntent, outerSender: Address, logs: readonly MmReceiptLog[], row?: MmDeploymentView): MetaMaskGaslessAccounting;
 /** Validate one scan log before treating its transaction hash as a candidate. */
-export declare function verifyScanLog(value: Record<string, unknown>, intent: MetaMaskGaslessIntent, from: bigint, to: bigint): Hex;
+export declare function verifyScanLog(value: Record<string, unknown>, intent: MetaMaskGaslessIntent, from: bigint, to: bigint, row?: MmDeploymentView): Hex;

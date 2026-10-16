@@ -3,7 +3,7 @@ import { hashObject } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { mmFail } from "../reasons.js";
 import { mmHex, mmUint } from "../validation.js";
-import { parseReceiptLogs, quantity, receiptHash, recheckBlock, rpcAddress, rpcBlock, rpcHex, rpcQuantity, rpcRecord, sameBlock } from "./abi.js";
+import { parseReceiptLogs, quantity, receiptHash, rpcAddress, rpcBlock, rpcHex, rpcQuantity, rpcRecord, sameBlock } from "./abi.js";
 import { verifyRedemption } from "./delegation.js";
 import { verifyMetaMaskReceiptAccounting } from "./receipt.js";
 import { MM_SCAN_STOP_REASONS, mmRedemptionCount, scanMetaMaskRedemption } from "./scan.js";
@@ -87,11 +87,9 @@ async function inspectCandidate(context, intent, transactionHash) {
     // The receipt's own IncreasedCount(limit 1, count 1) for this delegation proves the redemption at inclusion, so no
     // state is read at the inclusion block: that would be an archive read once the operation is older than the
     // RPC's state window, and the operation would stay unknown for ever.
-    const accounting = status === 1n ? verifyMetaMaskReceiptAccounting(intent, outer.from, logs) : null;
+    const accounting = status === 1n ? verifyMetaMaskReceiptAccounting(intent, outer.from, logs, context.deployment.row) : null;
     const finality = (await rpcBlock(context.call, context.deployment.row.finalityTag)).block;
     if (BigInt(finality.numberAtomic) < blockNumber) {
-        await recheckBlock(context.call, included);
-        await recheckBlock(context.call, finality);
         return { kind: "pending", evidenceHash: hashObject({ transactionHash, included, finality }),
             usableCandidate: accounting !== null };
     }
@@ -101,8 +99,8 @@ async function inspectCandidate(context, intent, transactionHash) {
         { blockHash: finality.hash, requireCanonical: true }]), 32 * 1024);
     if (ownerCode !== `0xef0100${context.deployment.row.protocol.delegate.address.slice(2)}`)
         mmFail("mm_gasless_evidence_invalid");
-    await recheckBlock(context.call, included);
-    await recheckBlock(context.call, finality);
+    // The included block is at or below finality and its hash is bound to the receipt; finality reads were pinned by
+    // hash with requireCanonical, so no header is rechecked.
     const baseProof = { chainId: intent.request.chainId, transactionHash, transactionBlock: included,
         finalityBlock: finality, transactionIndexAtomic: transactionIndex.toString(), outer };
     if (status === 0n) {
@@ -150,8 +148,6 @@ async function scanSafely(context, intent, cursor, memo) {
         const inspections = [];
         for (const hash of scanned.candidates)
             inspections.push({ hash, result: await inspectSafely(context, intent, hash, memo) });
-        for (const block of scanned.recheck)
-            await recheckBlock(context.call, block);
         if (inspections.length !== 1)
             mmFail("mm_gasless_evidence_invalid");
         const inspected = inspections[0];
