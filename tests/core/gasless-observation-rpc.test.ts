@@ -94,7 +94,9 @@ test("alternate RPC rejects wrong binding, chain and preparation anchor before r
 
 test("current protocol, permission, finality and log faults retain the final guard", async t => {
   const { operation } = await prepared(t, "final", "empty");
-  const protocolAndPermissionFaults: ObservationFault[] = ["protocol_code", "protocol_storage", "protocol_domain",
+  // Pinned bytecode is immutable and proven once per invocation at the initial anchor; proxy slots and identity
+  // reads are what can change at a current block, so those are the protocol faults observed here.
+  const protocolAndPermissionFaults: ObservationFault[] = ["protocol_storage", "protocol_domain",
     "permit", "allowance", "pending", "entrypoint", "eoa", "owner_code", "current_reorg"];
   for (const fault of protocolAndPermissionFaults) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
@@ -263,7 +265,7 @@ test("explicit observer serializes and spaces calls without retrying an unavaila
   }
 });
 
-test("explicit observation shares the 24 physical POST invocation cap", async t => {
+test("explicit observation shares the 24 physical POST resume invocation cap", async t => {
   const { operation } = await prepared(t, "final", "expected");
   const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
   const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
@@ -272,7 +274,7 @@ test("explicit observation shares the 24 physical POST invocation cap", async t 
     for (let index = 0; index < 24; index += 1) await call("eth_chainId", []);
     await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor), (error: any) =>
       error.code === "APN_RPC_AMBIGUOUS" && error.details?.reason === "gasless_observation_rpc_unavailable");
-  });
+  }, "resume");
   assert.equal(transport.calls.length, 24);
 });
 

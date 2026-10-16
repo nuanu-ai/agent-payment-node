@@ -20,11 +20,11 @@ import { gaslessRpcFactory } from "./gasless/rpc.js";
 export function createSpecialApnCore(bound, options, state) {
     if (bound.request.command === "gasless.transfer.quote") {
         if (bound.rpcUrl === undefined)
-            throw new ApnError("APN_RPC_CONFIG", "Ethereum quote requires an explicit public RPC URL.");
+            throw new ApnError("APN_RPC_CONFIG", "Ethereum quote requires an explicit public RPC URL.", { nextActions: ["Provide --rpc-url with a public HTTPS Ethereum RPC endpoint."] });
         // This read path has no custody implementation, signer, journal or effect transport.
         const unavailable = async () => { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Quote is read only."); };
         return new ApnCore({ state, gasless: { rpcFor: options.gasless?.rpcFor ??
-                    gaslessRpcFactory({ APN_ETHEREUM_RPC_URL: bound.rpcUrl }),
+                    gaslessRpcFactory({ APN_ETHEREUM_RPC_URL: bound.rpcUrl }, "--rpc-url"),
                 custody: { load: unavailable, seal: unavailable } } });
     }
     if (bound.request.command === "x402.permit2.status")

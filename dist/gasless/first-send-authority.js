@@ -2,13 +2,12 @@ import { FIRST_SEND_POLICY, FIRST_SEND_TTL_MS as TTL_MS, firstSendApprovalSchema
 import { hashObject } from "../canonical.js";
 import { publicGaslessOperation } from "./receipt.js";
 import { gaslessPolicyChain } from "./asset-policy.js";
-import { gaslessDeployment } from "./registry.js";
 import { gaslessFailure, gaslessSame } from "./validation.js";
 /** Only this exact first final effect can acquire fresh local consent. */
 export function assertSealedFirstSend(op) {
     const b = op.bootstrap, u = op.userOperation;
     if (gaslessPolicyChain(op.intent.request.chainId) === null || op.intent.allowlist === undefined ||
-        op.intent.token !== gaslessDeployment(op.intent.request.chainId).token || op.state !== "unknown_finality" ||
+        op.intent.allowlist.token !== op.intent.token || op.state !== "unknown_finality" ||
         b.phase !== "checked" || b.signingAttempts !== 1 || b.disclosureAttempts !== 1 || b.submissionAttempts !== 0 ||
         b.materialHash === null || b.estimate === null || b.sealedAt === null ||
         u.phase !== "sealed" || u.signingAttempts !== 1 || u.disclosureAttempts !== 0 || u.submissionAttempts !== 0 ||

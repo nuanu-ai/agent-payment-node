@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { getAddress, keccak256, pad, type Hex } from "viem";
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import { ApnError } from "../../src/errors.js";
 import { UsdtCommandReadBudget } from "../../src/gasless-usdt/command-prepare.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { UsdtJsonRpc, usdtChainPort, usdtRecoveryPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
+import { UsdtCodePins, UsdtJsonRpc, usdtChainPort, usdtRecoveryPort, usdtSafeSnapshot, usdtSponsorPort } from "../../src/gasless-usdt/rpc.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
@@ -82,7 +84,7 @@ test("safe snapshot anchors contract reads to the canonical safe block hash", as
       result: request.method === "eth_chainId" ? "0x1" : request.method === "eth_getBlockByNumber"
         ? { number: "0x100", hash: blockHash } : "0x01" })).reverse()) };
   } };
-  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), /gasless_usdt_code_drift/u);
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER, new UsdtCodePins()), /gasless_usdt_code_drift/u);
   assert.equal(batches.length, 2);
   assert.deepEqual(batches[0]!.map(request => request.method), ["eth_chainId", "eth_getBlockByNumber"]);
   assert.deepEqual(batches[0]![1]!.params, ["safe", false]);
@@ -95,6 +97,42 @@ test("safe snapshot anchors contract reads to the canonical safe block hash", as
   assert.deepEqual(batches[1]![8]!.params[0], OWNER);
 });
 
+test("one invocation proves the four immutable code pins once; later snapshots read only storage and account state", async () => {
+  const fixture = JSON.parse(await readFile(resolve("tests/core/gasless-fixtures/usdt-pinned-runtime.json"), "utf8")) as
+    { runtime: Record<string, { address: string; code: Hex }> };
+  const runtime = new Map(Object.values(fixture.runtime).map(row => [row.address, row.code]));
+  const batches: { method: string; params: unknown[] }[][] = [];
+  let drift = false;
+  const peer: GaslessTransport = { request: async (_endpoint, _method, body) => {
+    const requests = JSON.parse(body!) as { id: string; method: string; params: unknown[] }[]; batches.push(requests);
+    return { status: 200, body: JSON.stringify(requests.map(request => {
+      const target = request.params[0] as { to?: string } | string;
+      const result = request.method === "eth_chainId" ? "0x1" : request.method === "eth_getBlockByNumber"
+        ? { number: "0x100", hash: `0x${"ab".repeat(32)}` } : request.method === "eth_getTransactionCount" ? "0x1f"
+        : request.method === "eth_getCode" ? drift ? "0x01" : runtime.get(String(target)) ?? "0x"
+        : typeof target === "object" && target.to === USDT_GASLESS.paymaster ? word(USDT_GASLESS.entryPoint) : word(0n);
+      return { jsonrpc: "2.0", id: request.id, result };
+    })) };
+  } };
+  const pinned = (batch: { method: string; params: unknown[] }[]) => batch.filter(request => request.method === "eth_getCode" &&
+    runtime.has(String(request.params[0]))).length;
+  drift = true;
+  const session = new UsdtCodePins();
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER, session), /gasless_usdt_code_drift/u);
+  drift = false;
+  const first = await usdtSafeSnapshot(peer, RPC_URL, OWNER, session);
+  const second = await usdtSafeSnapshot(peer, RPC_URL, OWNER, session);
+  assert.deepEqual(batches.map(pinned), [0, 4, 0, 4, 0, 0], "a failed proof is not remembered; a proven session never re-reads");
+  assert.equal(batches[5]!.length, 8);
+  assert.deepEqual(first, second);
+  assert.deepEqual(first.pins, { token: USDT_GASLESS.tokenCodeHash, entryPoint: USDT_GASLESS.entryPointCodeHash,
+    delegate: USDT_GASLESS.delegateCodeHash, paymaster: USDT_GASLESS.paymasterCodeHash, paymasterEntryPoint: USDT_GASLESS.entryPoint });
+  await usdtSafeSnapshot(peer, "https://other-ethereum.example-rpc.test/", OWNER, session);
+  assert.equal(pinned(batches[7]!), 4, "another endpoint proves its own code");
+  await usdtSafeSnapshot(peer, RPC_URL, OWNER, new UsdtCodePins());
+  assert.equal(pinned(batches[9]!), 4, "a new invocation proves again");
+});
+
 test("safe-head HTTP failures retain status, retry delay and phase after one physical attempt", async t => {
   for (const status of [429, 503]) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -104,7 +142,7 @@ test("safe-head HTTP failures retain status, retry delay and phase after one phy
       return { status, body: "secret response body", retryAfterMs: 3_000 };
     } };
     const budget = new UsdtCommandReadBudget(new StateStore(temporary.root), peer, () => 1_000, async () => {});
-    await assert.rejects(usdtSafeSnapshot(budget, "https://secret.example/rpc?key=secret", OWNER), (error: unknown) => {
+    await assert.rejects(usdtSafeSnapshot(budget, "https://secret.example/rpc?key=secret", OWNER, new UsdtCodePins()), (error: unknown) => {
       assert.ok(error instanceof ApnError);
       assert.equal(error.code, status === 429 ? "APN_RPC_RATE_LIMITED" : "APN_RPC_AMBIGUOUS");
       assert.deepEqual(error.details, { reason: status === 429 ? "gasless_usdt_rpc_rate_limited" : "gasless_usdt_rpc_server_error",
@@ -123,7 +161,7 @@ test("safe-head transport failure is distinct and strips untrusted error text an
     attempts += 1;
     throw new ApnError("APN_RPC_AMBIGUOUS", "https://secret.example/rpc?key=secret", { leaked: "secret" });
   } };
-  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), (error: unknown) => {
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER, new UsdtCodePins()), (error: unknown) => {
     assert.ok(error instanceof ApnError);
     assert.equal(error.code, "APN_RPC_AMBIGUOUS");
     assert.deepEqual(error.details, { reason: "gasless_usdt_rpc_transport", rpcPhase: "safe_head" });
@@ -135,7 +173,7 @@ test("safe-head transport failure is distinct and strips untrusted error text an
 
 test("other HTTP 4xx remains a protocol refusal without exposing its body", async () => {
   const peer: GaslessTransport = { request: async () => ({ status: 403, body: "secret refusal" }) };
-  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), (error: unknown) => {
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER, new UsdtCodePins()), (error: unknown) => {
     assert.ok(error instanceof ApnError);
     assert.equal(error.code, "APN_RPC_PROTOCOL");
     assert.equal(JSON.stringify(error).includes("secret"), false);
@@ -156,7 +194,7 @@ test("safe snapshot rejects incomplete, duplicate and mismatched JSON-RPC batche
       if (fault === "foreign") replies[1] = { ...replies[1]!, id: "999" };
       return { status: 200, body: JSON.stringify(fault === "single" ? replies[0] : replies) };
     } };
-    await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), /gasless_usdt_rpc_batch_envelope/u);
+    await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER, new UsdtCodePins()), /gasless_usdt_rpc_batch_envelope/u);
     assert.equal(physical, 1);
   }
   let physical = 0;
@@ -169,7 +207,7 @@ test("safe snapshot rejects incomplete, duplicate and mismatched JSON-RPC batche
     if (physical === 2) replies.pop();
     return { status: 200, body: JSON.stringify(replies) };
   } };
-  await assert.rejects(usdtSafeSnapshot(secondPhasePeer, RPC_URL, OWNER), /gasless_usdt_rpc_batch_envelope/u);
+  await assert.rejects(usdtSafeSnapshot(secondPhasePeer, RPC_URL, OWNER, new UsdtCodePins()), /gasless_usdt_rpc_batch_envelope/u);
   assert.equal(physical, 2);
 });
 
@@ -208,7 +246,7 @@ test("safe snapshot refuses a wrong chain after one batch and never reads accoun
     return { status: 200, body: JSON.stringify(requests.map(request => ({ jsonrpc: "2.0", id: request.id,
       result: request.method === "eth_chainId" ? "0x89" : { number: "0x100", hash: `0x${"ab".repeat(32)}` } }))) };
   } };
-  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER), /gasless_usdt_chain/u);
+  await assert.rejects(usdtSafeSnapshot(peer, RPC_URL, OWNER, new UsdtCodePins()), /gasless_usdt_chain/u);
   assert.equal(physical, 1);
 });
 

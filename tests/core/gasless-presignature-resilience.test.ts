@@ -25,10 +25,11 @@ const atApproval = (s: Awaited<ReturnType<typeof gaslessFixture>>, fault: () => 
 test("a transport failure before the bootstrap signature is retried inside the window", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
-  atApproval(s, () => { s.rpc.transport = 3; });
+  atApproval(s, () => { s.rpc.transport = 1; });
   const stored = await approve(s, id);
   assert.equal(stored.state, "completed");
-  assert.deepEqual(s.wait.waits, [5000, 5000, 5000]);
+  // One guard retry is the invocation's whole retry allowance, and it is part of the derived POST budget.
+  assert.deepEqual(s.wait.waits, [5000]);
   assert.equal(s.rpc.sends.length, 1);
 });
 
@@ -39,12 +40,12 @@ test("a transport failure that never clears ends before any signature and names 
   const stored = await approve(s, id);
   assert.equal(stored.state, "failed_before_effect"); assert.equal(stored.failure, "gasless_rpc_unavailable");
   assert.equal(stored.bootstrap.signingAttempts, 0); assert.equal(s.wrapping.loads, 0);
-  assert.equal(s.wait.waits.length, 17); assert.equal(s.rpc.sends.length, 0);
+  assert.equal(s.wait.waits.length, 1); assert.equal(s.rpc.sends.length, 0);
   assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 0);
   await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
 });
 
-test("an unavailable mirror estimate is retried, and a misfit still ends at once", async (t) => {
+test("an unavailable mirror estimate is retried within the allowance, and a misfit still ends at once", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
   s.rpc.mirrorUnavailable = 2;

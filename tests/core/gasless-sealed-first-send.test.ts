@@ -11,18 +11,16 @@ import { TtyGaslessApproval } from "../../src/gasless/tty.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { bundledGaslessFixture } from "./gasless-fixtures/bundler-transport.js";
+import { gaslessPostBudget } from "../../src/gasless/rpc-budget.js";
 
 async function sealed(root: string) {
   const s = await gaslessFixture(root, 1, { now: new Date("2026-09-18T02:00:00.000Z"), delegation: "expected" });
   const { id } = await s.prepare("fresh-sealed-first-send");
-  const snapshot = s.rpc.snapshot.bind(s.rpc);
-  s.rpc.snapshot = async (...args) => {
-    if ((await s.record(id)).userOperation.phase === "sealed")
-      gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
-    return await snapshot(...args);
-  };
+  // The pre-send check after the final signature fails, leaving an exact sealed and never-sent UserOperation.
+  const feeCheck = s.rpc.assertSignedFees.bind(s.rpc);
+  s.rpc.assertSignedFees = async () => gaslessFailure("APN_RPC_BUDGET_EXCEEDED", "gasless_RPC_request_budget");
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
-  s.rpc.snapshot = snapshot;
+  s.rpc.assertSignedFees = feeCheck;
   const before = await s.record(id);
   assert.equal(before.state, "unknown_finality"); assert.equal(before.userOperation.phase, "sealed");
   const material = await s.custody.load(before, "user_operation");
@@ -198,7 +196,9 @@ for (const queuedExpiry of [false, true]) test(`production sealed first-send use
   const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
   s.setLimit(100);
   const confirm = s.approval.confirm.bind(s.approval);
-  s.approval.confirm = async input => { const accepted = await confirm(input); await s.rpc.assertChain(); return accepted; };
+  // Six foreign POSTs exceed the retry allowance, so the derived budget runs out at the pre-send fee check.
+  s.approval.confirm = async input => { const accepted = await confirm(input);
+    await s.rpc.assertChain(); await s.rpc.assertChain(); return accepted; };
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
   const before = await s.record(id);
   assert.equal(before.state, "unknown_finality"); assert.equal(before.userOperation.phase, "sealed");
@@ -216,7 +216,8 @@ for (const queuedExpiry of [false, true]) test(`production sealed first-send use
   assert.equal(calls.filter(c => c.method === "eth_sendUserOperation").length, queuedExpiry ? 0 : 1);
   assert.equal(calls.filter(c => c.method === "eth_estimateUserOperationGas").length, 0);
   assert.equal(calls.filter(c => c.methods.includes("eth_getBlockByNumber") && c.methods.includes("eth_chainId")).length, 2);
-  assert.ok(calls.length <= 24); t.diagnostic(`sealed recovery physical POSTs: ${calls.length}`);
+  assert.ok(calls.length <= gaslessPostBudget("first_send", Number.POSITIVE_INFINITY));
+  t.diagnostic(`sealed recovery physical POSTs: ${calls.length}`);
   assert.equal(after.userOperation.submissionAttempts, 1);
   assert.equal(after.state, queuedExpiry ? "unknown_finality" : "submitted_pending");
   assert.equal(after.userOperation.userOperationHash, before.userOperation.userOperationHash);

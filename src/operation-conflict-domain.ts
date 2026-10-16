@@ -39,6 +39,12 @@ export function conflictDomainKey(domain: MoneyConflictDomain): string {
   return `${domain.family}:${domain.network}:${domain.account}`;
 }
 
+/** An unreadable domain list yields no keys; the caller then blocks the whole profile. */
+export function conflictDomainKeys(domains: () => readonly MoneyConflictDomain[]): ReadonlySet<string> {
+  try { return new Set(domains().map(conflictDomainKey)); } catch { return new Set(); }
+}
+export { assertUsdtConflictDomainsAvailable } from "./gasless-usdt/account-conflict.js";
+
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
 export function storedOperationDomains(operation: StoredMoneyOperation): readonly MoneyConflictDomain[] | null {
   try {

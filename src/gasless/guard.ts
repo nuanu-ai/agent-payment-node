@@ -1,6 +1,7 @@
 import { ApnError } from "../errors.js";
 import type { StateStore } from "../state.js";
 import { assertGaslessSnapshot } from "./economics.js";
+import { assertGaslessIntentCurrent } from "./intent-validation.js";
 import type { GaslessFees } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import { assertGaslessOwner } from "./owner.js";
@@ -30,6 +31,7 @@ export async function guardGaslessOperation(state: StateStore, rpc: GaslessRpcPo
 export async function checkGaslessCurrentState(state: StateStore, rpc: GaslessRpcPort,
   op: GaslessOperationRecord, signed?: GaslessFees): Promise<GaslessFees> {
   assertGaslessExecutionChain(op.intent.request.chainId);
+  assertGaslessIntentCurrent(op.intent);
   await assertGaslessOwner(state, op.intent);
   const s = op.intent.initialSnapshot;
   if (rpc.chainId !== op.intent.request.chainId || rpc.rpcOrigin !== s.rpcOrigin ||

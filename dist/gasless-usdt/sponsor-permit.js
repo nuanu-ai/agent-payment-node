@@ -10,22 +10,28 @@ export function assertUsdtConsumedPermitFresh(context, clock) {
         usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_sponsor_permit_expired_before_signature");
 }
 const permits = new WeakMap();
+function atOrAfterPrepared(bound, blockNumber, blockHash) {
+    const prepared = BigInt(bound.binding.safeBlockNumber);
+    return blockNumber >= prepared && (blockNumber !== prepared || blockHash === bound.binding.safeBlockHash);
+}
 /** Mint ONLY after actual local recovery and canonical chain membership/parity attestation. */
 export async function mintUsdtSponsorPermit(input) {
     const bound = validateUsdtAnyBoundOperation(input.bound);
     if (bound.schemaVersion !== "apn.gasless-usdt-bound-operation.v2" || input.identity.profile !== bound.binding.profile ||
         input.identity.profileHash !== bound.profileHash || input.identity.operationId !== bound.operationId ||
-        input.identity.bindingHash !== bound.binding.bindingHash || input.snapshot.blockHash !== bound.binding.safeBlockHash ||
-        input.snapshot.blockNumber.toString() !== bound.binding.safeBlockNumber)
+        input.identity.bindingHash !== bound.binding.bindingHash || !atOrAfterPrepared(bound, input.snapshot.blockNumber, input.snapshot.blockHash)) {
         usdtFailure("APN_STATE_CORRUPT", "gasless_usdt_permit_identity");
+    }
+    // Membership and getHash parity are re-attested at the execution guard's fresh safe block, never the prepared one.
     const auth = await attestUsdtSponsor({ op: bound.binding.unsignedOperation, snapshot: input.snapshot,
-        expectedBlockHash: bound.binding.safeBlockHash, transport: input.transport, rpcUrl: input.rpcUrl, clock: input.clock });
+        expectedBlockHash: input.snapshot.blockHash, transport: input.transport, rpcUrl: input.rpcUrl, clock: input.clock });
     await verifyUsdtV2Auth(bound.binding.unsignedOperation, auth, input.snapshot);
     if (auth.signer !== bound.binding.sponsorAuth.signer)
         usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_sponsor_identity_changed");
     const permit = Object.freeze({ kind: "usdt-sponsor-custody-permit" });
     permits.set(permit, { boundDigest: hashObject(bound), identity: canonicalJson(input.identity), capturedAt: Date.parse(auth.capturedAt),
-        userOperationDigest: auth.userOperationDigest, sponsorHash: auth.sponsorHash, signature: auth.signature, blockHash: auth.blockHash });
+        userOperationDigest: auth.userOperationDigest, sponsorHash: auth.sponsorHash, signature: auth.signature,
+        blockNumber: BigInt(auth.blockNumber), blockHash: auth.blockHash });
     return permit;
 }
 /** Single use under custody lock BEFORE wallet describe. Expiry never triggers an implicit retry. */
@@ -36,7 +42,7 @@ export function consumeUsdtSponsorPermit(permit, bound, identity, clock) {
     const now = clock.now().getTime();
     if (saved === undefined || !Number.isSafeInteger(now) || now < saved.capturedAt || now - saved.capturedAt > 5000 ||
         saved.boundDigest !== hashObject(bound) || saved.identity !== canonicalJson(identity) ||
-        saved.userOperationDigest !== hashObject(bound.binding.unsignedOperation) || saved.blockHash !== bound.binding.safeBlockHash ||
+        saved.userOperationDigest !== hashObject(bound.binding.unsignedOperation) || !atOrAfterPrepared(bound, saved.blockNumber, saved.blockHash) ||
         (bound.schemaVersion === "apn.gasless-usdt-bound-operation.v2" &&
             (saved.sponsorHash !== bound.binding.sponsorAuth.sponsorHash || saved.signature !== bound.binding.sponsorAuth.signature))) {
         usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_sponsor_permit_missing_or_expired");

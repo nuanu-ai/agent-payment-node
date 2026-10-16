@@ -14,12 +14,14 @@ test("gasless USDT status/resume bind only an explicit profile hash", () => {
   assert.throws(() => bindArgv(["gasless", "usdt", "status", "--profile-hash", "default", "--operation", OP]), { code: "APN_INVALID_INPUT" });
 });
 
-test("gasless USDT status/resume catalog entries are local-read and non-approval", () => {
+test("gasless USDT status is local-read, resume observes the live journal, and neither needs approval", () => {
   for (const action of ["status", "resume"]) {
     const entry = COMMANDS.find(command => command.path.join(" ") === `gasless usdt ${action}`)!;
-    assert.equal(entry.effect.class, "local_read"); assert.equal(entry.approval.class, "none");
+    assert.equal(entry.effect.class, action === "status" ? "local_read" : "network_read"); assert.equal(entry.approval.class, "none");
     assert.equal(entry.options.some(option => option.name === "--profile-hash"), true);
   }
+  const execute = COMMANDS.find(command => command.path.join(" ") === "gasless usdt execute")!;
+  assert.ok(execute.states.terminal.includes("expired_never_landed"));
 });
 
 test("gasless USDT command cases read the isolated journal and do not create missing state", async t => {

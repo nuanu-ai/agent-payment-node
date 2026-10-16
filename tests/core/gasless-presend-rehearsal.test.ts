@@ -215,8 +215,8 @@ test("a fresh quote above the owner's cap after approval ends before the bootstr
   const stored = await s.record(id);
   assert.equal(stored.state, "failed_before_effect"); assert.equal(stored.failure, "gasless_fee_budget");
   assert.equal(stored.bootstrap.signingAttempts, 0); assert.equal(s.wrapping.loads, 0);
-  // A quote above the cap can fall back inside it, so 0.5.19 retries it to the end of the window before giving up.
-  assert.equal(s.wait.waits.length, 17);
+  // A quote above the cap can fall back inside it, so it is retried once: the invocation's retry allowance is one guard.
+  assert.equal(s.wait.waits.length, 1);
   assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 0); assert.equal(s.rpc.sends.length, 0);
   await new OperationService(s.state).assertProfileAvailable(stored.profileHash);
 });
@@ -234,7 +234,9 @@ for (const [spike, state] of [[2, "submitted_pending"], [100, "unknown_finality"
     if (spike === 2) {
       assert.deepEqual(s.wait.waits, [5000, 5000]); assert.equal(s.rpc.sends.length, 1);
     } else {
-      assert.equal(stored.failure, "gasless_bundler_fee_drift"); assert.equal(s.wait.waits.length, 17);
+      // Each fee check retry is one bundler POST; the allowance of one guard's POSTs bounds them to four.
+      assert.equal(stored.failure, "gasless_bundler_fee_drift"); assert.equal(s.wait.waits.length, 4);
+      assert.equal(stored.userOperation.phase, "sealed");
       assert.equal(s.rpc.sends.length, 0); assert.equal(stored.userOperation.submissionAttempts, 0);
     }
   });

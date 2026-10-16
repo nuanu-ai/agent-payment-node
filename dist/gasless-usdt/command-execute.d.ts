@@ -10,6 +10,11 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 export interface UsdtForegroundApproval {
     approve(bound: UsdtBoundOperation): Promise<void>;
 }
+/**
+ * A saved operation loads against its own hashes (R2). Before any prompt, signature or send it must also match every
+ * current pin, address and bound; a record an earlier release wrote under other constants needs a new preparation.
+ */
+export declare function assertUsdtBoundCurrent(bound: UsdtBoundOperation): void;
 /** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
 export declare function usdtApprovalPrompt(bound: UsdtBoundOperation, now: number): {
     readonly text: string;
@@ -40,6 +45,13 @@ export declare class GaslessUsdtCommandExecute {
     private load;
     private preparePort;
     execute(profileHash: string, operationId: string): Promise<UsdtExecutionRecord>;
+    /** No other non-terminal money operation of any family may hold this Ethereum account (shared EntryPoint and EOA nonces). */
+    private assertAccountAvailable;
+    /**
+     * Resume reads the live journal: a submitted hash is observed (never resent), an interrupted unsent attempt is retired
+     * and its usage hold released under the effect lock, and a terminal or never-executed operation is returned as saved.
+     */
+    resume(profileHash: string, operationId: string): Promise<UsdtBoundOperation | UsdtExecutionRecord>;
     status(profileHash: string, operationId: string): Promise<{
         readonly operationId: string;
         readonly execution: UsdtExecutionRecord | null;

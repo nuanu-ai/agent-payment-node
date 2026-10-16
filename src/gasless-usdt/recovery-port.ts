@@ -6,5 +6,5 @@ import { usdtRecoveryPort } from "./rpc.js";
 
 /** Production read adapter: one bounded pass with persisted provider pacing and fail-closed cooldown. */
 export function usdtPacedRecoveryPort(state: StateStore, transport: GaslessTransport, rpcUrl: string): UsdtRecoveryPort {
-  return usdtRecoveryPort(new UsdtCommandReadBudget(state, transport), rpcUrl);
+  return usdtRecoveryPort(new UsdtCommandReadBudget(state, transport, undefined, undefined, "observe"), rpcUrl);
 }

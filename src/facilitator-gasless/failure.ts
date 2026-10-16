@@ -17,12 +17,23 @@ export const FACILITATOR_REASONS = {
   facilitator_gasless_signing: "APN_PROVIDER_EFFECT_UNAVAILABLE",
   facilitator_gasless_capacity: "APN_OPERATION_BLOCKED",
   facilitator_gasless_state_corrupt: "APN_STATE_CORRUPT",
+  facilitator_gasless_allowlist_required: "APN_ALLOWLIST_REFUSED",
+  facilitator_gasless_allowlist_refused: "APN_ALLOWLIST_REFUSED",
+  facilitator_gasless_allowlist_changed: "APN_ALLOWLIST_REFUSED",
 } as const satisfies Readonly<Record<string, ErrorCode>>;
 
 export type FacilitatorReason = keyof typeof FACILITATOR_REASONS;
 
 export function facilitatorFail(reason: FacilitatorReason): never {
   throw new ApnError(FACILITATOR_REASONS[reason], "Avalanche facilitator transfer could not continue safely.", { reason });
+}
+
+/** The Avalanche RPC setting is missing or unusable; the guidance names this route's own environment variable. */
+export function facilitatorRpcConfigFail(cause: "missing" | "invalid"): never {
+  throw new ApnError("APN_RPC_CONFIG", "Avalanche facilitator transfer could not continue safely.", {
+    reason: "facilitator_gasless_rpc_binding", nextActions: [cause === "missing"
+      ? "Set APN_AVALANCHE_RPC_URL to a public HTTPS Avalanche C-Chain RPC endpoint."
+      : "Set APN_AVALANCHE_RPC_URL to a public, credential-free HTTPS Avalanche C-Chain RPC endpoint without a fragment."] });
 }
 
 export function facilitatorReason(error: unknown, fallback: FacilitatorReason): FacilitatorReason {

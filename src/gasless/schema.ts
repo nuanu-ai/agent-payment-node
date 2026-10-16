@@ -22,8 +22,8 @@ export const providerBindingSchema = z.strictObject({ providerId: z.literal("loc
   capabilityHash: hashSchema, revision: z.number().int().positive().safe() });
 export const requestSchema = z.strictObject({ chainId: chainSchema, recipient: addressSchema,
   grossAtomic: uintSchema, maxFeeAtomic: uintSchema, minReceivedAtomic: uintSchema });
-// Shape only: `validateGaslessIntent` re-validates the whole domain against the registry row the intent names,
-// so a stored record can never carry a token name or permit-domain version the row does not admit.
+// Shape only: before any effect `assertGaslessIntentCurrent` compares the domain with the registry row the intent
+// names, so a saved record can never act under a token name or permit-domain version the row does not admit.
 export const tokenDomainSchema = z.strictObject({ name: z.string().min(1).max(64), version: z.string().min(1).max(16),
   chainId: chainSchema, verifyingContract: addressSchema, domainSeparator: wordSchema });
 export const gasSchema = z.strictObject({ verificationGasLimit: uintSchema, callGasLimit: uintSchema,
@@ -46,7 +46,7 @@ export const intentSchema = z.strictObject({ wireVersion: z.enum(["apn.gasless-w
   delegate: addressSchema, feeCapAtomic: uintSchema, recipientAtomic: uintSchema, callData: hexSchema,
   unsignedEnvelopeHash: hashSchema, preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema,
   allowlist: z.strictObject({ policyDigest: hashSchema, policyRevision: z.number().int().positive().safe(),
-    activationDigest: hashSchema, chain: z.enum(["eip155:8453", "eip155:1"]), token: addressSchema,
+    activationDigest: hashSchema, chain: z.string().regex(/^eip155:[1-9][0-9]{0,9}$/u), token: addressSchema,
     mechanism: z.strictObject({ provider: z.literal("local"), reference: z.string().min(1).max(256) }),
     reservationId: hashSchema }).optional() });
 export const estimateSchema = z.strictObject({ verificationGasLimit: uintSchema, callGasLimit: uintSchema,

@@ -12,6 +12,7 @@ import { FACILITATOR_EXPOSED, FACILITATOR_POLICY, type FacilitatorExchange, type
   type FacilitatorOperationRecord } from "./operation-model.js";
 import { publicFacilitatorOperation } from "./receipt.js";
 import { facilitatorAuthorizationDigest, newFacilitatorAuthorization } from "./requirement.js";
+import type { FacilitatorGaslessPolicy } from "./policy.js";
 import type { FacilitatorEvidence, FacilitatorRpcPort } from "./rpc.js";
 
 export type FacilitatorSave = (op: FacilitatorOperationRecord, patch: Partial<FacilitatorMutable>) => Promise<FacilitatorOperationRecord>;
@@ -21,17 +22,24 @@ const EXPOSURE_MARGIN_SECONDS = 60n;
 export class FacilitatorExecution {
   constructor(private readonly state: StateStore, private readonly rpc: () => FacilitatorRpcPort,
     private readonly facilitator: FacilitatorPort, private readonly signer: FacilitatorSignerPort,
-    private readonly now: () => number, private readonly save: FacilitatorSave) {}
+    private readonly now: () => number, private readonly save: FacilitatorSave,
+    private readonly policy: FacilitatorGaslessPolicy) {}
 
   async approve(op: FacilitatorOperationRecord, approval: GaslessApprovalPort): Promise<FacilitatorOperationRecord> {
     if (op.terminal || op.state !== "awaiting_approval") return op;
     if (this.expired(op)) return await this.save(op, { state: "failed_before_effect", failure: "facilitator_gasless_expired" });
+    // A record prepared before owner admission existed on this route cannot authorize a new signature.
+    if (op.intent.allowlist === undefined) {
+      return await this.save(op, { state: "failed_before_effect", failure: "facilitator_gasless_allowlist_required" });
+    }
     const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
       exactPhrase: approvalCode("gasless", op.fingerprint), summary: publicFacilitatorOperation(op) });
     if (!accepted) return await this.save(op, { state: "failed_before_effect", failure: "facilitator_gasless_approval_rejected" });
     let startBlock: GaslessBlock;
-    try { startBlock = await this.guard(op); }
-    catch (error) { return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") }); }
+    try {
+      startBlock = await this.guard(op);
+      await this.policy.reserve(op); // charged before the owner signs
+    } catch (error) { return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") }); }
     const authorization = newFacilitatorAuthorization(op.intent.owner.address.toLowerCase(), op.intent.requirement, this.now());
     const signed = { authorization, digest: facilitatorAuthorizationDigest(authorization), startBlock, signatureHash: null };
     op = await this.save(op, { state: "approved", signed, failure: null, approval: { policy: FACILITATOR_POLICY,
@@ -42,6 +50,7 @@ export class FacilitatorExecution {
       if (BigInt(Math.floor(this.now() / 1000)) + EXPOSURE_MARGIN_SECONDS > BigInt(authorization.validBefore)) {
         facilitatorFail("facilitator_gasless_expired");
       }
+      await this.policy.assert(op, true); // unchanged activation and caps right before the authorization leaves APN
     } catch (error) {
       return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_signing") });
     }

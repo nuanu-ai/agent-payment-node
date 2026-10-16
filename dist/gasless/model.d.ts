@@ -132,7 +132,7 @@ export interface GaslessAllowlistBinding {
     readonly policyDigest: string;
     readonly policyRevision: number;
     readonly activationDigest: string;
-    readonly chain: "eip155:8453" | "eip155:1";
+    readonly chain: `eip155:${number}`;
     readonly token: Address;
     readonly mechanism: Readonly<{
         provider: "local";

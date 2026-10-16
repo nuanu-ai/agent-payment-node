@@ -15,7 +15,12 @@ export declare const FACILITATOR_REASONS: {
     readonly facilitator_gasless_signing: "APN_PROVIDER_EFFECT_UNAVAILABLE";
     readonly facilitator_gasless_capacity: "APN_OPERATION_BLOCKED";
     readonly facilitator_gasless_state_corrupt: "APN_STATE_CORRUPT";
+    readonly facilitator_gasless_allowlist_required: "APN_ALLOWLIST_REFUSED";
+    readonly facilitator_gasless_allowlist_refused: "APN_ALLOWLIST_REFUSED";
+    readonly facilitator_gasless_allowlist_changed: "APN_ALLOWLIST_REFUSED";
 };
 export type FacilitatorReason = keyof typeof FACILITATOR_REASONS;
 export declare function facilitatorFail(reason: FacilitatorReason): never;
+/** The Avalanche RPC setting is missing or unusable; the guidance names this route's own environment variable. */
+export declare function facilitatorRpcConfigFail(cause: "missing" | "invalid"): never;
 export declare function facilitatorReason(error: unknown, fallback: FacilitatorReason): FacilitatorReason;

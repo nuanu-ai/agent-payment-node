@@ -15,7 +15,7 @@ import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { Permit2LegacyConflictRepository } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
-import { conflictDomainKey, evmConflictDomain, railConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
+import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import { publicX402Operation, } from "./x402-state-integrity.js";
 import { publicProviderX402Operation, } from "./provider-x402-model.js";
@@ -198,13 +198,9 @@ export class OperationService {
         await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
     }
     async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources, cleanup85Parent, nativeOwner) {
-        let wanted;
-        try {
-            wanted = new Set(domains().map(conflictDomainKey));
-        }
-        catch {
-            wanted = new Set();
-        }
+        const wanted = conflictDomainKeys(domains);
+        if (this.state.root !== undefined)
+            await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
         if (this.state.root !== undefined) {
             for (const wantedKey of wanted) {
                 const [family, network, account] = wantedKey.split(":");
