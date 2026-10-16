@@ -11,7 +11,8 @@ import { advanceMetaMaskGaslessOperation } from "./metamask-gasless/journal/tran
 import { mmFailure } from "./metamask-gasless/reasons.js";
 const CHAIN_NAMES = { 1: "Ethereum", 10: "Optimism", 130: "Unichain", 137: "Polygon",
     143: "Monad", 1329: "Sei", 8453: "Base", 42161: "Arbitrum", 43114: "Avalanche", 59144: "Linea" };
-const UNRESOLVED = ["unknown_finality", "submitted_pending"];
+// A reverted relay leaves the delegation unredeemed, so MetaMask may still relay it: the owner may release it too.
+const UNRESOLVED = ["unknown_finality", "submitted_pending", "failed_effects_pending"];
 /** Owner release of a disclosed Local gasless effect whose outcome stayed unknown after its approval window. */
 export async function abandonLocalGasless(d, operationId) {
     const initial = await localRecord(d, operationId);

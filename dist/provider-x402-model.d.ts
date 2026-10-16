@@ -8,7 +8,7 @@ import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export type { ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
 export declare const PROVIDER_X402_STATE_VERSION: "apn.provider-x402.state.v1";
 export declare const PROVIDER_X402_HTTP_STATE_VERSION: "apn.provider-x402.state.v2";
-export type ProviderX402State = "preparing" | "awaiting_approval" | "started" | "settlement_pending" | "ambiguous_effect" | "completed" | "failed_before_effect" | "failed_settled_without_result";
+export type ProviderX402State = "preparing" | "awaiting_approval" | "started" | "settlement_pending" | "ambiguous_effect" | "completed" | "failed_before_effect" | "failed_settled_without_result" | "abandoned_unknown";
 export interface ProviderX402Transition {
     readonly sequence: string;
     readonly at: string;
@@ -145,7 +145,7 @@ export interface ProviderX402ReceiptRecord {
     readonly schemaVersion: "apn.provider-x402.receipt.v1";
     readonly kind: "x402_fetch";
     readonly operationId: string;
-    readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result";
+    readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result" | "abandoned_unknown";
     readonly reason: string;
     readonly proofClass: string;
     readonly fingerprint: string;

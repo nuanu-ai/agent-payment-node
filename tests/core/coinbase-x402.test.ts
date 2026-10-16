@@ -1903,15 +1903,22 @@ test("a frozen lower-block mismatch is ambiguity while it lasts and a transient 
   assert.equal((mismatch.operation as { state?: unknown }).state, "ambiguous_effect");
   assert.equal((mismatch.operation as { reason?: unknown }).reason, "settlement_evidence_contradiction");
   fixture.rpc.blockHashOverrides.delete("1000");
-  // An HTTP 429/5xx surfaces as APN_RPC_PROTOCOL from the RPC client; it must stay retryable.
-  const original = fixture.rpc.getX402TransferLogs.bind(fixture.rpc);
-  fixture.rpc.getX402TransferLogs = async () => { throw new ApnError("APN_RPC_PROTOCOL", "RPC HTTP 503"); };
-  const transient = await fixture.core.execute({ command: "operation.resume", operationId });
-  assert.equal((transient.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
-  fixture.rpc.getX402TransferLogs = original;
   const consistent = await fixture.core.execute({ command: "operation.resume", operationId });
   assert.equal((consistent.operation as { state?: unknown }).state, "completed", JSON.stringify(consistent));
   assert.equal(fixture.effect.calls.length, 1);
+
+  // An HTTP 429/5xx surfaces as APN_RPC_PROTOCOL from the RPC client; it must stay retryable.
+  const other = await setup(t);
+  const otherId = await prepare(other.core, "provider-transient-503");
+  await other.core.execute({ command: "x402.fetch.approve", operationId: otherId });
+  armExactSettlement(other);
+  const original = other.rpc.getX402TransferLogs.bind(other.rpc);
+  other.rpc.getX402TransferLogs = async () => { throw new ApnError("APN_RPC_PROTOCOL", "RPC HTTP 503"); };
+  const transient = await other.core.execute({ command: "operation.resume", operationId: otherId });
+  assert.equal((transient.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  other.rpc.getX402TransferLogs = original;
+  const settled = await other.core.execute({ command: "operation.resume", operationId: otherId });
+  assert.equal((settled.operation as { state?: unknown }).state, "completed", JSON.stringify(settled));
 });
 
 test("started persistence, same-operation races and exact spend without seller result terminalize once without replay", async (t) => {
@@ -2365,6 +2372,33 @@ test("exact-transaction recovery binds the transfer to this operation's own paym
     assert.equal(reused.error?.code, "APN_IDEMPOTENCY_CONFLICT");
     assert.equal((await new ProviderX402Repository(fixture.temporary.root).findOperation(second))?.terminal, false);
   });
+});
+
+test("a provider payment whose settlement cannot be proven unique is owner-abandoned only after its evidence window (R4)", async (t) => {
+  const fixture = await setup(t);
+  const operationId = await prepare(fixture.core, "provider-abandon-not-unique");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const calls: unknown[] = [];
+  const owner = new ApnCore({ state: new StateStore(fixture.temporary.root, { lockWaitMs: 1_000 }),
+    profileRepository: new StateProfileRepository(fixture.state), providerRegistry: fixture.registry, policy: fixture.policy,
+    rpc: fixture.rpc, http: fixture.http, rpcUrl: "https://rpc.example/base?tenant=one", clock: fixture.clock,
+    operationAbandonApproval: { approve: async (intent) => { calls.push(intent); } } });
+  const early = await owner.execute({ command: "operation.abandon", operationId });
+  assert.equal(early.error?.code, "APN_OPERATION_BLOCKED");
+  armExactSettlement(fixture);
+  fixture.rpc.transferLogs = [exactTransfer(1010n), { ...exactTransfer(1012n), transactionHash: `0x${"d".repeat(64)}` as Hex }];
+  const ambiguous = await owner.execute({ command: "operation.resume", operationId });
+  assert.equal((ambiguous.operation as { reason?: unknown }).reason, "settlement_not_unique", JSON.stringify(ambiguous));
+  const abandoned = await owner.execute({ command: "operation.abandon", operationId });
+  assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+  assert.equal((abandoned.operation as { state?: unknown }).state, "abandoned_unknown");
+  assert.equal(calls.length, 1);
+  const receipt = await owner.execute({ command: "receipt.get", operationId });
+  assert.equal((receipt.receipt as { terminalState?: unknown }).terminalState, "abandoned_unknown", JSON.stringify(receipt));
+  assert.equal(fixture.effect.calls.length, 1, "abandonment never pays again");
+  const repeated = await owner.execute({ command: "operation.abandon", operationId });
+  assert.equal((repeated.operation as { state?: unknown }).state, "abandoned_unknown");
+  assert.equal(calls.length, 1);
 });
 
 function ambiguousEffect(): FixtureX402 {

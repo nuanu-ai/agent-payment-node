@@ -376,8 +376,8 @@ export class ProviderX402Service {
         }
         if (receipt === null)
             return operation;
-        if (receipt.terminalState === "failed_before_effect") {
-            return await this.transition(operation, "failed_before_effect", receipt.reason, receipt.proofClass);
+        if (receipt.terminalState === "failed_before_effect" || receipt.terminalState === "abandoned_unknown") {
+            return await this.transition(operation, receipt.terminalState, receipt.reason, receipt.proofClass);
         }
         if (operation.settlementEvidence === undefined || (receipt.terminalState === "completed" ? operation.sellerResult === undefined : operation.sellerResult !== undefined)) {
             throw new ApnError("APN_STATE_CORRUPT", "Provider x402 terminal receipt has no matching durable evidence.");

@@ -2,7 +2,7 @@ import { appendProviderX402Transition, providerX402BindingHash, sealProviderX402
 export function transitionProviderX402Operation(operation, state, reason, proofClass, extra, at) {
     const transitions = appendProviderX402Transition(operation.transitions, { at, state, reason, proofClass });
     const { integrityHash: _integrity, ...base } = operation;
-    const terminal = ["completed", "failed_before_effect", "failed_settled_without_result"].includes(state);
+    const terminal = ["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(state);
     return sealProviderX402Operation({
         ...base,
         ...extra,
