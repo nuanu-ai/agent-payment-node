@@ -1,6 +1,7 @@
 import { SecureStateStore } from "../../secure-state-store.js";
 import { type SwapQuoteSnapshot } from "../quote.js";
 import type { GuardedSwapPreparedMaterial } from "../runtime.js";
+import type { SolanaProgramObservation } from "../solana-program-authority.js";
 import { type OrcaSwapLifetime, type OrcaSwapPlan } from "./instructions.js";
 import type { WhirlpoolSwapQuote } from "./math.js";
 import type { OrcaOwnerBalances, OrcaSimulationEvidence } from "./simulation.js";
@@ -28,11 +29,12 @@ export interface OrcaQuoteEvidence {
     readonly vaultUsdcAtomic: string;
     readonly owner: OrcaOwnerBalances;
     readonly tokenAccountRentLamports: string;
-    readonly programPins: readonly {
+    /** Program authority observations; operations quoted by APN 0.5.42 and earlier hold {role, address, dataSha256} byte pins. */
+    readonly programPins: readonly (SolanaProgramObservation | {
         readonly role: string;
         readonly address: string;
         readonly dataSha256: string;
-    }[];
+    })[];
     readonly swap: WhirlpoolSwapQuote;
 }
 export interface OrcaKeylessExecution {

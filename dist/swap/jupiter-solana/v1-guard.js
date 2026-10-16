@@ -5,7 +5,8 @@ import { associatedTokenAddress, decodeWhirlpool, decodeTickArray, whirlpoolTick
 import { assertJupiterV1FreshMaterial, validateJupiterV1Material } from "./v1-material.js";
 import { JUPITER_V1_POOL, JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA } from "./v1-pins.js";
 import { JUPITER_V6_PROGRAM as JUP, TOKEN_PROGRAM as TOKEN, ASSOCIATED_TOKEN_PROGRAM as ATA, SYSTEM_PROGRAM as SYS, COMPUTE_BUDGET_PROGRAM as COMPUTE, WRAPPED_SOL_MINT as SOL, SOLANA_USDC_MINT as USDC } from "./catalog.js";
-import { routeConfigForMaterial, jupiterV1RegisteredProgramPins } from "./v1-route-config.js";
+import { routeConfigForMaterial, jupiterV1RegisteredProgramPins, jupiterV1RouteProgramAuthorities } from "./v1-route-config.js";
+import { UPGRADEABLE_LOADER, verifyProgramAuthority } from "../solana-program-authority.js";
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { REVIEWED_WHIRLPOOL_FP, validateReviewedWhirlpoolFpPool } from "./v1-whirlpool-fp.js";
 export function reject(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
@@ -102,16 +103,15 @@ async function evaluate(material, options, requireFresh) {
     const input = BigInt(q.inAmount);
     if (fee < 1400n || fee > 20000n || input + fee + (src.existence === "absent" ? rent : 0n) > cap || BigInt(semanticAccount(material, p).lamports) < input + fee + (src.existence === "absent" ? rent : 0n))
         reject("Jupiter V1 prospective expense or payer balance exceeds cap.");
-    for (const pin of jupiterV1RegisteredProgramPins(config)) {
-        const a = semanticAccount(material, pin.programId), actual = material.programPins.find(x => x.programId === pin.programId), pd = semanticAccount(material, pin.programDataAddress);
-        if (!a.executable || actual?.storedPayloadHash !== pin.payloadHash || actual.programDataAddress !== pin.programDataAddress || actual.provenance !== "runtime_bytes_only" || actual.accountHash !== a.dataHash || actual.programDataHash !== pd.dataHash || pin.programDataHash !== undefined && pd.dataHash !== pin.programDataHash || sha256(Buffer.from(pd.dataBase64, "base64").subarray(45)) !== pin.payloadHash || a.owner !== "BPFLoaderUpgradeab1e11111111111111111111111" || pd.owner !== a.owner || pd.executable || Buffer.from(pd.dataBase64, "base64").length < 45 || Buffer.from(pd.dataBase64, "base64").readUInt32LE(0) !== 3 || ![0, 1].includes(Buffer.from(pd.dataBase64, "base64")[12]) || actual.loader !== a.owner || actual.deploymentSlot !== Buffer.from(pd.dataBase64, "base64").readBigUInt64LE(4).toString() || actual.upgradeAuthority !== (Buffer.from(pd.dataBase64, "base64")[12] === 1 ? getAddressDecoder().decode(Buffer.from(pd.dataBase64, "base64").subarray(13, 45)) : null) || Buffer.from(a.dataBase64, "base64").length !== 36 || Buffer.from(a.dataBase64, "base64").readUInt32LE(0) !== 2 || getAddressDecoder().decode(Buffer.from(a.dataBase64, "base64").subarray(4)) !== pin.programDataAddress)
-            reject("Jupiter V1 runtime pin changed.");
-    }
-    const fixed = [{ programId: ATA, hash: "6804554e69fd3a58caa191dc4a58f4c67223d30ca28ab8987f39fc18d2f7374d" }, { programId: COMPUTE, hash: "005950c007e8e550a16beddf836f0082d26d197f5f645ff7c04a5c8d171cf8a1" }, { programId: SYS, hash: "c94b792a6d8b25d3e53ea94d8b80111735ed80d6a7dc8deb937cd342707f5f03" }];
-    for (const pin of fixed) {
-        const a = semanticAccount(material, pin.programId);
-        if (!a.executable || a.dataHash !== pin.hash || a.owner !== (pin.programId === ATA ? "BPFLoader2111111111111111111111111111111111" : "NativeLoader1111111111111111111111111111111"))
-            reject("Jupiter V1 setup executable bytes changed.");
+    if (config.programAuthorities === undefined)
+        assertByteEvidence(material, config);
+    else
+        assertAuthorityEvidence(material, config);
+    // ATA (BPFLoader2), Compute Budget and System (native) cannot be upgraded: loader and executable flag are their whole pin.
+    for (const [programId, loader] of [[ATA, "BPFLoader2111111111111111111111111111111111"], [COMPUTE, "NativeLoader1111111111111111111111111111111"], [SYS, "NativeLoader1111111111111111111111111111111"]]) {
+        const a = semanticAccount(material, programId);
+        if (!a.executable || a.owner !== loader)
+            reject("Jupiter V1 setup program loader changed.");
     }
     if (material.semanticAccounts.some(a => BigInt(a.slot) < BigInt(q.contextSlot)))
         reject("Jupiter V1 semantic snapshot predates quote.");
@@ -134,5 +134,32 @@ export function jupiterV1ProofRoles(g) {
     if (g.routeId !== undefined || g.namedRoles !== undefined)
         reject("Jupiter V1 old proof shape changed.");
     return { payer: g.payer, source: g.sourceTokenAccount, destination: g.destinationTokenAccount, pool: g.pool, mintA: SOL, mintB: USDC, vaultA: g.nativeAccounts[4], vaultB: g.nativeAccounts[6], ticks: [g.nativeAccounts[7], g.nativeAccounts[8], g.nativeAccounts[9]], oracle: g.nativeAccounts[10], nativeCpiAccounts: g.nativeAccounts };
+}
+/** Historical byte evidence (APN 0.5.42 and earlier): the stored ProgramData still hashes to the registered generation. */
+function assertByteEvidence(material, config) {
+    for (const pin of jupiterV1RegisteredProgramPins(config)) {
+        const a = semanticAccount(material, pin.programId), actual = material.programPins.find(x => x.programId === pin.programId), pd = semanticAccount(material, pin.programDataAddress);
+        if (actual?.provenance !== "runtime_bytes_only" || !a.executable || actual.storedPayloadHash !== pin.payloadHash || actual.programDataAddress !== pin.programDataAddress || actual.provenance !== "runtime_bytes_only" || actual.accountHash !== a.dataHash || actual.programDataHash !== pd.dataHash || pin.programDataHash !== undefined && pd.dataHash !== pin.programDataHash || sha256(Buffer.from(pd.dataBase64, "base64").subarray(45)) !== pin.payloadHash || a.owner !== "BPFLoaderUpgradeab1e11111111111111111111111" || pd.owner !== a.owner || pd.executable || Buffer.from(pd.dataBase64, "base64").length < 45 || Buffer.from(pd.dataBase64, "base64").readUInt32LE(0) !== 3 || ![0, 1].includes(Buffer.from(pd.dataBase64, "base64")[12]) || actual.loader !== a.owner || actual.deploymentSlot !== Buffer.from(pd.dataBase64, "base64").readBigUInt64LE(4).toString() || actual.upgradeAuthority !== (Buffer.from(pd.dataBase64, "base64")[12] === 1 ? getAddressDecoder().decode(Buffer.from(pd.dataBase64, "base64").subarray(13, 45)) : null) || Buffer.from(a.dataBase64, "base64").length !== 36 || Buffer.from(a.dataBase64, "base64").readUInt32LE(0) !== 2 || getAddressDecoder().decode(Buffer.from(a.dataBase64, "base64").subarray(4)) !== pin.programDataAddress)
+            reject("Jupiter V1 runtime pin changed.");
+    }
+}
+/**
+ * Authority evidence: each program's loader account and ProgramData header exactly as stored with its row. The pinned
+ * authority itself is compared where chain data enters, in the resolver at quote and again before consent; a saved
+ * material is checked against its own rows, so a later release that reviews another authority still observes it (R2).
+ */
+function assertAuthorityEvidence(material, config) {
+    const pins = jupiterV1RouteProgramAuthorities(config), view = (a) => a.existence === "absent" ? null : { owner: a.owner, executable: a.executable, data: Buffer.from(a.dataBase64, "base64") };
+    if (material.programPins.length !== pins.length)
+        reject("Jupiter V1 program evidence is incomplete.");
+    for (const pin of pins) {
+        const row = material.programPins.find(r => r.programId === pin.programId), a = semanticAccount(material, pin.programId);
+        if (row === undefined || row.provenance !== "upgrade_authority" || row.loader !== pin.loader || row.accountHash !== a.dataHash)
+            reject("Jupiter V1 program evidence changed.");
+        const expected = pin.loader === UPGRADEABLE_LOADER ? { ...pin, upgradeAuthority: row.upgradeAuthority } : pin;
+        const seen = verifyProgramAuthority(expected, view(a), pin.loader === UPGRADEABLE_LOADER ? view(semanticAccount(material, pin.programDataAddress)) : null);
+        if (seen.deploymentSlot !== row.deploymentSlot || seen.upgradeAuthority !== row.upgradeAuthority || seen.programDataAddress !== row.programDataAddress || seen.programDataHeaderSha256 !== row.programDataHeaderHash)
+            reject("Jupiter V1 program evidence changed.");
+    }
 }
 //# sourceMappingURL=v1-guard.js.map

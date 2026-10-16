@@ -6,6 +6,8 @@ import { JUPITER_V1_WHIRLPOOL_FP_POOL, JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN, JU
 import { JUPITER_V1_RUNTIME_PROGRAM_PINS, JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
 import { JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
 import { JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_PROTOCOL_REGISTRY } from "./v1-pins.js";
+import { JUPITER_V1_83_MECHANISM_PIN, JUPITER_V1_83_PROTOCOL_REGISTRY, JUPITER_V1_FP_MECHANISM_PIN, JUPITER_V1_FP_PROTOCOL_REGISTRY, JUPITER_V1_ESV_MECHANISM_PIN, JUPITER_V1_ESV_PROTOCOL_REGISTRY, JUPITER_V1_4H_MECHANISM_PIN, JUPITER_V1_4H_PROTOCOL_REGISTRY, JUPITER_V1_PROGRAM_AUTHORITIES, JUPITER_V1_IMMUTABLE_PROGRAMS } from "./v1-pins.js";
+import { UPGRADEABLE_LOADER } from "../solana-program-authority.js";
 import { JUPITER_V1_RUNTIME_099DA3_WHIRLPOOL_C422B2_PROGRAM_PINS, JUPITER_V1_WHIRLPOOL_RUNTIME_C422B2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_RUNTIME_C422B2_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_PROTOCOL_REGISTRY } from "./v1-pins.js";
 export const JUPITER_V1_OLD_ROUTE = Object.freeze({ routeId: "whirlpool-v1-83-sol-usdc", pool: JUPITER_V1_POOL, variant: 17, instructionBytes: 36, accountCount: 21, mechanismPin: Object.freeze({ ...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, auxiliaryContractProgramIdentities: Object.freeze([...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.auxiliaryContractProgramIdentities]) }), protocolRegistry: JUPITER_V1_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([]) });
 export const JUPITER_V1_WHIRLPOOL_V2_ROUTE = Object.freeze({ routeId: "whirlpool-swap-v2-esv-sol-usdc", pool: JUPITER_V1_WHIRLPOOL_V2_POOL, variant: 47, instructionBytes: 37, accountCount: 25, mechanismPin: JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, protocolRegistry: JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY, requiredExtraPrograms: Object.freeze([JUPITER_V1_MEMO_PROGRAM]) });
@@ -43,26 +45,58 @@ export const JUPITER_V1_WHIRLPOOL_RUNTIME_C422B2_ROUTE = c422b2(JUPITER_V1_OLD_R
 export const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_ROUTE = c422b2(JUPITER_V1_WHIRLPOOL_FP_ROUTE, "whirlpool-v1-fp-sol-usdc-runtime-c422b2", JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_PROTOCOL_REGISTRY);
 export const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_ROUTE = c422b2(JUPITER_V1_WHIRLPOOL_V2_ROUTE, "whirlpool-swap-v2-esv-sol-usdc-runtime-c422b2", JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_PROTOCOL_REGISTRY);
 export const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_ROUTE = c422b2(JUPITER_V1_WHIRLPOOL_4H_ROUTE, "whirlpool-swap-v2-4h-sol-usdc-runtime-c422b2", JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_MECHANISM_PIN, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_PROTOCOL_REGISTRY);
-export const JUPITER_V1_FINITE_ROUTES = Object.freeze([JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_V2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE,
+/** Byte-pinned generations of APN 0.5.42 and earlier, in their original order: parsers for saved materials and operations only. */
+export const JUPITER_V1_HISTORICAL_ROUTES = Object.freeze([JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_V2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE,
     JUPITER_V1_WHIRLPOOL_RUNTIME_C422B2_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_ROUTE, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_ROUTE]);
-/** The newest registered generation of each pool, in registry order: the only routes whose executable pins can still match. */
-export const JUPITER_V1_CURRENT_ROUTES = Object.freeze(JUPITER_V1_FINITE_ROUTES.filter((route, index) => !JUPITER_V1_FINITE_ROUTES.slice(index + 1).some(later => later.pool === route.pool)));
+/** The current route set: one route per pool, valid across routine program upgrades by the pinned authorities. */
+function current(route, routeId, mechanismPin, protocolRegistry) {
+    const { runtimeProgramPins: _historical, ...shape } = route;
+    return Object.freeze({ ...shape, routeId, mechanismPin, protocolRegistry, programAuthorities: JUPITER_V1_PROGRAM_AUTHORITIES });
+}
+export const JUPITER_V1_ROUTES = Object.freeze([
+    current(JUPITER_V1_OLD_ROUTE, "whirlpool-v1-83-sol-usdc-authority", JUPITER_V1_83_MECHANISM_PIN, JUPITER_V1_83_PROTOCOL_REGISTRY),
+    current(JUPITER_V1_WHIRLPOOL_FP_ROUTE, "whirlpool-v1-fp-sol-usdc-authority", JUPITER_V1_FP_MECHANISM_PIN, JUPITER_V1_FP_PROTOCOL_REGISTRY),
+    current(JUPITER_V1_WHIRLPOOL_V2_ROUTE, "whirlpool-swap-v2-esv-sol-usdc-authority", JUPITER_V1_ESV_MECHANISM_PIN, JUPITER_V1_ESV_PROTOCOL_REGISTRY),
+    current(JUPITER_V1_WHIRLPOOL_4H_ROUTE, "whirlpool-swap-v2-4h-sol-usdc-authority", JUPITER_V1_4H_MECHANISM_PIN, JUPITER_V1_4H_PROTOCOL_REGISTRY)
+]);
+/** Every route an operation can name: the current set first, then the historical generations it may have been prepared under. */
+export const JUPITER_V1_KNOWN_ROUTES = Object.freeze([...JUPITER_V1_ROUTES, ...JUPITER_V1_HISTORICAL_ROUTES]);
+/** Every program a current route may invoke: its upgradeable authorities and the immutable programs of its shape. */
+export function jupiterV1RouteProgramAuthorities(route) {
+    if (route.programAuthorities === undefined)
+        blocked();
+    return [...route.programAuthorities, ...JUPITER_V1_IMMUTABLE_PROGRAMS.filter(pin => pin.programId !== JUPITER_V1_MEMO_PROGRAM || route.requiredExtraPrograms.includes(pin.programId))];
+}
 export function jupiterV1RegisteredProgramPins(route) {
     return route.runtimeProgramPins ?? JUPITER_V1_RUNTIME_PROGRAM_PINS;
 }
 function blocked() { throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 pool, variant or canonical route shape is outside the admitted lane."); }
-/** Finite source-reviewed pool lookup, never a pin learned from a provider response. */
+/** Finite source-reviewed pool lookup, never a pin learned from a provider response. A new quote uses the current set. */
 export function routeConfigForQuote(quote, expectedRouteId) {
     const pool = quote.routePlan[0]?.swapInfo.ammKey;
-    const config = JUPITER_V1_FINITE_ROUTES.find(route => route.pool === pool && (expectedRouteId === undefined || route.routeId === expectedRouteId)) ?? blocked();
+    const config = (expectedRouteId === undefined ? JUPITER_V1_ROUTES : JUPITER_V1_KNOWN_ROUTES).find(route => route.pool === pool && (expectedRouteId === undefined || route.routeId === expectedRouteId)) ?? blocked();
     return config;
 }
-/** Saved materials select only a registered generation. Pool identity alone cannot select upgraded code. */
+/**
+ * A saved material names its route by its own program evidence. Authority evidence (current) selects the pool's current
+ * route and must be internally consistent; the fresh read that produced it was checked against the pinned authorities,
+ * so a later release that reviews another authority still reads it. Byte evidence (APN 0.5.42 and earlier) selects only a
+ * registered historical generation.
+ */
 export function routeConfigForMaterial(material) {
+    if (material.programPins.some(pin => pin.provenance === "upgrade_authority")) {
+        const config = JUPITER_V1_ROUTES.find(route => route.pool === material.quoteResponse.routePlan[0]?.swapInfo.ammKey) ?? blocked();
+        if (material.programPins.some(pin => pin.provenance !== "upgrade_authority") || config.programAuthorities.some(pin => {
+            const rows = material.programPins.filter(row => row.programId === pin.programId);
+            return rows.length !== 1 || rows[0].loader !== UPGRADEABLE_LOADER || rows[0].programDataAddress !== pin.programDataAddress;
+        }))
+            blocked();
+        return routeConfigForQuoteBuild(material.quoteResponse, material.rawBuildResponse, config.routeId);
+    }
     const jup = material.programPins.filter(pin => pin.programId === JUPITER_V6_PROGRAM);
     if (jup.length !== 1 || jup[0].provenance !== "runtime_bytes_only")
         blocked();
-    const candidates = JUPITER_V1_FINITE_ROUTES.filter(route => route.pool === material.quoteResponse.routePlan[0]?.swapInfo.ammKey &&
+    const candidates = JUPITER_V1_HISTORICAL_ROUTES.filter(route => route.pool === material.quoteResponse.routePlan[0]?.swapInfo.ammKey &&
         jupiterV1RegisteredProgramPins(route).some(pin => pin.programId === JUPITER_V6_PROGRAM && materialHasPin(material, pin)));
     // Several generations can share one JUP6 snapshot. Then every registered executable pin, Whirlpool included, selects one.
     const exact = candidates.length === 1 ? candidates : candidates.filter(route => jupiterV1RegisteredProgramPins(route).every(pin => materialHasPin(material, pin)));

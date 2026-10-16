@@ -16,8 +16,9 @@ function changed(a: JupiterV1SemanticAccount, mutate: (d: Buffer) => void): Jupi
 }
 
 test("4H public account capture binds its distinct configuration, PDA, adaptive oracle and mixed tick layouts", async () => {
- const c = captured4H(), route = routeConfigForQuoteBuild(c.quote, c.build);
+ const c = captured4H(), route = routeConfigForQuoteBuild(c.quote, c.build, JUPITER_V1_WHIRLPOOL_4H_ROUTE.routeId);
  assert.equal(route, JUPITER_V1_WHIRLPOOL_4H_ROUTE);
+ assert.equal(routeConfigForQuoteBuild(c.quote, c.build).routeId, "whirlpool-swap-v2-4h-sol-usdc-authority");
  const snapshot = await validateWhirlpoolV2AccountSnapshot(c.build.swapInstruction.accounts[1]!.pubkey, c.build, c.accounts);
  assert.equal(snapshot.roles.pool, POOL);
  assert.equal(snapshot.pool.tickSpacing, 4); assert.equal(snapshot.pool.feeTierIndexSeed, 1028);
@@ -44,11 +45,12 @@ for (let index = 0; index < 25; index++) {
  });
 }
 
-for (const offset of [0, 8, 40, 41, 43, 45, 47, 101, 133, 181, 213]) test(`4H pool refuses immutable field drift at ${offset}`, () => {
+for (const offset of [0, 8, 40, 41, 43, 101, 133, 181, 213]) test(`4H pool refuses immutable field drift at ${offset}`, () => {
  const a = captured4H().accounts.find(a => a.address === POOL)!;
  assert.throws(() => decodeWhirlpoolV2Pool(changed(a, d => { d[offset] = d[offset]! ^ 1; })));
 });
-for (const offset of [0, 8, 40, 48, 50, 52, 54, 58, 62, 64, 66, 110, 253]) test(`4H oracle refuses contract drift at ${offset}`, () => {
+// Fee rates (45, 47) and adaptive-fee constants (48–65) are tunable by Orca's fee authority and are read, not pinned (SWAP-18).
+for (const offset of [0, 8, 40, 66, 110, 253]) test(`4H oracle refuses contract drift at ${offset}`, () => {
  const c = captured4H(), a = c.accounts.find(a => a.address === c.build.swapInstruction.accounts[24]!.pubkey)!;
  assert.throws(() => decodeWhirlpoolV2Oracle(changed(a, d => { d[offset] = d[offset]! ^ 1; })));
 });

@@ -8,7 +8,7 @@ import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import { swapMechanismDigest } from "../pin.js";
 import { assetAdmitsSwapMechanism } from "../route-admission.js";
 import { validateJupiterV1PreparedMaterial } from "./v1-material.js";
-import { JUPITER_V1_FINITE_ROUTES, JUPITER_V1_CURRENT_ROUTES, routeConfigForMaterial, type JupiterV1RouteConfig } from "./v1-route-config.js";
+import { JUPITER_V1_KNOWN_ROUTES, JUPITER_V1_ROUTES, routeConfigForMaterial, type JupiterV1RouteConfig } from "./v1-route-config.js";
 import { JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 
 export interface JupiterV1OwnerBinding {
@@ -34,16 +34,16 @@ export class JupiterV1OwnerAdmission {
  async resolveRoute(profile:string, amountAtomic:string, minimumOutputAtomic:string, expected?:string, ownReservationAtomic="0"):Promise<{readonly route:JupiterV1RouteConfig;readonly routes:readonly JupiterV1RouteConfig[];readonly owner:JupiterV1OwnerBinding}>{
    const account=await this.localAccount(profile,expected), active=await this.activePolicy(profile), now=this.now(), at=now.toISOString();
    if(active===null||active.profile!==profile||active.accounts.solana!==account.address||active.digest!==active.registry.policyDigest) blocked("The exact active owner policy is required.");
-   // Route admission (pool, programs) is generation-independent: every registered generation of an admitted pool matches.
-   let admitted:readonly JupiterV1RouteConfig[]=JUPITER_V1_FINITE_ROUTES;
+   // Route admission (pool, programs) is generation-independent: every known route of an admitted pool matches.
+   let admitted:readonly JupiterV1RouteConfig[]=JUPITER_V1_KNOWN_ROUTES;
    for(const [asset,amount] of [[{kind:"native" as const,identifier:null},amountAtomic],[{kind:"token" as const,identifier:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"},minimumOutputAtomic]] as const){
      const used=await this.usage.usage({account:account.address,chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,asset},now);
      const result=evaluateAssetPolicy(active.registry,{chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,asset,rail:"swap",amountAtomic:amount,
        dailyUsageAtomic:asset.kind==="native"?(BigInt(used.amountAtomic)-BigInt(ownReservationAtomic)).toString():used.amountAtomic,asOfDate:at.slice(0,10),asOf:at});
      admitted=admitted.filter(r=>assetAdmitsSwapMechanism(result.asset,r.mechanismPin));
    }
-   // New quotes use the current executable generation of the first admitted pool; saved material keeps its own generation.
-   const selected=JUPITER_V1_CURRENT_ROUTES.find(r=>admitted.some(a=>a.routeId===r.routeId));
+   // New quotes use the current route of the first admitted pool; saved material keeps its own route.
+   const selected=JUPITER_V1_ROUTES.find(r=>admitted.some(a=>a.routeId===r.routeId));
    if(selected===undefined)blocked("Both assets require the same exact finite Jupiter V1 mechanism admission.");
    const body={account,accountBindingHash:jupiterV1AccountBindingHash(account),policyDigest:active.digest,activationDigest:active.activationDigest};
    return {route:selected,routes:admitted,owner:detached({...body,admissionHash:domainHash("apn.jupiter-v1-owner-admission.v1",canonicalJson(body))})};
