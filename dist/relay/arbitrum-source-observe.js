@@ -36,6 +36,10 @@ function boundProof(proof, role, chosen, approval) {
         (role === "approval" ? proof.approval === null : approval === null ? proof.approval === null :
             proof.approval !== null && same(proof.approval.transactionHash, approval.transactionHash));
 }
+function boundRevert(proof, chosen) {
+    return proof.sourceChainId === 42161 && proof.proofClass === "canonical_safe_source_revert" &&
+        same(proof.reverted.transactionHash, chosen.transactionHash);
+}
 export class RelayArbitrumSourceObserveService {
     state;
     observer;
@@ -58,6 +62,20 @@ export class RelayArbitrumSourceObserveService {
             reservationId: assetUsageReservationId(identity, `relay-arbitrum-approval:${op.operationId}`),
             policyDigest: op.policyDigest, state: "finalized", outcomeDigest: proofDigest,
             expectedCurrentStates: ["reserved", "submitted", "unknown_finality", "finalized"], now: new Date() });
+    }
+    /** A reverted approval or deposit moved no principal: the hold is released, never counted as spent. */
+    async releaseRevertedUsage(op, proofDigest) {
+        if (this.ports.releaseRevertedUsage !== undefined)
+            return this.ports.releaseRevertedUsage(op, proofDigest);
+        const identity = { account: getAddress(op.sourceAccount), chain: "eip155:42161",
+            asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC } };
+        const ledger = new AssetUsageLedger(this.state.root), reservationId = assetUsageReservationId(identity, `relay-arbitrum-approval:${op.operationId}`);
+        const current = await ledger.load(identity, reservationId);
+        if (current === null || current.state === "failed_confirmed_revert" || current.state === "failed_before_effect")
+            return;
+        await ledger.transition({ ...identity, reservationId, policyDigest: op.policyDigest,
+            state: current.state === "reserved" ? "failed_before_effect" : "failed_confirmed_revert", outcomeDigest: proofDigest,
+            expectedCurrentStates: ["reserved", "submitted", "unknown_finality"], now: new Date() });
     }
     async observe(operationId) {
         if (!HASH.test(operationId))
@@ -87,6 +105,11 @@ export class RelayArbitrumSourceObserveService {
             journal.orderId !== op.arbitrumDraft.orderId)
             corrupt("journal_operation_binding");
         const [approvalEffect, depositEffect] = journal.effects;
+        const failed = journal.effects.find(e => e.phase === "failed");
+        if (failed !== undefined) {
+            await this.releaseRevertedUsage(op, failed.attempt.observationDigest);
+            return output("source_effect_reverted", `${failed.role}_reverted_at_safe_finality`);
+        }
         if (depositEffect.phase === "confirmed") {
             await this.finalizeUsage(op, journal);
             return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
@@ -101,6 +124,11 @@ export class RelayArbitrumSourceObserveService {
         const approval = role === "deposit" && approvalEffect.phase === "confirmed" ? expected(op, journal, "approval") : null;
         // The standalone observer owns the persisted 24-POST cap, 750 ms pacing, and no-429-retry policy.
         const proof = await this.observer.observe(chosen, approval ?? undefined);
+        if (proof === null) {
+            const reverted = await this.observer.observeRevert(chosen);
+            if (reverted !== null && boundRevert(reverted, chosen))
+                return this.recordRevert(op, journal, role, chosen, reverted, output);
+        }
         if (proof === null || !boundProof(proof, role, chosen, approval))
             return output("source_proof_pending", "canonical_safe_source_proof_unavailable");
         const proofDigest = hashObject(proof);
@@ -108,7 +136,7 @@ export class RelayArbitrumSourceObserveService {
             input.role === role && input.outcome === "confirmed" && input.proofDigest === proofDigest &&
             input.journal.effects[role === "approval" ? 0 : 1].attempt?.transactionHash === chosen.transactionHash &&
             boundProof(proof, role, chosen, approval);
-        const next = await (this.ports.transition?.(op.profileHash, operationId, journal.integrityHash, role, proofDigest, verify) ??
+        const next = await (this.ports.transition?.(op.profileHash, operationId, journal.integrityHash, role, proofDigest, verify, "confirmed") ??
             new ArbitrumSourceEffectJournalRepository(this.state.root, verify).transition(op.profileHash, operationId, journal.integrityHash, { kind: "record_verified_observation", role, outcome: "confirmed", proofDigest }));
         if (next.effects[role === "approval" ? 0 : 1].phase !== "confirmed" ||
             next.effects[role === "approval" ? 0 : 1].attempt?.observationDigest !== proofDigest)
@@ -116,6 +144,20 @@ export class RelayArbitrumSourceObserveService {
         if (role === "deposit")
             await this.finalizeUsage(op, next);
         return { ...output(role === "approval" ? "approval_source_confirmed" : "deposit_source_confirmed", "canonical_safe_source_receipt", proof), approvalPhase: next.effects[0].phase, depositPhase: next.effects[1].phase };
+    }
+    async recordRevert(op, journal, role, chosen, reverted, output) {
+        const proofDigest = hashObject(reverted);
+        const verify = async (input) => input.operation.integrityHash === op.integrityHash && input.journal.integrityHash === journal.integrityHash &&
+            input.role === role && input.outcome === "failed" && input.proofDigest === proofDigest &&
+            input.journal.effects[role === "approval" ? 0 : 1].attempt?.transactionHash === chosen.transactionHash &&
+            boundRevert(reverted, chosen);
+        const next = await (this.ports.transition?.(op.profileHash, op.operationId, journal.integrityHash, role, proofDigest, verify, "failed") ??
+            new ArbitrumSourceEffectJournalRepository(this.state.root, verify).transition(op.profileHash, op.operationId, journal.integrityHash, { kind: "record_verified_observation", role, outcome: "failed", proofDigest }));
+        const effect = next.effects[role === "approval" ? 0 : 1];
+        if (effect.phase !== "failed" || effect.attempt?.observationDigest !== proofDigest)
+            corrupt("revert_transition_result");
+        await this.releaseRevertedUsage(op, proofDigest);
+        return output("source_effect_reverted", `${role}_reverted_at_safe_finality`);
     }
 }
 //# sourceMappingURL=arbitrum-source-observe.js.map

@@ -80,7 +80,7 @@ test("saved hash-bound uncertain send observes approval then joint deposit, with
   let journal = await createArbitrumSourceEffectJournal(op, now);
   journal = await marked(op, "approval", journal, 7);
   let reads = 0, writes = 0, joint = false;
-  const observer = { observe: async (deposit: RelayArbitrumExpectedEffect, approval?: RelayArbitrumExpectedEffect) => {
+  const observer = { observeRevert: async () => null, observe: async (deposit: RelayArbitrumExpectedEffect, approval?: RelayArbitrumExpectedEffect) => {
     reads++;
     joint = approval !== undefined;
     return proof(deposit, approval);
@@ -136,19 +136,50 @@ test("reorg or wrong hash leaves uncertain saved attempt unchanged", async t => 
   const ports = { operation: async () => op, journal: async () => journal,
     transition: async () => { writes++; throw new Error("must not transition"); } };
   const state = new StateStore(temp.root);
-  const reorg = new RelayArbitrumSourceObserveService(state, { observe: async () => null }, ports);
+  const reorg = new RelayArbitrumSourceObserveService(state, { observe: async () => null, observeRevert: async () => null }, ports);
   assert.equal((await reorg.observe(op.operationId)).state, "source_proof_pending");
-  const wrong = new RelayArbitrumSourceObserveService(state, { observe: async expected =>
+  const wrong = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observe: async expected =>
     proof({ ...expected, transactionHash: `0x${"f".repeat(64)}` as Hex }) }, ports);
   assert.equal((await wrong.observe(op.operationId)).state, "source_proof_pending");
   assert.equal(journal.integrityHash, original);
   assert.equal(writes, 0);
   let reads = 0;
-  const wrongJournal = new RelayArbitrumSourceObserveService(state, { observe: async () => {
+  const wrongJournal = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observe: async () => {
     reads++; return null;
   } }, { operation: async () => op, journal: async () => ({ ...journal, quoteDigest: "f".repeat(64) }) });
   await assert.rejects(wrongJournal.observe(op.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(reads, 0);
+});
+
+test("a safe-finality revert is recorded once as failed, releases the hold and ends observation", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const op = await synthetic();
+  let journal = await marked(op, "approval", await createArbitrumSourceEffectJournal(op, now), 7);
+  let released: string | null = null, writes = 0, reads = 0;
+  const service = new RelayArbitrumSourceObserveService(new StateStore(temp.root), {
+    observe: async () => { reads++; return null; },
+    observeRevert: async expected => ({ sourceChainId: 42161 as const, rpcOrigin: "https://arb-rpc.example",
+      reverted: { transactionHash: expected.transactionHash, blockNumber: "100", blockHash },
+      safeHead: { number: "112", hash: safeHash }, proofClass: "canonical_safe_source_revert" as const }),
+  }, { operation: async () => op, journal: async () => journal,
+    releaseRevertedUsage: async (_op, digest) => { released = digest; },
+    transition: async (_profileHash, _operationId, expectedHash, role, digest, verify, outcome) => {
+      assert.equal(expectedHash, journal.integrityHash); assert.equal(outcome, "failed");
+      assert.equal(await verify({ operation: op, journal, role, outcome: "confirmed", proofDigest: digest }), false);
+      assert.equal(await verify({ operation: op, journal, role, outcome: "failed", proofDigest: digest }), true);
+      writes++;
+      journal = await advanceArbitrumSourceEffectJournal(journal, op,
+        { kind: "record_verified_observation", role, outcome: "failed", proofDigest: digest });
+      return journal;
+    } });
+  const result = await service.observe(op.operationId);
+  assert.equal(result.state, "source_effect_reverted");
+  assert.equal(journal.effects[0].phase, "failed");
+  assert.equal(released, journal.effects[0].attempt?.observationDigest);
+  assert.equal((await service.observe(op.operationId)).state, "source_effect_reverted");
+  assert.equal(writes, 1); assert.equal(reads, 1);
+  await assert.rejects(advanceArbitrumSourceEffectJournal(journal, op,
+    { kind: "begin_signing", role: "deposit", marker: "f".repeat(64), at: later }), { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("installed command refuses absent saved operation before any RPC", async t => {
@@ -179,7 +210,7 @@ test("verified approval skip observes a dispatched deposit without invented appr
     attempt: null, skipProof }, initial.effects[1]] as const };
   let journal = await marked(op, "deposit", { ...body, integrityHash: hashObject(body) }, 7);
   let readApproval = true;
-  const service = new RelayArbitrumSourceObserveService(new StateStore(temp.root), {
+  const service = new RelayArbitrumSourceObserveService(new StateStore(temp.root), { observeRevert: async () => null,
     observe: async (deposit, approval) => { readApproval = approval !== undefined; return proof(deposit, approval); },
   }, { operation: async () => op, journal: async () => journal,
     finalizeUsage: async () => {},

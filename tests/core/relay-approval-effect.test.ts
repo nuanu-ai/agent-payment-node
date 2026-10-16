@@ -13,6 +13,7 @@ import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator, validateRelayQu
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
 import { StateStore } from "../../src/state.js";
+import { OperationService } from "../../src/operation-service.js";
 import { temporaryState } from "./helpers.js";
 
 const account = privateKeyToAccount(`0x${"1".repeat(64)}`);
@@ -208,6 +209,40 @@ test("wrong receipt, event, and canonical block fail closed without resending", 
     await assert.rejects(service.run(f.op.operationId), { code: "APN_STATE_CORRUPT" });
   }
   assert.equal(f.counts.sends, 1); assert.equal(f.counts.signs, 1);
+});
+
+test("a finality-proven approval revert makes the Relay operation terminal and frees the profile", async t => {
+  const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
+  let journal = await service.run(f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
+  const operations = new OperationService(f.state);
+  assert.equal((await operations.relayStatus(f.op)).terminal, false);
+  f.setObservation({ ...f.receipt(hash, []), receipt: { ...f.receipt(hash, []).receipt, status: "reverted" } });
+  journal = await service.run(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "failed");
+  const status = await operations.relayStatus(f.op);
+  assert.equal(status.state, "failed_confirmed_revert"); assert.equal(status.terminal, true);
+  assert.equal(status.proofClass, "source_effect_reverted");
+  await operations.assertProfileAvailable(f.op.profileHash);
+  assert.equal(f.counts.sends, 1);
+});
+
+test("a route abandoned after its confirmed approval retires only under fresh owner consent", async t => {
+  const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
+  let journal = await service.run(f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
+  f.setObservation(f.receipt(hash, [f.event(hash)]));
+  journal = await service.run(f.op.operationId); assert.equal(journal.effects[0].phase, "confirmed");
+  const retire = (confirm?: () => Promise<boolean>) => new RelayRetireService(f.state, { now: () => now }, undefined,
+    confirm === undefined ? undefined : { confirm: async summary => {
+      assert.equal(summary.operationId, f.op.operationId); assert.equal(summary.journalIntegrityHash, journal.integrityHash);
+      return confirm(); } }).retire({ profile: "default", operationId: f.op.operationId });
+  await assert.rejects(retire(), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(retire(async () => false), { code: "APN_OPERATION_BLOCKED" });
+  const operations = new OperationService(f.state);
+  await assert.rejects(operations.assertProfileAvailable(f.op.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  const retired = await retire(async () => true);
+  assert.equal(retired.state, "retired"); assert.equal(retired.terminal, true);
+  await operations.assertProfileAvailable(f.op.profileHash);
+  assert.equal(f.counts.sends, 1);
 });
 
 test("a risen base fee that still fits the frozen envelopes admits the approval; one that cannot be included refuses before signing", async t => {

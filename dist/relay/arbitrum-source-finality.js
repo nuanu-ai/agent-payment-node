@@ -24,10 +24,10 @@ export class RelayArbitrumSourceFinalityObserver {
         if (approval !== undefined)
             validateExpected(approval);
         const guard = this.guardFactory();
-        const approved = approval === undefined ? null : await this.effect(approval, guard);
+        const approved = approval === undefined ? null : await this.effect(approval, guard, 1n);
         if (approval !== undefined && approved === null)
             return null;
-        const deposited = await this.effect(deposit, guard);
+        const deposited = await this.effect(deposit, guard, 1n);
         if (deposited === null)
             return null;
         // Earlier safe observations cannot be combined into a joint proof: the
@@ -35,13 +35,26 @@ export class RelayArbitrumSourceFinalityObserver {
         const finalSafe = await this.confirmTogether(guard, [
             ...(approval === undefined || approved === null ? [] : [{ expected: approval, proof: approved.effect }]),
             { expected: deposit, proof: deposited.effect },
-        ]);
+        ], 1n);
         if (finalSafe === null)
             return null;
         return { sourceChainId: 42161, rpcOrigin: new URL(this.url).origin,
             deposit: deposited.effect, approval: approved?.effect ?? null, safeHead: finalSafe,
             proofClass: "canonical_safe_source_receipts", destinationDeliveryProven: false,
             causalLinkCryptographicallyProven: false, paidAcceptance: false };
+    }
+    /** The same canonical safe reads as `observe`, accepting only a reverted receipt. */
+    async observeRevert(effect) {
+        validateExpected(effect);
+        const guard = this.guardFactory();
+        const reverted = await this.effect(effect, guard, 0n);
+        if (reverted === null)
+            return null;
+        const finalSafe = await this.confirmTogether(guard, [{ expected: effect, proof: reverted.effect }], 0n);
+        if (finalSafe === null)
+            return null;
+        return { sourceChainId: 42161, rpcOrigin: new URL(this.url).origin, reverted: reverted.effect,
+            safeHead: finalSafe, proofClass: "canonical_safe_source_revert" };
     }
     async batch(guard, calls) {
         // The guard persists the provider-family start before transport setup. Keep
@@ -58,7 +71,7 @@ export class RelayArbitrumSourceFinalityObserver {
             invalid("batch_shape");
         return results;
     }
-    async confirmTogether(guard, effects) {
+    async confirmTogether(guard, effects, expectedStatus) {
         const calls = [{ method: "eth_chainId", params: [] }];
         for (const { expected, proof } of effects)
             calls.push({ method: "eth_getBlockByNumber", params: [`0x${BigInt(proof.blockNumber).toString(16)}`, false] }, { method: "eth_getTransactionByHash", params: [expected.transactionHash] }, { method: "eth_getTransactionReceipt", params: [expected.transactionHash] });
@@ -93,12 +106,12 @@ export class RelayArbitrumSourceFinalityObserver {
             const status = evmRpcQuantity(receipt.status);
             if (status !== 0n && status !== 1n)
                 invalid("receipt_status");
-            if (status !== 1n)
+            if (status !== expectedStatus)
                 return null;
         }
         return { number: safe.number, hash: safe.hash };
     }
-    async effect(expected, guard) {
+    async effect(expected, guard, expectedStatus) {
         const [chain, rawTx, rawReceipt, rawSafe] = await this.batch(guard, [
             { method: "eth_chainId", params: [] },
             { method: "eth_getTransactionByHash", params: [expected.transactionHash] },
@@ -151,7 +164,7 @@ export class RelayArbitrumSourceFinalityObserver {
         const status = evmRpcQuantity(receipt.status), statusAgain = evmRpcQuantity(receiptAgain.status);
         if ((status !== 0n && status !== 1n) || (statusAgain !== 0n && statusAgain !== 1n))
             invalid("receipt_status");
-        if (status !== 1n || statusAgain !== 1n)
+        if (status !== expectedStatus || statusAgain !== expectedStatus)
             return null;
         return { effect: { transactionHash: txHash, blockNumber: blockNumber.toString(), blockHash: block.hash } };
     }
