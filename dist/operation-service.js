@@ -14,7 +14,7 @@ import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { ApnError } from "./errors.js";
-import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
+import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys, sharedEvmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import { publicX402Operation, } from "./x402-state-integrity.js";
 import { publicProviderX402Operation, } from "./provider-x402-model.js";
@@ -143,6 +143,10 @@ export class OperationService {
     async assertEvmAccountAvailable(profileHash, chainId, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
     }
+    /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
+    async assertEvmAccountSharedAvailable(profileHash, chainId, account) {
+        await this.assertConflictDomainsAvailable(profileHash, () => [sharedEvmConflictDomain(chainId, account)]);
+    }
     /** Only the real current foreground owner may exclude its exact own native journal claim. */
     async assertMetaMaskNativeOwnedAccountAvailable(scope, context) {
         assertMetaMaskNativeOwnedScope(scope, context);
@@ -197,7 +201,7 @@ export class OperationService {
         await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
     }
     async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources, cleanup85Parent, nativeOwner) {
-        const wanted = conflictDomainKeys(domains);
+        const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
         if (this.state.root !== undefined)
             await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
         if (this.state.root !== undefined) {
@@ -230,7 +234,8 @@ export class OperationService {
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash)
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
-            const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
+            const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)) &&
+                !(domain.shared === true && coexisting.has(conflictDomainKey(domain))));
             // An unreadable network or account on either side blocks the whole profile.
             if (held !== null && wanted.size > 0 && shared === undefined)
                 continue;

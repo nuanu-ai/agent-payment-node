@@ -111,6 +111,19 @@ test("the bridge domain refuses an account that is not its chain's own account f
   assert.throws(() => bridgeConflictDomain(0, A), /Invalid EVM conflict domain/u);
 });
 
+test("local EIP-3009 x402 shares its account with other purchases and excludes every other claim in both orders", async () => {
+  const purchase = (operationId: string, chainId = "8453", assetTransferMethod = "eip3009") =>
+    open(operationId, { chainId, wallet: A.toLowerCase(), selectedOffer: { resolved: { assetTransferMethod } } });
+  const held = service({ x402: [purchase("x402-1")] });
+  await held.assertEvmAccountSharedAvailable(PROFILE, 8453, A);
+  await assert.rejects(held.assertEvmAccountAvailable(PROFILE, 8453, A), blockedOn("x402-1", "evm:8453", A.toLowerCase()));
+  await held.assertEvmAccountAvailable(PROFILE, 10, A);
+  await assert.rejects(service({ gasless: [gaslessOn(8453, A)] }).assertEvmAccountSharedAvailable(PROFILE, 8453, A),
+    blockedOn("gasless-1", "evm:8453", A.toLowerCase()));
+  await assert.rejects(service({ x402: [purchase("x402-7710", "8453", "erc7710")] }).assertEvmAccountSharedAvailable(PROFILE, 8453, A),
+    blockedOn("x402-7710", "evm:8453", A.toLowerCase()));
+});
+
 test("terminal operations never block", async () => {
   await service({ gasless: [{ ...gaslessOn(137, A), state: "failed_before_effect", terminal: true }] }).assertEvmAccountAvailable(PROFILE, 137, A);
 });
@@ -131,7 +144,8 @@ test("every stored money family maps to its network and sending account", () => 
   assert.deepEqual(domains({ kind: "relay_unsigned", record: open("u", { sourceChainId: 1, sourceAccount: A }) }), evm("1", A));
   const offer = (assetTransferMethod: string) => ({ selectedOffer: { resolved: { assetTransferMethod } } });
   assert.deepEqual(domains({ kind: "x402_fetch", strategy: "local", record: open("x", { chainId: "10", wallet: A.toLowerCase(), ...offer("erc7710") }) }), evm("10", A));
-  assert.deepEqual(domains({ kind: "x402_fetch", strategy: "local", record: open("x", { chainId: "10", wallet: A.toLowerCase(), ...offer("eip3009") }) }), []);
+  assert.deepEqual(domains({ kind: "x402_fetch", strategy: "local", record: open("x", { chainId: "10", wallet: A.toLowerCase(), ...offer("eip3009") }) }),
+    [{ ...evm("10", A)[0], shared: true }]);
   assert.deepEqual(domains({ kind: "x402_fetch", strategy: "provider_atomic", record: open("p", { provider: { payer: B } }) }), evm("8453", B));
   assert.deepEqual(domains({ kind: "rail_transfer", record: open("r", { account: { rail: "solana", address: SOLANA } }) }),
     [{ family: "solana", network: SOLANA_GENESIS, account: SOLANA }]);

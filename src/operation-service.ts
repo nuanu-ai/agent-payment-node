@@ -18,7 +18,7 @@ import { ApnError } from "./errors.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
-import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, storedOperationDomains, type MoneyConflictDomain } from "./operation-conflict-domain.js";
+import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys, sharedEvmConflictDomain, storedOperationDomains, type MoneyConflictDomain } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import {
   publicX402Operation,
@@ -167,6 +167,10 @@ export class OperationService {
   async assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
   }
+  /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
+  async assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
+    await this.assertConflictDomainsAvailable(profileHash, () => [sharedEvmConflictDomain(chainId, account)]);
+  }
   /** Only the real current foreground owner may exclude its exact own native journal claim. */
   async assertMetaMaskNativeOwnedAccountAvailable(scope:MetaMaskNativeOwnedScope,context:MetaMaskNativeOwnedContext):Promise<void> {
     assertMetaMaskNativeOwnedScope(scope,context);
@@ -209,7 +213,7 @@ export class OperationService {
   }
 
   private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>, cleanup85Parent?: { readonly operationId: string; readonly integrityHash: string }, nativeOwner?: { readonly scope:MetaMaskNativeOwnedScope; readonly context:MetaMaskNativeOwnedContext }): Promise<void> {
-    const wanted = conflictDomainKeys(domains);
+    const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
     if (this.state.root !== undefined) await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
     if(this.state.root!==undefined) {
       for(const wantedKey of wanted) {
@@ -234,7 +238,8 @@ export class OperationService {
       if (operation.kind === "circle_route" && operation.record.schemaVersion === "apn.circle-v2-evm-operation.v1" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
         held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash) held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
-      const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
+      const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)) &&
+        !(domain.shared === true && coexisting.has(conflictDomainKey(domain))));
       // An unreadable network or account on either side blocks the whole profile.
       if (held !== null && wanted.size > 0 && shared === undefined) continue;
       throw new ApnError("APN_OPERATION_BLOCKED", shared === undefined

@@ -132,7 +132,7 @@ test("signing material that never reached APN expires on the same chain proof", 
   assert.equal(terminal.unusedExpiryEvidence?.schemaVersion, "apn.x402.unused-expiry-evidence.v2");
 });
 
-test("open EIP-3009 purchases do not hold the account: a second purchase prepares on the same wallet", async (t) => {
+test("open EIP-3009 purchases share the account: a second purchase prepares on the same wallet", async (t) => {
   const f = await fixture(t);
   const first = await prepare(f, "x402-first");
   assert.equal((await f.core.execute({ command: "x402.fetch.approve", operationId: first })).ok, true);
@@ -140,7 +140,9 @@ test("open EIP-3009 purchases do not hold the account: a second purchase prepare
   const second = await prepare(f, "x402-second");
   assert.notEqual(second, first);
   const record = await stored(f, first);
-  assert.deepEqual(storedOperationDomains({ kind: "x402_fetch", strategy: "local", record } as StoredMoneyOperation), []);
+  // A shared claim: other purchases proceed, nonce and EIP-7702 spenders on this account still wait for it.
+  assert.deepEqual(storedOperationDomains({ kind: "x402_fetch", strategy: "local", record } as StoredMoneyOperation),
+    [{ family: "evm", network: "8453", account: record.wallet, shared: true }]);
   const delegated = { ...record, selectedOffer: { ...record.selectedOffer, resolved: { assetTransferMethod: "erc7710" } } };
   assert.deepEqual(storedOperationDomains({ kind: "x402_fetch", strategy: "local", record: delegated } as unknown as StoredMoneyOperation),
     [{ family: "evm", network: "8453", account: record.wallet }]);

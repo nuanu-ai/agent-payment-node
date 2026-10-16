@@ -95,8 +95,9 @@ export class X402Service extends X402PaidRequest {
       });
       if (existing !== null) return publicX402Operation(existing.record as X402OperationRecord);
       const payer = await resolveX402Payer(this.context, profileHash, network.chainId);
-      // EIP-3009 uses its own random nonce, not the account nonce, so it neither waits for nor blocks other operations.
-      if (payer.transferMethod !== "eip3009") await this.operations.assertEvmAccountAvailable(profileHash, network.chainId, payer.wallet);
+      // EIP-3009 uses its own random nonce: purchases share the account, but nonce and EIP-7702 spenders still exclude them.
+      if (payer.transferMethod === "eip3009") await this.operations.assertEvmAccountSharedAvailable(profileHash, network.chainId, payer.wallet);
+      else await this.operations.assertEvmAccountAvailable(profileHash, network.chainId, payer.wallet);
 
       const profilePolicy = requireProfilePolicy(
         await this.context.requirePolicy().load(payer.policy),
