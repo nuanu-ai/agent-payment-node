@@ -71,7 +71,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
     executionAdmission: async operation => ({ requestId,
       operationIntegrityHash: operation.integrityHash, quoteDigest: operation.quoteDigest }),
     funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n, tokenBalanceAtomic: 2500000n,
-      allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 7n }),
+      allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 7n }),
     sign: async operation => { signs++; const a = operation.quote!.approval;
       return account.signTransaction({ type: "eip1559", chainId: 1, to: a.to as Hex, data: a.data as Hex,
         value: 0n, nonce: 7, gas: BigInt(a.gas), maxFeePerGas: BigInt(a.maxFeePerGas),
@@ -120,9 +120,9 @@ test("wrong requestId and stale source funding or nonce block approval before se
     { ...f.ports, executionAdmission: async operation => ({ requestId: "wrong-request-0001",
       operationIntegrityHash: operation.integrityHash, quoteDigest: operation.quoteDigest }) },
     { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 0n,
-      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 7n }) },
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 7n }) },
     { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
-      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 8n }) },
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 8n }) },
   ];
   for (const ports of invalid) await assert.rejects(new RelayApprovalEffectService(f.state, ports).run(f.op.operationId));
   assert.equal(f.counts.sends, 0);
@@ -208,4 +208,20 @@ test("wrong receipt, event, and canonical block fail closed without resending", 
     await assert.rejects(service.run(f.op.operationId), { code: "APN_STATE_CORRUPT" });
   }
   assert.equal(f.counts.sends, 1); assert.equal(f.counts.signs, 1);
+});
+
+test("a risen base fee that still fits the frozen envelopes admits the approval; one that cannot be included refuses before signing", async t => {
+  const f = await setup(t);
+  const a = f.op.quote!.approval, d = f.op.quote!.deposit;
+  const fits = BigInt(a.maxFeePerGas) - BigInt(a.maxPriorityFeePerGas);
+  const depositFits = BigInt(d.maxFeePerGas) - BigInt(d.maxPriorityFeePerGas);
+  const limit = fits < depositFits ? fits : depositFits;
+  const risen = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
+    tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: limit, nextNonce: 7n }) });
+  const blocked = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
+    tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: limit + 1n, nextNonce: 7n }) });
+  await assert.rejects(blocked.run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(f.counts.signs, 0);
+  assert.equal((await risen.run(f.op.operationId)).effects[0].phase, "submitting");
+  assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 1);
 });

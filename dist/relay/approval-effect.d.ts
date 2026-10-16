@@ -66,7 +66,7 @@ export interface RelayApprovalPorts {
         nativeBalanceWei: bigint;
         tokenBalanceAtomic: bigint;
         allowanceAtomic: bigint;
-        currentMaxFeePerGasWei: bigint;
+        baseFeePerGasWei: bigint;
         nextNonce: bigint;
     }>>;
     sign(op: RelayUnsignedOperation): Promise<Hex>;
@@ -87,3 +87,8 @@ export declare class RelayApprovalEffectService {
 }
 export declare function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimedHash?: string, expectedNonce?: bigint): Promise<RelaySignedApproval>;
 export declare function verifyApprovalObservation(op: RelayUnsignedOperation, hash: Hex, value: RelayApprovalObservation): "pending" | "confirmed" | "failed";
+/** The shared frozen-envelope rule: the signed `gas × maxFeePerGas` within the consented ceiling bounds spend. */
+export declare function relayEnvelopeFeeAdmitted(baseFeePerGasWei: bigint, envelope: Readonly<{
+    maxFeePerGas: string;
+    maxPriorityFeePerGas: string;
+}>): boolean;

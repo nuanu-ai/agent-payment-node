@@ -9,6 +9,7 @@ import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-re
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { relayExecutionRoute } from "./execution-route.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 const TX = /^0x[0-9a-fA-F]+$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 const topic = keccak256(toBytes("Approval(address,address,uint256)"));
@@ -223,7 +224,9 @@ export class RelayApprovalEffectService {
         const funding = await this.ports.funding(op);
         if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.approvalNetworkFeeCeilingWei) + BigInt(op.depositNetworkFeeCeilingWei) ||
             funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < 0n ||
-            funding.currentMaxFeePerGasWei < 0n || funding.currentMaxFeePerGasWei > BigInt(op.quote.approval.maxFeePerGas) ||
+            !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote.approval) ||
+            // The deposit that must follow is admitted now too, so an inadmissible fee never buys a paid approval.
+            !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote.deposit) ||
             funding.nextNonce < 0n)
             blocked("source_funding_or_fee");
         const after = this.ports.now();
@@ -277,5 +280,10 @@ export function verifyApprovalObservation(op, hash, value) {
     if (matches.length !== 1)
         corrupt("exact Approval event");
     return "confirmed";
+}
+/** The shared frozen-envelope rule: the signed `gas × maxFeePerGas` within the consented ceiling bounds spend. */
+export function relayEnvelopeFeeAdmitted(baseFeePerGasWei, envelope) {
+    return evmFrozenFeeAdmitted(baseFeePerGasWei, { maxFeePerGasWei: BigInt(envelope.maxFeePerGas),
+        maxPriorityFeePerGasWei: BigInt(envelope.maxPriorityFeePerGas) });
 }
 //# sourceMappingURL=approval-effect.js.map

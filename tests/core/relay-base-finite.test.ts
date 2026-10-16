@@ -112,8 +112,8 @@ test("Base funding rechecks chain, balance plus full fee, nonce and pinned block
   function rpc(balance = 51000000000000n, drift = false) {
     let n = 0;
     return { batchCall: async () => {
-      n++; if (n === 1) return ["0x2105", { number: "0x1", hash }];
-      if (n === 2) return [{ number: "0x1", hash }, `0x${balance.toString(16)}`, "0x1", "0x100000", "0x2105"];
+      n++; if (n === 1) return ["0x2105", { number: "0x1", hash, baseFeePerGas: "0x1" }];
+      if (n === 2) return [{ number: "0x1", hash }, `0x${balance.toString(16)}`, "0x1", "0x2105"];
       if (n === 3) return [code, "0x7fc9", word, word];
       return [{ number: "0x1", hash: drift ? `0x${"c".repeat(64)}` : hash }];
     }, submitRawTransaction: async () => { throw new Error("no send in funding"); } };

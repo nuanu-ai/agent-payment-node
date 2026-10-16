@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { HttpsBaseRpc } from "../rpc.js";
@@ -41,9 +42,10 @@ export async function preflightRelayArbitrumApproval(operation, active, publicAc
     const baseFee = evmRpcQuantity(block.baseFeePerGas);
     const confirmedNonce = evmRpcQuantity(rows[2]);
     const pendingNonce = evmRpcQuantity(rows[3]);
-    const maxFee = BigInt(quote.approval.maxFeePerGas);
-    const priority = BigInt(quote.approval.maxPriorityFeePerGas);
-    const feeWithinQuote = baseFee + priority <= maxFee;
+    const admitted = (e) => evmFrozenFeeAdmitted(baseFee, { maxFeePerGasWei: BigInt(e.maxFeePerGas), maxPriorityFeePerGasWei: BigInt(e.maxPriorityFeePerGas) });
+    const feeWithinQuote = admitted(quote.approval);
+    // The deposit that must follow is checked before any paid approval as well.
+    const depositFeeWithinQuote = admitted(quote.deposit);
     const nonceUncontended = confirmedNonce === pendingNonce;
     const observedAt = ports.now();
     if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime()) ||
@@ -57,6 +59,7 @@ export async function preflightRelayArbitrumApproval(operation, active, publicAc
         ...funding.fundingReasons,
         ...(nonceUncontended ? [] : ["pending_nonce_conflict"]),
         ...(feeWithinQuote ? [] : ["approval_base_fee_exceeds_quote"]),
+        ...(depositFeeWithinQuote ? [] : ["deposit_base_fee_exceeds_quote"]),
     ]);
     return Object.freeze({ kind: "relay_arbitrum_read_only_approval_preflight",
         operationId: operation.operationId, operationIntegrityHash: operation.integrityHash,
