@@ -608,7 +608,7 @@ Monad and Linea remain destination-only and are refused before LI.FI step
 materialization when presented as a source. Route discovery from such a
 source returns every otherwise reviewed row as `preparable: false` with
 `source_execution_unreviewed`, and `bridge prepare` refuses that quote with the
-same reason.
+same reason, including an otherwise intact quote saved before this gate.
 
 ```sh
 apn bridge routes --profile existing-local \
