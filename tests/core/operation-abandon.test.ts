@@ -252,6 +252,19 @@ test("TTY renders exact unknown-risk identity, and wrong or non-TTY confirmation
   }).approve(intent), { code: "APN_NATIVE_REJECTED" });
 });
 
+test("TTY abandonment shows an approved ceiling only when the intent carries one", async () => {
+  for (const ceiling of [undefined, { budgetCeilingAtomic: "25000", budgetCeilingDecimal: "0.025" }]) {
+    const intent = { ...abandonIntent(), ...ceiling };
+    let rendered = "";
+    const terminal = { fd: 7, write: async (contents: string) => { rendered += contents; },
+      read: async function* () { yield Buffer.from(`${operationAbandonPhrase(intent.fingerprint)}\n`, "ascii"); },
+      close: async () => undefined };
+    await new TtyOperationAbandonApproval({ openTerminal: async () => terminal, isTerminal: () => true }).approve(intent);
+    assert.equal(rendered.includes("Approved ceiling: 0.025"), ceiling !== undefined);
+    if (ceiling !== undefined) assert.match(rendered, /Approved ceiling: 0\.025 [A-Z]+ \(25000 atomic\)/u);
+  }
+});
+
 test("MCP abandon exposes only a canonical foreground CLI handoff", async () => {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createMcpServer();

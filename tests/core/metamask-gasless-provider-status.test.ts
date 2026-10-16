@@ -30,7 +30,8 @@ test("public SDK response metadata is discarded while MFA and transaction identi
   const operation = intent(home.binding, 8453, expectedQuote(8453), built.result as MetaMaskGaslessUnsignedResult);
   for (const metadata of [false, true]) for (const mode of ["submit", "observe"] as const) {
     for (const [status, expected] of [["AWAITING_MFA", "awaiting_approval"], ["EVALUATING", "pending"],
-      ["CONFIRMED", "confirmed"]] as const) await t.test(`${mode}/${status}/metadata=${metadata}`, async () => {
+      ["CONFIRMED", "confirmed"], ["DENIED", "denied"], ["EXPIRED", "expired"], ["FAILED", "failed"],
+      ["BROADCAST_FAILED", "failed"]] as const) await t.test(`${mode}/${status}/metadata=${metadata}`, async () => {
       const exchange = new StatusExchange({ status }, metadata);
       const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode, intent: operation },
         { homeDirectory: home.home, now: () => NOW, exchange });

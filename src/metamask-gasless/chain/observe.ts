@@ -7,17 +7,14 @@ import type { MetaMaskGaslessCursor, MetaMaskGaslessDeployment, MetaMaskGaslessI
   MetaMaskGaslessObservation, MetaMaskGaslessProviderObservation, MetaMaskGaslessRpcObservation,
   MetaMaskGaslessSettlement } from "../model.js";
 import { mmFail, type MetaMaskGaslessFailureReason, type MetaMaskGaslessReason } from "../reasons.js";
-import { mmHex, mmSame, mmUint } from "../validation.js";
-import { addressWord, MM_INCREASED_COUNT_TOPIC, parseReceiptLogs, quantity, receiptHash,
-  recheckBlock, rpcAddress, rpcBlock, rpcHex, rpcQuantity, rpcRecord, sameBlock, type MmRpcCall } from "./abi.js";
+import { mmHex, mmUint } from "../validation.js";
+import { parseReceiptLogs, quantity, receiptHash, recheckBlock, rpcAddress, rpcBlock, rpcHex, rpcQuantity, rpcRecord,
+  sameBlock, type MmRpcCall } from "./abi.js";
 import { verifyRedemption } from "./delegation.js";
-import { verifyMetaMaskReceiptAccounting, verifyScanLog } from "./receipt.js";
+import { verifyMetaMaskReceiptAccounting } from "./receipt.js";
+import { MM_SCAN_STOP_REASONS, scanMetaMaskRedemption } from "./scan.js";
 import { readMetaMaskChainState } from "./snapshot.js";
 import { verifyMetaMaskOuterTransaction } from "./transaction.js";
-
-const SCAN_WINDOW = 2000n;
-const MAX_SCAN_LOGS = 512;
-const MAX_SCAN_CANDIDATES = 8;
 
 export interface MetaMaskObservationContext {
   readonly deployment: MetaMaskGaslessDeployment;
@@ -30,7 +27,8 @@ type Inspection =
   | { readonly kind: "reverted"; readonly transactionBlock: MetaMaskGaslessSettlement["transactionBlock"];
       readonly finalityBlock: MetaMaskGaslessSettlement["finalityBlock"]; readonly evidenceHash: string }
   | { readonly kind: "pending"; readonly evidenceHash: string | null; readonly usableCandidate: boolean }
-  | { readonly kind: "invalid" | "unavailable" | "reorg"; readonly evidenceHash: string | null };
+  | { readonly kind: "invalid" | "reorg"; readonly evidenceHash: string | null }
+  | { readonly kind: "unavailable"; readonly evidenceHash: string | null; readonly reason: MetaMaskGaslessFailureReason };
 
 /** Observe provider hints and the canonical enforcer log stream without any write/sign/send method. */
 export async function observeMetaMaskGasless(context: MetaMaskObservationContext, intent: MetaMaskGaslessIntent,
@@ -48,9 +46,11 @@ export async function observeMetaMaskGasless(context: MetaMaskObservationContext
   }
   if (providerResult?.kind === "reverted") return result(scan.cursor, providerHash, providerResult, context.clock);
   const adverse = chooseAdverse(scan.inspection, providerResult);
-  // An invalid provider-hinted receipt also forbids advancing past the page.
-  // Keep the original cursor until all relevant evidence can be validated.
-  if (adverse !== null) return result(cursor, null, adverse, context.clock);
+  // An invalid provider-hinted receipt also forbids advancing past the page, and so does any invalid or reorged
+  // scan evidence: keep the original cursor until all relevant evidence can be validated. Blocks this resume fully
+  // proved before the RPC stopped answering stay proved.
+  if (adverse !== null) return result(adverse === scan.inspection && adverse.kind === "unavailable" ? scan.cursor : cursor,
+    null, adverse, context.clock);
   const usableCandidate = scan.inspection?.kind === "pending" && scan.inspection.usableCandidate ? scan.candidate :
     providerResult?.kind === "pending" && providerResult.usableCandidate ? providerHash : null;
   return makeObservation(scan.cursor, "pending", "mm_gasless_pending", usableCandidate, null, null,
@@ -146,45 +146,19 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
 async function scanSafely(context: MetaMaskObservationContext, intent: MetaMaskGaslessIntent,
   cursor: MetaMaskGaslessCursor): Promise<{ readonly cursor: MetaMaskGaslessCursor; readonly candidate: Hex | null;
     readonly inspection: Inspection | null; readonly evidenceHash: string | null }> {
-  try { return await scan(context, intent, cursor); }
-  catch (error) { return { cursor, candidate: null, inspection: classified(error), evidenceHash: null }; }
-}
-
-async function scan(context: MetaMaskObservationContext, intent: MetaMaskGaslessIntent,
-  cursor: MetaMaskGaslessCursor): Promise<{ readonly cursor: MetaMaskGaslessCursor; readonly candidate: Hex | null;
-    readonly inspection: Inspection | null; readonly evidenceHash: string | null }> {
-  await recheckBlock(context.call, cursor.startBlock);
-  if (cursor.previousEndBlock !== null) await recheckBlock(context.call, cursor.previousEndBlock);
-  const finality = (await rpcBlock(context.call, context.deployment.row.finalityTag)).block;
-  const start = BigInt(cursor.nextBlockAtomic), finalityNumber = BigInt(finality.numberAtomic);
-  if (finalityNumber < start) {
-    await recheckBlock(context.call, finality);
-    return { cursor, candidate: null, inspection: null, evidenceHash: hashObject({ cursor, finality, empty: true }) };
-  }
-  const end = minimum(finalityNumber, start + SCAN_WINDOW - 1n);
-  const [startBlock, endBlock] = await Promise.all([
-    rpcBlock(context.call, quantity(start)).then(value => value.block),
-    rpcBlock(context.call, quantity(end)).then(value => value.block),
-  ]);
-  const row = context.deployment.row;
-  const filter = { address: row.protocol.limitedCalls.address, fromBlock: quantity(start), toBlock: quantity(end),
-    topics: [MM_INCREASED_COUNT_TOPIC, addressWord(row.protocol.manager.address), null, intent.delegationHash] };
-  const rawLogs = await context.call("eth_getLogs", [filter]);
-  if (!Array.isArray(rawLogs) || rawLogs.length > MAX_SCAN_LOGS) mmFail("mm_gasless_evidence_invalid");
-  const candidates = new Set<Hex>();
-  for (const raw of rawLogs) candidates.add(verifyScanLog(rpcRecord(raw), intent, start, end));
-  if (candidates.size > MAX_SCAN_CANDIDATES) mmFail("mm_gasless_evidence_invalid");
-  const inspections: Array<{ readonly hash: Hex; readonly result: Inspection }> = [];
-  for (const hash of candidates) inspections.push({ hash, result: await inspectSafely(context, intent, hash) });
-  await recheckBlock(context.call, startBlock); await recheckBlock(context.call, endBlock);
-  await recheckBlock(context.call, finality);
-  if (candidates.size > 1) mmFail("mm_gasless_evidence_invalid");
-  const inspected = inspections[0];
-  if (inspected !== undefined) return { cursor, candidate: inspected.hash, inspection: inspected.result,
-    evidenceHash: inspected.result.kind === "success" ? hashObject(inspected.result.settlement) : inspected.result.evidenceHash };
-  const nextCursor = { startBlock: cursor.startBlock, nextBlockAtomic: (end + 1n).toString(), previousEndBlock: endBlock };
-  return { cursor: nextCursor, candidate: null, inspection: null,
-    evidenceHash: hashObject({ filter, startBlock, endBlock, finality, complete: true }) };
+  try {
+    const scanned = await scanMetaMaskRedemption({ row: context.deployment.row, call: context.call }, intent, cursor);
+    if (scanned.kind === "progress") return { cursor: scanned.cursor, candidate: null, inspection: null, evidenceHash: scanned.evidenceHash };
+    if (scanned.kind === "stopped") return { cursor: scanned.cursor, candidate: null,
+      inspection: { kind: "unavailable", evidenceHash: null, reason: scanned.reason }, evidenceHash: null };
+    const inspections: Array<{ readonly hash: Hex; readonly result: Inspection }> = [];
+    for (const hash of scanned.candidates) inspections.push({ hash, result: await inspectSafely(context, intent, hash) });
+    for (const block of scanned.recheck) await recheckBlock(context.call, block);
+    if (inspections.length !== 1) mmFail("mm_gasless_evidence_invalid");
+    const inspected = inspections[0]!;
+    return { cursor: scanned.cursor, candidate: inspected.hash, inspection: inspected.result,
+      evidenceHash: inspected.result.kind === "success" ? hashObject(inspected.result.settlement) : inspected.result.evidenceHash };
+  } catch (error) { return { cursor, candidate: null, inspection: classified(error), evidenceHash: null }; }
 }
 
 function validateCursor(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor): MetaMaskGaslessCursor {
@@ -212,7 +186,7 @@ function classified(error: unknown): Inspection {
   if (error instanceof ApnError && typeof error.details?.reason === "string") {
     const reason = error.details.reason as MetaMaskGaslessFailureReason;
     if (reason === "mm_gasless_scan_reorg") return { kind: "reorg", evidenceHash: null };
-    if (reason === "mm_gasless_rpc_unavailable") return { kind: "unavailable", evidenceHash: null };
+    if (MM_SCAN_STOP_REASONS.includes(reason)) return { kind: "unavailable", evidenceHash: null, reason };
   }
   return { kind: "invalid", evidenceHash: null };
 }
@@ -238,7 +212,8 @@ function result(cursor: MetaMaskGaslessCursor, candidate: Hex | null,
     invalid: ["invalid", "mm_gasless_evidence_invalid"], unavailable: ["unavailable", "mm_gasless_rpc_unavailable"],
     reorg: ["reorg", "mm_gasless_scan_reorg"], pending: ["pending", "mm_gasless_pending"],
   };
-  const [phase, reason] = map[inspected.kind];
+  const [phase, mapped] = map[inspected.kind];
+  const reason = inspected.kind === "unavailable" ? inspected.reason : mapped;
   return makeObservation(cursor, phase, reason, candidate, null, null, inspected.evidenceHash, null, clock);
 }
 
@@ -251,4 +226,3 @@ function makeObservation(cursor: MetaMaskGaslessCursor, phase: MetaMaskGaslessOb
     transactionBlock, finalityBlock, evidenceHash }, settlement };
 }
 
-function minimum(left: bigint, right: bigint): bigint { return left < right ? left : right; }

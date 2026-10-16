@@ -4,10 +4,12 @@ import test from "node:test";
 import { verifyMetaMaskOuterTransaction } from "../../src/metamask-gasless/chain/transaction.js";
 import { observeMetaMaskGasless } from "../../src/metamask-gasless/chain/observe.js";
 import { mmRegistry } from "../../src/metamask-gasless/registry.js";
-import { canonicalJson } from "../../src/canonical.js";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessCursor, MetaMaskGaslessProviderObservation } from "../../src/metamask-gasless/model.js";
 import type { Hex } from "../../src/model.js";
 const fixture = JSON.parse(readFileSync("tests/core/metamask-gasless-chain-fixtures/arbitrum-rpc-signature-quantity-20261009.json", "utf8"));
+/** Actual reads of the redemption counter and its enforcer code at the captured safe block, taken later. */
+const safeCounter = JSON.parse(readFileSync("tests/core/metamask-gasless-chain-fixtures/arbitrum-safe-counter-20261016.json", "utf8"));
 const intent = fixture.intent as MetaMaskGaslessIntent;
 const tx = fixture.replies.find((r: any) => r.method === "eth_getTransactionByHash").result;
 const hash = tx.hash as Hex;
@@ -20,10 +22,15 @@ test("untouched actual Arbitrum quantity signature traverses the complete produc
   const result = await observeMetaMaskGasless({ deployment: mmRegistry(42161), clock: { now: () => new Date(fixture.at) },
     call: async (method, params) => {
       calls.push(method);
-      const reply = fixture.replies.find((r: any) => r.method === method && canonicalJson(r.params) === canonicalJson(params));
+      const reply = [...fixture.replies, ...safeCounter.replies].find((r: any) => r.method === method && canonicalJson(r.params) === canonicalJson(params));
       assert.ok(reply, `uncached or effect-capable method ${method}`); return structuredClone(reply.result);
     } }, intent, fixture.cursor as MetaMaskGaslessCursor, fixture.provider as MetaMaskGaslessProviderObservation);
-  assert.deepEqual(result, fixture.result);
+  // The zero counter at the safe block replaces the captured empty log window; only the evidence digest names that.
+  const safe = fixture.result.cursor.previousEndBlock;
+  assert.deepEqual(result, { ...fixture.result, observation: { ...fixture.result.observation, evidenceHash: hashObject({
+    purpose: "apn.metamask-gasless.counter-scan.v1", cursor: fixture.cursor, finality: safe,
+    delegationHash: intent.delegationHash, counterAtomic: "0" }) } });
+  assert.equal(calls.includes("eth_getLogs"), false);
   assert.equal(result.observation.phase, "pending");
   assert.equal(result.observation.candidateTxHash, hash);
   assert.equal(result.settlement, null); // Captured safe finality is before the included transaction.
