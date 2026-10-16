@@ -62,13 +62,15 @@ export function validateFile(stats: Stats): void {
 interface HeldLock {
   readonly handle: FileHandle;
 }
-interface DirectoryIdentity {
-  readonly path: string;
-  readonly stats: Stats;
-}
 export function isCode(error: unknown, code: string): boolean {
   return error !== null && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === code;
 }
+
+/**
+ * Roots whose ancestors were proven free of symbolic links and aliases in this process, with the identity they had.
+ * Each read still re-checks the root's own identity, owner and mode; only the walk above it and `realpath` are skipped.
+ */
+const provenRoots = new Map<string, { readonly dev: number; readonly ino: number }>();
 
 function compareLockKeys(left: string, right: string): number {
   const rank = (key: string): number => key.startsWith("profile:") ? 0 : key.startsWith("operation:") ? 1 : 2;
@@ -173,12 +175,39 @@ export class SecureStateStore {
   /** Raw listing that still shows atomic-write stages; only for code that inspects its own in-flight stage. */
   protected async readDirectoryWithStagedWrites(relativePath: string): Promise<readonly Dirent[]> {
     const target = this.resolveRelative(relativePath);
-    await this.assertNoSymlinkAncestors(target);
-    const before = await this.directorySnapshot(target);
-    if (before === null) return [];
-    const entries = await readdir(target, { withFileTypes: true });
-    this.assertSameDirectorySnapshot(before, await this.directorySnapshot(target));
-    return entries;
+    if (!await this.readableDirectories(target)) return [];
+    try { return await readdir(target, { withFileTypes: true }); }
+    catch (error) { if (isCode(error, "ENOENT")) return []; throw error; }
+  }
+
+  /**
+   * The read-side boundary: the root (its ancestors proven once per process) and every directory below it down to
+   * `target` is a real, owner-only directory. False when one is absent. Writes keep their full atomic-write checks.
+   */
+  private async readableDirectories(target: string): Promise<boolean> {
+    let root: Stats;
+    try { root = await lstat(this.root); }
+    catch (error) {
+      if (!isCode(error, "ENOENT")) throw error;
+      // An absent root holds no state, but a root configured through an alias is still refused.
+      await this.assertNoSymlinkAncestors(this.root);
+      return false;
+    }
+    validateDirectory(root, true);
+    const proven = provenRoots.get(this.root);
+    if (proven === undefined || proven.dev !== root.dev || proven.ino !== root.ino) {
+      await this.assertNoSymlinkAncestors(this.root);
+      if (await realpath(this.root) !== this.root) stateSecurity("State root resolves through an alias or symbolic link.");
+      provenRoots.set(this.root, { dev: root.dev, ino: root.ino });
+    }
+    let current = this.root;
+    const below = relative(this.root, target);
+    for (const component of below === "" ? [] : below.split(sep)) {
+      current = join(current, component);
+      try { validateDirectory(await lstat(current), false); }
+      catch (error) { if (isCode(error, "ENOENT")) return false; throw error; }
+    }
+    return true;
   }
 
   protected resolveRelative(relativePath: string): string {
@@ -204,56 +233,18 @@ export class SecureStateStore {
     }
   }
 
-  private async directorySnapshot(target: string): Promise<readonly DirectoryIdentity[] | null> {
-    const paths = [this.root];
-    let current = this.root;
-    const targetRelative = relative(this.root, target);
-    for (const component of targetRelative === "" ? [] : targetRelative.split(sep)) {
-      current = join(current, component);
-      paths.push(current);
-    }
-    const result: DirectoryIdentity[] = [];
-    for (const path of paths) {
-      let info: Stats;
-      try { info = await lstat(path); }
-      catch (error) {
-        if (isCode(error, "ENOENT")) return null;
-        throw error;
-      }
-      validateDirectory(info, path === this.root);
-      if (path === this.root && await realpath(path) !== path) {
-        stateSecurity("State root resolves through an alias or symbolic link.");
-      }
-      result.push({ path, stats: info });
-    }
-    return result;
-  }
-
-  private assertSameDirectorySnapshot(
-    before: readonly DirectoryIdentity[],
-    after: readonly DirectoryIdentity[] | null,
-  ): void {
-    if (after === null || before.length !== after.length || before.some((item, index) => {
-      const current = after[index];
-      return current === undefined || item.path !== current.path ||
-        item.stats.dev !== current.stats.dev || item.stats.ino !== current.stats.ino;
-    })) stateSecurity("State directory changed during a protected read.");
-  }
-
+  /**
+   * One protected read: the directory boundary above, then `O_NOFOLLOW`, `fstat` owner/mode/single-link and the size cap
+   * on the opened file itself, then strict UTF-8, JSON and canonical-bytes checks of the content.
+   */
   protected async readJson(relativePath: string): Promise<unknown | null> {
     const target = this.resolveRelative(relativePath);
-    const parent = dirname(target);
-    await this.assertNoSymlinkAncestors(target);
-    const directoriesBefore = await this.directorySnapshot(parent);
-    if (directoriesBefore === null) return null;
+    if (!await this.readableDirectories(dirname(target))) return null;
     let handle;
     try {
       handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
     } catch (error) {
-      if (isCode(error, "ENOENT")) {
-        this.assertSameDirectorySnapshot(directoriesBefore, await this.directorySnapshot(parent));
-        return null;
-      }
+      if (isCode(error, "ENOENT")) return null;
       if (isCode(error, "ELOOP")) stateSecurity("State file is a symbolic link.");
       throw error;
     }
@@ -261,10 +252,8 @@ export class SecureStateStore {
       let info = await handle.stat();
       if (await releasePublishedTemporary(target, info)) info = await handle.stat();
       validateFile(info);
-      this.assertSameDirectorySnapshot(directoriesBefore, await this.directorySnapshot(parent));
       if (info.size > MAX_STATE_BYTES) stateCorrupt("State file exceeds the size limit.");
       const bytes = await handle.readFile();
-      this.assertSameDirectorySnapshot(directoriesBefore, await this.directorySnapshot(parent));
       let text: string;
       try {
         text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -277,6 +266,7 @@ export class SecureStateStore {
       } catch {
         stateCorrupt("State file is not valid JSON.");
       }
+      // APN writes canonical bytes; anything else (pretty-printing, duplicate keys) is not a record APN wrote. CPU only.
       const canonical = canonicalJson(value);
       if (text !== canonical && text !== `${canonical}\n`) stateCorrupt("State file is not canonical JSON.");
       return value;
