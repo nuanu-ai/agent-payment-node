@@ -167,20 +167,30 @@ export function assertBridgeRemaining(op, now) {
 }
 const PRE_SIGN_RPC_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode",
     "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "debug_traceTransaction"]);
+/** A transport failure or an HTTP 408/5xx answer after its bounded retry: the endpoint was unavailable, not refusing. */
+export function bridgeTransientRpcFailure(error) {
+    if (!(error instanceof ApnError))
+        return false;
+    if (error.code === "APN_RPC_AMBIGUOUS")
+        return true;
+    const status = Number(error.details?.httpStatus);
+    return error.code === "APN_RPC_PROTOCOL" && (status === 408 || status >= 500 && status <= 599);
+}
 async function preSignRpc(input, work) {
     try {
         return await work();
     }
     catch (error) {
-        if (!(error instanceof ApnError) || error.code !== "APN_RPC_AMBIGUOUS")
+        if (!bridgeTransientRpcFailure(error))
             throw error;
         const candidate = error.details?.rpcMethod;
         const method = typeof candidate === "string" && PRE_SIGN_RPC_METHODS.has(candidate)
             ? candidate : null;
         const context = { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard", ...input, method };
-        throw new ApnError("APN_RPC_AMBIGUOUS", "Bridge pre-sign RPC transport is unavailable.", {
+        throw new ApnError(error.code, "Bridge pre-sign RPC endpoint is unavailable.", {
             rpcStage: context.stage, rpcChainRole: context.chainRole, rpcChainId: context.chainId.toString(),
             rpcCategory: context.category, ...(method === null ? {} : { rpcMethod: method }), effectRole: context.effectRole,
+            ...(error.details?.httpStatus === undefined ? {} : { httpStatus: error.details.httpStatus }),
         });
     }
 }
