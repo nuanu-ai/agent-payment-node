@@ -44,7 +44,7 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
   const operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root), approvals = new GuardedSwapApprovalRepository(root);
   const quote = createSwapQuote(structuredClone(quoteInput)), material = { quote, approvalCapAtomic: "0",
     gasOrEnergy: { gasLimit: "100000", maxFeePerGas: "2", maxPriorityFeePerGas: "1", executionHead: "101" }, execution: { unsigned: true } };
-  let runtime!: GuardedSwapRuntime<any>, sends = 0, observes = 0, admissionCalls = 0, clockMs = NOW.getTime();
+  let runtime!: GuardedSwapRuntime<any>, sends = 0, observes = 0, admissionCalls = 0, materialLoads = 0, policyCalls = 0, clockMs = NOW.getTime();
   const clock = { now: () => new Date(clockMs) };
   const execution: GuardedSwapExecutionDriver = {
     async execute(input) { sends++; let op = await runtime.service.markSubmitting(input.operation, input.now);
@@ -54,13 +54,14 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
   };
   runtime = new GuardedSwapRuntime({ chain: "eip155:1", builder: { async quote() {
     return { quoteHash: quote.quoteHash, quote, signed: false, broadcast: false };
-  }, async load(hash) { return hash === quote.quoteHash ? material : null; } },
-    policy: async (profile) => options.admitted === false || profile !== "runtime-swap" ? null : policy, clock,
+  }, async load(hash) { materialLoads++; return hash === quote.quoteHash ? material : null; } },
+    policy: async (profile) => { policyCalls++; return options.admitted === false || profile !== "runtime-swap" ? null : policy; }, clock,
     protocolRegistry: protocols, usage, operations, approvals,
     ownerAdmission: { async assert() { admissionCalls++; } },
     foregroundApproval: { async approve(intent) { clockMs += options.typingMs ?? 0; return sealGuardedSwapApproval(intent, clock.now(), H("f")); } }, execution,
     rpc: {}, effectStore: {}, signer: {}, sender: {}, observer: {}, caps: { gasLimit: "100000", maxFeePerGas: "2" } });
   return { runtime, quote, material, policy, approvals, operations, counters: () => ({ sends, observes, admissionCalls }),
+    loads: () => ({ sends, admissionCalls, materialLoads, policyCalls }),
     setClock: (value: Date) => { clockMs = value.getTime(); } };
 }
 
@@ -204,7 +205,8 @@ for (const field of ["recipient", "inputAmountAtomic", "account", "gasOrEnergy"]
     assert.equal(approved.quote.inputAmountAtomic, "100"); assert.equal(f.counters().sends, 0);
   });
 }
-for (const change of ["policy", "material", "caps", "owner", "stored"] as const) {
+// The material is the immutable snapshot the consent screen was built from; it is not reloaded after the prompt (SWAP-12).
+for (const change of ["policy", "caps", "owner", "stored"] as const) {
   test(`post-prompt ${change} drift refuses without usage, approval or effect writes`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
     const op = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: `drift-${change}-0001` }, NOW);
@@ -213,7 +215,6 @@ for (const change of ["policy", "material", "caps", "owner", "stored"] as const)
     deps.foregroundApproval = { async approve(intent: any) {
       await Promise.resolve();
       if (change === "policy") deps.policy = async () => null;
-      if (change === "material") (f.material.quote as any).destinationAsset.identifier = RECIPIENT;
       if (change === "caps") deps.caps.gasLimit = "999999";
       if (change === "owner") deps.ownerAdmission = { async assert() { throw new Error("owner revoked"); } };
       if (change === "stored") {
@@ -231,6 +232,24 @@ for (const change of ["policy", "material", "caps", "owner", "stored"] as const)
     if (change !== "stored") assert.equal((await f.operations.loadAny(op.operationId))?.state, "awaiting_approval");
   });
 }
+
+test("approve-and-execute loads the material once and re-checks owner and policy once after the prompt (SWAP-12)", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+  const op = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "single-recheck-0001" }, NOW);
+  const before = f.loads(), result = await f.runtime.approveAndExecute(op.operationId, NOW), after = f.loads();
+  assert.ok(result.submissionMarker); assert.equal(result.state, "unknown_finality");
+  assert.deepEqual({ materialLoads: after.materialLoads - before.materialLoads, admissionCalls: after.admissionCalls - before.admissionCalls,
+    policyCalls: after.policyCalls - before.policyCalls, sends: after.sends - before.sends }, { materialLoads: 1, admissionCalls: 2, policyCalls: 2, sends: 1 });
+});
+test("a separate execute command re-checks owner, policy and consent once and loads the material once (SWAP-12)", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
+  const op = await f.runtime.prepare({ profile: "runtime-swap", quoteHash: f.quote.quoteHash, idempotencyKey: "single-recheck-0002" }, NOW);
+  await f.runtime.approve(op.operationId, NOW);
+  const mid = f.loads(), result = await f.runtime.execute(op.operationId, NOW), end = f.loads();
+  assert.ok(result.submissionMarker);
+  assert.deepEqual({ materialLoads: end.materialLoads - mid.materialLoads, admissionCalls: end.admissionCalls - mid.admissionCalls,
+    policyCalls: end.policyCalls - mid.policyCalls, sends: end.sends - mid.sends }, { materialLoads: 1, admissionCalls: 1, policyCalls: 1, sends: 1 });
+});
 
 test("revoking active policy after reservation prevents execution", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root);
