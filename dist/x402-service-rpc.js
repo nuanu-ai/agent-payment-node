@@ -8,13 +8,6 @@ export function selectX402Rpc(rpc, chainId = 8453) {
         throw new ApnError("APN_RPC_CONFIG", "RPC adapter lacks explicit x402 network support.");
     return rpc.forX402Network(chainId);
 }
-export function boundedX402PrepareRpc(rpc, timeoutMs) {
-    const bounded = rpc.withTotalTimeout?.(timeoutMs);
-    if (bounded === undefined || typeof bounded.getX402PrepareEvidence !== "function") {
-        throw new ApnError("APN_RPC_CONFIG", "Bounded first-exposure checks require network-aware prepare reads.");
-    }
-    return bounded;
-}
 export async function assertX402RpcChain(rpc, chainId = 8453) {
     const chain = rpc.assertX402Chain === undefined && chainId === 8453 ? await rpc.assertBaseChain() :
         await rpc.assertX402Chain?.(chainId);

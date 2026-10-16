@@ -2,7 +2,6 @@ import type { EvmChainId } from "./evm-asset.js";
 import type { RpcPort, X402RpcPort } from "./ports.js";
 import type { SettlementResponseObservation, X402OperationRecord, X402ProofClass, X402Reason, X402TerminalState, X402SettlementWaitProjection } from "./x402-state-integrity.js";
 export declare function selectX402Rpc(rpc: RpcPort, chainId?: EvmChainId): RpcPort;
-export declare function boundedX402PrepareRpc(rpc: RpcPort, timeoutMs: number): Pick<RpcPort, "assertBaseChain" | "getX402PrepareEvidence"> & Partial<X402RpcPort>;
 export declare function assertX402RpcChain(rpc: Pick<RpcPort, "assertBaseChain"> & Partial<X402RpcPort>, chainId?: EvmChainId): Promise<{
     readonly chainId: EvmChainId;
     readonly rpcOrigin: string;

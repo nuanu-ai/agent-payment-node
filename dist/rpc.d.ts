@@ -19,6 +19,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     get observationMetrics(): Readonly<import("./rpc-observation-metrics.js").RpcObservationCounters>;
     private readonly x402ChainId;
     private pinnedAddresses;
+    /** One eth_chainId per command invocation and endpoint, shared by every bounded or network-selected copy. */
+    private chainIdCell;
     private readonly totalDeadlineMs;
     private readonly abortSignal;
     private directGuard;
@@ -46,6 +48,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly chainId: 8453;
         readonly rpcOrigin: string;
     }>;
+    private endpointChainId;
     getBalances(address: Address): Promise<BalanceSnapshot>;
     getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence>;
     getX402Head(tag: "safe" | "finalized"): Promise<X402RpcHead>;
@@ -60,6 +63,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     }): Promise<X402AuthorizationUsedLogs>;
     getX402TransferLogs(input: {
         readonly from: Address;
+        readonly to?: Address;
         readonly fromBlock: string;
         readonly toBlock: string;
     }): Promise<X402TransferLogs>;

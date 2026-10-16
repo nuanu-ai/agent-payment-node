@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
-import type { ClockPort, X402RpcPort } from "./ports.js";
+import type { ClockPort, X402RpcBlock, X402RpcHead, X402RpcPort } from "./ports.js";
 import { matchingTransfer, sameRpcOrigin, validX402Head } from "./x402-rpc-scan.js";
 import {
   appendX402Transition,
@@ -10,6 +10,8 @@ import {
   type Erc7710UnusedExpiryEvidence,
   type X402OperationRecord,
 } from "./x402-state-integrity.js";
+
+const MAX_EXPIRY_BOUND_READS = 4;
 
 export interface Erc7710ReconciliationStore {
   persist(operation: X402OperationRecord): Promise<void>;
@@ -33,13 +35,9 @@ export class X402Erc7710RpcReconciler {
     }
     if (operation.transactionHint === undefined || operation.settlementResponseObservation === undefined ||
       operation.signatureHash === undefined || operation.paymentContextHash === undefined) return operation;
+    // The safe head is read once; the transaction block read below is the canonical-membership check of the receipt.
     const safe = await this.rpc.getX402Head("safe");
     if (!validX402Head(safe) || !sameRpcOrigin(safe.rpcOrigin, chain.rpcOrigin)) return operation;
-    let safeBlock;
-    try { safeBlock = await this.rpc.getX402Block(safe.number); }
-    catch { return operation; }
-    if (safeBlock.number !== safe.number || safeBlock.hash !== safe.hash || safeBlock.timestamp !== safe.timestamp ||
-      !sameRpcOrigin(safeBlock.rpcOrigin, chain.rpcOrigin)) return operation;
     let receipt;
     try { receipt = await this.rpc.getX402Receipt(operation.transactionHint.transactionHash); }
     catch { return operation; }
@@ -132,48 +130,17 @@ export class X402Erc7710RpcReconciler {
     if (!validX402Head(finalized) || !sameRpcOrigin(finalized.rpcOrigin, rpcOrigin) ||
       BigInt(finalized.timestamp) < BigInt(binding.effectiveExpiryUnix) ||
       BigInt(finalized.number) < BigInt(operation.preparedBlock.number)) return operation;
-    let canonicalFinalized;
     let startBlock;
-    try {
-      canonicalFinalized = await this.rpc.getX402Block(finalized.number);
-      startBlock = await this.rpc.getX402Block(operation.preparedBlock.number);
-    } catch { return operation; }
-    if (!sameBlock(canonicalFinalized, finalized, rpcOrigin) ||
-      startBlock.number !== operation.preparedBlock.number || startBlock.hash !== operation.preparedBlock.hash ||
+    try { startBlock = await this.rpc.getX402Block(operation.preparedBlock.number); }
+    catch { return operation; }
+    if (startBlock.number !== operation.preparedBlock.number || startBlock.hash !== operation.preparedBlock.hash ||
       !sameRpcOrigin(startBlock.rpcOrigin, rpcOrigin) ||
       BigInt(startBlock.timestamp) >= BigInt(binding.effectiveExpiryUnix)) return operation;
 
-    const expiryBlock = await this.firstExpiredBlock(
-      startBlock.number,
-      finalized.number,
-      binding.effectiveExpiryUnix,
-      rpcOrigin,
-    );
+    const expiryBlock = await this.expiryBound(startBlock, finalized, binding.effectiveExpiryUnix, rpcOrigin);
     if (expiryBlock === null) return operation;
-    const noExactTransfer = await this.scanExactTransfers(
-      operation,
-      startBlock.number,
-      expiryBlock.number,
-    );
-    if (!noExactTransfer) return operation;
-
-    let finalizedRecheck;
-    let finalizedAnchorRecheck;
-    let startRecheck;
-    let expiryRecheck;
-    try {
-      finalizedRecheck = await this.rpc.getX402Head("finalized");
-      finalizedAnchorRecheck = await this.rpc.getX402Block(finalized.number);
-      startRecheck = await this.rpc.getX402Block(startBlock.number);
-      expiryRecheck = await this.rpc.getX402Block(expiryBlock.number);
-    } catch { return operation; }
-    if (!validX402Head(finalizedRecheck) || !sameRpcOrigin(finalizedRecheck.rpcOrigin, rpcOrigin) ||
-      BigInt(finalizedRecheck.number) < BigInt(finalized.number) ||
-      !sameBlock(canonicalFinalized, finalizedAnchorRecheck, rpcOrigin) ||
-      (finalizedRecheck.number === finalized.number &&
-        (finalizedRecheck.hash !== finalized.hash || finalizedRecheck.timestamp !== finalized.timestamp)) ||
-      !sameBlock(startBlock, startRecheck, rpcOrigin) ||
-      !sameBlock(expiryBlock, expiryRecheck, rpcOrigin)) return operation;
+    // Finalized blocks do not reorg and every read above is from this pass's endpoint, so no recheck follows the scan.
+    if (!await this.scanExactTransfers(operation, startBlock.number, expiryBlock.number)) return operation;
 
     const completedAt = this.clock.now().toISOString();
     const body = {
@@ -237,29 +204,34 @@ export class X402Erc7710RpcReconciler {
     return next;
   }
 
-  private async firstExpiredBlock(
-    startNumber: string,
-    finalizedNumber: string,
+  /**
+   * A block at or after the delegation's expiry that closes the scan range. Any such block is sound: the timestamp
+   * caveat refuses redemption from it on, and a later bound only widens the scan. Block times are near-constant, so
+   * interpolation between the prepared block and the finalized head lands on the first expired block in one header
+   * read (was a binary search of ~log2(range) reads plus four rechecks); a guess that falls short of the expiry moves
+   * the lower end and tries again, and the finalized head itself is the bound when the reads run out.
+   */
+  private async expiryBound(
+    start: { readonly number: string; readonly timestamp: string },
+    finalized: X402RpcHead,
     expiryUnix: string,
     rpcOrigin: string,
-  ): Promise<Awaited<ReturnType<X402RpcPort["getX402Block"]>> | null> {
-    let low = BigInt(startNumber);
-    let high = BigInt(finalizedNumber);
-    while (low + 1n < high) {
-      const middle = (low + high) / 2n;
+  ): Promise<X402RpcHead | X402RpcBlock | null> {
+    const expiry = BigInt(expiryUnix), high = BigInt(finalized.number), highTimestamp = BigInt(finalized.timestamp);
+    let low = { number: BigInt(start.number), timestamp: BigInt(start.timestamp) };
+    for (let reads = 0; reads < MAX_EXPIRY_BOUND_READS && high - low.number > 1n; reads += 1) {
+      const span = high - low.number, elapsed = highTimestamp - low.timestamp;
+      let guess = low.number + ((expiry - low.timestamp) * span + elapsed - 1n) / elapsed;
+      if (guess >= high) guess = high - 1n;
+      if (guess <= low.number) guess = low.number + 1n;
       let block;
-      try { block = await this.rpc.getX402Block(middle.toString()); }
+      try { block = await this.rpc.getX402Block(guess.toString()); }
       catch { return null; }
-      if (block.number !== middle.toString() || !sameRpcOrigin(block.rpcOrigin, rpcOrigin)) return null;
-      if (BigInt(block.timestamp) >= BigInt(expiryUnix)) high = middle;
-      else low = middle;
+      if (block.number !== guess.toString() || !sameRpcOrigin(block.rpcOrigin, rpcOrigin)) return null;
+      if (BigInt(block.timestamp) >= expiry) return block;
+      low = { number: guess, timestamp: BigInt(block.timestamp) };
     }
-    let block;
-    try { block = await this.rpc.getX402Block(high.toString()); }
-    catch { return null; }
-    if (block.number !== high.toString() || !sameRpcOrigin(block.rpcOrigin, rpcOrigin) ||
-      BigInt(block.timestamp) < BigInt(expiryUnix)) return null;
-    return block;
+    return finalized;
   }
 
   private async scanExactTransfers(
@@ -276,6 +248,7 @@ export class X402Erc7710RpcReconciler {
       try {
         result = await this.rpc.getX402TransferLogs({
           from: operation.wallet,
+          to: operation.payee,
           fromBlock: from.toString(),
           toBlock: to.toString(),
         });
@@ -290,13 +263,4 @@ export class X402Erc7710RpcReconciler {
     }
     return true;
   }
-}
-
-function sameBlock(
-  left: { readonly number: string; readonly hash: string; readonly timestamp: string; readonly rpcOrigin: string },
-  right: { readonly number: string; readonly hash: string; readonly timestamp: string; readonly rpcOrigin: string },
-  rpcOrigin: string,
-): boolean {
-  return left.number === right.number && left.hash === right.hash && left.timestamp === right.timestamp &&
-    left.rpcOrigin === rpcOrigin && right.rpcOrigin === rpcOrigin;
 }

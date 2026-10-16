@@ -181,7 +181,7 @@ class SmartAccountX402Rpc extends RecoveryRpc {
   ownerUsdcAtomic = "10000000";
   observedUnix = NOW;
   readonly balanceAddresses: Address[] = [];
-  readonly transferCalls: { readonly fromBlock: string; readonly toBlock: string }[] = [];
+  readonly transferCalls: { readonly to?: Address; readonly fromBlock: string; readonly toBlock: string }[] = [];
   transferOutcomes: X402TransferLogs[] = [];
 
   override async getBalances(address: Address) {
@@ -202,8 +202,6 @@ class SmartAccountX402Rpc extends RecoveryRpc {
       ...this.x402Evidence,
       address,
       usdcAtomic: this.ownerUsdcAtomic,
-      tokenName: "ignored-for-erc7710",
-      tokenVersion: "ignored-for-erc7710",
       domainSeparator: "0x01" as Hex,
       observedAt: new Date(this.observedUnix * 1_000).toISOString(),
       block: {
@@ -215,9 +213,9 @@ class SmartAccountX402Rpc extends RecoveryRpc {
   }
 
   override async getX402TransferLogs(input: {
-    readonly from: Address; readonly fromBlock: string; readonly toBlock: string;
+    readonly from: Address; readonly to?: Address; readonly fromBlock: string; readonly toBlock: string;
   }): Promise<X402TransferLogs> {
-    this.transferCalls.push({ fromBlock: input.fromBlock, toBlock: input.toBlock });
+    this.transferCalls.push({ ...(input.to === undefined ? {} : { to: input.to }), fromBlock: input.fromBlock, toBlock: input.toBlock });
     return this.transferOutcomes.shift() ?? { kind: "complete", logs: [] };
   }
 }
@@ -2007,6 +2005,13 @@ test("ambiguous Smart Account paid HTTP finalizes unused only after expiry and a
     assert.equal(http.calls.length, 2, "challenge plus one ambiguous paid request only");
     assert.equal(engine.calls, 1);
     assert.ok(rpc.transferCalls.length > 0);
+    assert.ok(rpc.transferCalls.every((call) => call.to === durable?.payee), "the scan filters the exact payee topic");
+    assert.equal(finalizedReads, 1, "one finalized head, no recheck after the scan");
+    const scannedTo = (recovered.receipt as any).unusedExpiryEvidence.scan.toBlock as string;
+    assert.deepEqual(rpc.x402Calls.filter((call) => call.startsWith("block:")),
+      [`block:${durable?.preparedBlock.number}`, `block:${scannedTo}`],
+      "prepared block plus one interpolated expiry bound, not a binary search and four rechecks");
+    assert.ok(BigInt(scannedTo) < BigInt(rpc.finalizedHead.number), "the scan stops at the expiry bound, not the finalized head");
     assert.equal(rpc.x402Calls.some((call) => call.startsWith("state:")), false);
     assert.equal(rpc.submissions.length, 0);
 
