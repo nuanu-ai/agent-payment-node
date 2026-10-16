@@ -5,11 +5,8 @@ export declare const MEGA_FUNDING: Readonly<{
     sourceChain: 8453;
     destinationChain: 4326;
     short: 514;
-    owner: `0x${string}`;
-    profile: "default";
     target: `0x${string}`;
     data: Hex;
-    maximumAmount: 10000000000000n;
     mechanism: {
         provider: string;
         reference: string;

@@ -18,7 +18,8 @@ sender as recipient and GasZip short chain ID 246. No approval is involved.
 LI.FI does not execute this route.
 
 The active Base native bridge admission must name exactly
-`{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`.
+`{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`; an owner
+`recipients` pin on it must list the payer, who is also the recipient.
 The owner's `--minimum-output-atomic` floor and `--maximum-fee-atomic` ceiling are
 the only output and fee bounds; no lane constant caps them. Base fee quotes include L2 gas,
 the OP GasPriceOracle L1 data fee upper bound for 512 signed bytes, and the
@@ -1151,17 +1152,19 @@ including rate limits, recoverable.
 
 `apn mega funding prepare`, `approve` and `status` use an independent GasZip
 journal and mechanism pin. They preserve existing Sei operation hashes and do
-not enable LI.FI GasZip execution. Only profile `default`, owner and SELF
-recipient `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`, Base source chain 8453 and
-Mega destination chain 4326 are admitted. The direct target is the official
-EOA `0x391E7C679d29bD940d63be94AD22A25d25b5A604`, whose code must be empty;
-calldata is exactly `0x010202` (short 514). Input is exactly 10000000000000 wei.
+not enable LI.FI GasZip execution. Any local profile may use it: the payer is the
+profile's own wallet, `--expected-payer` must equal it, and the deposit pays that same
+address on Mega (SELF). The route is Base source chain 8453 to Mega destination chain
+4326. The direct target is the official EOA `0x391E7C679d29bD940d63be94AD22A25d25b5A604`,
+whose code must be empty; calldata is exactly `0x010202` (short 514). The amount is the
+caller's `--amount-atomic`, bounded by the admission's per-transfer and daily caps.
 The owner's Base network fee ceiling includes L1 and operator
 fees. A fresh balance must cover the frozen signed envelope's full fee upper
 bound even when a later estimate is lower.
 
 The active Base native bridge policy must admit
-`{ "provider": "gaszip", "reference": "v2-direct-base-mega-self-010202.1" }`.
+`{ "provider": "gaszip", "reference": "v2-direct-base-mega-self-010202.1" }`. An owner
+`recipients` pin on that admission must list the payer, because the payer is the recipient.
 `APN_BASE_RPC_URL` and `APN_MEGA_RPC_URL` must be public HTTPS RPC URLs. Production
 Mega mainnet RPC is `https://mainnet.megaeth.com/rpc`; chain identity and safe
 receipt inclusion are independently checked. Minimum delivered Mega ETH is the
@@ -1170,7 +1173,7 @@ calldata cannot enforce it. Quote expiry, owner binding, custody, usage and
 shared Base owner conflicts are checked before the single signature/send attempt.
 
 ```sh
-apn mega funding prepare --profile default --expected-payer 0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14 --amount-atomic 10000000000000 --minimum-output-atomic 8000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key mega-self-funding-01
+apn mega funding prepare --profile <profile> --expected-payer <profile-wallet-address> --amount-atomic 10000000000000 --minimum-output-atomic 8000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key mega-self-funding-01
 apn mega funding approve --operation <operation-id>
 apn mega funding status --operation <operation-id>
 ```
