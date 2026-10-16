@@ -74,13 +74,15 @@ test("variable DNS completion cannot bunch or reorder physical POST starts", asy
   assert.deepEqual(starts, [1_000, 2_000]);
 });
 
-test("unset and zero pacing preserve unpaced physical POSTs", async () => {
-  for (const interval of [undefined, "0"]) {
-    const { rpc, starts, waits } = offline(interval);
-    await Promise.all(Array.from({ length: 10 }, () => rpc.call("wallet/getaccount", {})));
-    assert.deepEqual(starts, Array(10).fill(0));
-    assert.deepEqual(waits, []);
-  }
+test("unset pacing starts at most two TRON POSTs per second; zero turns pacing off", async () => {
+  const paced = offline(undefined);
+  await Promise.all(Array.from({ length: 4 }, () => paced.rpc.call("wallet/getaccount", {})));
+  assert.deepEqual(paced.starts, [0, 500, 1_000, 1_500]);
+  assert.deepEqual(paced.waits, [500, 500, 500]);
+  const { rpc, starts, waits } = offline("0");
+  await Promise.all(Array.from({ length: 10 }, () => rpc.call("wallet/getaccount", {})));
+  assert.deepEqual(starts, Array(10).fill(0));
+  assert.deepEqual(waits, []);
 });
 
 test("invalid TRON pacing fails before DNS or POST and reveals no setting text", async () => {
@@ -129,4 +131,16 @@ test("deadline cancellation during pacing never opens a physical POST", async ()
     return true;
   });
   assert.deepEqual(starts, [0]);
+});
+
+test("one TRON client reads the immutable genesis block once per invocation", async () => {
+  const genesis = { blockID: "00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc", block_header: { raw_data: { number: 0, timestamp: 0 } } };
+  let posts = 0;
+  const fetcher = (async () => { posts += 1; return new Response(JSON.stringify(genesis), { headers: { "content-type": "application/json" } }); }) as unknown as typeof fetch;
+  const rpc = new TronRpc("https://rpc.example/tron", fetcher);
+  await rpc.call("wallet/getblockbynum", { num: 0 });
+  assert.deepEqual(await rpc.call("wallet/getblockbynum", { num: 0 }), await rpc.call("wallet/getblockbynum", { num: 0 }));
+  assert.equal(posts, 1);
+  await rpc.call("wallet/getblockbynum", { num: 1 });
+  assert.equal(posts, 2, "only block 0 is answered from memory");
 });

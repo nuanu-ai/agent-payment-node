@@ -14,12 +14,28 @@ import { SOL_RECIPIENT } from "./solana-helpers.js";
 import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
 import { reserveRailLease } from "./direct-allowlist-helpers.js";
 
-test("TRX preparation keeps its ten safety reads", async (t) => {
+test("TRX preparation reads its window once and keeps every other safety read", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await tronFixture(temporary.root);
   const before = s.rpc.calls.length;
   await s.prepare("trx");
-  assert.equal(s.rpc.calls.length - before, 10);
+  // Maintenance time, then parameters, then the head: a head still before that maintenance proves the parameters current.
+  assert.deepEqual(s.rpc.calls.slice(before), ["wallet/getblockbynum", "wallet/getnextmaintenancetime", "wallet/getchainparameters",
+    "wallet/getnowblock", "wallet/getaccount", "walletsolidity/getnowblock", "walletsolidity/getaccount"]);
+});
+
+test("TRX approval re-reads neither the parameters nor the solidified activation head inside its frozen window", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare();
+  const before = s.rpc.calls.length;
+  // A mid-window parameter or maintenance answer cannot take effect before the frozen expiry, which ends before maintenance.
+  s.approval.approve = async (input) => { s.approval.calls.push(input); s.rpc.bandwidthPrice++; s.rpc.maintenance += 1000n; s.rpc.solidReferenceMismatch = true; };
+  const result = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
+  const approval = s.rpc.calls.slice(before), sendAt = approval.indexOf("wallet/broadcasttransaction");
+  // One pre-prompt and one post-prompt revalidation (head, reference block, owner, recipient); genesis is the fixture's own transport.
+  assert.deepEqual(approval.slice(0, sendAt), ["wallet/getblockbynum", "wallet/getnowblock", "wallet/getblockbynum", "wallet/getaccount", "walletsolidity/getaccount",
+    "wallet/getblockbynum", "wallet/getnowblock", "wallet/getblockbynum", "wallet/getaccount", "walletsolidity/getaccount"]);
+  assert.equal(approval.includes("wallet/getchainparameters") || approval.includes("wallet/getnextmaintenancetime"), false);
+  assert.equal(s.rpc.submissions.length, 1);
 });
 
 test("TRON assets are default-denied independently before RPC or signer access", async (t) => {
@@ -59,14 +75,11 @@ test("TRON interrupted submission, expired TAPOS and absent history preserve the
   const recovered = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal((recovered.operation as { state: string }).state, "completed"); assert.deepEqual(s.rpc.submissions, [transaction]);
 });
 
-for (const mutation of ["price", "maintenance", "reference", "solid-reference", "expiry", "last-slot", "permission", "funding"] as const) test(`TRON ${mutation} drift after foreground review fails before any sealed or broadcast effect`, async (t) => {
+for (const mutation of ["reference", "expiry", "last-slot", "permission", "funding"] as const) test(`TRON ${mutation} drift after foreground review fails before any sealed or broadcast effect`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare();
   s.approval.approve = async (input) => {
     s.approval.calls.push(input);
-    if (mutation === "price") s.rpc.bandwidthPrice++;
-    if (mutation === "maintenance") s.rpc.maintenance += 1000n;
     if (mutation === "reference") s.rpc.referenceMismatch = true;
-    if (mutation === "solid-reference") s.rpc.solidReferenceMismatch = true;
     if (mutation === "expiry") s.now.setTime(s.now.getTime() + 121_000);
     if (mutation === "last-slot") s.now.setTime(s.now.getTime() + 119_000);
     if (mutation === "permission") s.rpc.badPermission = true;

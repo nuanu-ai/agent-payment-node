@@ -14,12 +14,28 @@ export class TronRpc {
     endpoint;
     fetcher;
     originHash;
+    /** Block 0 is immutable and this client's endpoint fixed: one read proves the network for the whole invocation. */
+    genesisBlock;
     constructor(endpoint, fetcher = tronHttpsFetch) {
         this.endpoint = endpoint;
         this.fetcher = fetcher;
         this.originHash = sha256(endpoint ?? "tron_rpc_unconfigured");
     }
     async call(method, body) {
+        const genesisRead = method === "wallet/getblockbynum" && Object.keys(body).length === 1 && body.num === 0;
+        if (genesisRead && this.genesisBlock !== undefined)
+            return this.genesisBlock;
+        const value = await this.post(method, body);
+        if (genesisRead) {
+            try {
+                if (tronBlock(value).id === TRON_GENESIS)
+                    this.genesisBlock = value;
+            }
+            catch { /* The caller's own check reports it. */ }
+        }
+        return value;
+    }
+    async post(method, body) {
         if (this.endpoint === undefined || !TRON_RPC_METHODS.includes(method))
             configFailure();
         let base;
@@ -64,7 +80,7 @@ export class TronRpc {
         }
         catch (error) {
             if (error instanceof ApnError) {
-                if (error.code !== "APN_RPC_PROTOCOL")
+                if (error.code !== "APN_RPC_PROTOCOL" && error.code !== "APN_RPC_RATE_LIMITED")
                     throw error;
                 throw new ApnError(error.code, error.message, { ...error.details, rpcMethod: method });
             }

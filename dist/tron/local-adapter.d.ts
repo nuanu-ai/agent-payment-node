@@ -23,6 +23,7 @@ export declare class TronLocalAdapter implements DirectRailPort {
         readonly now: Date;
     }): Promise<RailPreparedTransfer>;
     revalidate(account: ChainAccount, prepared: RailPreparedTransfer): Promise<void>;
+    /** The lifecycle revalidated immediately before calling this; signing reads no chain state of its own. */
     sign(binding: RailEffectBinding): Promise<RailSignedEffect>;
     recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null>;
     submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{

@@ -45,6 +45,8 @@ export declare class SolanaRpc implements SolanaRpcPort {
     private readonly pacer?;
     readonly originHash: string;
     readonly budget: SolanaRpcBudget | undefined;
+    /** Set only after this endpoint answered the mainnet genesis; a different answer is never cached. */
+    private genesis;
     constructor(endpoint?: string | undefined, fetcher?: typeof fetch, budget?: SolanaRpcBudget, pacer?: Pick<SolanaRpcPacer, "schedule"> | undefined);
     get hasPersistentPacer(): boolean;
     get maximumAccountsPerRead(): 8 | 16;
