@@ -1043,9 +1043,14 @@ test("common transfer seals one delegated effect, proves the owner USDC log and 
     assert.equal(stored.providerDirect.sessionAddress, SESSION);
     assert.equal(stored.providerDirect.permissionRevision, 1);
 
+    const balancesBeforeApprove = rpc.balanceCalls;
     const pending = await runtime.core.execute({ command: "transfer.approve", operationId });
     assert.equal(pending.ok, true, JSON.stringify({ pending, stored: await runtime.state.findOperation(operationId) }));
     assert.equal((pending.operation as any).state, "evidence_pending", JSON.stringify(pending));
+    // One pre-effect preflight per approve: execute reuses it (allowance once, owner + session balances, then the
+    // session gas balance after the exact estimate), instead of a second full preflight.
+    assert.equal(allowance.calls, 2, "prepare and one approve preflight");
+    assert.equal(rpc.balanceCalls - balancesBeforeApprove, 3);
     assert.equal(approval.calls, 1);
     assert.equal(engine.createCalls, 1);
     assert.equal(engine.signCalls, 1);
