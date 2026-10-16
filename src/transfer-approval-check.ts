@@ -13,7 +13,7 @@ export async function checkTransferApproval(
   stateRoot?: string,
 ): Promise<void> {
   if (operation.evm !== undefined) {
-    try { await checkEvmTransferFunding(rpc, operation, true, stateRoot); }
+    try { await checkEvmTransferFunding(rpc, operation, stateRoot); }
     catch (error) {
       if (error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED") await failBeforeEffect("fee_or_nonce_changed");
       throw error;

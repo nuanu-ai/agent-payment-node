@@ -5,6 +5,7 @@ import { hashObject } from "./canonical.js";
 import { APPROVAL_WINDOW_MS, BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { prepareEvmTransfer } from "./evm-transfer-prepare.js";
+import { armDirectEvmStep } from "./evm-direct.js";
 import { checkTransferApproval } from "./transfer-approval-check.js";
 import { parseDecimal } from "./money.js";
 import { conflictDomainKey, evmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
@@ -189,7 +190,10 @@ export class TransferService {
             if (operation.evm?.circleNativeAdmission !== undefined)
                 await this.failBeforeEffect(operation, "circle_native_admission_retired");
             const rpc = this.context.requireRpc();
-            if (operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329)
+            // A listed-asset transfer's cap is derived from its read plan; the legacy Base-USDC path keeps its own fixed cap.
+            if (operation.evm !== undefined)
+                armDirectEvmStep(rpc, operation.evm.asset.chainId, "approve");
+            else
                 rpc.armEvmDirectRpcGuard?.();
             const check = async () => {
                 if (operation.evm?.nativeCustody !== undefined)
@@ -211,7 +215,8 @@ export class TransferService {
             const effect = parseEffect(effectValue);
             await verifyEffect(effect, operation);
             operation = await this.transition(operation, "signed_not_submitted", false, "native_effect_material_bound", "native_transaction_hash", { transactionHash: effect.transactionHash, rawTransactionHash: effect.rawTransactionHash });
-            operation = await this.submitAndInspect(operation, effect.rawTransaction);
+            // Native published and ECDSA-verified the public signed record inside the call above, under these same locks.
+            operation = await this.submitAndInspect(operation, effect.rawTransaction, true);
             return publicOperation(operation);
         });
     }
@@ -233,8 +238,8 @@ export class TransferService {
     async requiredOperation(operationId) {
         return await this.observation.requiredOperation(operationId);
     }
-    async submitAndInspect(operation, rawTransaction) {
-        return await this.observation.submitAndInspect(operation, rawTransaction);
+    async submitAndInspect(operation, rawTransaction, publicEffectProven) {
+        return await this.observation.submitAndInspect(operation, rawTransaction, publicEffectProven);
     }
     /** After every approval pre-check and before the native approve-and-sign call; refusals end the operation before effect. */
     async reserveUsage(operation) {

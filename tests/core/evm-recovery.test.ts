@@ -36,7 +36,7 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real 
   const resumed = spawnSync(process.execPath, [worker, "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(resumed.status, 0, resumed.stderr);
   const result = JSON.parse(resumed.stdout);
-  assert.equal(result.result.state, chainId === 1 ? "submitted_pending" : "completed");
+  assert.equal(result.result.state, "completed", "the recovered signature is dispatched and its receipt read in the same invocation");
   assert.equal(result.approvals, 0); assert.equal(result.submissions, 1);
   const replay = spawnSync(process.execPath, [worker, "observe", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(replay.status, 0, replay.stderr);
@@ -44,15 +44,14 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real 
   assert.equal(observed.result.state, "completed"); assert.equal(observed.approvals, 0); assert.equal(observed.submissions, 0);
 });
 
-// Named lifecycle contracts: canonical Base/Arbitrum USDC and both Ethereum lanes
-// deliberately finish approval at submission; explicit observation proves delivery.
+// Every lane reads its receipt in the approving invocation: the step's POST cap is derived from a plan that includes it.
 const mcpLifecycleScenarios = [
   { chainId: 8453, kind: "native", approvalState: "completed" },
-  { chainId: 8453, kind: "usdc", approvalState: "submitted_pending" },
-  { chainId: 1, kind: "native", approvalState: "submitted_pending" },
-  { chainId: 1, kind: "usdc", approvalState: "submitted_pending" },
+  { chainId: 8453, kind: "usdc", approvalState: "completed" },
+  { chainId: 1, kind: "native", approvalState: "completed" },
+  { chainId: 1, kind: "usdc", approvalState: "completed" },
   { chainId: 42161, kind: "native", approvalState: "completed" },
-  { chainId: 42161, kind: "usdc", approvalState: "submitted_pending" },
+  { chainId: 42161, kind: "usdc", approvalState: "completed" },
 ] as const;
 for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP ${chainId}/${kind} prepare and balance share CLI state, handoff stays unsigned, and CLI completes the same operation`, async (context) => {
   const asset = kind === "native" ? "native" : EVM_USDC[chainId];
@@ -98,11 +97,7 @@ for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP 
     (statusView.next_actions as string[]).map(action => action.replace("--rpc-url <https-url>", `--rpc-url ${selection.rpc_url}`)));
   assert.equal(receiptCalls, afterApproval.receiptCalls); assert.equal(setup.wrapping.loads, afterApproval.loads);
   assert.equal(signingRequests, 1); assert.equal(setup.rpc.submissions.length, 1);
-  const observe = approvalState === "submitted_pending";
-  if (observe) assert.equal(receiptCalls, 0);
-  const completed = observe ? await runCli(["operation", "resume", "--operation", operation.operation_id, "--rpc-url", selection.rpc_url, "--observe-only", "true"], {}, {
-    stateRoot: temporary.root, rpc: setup.rpc, wrappingSecret: setup.wrapping, approval: setup.approval, native,
-  }) : approved;
+  const completed = approved;
   assert.equal(completed.ok, true, JSON.stringify(completed));
   assert.equal((completed.operation as { state: string }).state, "completed");
   assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1); assert.equal(signingRequests, 1);

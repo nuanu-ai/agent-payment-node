@@ -6,7 +6,7 @@ import { requireFunding, validateBalance, validateEconomics } from "./transfer-p
 export async function checkTransferApproval(rpc, operation, failBeforeEffect, stateRoot) {
     if (operation.evm !== undefined) {
         try {
-            await checkEvmTransferFunding(rpc, operation, true, stateRoot);
+            await checkEvmTransferFunding(rpc, operation, stateRoot);
         }
         catch (error) {
             if (error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED")

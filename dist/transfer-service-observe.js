@@ -4,7 +4,7 @@ import { DirectPublicEffectJournal } from "./direct-public-effect.js";
 import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
 import { ApnError } from "./errors.js";
 import { hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
-import { requireEvmRpc } from "./evm-direct.js";
+import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { canonicalOperationId, hasExactTransfer, hasSoleExactTransfer, parseEffect, publicOperation, publicReceipt, verifyEffect } from "./transfer-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
@@ -26,10 +26,12 @@ export class TransferServiceObservation {
      * Every check that can refuse (policy, funding, fees, nonce) ran before signing. A persisted signature is only ever
      * dispatched, as these exact bytes, or kept resumable; nothing after signing may strand it.
      */
-    async submitAndInspect(operationInput, rawTransaction) {
+    async submitAndInspect(operationInput, rawTransaction, publicEffectProven = false) {
         const journal = new EvmDirectSubmissionJournal(this.context.state.root);
         return await journal.withLocks([`submission:${operationInput.operationId}`], async () => {
-            await new DirectPublicEffectJournal(this.context.state).effect(operationInput);
+            // A caller that proved the public signed record in this locked section passes that along instead of re-proving it.
+            if (!publicEffectProven)
+                await new DirectPublicEffectJournal(this.context.state).effect(operationInput);
             if (await journal.exists(operationInput))
                 return await this.inspectReceipt(operationInput, this.context.requireRpc());
             await journal.fence(operationInput, rawTransaction);
@@ -49,18 +51,7 @@ export class TransferServiceObservation {
         catch {
             return await this.lifecycle.transition(operation, "unknown_finality", false, "submission_outcome_ambiguous", "ambiguous_submission", { lastSubmissionAt: this.context.clock.now().toISOString() });
         }
-        // A successful Ethereum send is durable at this point. Receipt inspection belongs to
-        // explicit observation, preserving this invocation's bounded pre-send RPC budget.
-        if (operation.evm?.asset.chainId === 1 && (operation.evm.asset.kind === "native" ||
-            operation.evm.asset.address.toLowerCase() === "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48" ||
-            operation.evm.asset.address.toLowerCase() === "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"))
-            return operation;
-        if (operation.evm?.asset.chainId === 8453 && operation.evm.asset.kind === "erc20" &&
-            ["0x4200000000000000000000000000000000000006", "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"].includes(operation.evm.asset.address.toLowerCase()))
-            return operation;
-        if (operation.evm?.asset.chainId === 42161 && operation.evm.asset.kind === "erc20" &&
-            ["0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", "0xaf88d065e77c8cc2239327c5edb3a432268e5831"].includes(operation.evm.asset.address.toLowerCase()))
-            return operation;
+        // The step's POST cap includes one receipt and one evidence read, so every network inspects in this invocation.
         return await this.inspectReceipt(operation, rpc);
     }
     async resume(operationIdInput, waitSeconds, observeOnly, coinbaseObservationRpc) {
@@ -71,7 +62,9 @@ export class TransferServiceObservation {
             throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
         if (found.providerDirect !== undefined)
             return await this.providerDirect.resume(operationId, waitSeconds, coinbaseObservationRpc);
-        if (found.chainId === 1 || found.chainId === 56 || found.chainId === 8453 || found.chainId === 42161 || found.chainId === 1329)
+        if (found.evm !== undefined)
+            armDirectEvmStep(this.context.requireRpc(), found.evm.asset.chainId, "resume");
+        else if (found.chainId === 8453)
             this.context.requireRpc().armEvmDirectRpcGuard?.();
         if (waitSeconds !== undefined) {
             throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
@@ -119,7 +112,7 @@ export class TransferServiceObservation {
             const dispatched = await new EvmDirectSubmissionJournal(this.context.state.root).exists(operation);
             // APN never dispatched this signature: send the exact approved bytes now, once, behind the same dispatch fence.
             if (operation.state === "signed_not_submitted" && !dispatched && observeOnly !== true) {
-                return publicOperation(await this.submitAndInspect(operation, await this.signedRawTransaction(operation)));
+                return publicOperation(await this.submitAndInspect(operation, await this.signedRawTransaction(operation), true));
             }
             if (operation.state === "signed_not_submitted")
                 operation = await this.lifecycle.transition(operation, "unknown_finality", false, "signed_recovery_observation_only", "dispatch_history_ambiguous");

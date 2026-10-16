@@ -49,7 +49,7 @@ fee cap. Ethereum uses execution-only EIP-1559 fees: its L1/operator extra field
 are explicitly zero and no Base oracle is queried. Base includes maximum
 EIP-1559 execution cost, L1 data upper
 estimate for at most 512 signed bytes, and operator fee estimate. Native value
-must also be funded. The quote is rechecked before signing and every submission.
+must also be funded. The quote is re-read once, before signing.
 Variable L1/operator fees may change at inclusion. Missing oracle evidence fails
 closed. Before signing on every supported EVM chain, the nonce must remain
 exact, current required gas must fit within the frozen gas limit, and the
@@ -62,11 +62,9 @@ Arbitrum uses its full inclusive `eth_estimateGas` result: L2 execution and L1
 posting are paid within one gas envelope. Its `feeModel: arbitrum-inclusive`
 is frozen and shown at approval and in receipts; zero *separate* L1/operator
 surcharges do not mean posting is free. APN never calls the Base oracle or
-adds posting costs twice. Priority fee is zero. Arbitrum additionally rechecks
-the inclusive envelope after signing and before submission: required gas above
-the frozen gas limit or current base fee above the frozen ceiling blocks the
-existing signed operation rather than replacing it; resume only that operation
-when its frozen envelope suffices. Before signing on any chain, nonce drift,
+adds posting costs twice. Priority fee is zero. Nothing is re-read between
+signing and the send: the signed gas limit and maximum fee already bound what the
+transaction may cost. Before signing on any chain, nonce drift,
 required gas above the frozen limit, or base fee above the frozen ceiling
 requires a new operation. APN always signs the original approved transaction
 unchanged.
@@ -100,20 +98,34 @@ Fee models. Every model signs an EIP-1559 transaction with
 `maxFeePerGas = 2 x latest baseFeePerGas + eth_maxPriorityFeePerGas` and
 `gas = eth_estimateGas`, and freezes `gas x maxFeePerGas` as the maximum
 execution fee. The owner's `--max-fee-wei` caps the **total** quote: execution
-plus any L1 data and operator fee. The quote is rechecked before signing and
-before every submission.
+plus any L1 data and operator fee. The quote is re-read once, before signing.
 
-Base native ETH prepare groups the balance head, pinned balance and recheck,
-pending nonce, gas estimate, priority fee, fee head, both GasPriceOracle reads,
-and fee head recheck into six physical JSON-RPC batch POSTs. Approval refreshes
-funding before signing and after signing (including a resumed signed operation)
-in at most six POSTs per refresh. A synthetic HTTPS transport test measured
-six prepare POSTs and six POSTs in each funding phase; the full guarded
-approve/resume invocation has not been measured end to end against its 24 POST
-ceiling. Batch response IDs must bind all
-members; a missing, malformed, rejected or rate-limited batch ends that
-invocation without scalar fallback. Provider batch acceptance and live Base
-payment execution are separate operational checks.
+Read plan. Every listed network and asset uses one batched reader
+(`src/evm-direct-reads.ts`); there are no per-network or per-token read lanes.
+One step reads, in physical JSON-RPC POSTs:
+
+| Phase | POSTs | Reads |
+|---|---|---|
+| balances | 1 | `latest` head, native balance; for a token also its code, `balanceOf` and `decimals` |
+| nonce and estimate | 1 | pending nonce, `eth_estimateGas`, priority fee (not on Arbitrum), `latest` head |
+| OP-stack fees | 1, OP-stack only | `getL1FeeUpperBound` and `getOperatorFee` at that head |
+| send | 1 | the exact signed bytes |
+| receipt | 1 | the receipt |
+| evidence | 1 | the receipt's block, the transaction and, on `safe` networks, the `safe` head |
+
+The endpoint's chain id rides inside the first POST of an invocation and is not
+asked again: the endpoint's address is pinned for the invocation, and every
+response is still validated as untrusted input. No head is re-read around pinned
+reads. So prepare is 2 POSTs (3 on OP-stack) and approve is 5 (6 on OP-stack),
+including the send and the receipt evidence, so every network can complete in
+the approving invocation. Each step's hard POST cap is derived from this plan
+times two (`directEvmStepBudget`): prepare 4 (6), approve 10 (12), resume 12, and
+every listed network is capped and paced the same way. A missing, malformed,
+rejected or rate-limited batch ends that step without scalar fallback; there is
+no per-call variant, so an endpoint that refuses JSON-RPC batches is not usable
+for direct transfers. `--rpc-read-mode batch` is still accepted and changes
+nothing. Provider batch acceptance and live payment execution are separate
+operational checks.
 
 - **OP-stack (Base, OP Mainnet, Unichain).** The L1 data fee upper bound for
   512 signed bytes (`getL1FeeUpperBound`) and the operator fee
@@ -130,8 +142,7 @@ payment execution are separate operational checks.
   already `limit x maxFeePerGas`, so the cap holds; the quote carries
   `feeModel: monad-gas-limit` and the approval prompt says so, because the
   actual charge is close to the budgeted execution fee rather than below it.
-- **Arbitrum.** Unchanged: inclusive gas, zero priority fee, post-signing
-  envelope recheck.
+- **Arbitrum.** Inclusive gas and zero priority fee.
 
 Completion. `inclusion` networks complete on a canonical receipt at the
 selected RPC's latest head, as Base and Ethereum always have. `safe` networks
@@ -145,8 +156,8 @@ choice follows what each chain's `safe` tag means, measured on 2026-09-18:
 
 On 2026-09-25 the selected public BNB endpoint returned `missing trie node`
 for a `safe` state read while `latest` succeeded. Direct BNB native commands
-therefore use batched prepare and approval reads with a 24 physical POST cap
-and persistent provider pacing. The `safe` receipt proof remains required;
+read balances at `latest`, like every network, under the plan-derived cap and
+persistent provider pacing. The `safe` receipt proof remains required;
 an unavailable `safe` read leaves the signed operation nonterminal for
 observation-only recovery. `latest` is not substituted for `safe`.
 - OP Mainnet and Unichain: `safe` is L1-derived and lagged 94 and 346 blocks;
@@ -218,48 +229,18 @@ Exact foreground TTY approval precedes private-key access. MCP
 catalog/core. MCP direct approval returns the existing CLI handoff; it cannot
 authorize or strand the operation. Status and receipt do not resume effects.
 
-Canonical Ethereum USDC direct transfers use grouped JSON-RPC reads by default,
-including with explicit `--rpc-read-mode batch`. The frozen allowlist address and
-six decimals, pinned token contract code and balance, native gas balance, chain
-identity, block rechecks, pending nonce, gas estimate and fee quote are checked
-before signing; both approval funding phases refresh grouped reads. A synthetic
-HTTPS transport test counted eight physical POSTs for prepare and eight for the
-pre-sign funding check; nothing is re-read between signing and the send. A
-successful raw send adds one POST, within the direct command's 24-POST guard. A rejected or
-rate-limited batch does not retry through scalar reads. This is a local test
-budget, not proof that any live provider accepts batches or that a mainnet
-payment succeeded. Direct ERC-20 transfer calls the token contract itself and
-does not use an allowance or spender approval.
-
-After the Ethereum USDC send, the durable state is `submitted_pending`. Use
-`apn operation resume --operation <id> --observe-only true --rpc-url <url>` to
-inspect the exact receipt and token effect; observe-only never broadcasts. A
-successful receipt alone is insufficient: completion requires the receipt's
-sole exact `Transfer` log out of the sender, read from that receipt alone.
-
-Listed Arbitrum USD₮0 direct transfers use five grouped JSON-RPC POSTs for
-prepare and five for each approval funding check. The pinned balance read
-includes native gas balance, token contract code, token balance and decimals;
-chain identity and block hash are rechecked. The inclusive fee quote uses zero
-priority fee. Two approval checks plus the raw send use eleven physical POSTs
-within the 24-POST guard. A rejected batch ends the invocation without scalar
-fallback. A successful send remains `submitted_pending` for explicit
-observe-only receipt and safe-head effect verification in another invocation.
-These counts are from mocked HTTPS, not a live provider acceptance check.
-
-The same grouped direct path now accepts only canonical Ethereum WETH9
-`0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` with the pinned 18 decimals.
-It checks the same chain, contract code, pinned WETH/native balances, block
-identities, pending nonce, gas estimate and frozen fee quote. Both approval
-funding phases use grouped reads, and a successful send remains
-`submitted_pending` until explicit observe-only receipt and exact WETH effect
-proof. A synthetic HTTPS test counted 8 + 8 + 5 + 1 = 22 physical POSTs
-through a synthetic send under the 24-POST guard; wrong token/chain, reorg and
-429 fail closed without scalar fallback. The test uses 1,000,000,000 wei of
-synthetic WETH balance and a 100,000,000 wei transfer under a synthetic
-1,000,000,000,000 wei owner cap. It does not establish live RPC acceptance,
-buyer balance, owner policy, or payment delivery. Base WETH and other tokens
-and chains keep their existing paths.
+Every listed token, including canonical Ethereum USDC and WETH9, Base USDC and
+WETH and Arbitrum USDC and USD₮0, uses the read plan above. The frozen allowlist
+address and decimals, token contract code and balance, native gas balance, pending
+nonce, gas estimate and fee quote are checked before signing; nothing is re-read
+between signing and the send. Direct ERC-20 transfer calls the token contract
+itself and does not use an allowance or spender approval. The approving
+invocation reads the receipt; if it is not there yet the state is
+`submitted_pending`, and `apn operation resume --operation <id> --observe-only true
+--rpc-url <url>` inspects it later without broadcasting. A successful receipt
+alone is insufficient: completion requires the receipt's sole exact `Transfer`
+log out of the sender, read from that receipt alone. The POST counts are from
+mocked HTTPS, not a live provider acceptance check.
 
 A fresh explicit EVM prepare retires expired unsigned local transfers on the
 same profile, network and sending account before checking for conflicts. It
@@ -300,7 +281,7 @@ this path.
 - Base/Ethereum completion reports **inclusion only**, not irrevocable finality;
   so do OP Mainnet, Unichain, Linea and Polygon. BNB, Avalanche, Monad and Sei
   use the Arbitrum `safe` rule below.
-  Arbitrum additionally requires rechecked selected-RPC `safe` inclusion for
+  Arbitrum additionally requires selected-RPC `safe` inclusion for
   success/revert and safe-chain nonce supersession; a sequencer-only receipt
   stays nonterminal. Its receipt says `rpc_safe_inclusion`, with observed safe
   block identity. This trusts the RPC and is not a trustless rollup proof or

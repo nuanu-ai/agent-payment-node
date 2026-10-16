@@ -2,20 +2,17 @@ import { encodeFunctionData } from "viem";
 import { MAX_NONCE_SCAN_BLOCKS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEvmAsset, type EvmAssetSelection } from "./evm-asset.js";
-import { directEvmChain, directEvmListRows, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
+import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
+import { evmDirectReads, OP_STACK_GAS_ORACLE, OP_STACK_GAS_ORACLE_ABI } from "./evm-direct-reads.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
-import type { EvmBalanceSnapshot, EvmFeeQuote, EvmNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence, EvmUnlandedEvidence } from "./evm-ports.js";
+import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence, EvmUnlandedEvidence } from "./evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, evmTokenBalance, recheckEvmBlock } from "./evm-rpc-codec.js";
 import { observeEvmTransfer } from "./evm-transfer-evidence.js";
 
-const GAS_ORACLE = "0x420000000000000000000000000000000000000F";
-const GAS_ORACLE_ABI = [
-  { type: "function", name: "getL1FeeUpperBound", stateMutability: "view", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] },
-] as const;
-
 export class EvmRpc implements EvmRpcPort {
+  /** The endpoint's IP is pinned for this instance, so its chain id is proven once and cannot change afterwards. */
+  private verifiedChain: number | undefined;
   constructor(private readonly call: EvmRpcCall, private readonly rpcOrigin: string,
     private readonly maximumSignedBytes = MAX_DIRECT_TRANSACTION_BYTES,
     private readonly batchCall?: EvmRpcBatchCall) {
@@ -24,254 +21,37 @@ export class EvmRpc implements EvmRpcPort {
     }
   }
 
-  prepareLineaNative(): EvmNativePrepareReads { return this.prepareNativeBatched(59144); }
-  prepareSeiNative(): EvmNativePrepareReads { return this.prepareNativeBatched(1329); }
-  prepareUnichainNative(): EvmNativePrepareReads { return this.prepareNativeBatched(130); }
-  prepareUnichainUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(130, "usdc"); }
-  preparePolygonUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(137, "usdc"); }
-  prepareBnbNative(): EvmNativePrepareReads { return this.prepareNativeBatched(56); }
-  ethereumNativeFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1); }
-  prepareEthereumUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "usdc"); }
-  ethereumUsdcFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "usdc"); }
-  prepareEthereumWeth(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "weth"); }
-  ethereumWethFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(1, "weth"); }
-  prepareBaseWeth(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "weth"); }
-  baseWethFundingReads(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "weth"); }
-  prepareBaseUsdc(): EvmNativePrepareReads { return this.prepareNativeBatched(8453, "usdc"); }
-  baseUsdcFundingReads(): EvmNativePrepareReads { return this.prepareBaseUsdc(); }
-  prepareBaseNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(8453); }
-  prepareArbitrumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161); }
-  prepareArbitrumUsdt0(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161, "usdt0"); }
-  arbitrumUsdt0FundingReads(): EvmNativePrepareReads { return this.prepareArbitrumUsdt0(); }
-  prepareArbitrumUsdc(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(42161, "usdc"); }
-  arbitrumUsdcFundingReads(): EvmNativePrepareReads { return this.prepareArbitrumUsdc(); }
-  private prepareEthereumOrBaseNative(chainId: 1 | 8453 | 42161, asset: "native" | "usdt0" | "usdc" = "native"): EvmNativePrepareReads {
-    if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
-    let posts = 0;
-    const started = Date.now();
-    const batch = async (phase: string, calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> => {
-      const index = ++posts;
-      if (index > (chainId === 8453 ? 6 : 5)) throw new ApnError("APN_RPC_PROTOCOL", "Native prepare RPC request ceiling exceeded.",
-        { phase, postIndex: index, elapsedMs: Date.now() - started });
-      try { return await this.batchCall!(calls); }
-      catch (error) {
-        if (error instanceof ApnError) throw new ApnError(error.code, error.message,
-          { phase, postIndex: index, elapsedMs: Date.now() - started,
-            ...(typeof error.details?.httpStatus === "number" ? { httpStatus: error.details.httpStatus } : {}) });
-        throw new ApnError("APN_RPC_AMBIGUOUS", "Native prepare RPC result is unavailable.",
-          { phase, postIndex: index, elapsedMs: Date.now() - started });
-      }
-    };
-    const chain = { method: "eth_chainId", params: [] } as const;
-    const check = (value: unknown): void => {
-      if (evmRpcQuantity(value) !== BigInt(chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-    };
-    let feeHead: Awaited<ReturnType<typeof evmRpcBlock>> | undefined;
-    return {
-      balance: async (address, selection) => {
-        const listedToken = asset !== "native" && chainId === 42161 && directEvmListRows(42161).some(row =>
-          row.kind === "token" && row.symbol === (asset === "usdt0" ? "USDT0" : "USDC") && row.identifier === selection.token && row.decimals === 6);
-        if (selection.chainId !== chainId || (asset === "native" ? selection.token !== "native" : !listedToken))
-          throw new ApnError("APN_INVALID_INPUT", "Grouped prepare requires the listed asset on the selected network.");
-        if (selection.decimals !== undefined) evmDecimals(selection.decimals);
-        const [identity, rawHead] = await batch("balance_head", [chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
-        check(identity);
-        const head = await evmRpcBlock(async () => rawHead, "latest");
-        const token = selection.token as Address;
-        const [rawBalance, rawCode, rawToken, rawDecimals] = await batch("pinned_balance", asset === "native"
-          ? [{ method: "eth_getBalance", params: [address, head.tag] }]
-          : [{ method: "eth_getBalance", params: [address, head.tag] },
-            { method: "eth_getCode", params: [token, head.tag] },
-            { method: "eth_call", params: [{ to: token, data: `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}` }, head.tag] },
-            { method: "eth_call", params: [{ to: token, data: "0x313ce567" }, head.tag] }]);
-        const nativeAtomic = evmRpcQuantity(rawBalance).toString();
-        if (asset !== "native" && evmRpcHex(rawCode) === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token address has no contract on this chain.");
-        if (asset !== "native" && rawDecimals === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token contract did not report decimals.");
-        const assetAtomic = asset === "native" ? nativeAtomic : evmRpcWord(rawToken).toString();
-        const observedDecimals = asset === "native" || rawDecimals === "0x" ? undefined : evmDecimals(Number(evmRpcWord(rawDecimals)));
-        const [rawRecheck, postChain] = await batch("balance_recheck", [
-          { method: "eth_getBlockByNumber", params: [head.tag, false] }, chain,
-        ]);
-        await recheckEvmBlock(async () => rawRecheck, head); check(postChain);
-        return { address, asset: resolveEvmAsset(selection, observedDecimals), assetAtomic, nativeAtomic,
-          blockNumberAtomic: head.number, blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
-      },
-      nonceEstimate: async (address, transaction) => {
-        if (transaction.chainId !== chainId) throw new ApnError("APN_INVALID_INPUT", "Native prepare requires the selected network.");
-        const [identity, rawNonce, rawGas, rawFourth, rawFifth] = await batch("nonce_estimate_fee_head", [
-          chain,
-          { method: "eth_getTransactionCount", params: [address, "pending"] },
-          { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
-            value: `0x${evmUint(transaction.valueAtomic).toString(16)}` }] },
-          ...(chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [] }]),
-          { method: "eth_getBlockByNumber", params: ["latest", false] },
-        ]);
-        check(identity);
-        const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas);
-        const priority = chainId === 42161 ? 0n : evmRpcQuantity(rawFourth);
-        const head = await evmRpcBlock(async () => chainId === 42161 ? rawFourth : rawFifth, "latest");
-        const maximum = 2n * evmRpcQuantity(head.raw.baseFeePerGas) + priority;
-        if (maximum === 0n) throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC quoted a zero gas price.");
-        evmUint(maximum.toString(), true);
-        feeHead = head;
-        return { nonce, estimated: { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(),
-          maxPriorityFeePerGasAtomic: priority.toString() } };
-      },
-      feeQuote: async (economics) => {
-        // Base post-sign funding has no nonce/estimate phase, so it obtains its own fee head.
-        if (feeHead === undefined && chainId !== 8453) throw new ApnError("APN_RPC_PROTOCOL", "Native prepare fee head is unavailable.");
-        const head = feeHead ?? await (async () => {
-          const [identity, rawHead] = await batch("fee_head", [chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
-          check(identity);
-          return await evmRpcBlock(async () => rawHead, "latest");
-        })();
-        const execution = evmUint(economics.maximumGasCostAtomic, true);
-        let l1Fee = 0n, operatorFee = 0n;
-        if (chainId === 8453) {
-          const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
-          const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
-          const [rawL1, rawOperator] = await batch("oracle_fees", [
-            { method: "eth_call", params: [{ to: GAS_ORACLE, data }, head.tag] },
-            { method: "eth_call", params: [{ to: GAS_ORACLE, data: operatorData }, head.tag] },
-          ]);
-          l1Fee = evmRpcWord(rawL1); operatorFee = evmRpcWord(rawOperator);
-        }
-        const total = evmUint((execution + l1Fee + operatorFee).toString(), true);
-        const [rawRecheck, postChain] = await batch("fee_head_recheck", [
-          { method: "eth_getBlockByNumber", params: [head.tag, false] }, chain,
-        ]);
-        await recheckEvmBlock(async () => rawRecheck, head); check(postChain);
-        feeHead = undefined;
-        return { chainId, ...(chainId === 42161 ? { feeModel: "arbitrum-inclusive" as const } : {}),
-          l1DataFeeUpperWei: l1Fee.toString(), operatorFeeUpperWei: operatorFee.toString(), maximumExecutionFeeWei: execution.toString(),
-          totalQuoteWei: total.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: head.number,
-          blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
-      },
-    };
+  /** One batched read session for one direct transfer step; see `evmDirectReads` for its POST plan. */
+  directReads(chainId: DirectEvmChainId): EvmDirectReads {
+    if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched direct reads.");
+    return evmDirectReads(directEvmChain(chainId), calls => this.read(chainId, calls), this.rpcOrigin, this.maximumSignedBytes);
   }
 
-  prepareEthereumNative(): EvmNativePrepareReads { return this.prepareEthereumOrBaseNative(1); }
-
-  /** One prepare owns this bounded read session. No retry or scalar fallback follows a batch rejection. */
-  private prepareNativeBatched(chainId: 1 | 8453 | 59144 | 130 | 137 | 56 | 1329, asset: "native" | "usdc" | "weth" = "native"): EvmNativePrepareReads {
-    if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched prepare reads.");
-    let attempts = 0;
-    const attempt = async (method: string, params: readonly unknown[]): Promise<unknown> => {
-      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Batched prepare RPC attempt ceiling exceeded.");
-      return await this.call(method, params);
-    };
-    const batch = async (calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> => {
-      if (++attempts > 10) throw new ApnError("APN_RPC_PROTOCOL", "Batched prepare RPC attempt ceiling exceeded.");
-      return await this.batchCall!(calls);
-    };
-    const chain = { method: "eth_chainId", params: [] } as const;
-    const check = (value: unknown): void => {
-      if (evmRpcQuantity(value) !== BigInt(chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-    };
-    const blockFrom = async (value: unknown, tag: string) => await evmRpcBlock(async () => value, tag);
-    const recheck = async (value: unknown, block: { readonly tag: Hex; readonly hash: Hex }) => {
-      await recheckEvmBlock(async () => value, block);
-    };
-    const onlySelectedChain = (selected: DirectEvmChainId): void => {
-      if (selected !== chainId) throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected chain.");
-    };
-    return {
-      balance: async (address, selection) => {
-        onlySelectedChain(selection.chainId);
-        if (asset === "native" ? selection.token !== "native" :
-          selection.token === "native" || !directEvmListRows(chainId).some((row) => row.kind === "token" &&
-            row.symbol === (asset === "weth" ? "WETH" : "USDC") && row.identifier === selection.token &&
-            row.decimals === (asset === "weth" ? 18 : 6))) {
-          throw new ApnError("APN_INVALID_INPUT", "Batched prepare reads require the selected asset.");
-        }
-        if (selection.decimals !== undefined) evmDecimals(selection.decimals);
-        const balanceTag = directEvmRequiresSafeHead(chainId) ? "safe" : "latest";
-        const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: [balanceTag, false] }]);
-        check(preChain);
-        const head = await blockFrom(rawHead, balanceTag);
-        let nativeAtomic: string, assetAtomic: string, observedDecimals: number | undefined;
-        if (asset === "native") {
-          // Sei's public transport requires every logical read in a grouped physical POST.
-          const rawBalance = chainId === 1329
-            ? (await batch([{ method: "eth_getBalance", params: [address, head.tag] }]))[0]
-            : await attempt("eth_getBalance", [address, head.tag]);
-          nativeAtomic = evmRpcQuantity(rawBalance).toString();
-          assetAtomic = nativeAtomic;
-        } else {
-          const token = selection.token as Address;
-          const data = `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}`;
-          const [rawNative, rawCode, rawToken, rawDecimals] = await batch([
-            { method: "eth_getBalance", params: [address, head.tag] },
-            { method: "eth_getCode", params: [token, head.tag] },
-            { method: "eth_call", params: [{ to: token, data }, head.tag] },
-            { method: "eth_call", params: [{ to: token, data: "0x313ce567" }, head.tag] },
-          ]);
-          nativeAtomic = evmRpcQuantity(rawNative).toString();
-          if (evmRpcHex(rawCode) === "0x") throw new ApnError("APN_ASSET_MISMATCH", "The selected token address has no contract on this chain.");
-          assetAtomic = evmRpcWord(rawToken).toString();
-          if (rawDecimals !== "0x") observedDecimals = evmDecimals(Number(evmRpcWord(rawDecimals)));
-        }
-        const [rawRecheck, postChain] = await batch([{ method: "eth_getBlockByNumber", params: [head.tag, false] }, chain]);
-        await recheck(rawRecheck, head); check(postChain);
-        return { address, asset: resolveEvmAsset(selection, observedDecimals), assetAtomic, nativeAtomic,
-          blockNumberAtomic: head.number, blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
-      },
-      nonceEstimate: async (address, transaction) => {
-        onlySelectedChain(transaction.chainId);
-        if (chainId !== 8453) {
-          const [nonceChain, estimateChain] = await batch([chain, chain]);
-          check(nonceChain); check(estimateChain);
-        }
-        const values = await batch([
-          ...(chainId === 8453 ? [chain] : []),
-          { method: "eth_getTransactionCount", params: [address, "pending"] },
-          { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
-            value: `0x${evmUint(transaction.valueAtomic).toString(16)}` }] },
-          { method: "eth_maxPriorityFeePerGas", params: [] },
-          { method: "eth_getBlockByNumber", params: ["latest", false] },
-        ]);
-        if (chainId === 8453) check(values[0]);
-        const [rawNonce, rawGas, rawPriority, rawHead] = chainId === 8453 ? values.slice(1) : values;
-        const nonce = evmRpcQuantity(rawNonce).toString(), gas = evmRpcQuantity(rawGas), priority = evmRpcQuantity(rawPriority);
-        const head = await blockFrom(rawHead, "latest");
-        const maximum = 2n * evmRpcQuantity(head.raw.baseFeePerGas) + priority;
-        if (maximum === 0n) throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC quoted a zero gas price.");
-        evmUint(maximum.toString(), true);
-        const [noncePostChain, estimatePostChain] = await batch([chain, chain]);
-        check(noncePostChain); check(estimatePostChain);
-        return { nonce, estimated: { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(),
-          maxPriorityFeePerGasAtomic: priority.toString() } };
-      },
-      feeQuote: async (economics) => {
-        const [preChain, rawHead] = await batch([chain, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
-        check(preChain);
-        const head = await blockFrom(rawHead, "latest");
-        const execution = evmUint(economics.maximumGasCostAtomic, true);
-        let l1Fee = 0n, operatorFee = 0n;
-        if (chainId === 130 || chainId === 8453) {
-          const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
-          const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
-          const [rawL1Fee, rawOperatorFee] = await batch([
-            { method: "eth_call", params: [{ to: GAS_ORACLE, data }, head.tag] },
-            { method: "eth_call", params: [{ to: GAS_ORACLE, data: operatorData }, head.tag] },
-          ]);
-          l1Fee = evmRpcWord(rawL1Fee); operatorFee = evmRpcWord(rawOperatorFee);
-        }
-        const total = evmUint((execution + l1Fee + operatorFee).toString(), true);
-        const [rawRecheck, postChain] = await batch([{ method: "eth_getBlockByNumber", params: [head.tag, false] }, chain]);
-        await recheck(rawRecheck, head); check(postChain);
-        return { chainId, l1DataFeeUpperWei: l1Fee.toString(), operatorFeeUpperWei: operatorFee.toString(), maximumExecutionFeeWei: execution.toString(),
-          totalQuoteWei: total.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: head.number,
-          blockHash: head.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
-      },
-    };
+  /** Independent reads in one POST when the transport batches; the chain id joins the first POST of this instance. */
+  private async read(chainId: number, calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> {
+    if (this.verifiedChain !== undefined && this.verifiedChain !== chainId) chainMismatch();
+    const identity = this.verifiedChain === undefined ? [{ method: "eth_chainId", params: [] as const }] : [];
+    const all = [...identity, ...calls];
+    let values: readonly unknown[];
+    if (this.batchCall !== undefined) values = await this.batchCall(all);
+    else {
+      const sequential: unknown[] = [];
+      for (const item of all) sequential.push(await this.call(item.method, item.params));
+      values = sequential;
+    }
+    if (values.length !== all.length) throw new ApnError("APN_RPC_PROTOCOL", "RPC batch result count differs from its request.");
+    if (identity.length === 1) {
+      if (evmRpcQuantity(values[0]) !== BigInt(chainId)) chainMismatch();
+      this.verifiedChain = chainId;
+    }
+    return values.slice(identity.length);
   }
 
   async assertChain(chainId: DirectEvmChainId): Promise<void> {
     directEvmChain(chainId);
-    if (evmRpcQuantity(await this.call("eth_chainId", [])) !== BigInt(chainId)) {
-      throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-    }
+    if (this.verifiedChain === chainId) return;
+    if (this.verifiedChain !== undefined || evmRpcQuantity(await this.call("eth_chainId", [])) !== BigInt(chainId)) chainMismatch();
+    this.verifiedChain = chainId;
   }
 
   async balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot> {
@@ -292,16 +72,12 @@ export class EvmRpc implements EvmRpcPort {
       if (encodedDecimals !== undefined && encodedDecimals !== "0x") observedDecimals = evmDecimals(Number(evmRpcWord(encodedDecimals)));
     }
     const asset = resolveEvmAsset(selection, observedDecimals);
-    await recheckEvmBlock(this.call, block);
-    await this.assertChain(selection.chainId);
     return { address, asset, assetAtomic, nativeAtomic, blockNumberAtomic: block.number, blockHash: block.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
   }
 
   async nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string> {
     await this.assertChain(chainId);
-    const nonce = evmRpcQuantity(await this.call("eth_getTransactionCount", [address, tag])).toString();
-    await this.assertChain(chainId);
-    return nonce;
+    return evmRpcQuantity(await this.call("eth_getTransactionCount", [address, tag])).toString();
   }
 
   async estimate(input: EvmTransactionInput): Promise<FeeEstimate> {
@@ -314,25 +90,22 @@ export class EvmRpc implements EvmRpcPort {
     const maximum = 2n * evmRpcQuantity(block.raw.baseFeePerGas) + priority;
     if (maximum === 0n) throw new ApnError("APN_RPC_PROTOCOL", "The selected RPC quoted a zero gas price.");
     evmUint(maximum.toString(), true);
-    await this.assertChain(input.chainId);
     return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
   }
 
   async feeQuote(chainId: DirectEvmChainId, economics: Economics): Promise<EvmFeeQuote> {
     await this.assertChain(chainId);
     const block = await evmRpcBlock(this.call, "latest");
-    const data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
-    const operatorData = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
+    const data = encodeFunctionData({ abi: OP_STACK_GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [BigInt(this.maximumSignedBytes)] });
+    const operatorData = encodeFunctionData({ abi: OP_STACK_GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [evmUint(economics.gasLimitAtomic, true)] });
     // OP-stack chains add the L1 data fee and operator fee on top of execution; the owner's budget caps the sum.
     const feeModel = directEvmQuoteFeeModel(chainId);
     const [l1Fee, operatorFee] = directEvmNetwork(chainId).feeModel !== "op-stack" ? [0n, 0n] : await Promise.all([
-      this.call("eth_call", [{ to: GAS_ORACLE, data }, block.tag]).then(evmRpcWord),
-      this.call("eth_call", [{ to: GAS_ORACLE, data: operatorData }, block.tag]).then(evmRpcWord),
+      this.call("eth_call", [{ to: OP_STACK_GAS_ORACLE, data }, block.tag]).then(evmRpcWord),
+      this.call("eth_call", [{ to: OP_STACK_GAS_ORACLE, data: operatorData }, block.tag]).then(evmRpcWord),
     ]);
     const execution = evmUint(economics.maximumGasCostAtomic, true);
     const total = evmUint((execution + l1Fee + operatorFee).toString(), true);
-    await recheckEvmBlock(this.call, block);
-    await this.assertChain(chainId);
     return {
       chainId, ...(feeModel === undefined ? {} : { feeModel }), l1DataFeeUpperWei: l1Fee.toString(), operatorFeeUpperWei: operatorFee.toString(),
       maximumExecutionFeeWei: execution.toString(), totalQuoteWei: total.toString(), totalFeeEnforcedOnchain: false,
@@ -341,17 +114,7 @@ export class EvmRpc implements EvmRpcPort {
   }
 
   async receipt(chainId: DirectEvmChainId, transactionHash: Hex): Promise<RpcReceipt | null> {
-    let raw: unknown;
-    if (chainId === 56 && this.batchCall !== undefined) {
-      const [identity, receipt] = await this.batchCall([
-        { method: "eth_chainId", params: [] }, { method: "eth_getTransactionReceipt", params: [transactionHash] },
-      ]);
-      if (evmRpcQuantity(identity) !== 56n) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-      raw = receipt;
-    } else {
-      await this.assertChain(chainId);
-      raw = await this.call("eth_getTransactionReceipt", [transactionHash]);
-    }
+    const [raw] = await this.read(directEvmChain(chainId), [{ method: "eth_getTransactionReceipt", params: [transactionHash] }]);
     if (raw === null) return null;
     const receipt = evmRpcRecord(raw);
     const receiptHash = evmRpcHex(receipt.transactionHash, 32), blockHash = evmRpcHex(receipt.blockHash, 32);
@@ -369,7 +132,6 @@ export class EvmRpc implements EvmRpcPort {
       }
       return { address: evmRpcAddress(log.address), topics: log.topics.map((topic) => evmRpcHex(topic, 32)), data: evmRpcHex(log.data) };
     });
-    await this.assertChain(chainId);
     return {
       transactionHash: receiptHash, status: status === 1n ? "success" : "reverted",
       blockNumberAtomic: blockNumber.toString(), blockHash,
@@ -385,21 +147,18 @@ export class EvmRpc implements EvmRpcPort {
     return await this.call(method, params);
   }
 
+  /** One POST after the receipt: its block, the transaction and, where finality is `safe`, the safe head. */
   async evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence> {
-    await this.assertChain(operation.chainId);
-    const evidence = await observeEvmTransfer(this.call, operation, receipt);
-    await this.assertChain(operation.chainId);
-    return evidence;
+    return await observeEvmTransfer(calls => this.read(directEvmChain(operation.chainId), calls), operation, receipt);
   }
 
   /** A finalized nonce past the frozen one, with no receipt for this hash from the same node, proves another transaction took it. */
   async unlandedEvidence(chainId: DirectEvmChainId, address: Address, transactionHash: Hex): Promise<EvmUnlandedEvidence> {
     if (this.batchCall === undefined) throw new ApnError("APN_RPC_CONFIG", "Unlanded-transfer evidence requires one batched RPC read.");
-    const [identity, nonce, receipt, transaction] = await this.batchCall([
-      { method: "eth_chainId", params: [] }, { method: "eth_getTransactionCount", params: [address, "finalized"] },
+    const [nonce, receipt, transaction] = await this.read(directEvmChain(chainId), [
+      { method: "eth_getTransactionCount", params: [address, "finalized"] },
       { method: "eth_getTransactionReceipt", params: [transactionHash] }, { method: "eth_getTransactionByHash", params: [transactionHash] },
     ]);
-    if (evmRpcQuantity(identity) !== BigInt(directEvmChain(chainId))) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
     if (receipt !== null) evmRpcRecord(receipt);
     if (transaction !== null && evmRpcHex(evmRpcRecord(transaction).hash, 32) !== transactionHash.toLowerCase()) {
       throw new ApnError("APN_RPC_PROTOCOL", "EVM transaction lookup returned a different hash.");
@@ -431,4 +190,8 @@ export class EvmRpc implements EvmRpcPort {
     }
     return null;
   }
+}
+
+function chainMismatch(): never {
+  throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
 }

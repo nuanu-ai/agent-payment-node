@@ -29,8 +29,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly abortSignal?: AbortSignal;
         readonly directGuardState?: StateStore;
     });
-    armBnbDirectRpcGuard(): void;
-    armEvmDirectRpcGuard(): void;
+    /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
+    armEvmDirectRpcGuard(maxPhysicalRequests?: number): void;
     seiNativeBalance(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal: AbortSignal): HttpsBaseRpc;
@@ -42,6 +42,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly chainId: EvmChainId;
         readonly rpcOrigin: string;
     }>;
+    /** Proven once per instance (its IP is pinned); later Base reads in the same invocation do not re-ask. */
     assertBaseChain(): Promise<{
         readonly chainId: 8453;
         readonly rpcOrigin: string;
