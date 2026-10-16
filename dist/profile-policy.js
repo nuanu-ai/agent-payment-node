@@ -113,6 +113,7 @@ export function publicProfilePolicy(profile, policy, chainId) {
         next_actions: [],
     };
 }
+export const REDUCE_EXCESS_ACTION = "Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically.";
 export function fundingPosture(usdcAtomic, ethAtomic, policy) {
     const usdc = parseAtomic(usdcAtomic);
     const eth = parseAtomic(ethAtomic);
@@ -154,7 +155,7 @@ export function fundingPosture(usdcAtomic, ethAtomic, policy) {
         },
         reason: overfunded ? "local_disposable_balance_overfunded" : "local_disposable_balance_within_limit",
         next_actions: overfunded
-            ? ["Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically."]
+            ? [REDUCE_EXCESS_ACTION]
             : [],
     };
 }

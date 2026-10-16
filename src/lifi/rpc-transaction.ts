@@ -21,6 +21,12 @@ export function evmTransactionSignatureScalar(value: unknown): Hex {
   return `0x${value.slice(2).toLowerCase().padStart(64, "0")}` as Hex;
 }
 
+/** Authorization r/s are uint256 QUANTITYs; exact 32-byte DATA stays accepted. The outer signed hash binds their values. */
+function authorizationScalar(value: unknown): Hex {
+  if (typeof value === "string" && value.length === 66) return evmRpcHex(value, 32);
+  return `0x${evmRpcQuantity(value).toString(16).padStart(64, "0")}` as Hex;
+}
+
 export async function verifyRpcTransaction(raw: Record<string, unknown>, chainId: BridgeChainId, hash: Hex, expected?: BridgeEnvelope) {
   const type = evmRpcQuantity(raw.type), nonce = safeNumber(evmRpcQuantity(raw.nonce)), to = evmRpcAddress(raw.to), from = evmRpcAddress(raw.from);
   if (type > 4n || evmRpcHex(raw.hash, 32) !== hash || (raw.chainId !== undefined && evmRpcQuantity(raw.chainId) !== BigInt(chainId))) bridgeFailure("APN_RPC_PROTOCOL", "transaction_chain_or_hash");
@@ -47,7 +53,7 @@ export async function verifyRpcTransaction(raw: Record<string, unknown>, chainId
         const a = evmRpcRecord(value), parity = safeNumber(evmRpcQuantity(a.yParity));
         if (parity !== 0 && parity !== 1) bridgeFailure("APN_RPC_PROTOCOL", "authorization_parity");
         return { chainId: safeNumber(evmRpcQuantity(a.chainId)), address: evmRpcAddress(a.address), nonce: safeNumber(evmRpcQuantity(a.nonce)),
-          r: evmRpcHex(a.r, 32), s: evmRpcHex(a.s, 32), yParity: parity };
+          r: authorizationScalar(a.r), s: authorizationScalar(a.s), yParity: parity };
       }) };
     }
   }

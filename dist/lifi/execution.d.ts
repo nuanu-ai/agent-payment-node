@@ -26,6 +26,12 @@ export declare class BridgeExecution {
     private guard;
     private authorityPolicy;
     private allowlist;
+    /**
+     * A provider rate limit, transport failure or HTTP 408/5xx during a guard is transient: nothing is sealed, signed or sent,
+     * the operation keeps its state with a visible reason, and the next resume repeats the full guard, which ends the
+     * operation on the normal expiry path once late. Deterministic refusals halt the unsent effect as before.
+     */
+    private deferOrHalt;
     private haltUnsent;
     private terminalFailure;
 }

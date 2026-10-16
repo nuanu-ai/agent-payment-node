@@ -15,7 +15,7 @@ apn relay native execute --operation <saved-operation-id> --rpc-url https://main
 apn relay observe --operation <saved-operation-id> --rpc-url https://mainnet.base.org --bnb-rpc-url https://mainnet.megaeth.com/rpc
 ```
 
-For POL, use the buyer recipient and `700000000000000000` minimum. `--bnb-rpc-url` is the retained destination RPC option name; the observer verifies the saved destination chain. The CLI and MCP share the existing native prepare/execute command contracts. Execution requires foreground confirmation.
+For POL, use the buyer recipient and `700000000000000000` minimum. `--bnb-rpc-url` is the retained destination RPC option name; the observer verifies the saved destination chain. These lanes use the same CLI-only `relay native prepare` and `relay native execute` contracts as the BNB native routes; no Relay command is exposed as an MCP tool. Execution requires foreground terminal confirmation.
 
 The quote validator recomputes the official vendored Relay settlement SDK order ID, recovers the pinned solver, and re-encodes the exact native deposit. It rejects extra steps/output calls, changed currencies/recipients, malformed status locators, lower outputs and changed refund rows. The Polygon output's USDC refund row is admitted only for this exact fixed route; final output remains native POL.
 

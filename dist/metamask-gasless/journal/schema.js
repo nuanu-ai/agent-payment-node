@@ -1,6 +1,6 @@
 import { keccak256 } from "viem";
 import { hashObject } from "../../canonical.js";
-import { MM_MIN_REMAINING_MS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
+import { MM_MIN_REMAINING_MS, MM_PROVIDER_STATUSES, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
 import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
 import { mmProtocolPins } from "../single-protocol.js";
@@ -145,7 +145,7 @@ function providerObservation(value, intent, at) {
         return null;
     const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"]);
     if (time(mmIso(p.observedAt)) > time(at) || p.requestIdHash !== mmPrivateHash("request-id", intent.requestId) ||
-        !["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(p.status))
+        !MM_PROVIDER_STATUSES.includes(p.status))
         corrupt();
     if (p.txHash !== null)
         mmHex(p.txHash, 32);
@@ -179,9 +179,12 @@ function observation(value, at) {
     if (time(mmIso(o.observedAt)) > time(at) || !["pending", "unavailable", "invalid", "reorg", "reverted", "success"].includes(o.phase) ||
         typeof o.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, o.reason))
         corrupt();
-    const exactReason = { pending: "mm_gasless_pending", unavailable: "mm_gasless_rpc_unavailable",
+    const exactReason = { pending: "mm_gasless_pending",
         reorg: "mm_gasless_scan_reorg", reverted: "mm_gasless_transaction_reverted", success: "mm_gasless_success" };
-    if (o.phase !== "invalid" && o.reason !== exactReason[o.phase])
+    if (o.phase === "unavailable" && !["mm_gasless_rpc_unavailable", "mm_gasless_rpc_log_range",
+        "mm_gasless_rpc_rate_limited"].includes(o.reason))
+        corrupt();
+    if (o.phase !== "invalid" && o.phase !== "unavailable" && o.reason !== exactReason[o.phase])
         corrupt();
     if (o.phase === "invalid" && !["mm_gasless_evidence_invalid", "mm_gasless_rpc_binding"].includes(o.reason))
         corrupt();

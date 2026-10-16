@@ -99,8 +99,9 @@ test("LI.FI observation phases use independent lazy bounded RPC sessions", async
   assert.equal(resumed.ok, true, resumed.error?.message); assert.ok(s.rpcSessions.length >= 5);
   const resumeSession = s.rpcSessions[0]; assert.ok(resumeSession); assert.equal(s.rpcSessions[1], resumeSession);
   const resumeUnique = [...new Set(s.rpcSessions)]; assert.equal(resumeUnique.length, 4);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14, 16, 2]);
-  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 16, 16, 3]);
+  // Ethereum USDC to Base USDC: derived source cap 14 and destination cap 17 (Base USDC deployment chunks), each with two retry attempts.
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpRequests), [28, 14, 17, 2]);
+  assert.deepEqual(resumeUnique.map((session) => session.telemetry().remainingHttpAttempts), [30, 16, 19, 3]);
   assert.notEqual(resumeSession, approvalSession);
 });
 
@@ -109,8 +110,9 @@ test("LI.FI exhausted invocation budget leaves an effect unsigned for a fresh re
   const s = await lifiFixture(temporary.root); s.source.allowance = s.request.amountAtomic;
   const { id } = await s.prepare();
   s.approval.confirm = async () => {
+    // Leave exactly one POST of the derived invocation cap: too few to sign and still send.
     const budget = s.rpcSessions.at(-1)!.physicalBudget!;
-    (budget as unknown as { posts: number }).posts = 23;
+    (budget as unknown as { posts: number }).posts += budget.remaining() - 1;
     return true;
   };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
@@ -132,7 +134,7 @@ test("LI.FI exhausted send slot preserves one durable seal for a fresh resume", 
   s.custody.seal = async (...args) => {
     const material = await originalSeal(...args);
     const budget = s.rpcSessions.at(-1)!.physicalBudget!;
-    (budget as unknown as { posts: number }).posts = 24;
+    (budget as unknown as { posts: number }).posts += budget.remaining();
     return material;
   };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });

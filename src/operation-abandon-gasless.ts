@@ -7,6 +7,8 @@ import type { GaslessOperationRecord } from "./gasless/operation-model.js";
 import { publicGaslessOperation } from "./gasless/receipt.js";
 import type { GaslessService } from "./gasless/service.js";
 import { transitionGasless } from "./gasless/transitions.js";
+import { mmDispatchIntent } from "./metamask-gasless/dispatch.js";
+import { mmActualGross } from "./metamask-gasless/economics.js";
 import { publicMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
 import { advanceMetaMaskGaslessOperation } from "./metamask-gasless/journal/transitions.js";
 import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
@@ -52,10 +54,13 @@ export async function abandonMetaMaskGasless(d: Base & { readonly metaMaskGasles
     const op = await metaMaskRecord(d, operationId);
     if (op.terminal) return publicMetaMaskGaslessOperation(op);
     assertEligible(d, op.terminal, op.state, op.settlement !== null, op.intent.expiresAt);
-    const i = op.intent;
+    // The amount is the gross of the batch actually dispatched; a fixed-net request also shows the approved ceiling.
+    const i = op.intent, dispatched = mmActualGross(mmDispatchIntent(op).quote);
+    const ceiling = i.request.fixedNet === undefined || i.request.grossAtomic === dispatched ? {} :
+      { budgetCeilingAtomic: i.request.grossAtomic, budgetCeilingDecimal: usdc(i.request.grossAtomic) };
     await d.context.requireOperationAbandonApproval().approve({ operationId, fingerprint: op.fingerprint, profile: i.profile,
-      providerId: "metamask-agent-wallet", walletAddress: i.binding.address, recipient: i.request.recipient, amountAtomic: i.request.grossAtomic,
-      amountDecimal: usdc(i.request.grossAtomic), chainLabel: chainLabel(i.request.chainId), assetLabel: `USDC (${i.token})`, unit: "USDC",
+      providerId: "metamask-agent-wallet", walletAddress: i.binding.address, recipient: i.request.recipient, amountAtomic: dispatched,
+      amountDecimal: usdc(dispatched), ...ceiling, chainLabel: chainLabel(i.request.chainId), assetLabel: `USDC (${i.token})`, unit: "USDC",
       outcomeNote: "Financial outcome: UNKNOWN. MetaMask may still relay this transfer; its delegation has no on-chain expiry." });
     const next = advanceMetaMaskGaslessOperation(op, { state: "abandoned_unknown", failure: mmFailure("mm_gasless_owner_abandoned") },
       d.context.clock.now().toISOString());

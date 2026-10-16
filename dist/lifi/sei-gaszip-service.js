@@ -20,6 +20,7 @@ import { BridgeHttps } from "./https.js";
 import { SEI_FUNDING, inspectSeiDelivery, inspectSeiFundingQuote, seiFail, seiHash, seiJson, seiUint } from "./sei-gaszip-contract.js";
 import { SeiFundingJournal, publicSeiFunding, sealSeiFunding } from "./sei-gaszip-journal.js";
 import { SeiFundingRpc, assertSeiFundingFresh, readSeiFundingPlan, proveSeiDelivery, proveSeiSource } from "./sei-gaszip-rpc.js";
+import { gaszipObservationRefusal } from "./gaszip-native-delivery.js";
 const ORIGIN = "https://backend.gas.zip";
 /** Strictly Base-native to Sei-native, self recipient; adapters cannot supply authoritative receipts in place of RPC reads. */
 export class SeiFundingService {
@@ -234,26 +235,33 @@ export class SeiFundingService {
         }
         if (r.transactionHash === null)
             return publicSeiFunding(r);
-        const source = await proveSeiSource(this.rpc("source"), r);
-        if (source === null)
-            return publicSeiFunding(r);
-        if (source.actualFee === null || BigInt(source.actualFee) > BigInt(r.maximumFeeAtomic))
-            seiFail("source_actual_fee_cap");
-        let destination = null, claimHash = null;
-        if (source.status === "success") {
-            const response = await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`, "GET", null, 256 * 1024, "APN_HTTP_CONFIG");
-            if (response.status !== 200)
-                seiFail("status_http");
-            const d = inspectSeiDelivery(seiJson(response.body), r.transactionHash, r.owner.address, r.amountAtomic, source.blockNumber);
-            if (d === null)
+        let phase = "source_proof", source = null, destination = null, claimHash = null;
+        try {
+            source = await proveSeiSource(this.rpc("source"), r);
+            if (source === null)
                 return publicSeiFunding(r);
-            const proof = await proveSeiDelivery(this.rpc("destination"), r.owner.address, d);
-            if (proof === null)
-                return publicSeiFunding(r);
-            if (BigInt(proof.amount) < BigInt(r.minimumOutputAtomic))
-                seiFail("delivery_owner_floor");
-            destination = { ...proof, providerDigest: d.providerDigest };
-            claimHash = d.hash;
+            if (source.actualFee === null || BigInt(source.actualFee) > BigInt(r.maximumFeeAtomic))
+                seiFail("source_actual_fee_cap");
+            if (source.status === "success") {
+                phase = "provider_correlation";
+                const response = await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`, "GET", null, 256 * 1024, "APN_HTTP_CONFIG");
+                if (response.status !== 200)
+                    seiFail("status_http");
+                const d = inspectSeiDelivery(seiJson(response.body), r.transactionHash, r.owner.address, r.amountAtomic, source.blockNumber);
+                if (d === null)
+                    return publicSeiFunding(r);
+                phase = "destination_proof";
+                const proof = await proveSeiDelivery(this.rpc("destination"), r.owner.address, d);
+                if (proof === null)
+                    return publicSeiFunding(r);
+                if (BigInt(proof.amount) < BigInt(r.minimumOutputAtomic))
+                    seiFail("delivery_owner_floor");
+                destination = { ...proof, providerDigest: d.providerDigest };
+                claimHash = d.hash;
+            }
+        }
+        catch (error) {
+            return gaszipObservationRefusal(error, id, phase, "apn sei funding status");
         }
         r = await this.state.withLocks([...this.locks(r), "sei-gaszip:destination-claims"], async () => {
             const saved = await this.required(id);

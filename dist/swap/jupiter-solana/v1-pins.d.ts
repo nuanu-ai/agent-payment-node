@@ -58,3 +58,20 @@ export declare const JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS: readonly (Reado
     loader: "NativeLoader1111111111111111111111111111111";
     payloadHash: "c94b792a6d8b25d3e53ea94d8b80111735ed80d6a7dc8deb937cd342707f5f03";
 }>)[];
+/**
+ * Whirlpool upgraded at slot 457152296 (2026-10-15 07:22:05 UTC, Squads vault GwH3Hiv5…, transaction 2Z156jvt…).
+ * Two mainnet origins returned identical ProgramData bytes. Runtime bytes only, not a source-build attestation.
+ * The JUP6 and Token entries are the registered 099da3 snapshot; only the shared Whirlpool executable pin changes.
+ */
+export declare const JUPITER_V1_WHIRLPOOL_C422B2_PAYLOAD_HASH = "c422b22f3eefe86dd55878a4f505b9c68c26e241dc96af1573ca032b24b8ee3f";
+export declare const JUPITER_V1_WHIRLPOOL_C422B2_PROGRAM_DATA_HASH = "a49ebc534880f4aaf525b5fd1504aed6223928bdbbea6c83d40473eb17abd04e";
+export declare const JUPITER_V1_RUNTIME_099DA3_WHIRLPOOL_C422B2_PROGRAM_PINS: readonly JupiterV1RegisteredProgramPin[];
+/** Separate owner admissions: 099da3-generation policies name the previous Whirlpool bytes and cannot authorize these. */
+export declare const JUPITER_V1_WHIRLPOOL_RUNTIME_C422B2_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_RUNTIME_C422B2_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+export declare const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+export declare const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
+export declare const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_MECHANISM_PIN: Readonly<import("../pin.js").SwapMechanismPin>;
+export declare const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;

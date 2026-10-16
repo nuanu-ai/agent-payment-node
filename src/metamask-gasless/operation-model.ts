@@ -9,6 +9,13 @@ export const MM_OPERATION_KIND = "metamask_gasless_transfer" as const;
 export const MM_RECEIPT_VERSION = "apn.metamask-gasless-receipt.v1" as const;
 export const MM_TERMINAL: readonly MetaMaskGaslessState[] = ["completed", "failed_before_effect", "abandoned_unknown"];
 export const MM_HISTORY_LIMIT = 96;
+/**
+ * Nonterminal transitions stop one short of the limit, so the final slot is always free for the one terminal
+ * transition an operation can ever take (a proved completion or the owner's abandonment).
+ */
+export const MM_NONTERMINAL_HISTORY_LIMIT = MM_HISTORY_LIMIT - 1;
+/** A journal an earlier release filled to the old limit with nonterminal transitions may still take its terminal one. */
+export const MM_TERMINAL_HISTORY_LIMIT = MM_HISTORY_LIMIT + 1;
 export const MM_FILE_LIMIT = 1024 * 1024;
 export const MM_DISPATCH_RESERVE_TRANSITIONS = 8;
 export const MM_DISPATCH_RESERVE_BYTES = 64 * 1024;

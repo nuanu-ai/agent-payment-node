@@ -10,6 +10,9 @@ export interface OperationAbandonIntent {
   readonly recipient: string;
   readonly amountAtomic: string;
   readonly amountDecimal: string;
+  /** The owner's approved maximum when it differs from the amount actually dispatched. */
+  readonly budgetCeilingAtomic?: string;
+  readonly budgetCeilingDecimal?: string;
   readonly chainLabel: string;
   readonly assetLabel: string;
   readonly unit: string;
@@ -35,6 +38,8 @@ export class TtyOperationAbandonApproval implements OperationAbandonApprovalPort
       `Sender: ${intent.walletAddress}`,
       `Recipient: ${intent.recipient}`,
       `Amount: ${intent.amountDecimal} ${intent.unit} (${intent.amountAtomic} atomic)`,
+      ...(intent.budgetCeilingAtomic === undefined ? [] :
+        [`Approved ceiling: ${intent.budgetCeilingDecimal} ${intent.unit} (${intent.budgetCeilingAtomic} atomic)`]),
       intent.outcomeNote,
       "This administrative action does not prove success, failure, cancellation, refund or no effect.",
       "The original operation will never be submitted again; a new operation has independent risk.",

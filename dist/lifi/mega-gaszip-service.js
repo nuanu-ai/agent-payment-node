@@ -20,6 +20,7 @@ import { BridgeHttps } from "./https.js";
 import { MEGA_FUNDING, inspectMegaDelivery, inspectMegaFundingQuote, megaFail, megaHash, megaJson, megaUint } from "./mega-gaszip-contract.js";
 import { MegaFundingJournal, publicMegaFunding, sealMegaFunding } from "./mega-gaszip-journal.js";
 import { MegaFundingRpc, assertMegaFundingFresh, readMegaFundingPlan, proveMegaDelivery, proveMegaSource } from "./mega-gaszip-rpc.js";
+import { gaszipObservationRefusal } from "./gaszip-native-delivery.js";
 const ORIGIN = "https://backend.gas.zip";
 /** Strictly Base-native to Mega-native, self recipient; adapters cannot supply authoritative receipts in place of RPC reads. */
 export class MegaFundingService {
@@ -233,26 +234,33 @@ export class MegaFundingService {
         }
         if (r.transactionHash === null)
             return publicMegaFunding(r);
-        const source = await proveMegaSource(this.rpc("source"), r);
-        if (source === null)
-            return publicMegaFunding(r);
-        if (source.actualFee === null || BigInt(source.actualFee) > BigInt(r.maximumFeeAtomic))
-            megaFail("source_actual_fee_cap");
-        let destination = null, claimHash = null;
-        if (source.status === "success") {
-            const response = await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`, "GET", null, 256 * 1024, "APN_HTTP_CONFIG");
-            if (response.status !== 200)
-                megaFail("status_http");
-            const d = inspectMegaDelivery(megaJson(response.body), r.transactionHash, r.owner.address, r.amountAtomic, source.blockNumber);
-            if (d === null)
+        let phase = "source_proof", source = null, destination = null, claimHash = null;
+        try {
+            source = await proveMegaSource(this.rpc("source"), r);
+            if (source === null)
                 return publicMegaFunding(r);
-            const proof = await proveMegaDelivery(this.rpc("destination"), r.owner.address, d);
-            if (proof === null)
-                return publicMegaFunding(r);
-            if (BigInt(proof.amount) < BigInt(r.minimumOutputAtomic))
-                megaFail("delivery_owner_floor");
-            destination = { ...proof, providerDigest: d.providerDigest };
-            claimHash = d.hash;
+            if (source.actualFee === null || BigInt(source.actualFee) > BigInt(r.maximumFeeAtomic))
+                megaFail("source_actual_fee_cap");
+            if (source.status === "success") {
+                phase = "provider_correlation";
+                const response = await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`, "GET", null, 256 * 1024, "APN_HTTP_CONFIG");
+                if (response.status !== 200)
+                    megaFail("status_http");
+                const d = inspectMegaDelivery(megaJson(response.body), r.transactionHash, r.owner.address, r.amountAtomic, source.blockNumber);
+                if (d === null)
+                    return publicMegaFunding(r);
+                phase = "destination_proof";
+                const proof = await proveMegaDelivery(this.rpc("destination"), r.owner.address, d);
+                if (proof === null)
+                    return publicMegaFunding(r);
+                if (BigInt(proof.amount) < BigInt(r.minimumOutputAtomic))
+                    megaFail("delivery_owner_floor");
+                destination = { ...proof, providerDigest: d.providerDigest };
+                claimHash = d.hash;
+            }
+        }
+        catch (error) {
+            return gaszipObservationRefusal(error, id, phase, "apn mega funding status");
         }
         r = await this.state.withLocks([...this.locks(r), "mega-gaszip:destination-claims"], async () => {
             const saved = await this.required(id);

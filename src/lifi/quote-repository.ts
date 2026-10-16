@@ -3,7 +3,7 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import type { BridgeOwner, BridgeProviderBinding, BridgeRouteRequest } from "./model.js";
 import { parseBridgeRoutes, type BridgeRouteChoice } from "./routes.js";
 import { ownerSchema, providerBindingSchema } from "./schema.js";
-import { validateBridgeRequest } from "./asset-registry.js";
+import { bridgeExecutionSource, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeExact, bridgeFailure, bridgeHash, bridgeIso, bridgeSame } from "./validation.js";
 
 export interface BridgeQuoteSnapshot {
@@ -26,11 +26,22 @@ export function validateBridgeQuote(value: unknown): BridgeQuoteSnapshot {
   validateBridgeRequest(quote.request, "APN_STATE_CORRUPT");
   if (snapshotHash !== hashObject(body) || quote.responseHash !== sha256(quote.rawResponse) || quote.requestHash !== hashObject(quote.request) ||
     quote.profileHash !== quote.owner.profileHash || quote.profileHash !== sha256(`profile\0${quote.owner.profile}`)) bridgeFailure("APN_STATE_CORRUPT", "bridge_quote_binding");
+  let routes: readonly BridgeRouteChoice[];
   try {
-    const routes = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).map((r) => r.choice);
-    if (!bridgeSame(routes, quote.routes)) bridgeFailure("APN_STATE_CORRUPT", "bridge_quote_routes");
+    routes = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).map((r) => r.choice);
   } catch { bridgeFailure("APN_STATE_CORRUPT", "bridge_quote_route_binding"); }
+  if (!bridgeSame(routes, quote.routes)) {
+    if (sourceGateOnlyDrift(quote.request, routes, quote.routes)) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "source_execution_unreviewed");
+    bridgeFailure("APN_STATE_CORRUPT", "bridge_quote_route_binding");
+  }
   return quote;
+}
+/** A quote saved before discovery gated the source chain differs from today's parse only by that gate. It is refused,
+ * never admitted; any other difference remains state corruption. */
+function sourceGateOnlyDrift(request: BridgeRouteRequest, current: readonly BridgeRouteChoice[], stored: unknown): boolean {
+  return !bridgeExecutionSource(request.fromChainId) && Array.isArray(stored) && stored.length === current.length &&
+    current.every((route, i) => bridgeSame(route.unavailableReason === "source_execution_unreviewed"
+      ? { ...route, preparable: true, unavailableReason: null } : route, stored[i]));
 }
 export class BridgeQuoteRepository extends SecureStateStore {
   async save(quote: BridgeQuoteSnapshot): Promise<void> {

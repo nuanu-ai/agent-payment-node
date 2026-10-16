@@ -487,6 +487,11 @@ and its existing production session. The current selected wallet must resolve
 to that same address. This path does not create a wallet, change selection,
 refresh a login or complete provider MFA. If the session is unavailable,
 complete the normal provider login separately and continue the saved operation.
+Observing a dispatched operation never needs the session. While an unresolved
+operation holds the profile, wallet connect for that profile waits for it, so a
+prepare refused for a missing session names that operation instead: inspect it
+with `apn operation status`, and release an outcome still unknown after its
+approval window with `apn operation abandon` before connecting again.
 
 | Network | Chain ID | Required RPC environment | Finality |
 | --- | --- | --- | --- |
@@ -504,6 +509,20 @@ public HTTPS RPC must provide canonical block-hash state reads, the listed
 finality tag, complete transaction/receipt membership and bounded log queries.
 APN checks protocol and USDC implementation code at preparation and settlement.
 Unichain and Avalanche belong to the local-wallet path above.
+
+After dispatch, each resume first reads the delegation's one-use counter
+(`LimitedCallsEnforcer.callCounts` for the pinned DelegationManager) and the
+enforcer code at the finality block, pinned by block hash. The counter only
+ever rises, and only inside a successful redemption of this exact delegation,
+so a count of 0 proves that no redemption exists up to that block: APN moves
+its scan cursor there without any `eth_getLogs` request. Only once the count
+is 1 does APN search the logs, in windows of at most 2000 blocks from the
+cursor and at most eight `eth_getLogs` requests per resume. A window the RPC
+refuses as too wide, or rate-limits, is halved and asked again, down to 62
+blocks. A refusal at that width ends the resume as
+`mm_gasless_rpc_log_range` or `mm_gasless_rpc_rate_limited`; a transport
+failure is `mm_gasless_rpc_unavailable`. In every case the blocks already
+proved in that resume stay proved, and the next resume continues from there.
 
 For MetaMask, `--amount` is the exact successful sender debit `G`. APN quotes the
 provider's USDC fee `F` and recipient amount `N`, requiring `G = N + F`,
@@ -611,6 +630,17 @@ provider policy changes. The saved operation stays guarded while confirmation
 is pending; neither another CLI approval nor resume sends a second request.
 Provider metadata, approval links and signatures are discarded from public output.
 
+If MetaMask then closes that request as `DENIED` or `EXPIRED`, the operation
+reports `mm_gasless_provider_mfa_rejected`: by MetaMask's job order the request
+closed at the MFA step, before signing. That is the provider's word, not proof
+that no signature exists, so the operation stays guarded until a proved
+completion or owner abandonment. A `FAILED` or `BROADCAST_FAILED` request, or a
+`DENIED` or `EXPIRED` one that never reported MFA, stays
+`mm_gasless_provider_failed`. Once MetaMask reports a closed status, a later
+failed provider read, such as an expired session, keeps that status and reason
+instead of replacing it with `mm_gasless_provider_unavailable` or
+`mm_gasless_session_unavailable`.
+
 Continue with `apn operation resume --operation <operation-id>`, without
 `--wait-seconds`, including after the APN deadline. A provider status or hash
 is only a hint. Completion requires the independently authenticated transaction,
@@ -618,18 +648,37 @@ canonical receipt and finality, exact two-call batch, consumed permission,
 USDC delivery/fee/debit and outer gas payer. A temporarily unusable clock or
 full history preserves the saved guard and cannot authorize another dispatch.
 
+A resume whose result differs from the saved one only in when it was read
+writes nothing. The operation history holds 96 transitions and keeps the last
+one for the terminal transition, so a long-unresolved operation can always
+still complete or be abandoned. Once only that slot is left, resume keeps
+observing: a proved completion is saved, and any other result is reported as
+`transient_observation` with a `mm_gasless_record_capacity` warning instead of
+being saved. A history that an earlier release filled to 96 nonterminal
+transitions still loads and still takes its one terminal transition.
+
 `operation status` and `receipt get` use saved evidence without network access;
 they may repair local operation or receipt records after an interrupted write. Public output
 contains hashed provider identities and accounting, without the private
 request UUID, session token, unsigned wire or provider response. Unresolved
 operations block competing payments and wallet lifecycle changes for the profile.
+A new MetaMask Agent gasless transfer also waits for unresolved operations of
+every other APN profile bound to the same server-wallet address on that chain:
+once the account carries the pinned designation, an earlier signed delegation
+could be redeemed, so the account is held, not just the profile.
 
 ### MetaMask owner abandonment
 
 A MetaMask Agent transfer whose outcome is still unknown after its approval window
 can be released with `apn operation abandon --operation <operation-id>` after the
 exact acknowledgement. APN records `abandoned_unknown`; MetaMask may still relay the
-transfer later because its delegation has no on-chain expiry.
+transfer later because its delegation has no on-chain expiry. The confirmation
+screen shows the gross of the batch actually dispatched; for a fixed-net transfer
+it also shows the approved ceiling beside it.
+
+When an observation went through `--observation-rpc-env`, the next action of the
+still unresolved operation repeats that option. Receipts written before this
+option appeared in next actions remain valid.
 
 ## MetaMask Smart Account
 

@@ -1,3 +1,5 @@
+import { evmAccountProfileHashes } from "../evm-account-aliases.js";
+import { evmAddressLock } from "../evm-address-ownership.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
@@ -37,37 +39,43 @@ export class MetaMaskGaslessPreparation {
             clock.check();
             const owner = await metaMaskGaslessOwner(state, profile);
             clock.check();
-            await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, owner.address);
-            if ([MM_ZERO_ADDRESS, owner.address, row.token, ...Object.values(row.protocol).map(p => p.address)].includes(request.recipient)) {
-                mmFail("mm_gasless_input");
-            }
-            const rpc = this.o.rpcFor(request.chainId);
-            if (rpc.chainId !== request.chainId)
-                mmFail("mm_gasless_rpc_binding");
-            return await state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
-                clock.check();
-                const binding = await this.o.provider.inspect(owner);
-                clock.check();
-                mmAssertProfileBinding(binding, owner);
-                const quote = await metaMaskGaslessQuote(this.o.provider, binding, request, rpc.rpcUrl, clock);
-                clock.check();
-                const unsignedInput = { owner: binding.address, chainId: request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) };
-                const unsigned = await this.o.provider.buildUnsigned(unsignedInput);
-                clock.check();
-                const checkedUnsigned = mmValidateUnsigned(unsigned, unsignedInput);
-                const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: checkedUnsigned.delegationHash,
-                    grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
-                clock.check(undefined, [snapshot.observedAt]);
-                const initialSnapshot = validateMetaMaskGaslessSnapshot(snapshot, { chainId: request.chainId,
-                    endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
-                const prepared = clock.fresh(initialSnapshot.observedAt), preparedAt = new Date(prepared).toISOString();
-                const intent = { profile, request, binding, ...checkedUnsigned, token: row.token, decimals: 6,
-                    deploymentEvidenceHash, initialSnapshot, ...(request.fixedNet ? { preparedGrossAtomic: mmActualGross(quote) } : {}), quote, requestId: mmUuid(this.o.ids.next()), preparedAt,
-                    expiresAt: new Date(prepared + MM_TTL_MS).toISOString(), policyHash: mmPolicyHash(profileHash, binding, request) };
-                const operation = newMetaMaskGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);
-                clock.check(operation);
-                await this.o.records.persist(operation);
-                return operation;
+            // The server wallet may be bound to several profiles. Its delegation is redeemable by anyone once the account
+            // carries the pinned designation, so an unresolved operation of any of them holds the account on that chain.
+            return await state.withLocks([evmAddressLock(owner.address)], async () => {
+                for (const hash of await evmAccountProfileHashes(state, owner.address, profileHash)) {
+                    await this.o.operations.assertEvmAccountAvailable(hash, request.chainId, owner.address);
+                }
+                if ([MM_ZERO_ADDRESS, owner.address, row.token, ...Object.values(row.protocol).map(p => p.address)].includes(request.recipient)) {
+                    mmFail("mm_gasless_input");
+                }
+                const rpc = this.o.rpcFor(request.chainId);
+                if (rpc.chainId !== request.chainId)
+                    mmFail("mm_gasless_rpc_binding");
+                return await state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
+                    clock.check();
+                    const binding = await this.o.provider.inspect(owner);
+                    clock.check();
+                    mmAssertProfileBinding(binding, owner);
+                    const quote = await metaMaskGaslessQuote(this.o.provider, binding, request, rpc.rpcUrl, clock);
+                    clock.check();
+                    const unsignedInput = { owner: binding.address, chainId: request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) };
+                    const unsigned = await this.o.provider.buildUnsigned(unsignedInput);
+                    clock.check();
+                    const checkedUnsigned = mmValidateUnsigned(unsigned, unsignedInput);
+                    const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: checkedUnsigned.delegationHash,
+                        grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
+                    clock.check(undefined, [snapshot.observedAt]);
+                    const initialSnapshot = validateMetaMaskGaslessSnapshot(snapshot, { chainId: request.chainId,
+                        endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
+                    const prepared = clock.fresh(initialSnapshot.observedAt), preparedAt = new Date(prepared).toISOString();
+                    const intent = { profile, request, binding, ...checkedUnsigned, token: row.token, decimals: 6,
+                        deploymentEvidenceHash, initialSnapshot, ...(request.fixedNet ? { preparedGrossAtomic: mmActualGross(quote) } : {}), quote, requestId: mmUuid(this.o.ids.next()), preparedAt,
+                        expiresAt: new Date(prepared + MM_TTL_MS).toISOString(), policyHash: mmPolicyHash(profileHash, binding, request) };
+                    const operation = newMetaMaskGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);
+                    clock.check(operation);
+                    await this.o.records.persist(operation);
+                    return operation;
+                });
             });
         });
     }

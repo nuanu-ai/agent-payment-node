@@ -6,6 +6,7 @@ import type { BridgeChainId } from "./chains.js";
 import type { BridgeBlock } from "./model.js";
 import { isArchiveRead } from "./rpc-archive.js";
 import { approvedTransportReason, MAX_READ_ATTEMPTS, RpcHttpFailure, RPC_RETRY_DELAY_MS } from "./rpc-session.js";
+import { jsonRpcRateLimit } from "./rpc-session-helpers.js";
 import { bridgeFailure } from "./validation.js";
 
 export const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "debug_traceTransaction", "eth_sendRawTransaction"]);
@@ -130,6 +131,8 @@ export function decodeAtomicBatchResponse(response: unknown, requests: readonly 
   const byId = new Map<string, unknown>();
   for (const candidate of response) {
     const row = evmRpcRecord(candidate);
+    if (jsonRpcRateLimit(row.error)) throw new ApnError("APN_RPC_RATE_LIMITED", "Bridge RPC provider requested a cooldown.",
+      { rpcMethod: "eth_getTransactionReceipt", reason: "json_rpc_rate_limit" });
     if (row.jsonrpc !== "2.0" || typeof row.id !== "string" || byId.has(row.id) || Object.hasOwn(row, "error") || !Object.hasOwn(row, "result")) {
       bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: "eth_getTransactionReceipt" });
     }

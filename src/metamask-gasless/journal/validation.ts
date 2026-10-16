@@ -1,6 +1,6 @@
 import { hashObject, sha256 } from "../../canonical.js";
 import { mmImmutable, mmMutable, MM_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_TERMINAL,
-  mmRequestHash, type MetaMaskGaslessOperationRecord, type MetaMaskGaslessTransition } from "../operation-model.js";
+  MM_TERMINAL_HISTORY_LIMIT, mmRequestHash, type MetaMaskGaslessOperationRecord, type MetaMaskGaslessTransition } from "../operation-model.js";
 import type { MetaMaskGaslessMutable, MetaMaskGaslessState } from "../model.js";
 import { MM_ZERO_HASH } from "../model.js";
 import { mmFail } from "../reasons.js";
@@ -96,7 +96,7 @@ function validate(value: unknown): MetaMaskGaslessOperationRecord {
   if (fingerprint !== hashObject(mmImmutable(immutable))) corrupt();
   const expectedRequestHash = mmRequestHash(profileHash, intent);
   if (requestHash !== expectedRequestHash || !Array.isArray(r.transitions) || r.transitions.length < 1 ||
-    r.transitions.length > MM_HISTORY_LIMIT) corrupt();
+    r.transitions.length > MM_TERMINAL_HISTORY_LIMIT) corrupt();
   const transitions: MetaMaskGaslessTransition[] = [];
   for (const raw of r.transitions) {
     const current = transition(raw, intent, fingerprint), prior = transitions.at(-1);
@@ -118,6 +118,8 @@ function validate(value: unknown): MetaMaskGaslessOperationRecord {
     transitions.push(current);
   }
   const last = transitions.at(-1)!;
+  // Only a terminal transition may follow a journal that an earlier release filled to the old limit.
+  if (transitions.length > MM_HISTORY_LIMIT && !MM_TERMINAL.includes(last.state)) corrupt();
   const currentMutable = mmJournalMutable(mutable(r), intent, fingerprint, updatedAt);
   if (last.at !== updatedAt || !mmSame(mmMutable(last), currentMutable) ||
     r.terminal !== MM_TERMINAL.includes(currentMutable.state)) corrupt();
