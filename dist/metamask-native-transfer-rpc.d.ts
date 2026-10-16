@@ -36,7 +36,8 @@ export declare function prepareMetaMaskNativeQuote(input: MetaMaskNativeQuoteInp
 export declare function prepareWithRpc(rpc: EvmRpc, input: MetaMaskNativeQuoteInput): Promise<MetaMaskNativeFeeQuote>;
 export declare function observeMetaMaskNativeTransfer(quote: MetaMaskNativeFeeQuote, transactionHash: Hex): Promise<MetaMaskNativeObservation>;
 /**
- * One observation of the stored hash on one endpoint (P2): the chain id once, the receipt once, the receipt's block by
+ * One observation of the stored hash on one endpoint of the quote's chain (any endpoint: its eth_chainId binds it, and
+ * its origin is recorded as provenance only). P2: the chain id once, the receipt once, the receipt's block by
  * number, the finality head and the transaction once. The receipt's block hash binds everything read with it; nothing
  * is re-read around it, and the quote's own block is not re-proven (it says nothing about the transfer). OP-stack
  * only: the operator fee is read at the receipt block, a history read that a non-archive node serves for recent blocks;
