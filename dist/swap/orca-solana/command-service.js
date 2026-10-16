@@ -3,7 +3,7 @@ import { isPlainRecord } from "../../canonical.js";
 import { swapMechanismDigest } from "../pin.js";
 import { SwapOperationRepository } from "../repository.js";
 import { orcaStableInventory } from "./stable-readonly.js";
-import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_POOL_FEE_RATE, ORCA_POOL_TICK_SPACING, ORCA_PROGRAM_PINS, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_SOLANA_CHAIN, ORCA_USDC_VAULT, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
+import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, isOrcaKeylessMechanismDigest, ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_POOL_FEE_RATE, ORCA_POOL_TICK_SPACING, ORCA_PROGRAM_PINS, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_SOLANA_CHAIN, ORCA_USDC_VAULT, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
 /** Inventory is the owner's source for the keyless pin and digest; nothing here admits or signs anything. */
 export function orcaInventory(runtimeInstalled) {
     return { chain: ORCA_SOLANA_CHAIN, admitted: false, execution: runtimeInstalled ? "foreground_cli_after_owner_admission" : "dormant",
@@ -69,7 +69,8 @@ export async function executeOrcaCommand(request, context) {
         const operation = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
         if (operation === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
-        if (operation.mechanismDigest !== swapMechanismDigest(ORCA_KEYLESS_MECHANISM_PIN))
+        // Any registered generation stays readable; the runtime admits only the current registry for approval or signing.
+        if (!isOrcaKeylessMechanismDigest(operation.mechanismDigest))
             throw new ApnError("APN_OPERATION_BLOCKED", "This operation is outside the native SOL to USDC Orca runtime.", { reason: "orca_mechanism_mismatch" });
     }
     if (request.command === "swap.orca.status" && runtime === undefined) {

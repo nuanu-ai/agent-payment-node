@@ -351,3 +351,52 @@ Immutable evidence anchors:
 - Canonical receipt decoded summary, workspace-root path `reports/apn-all-remaining-2026-10-07/integration/resumed-closure-20261008/parallel-closeout-20261009/source26-normal-finalized-receipt-one-public-readonly-post-20261011/decoded-summary.json`, SHA-256 `2236f96e0da90383459187dc05b5a07536d69718ec5e70d5c95f40fcc566b7fd`; raw response body SHA-256 `6f42261bf9ca0c32f515088c74168e407437db669403601e39f34d9fb3b30045`; packet manifest `SHA256SUMS.txt` SHA-256 `d699544e221f033b541fe0305060d4e95d6958ec6dd20b7e31eea4a99508edbf`.
 
 The original Quantum V2 obligations remain route-specific and open. This generic-row closure does not change them.
+
+## Whirlpool c422b2 registrations, 16 October 2026
+
+Orca upgraded the Whirlpool program at slot 457152296 (2026-10-15 07:22:05
+UTC, Squads vault `GwH3Hiv5…Rx4PV`, transaction `2Z156jvt…kHNwzGT`). All eight
+preceding registrations share the Whirlpool executable pin `610b1e39…c350f9ae`,
+so every finite lane refused at the resolver's runtime executable pin from then
+on. The four historical lanes were already unusable on mainnet: their JUP6
+pin `899161c0…e321850f` predates the 8 October JUP6 upgrade.
+
+This change adds a ninth to twelfth registration, one per reviewed pool. Each
+binds the registered JUP6 snapshot (`099da3a2…a8a79a5f`, ProgramData
+`3bd95cf0…40dbc517`), the unchanged Token pin, and the new Whirlpool payload
+SHA256 `c422b22f3eefe86dd55878a4f505b9c68c26e241dc96af1573ca032b24b8ee3f`
+with complete ProgramData SHA256
+`a49ebc534880f4aaf525b5fd1504aed6223928bdbbea6c83d40473eb17abd04e`. Two
+mainnet origins returned identical 10,485,760-byte accounts; see
+`tests/fixtures/whirlpool-runtime-c422b2/README.md`.
+
+| Route | Mechanism digest | Registry digest |
+| --- | --- | --- |
+| `whirlpool-v1-83-sol-usdc-runtime-c422b2` | `4c46bcfd9d2e24985efca7cfe73e174cd0b36e8054daf0499a99f590bb94ee7e` | `330d187eee7db765183befcc319fda3075f8306093d890c84369210fe66851f8` |
+| `whirlpool-v1-fp-sol-usdc-runtime-c422b2` | `1f321322bc0d384f6cad129b17e01c196087a371d7668ec6071578675c131ec5` | `440a4b7a38235c1f66a9eab49cbb4fc3420238bbc71e2220921ab7c72104bdb1` |
+| `whirlpool-swap-v2-esv-sol-usdc-runtime-c422b2` | `30a73ea0637238081aeb70f29a538d196b03697163883ef04be502a51b5bacd5` | `6f0a7b4580be24ad0fa18e99d9388f0be67c0724fca850194f5ec98a27d0b3e9` |
+| `whirlpool-swap-v2-4h-sol-usdc-runtime-c422b2` | `7cd3351d54a1d8ee3517269613fcbd56b10aebc5adfcbdd002f2dc588196099f` | `779bafe47c78d319e211d3e4053075faac81a414918d067ea7d7e6a1487add3c` |
+
+All eight preceding mechanism and registry digests, their route order and the
+default historical quote selection are unchanged. No pool identity, enum 17 or
+47 instruction, account role, Memo requirement, Token pin, CPI or decoder
+contract changes. Both active asset rows must admit the same new mechanism;
+a 099da3 admission cannot select these bytes, and a mixed admission refuses.
+
+Saved material still selects its generation from registered executable
+identities. One JUP6 snapshot is now shared by two generations per pool, so
+when the pool and JUP6 pin match more than one registration, every registered
+executable pin, Whirlpool included, must match exactly once. Materials with a
+single candidate select exactly as before, so all existing operations and
+historical material keep their dispatch.
+
+This is registered support under the existing `runtime_bytes_only` contract.
+No reproducible source build is claimed; the source review of the five Orca
+commits between the two deployments is in [Orca](orca.md#whirlpool-upgrade-re-pin-16-october-2026).
+The synthetic mixed-slot vectors in this change are not a live simulation or
+paid proof. No live Jupiter quote was run: the canonical quote path requires an
+activated owner admission, and a diagnostic around it would be new tooling.
+The Orca keyless quote did simulate the same Whirlpool bytes on mainnet. Each
+lane still requires a fresh normal quote, complete program and account reads,
+exact-message simulation, exact active owner admission and genuine foreground
+approval before a single send.

@@ -97,14 +97,20 @@ accounts, a fixed tick-array layout and a stable vanity program id.
 | SPL Token (upgradeable loader, no upgrade authority) | `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`, programdata `3gvYRKWyXRR9xKWe1ZjPhLY5ZJRN7KDB4rFZFGoJfFk2` |
 | Associated Token (BPFLoader2, immutable) | `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` |
 
-Program bytes are verified at quote time and again before signing, in one
-`getMultipleAccounts` read each:
+Program bytes are verified at quote time and again before signing: one
+`getMultipleAccounts` read for the program accounts and seven 1,500,000-byte
+`dataSlice` reads for the Whirlpool programdata:
 
-- Whirlpool: the program account must point at the pinned programdata, and
-  the SHA-256 of the programdata's 45-byte header (deployment slot 440170207,
+- Whirlpool: the program account must point at the pinned programdata. The
+  SHA-256 of the programdata's 45-byte header (deployment slot 457152296,
   upgrade authority `GwH3Hiv5mACLX3ufTw1pFsrhSPon5tdw252DBs4Rx4PV`) must be
-  `88fc1d0d…4ee1814`. Any upgrade rewrites that slot. The full 10 MiB
-  programdata hashed to `b5ee20ce…58048fa0` at pin time.
+  `fabfdb12…3e7f1bdf`, and the SHA-256 of every byte after the header (the
+  executable payload) must be `c422b22f…24b8ee3f`. The first chunk carries the
+  header, so a header change refuses before the other six reads. The full
+  10 MiB programdata hashes to `a49ebc53…17abd04e`. See
+  [the 16 October re-pin](#whirlpool-upgrade-re-pin-16-october-2026); the
+  previous generation (slot 440170207, header `88fc1d0d…4ee1814`, full
+  `b5ee20ce…58048fa0`) pinned the header only.
 - SPL Token programdata (108,645 bytes, no upgrade authority): full SHA-256
   `573971c9…1dde5fe3`.
 - Associated Token program (105,032 bytes): full SHA-256 `6804554e…d2f7374d`.
@@ -165,8 +171,12 @@ An existing owner wSOL account refuses with `orca_wsol_account_present`
 
 `apn swap solana orca inventory` lists the pool, the program pins and, under
 `keyless`, the mechanism pin with its digest
-`7cef079e773ae2cc19e53714edce77873e2d1abb4acee3bf5af70f7090295928` and the
-protocol registry digest. `prepare` needs the profile's active allowlist
+`3daa0909114ad86a7c4c95d17ddc9ecebbecd22e7b9b74452e3745500dc442cb` and the
+protocol registry digest
+`a154c98d2b3c36b51bedeb90750b7e279b10f0f577189f50eb1c11533c4e76e5`
+(`orca-whirlpool-keyless.2026-10-16`). The slot 440170207 pin
+(`7cef079e…0295928`) only identifies existing operations; a policy that
+admits it cannot prepare or approve a new swap. `prepare` needs the profile's active allowlist
 policy to admit native SOL and canonical USDC on
 `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d` for the `swap` rail,
 both with exactly that pin:
@@ -245,3 +255,80 @@ apn swap solana orca status --operation $OP
 
 Run `status` again until it reports `finalized` (Solana finality takes about
 13 seconds).
+
+## Whirlpool upgrade re-pin, 16 October 2026
+
+Orca upgraded the Whirlpool program at slot 457152296 (2026-10-15
+07:22:05 UTC). Transaction
+`2Z156jvtGjumG6tAEqfMqctBRuh8YmNb5UbQzkqbnAw6xR4TtFgUC4DW8tykwgcibPfeyiEigZQ3x1Pp1kHNwzGT`
+is a Squads v4 `VaultTransactionExecute` that runs the upgradeable loader's
+`Upgrade` from buffer `GFAGqhnRdPaoyft7fNyoxxXEhwDQpxsc3j77wV7Wa2TW`, signed by
+the unchanged authority `GwH3Hiv5…Rx4PV`. Every quote of APN 0.5.40 refused
+with `orca_program_pin_drift` from then on. Pool accounts did not change: owner,
+size, discriminator, config, bump, PDA, tick spacing, fee-tier seed, fee and
+protocol fee rates, mints, vaults and oracle absence of the SOL/USDC and
+USDC/USDT pools all still match their pins.
+
+Two origins (`api.mainnet-beta.solana.com` and `solana-rpc.publicnode.com`)
+returned identical 10,485,760 programdata bytes on 16 October. The capture,
+with hashes, is in `tests/fixtures/whirlpool-runtime-c422b2/`. The trimmed
+executable hash is `75d0cbf1…939c605c`, matching
+`solana-verify get-program-hash` (previous generation `46328660…10154992`).
+
+**Contract: runtime bytes only.** No reproducible source build is claimed.
+`solana-verify` 0.4.9 is installed on the review machine, but its
+verifiable-build Docker image is not, and installing it was out of scope; the
+OtterSec registry reports this executable as not verified (its last verified
+build is commit `e5f089bc`, February 2026). The source review covers the
+orca-so/whirlpools `programs/whirlpool` commits between the two deployments:
+`408c945` (rent reduction for Agave 4.2), `f6db412` (removes
+`migrate_repurpose_reward_authority_space`), `4aac511` (u256 division add-back
+edge case), `fb19ae2` (SIMD-0460 dynamic tick array refactor) and `f2a3d13`
+(fee and reward checkpoint update). None changes the `swap` or `swap_v2`
+arguments, their account lists, the Whirlpool, TickArray or Oracle layouts, or
+their discriminators. The u256 fix only affects operands near 2^192; APN's
+quote math uses exact big integers. The new executable no longer contains the
+`MigrateRepurposeRewardAuthoritySpace` log string and still contains `Swap`,
+`SwapV2` and `TwoHopSwap`, so the deployment includes the 6 October commits;
+which exact commit was built cannot be proven without a reproducible build.
+
+The header pin is now joined by a payload pin, so a pin match means these exact
+executable bytes, not only "no upgrade since this slot". Verification costs one
+genesis read, one account read and seven programdata reads. Measured on
+mainnet: 9 physical POSTs for the pins, 15 for a complete keyless quote with
+simulation, and 13 for a stable snapshot, all inside the 24-POST budget.
+
+New mechanism identities, so every owner must admit them again:
+
+| Mechanism | Slot 457152296 digest | Slot 440170207 digest (existing operations only) |
+| --- | --- | --- |
+| Keyless SOL→USDC | `3daa0909114ad86a7c4c95d17ddc9ecebbecd22e7b9b74452e3745500dc442cb` | `7cef079e773ae2cc19e53714edce77873e2d1abb4acee3bf5af70f7090295928` |
+| Stable preview USDC→USDT | `27d5bdce74ccc5e9aa65df4ec3c596bdf4f9e202dd3444eb802835d57bb4764f` | `a64a464a26f017af9c57d7528e9baa95b3cb41322e7384e36b9beffd97e08095` |
+| Stable guarded USDC→USDT | `f11383d8bb5344ca73f5af43c0640749d7bbb36344f43914ad3765684c7c2ce9` | `419bdd5d4a1f663ffa9c1a4b0e4dc5ff7428cb7f0882417ecb16c39115c5aefc` |
+| Stable registry | `edd3f14d873a2e722923322a4137261441832afbab1eb3c66ae878f7d078ce49` (`orca-whirlpool-routes.2026-10-16`) | `c1651aabba1e93ba2c5f0f30a59ebce0e6cdec75b90022e203f933ca3a7bef98` (`orca-whirlpool-routes.2026-09-28`) |
+
+The slot 440170207 identities remain registered for existing operations only.
+Status, observation, release, expiry reconciliation and no-send recovery accept
+either generation, and stable material must carry the registry of its own
+generation. Preparation, approval, execution consent, the submission marker
+and the single send accept only the current generation. Program bytes are
+always checked against the current pins, so nothing can sign for the old code.
+
+**No-money mainnet diagnostics, 16 October 08:09 UTC.** Through this source
+build and the production Solana transport (24-POST budget, persistent
+pacing, `api.mainnet-beta.solana.com`), using the public account
+`GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki` and no key:
+
+- all eight program pins passed;
+- a keyless quote for 1,000,000 lamports read the pool at slot 457565610 and
+  simulated the exact unsigned message (`sigVerify: false`,
+  `replaceRecentBlockhash: true`) at slot 457565626: 106279 atomic USDC
+  expected and received, minimum 105748, 1005200 lamports SOL spent, 49448
+  compute units;
+- a stable USDC→USDT snapshot for 100000 atomic USDC (existing ATAs) at market
+  slot 457565686 returned expected 100105 and minimum 99605 atomic USDT, with
+  `signable: false`.
+
+The guarded stable simulation needs an active owner policy and was not run.
+Nothing was signed or sent; there is no paid receipt for the new program
+bytes.

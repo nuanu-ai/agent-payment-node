@@ -12,7 +12,7 @@ import { OrcaStableExecutionBindingStore, verifyOrcaStableSignedEffect } from ".
 import { OrcaStableFinalizedObservationStore, sealOrcaStableFinalizedObservation,
   type OrcaStableFinalizedObservation } from "./stable-finalized-proof.js";
 import { SavedOrcaStableMaterialStore } from "./stable-material.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "./stable-mechanism.js";
 import { verifyOrcaStableFinalizedReceipt } from "./stable-receipt.js";
 
 /** Internal observe-only route. Every entry reloads durable state under the sender's operation lock. */
@@ -30,7 +30,7 @@ export class OrcaStableFinalizedObserver {
     return await this.service.operations.withLocks([`orca-stable-operation:${operationId}`], async () => {
       let operation = await this.service.operations.loadAny(operationId);
       if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
-      if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
+      if (!isOrcaStableGuardedMechanismDigest(operation.mechanismDigest) ||
           operation.submissionMarker === null || operation.usageLease === null ||
           !["submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(operation.state))
         blocked("Stable operation has no claimed observation boundary.");
