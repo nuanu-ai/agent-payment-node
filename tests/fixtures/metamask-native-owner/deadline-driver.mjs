@@ -61,21 +61,40 @@ try {
    await state.writeOperation(sealOperation({...body,state:started.state,reason:started.reason,proofClass:started.proofClass,transitions:appendTransition(saved.transitions,started)}));
  }
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
+ if(['resolver-late','rpc-late'].includes(scenario)){
+   // A deadline before the vendor child starts proves no hand-off: the marker closes as failed_before_effect (R4).
+   await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001',profile));
+   const children=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse);assert.equal(children.filter(a=>a[1]==='send-transaction').length,0);
+   const files=await readdir(join(root,'metamask-native-operations')),journal=JSON.parse(await readFile(join(root,'metamask-native-operations',files[0]),'utf8'));
+   assert.equal(journal.state,'failed_before_effect');assert.equal(journal.effectAttempts,1);
+   const {AssetUsageLedger}=await import(moduleUrl('asset-usage-ledger.js'));const ledger=new AssetUsageLedger(root),address=getAddress(payer);
+   assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'native',identifier:null}},new Date())).amountAtomic,'0');
+   assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'token',identifier:token}},new Date())).amountAtomic,'0');
+   const replay=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001',profile);assert.equal(replay.state,'failed_before_effect');
+   process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
+   await rm(root,{recursive:true,force:true});await rm(temp,{recursive:true,force:true});process.exit(0);
+ }
  const result=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001',profile);
  const children=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse),sent=children.filter(a=>a[1]==='send-transaction');
- assert.equal(result.effect_attempts,1);assert.equal(result.state,['resolver-late','rpc-late','send-refused','nonce-advanced'].includes(scenario)?'unknown':'acknowledged');
- assert.equal(sent.length,['resolver-late','rpc-late'].includes(scenario)?0:1);
+ assert.equal(result.effect_attempts,1);assert.equal(result.state,['send-refused','nonce-advanced'].includes(scenario)?'unknown':'acknowledged');
+ assert.equal(sent.length,1);
  if(sent.length){const first=children.findIndex(a=>a[1]==='send-transaction');assert.equal(first,12,'initial six READs and ONE final six READs before send');const payload=JSON.parse(sent[0][sent[0].indexOf('--payload')+1]);assert.equal(payload.nonce,'0x7');assert.equal(payload.gas,'0xfde8');assert.equal(payload.value,'0x0');assert.deepEqual(Object.keys(payload),['to','data','value','gas','nonce','maxFeePerGas','maxPriorityFeePerGas']);}
  const journalFile=join(root,'metamask-native-operations',result.operation_id+'.json'),bytes=await readFile(journalFile),journal=JSON.parse(bytes);
  assert.equal(journal.context.profile,profile);assert.equal(journal.context.quote.sender.toLowerCase(),payer);assert.equal(journal.effectAttempts,1);assert.ok(journal.diagnostic);assert.ok(!JSON.stringify(result).includes('TEST secret'));
  if(scenario==='send-refused'){assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.diagnostic.providerCode,'policy');assert.equal(result.diagnostic.stage,'sdk_send');}
- if(scenario==='resolver-late')assert.equal(result.diagnostic.stage,'sdk_resolver');
- if(scenario==='rpc-late')assert.equal(result.diagnostic.stage,'rpc_balance');
  const count=children.length,replay=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001',profile);assert.deepEqual(replay,result);assert.deepEqual(await readFile(journalFile),bytes);assert.equal((await readFile(log,'utf8')).trim().split('\n').length,count);
  const {AssetUsageLedger}=await import(moduleUrl('asset-usage-ledger.js'));const ledger=new AssetUsageLedger(root);assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'native',identifier:null}},new Date())).amountAtomic,'13000000');assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'token',identifier:token}},new Date())).amountAtomic,'1000');
  await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-second-0002',profile));
+ if(scenario==='send-refused'){
+   // Abandonment observes once first: the stored request resolves to a confirmed receipt, so nothing is released.
+   const approvals=[];
+   await assert.rejects(()=>owner.abandonFixedMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date()),{code:'APN_OPERATION_BLOCKED'});
+   const closed=await owner.abandonFixedMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(Date.now()+120000));
+   assert.equal(closed.state,'confirmed');assert.equal(approvals.length,0);
+ }
  if(scenario==='nonce-advanced'||custom){
-   if(!custom){assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.transaction_hash,null);assert.equal(result.diagnostic.stage,'post_handoff');}
+   // The pending request is kept as returned; no owner guard re-reads the (advanced) nonce after the hand-off.
+   if(!custom){assert.equal(journal.providerRequestId,'TEST-pending-request');assert.equal(result.transaction_hash,null);assert.notEqual(result.diagnostic.stage,'post_handoff');}
    const nonceBefore=nonceReads,balanceBefore=guardBalances;
    mock.timers.enable({apis:['Date'],now:Date.now()});mock.timers.tick(61000);
    const observed=await owner.readFixedMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(observed.state,'confirmed');assert.equal(observed.transaction_hash,'0x'+'e'.repeat(64));assert.equal(observed.receipt.nativeFeeAtomic,'7500000');

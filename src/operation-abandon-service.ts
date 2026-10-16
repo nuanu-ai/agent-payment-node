@@ -15,6 +15,7 @@ import type { FacilitatorGaslessService } from "./facilitator-gasless/service.js
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
 import { abandonProviderX402 } from "./operation-abandon-provider.js";
+import { abandonFixedMetaMaskNativeTransfer, metaMaskNativeOperationExists } from "./metamask-native-transfer-owner.js";
 
 export class OperationAbandonService {
   private readonly operations: OperationService;
@@ -30,6 +31,10 @@ export class OperationAbandonService {
   async abandon(operationIdInput: string): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
+    if (await metaMaskNativeOperationExists(this.context.state.root, operationId)) {
+      return await abandonFixedMetaMaskNativeTransfer(this.context.state.root, operationId,
+        async (intent) => await this.context.requireOperationAbandonApproval().approve(intent), () => this.context.clock.now());
+    }
     const found = await this.operations.required(operationId);
     if (found.kind === "rail_transfer") return found.record.account.rail === "solana"
       ? await this.abandonLocalSolana(found.record.profileHash, operationId)
