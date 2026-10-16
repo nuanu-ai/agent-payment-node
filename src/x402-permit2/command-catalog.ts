@@ -33,8 +33,9 @@ export const PERMIT2_COMMANDS: readonly CommandDefinition[] = [
     "none", "Never.", { terminal: ["admissible_unsigned"], non_terminal: [] }, [],
     ["apn x402 permit2 preflight --profile default --payment-required <inspected-header> --expected-challenge-hash <hash> --expected-index 0 --expected-terms <inspected-terms-base64> --rpc-url https://avalanche-rpc.example"]),
   command(["x402", "permit2", "status"], "apn x402 permit2 status --profile <profile> --operation <operation-id>",
-    "Read one existing blocked Permit2 intent with redacted output.", [profileRequired, operationRequired],
+    "Read one Permit2 operation from the production journal with redacted output.", [profileRequired, operationRequired],
     "local_read", "Checks existing local state only; never initializes, repairs, reserves, signs or sends.",
-    "none", "Never.", { terminal: ["not_found"], non_terminal: ["execution_blocked"] }, [],
+    "none", "Never.", { terminal: ["not_found", "released_unsubmitted", "settled", "expired_no_effect"],
+      non_terminal: ["prepared", "reserving", "reserved", "release_pending", "exposure_unknown", "request_pending", "terminal_pending"] }, [],
     ["apn x402 permit2 status --profile default --operation <operation-id>"]),
 ];

@@ -7,7 +7,6 @@ import { type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operati
 import { MegaFundingJournal, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
-import { type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
@@ -42,9 +41,6 @@ export type StoredMoneyOperation = {
 } | {
     readonly kind: "permit2_production";
     readonly record: Permit2ProductionRecord;
-} | {
-    readonly kind: "permit2_legacy_conflict";
-    readonly record: Permit2LegacyConflict;
 } | {
     readonly kind: "relay_unsigned";
     readonly record: RelayUnsignedOperation;
@@ -116,7 +112,6 @@ export declare class OperationService {
     assertRailAccountAvailable(profileHash: string, rail: "solana" | "tron", account: string): Promise<void>;
     private assertConflictDomainsAvailable;
     private permit2ProductionOperations;
-    private permit2LegacyOperations;
     private profileOperations;
     private circleOperations;
     /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */

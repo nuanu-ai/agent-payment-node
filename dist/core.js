@@ -1,7 +1,7 @@
 import { runFixedMetaMaskNativeTransfer, readFixedMetaMaskNativeTransfer } from "./metamask-native-transfer-owner.js";
 import { explainOperationNotFound } from "./operation-coverage.js";
 import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";
-import { readPermit2IntentStatus } from "./x402-permit2/status.js";
+import { readPermit2ProductionStatus } from "./x402-permit2/status.js";
 import { publicKnownCircle, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { failureEnvelope, successEnvelope } from "./output.js";
@@ -103,7 +103,7 @@ export class ApnCore {
             case "x402.permit2.observe":
                 throw new ApnError("APN_UNSUPPORTED_COMMAND", "This provider command requires its dedicated bounded CLI path.");
             case "x402.permit2.status":
-                return dataOutcome(await readPermit2IntentStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_blocked_intent");
+                return dataOutcome(await readPermit2ProductionStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_operation_status");
             case "relay.prepare": {
                 const service = this.context.relayPrepare;
                 if (service === undefined)
@@ -472,7 +472,7 @@ export class ApnCore {
                 const operation = await this.operations.required(request.operationId);
                 if (operation.kind === "circle_route")
                     throw new ApnError("APN_OPERATION_BLOCKED", "Use the separate Circle EVM approval, observation or cleanup command.");
-                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict")
+                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production")
                     throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no approval or execution path." : operation.kind === "merchant_x402" ? "Use x402 merchant approve for this frozen USDm operation." : "Permit2 production execution remains unavailable.");
                 if (operation.kind === "gasless_transfer" || operation.kind === "metamask_gasless_transfer" || operation.kind === "smart_account_gasless_transfer" ||
                     operation.kind === "facilitator_gasless_transfer")
@@ -501,7 +501,7 @@ export class ApnCore {
                     assertCoinbaseObservationRequest(operation.kind === "direct_transfer" ? operation.record : {}, request.coinbaseObservationRpc, request.observeOnly !== undefined || request.waitSeconds !== undefined || request.observationRpcEnv !== undefined);
                 if (operation.kind === "circle_route")
                     throw new ApnError("APN_OPERATION_BLOCKED", "Use the separate Circle EVM approval, observation or cleanup command.");
-                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict")
+                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production")
                     throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no resume or execution path." : operation.kind === "merchant_x402" ? "Use x402 merchant observe for this USDm operation; it never pays again." : "Permit2 production execution remains unavailable.");
                 if (request.observeOnly && (operation.kind !== "direct_transfer" || operation.record.providerDirect !== undefined)) {
                     throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
@@ -570,7 +570,7 @@ export class ApnCore {
                 const operation = await this.operations.required(request.operationId);
                 if (operation.kind === "circle_route")
                     return operationOutcome(await this.operations.status(request.operationId));
-                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict")
+                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production")
                     return operationOutcome(await this.operations.status(request.operationId));
                 if (operation.kind === "smart_account_gasless_transfer")
                     return operationOutcome(await this.smartAccountGasless.status(request.operationId));
@@ -601,7 +601,7 @@ export class ApnCore {
                         throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.");
                     return receiptOutcome(publicKnownCircle(validateKnownCircle(operation.record)));
                 }
-                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production" || operation.kind === "permit2_legacy_conflict")
+                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production")
                     throw new ApnError("APN_RECEIPT_NOT_FOUND", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no receipt." : operation.kind === "merchant_x402" ? "Use x402 merchant status for its payment and delivery evidence." : "Permit2 production has no paid receipt.");
                 if (operation.kind === "smart_account_gasless_transfer")
                     return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));

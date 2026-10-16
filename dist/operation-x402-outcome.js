@@ -18,11 +18,12 @@ export function providerX402Outcome(operation, receipt, options) {
 }
 export function localX402Outcome(operation, result, receipt, options) {
     let data = null;
-    if (options.exposeSellerResult && operation.state === "completed") {
-        if (result === null)
-            throw new ApnError("APN_STATE_CORRUPT", "Completed x402 operation has no public result.");
-        data = projectPublicX402Result({ variant: "local", result });
+    if (options.exposeSellerResult && operation.state === "completed" && result === null) {
+        throw new ApnError("APN_STATE_CORRUPT", "Completed x402 operation has no public result.");
     }
+    // The paid body is delivered as soon as it is stored; the operation state still says whether settlement is proven.
+    if (options.exposeSellerResult && result !== null)
+        data = projectPublicX402Result({ variant: "local", result });
     return {
         proofClass: operation.proofClass,
         data,

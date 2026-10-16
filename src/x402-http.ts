@@ -23,7 +23,7 @@ import {
 import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from "./x402-model.js";
 import type { X402HttpObservation } from "./x402-state-integrity.js";
 import { decodeX402RequestBody, optionalX402HttpRequest, type X402HttpRequestV1 } from "./x402-http-request.js";
-import { opaqueHttpResult, parseResultMediaType } from "./x402-opaque-result.js";
+import { observedPaidResult } from "./x402-opaque-result.js";
 import { inspectPermit2Offer } from "./x402-permit2/inspection.js";
 import type { Address } from "./model.js";
 
@@ -154,21 +154,10 @@ export function observePaidX402Response(
   ) throw httpError("APN_HTTP_PROTOCOL", "Paid seller transport provenance is unsafe.");
   const selectedFamily = isIP(raw.selectedAddress);
   if (selectedFamily !== 4 && selectedFamily !== 6) throw httpError("APN_HTTP_PROTOCOL", "Paid seller selected address is invalid.");
-  if (raw.bodyBytes.byteLength > MAX_BODY_BYTES) throw resultError("Seller result exceeds the supported bound.");
   validateRawHeaders(raw.rawHeaderPairs);
   if (optionalSingleHeader(raw.rawHeaderPairs, "payment-signature") !== undefined) {
     throw httpError("APN_HTTP_PROTOCOL", "Seller response must not echo PAYMENT-SIGNATURE.");
   }
-
-  const contentEncoding = optionalSingleHeader(raw.rawHeaderPairs, "content-encoding");
-  if (contentEncoding !== undefined && contentEncoding !== "identity") {
-    throw resultError("Compressed seller results are unsupported.");
-  }
-  const contentLength = optionalSingleHeader(raw.rawHeaderPairs, "content-length");
-  if (
-    contentLength !== undefined &&
-    (!/^(?:0|[1-9][0-9]*)$/u.test(contentLength) || BigInt(contentLength) !== BigInt(raw.bodyBytes.byteLength))
-  ) throw resultError("Seller result length is invalid or truncated.");
 
   const paymentRequiredHeader = optionalSingleHeader(raw.rawHeaderPairs, "payment-required");
   if (paymentRequiredHeader !== undefined) {
@@ -179,23 +168,7 @@ export function observePaidX402Response(
   const paymentResponseHeader = optionalPaymentResponseHeader(raw.rawHeaderPairs);
   if (paymentResponseHeader !== undefined) requireAsciiControl(paymentResponseHeader, "PAYMENT-RESPONSE");
 
-  let result: PaidHttpResult["result"] = input.opaqueResult === true ? opaqueHttpResult(raw) : undefined;
-  if (raw.status === 200 && input.opaqueResult !== true) {
-    const mediaType = parseResultMediaType(singleControlLikeHeader(raw.rawHeaderPairs, "content-type"));
-    let bodyText: string;
-    try { bodyText = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw.bodyBytes); }
-    catch { throw resultError("Seller result is not strict UTF-8."); }
-    if (mediaType === "application/json") {
-      try { JSON.parse(bodyText) as unknown; }
-      catch { throw resultError("Seller JSON result is malformed."); }
-    }
-    result = {
-      mediaType,
-      bodyText,
-      resultHash: domainHash("apn.x402.result-body.v1", raw.bodyBytes),
-      byteLength: raw.bodyBytes.byteLength.toString(),
-    };
-  }
+  const result = observedPaidResult(raw, input.opaqueResult === true, MAX_BODY_BYTES);
 
   const observation: X402HttpObservation = {
     attemptNumber: input.attemptNumber,
@@ -476,14 +449,6 @@ function optionalPaymentResponseHeader(pairs: readonly (readonly [string, string
   return values[0];
 }
 
-function singleControlLikeHeader(pairs: readonly (readonly [string, string])[], name: string): string {
-  const value = optionalSingleHeader(pairs, name);
-  if (value === undefined || value.trim() !== value || value.includes(",")) {
-    throw resultError(`Seller response requires one canonical ${name.toUpperCase()} header.`);
-  }
-  return value;
-}
-
 function requireAsciiControl(value: string, name: string): void {
   if (!/^[\x20-\x7e]+$/u.test(value)) throw httpError("APN_HTTP_PROTOCOL", `${name} must be exact ASCII.`);
 }
@@ -493,8 +458,4 @@ function httpError(
   message: string,
 ): ApnError {
   return new ApnError(code, message);
-}
-
-function resultError(message: string): ApnError {
-  return new ApnError("APN_X402_RESULT_INVALID", message);
 }

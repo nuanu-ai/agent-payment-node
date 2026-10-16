@@ -1,14 +1,23 @@
 import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
-import { appendX402Transition, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
+import { appendX402Transition, deliversX402Result, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
 import { settlementResponseTransaction, terminalClassification } from "./x402-service-rpc.js";
+import { X402Usage } from "./x402-usage.js";
 export class X402Lifecycle {
     context;
     operations;
+    usage;
     constructor(context) {
         this.context = context;
         this.operations = new OperationService(context.state);
+        this.usage = new X402Usage(context);
+    }
+    /** Moves the shared usage hold forward to the durable journal state; callers hold the operation lock. */
+    async followUsage(profileHash, operationId) {
+        const latest = await this.context.state.loadX402Operation(profileHash, operationId);
+        if (latest !== null)
+            await this.usage.follow(latest);
     }
     async beginPaidAttempt(operation, purpose) {
         if (purpose === "result_recovery" && operation.attempts.some((attempt) => attempt.purpose === "result_recovery")) {
@@ -70,7 +79,7 @@ export class X402Lifecycle {
         const attempt = Number.isSafeInteger(attemptIndex) && attemptIndex >= 0
             ? operation.attempts[attemptIndex]
             : undefined;
-        if (response?.classification !== "success" || attempt?.phase !== "observed" ||
+        if (!deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
             attempt.observation?.status !== result.responseStatus || attempt.observation.bodyHash !== result.resultHash ||
             attempt.observation.bodyByteLength !== result.byteLength || attempt.observation.mediaType !== result.mediaType)
             throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 result lacks its designated successful response.");
@@ -84,7 +93,8 @@ export class X402Lifecycle {
         }
         if (operation.settlementEvidence === undefined)
             return operation;
-        if (operation.settlementResponseObservation !== undefined &&
+        // A nonce-state proof without a matched receipt names no transaction; the single-use nonce alone proves this payment.
+        if (operation.settlementResponseObservation !== undefined && operation.settlementEvidence.transactionHash !== undefined &&
             settlementResponseTransaction(operation.settlementResponseObservation) !== operation.settlementEvidence.transactionHash)
             return operation;
         if (operation.resultLink !== undefined)

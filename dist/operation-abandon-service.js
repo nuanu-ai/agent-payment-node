@@ -5,11 +5,10 @@ import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { OperationService } from "./operation-service.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
-import { TransferService } from "./transfer-service.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
-import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
+import { X402AbandonService } from "./x402-abandon.js";
 export class OperationAbandonService {
     context;
     rails;
@@ -43,10 +42,10 @@ export class OperationAbandonService {
         if (found.kind === "facilitator_gasless_transfer" && this.facilitatorGasless !== undefined) {
             return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
         }
+        if (found.kind === "x402_fetch" && found.strategy === "local")
+            return await new X402AbandonService(this.context).abandon(operationId);
         if (found.kind !== "direct_transfer")
-            return ineligible(found.kind);
-        if (found.record.providerDirect === undefined)
-            return await new TransferService(this.context).abandonUndispatched(operationId);
+            return ineligible();
         const profileHash = found.record.profileHash;
         return await this.context.state.withLocks([
             `profile:${profileHash}`,
@@ -174,10 +173,8 @@ function assertEligible(operation) {
         operation.transactionHash !== undefined || operation.providerEffect !== undefined)
         ineligible();
 }
-function ineligible(kind) {
-    throw new ApnError("APN_OPERATION_BLOCKED", kind === undefined
-        ? "Only an eligible ambiguous provider-atomic direct operation can be abandoned; Coinbase gasless guards have no manual release."
-        : `Operation abandon does not cover ${kind} operations yet; use that family's own recovery command.`, kind === undefined ? undefined : { reason: "operation_kind_not_abandonable", kind, abandon_kinds: ABANDON_OPERATION_KINDS });
+function ineligible() {
+    throw new ApnError("APN_OPERATION_BLOCKED", "Only an eligible ambiguous provider-atomic direct operation can be abandoned; Coinbase gasless guards have no manual release.");
 }
 function ineligibleRail() {
     throw new ApnError("APN_OPERATION_BLOCKED", "Only a local Solana or TRON transfer with an unknown outcome and a bound transaction can be abandoned after its validity window.");

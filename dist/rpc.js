@@ -246,6 +246,7 @@ export class HttpsBaseRpc {
             value: value === 1n,
             blockNumber: identity.number,
             blockHash: identity.hash,
+            blockTimestamp: identity.timestamp,
             blockTag: "tag" in block ? block.tag : "number",
             observedAt: new Date().toISOString(),
             rpcOrigin: this.rpcOrigin,

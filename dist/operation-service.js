@@ -13,7 +13,6 @@ import { MegaFundingJournal, publicMegaFunding } from "./lifi/mega-gaszip-journa
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
-import { Permit2LegacyConflictRepository } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
 import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
@@ -248,9 +247,6 @@ export class OperationService {
     async permit2ProductionOperations(profileHash) {
         return this.state.root === undefined ? [] : new Permit2ProductionRepository(this.state.root).listOperations(profileHash);
     }
-    async permit2LegacyOperations(profileHash) {
-        return this.state.root === undefined ? [] : new Permit2LegacyConflictRepository(this.state.root).listOperations(profileHash);
-    }
     async profileOperations(profileHash) {
         return [
             ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip", record })),
@@ -258,7 +254,6 @@ export class OperationService {
             ...(await this.megaFunding.listOperations(profileHash)).map(record => ({ kind: "mega_gaszip", record })),
             ...(await this.merchantOperations(profileHash)).map(record => ({ kind: "merchant_x402", record })),
             ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production", record })),
-            ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict", record })),
             ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned", record })),
             ...(await this.facilitatorGasless.listOperations(profileHash)).map((record) => ({ kind: "facilitator_gasless_transfer", record })),
             ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
@@ -398,8 +393,6 @@ export class OperationService {
             return publicMerchant(operation.record);
         if (operation.kind === "permit2_production")
             return publicPermit2Production(operation.record);
-        if (operation.kind === "permit2_legacy_conflict")
-            throw new ApnError("APN_OPERATION_BLOCKED", "Legacy Permit2 execution remains blocked.");
         if (operation.kind === "relay_unsigned")
             return this.relayStatus(operation.record);
         if (operation.kind === "direct_transfer")

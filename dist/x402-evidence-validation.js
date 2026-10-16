@@ -2,6 +2,7 @@ import { validX402Tuple } from "./x402-network.js";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { x402OperationBindingHash } from "./x402-state-model.js";
+import { validateStateSettlementEvidence } from "./x402-state-evidence.js";
 import { address, allowedRecord, bytes32, canonicalText, exactRecord, hash, mediaType, positive, record, stateCorrupt, timestamp, transactionHash, uint, } from "./x402-state-validation-primitives.js";
 export function validateAttempts(value, operation) {
     if (!Array.isArray(value) || value.length > 64)
@@ -138,7 +139,7 @@ export function validateTransferMethodEvidence(method, transactionHint, authoriz
         }
         return;
     }
-    if (settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.settlement-evidence.v1" ||
+    if (settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" ||
         unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1") {
         stateCorrupt("x402 EIP-3009 operation contains ERC-7710 settlement evidence.");
     }
@@ -226,7 +227,9 @@ export function validateSettlementEvidence(value, operation) {
     const candidate = record(value);
     return candidate.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1"
         ? validateErc7710SettlementEvidence(candidate, operation)
-        : validateEip3009SettlementEvidence(candidate, operation);
+        : candidate.schemaVersion === "apn.x402.settlement-evidence.v2"
+            ? validateStateSettlementEvidence(candidate, operation)
+            : validateEip3009SettlementEvidence(candidate, operation);
 }
 function validateEip3009SettlementEvidence(value, operation) {
     const evidence = exactRecord(value, [
@@ -376,8 +379,10 @@ export function validateUnusedExpiryEvidence(value, operation) {
     if (record(value).schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1") {
         return validateErc7710UnusedExpiryEvidence(value, operation);
     }
-    const evidence = exactRecord(value, ["schemaVersion", "network", "chainId", "token", "validBefore", "finalizedHead", "authorizationState", "absence", "rpcOriginHash", "evidenceHash"]);
-    if (evidence.schemaVersion !== "apn.x402.unused-expiry-evidence.v1" || !matchingEvidenceNetwork(evidence, operation))
+    const stateProof = record(value).schemaVersion === "apn.x402.unused-expiry-evidence.v2";
+    const evidence = exactRecord(value, ["schemaVersion", "network", "chainId", "token", "validBefore", "finalizedHead", "authorizationState",
+        ...(stateProof ? [] : ["absence"]), "rpcOriginHash", "evidenceHash"]);
+    if ((!stateProof && evidence.schemaVersion !== "apn.x402.unused-expiry-evidence.v1") || !matchingEvidenceNetwork(evidence, operation))
         stateCorrupt("x402 unused-expiry evidence discriminant is invalid.");
     uint(evidence.validBefore);
     const finalizedHead = exactRecord(evidence.finalizedHead, ["number", "hash", "timestamp", "observedAt"]);
@@ -396,13 +401,15 @@ export function validateUnusedExpiryEvidence(value, operation) {
     if (operation !== undefined && (evidence.validBefore !== record(operation.authorization).validBefore ||
         authorizationState.blockNumber !== finalizedHead.number || authorizationState.blockHash !== finalizedHead.hash))
         stateCorrupt("x402 unused-expiry evidence conflicts with the frozen authorization or finalized head.");
-    const absence = exactRecord(evidence.absence, ["localSettlement", "httpSettlement", "authorizationUsed", "transactionReceipt"]);
-    if (Object.values(absence).some((item) => item !== false))
-        stateCorrupt("x402 unused-expiry absence proof is invalid.");
+    if (!stateProof) {
+        const absence = exactRecord(evidence.absence, ["localSettlement", "httpSettlement", "authorizationUsed", "transactionReceipt"]);
+        if (Object.values(absence).some((item) => item !== false))
+            stateCorrupt("x402 unused-expiry absence proof is invalid.");
+    }
     hash(evidence.rpcOriginHash);
     hash(evidence.evidenceHash);
     const { evidenceHash: _hash, ...body } = evidence;
-    if (evidence.evidenceHash !== domainHash("apn.x402.unused-expiry-evidence.v1", canonicalJson(body)))
+    if (evidence.evidenceHash !== domainHash(evidence.schemaVersion, canonicalJson(body)))
         stateCorrupt("x402 unused-expiry evidence hash is invalid.");
     return evidence;
 }

@@ -58,21 +58,23 @@ export function publicX402Operation(operation, result, settlementWait) {
         token: operation.token,
         ...(operation.paymentIdentifier === undefined ? {} : { paymentIdentifier: operation.paymentIdentifier.value }),
         ...(operation.transactionHint === undefined ? {} : { transactionHash: operation.transactionHint.transactionHash }),
-        ...(operation.settlementEvidence === undefined ? {} : {
-            blockNumber: operation.settlementEvidence.transactionBlock.number,
-            blockHash: operation.settlementEvidence.transactionBlock.hash,
-            ...(operation.settlementEvidence.schemaVersion === "apn.x402.settlement-evidence.v1" ? { authorizationState: {
-                    value: true,
-                    blockNumber: operation.settlementEvidence.authorizationState.blockNumber,
-                    blockHash: operation.settlementEvidence.authorizationState.blockHash,
-                } } : { settlementMethod: "erc7710" }),
-        }),
+        ...publicSettlement(operation.settlementEvidence),
         ...(result === undefined ? {} : {
             result: { resultHash: result.resultHash, mediaType: result.mediaType, byteLength: result.byteLength },
         }),
         ...(settlementWait === undefined ? {} : { settlementWait }),
     };
     return { ...value, integrityHash: domainHash("apn.x402.public-operation.v1", canonicalJson(value)) };
+}
+function publicSettlement(evidence) {
+    if (evidence === undefined)
+        return {};
+    const block = evidence.transactionBlock === undefined ? {} : { blockNumber: evidence.transactionBlock.number, blockHash: evidence.transactionBlock.hash };
+    if (evidence.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1")
+        return { ...block, settlementMethod: "erc7710" };
+    return { ...block, authorizationState: {
+            value: true, blockNumber: evidence.authorizationState.blockNumber, blockHash: evidence.authorizationState.blockHash,
+        } };
 }
 export function publicX402ResultData(result) {
     return {

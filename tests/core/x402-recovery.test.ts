@@ -248,7 +248,7 @@ test("x402 recovery begins from explicit safe/finalized read-only heads", async 
   assert.equal(rpc.submissions.length, 0);
 });
 
-test("first authorized send follows recovered material and a durable Base safe scan", async (t) => {
+test("first authorized send follows recovered material and one unused nonce read at the safe head", async (t) => {
   let fixtureRef: Fixture | undefined;
   let callsAtPaidHttp: readonly string[] = [];
   let nativeAtPaidHttp: readonly string[] = [];
@@ -264,11 +264,10 @@ test("first authorized send follows recovered material and a durable Base safe s
   fixtureRef = fixture;
   const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  assert.deepEqual(callsAtPaidHttp, [
-    "chain", "safe", "block:12345", "logs:12345-12345", "block:12345", "block:12345",
-  ]);
+  // chainId plus authorizationState(wallet, nonce) at the safe block: no log scan, no anchor re-reads.
+  assert.deepEqual(callsAtPaidHttp, ["chain", "state:safe"]);
   assert.deepEqual(nativeAtPaidHttp, ["x402Exact.authorizationMaterial.get"]);
-  assert.equal((await operation(fixture)).authorizationUsedScan?.status, "complete");
+  assert.equal((await operation(fixture)).authorizationUsedScan, undefined);
 });
 
 type AnchorFault = (fixture: Fixture, target: string, durable: X402OperationRecord) => void;
@@ -310,123 +309,6 @@ async function completeZeroScanWithoutSend(fixture: Fixture): Promise<X402Operat
   fixture.rpc.blockHashes.set(target.number, target.hash as Hex);
   return durable;
 }
-
-test("first EIP-3009 send requires this resume's anchor revalidation, not a stored complete zero scan", async (t) => {
-  const cases: readonly {
-    readonly name: string;
-    readonly priorComplete: boolean;
-    readonly paid: 0 | 1;
-    readonly scan: "active" | "complete";
-    readonly fault?: AnchorFault;
-  }[] = [
-    { name: "fresh scan, numbered anchor throws", priorComplete: false, paid: 0, scan: "active",
-      fault: (fixture, target) => rpcFaultOn(fixture, (call) => call === `block:${target}`) },
-    { name: "complete scan, healthy same-head anchor", priorComplete: true, paid: 1, scan: "complete" },
-    { name: "complete scan, numbered anchor throws", priorComplete: true, paid: 0, scan: "complete",
-      fault: (fixture, target) => rpcFaultOn(fixture, (call) => call === `block:${target}`) },
-    { name: "complete scan, numbered anchor has another origin", priorComplete: true, paid: 0, scan: "complete",
-      fault: foreignOriginBlock },
-    { name: "complete scan, canonical hash reorg", priorComplete: true, paid: 0, scan: "active",
-      fault: (fixture, target) => { fixture.rpc.blockHashes.set(target, `0x${"e".repeat(64)}` as Hex); } },
-    { name: "fresh scan, rate-limited log read", priorComplete: false, paid: 0, scan: "active",
-      fault: (fixture) => rpcFaultOn(fixture, (call) => call.startsWith("logs:")) },
-    { name: "complete scan, reorg reset cannot re-read safe", priorComplete: true, paid: 0, scan: "complete",
-      fault: (fixture, target) => {
-        fixture.rpc.blockHashes.set(target, `0x${"e".repeat(64)}` as Hex);
-        rpcFaultOn(fixture, (call, count) => call === "safe" && count === 2);
-      } },
-    { name: "complete scan, safe tag disagrees with numbered anchor", priorComplete: true, paid: 0, scan: "complete",
-      fault: (fixture) => { fixture.rpc.safeHead = { ...fixture.rpc.safeHead, hash: `0x${"c".repeat(64)}` as Hex }; } },
-    { name: "complete scan, safe head has another origin", priorComplete: true, paid: 0, scan: "complete",
-      fault: (fixture) => { fixture.rpc.safeHead = { ...fixture.rpc.safeHead, rpcOrigin: "https://different.example" }; } },
-    { name: "complete scan, extension target read throws", priorComplete: true, paid: 0, scan: "complete",
-      fault: (fixture, target) => {
-        fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: nextBlock(target), hash: `0x${"e".repeat(64)}` as Hex };
-        rpcFaultOn(fixture, (call) => call === `block:${nextBlock(target)}`);
-      } },
-    { name: "complete scan, safe head regressed below the anchor", priorComplete: true, paid: 0, scan: "complete",
-      fault: (fixture) => { fixture.rpc.safeHead = { ...fixture.rpc.finalizedHead, queriedTag: "safe" }; } },
-    { name: "complete scan, finalized anchor throws after chain-time expiry", priorComplete: true, paid: 0, scan: "complete",
-      fault: (fixture, _target, durable) => {
-        const validBefore = durable.authorization.validBefore;
-        assert.equal(BigInt(fixture.clock.now().getTime()) < BigInt(validBefore) * 1000n, true, "local clock has not expired");
-        fixture.rpc.safeHead = {
-          ...fixture.rpc.safeHead,
-          timestamp: validBefore,
-          observedAt: new Date(Number(validBefore) * 1000).toISOString(),
-        };
-        rpcFaultOn(fixture, (call) => call === `block:${fixture.rpc.finalizedHead.number}`);
-      } },
-  ];
-  for (const [index, scenario] of cases.entries()) {
-    await t.test(scenario.name, async (nested) => {
-      const fixture = await authorizedFixture(nested, { idempotencyKey: `anchor-revalidation-${index}` });
-      if (scenario.priorComplete) await completeZeroScanWithoutSend(fixture);
-      const before = await operation(fixture);
-      scenario.fault?.(fixture, before.authorizationUsedScan?.targetSafeHead.number ?? fixture.rpc.safeHead.number, before);
-      fixture.rpc.x402Calls.length = 0;
-      const httpCalls = fixture.http.calls.length;
-      const nativeCalls = fixture.native.calls.length;
-
-      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal(resumed.ok, true, JSON.stringify(resumed));
-      const after = await operation(fixture);
-      assert.equal(fixture.http.calls.length - httpCalls, scenario.paid, "paid HTTP dispatches");
-      assert.equal(after.attempts.length, scenario.paid, "durable paid attempts");
-      assert.equal(after.state, scenario.paid === 1 ? "effect_unknown" : "authorized_not_sent");
-      assert.equal(after.authorizationUsedScan?.status, scenario.scan);
-      assert.equal(fixture.rpc.submissions.length, 0);
-      if (scenario.paid === 1) {
-        assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false, "same-head send needs no new log read");
-        return;
-      }
-      assert.equal(fixture.native.calls.length, nativeCalls, "the gate closes before payment material is recovered");
-      assert.equal(after.nextActions.includes("operation.resume"), true);
-      if (scenario.scan === "complete") assert.equal(after.integrityHash, before.integrityHash, "durable hold is untouched");
-    });
-  }
-});
-
-test("post-exposure zero-scan retry requires this resume's anchor revalidation", async (t) => {
-  const cases: readonly { readonly name: string; readonly paid: 0 | 1; readonly fault?: AnchorFault }[] = [
-    { name: "prior anchor throws", paid: 0, fault: (fixture, target) => rpcFaultOn(fixture, (call) => call === `block:${target}`) },
-    { name: "extension target has another origin", paid: 0, fault: (fixture, target) => foreignOriginBlock(fixture, nextBlock(target)) },
-    { name: "final anchor throws after the zero log read", paid: 0,
-      fault: (fixture, target) => rpcFaultOn(fixture, (call, count) => call === `block:${nextBlock(target)}` && count === 3) },
-    { name: "healthy extension permits one identical retry", paid: 1 },
-  ];
-  for (const [index, scenario] of cases.entries()) {
-    await t.test(scenario.name, async (nested) => {
-      const fixture = await authorizedFixture(nested, {
-        paidOutcomes: [new Error("first ambiguity"), new Error("retry ambiguity")],
-        idempotencyKey: `anchor-retry-${index}`,
-      });
-      await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      const exposed = await operation(fixture);
-      assert.equal(exposed.state, "effect_unknown");
-      assert.equal(exposed.attempts.length, 1);
-      assert.equal(exposed.authorizationUsedScan?.status, "complete");
-      const target = exposed.authorizationUsedScan!.targetSafeHead;
-      fixture.rpc.blockHashes.set(target.number, target.hash as Hex);
-      fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: nextBlock(target.number), hash: `0x${"e".repeat(64)}` as Hex };
-      fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-      scenario.fault?.(fixture, target.number, exposed);
-      fixture.rpc.x402Calls.length = 0;
-      const httpCalls = fixture.http.calls.length;
-
-      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal(resumed.ok, true, JSON.stringify(resumed));
-      const after = await operation(fixture);
-      assert.equal(fixture.http.calls.length - httpCalls, scenario.paid, "paid HTTP retries");
-      assert.equal(after.attempts.length, 1 + scenario.paid, "durable paid attempts");
-      assert.equal(after.state, "effect_unknown");
-      assert.equal(fixture.rpc.submissions.length, 0);
-      if (scenario.name.startsWith("final anchor")) {
-        assert.equal(fixture.rpc.x402Calls.includes(`logs:${nextBlock(target.number)}-${nextBlock(target.number)}`), true);
-      }
-    });
-  }
-});
 
 test("one bounded resume waits outside locks and completes through RPC-only settlement observations", async (t) => {
   const wait = new ControlledWait();
@@ -487,7 +369,7 @@ test("one bounded resume waits outside locks and completes through RPC-only sett
   assert.equal(fixture.native.calls.length, nativeCalls);
 });
 
-test("bounded wait advances a no-hint multi-chunk cursor and discovers settlement without another effect", async (t) => {
+test("bounded wait discovers a no-hint settlement from the nonce state without another effect", async (t) => {
   const wait = new ControlledWait();
   const fixture = await authorizedFixture(t, {
     idempotencyKey: "bounded-no-hint-multichunk",
@@ -506,11 +388,7 @@ test("bounded wait advances a no-hint multi-chunk cursor and discovers settlemen
       number: (BigInt(previousSafe.number) + 3_000n).toString(),
       hash: `0x${"e".repeat(64)}` as Hex,
     };
-    const settlement = configureSettlement(fixture.rpc, current);
-    fixture.rpc.logOutcomes.push(
-      { kind: "complete", logs: [] },
-      { kind: "complete", logs: [settlement.logs[0]!] },
-    );
+    configureSettlement(fixture.rpc, current);
   };
 
   const completed = await fixture.core.execute({
@@ -522,10 +400,10 @@ test("bounded wait advances a no-hint multi-chunk cursor and discovers settlemen
   assert.equal((completed.operation as { state: string }).state, "failed_settled_without_result");
   assert.equal((completed.operation as { terminal: boolean }).terminal, true);
   assert.notEqual(completed.receipt, null);
-  assert.deepEqual(
-    fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-    ["logs:12345-12345", "logs:12346-14393", "logs:14394-15345"],
-  );
+  assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false, "no log scan on any poll");
+  const settled = await operation(fixture);
+  assert.equal(settled.settlementEvidence?.schemaVersion, "apn.x402.settlement-evidence.v2");
+  assert.equal(settled.settlementEvidence?.transactionHash, undefined, "no hint names no transaction");
   assert.equal(fixture.http.calls.length, 2, "challenge plus one paid GET only");
   assert.equal(fixture.native.calls.length, 1, "one existing authorization retrieval only");
   assert.equal((await operation(fixture)).attempts.filter((attempt) => attempt.purpose === "payment").length, 1);
@@ -649,10 +527,8 @@ test("one-second bounded wait caps cached result-recovery HTTP without replay", 
     },
   });
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
   const exposed = await operation(fixture);
   const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
   let consumedRpcBudget = false;
   fixture.rpc.onX402Call = () => {
     if (consumedRpcBudget) return;
@@ -773,235 +649,6 @@ test("bounded wait rejects unsafe RPC provenance and pre-approval state before p
   assert.equal(rpc.x402Calls.length, 0);
 });
 
-test("a complete pre-send AuthorizationUsed scan persists effect-unknown without paid HTTP", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "pre-send-complete-candidate" });
-  const authorized = await operation(fixture);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [authorizationUsedLog({
-    authorizer: authorized.wallet,
-    nonce: authorized.authorization.nonce,
-    transactionHash: X402_TRANSACTION as Hex,
-    blockNumber: fixture.rpc.safeHead.number,
-    blockHash: fixture.rpc.safeHead.hash,
-  })] });
-
-  const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  const durable = await operation(fixture);
-  assert.equal(durable.state, "effect_unknown");
-  assert.equal(durable.attempts.length, 0);
-  assert.equal(durable.authorizationUsedScan?.status, "complete");
-  assert.equal(durable.authorizationUsedScan?.candidates.length, 1);
-  assert.equal(durable.transactionHint?.source, "authorization_used_log");
-  assert.equal(fixture.http.calls.length, 1, "pre-send settlement evidence cannot trigger a paid request");
-  assert.deepEqual(fixture.native.calls, [], "pre-send settlement evidence is reconciled before material recovery");
-});
-
-test("a provisional pre-send AuthorizationUsed candidate persists its multi-chunk cursor", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "pre-send-provisional-candidate" });
-  const authorized = await operation(fixture);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: (BigInt(authorized.preparedBlock.number) + 3000n).toString(),
-    hash: `0x${"e".repeat(64)}` as Hex,
-  };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [authorizationUsedLog({
-    authorizer: authorized.wallet,
-    nonce: authorized.authorization.nonce,
-    transactionHash: X402_TRANSACTION as Hex,
-    blockNumber: authorized.preparedBlock.number,
-    blockHash: authorized.preparedBlock.hash,
-  })] });
-
-  const first = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(first.ok, true, JSON.stringify(first));
-  let durable = await operation(fixture);
-  assert.equal(durable.state, "effect_unknown");
-  assert.equal(durable.attempts.length, 0);
-  assert.equal(durable.authorizationUsedScan?.status, "active");
-  assert.equal(durable.authorizationUsedScan?.candidates.length, 1);
-  assert.equal(durable.authorizationUsedScan?.nextFromBlock, (BigInt(authorized.preparedBlock.number) + 2048n).toString());
-  assert.deepEqual(
-    fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-    [`logs:${authorized.preparedBlock.number}-${(BigInt(authorized.preparedBlock.number) + 2047n).toString()}`],
-  );
-  assert.equal(fixture.http.calls.length, 1);
-  assert.deepEqual(fixture.native.calls, []);
-
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  const second = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(second.ok, true, JSON.stringify(second));
-  durable = await operation(fixture);
-  assert.equal(durable.authorizationUsedScan?.status, "complete");
-  assert.equal(durable.authorizationUsedScan?.candidates.length, 1);
-  assert.equal(durable.transactionHint?.source, "authorization_used_log");
-  assert.deepEqual(
-    fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-    [
-      `logs:${authorized.preparedBlock.number}-${(BigInt(authorized.preparedBlock.number) + 2047n).toString()}`,
-      `logs:${(BigInt(authorized.preparedBlock.number) + 2048n).toString()}-${fixture.rpc.safeHead.number}`,
-    ],
-    "the second resume continues from the fsynced cursor instead of repeating the first chunk",
-  );
-  assert.equal(fixture.http.calls.length, 1);
-  assert.deepEqual(fixture.native.calls, []);
-});
-
-test("zero-attempt effect-unknown cannot invent an empty active scan", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "invalid-empty-pre-send-scan" });
-  const authorized = await operation(fixture);
-  const scanBody = {
-    schemaVersion: "apn.x402.authorization-used-scan.v1" as const,
-    searchStartBlock: authorized.preparedBlock.number,
-    nextFromBlock: authorized.preparedBlock.number,
-    targetSafeHead: {
-      number: fixture.rpc.safeHead.number,
-      hash: fixture.rpc.safeHead.hash,
-      observedAt: fixture.rpc.safeHead.observedAt,
-    },
-    candidates: [],
-    status: "active" as const,
-    updatedAt: authorized.updatedAt,
-  };
-  const { integrityHash: _integrityHash, ...withoutIntegrity } = authorized;
-  const invalid = sealX402Operation({
-    ...withoutIntegrity,
-    authorizationUsedScan: {
-      ...scanBody,
-      evidenceHash: domainHash("apn.x402.authorization-used-scan.v1", canonicalJson(scanBody)),
-    },
-    state: "effect_unknown",
-    finalityClass: "unknown_finality",
-    reason: "x402_effect_unknown",
-    proofClass: "x402_unknown_finality",
-    nextActions: ["operation.resume", "operation.status"],
-    transitions: appendX402Transition(authorized.transitions, {
-      at: authorized.updatedAt,
-      state: "effect_unknown",
-      terminal: false,
-      reason: "x402_effect_unknown",
-      proofClass: "x402_unknown_finality",
-    }),
-  });
-  await assert.rejects(
-    fixture.core.context.state.writeX402Operation(invalid),
-    { code: "APN_STATE_CORRUPT" },
-    "an empty zero-attempt scan is valid only as the durable reset after prior effect-unknown evidence",
-  );
-  const { integrityHash: _invalidIntegrityHash, ...invalidWithoutIntegrity } = invalid;
-  const twoTransitionBypass = sealX402Operation({
-    ...invalidWithoutIntegrity,
-    transitions: appendX402Transition(invalid.transitions, {
-      at: authorized.updatedAt,
-      state: "effect_unknown",
-      terminal: false,
-      reason: "x402_effect_unknown",
-      proofClass: "x402_unknown_finality",
-    }),
-  });
-  await assert.rejects(
-    fixture.core.context.state.writeX402Operation(twoTransitionBypass),
-    { code: "APN_STATE_CORRUPT" },
-    "one atomic overwrite cannot invent reorg lineage by appending two transitions",
-  );
-});
-
-test("pre-send AuthorizationUsed candidates reset durably after a canonical reorg", async (t) => {
-  for (const posture of ["complete", "provisional"] as const) {
-    await t.test(posture, async (nested) => {
-      const fixture = await authorizedFixture(nested, { idempotencyKey: `pre-send-candidate-reorg-${posture}` });
-      const authorized = await operation(fixture);
-      if (posture === "provisional") {
-        fixture.rpc.safeHead = {
-          ...fixture.rpc.safeHead,
-          number: (BigInt(authorized.preparedBlock.number) + 3000n).toString(),
-          hash: `0x${"e".repeat(64)}` as Hex,
-        };
-      }
-      fixture.rpc.logOutcomes.push({ kind: "complete", logs: [authorizationUsedLog({
-        authorizer: authorized.wallet,
-        nonce: authorized.authorization.nonce,
-        transactionHash: X402_TRANSACTION as Hex,
-        blockNumber: authorized.preparedBlock.number,
-        blockHash: authorized.preparedBlock.hash,
-      })] });
-      await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      const candidate = await operation(fixture);
-      assert.equal(candidate.state, "effect_unknown");
-      assert.equal(candidate.attempts.length, 0);
-      assert.equal(candidate.authorizationUsedScan?.status, posture === "complete" ? "complete" : "active");
-      assert.equal(candidate.authorizationUsedScan?.candidates.length, 1);
-
-      fixture.rpc.safeHead = {
-        ...fixture.rpc.safeHead,
-        number: candidate.authorizationUsedScan!.targetSafeHead.number,
-        hash: `0x${"f".repeat(64)}` as Hex,
-      };
-      fixture.rpc.x402Calls.length = 0;
-      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal(resumed.ok, true, JSON.stringify(resumed));
-      const reset = await operation(fixture);
-      assert.equal(reset.state, "effect_unknown");
-      assert.equal(reset.attempts.length, 0);
-      assert.equal(reset.authorizationUsedScan?.status, "active");
-      assert.equal(reset.authorizationUsedScan?.nextFromBlock, reset.authorizationUsedScan?.searchStartBlock);
-      assert.equal(reset.authorizationUsedScan?.lastCompletedChunk, undefined);
-      assert.deepEqual(reset.authorizationUsedScan?.candidates, []);
-      assert.equal(reset.authorizationUsedScan?.targetSafeHead.hash, fixture.rpc.safeHead.hash);
-      assert.equal(reset.transactionHint, undefined);
-      assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false);
-      assert.equal(fixture.http.calls.length, 1);
-      assert.deepEqual(fixture.native.calls, []);
-
-      fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-      if (posture === "provisional") fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-      fixture.rpc.x402Calls.length = 0;
-      await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      if (posture === "provisional") {
-        const progressed = await operation(fixture);
-        assert.equal(progressed.authorizationUsedScan?.status, "active");
-        await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      }
-      const rescanned = await operation(fixture);
-      assert.equal(rescanned.state, "effect_unknown");
-      assert.equal(rescanned.attempts.length, 0);
-      assert.equal(rescanned.authorizationUsedScan?.status, "complete");
-      assert.deepEqual(rescanned.authorizationUsedScan?.candidates, []);
-      const start = BigInt(rescanned.authorizationUsedScan!.searchStartBlock);
-      const target = BigInt(rescanned.authorizationUsedScan!.targetSafeHead.number);
-      assert.deepEqual(
-        fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-        target === start
-          ? [`logs:${start.toString()}-${start.toString()}`]
-          : [
-              `logs:${start.toString()}-${(start + 2047n).toString()}`,
-              `logs:${(start + 2048n).toString()}-${target.toString()}`,
-            ],
-        "the reset scan resumes from the immutable start and completes without repeating a chunk",
-      );
-
-      const priorTarget = rescanned.authorizationUsedScan!.targetSafeHead;
-      fixture.rpc.blockHashes.set(priorTarget.number, priorTarget.hash as Hex);
-      fixture.rpc.safeHead = {
-        ...fixture.rpc.safeHead,
-        number: (BigInt(priorTarget.number) + 1n).toString(),
-        hash: `0x${"c".repeat(64)}` as Hex,
-      };
-      fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-      fixture.rpc.x402Calls.length = 0;
-      await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      const extended = await operation(fixture);
-      assert.equal(extended.authorizationUsedScan?.status, "complete");
-      assert.equal(extended.authorizationUsedScan?.targetSafeHead.number, fixture.rpc.safeHead.number);
-      assert.deepEqual(
-        fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-        [`logs:${fixture.rpc.safeHead.number}-${fixture.rpc.safeHead.number}`],
-      );
-      assert.equal(fixture.http.calls.length, 1);
-      assert.deepEqual(fixture.native.calls, []);
-    });
-  }
-});
-
 test("RPC log availability classifier separates history/range gaps from rate limiting", () => {
   assert.equal(acceptRpcHttpBody(200, false), true);
   assert.equal(acceptRpcHttpBody(400, true), true);
@@ -1016,53 +663,6 @@ test("RPC log availability classifier separates history/range gaps from rate lim
   assert.equal(classifyX402LogAvailabilityMessage("too many requests"), null);
   assert.equal(classifyX402LogAvailabilityMessage("historical state request rate limit exceeded"), null);
   assert.equal(classifyX402LogAvailabilityMessage("history unavailable: request limit exceeded"), null);
-});
-
-test("rate-limited log faults preserve the active cursor without archival classification", async (t) => {
-  for (const [caseName, message] of [
-    ["historical-state", "historical state request was rate limited"],
-    ["logs-query", "logs query was rate-limited"],
-  ] as const) {
-    await t.test(caseName, async (nested) => {
-      const fixture = await authorizedFixture(nested, { idempotencyKey: `rpc-rate-limited-${caseName}` });
-      fixture.rpc.safeHead = {
-        ...fixture.rpc.safeHead,
-        number: "15345",
-        hash: `0x${"e".repeat(64)}` as Hex,
-      };
-      fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-      const first = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal(first.ok, true, JSON.stringify(first));
-      const beforeFault = await operation(fixture);
-      assert.equal(beforeFault.authorizationUsedScan?.status, "active");
-      assert.equal(beforeFault.authorizationUsedScan?.nextFromBlock, "14393");
-      fixture.rpc.blockHashes.set(
-        beforeFault.authorizationUsedScan!.targetSafeHead.number,
-        beforeFault.authorizationUsedScan!.targetSafeHead.hash as Hex,
-      );
-      fixture.rpc.blockHashes.set(
-        beforeFault.authorizationUsedScan!.lastCompletedChunk!.toBlock,
-        beforeFault.authorizationUsedScan!.lastCompletedChunk!.toBlockHash as Hex,
-      );
-      const httpCalls = fixture.http.calls.length;
-      const nativeCalls = fixture.native.calls.length;
-      fixture.rpc.onX402Call = (name) => {
-        if (name.startsWith("logs:")) {
-          assert.equal(classifyX402LogAvailabilityMessage(message), null);
-          throw new ApnError("APN_RPC_AMBIGUOUS", "transient rate-limit fault");
-        }
-      };
-
-      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal(resumed.ok, true, JSON.stringify(resumed));
-      const afterFault = await operation(fixture);
-      assert.equal(afterFault.integrityHash, beforeFault.integrityHash);
-      assert.deepEqual(afterFault.authorizationUsedScan, beforeFault.authorizationUsedScan);
-      assert.equal(afterFault.nextActions.includes("use.archival_rpc"), false);
-      assert.equal(fixture.http.calls.length, httpCalls);
-      assert.equal(fixture.native.calls.length, nativeCalls);
-    });
-  }
 });
 
 test("top-level transient chain, safe, and finalized RPC faults preserve the durable operation", async (t) => {
@@ -1081,8 +681,9 @@ test("top-level transient chain, safe, and finalized RPC faults preserve the dur
       }
       const httpCalls = fixture.http.calls.length;
       const nativeCalls = fixture.native.calls.length;
+      const label = faultAt === "chain" ? "chain" : `state:${faultAt}`;
       fixture.rpc.onX402Call = (name) => {
-        if (name === faultAt) throw new ApnError("APN_RPC_AMBIGUOUS", `transient ${faultAt} fault`);
+        if (name === label) throw new ApnError("APN_RPC_AMBIGUOUS", `transient ${faultAt} fault`);
       };
 
       const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
@@ -1093,73 +694,6 @@ test("top-level transient chain, safe, and finalized RPC faults preserve the dur
       assert.equal((await operation(fixture)).integrityHash, durable.integrityHash);
     });
   }
-});
-
-test("recoverable RPC faults after intermediate fsync return the latest durable operation", async (t) => {
-  await t.test("settlement hint before pinned authorization-state read", async (nested) => {
-    const fixture = await authorizedFixture(nested, { idempotencyKey: "rpc-fault-after-hint-fsync" });
-    await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    await advanceSafeAndReset(fixture);
-    const exposed = await operation(fixture);
-    const settlement = configureSettlement(fixture.rpc, exposed);
-    fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
-    const authorizationStateRead = `state:${fixture.rpc.safeHead.number}`;
-    fixture.rpc.onX402Call = (name) => {
-      if (name === authorizationStateRead) {
-        throw new ApnError("APN_RPC_AMBIGUOUS", "pinned authorization-state fault after hint fsync");
-      }
-    };
-
-    const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    assert.equal(resumed.ok, true, JSON.stringify(resumed));
-    delete fixture.rpc.onX402Call;
-    const durable = await operation(fixture);
-    assert.equal(durable.authorizationUsedScan?.status, "complete");
-    assert.equal(durable.transactionHint?.transactionHash, X402_TRANSACTION);
-    assert.equal(durable.settlementEvidence, undefined);
-    const status = await fixture.core.execute({ command: "operation.status", operationId: fixture.operationId });
-    assert.deepEqual(resumed.operation, status.operation);
-    assert.equal(fixture.http.calls.length, 2);
-    assert.equal(fixture.native.calls.length, 1);
-  });
-
-  await t.test("zero scan before finalized-head recheck", async (nested) => {
-    const fixture = await authorizedFixture(nested, { idempotencyKey: "rpc-fault-after-zero-scan-fsync" });
-    const current = await operation(fixture);
-    fixture.clock.advance(61_000);
-    fixture.rpc.safeHead = {
-      ...fixture.rpc.safeHead,
-      timestamp: current.authorization.validBefore,
-      observedAt: fixture.clock.now().toISOString(),
-    };
-    fixture.rpc.finalizedHead = {
-      queriedTag: "finalized",
-      number: fixture.rpc.safeHead.number,
-      hash: fixture.rpc.safeHead.hash,
-      timestamp: current.authorization.validBefore,
-      observedAt: fixture.rpc.safeHead.observedAt,
-      rpcOrigin: fixture.rpc.rpcOrigin,
-    };
-    fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-    let finalizedReads = 0;
-    fixture.rpc.onX402Call = (name) => {
-      if (name === "finalized" && ++finalizedReads === 2) {
-        throw new ApnError("APN_RPC_AMBIGUOUS", "finalized-head recheck fault after zero-scan fsync");
-      }
-    };
-
-    const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    assert.equal(resumed.ok, true, JSON.stringify(resumed));
-    delete fixture.rpc.onX402Call;
-    const durable = await operation(fixture);
-    assert.equal(durable.state, "authorized_not_sent");
-    assert.equal(durable.authorizationUsedScan?.status, "complete");
-    assert.equal(durable.unusedExpiryEvidence, undefined);
-    const status = await fixture.core.execute({ command: "operation.status", operationId: fixture.operationId });
-    assert.deepEqual(resumed.operation, status.operation);
-    assert.equal(fixture.http.calls.length, 1);
-    assert.deepEqual(fixture.native.calls, []);
-  });
 });
 
 test("response hint is fsynced before ordered receipt reconciliation and terminal commit", async (t) => {
@@ -1189,7 +723,9 @@ test("response hint is fsynced before ordered receipt reconciliation and termina
   assert.equal(completed.ok, true, JSON.stringify(completed));
   assert.equal((completed.operation as { readonly state?: unknown } | null)?.state, "completed");
   assert.equal(responseDurableBeforeReceipt, true);
-  assert.deepEqual(fixture.rpc.x402Calls, ["chain", "safe", "receipt", "block:12345", "state:12345", "block:12345"]);
+  // chainId, the nonce state at safe, and one receipt read only to name the transaction.
+  assert.deepEqual(fixture.rpc.x402Calls, ["chain", "state:safe", "receipt"]);
+  assert.equal((await operation(fixture)).settlementEvidence?.transactionHash, X402_TRANSACTION);
   const terminal = await operation(fixture);
   const receipt = await fixture.core.context.state.loadX402Receipt(terminal.profileHash, terminal.operationId);
   assert.equal(receipt?.previousLinkHash, terminal.transitions.at(-1)?.previousHash);
@@ -1197,226 +733,11 @@ test("response hint is fsynced before ordered receipt reconciliation and termina
   assert.equal(fixture.rpc.submissions.length, 0);
 });
 
-test("settlement pins the observed safe block while the safe tag advances", async (t) => {
-  const response = paidObservation({
-    paymentResponseHeader: canonicalPaymentResponseHeader({
-      success: true,
-      transaction: X402_TRANSACTION,
-      network: "eip155:8453",
-      payer: X402_TEST_ACCOUNT.address.toLowerCase(),
-      amount: "1250000",
-    }),
-  });
-  const fixture = await authorizedFixture(t, { paidOutcomes: [response], idempotencyKey: "safe-tag-advance-mid-proof" });
-  const exposed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal((exposed.operation as { readonly state?: unknown } | null)?.state, "settlement_pending");
-  const operationBeforeProof = await operation(fixture);
-  const observedSafe = { ...fixture.rpc.safeHead };
-  configureSettlement(fixture.rpc, operationBeforeProof);
-  fixture.rpc.blockHashes.set(observedSafe.number, observedSafe.hash);
-  fixture.rpc.blockTimestamps.set(observedSafe.number, observedSafe.timestamp);
-  fixture.rpc.onX402Call = (name) => {
-    if (name !== "receipt") return;
-    fixture.rpc.safeHead = {
-      ...fixture.rpc.safeHead,
-      number: (BigInt(fixture.rpc.safeHead.number) + 1n).toString(),
-      hash: `0x${"e".repeat(64)}` as Hex,
-    };
-  };
-
-  const completed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(completed.ok, true, JSON.stringify(completed));
-  assert.equal((completed.operation as { readonly state?: unknown } | null)?.state, "completed");
-  const terminal = await operation(fixture);
-  assert.equal(terminal.settlementEvidence?.safeHead.number, observedSafe.number);
-  assert.equal(terminal.settlementEvidence?.safeHead.hash, observedSafe.hash);
-  assert.equal(terminal.settlementEvidence?.schemaVersion, "apn.x402.settlement-evidence.v1");
-  if (terminal.settlementEvidence?.schemaVersion !== "apn.x402.settlement-evidence.v1") {
-    throw new Error("expected EIP-3009 settlement evidence");
-  }
-  assert.equal(terminal.settlementEvidence.authorizationState.blockTag, "number");
-  assert.equal(terminal.settlementEvidence.authorizationState.blockNumber, observedSafe.number);
-});
-
-test("a completed unique AuthorizationUsed scan produces a bound hint and scan-backed spent receipt", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "scan-happy" });
-  assert.equal((await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId })).ok, true);
-  await advanceSafeAndReset(fixture);
-  const exposed = await operation(fixture);
-  const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
-  fixture.rpc.x402Calls.length = 0;
-
-  const result = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal((result.operation as { readonly state?: unknown } | null)?.state, "failed_settled_without_result");
-  const terminal = await operation(fixture);
-  assert.equal(terminal.transactionHint?.source, "authorization_used_log");
-  assert.equal(terminal.authorizationUsedScan?.status, "complete");
-  assert.equal(terminal.authorizationUsedScan?.candidates.length, 1);
-  const receipt = await fixture.core.context.state.loadX402Receipt(terminal.profileHash, terminal.operationId);
-  assert.equal(receipt?.settlementResponseHash, undefined);
-  assert.equal(receipt?.settlementEvidence?.transactionHash, X402_TRANSACTION);
-  assert.deepEqual(fixture.rpc.x402Calls, [
-    "chain", "safe", "block:12346", "logs:12345-12346", "block:12346", "block:12346",
-    "receipt", "block:12346", "state:12346", "block:12346",
-  ]);
-});
-
-test("canonical safe-head advancement discovers a post-exposure facilitator transaction", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "canonical-post-exposure-settlement" });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const exposed = await operation(fixture);
-  const priorTarget = exposed.authorizationUsedScan?.targetSafeHead;
-  assert.notEqual(priorTarget, undefined);
-  fixture.rpc.blockHashes.set(priorTarget!.number, priorTarget!.hash as Hex);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: (BigInt(fixture.rpc.safeHead.number) + 1n).toString(),
-    hash: `0x${"e".repeat(64)}` as Hex,
-  };
-  const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
-  fixture.rpc.x402Calls.length = 0;
-  const httpCalls = fixture.http.calls.length;
-  const nativeCalls = fixture.native.calls.length;
-
-  const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "failed_settled_without_result");
-  const terminal = await operation(fixture);
-  assert.equal(terminal.authorizationUsedScan?.searchStartBlock, exposed.authorizationUsedScan?.searchStartBlock);
-  assert.equal(terminal.authorizationUsedScan?.targetSafeHead.number, fixture.rpc.safeHead.number);
-  assert.deepEqual(
-    fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-    [`logs:${(BigInt(priorTarget!.number) + 1n).toString()}-${fixture.rpc.safeHead.number}`],
-  );
-  assert.equal(fixture.http.calls.length, httpCalls);
-  assert.equal(fixture.native.calls.length, nativeCalls);
-});
-
-test("state persistence rejects a transitionless completed-zero scan extension", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "transitionless-zero-extension" });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const current = await operation(fixture);
-  assert.equal(current.state, "effect_unknown");
-  assert.equal(current.authorizationUsedScan?.status, "complete");
-  assert.deepEqual(current.authorizationUsedScan?.candidates, []);
-  const targetSafeHead = {
-    number: (BigInt(current.authorizationUsedScan!.targetSafeHead.number) + 1n).toString(),
-    hash: `0x${"d".repeat(64)}` as Hex,
-    observedAt: current.updatedAt,
-  };
-  const transitionless = transitionlessZeroScanExtension(current, targetSafeHead);
-  await assert.rejects(
-    fixture.core.context.state.writeX402Operation(transitionless),
-    { code: "APN_STATE_CORRUPT" },
-    "a completed-zero extension must append a durable self-transition",
-  );
-  const { integrityHash: _integrityHash, ...withTransitionBody } = transitionless;
-  const valid = sealX402Operation({
-    ...withTransitionBody,
-    transitions: appendX402Transition(current.transitions, {
-      at: current.updatedAt,
-      state: current.state,
-      terminal: false,
-      reason: current.reason,
-      proofClass: current.proofClass,
-    }),
-  });
-  await fixture.core.context.state.writeX402Operation(valid);
-  assert.equal((await operation(fixture)).authorizationUsedScan?.targetSafeHead.number, targetSafeHead.number);
-});
-
-test("canonical zero-scan extensions permit one identical retry but never a third paid send", async (t) => {
-  const fixture = await authorizedFixture(t, {
-    paidOutcomes: [new Error("first ambiguity"), new Error("bounded retry ambiguity")],
-    idempotencyKey: "canonical-zero-extension-retry-cap",
-  });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  let durable = await operation(fixture);
-  let target = durable.authorizationUsedScan?.targetSafeHead;
-  assert.notEqual(target, undefined);
-  fixture.rpc.blockHashes.set(target!.number, target!.hash as Hex);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: (BigInt(fixture.rpc.safeHead.number) + 1n).toString(),
-    hash: `0x${"e".repeat(64)}` as Hex,
-  };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  durable = await operation(fixture);
-  assert.equal(durable.attempts.filter((attempt) => attempt.purpose === "payment").length, 2);
-  assert.equal(fixture.http.calls.length, 3);
-
-  target = durable.authorizationUsedScan?.targetSafeHead;
-  assert.notEqual(target, undefined);
-  fixture.rpc.blockHashes.set(target!.number, target!.hash as Hex);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: (BigInt(fixture.rpc.safeHead.number) + 1n).toString(),
-    hash: `0x${"f".repeat(64)}` as Hex,
-  };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  durable = await operation(fixture);
-  assert.equal(durable.attempts.filter((attempt) => attempt.purpose === "payment").length, 2);
-  assert.equal(durable.authorizationUsedScan?.targetSafeHead.number, fixture.rpc.safeHead.number);
-  assert.equal(fixture.http.calls.length, 3);
-});
-
-test("a stale multi-chunk zero completion cannot retry before scanning the latest safe gap", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "stale-multichunk-retry-gate" });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  let durable = await operation(fixture);
-  const originalTarget = durable.authorizationUsedScan?.targetSafeHead;
-  assert.notEqual(originalTarget, undefined);
-  fixture.rpc.blockHashes.set(originalTarget!.number, originalTarget!.hash as Hex);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: (BigInt(originalTarget!.number) + 3000n).toString(),
-    hash: `0x${"e".repeat(64)}` as Hex,
-  };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  const httpCalls = fixture.http.calls.length;
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  durable = await operation(fixture);
-  assert.equal(durable.authorizationUsedScan?.status, "active");
-  assert.equal(fixture.http.calls.length, httpCalls);
-
-  const frozenTarget = durable.authorizationUsedScan?.targetSafeHead;
-  assert.notEqual(frozenTarget, undefined);
-  fixture.rpc.blockHashes.set(frozenTarget!.number, frozenTarget!.hash as Hex);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: (BigInt(frozenTarget!.number) + 1n).toString(),
-    hash: `0x${"f".repeat(64)}` as Hex,
-  };
-  const settlement = configureSettlement(fixture.rpc, durable);
-  fixture.rpc.logOutcomes.push(
-    { kind: "complete", logs: [] },
-    { kind: "complete", logs: [settlement.logs[0]!] },
-  );
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  durable = await operation(fixture);
-  assert.equal(durable.authorizationUsedScan?.status, "complete");
-  assert.equal(durable.authorizationUsedScan?.targetSafeHead.number, frozenTarget!.number);
-  assert.equal(durable.attempts.filter((attempt) => attempt.purpose === "payment").length, 1);
-  assert.equal(fixture.http.calls.length, httpCalls);
-
-  const settled = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(settled.ok, true, JSON.stringify(settled));
-  assert.equal((settled.operation as { readonly state?: unknown } | null)?.state, "failed_settled_without_result");
-  assert.equal(fixture.http.calls.length, httpCalls);
-});
-
 test("restart reuses fsynced settlement evidence after a crash before receipt write", async (t) => {
   const fixture = await authorizedFixture(t, { idempotencyKey: "settlement-evidence-restart" });
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
   const exposed = await operation(fixture);
   const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
 
   const state = fixture.core.context.state;
   const originalWriteReceipt = state.writeX402Receipt.bind(state);
@@ -1426,7 +747,7 @@ test("restart reuses fsynced settlement evidence after a crash before receipt wr
   state.writeX402Receipt = originalWriteReceipt;
   const preterminal = await operation(fixture);
   assert.equal(preterminal.terminal, false);
-  assert.equal(preterminal.settlementEvidence?.transactionHash, X402_TRANSACTION);
+  assert.equal(preterminal.settlementEvidence?.schemaVersion, "apn.x402.settlement-evidence.v2");
 
   const httpCalls = fixture.http.calls.length;
   const nativeCalls = fixture.native.calls.length;
@@ -1449,11 +770,9 @@ test("post-exposure settlement recovery does not depend on unlocked native mater
   const nativeCalls = fixture.native.calls.length;
   failRecoveredNativeMaterial(fixture, "APN_KEYCHAIN_LOCKED");
 
-  await advanceSafeAndReset(fixture);
   assert.equal(fixture.native.calls.length, nativeCalls);
   const exposed = await operation(fixture);
   const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
 
   const recovered = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(
@@ -1465,7 +784,7 @@ test("post-exposure settlement recovery does not depend on unlocked native mater
   assert.equal(fixture.http.calls.length, 2);
 });
 
-test("response-backed settlement without seller result commits spent receipt, while duplicate exact logs do not", async (t) => {
+test("response-backed settlement without seller result commits spent receipt; unmatched logs only drop the transaction name", async (t) => {
   const settlementOnly = paidObservation({
     status: 402,
     bodyText: "settled without cached body",
@@ -1500,404 +819,14 @@ test("response-backed settlement without seller result commits spent receipt, wh
         duplicateAuthorization: duplicate === "authorization",
         duplicateTransfer: duplicate === "transfer",
       });
+      // The used nonce proves this payment; a receipt with duplicate logs cannot name it, so no transaction is recorded.
       const resumed = await ambiguous.core.execute({ command: "operation.resume", operationId: ambiguous.operationId });
-      assert.equal((resumed.operation as { readonly terminal?: unknown } | null)?.terminal, false);
-      assert.equal((await operation(ambiguous)).settlementEvidence, undefined);
+      assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "failed_settled_without_result");
+      const settled = await operation(ambiguous);
+      assert.equal(settled.settlementEvidence?.schemaVersion, "apn.x402.settlement-evidence.v2");
+      assert.equal(settled.settlementEvidence?.transactionHash, undefined);
     });
   }
-});
-
-test("one inclusive 2048-block chunk is fsynced per restart and resumes at the exact cursor", async (t) => {
-  const fixture = await authorizedFixture(t, {
-    paidOutcomes: [new Error("first ambiguity"), new Error("retry ambiguity"), new Error("second retry ambiguity")],
-    idempotencyKey: "cursor-restart",
-  });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: "15345", hash: `0x${"e".repeat(64)}` };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] }, { kind: "complete", logs: [] });
-  fixture.rpc.x402Calls.length = 0;
-
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  fixture.rpc.x402Calls.length = 0;
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const afterFirst = await operation(fixture);
-  assert.equal(afterFirst.authorizationUsedScan?.nextFromBlock, "14393");
-  assert.equal(afterFirst.authorizationUsedScan?.lastCompletedChunk?.fromBlock, "12345");
-  assert.equal(afterFirst.authorizationUsedScan?.lastCompletedChunk?.toBlock, "14392");
-  assert.equal(fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")).length, 1);
-
-  const restarted = makeCore({ root: fixture.root, native: fixture.native, rpc: fixture.rpc, http: fixture.http, clock: fixture.clock });
-  fixture.rpc.x402Calls.length = 0;
-  await restarted.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const afterSecond = await operation(fixture);
-  assert.equal(afterSecond.authorizationUsedScan?.status, "complete");
-  assert.equal(afterSecond.authorizationUsedScan?.nextFromBlock, "15346");
-  assert.deepEqual(fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")), ["logs:14393-15345"]);
-});
-
-test("normal safe-head advancement preserves the frozen target and continues the next scan chunk", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "cursor-safe-advance" });
-  const frozenHash = `0x${"e".repeat(64)}` as Hex;
-  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: "15345", hash: frozenHash };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] }, { kind: "complete", logs: [] });
-
-  const first = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(first.ok, true, JSON.stringify(first));
-  const afterFirst = await operation(fixture);
-  assert.equal(afterFirst.authorizationUsedScan?.status, "active");
-  assert.equal(afterFirst.authorizationUsedScan?.nextFromBlock, "14393");
-  assert.equal(fixture.http.calls.length, 1);
-  fixture.rpc.blockHashes.set("15345", frozenHash);
-  fixture.rpc.blockHashes.set("14392", `0x${"d".repeat(64)}` as Hex);
-
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: "15346",
-    hash: `0x${"f".repeat(64)}` as Hex,
-  };
-  fixture.rpc.x402Calls.length = 0;
-  const second = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(second.ok, true, JSON.stringify(second));
-  const afterSecond = await operation(fixture);
-  assert.equal(afterSecond.authorizationUsedScan?.status, "complete");
-  assert.equal(afterSecond.authorizationUsedScan?.targetSafeHead.number, "15345");
-  assert.equal(afterSecond.authorizationUsedScan?.nextFromBlock, "15346");
-  assert.deepEqual(fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")), ["logs:14393-15345"]);
-  assert.equal(fixture.http.calls.length, 2);
-});
-
-test("partial, pruned, range-unavailable, multiple, and used-with-zero evidence stay nonterminal", async (t) => {
-  for (const kind of ["pruned", "range_unavailable"] as const) {
-    await t.test(kind, async (nested) => {
-      const fixture = await authorizedFixture(nested, { idempotencyKey: `unavailable-${kind}` });
-      await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      await advanceSafeAndReset(fixture);
-      fixture.rpc.logOutcomes.push({ kind });
-      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "effect_unknown");
-      const current = await operation(fixture);
-      assert.equal(current.authorizationUsedScan?.status, "unavailable");
-      assert.equal(current.authorizationUsedScan?.nextFromBlock, current.authorizationUsedScan?.searchStartBlock);
-      assert.deepEqual(current.nextActions, ["operation.resume", "operation.status", "use.archival_rpc"]);
-    });
-  }
-
-  await t.test("partial-malformed", async (nested) => {
-    const fixture = await authorizedFixture(nested, { idempotencyKey: "partial-case" });
-    await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    await advanceSafeAndReset(fixture);
-    const current = await operation(fixture);
-    fixture.rpc.logOutcomes.push({
-      kind: "complete",
-      logs: [authorizationUsedLog({
-        authorizer: current.wallet,
-        nonce: current.authorization.nonce,
-        transactionHash: X402_TRANSACTION as Hex,
-        blockNumber: (BigInt(fixture.rpc.safeHead.number) + 1n).toString(),
-        blockHash: `0x${"d".repeat(64)}` as Hex,
-      })],
-    });
-    await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    const after = await operation(fixture);
-    assert.equal(after.authorizationUsedScan?.nextFromBlock, after.authorizationUsedScan?.searchStartBlock);
-    assert.equal(after.authorizationUsedScan?.lastCompletedChunk, undefined);
-  });
-
-  await t.test("multiple", async (nested) => {
-    const fixture = await authorizedFixture(nested, { idempotencyKey: "multiple" });
-    await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    await advanceSafeAndReset(fixture);
-    const current = await operation(fixture);
-    const first = authorizationUsedLog({
-      authorizer: current.wallet,
-      nonce: current.authorization.nonce,
-      transactionHash: X402_TRANSACTION as Hex,
-      blockNumber: fixture.rpc.safeHead.number,
-      blockHash: fixture.rpc.safeHead.hash,
-    });
-    const second = { ...first, transactionHash: `0x${"9".repeat(64)}` as Hex, logIndex: "1" };
-    fixture.rpc.logOutcomes.push({ kind: "complete", logs: [first, second] });
-    await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    const after = await operation(fixture);
-    assert.equal(after.authorizationUsedScan?.status, "ambiguous");
-    assert.equal(after.transactionHint, undefined);
-  });
-
-  await t.test("zero-scan-but-used-state", async (nested) => {
-    const fixture = await authorizedFixture(nested, {
-      paidOutcomes: [new Error("initial ambiguity"), new Error("bounded retry")],
-      idempotencyKey: "zero-used",
-    });
-    await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    const current = await operation(fixture);
-    fixture.clock.advance(61_000);
-    fixture.rpc.safeHead = {
-      ...fixture.rpc.safeHead,
-      timestamp: current.authorization.validBefore,
-      observedAt: fixture.clock.now().toISOString(),
-    };
-    fixture.rpc.finalizedHead = {
-      queriedTag: "finalized",
-      number: fixture.rpc.safeHead.number,
-      hash: fixture.rpc.safeHead.hash,
-      timestamp: current.authorization.validBefore,
-      observedAt: fixture.rpc.safeHead.observedAt,
-      rpcOrigin: fixture.rpc.rpcOrigin,
-    };
-    fixture.rpc.authorizationStateValue = true;
-    fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-    const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-    assert.equal((resumed.operation as { readonly terminal?: unknown } | null)?.terminal, false);
-    assert.equal((await operation(fixture)).unusedExpiryEvidence, undefined);
-  });
-});
-
-test("an archival RPC adapter resumes an unavailable scan from the same durable cursor", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "archival-rpc-resume" });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
-  fixture.rpc.logOutcomes.push({ kind: "pruned" });
-  const unavailable = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(unavailable.ok, true, JSON.stringify(unavailable));
-  const checkpoint = await operation(fixture);
-  assert.equal(checkpoint.authorizationUsedScan?.status, "unavailable");
-  const cursor = checkpoint.authorizationUsedScan?.nextFromBlock;
-  const httpCalls = fixture.http.calls.length;
-  const nativeCalls = fixture.native.calls.length;
-
-  const archivalRpc = new RecoveryRpc();
-  archivalRpc.x402Evidence = { ...fixture.rpc.x402Evidence };
-  archivalRpc.safeHead = { ...fixture.rpc.safeHead };
-  archivalRpc.finalizedHead = { ...fixture.rpc.finalizedHead };
-  const settlement = configureSettlement(archivalRpc, checkpoint);
-  archivalRpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
-  const restarted = makeCore({
-    root: fixture.root,
-    native: fixture.native,
-    rpc: archivalRpc,
-    http: fixture.http,
-    clock: fixture.clock,
-  });
-  const resumed = await restarted.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "failed_settled_without_result");
-  const terminal = await operation({ ...fixture, core: restarted, rpc: archivalRpc });
-  assert.equal(terminal.authorizationUsedScan?.searchStartBlock, cursor);
-  assert.equal(terminal.authorizationUsedScan?.status, "complete");
-  assert.equal(terminal.settlementEvidence?.transactionHash, X402_TRANSACTION);
-  assert.equal(fixture.http.calls.length, httpCalls);
-  assert.equal(fixture.native.calls.length, nativeCalls);
-});
-
-test("a pruned first scan remains authorized and resumable before any paid HTTP exposure", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "archival-before-first-send" });
-  fixture.rpc.logOutcomes.push({ kind: "pruned" });
-  const unavailable = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(unavailable.ok, true, JSON.stringify(unavailable));
-  const durable = await operation(fixture);
-  assert.equal(durable.state, "authorized_not_sent");
-  assert.equal(durable.authorizationUsedScan?.status, "unavailable");
-  assert.deepEqual(durable.nextActions, ["operation.resume", "operation.status", "use.archival_rpc"]);
-  assert.equal(fixture.http.calls.length, 1);
-  assert.deepEqual(fixture.native.calls, []);
-
-  const archivalRpc = new RecoveryRpc();
-  archivalRpc.x402Evidence = { ...fixture.rpc.x402Evidence };
-  archivalRpc.safeHead = { ...fixture.rpc.safeHead };
-  archivalRpc.finalizedHead = { ...fixture.rpc.finalizedHead };
-  archivalRpc.logOutcomes.push({ kind: "complete", logs: [] });
-  const restarted = makeCore({
-    root: fixture.root,
-    native: fixture.native,
-    rpc: archivalRpc,
-    http: fixture.http,
-    clock: fixture.clock,
-  });
-  const resumed = await restarted.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "effect_unknown");
-  assert.equal(fixture.http.calls.length, 2);
-  assert.equal(fixture.native.calls.length, 1);
-});
-
-test("an archival RPC resumes the exact second chunk after one chunk was committed", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "archival-second-chunk" });
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: "15345",
-    hash: `0x${"e".repeat(64)}` as Hex,
-  };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const afterFirst = await operation(fixture);
-  assert.equal(afterFirst.state, "authorized_not_sent");
-  assert.equal(afterFirst.authorizationUsedScan?.status, "active");
-  assert.equal(afterFirst.authorizationUsedScan?.nextFromBlock, "14393");
-  assert.equal(afterFirst.authorizationUsedScan?.lastCompletedChunk?.toBlock, "14392");
-
-  fixture.rpc.logOutcomes.push({ kind: "range_unavailable" });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const unavailable = await operation(fixture);
-  assert.equal(unavailable.authorizationUsedScan?.status, "unavailable");
-  assert.equal(unavailable.authorizationUsedScan?.nextFromBlock, "14393");
-  assert.equal(unavailable.authorizationUsedScan?.lastCompletedChunk?.toBlock, "14392");
-
-  const archivalRpc = new RecoveryRpc();
-  archivalRpc.x402Evidence = { ...fixture.rpc.x402Evidence };
-  archivalRpc.safeHead = { ...fixture.rpc.safeHead };
-  archivalRpc.finalizedHead = { ...fixture.rpc.finalizedHead };
-  const priorChunk = unavailable.authorizationUsedScan?.lastCompletedChunk;
-  assert.notEqual(priorChunk, undefined);
-  archivalRpc.blockHashes.set(priorChunk!.toBlock, priorChunk!.toBlockHash as Hex);
-  archivalRpc.logOutcomes.push({ kind: "complete", logs: [] });
-  const restarted = makeCore({
-    root: fixture.root,
-    native: fixture.native,
-    rpc: archivalRpc,
-    http: fixture.http,
-    clock: fixture.clock,
-  });
-  const resumed = await restarted.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  const durable = await operation({ ...fixture, core: restarted, rpc: archivalRpc });
-  assert.equal(durable.authorizationUsedScan?.status, "complete");
-  assert.equal(durable.authorizationUsedScan?.nextFromBlock, "15346");
-  assert.deepEqual(
-    archivalRpc.x402Calls.filter((call) => call.startsWith("logs:")),
-    ["logs:14393-15345"],
-  );
-  assert.equal(fixture.http.calls.length, 2);
-});
-
-test("safe-head reorg discards candidates and cursor, returns, and scans only next invocation", async (t) => {
-  const fixture = await authorizedFixture(t, {
-    paidOutcomes: [new Error("initial ambiguity"), new Error("bounded retry")],
-    idempotencyKey: "reorg-reset",
-  });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: "15345", hash: `0x${"e".repeat(64)}` };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const before = await operation(fixture);
-  assert.equal(before.authorizationUsedScan?.nextFromBlock, "14393");
-
-  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: "15346", hash: `0x${"f".repeat(64)}` };
-  fixture.rpc.x402Calls.length = 0;
-  const httpCallsBefore = fixture.http.calls.length;
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const reset = await operation(fixture);
-  assert.equal(reset.authorizationUsedScan?.nextFromBlock, reset.authorizationUsedScan?.searchStartBlock);
-  assert.equal(reset.authorizationUsedScan?.lastCompletedChunk, undefined);
-  assert.deepEqual(reset.authorizationUsedScan?.candidates, []);
-  assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false);
-  assert.equal(fixture.http.calls.length, httpCallsBefore);
-});
-
-test("a completed zero scan is revalidated after reorg and never permits a third payment send", async (t) => {
-  const fixture = await authorizedFixture(t, {
-    paidOutcomes: [new Error("first ambiguity"), new Error("bounded retry")],
-    idempotencyKey: "completed-zero-reorg-cap",
-  });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal((await operation(fixture)).attempts.filter((attempt) => attempt.purpose === "payment").length, 2);
-  assert.equal(fixture.http.calls.length, 3);
-
-  await advanceSafeAndReset(fixture, "f");
-  const callsBeforeFinalScan = fixture.http.calls.length;
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const durable = await operation(fixture);
-  assert.equal(durable.authorizationUsedScan?.status, "complete");
-  assert.equal(durable.authorizationUsedScan?.candidates.length, 0);
-  assert.equal(durable.attempts.filter((attempt) => attempt.purpose === "payment").length, 2);
-  assert.equal(fixture.http.calls.length, callsBeforeFinalScan);
-});
-
-test("same-safe-head prior chunk mismatch resets the durable scan before any log read or HTTP send", async (t) => {
-  const fixture = await authorizedFixture(t, {
-    paidOutcomes: [new Error("first ambiguity")],
-    idempotencyKey: "prior-chunk-reorg",
-  });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: "15345", hash: `0x${"e".repeat(64)}` };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const progressed = await operation(fixture);
-  assert.equal(progressed.authorizationUsedScan?.lastCompletedChunk?.toBlock, "14392");
-
-  fixture.rpc.blockHashes.set("14392", `0x${"f".repeat(64)}` as Hex);
-  fixture.rpc.x402Calls.length = 0;
-  const httpCalls = fixture.http.calls.length;
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const reset = await operation(fixture);
-  assert.equal(reset.authorizationUsedScan?.targetSafeHead.number, "15345");
-  assert.equal(reset.authorizationUsedScan?.nextFromBlock, reset.authorizationUsedScan?.searchStartBlock);
-  assert.equal(reset.authorizationUsedScan?.lastCompletedChunk, undefined);
-  assert.deepEqual(reset.authorizationUsedScan?.candidates, []);
-  assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false);
-  assert.equal(fixture.http.calls.length, httpCalls);
-});
-
-test("a third distinct AuthorizationUsed candidate preserves two candidates and durable ambiguity", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "third-candidate" });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
-  const current = await operation(fixture);
-  const base = authorizationUsedLog({
-    authorizer: current.wallet,
-    nonce: current.authorization.nonce,
-    transactionHash: X402_TRANSACTION as Hex,
-    blockNumber: fixture.rpc.safeHead.number,
-    blockHash: fixture.rpc.safeHead.hash,
-  });
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [
-    base,
-    { ...base, transactionHash: `0x${"9".repeat(64)}` as Hex, logIndex: "1" },
-    { ...base, transactionHash: `0x${"8".repeat(64)}` as Hex, logIndex: "2" },
-  ] });
-  const httpCalls = fixture.http.calls.length;
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  const ambiguous = await operation(fixture);
-  assert.equal(ambiguous.authorizationUsedScan?.status, "ambiguous");
-  assert.equal(ambiguous.authorizationUsedScan?.candidates.length, 2);
-  assert.equal(ambiguous.transactionHint, undefined);
-  assert.equal(fixture.http.calls.length, httpCalls);
-});
-
-test("a crash before scan fsync cannot expose HTTP and restart replays the same chunk", async (t) => {
-  const fixture = await authorizedFixture(t, {
-    paidOutcomes: [new Error("first ambiguity"), new Error("bounded retry")],
-    idempotencyKey: "scan-fsync-cut",
-  });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  fixture.rpc.x402Calls.length = 0;
-  const state = fixture.core.context.state;
-  const originalWrite = state.writeX402Operation.bind(state);
-  let interrupted = false;
-  state.writeX402Operation = async (next) => {
-    if (next.authorizationUsedScan?.status === "complete" && !interrupted) {
-      interrupted = true;
-      throw new Error("scan commit crash cut");
-    }
-    await originalWrite(next);
-  };
-  const httpCalls = fixture.http.calls.length;
-  const crashed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(crashed.ok, false);
-  assert.equal(fixture.http.calls.length, httpCalls);
-  assert.deepEqual(fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")), ["logs:12345-12346"]);
-  state.writeX402Operation = originalWrite;
-
-  fixture.rpc.x402Calls.length = 0;
-  const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(resumed.ok, true, JSON.stringify(resumed));
-  assert.deepEqual(fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")), ["logs:12345-12346"]);
-  assert.equal(fixture.http.calls.length, httpCalls + 1);
 });
 
 test("authorized but never sent can finalize unused expiry after native material expires", async (t) => {
@@ -1920,7 +849,6 @@ test("authorized but never sent can finalize unused expiry after native material
     rpcOrigin: fixture.rpc.rpcOrigin,
   };
   fixture.rpc.authorizationStateValue = false;
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
 
   const expired = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal((expired.operation as { readonly state?: unknown } | null)?.state, "failed_expired_unused", JSON.stringify(expired));
@@ -1928,112 +856,7 @@ test("authorized but never sent can finalize unused expiry after native material
   assert.deepEqual(fixture.native.calls, [], "finalized expiry is classified before any optional pre-send material read");
 });
 
-test("authorized but never sent extends a stale zero scan before finalized unused expiry", async (t) => {
-  const fixture = await authorizedFixture(t, { idempotencyKey: "expiry-before-send-safe-advance" });
-  failRecoveredNativeMaterial(fixture, "APN_KEYCHAIN_LOCKED");
-  const unavailable = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(unavailable.ok, true, JSON.stringify(unavailable));
-  const scanned = await operation(fixture);
-  assert.equal(scanned.state, "authorized_not_sent");
-  assert.equal(scanned.authorizationUsedScan?.status, "complete");
-  assert.deepEqual(scanned.authorizationUsedScan?.candidates, []);
-
-  fixture.clock.advance(61_000);
-  const previousTarget = scanned.authorizationUsedScan!.targetSafeHead;
-  fixture.rpc.blockHashes.set(previousTarget.number, previousTarget.hash as Hex);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    number: (BigInt(previousTarget.number) + 1n).toString(),
-    hash: `0x${"d".repeat(64)}` as Hex,
-    timestamp: scanned.authorization.validBefore,
-    observedAt: fixture.clock.now().toISOString(),
-  };
-  fixture.rpc.finalizedHead = {
-    queriedTag: "finalized",
-    number: fixture.rpc.safeHead.number,
-    hash: fixture.rpc.safeHead.hash,
-    timestamp: scanned.authorization.validBefore,
-    observedAt: fixture.rpc.safeHead.observedAt,
-    rpcOrigin: fixture.rpc.rpcOrigin,
-  };
-  fixture.rpc.authorizationStateValue = false;
-  const transitionless = transitionlessZeroScanExtension(scanned, {
-    number: fixture.rpc.safeHead.number,
-    hash: fixture.rpc.safeHead.hash,
-    observedAt: fixture.rpc.safeHead.observedAt,
-  });
-  await assert.rejects(
-    fixture.core.context.state.writeX402Operation(transitionless),
-    { code: "APN_STATE_CORRUPT" },
-    "a pre-send completed-zero extension must append a durable self-transition",
-  );
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  fixture.rpc.x402Calls.length = 0;
-  const nativeCalls = fixture.native.calls.length;
-  const httpCalls = fixture.http.calls.length;
-
-  const expired = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal((expired.operation as { readonly state?: unknown } | null)?.state, "failed_expired_unused", JSON.stringify(expired));
-  assert.deepEqual(
-    fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-    [`logs:${fixture.rpc.safeHead.number}-${fixture.rpc.safeHead.number}`],
-  );
-  assert.equal(fixture.native.calls.length, nativeCalls, "finalized expiry completes before another material read");
-  assert.equal(fixture.http.calls.length, httpCalls, "pre-send expiry never exposes a paid request");
-});
-
-test("inconsistent safe and finalized ancestry cannot prove unused expiry", async (t) => {
-  for (const posture of ["same-height", "lower-height", "timestamp"] as const) {
-    await t.test(posture, async (nested) => {
-      const fixture = await authorizedFixture(nested, { idempotencyKey: `expiry-ancestry-${posture}` });
-      const current = await operation(fixture);
-      fixture.clock.advance(61_000);
-      fixture.rpc.safeHead = {
-        ...fixture.rpc.safeHead,
-        timestamp: current.authorization.validBefore,
-        observedAt: fixture.clock.now().toISOString(),
-      };
-      if (posture === "same-height") {
-        fixture.rpc.finalizedHead = {
-          queriedTag: "finalized",
-          number: fixture.rpc.safeHead.number,
-          hash: `0x${"c".repeat(64)}` as Hex,
-          timestamp: current.authorization.validBefore,
-          observedAt: fixture.rpc.safeHead.observedAt,
-          rpcOrigin: fixture.rpc.rpcOrigin,
-        };
-      } else if (posture === "lower-height") {
-        fixture.rpc.finalizedHead = {
-          ...fixture.rpc.finalizedHead,
-          timestamp: current.authorization.validBefore,
-          observedAt: fixture.rpc.safeHead.observedAt,
-        };
-        fixture.rpc.blockHashes.set(fixture.rpc.finalizedHead.number, `0x${"c".repeat(64)}` as Hex);
-      } else {
-        fixture.rpc.finalizedHead = {
-          queriedTag: "finalized",
-          number: fixture.rpc.safeHead.number,
-          hash: fixture.rpc.safeHead.hash,
-          timestamp: current.authorization.validBefore,
-          observedAt: fixture.rpc.safeHead.observedAt,
-          rpcOrigin: fixture.rpc.rpcOrigin,
-        };
-        fixture.rpc.blockTimestamps.set(
-          fixture.rpc.finalizedHead.number,
-          (BigInt(current.authorization.validBefore) - 1n).toString(),
-        );
-      }
-      fixture.rpc.authorizationStateValue = false;
-      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal(resumed.ok, true, JSON.stringify(resumed));
-      assert.equal((resumed.operation as { readonly terminal?: unknown } | null)?.terminal, false);
-      assert.equal((await operation(fixture)).unusedExpiryEvidence, undefined);
-      assert.equal(fixture.http.calls.length, 1);
-    });
-  }
-});
-
-test("expiry requires finalized timestamp, false state, and complete zero scan", async (t) => {
+test("post-exposure expiry requires a finalized block at or after validBefore with the nonce unused", async (t) => {
   const fixture = await authorizedFixture(t, { idempotencyKey: "expiry-positive" });
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   const current = await operation(fixture);
@@ -2054,19 +877,13 @@ test("expiry requires finalized timestamp, false state, and complete zero scan",
     rpcOrigin: fixture.rpc.rpcOrigin,
   };
   fixture.rpc.authorizationStateValue = false;
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
   const expired = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal((expired.operation as { readonly state?: unknown } | null)?.state, "failed_expired_unused", JSON.stringify(expired));
   const terminal = await operation(fixture);
   const unused = terminal.unusedExpiryEvidence;
-  assert.equal(unused?.schemaVersion, "apn.x402.unused-expiry-evidence.v1");
-  if (unused?.schemaVersion !== "apn.x402.unused-expiry-evidence.v1") throw new Error("expected EIP-3009 unused evidence");
-  assert.deepEqual(unused.absence, {
-    localSettlement: false,
-    httpSettlement: false,
-    authorizationUsed: false,
-    transactionReceipt: false,
-  });
+  assert.equal(unused?.schemaVersion, "apn.x402.unused-expiry-evidence.v2");
+  assert.equal(unused?.finalizedHead.timestamp, current.authorization.validBefore);
+  assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false);
   assert.equal(fixture.native.calls.length, nativeCalls);
 });
 
@@ -2087,7 +904,6 @@ test("durable unused-expiry evidence completes locally after a crash before rece
     observedAt: fixture.rpc.safeHead.observedAt,
     rpcOrigin: fixture.rpc.rpcOrigin,
   };
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
   const state = fixture.core.context.state;
   const originalWriteReceipt = state.writeX402Receipt.bind(state);
   state.writeX402Receipt = async () => { throw new Error("unused-expiry receipt crash cut"); };
@@ -2116,10 +932,8 @@ test("expired cached-result authorization closes known settlement without native
     idempotencyKey: "settled-result-recovery-expired",
   });
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
   const exposed = await operation(fixture);
   const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
   fixture.clock.advance(61_000);
   fixture.rpc.safeHead = {
     ...fixture.rpc.safeHead,
@@ -2162,10 +976,8 @@ test("one cached-result retry can complete scan-discovered settlement", async (t
     idempotencyKey: "cached-result-retry",
   });
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
   const exposed = await operation(fixture);
   const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
   const callsBefore = fixture.http.calls.length;
   const recovered = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal((recovered.operation as { readonly state?: unknown } | null)?.state, "completed");
@@ -2196,10 +1008,8 @@ test("a crash after cached-result HTTP exposure never sends the recovery request
     idempotencyKey: "cached-result-response-fsync-crash",
   });
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
   const exposed = await operation(fixture);
   const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
 
   const state = fixture.core.context.state;
   const originalWrite = state.writeX402Operation.bind(state);
@@ -2232,104 +1042,6 @@ test("a crash after cached-result HTTP exposure never sends the recovery request
   assert.equal(terminal.attempts.find((attempt) => attempt.purpose === "result_recovery")?.phase, "ambiguous");
 });
 
-test("a conflicting cached-result transaction never overwrites the durable scan hint", async (t) => {
-  const conflictingTransaction = `0x${"8".repeat(64)}` as Hex;
-  const fixture = await authorizedFixture(t, {
-    paymentIdentifier: true,
-    paidOutcomes: [new Error("initial ambiguity"), paidObservation({
-      paymentResponseHeader: canonicalPaymentResponseHeader({
-        success: true,
-        transaction: conflictingTransaction,
-        network: "eip155:8453",
-        payer: X402_TEST_ACCOUNT.address.toLowerCase(),
-        amount: "1250000",
-      }),
-      bodyText: '{"wrong":"transaction"}',
-    })],
-    idempotencyKey: "conflicting-result-hint",
-  });
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
-  const exposed = await operation(fixture);
-  const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
-  const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "effect_unknown");
-  const durable = await operation(fixture);
-  assert.equal(durable.transactionHint?.transactionHash, X402_TRANSACTION);
-  assert.equal(durable.transactionHint?.source, "authorization_used_log");
-  assert.equal(
-    settlementResponseTransactionForTest(durable.settlementResponseObservation?.normalizedCanonicalJson),
-    conflictingTransaction,
-  );
-  assert.equal(durable.resultLink, undefined);
-
-  await advanceSafeAndReset(fixture, "f");
-  const reset = await operation(fixture);
-  assert.equal(reset.transactionHint, undefined);
-  assert.equal(reset.settlementEvidence, undefined);
-  assert.equal(
-    settlementResponseTransactionForTest(reset.settlementResponseObservation?.normalizedCanonicalJson),
-    conflictingTransaction,
-  );
-
-  fixture.clock.advance(61_000);
-  fixture.rpc.safeHead = {
-    ...fixture.rpc.safeHead,
-    timestamp: reset.authorization.validBefore,
-    observedAt: fixture.clock.now().toISOString(),
-  };
-  fixture.rpc.finalizedHead = {
-    queriedTag: "finalized",
-    number: fixture.rpc.safeHead.number,
-    hash: fixture.rpc.safeHead.hash,
-    timestamp: reset.authorization.validBefore,
-    observedAt: fixture.rpc.safeHead.observedAt,
-    rpcOrigin: fixture.rpc.rpcOrigin,
-  };
-  fixture.rpc.authorizationStateValue = false;
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-  const httpCalls = fixture.http.calls.length;
-  const afterExpiry = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(afterExpiry.ok, true, JSON.stringify(afterExpiry));
-  assert.equal((afterExpiry.operation as { readonly state?: unknown } | null)?.state, "effect_unknown");
-  assert.equal(fixture.http.calls.length, httpCalls);
-  const stillAmbiguous = await operation(fixture);
-  assert.equal(stillAmbiguous.unusedExpiryEvidence, undefined);
-  assert.equal(
-    settlementResponseTransactionForTest(stillAmbiguous.settlementResponseObservation?.normalizedCanonicalJson),
-    conflictingTransaction,
-  );
-
-  const priorFinalizedNumber = (BigInt(fixture.rpc.safeHead.number) - 1n).toString();
-  fixture.rpc.finalizedHead = {
-    ...fixture.rpc.finalizedHead,
-    number: priorFinalizedNumber,
-    hash: fixture.rpc.blockHashes.get(priorFinalizedNumber) ?? `0x${"d".repeat(64)}` as Hex,
-    timestamp: reset.authorization.validBefore,
-    observedAt: fixture.rpc.safeHead.observedAt,
-  };
-  await advanceSafeAndReset(fixture, "a");
-  const reorged = await operation(fixture);
-  const canonicalSettlement = configureSettlement(fixture.rpc, reorged, { transactionHash: conflictingTransaction });
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [canonicalSettlement.logs[0]!] });
-  const terminalHttpCalls = fixture.http.calls.length;
-  const canonicallySettled = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  assert.equal(canonicallySettled.ok, true, JSON.stringify(canonicallySettled));
-  assert.equal(
-    (canonicallySettled.operation as { readonly state?: unknown } | null)?.state,
-    "failed_settled_without_result",
-  );
-  assert.equal(fixture.http.calls.length, terminalHttpCalls);
-  const terminal = await operation(fixture);
-  assert.equal(terminal.transactionHint?.source, "authorization_used_log");
-  assert.equal(terminal.transactionHint?.transactionHash, conflictingTransaction);
-  assert.equal(
-    settlementResponseTransactionForTest(terminal.settlementResponseObservation?.normalizedCanonicalJson),
-    conflictingTransaction,
-  );
-});
-
 test("cached-result non-success, malformed, and transport outcomes persist one attempt then close spent", async (t) => {
   const pending = paidObservation({
     status: 402,
@@ -2354,10 +1066,8 @@ test("cached-result non-success, malformed, and transport outcomes persist one a
         idempotencyKey: `cached-result-${item.label}`,
       });
       await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      await advanceSafeAndReset(fixture);
       const exposed = await operation(fixture);
       const settlement = configureSettlement(fixture.rpc, exposed);
-      fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
       const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
       assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "failed_settled_without_result");
       const terminal = await operation(fixture);
@@ -2376,10 +1086,8 @@ test("cached-result non-success, malformed, and transport outcomes persist one a
 test("orphan terminal receipt restarts without ports and preserves predecessor linkage", async (t) => {
   const fixture = await authorizedFixture(t, { idempotencyKey: "receipt-crash" });
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-  await advanceSafeAndReset(fixture);
   const exposed = await operation(fixture);
   const settlement = configureSettlement(fixture.rpc, exposed);
-  fixture.rpc.logOutcomes.push({ kind: "complete", logs: [settlement.logs[0]!] });
 
   const state = fixture.core.context.state;
   const originalWrite = state.writeX402Operation.bind(state);
