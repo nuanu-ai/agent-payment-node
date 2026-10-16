@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmod, cp, readdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, cp, readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { OperationService } from "../../src/operation-service.js";
 import { StateStore } from "../../src/state.js";
@@ -30,19 +29,13 @@ const LEDGER_BASE_KEYS = new Set(["schemaVersion", "reservationId", "idempotency
   "asset", "rail", "amountAtomic", "state", "reservedAt", "updatedAt", "effectAt", "outcomeDigest", "reservationDigest"]);
 
 /**
- * Copy one frozen case into a fresh state root with the owner-only modes the secure store requires. A MetaMask native
- * journal binds the absolute state root it was written under, so its `context.stateRoot` is rebound to this root and its
- * record hash resealed; every other byte is copied unchanged.
+ * Copy one frozen case into a fresh state root with the owner-only modes the secure store requires. Every byte is
+ * copied unchanged: a version 1 MetaMask native journal still names the home it was written under, which is never this
+ * root, so the corpus also proves that moving the APN home voids no journal.
  */
 export async function installLegacyCase(source: string, root: string): Promise<void> {
   await cp(source, root, { recursive: true });
   await ownerOnly(root);
-  for (const name of await jsonNames(root, "metamask-native-operations")) {
-    const path = join(root, "metamask-native-operations", name);
-    const { recordHash: _old, ...body } = JSON.parse(await readFile(path, "utf8")) as { recordHash: string; context: { stateRoot: string } };
-    body.context.stateRoot = root;
-    await writeFile(path, `${canonicalJson({ ...body, recordHash: hashObject(body) })}\n`, { mode: 0o600 });
-  }
 }
 
 /** Hash of every file outside `locks/`; readers may take locks but must not rewrite a stored record. */

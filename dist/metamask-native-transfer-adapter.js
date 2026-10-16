@@ -1,6 +1,5 @@
-import { metaMaskNativePolicyVariants, metaMaskNativePolicyAllowsChain } from "./metamask-native-policy.js";
+import { metaMaskGuardPolicyAdmits } from "./metamask-native-policy.js";
 import { getAddress } from "viem";
-import { performance } from "node:perf_hooks";
 import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -8,30 +7,25 @@ import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers,
 import { resolveMetaMaskBin } from "./metamask-package.js";
 import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices } from "./metamask-process-output.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
-import { validateMetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
+import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent } from "./metamask-native-transfer-owner.js";
-const PAYER = "0xf41170df51aab52aaa04fbc3ff325cf051644aca";
-const CHAINS = new Set([1, 10, 143, 59144, 1329]);
+// Read at call time: this module sits in an import cycle with the owner, so no imported value is used at load.
+const nativeChain = (value) => METAMASK_NATIVE_CHAINS.includes(value);
 const EFFECT_STATES = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"]);
 class NativeReadRefusal extends ApnError {
     nativeDiagnostic;
     constructor(nativeDiagnostic) {
-        super("APN_OPERATION_BLOCKED", "The fixed MetaMask native transfer is unavailable.");
+        super("APN_OPERATION_BLOCKED", "The MetaMask Agent Wallet did not confirm the paying wallet, Guard mode or policy.");
         this.nativeDiagnostic = nativeDiagnostic;
     }
 }
 function refuse(diagnostic) {
     if (diagnostic !== undefined)
         throw new NativeReadRefusal(diagnostic);
-    throw new ApnError("APN_OPERATION_BLOCKED", "The fixed MetaMask native transfer is unavailable.");
+    throw new ApnError("APN_OPERATION_BLOCKED", "The MetaMask Agent Wallet did not confirm the paying wallet, Guard mode or policy.");
 }
 function chain(value) {
-    if (!CHAINS.has(value))
-        refuse();
-}
-function policyAllowsChain(policy, chainId) {
-    chain(chainId);
-    if (!metaMaskNativePolicyAllowsChain(policy, chainId, policy.selectedAddress))
+    if (!nativeChain(value))
         refuse();
 }
 function success(result) {
@@ -39,18 +33,6 @@ function success(result) {
     if (result.exitCode !== 0 || parsed === null || parsed.notices.length !== 0 || envelope?.ok !== true || !isPlainRecord(envelope.data))
         refuse(result.nativeDiagnostic === undefined ? undefined : validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, code: result.exitCode === 0 ? "protocol" : result.nativeDiagnostic.code }));
     return envelope.data;
-}
-async function address(runner, deadline, expectedPayer = PAYER) {
-    const result = await runner.runJson(["wallet", "address", "--chain-namespace", "evm", "--json"], remaining(deadline), deadline);
-    try {
-        const data = success(result);
-        if (data.mode !== "server" || !isMetaMaskEvmNamespace(data.chainNamespace) ||
-            typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase())
-            refuse();
-    }
-    finally {
-        result.stdout.fill(0);
-    }
 }
 function remaining(deadline) {
     if (deadline === undefined)
@@ -70,56 +52,39 @@ async function project(runner, deadline) {
         result.stdout.fill(0);
     }
 }
-async function readPolicy(runner, deadline, observation, expectedPayer = PAYER) {
-    if (observation !== undefined)
-        observation.guard_step = "project_before";
-    const vendorProjectHash = await project(runner, deadline);
-    if (observation !== undefined)
-        observation.guard_step = "address_before";
-    await address(runner, deadline, expectedPayer);
-    if (observation !== undefined)
-        observation.guard_step = "trading_mode";
+/**
+ * Three vendor reads (PROV-12): the session project, then Guard trading mode and the policy of the selected server
+ * wallet. Both wallet reads report the selected address, so a separate address read before and after adds nothing.
+ */
+async function readPolicy(runner, expected, deadline) {
+    const vendorProjectHash = await project(runner, deadline), payer = expected.payer.toLowerCase();
     const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
     try {
         const data = success(mode);
-        if (data.mode !== "guard" || typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase())
+        if (data.mode !== "guard" || typeof data.address !== "string" || data.address.toLowerCase() !== payer)
             refuse();
     }
     finally {
         mode.stdout.fill(0);
     }
-    if (observation !== undefined)
-        observation.guard_step = "vendor_policy";
     const result = await runner.runJson(["wallet", "policy", "get", "--json"], remaining(deadline), deadline);
-    let variant;
+    let admitted;
     try {
         const data = success(result);
-        if (typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase() || typeof data.policy !== "string")
+        if (typeof data.address !== "string" || data.address.toLowerCase() !== payer || typeof data.policy !== "string")
             refuse();
-        const bytes = Buffer.byteLength(data.policy, "utf8"), hash = sha256(data.policy);
-        const expected = metaMaskNativePolicyVariants(expectedPayer).find(v => v.policyBytes === bytes && v.vendorPolicyHash === hash);
-        if (expected === undefined)
-            refuse();
-        variant = { vendorPolicyHash: expected.vendorPolicyHash, policyBytes: expected.policyBytes };
+        // OD-4: the policy must name this wallet, allowlist this recipient on this chain and carry an outflow limit.
+        admitted = { vendorPolicyHash: sha256(data.policy), ...metaMaskGuardPolicyAdmits(data.policy, expected) };
     }
     finally {
         result.stdout.fill(0);
     }
-    if (observation !== undefined)
-        observation.guard_step = "address_after";
-    await address(runner, deadline, expectedPayer);
-    if (observation !== undefined)
-        observation.guard_step = "project_after";
-    if (await project(runner, deadline) !== vendorProjectHash)
-        refuse();
-    return Object.freeze({ selectedAddress: getAddress(expectedPayer), ...variant, vendorProjectHash, tradingMode: "guard", observedAt: new Date().toISOString() });
+    return Object.freeze({ selectedAddress: getAddress(expected.payer), vendorProjectHash, ...admitted, tradingMode: "guard", observedAt: new Date().toISOString() });
 }
-/** Normal pinned CLI GETs only. No YAML decoder, policy mutation or remote rolling-usage prediction. */
-export async function readFixedMetaMaskNativePolicy(chainId, deadline, expectedPayer = PAYER) {
+/** Normal vendor CLI reads only; no policy mutation or remote rolling-usage prediction. */
+export async function readMetaMaskNativeVendorPolicy(chainId, payer, recipient, deadline) {
     chain(chainId);
-    const policy = await readPolicy(new NodeMetaMaskProcessRunner(), deadline, undefined, getAddress(expectedPayer));
-    policyAllowsChain(policy, chainId);
-    return policy;
+    return await readPolicy(new NodeMetaMaskProcessRunner(), { payer: getAddress(payer), chainId, recipient: getAddress(recipient) }, deadline);
 }
 const quantity = (value) => `0x${BigInt(value).toString(16)}`;
 /** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
@@ -144,8 +109,9 @@ export async function submitOwnedMetaMaskNative(scope, context) {
     // EIP-1559 fees force the ordinary type2 path; the normal parser accepts no authorization list.
     let result;
     try {
+        const transfer = metaMaskNativeQuoteTransfer(quote);
         result = await handoffRunner.runJson(["wallet", "send-transaction", "--chain-id", String(quote.chainId), "--payload", payload,
-            "--intent", `APN ${context.operationId}: native-paid fixed 1000 atomic USDC to Seller`, "--json"], nativeDeadlineRemaining(deadline), deadline);
+            "--intent", `APN ${context.operationId}: ${transfer.amountAtomic} atomic USDC to ${transfer.recipient}`, "--json"], nativeDeadlineRemaining(deadline), deadline);
     }
     catch (error) {
         const diagnostic = takeMetaMaskNativeProcessFailureDiagnostic(error);
@@ -177,9 +143,6 @@ async function prepareNativeHandoff(scope, context) {
     nativeDeadlineRemaining(deadline);
     const quote = validateMetaMaskNativeFeeQuote(context.quote);
     chain(quote.chainId);
-    const policy = metaMaskNativePolicyVariants(quote.sender).find(v => v.vendorPolicyHash === context.vendorPolicyHash);
-    if (policy === undefined || !metaMaskNativePolicyAllowsChain(policy, quote.chainId, quote.sender))
-        refuse();
     // Finish package validation before the last owner/deadline check, so a slow resolver cannot move the private handoff past it.
     nativeDeadlineRemaining(deadline);
     let resolverTimer;
@@ -212,8 +175,12 @@ function readDiagnostic(value) {
         return null;
     }
 }
-/** Normal status READ only. Owner supplies RID/project hash from its authentic journal; a service hint is not chain evidence. */
-export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHash, expectedPayer = PAYER) {
+/**
+ * Normal status READ only (three vendor processes): the session project before, the watch, the project after. The owner
+ * supplies the request id and project hash from its authentic journal; a service hint is never chain evidence, so no
+ * policy is read around it.
+ */
+export async function readMetaMaskNativeRequest(requestId, vendorProjectHash) {
     const observation = { stage: "input", guard_step: null, request_id: null, watch_returned: false,
         before_guard_verified: false, after_guard_verified: false, request_identity_verified: false, provider_status: null,
         transaction_hash: null, chain_id: null, response_hash: null, reason: null, error_code: null, diagnostic: null };
@@ -230,8 +197,8 @@ export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHas
     let hint = { disposition: "unknown", reason: "provider_request_read_unavailable", requestId };
     try {
         observation.stage = "before_guard";
-        const before = await readPolicy(runner, undefined, observation, getAddress(expectedPayer));
-        if (before.vendorProjectHash !== vendorProjectHash)
+        observation.guard_step = "project_before";
+        if (await project(runner) !== vendorProjectHash)
             refuse();
         observation.before_guard_verified = true;
         observation.stage = "watch";
@@ -247,11 +214,9 @@ export async function readFixedMetaMaskNativeRequest(requestId, vendorProjectHas
             result.stdout.fill(0);
         }
         observation.stage = "after_guard";
-        const after = await readPolicy(runner, undefined, observation, getAddress(expectedPayer));
-        if (after.vendorProjectHash !== vendorProjectHash || after.vendorPolicyHash !== before.vendorPolicyHash)
+        observation.guard_step = "project_after";
+        if (await project(runner) !== vendorProjectHash)
             refuse();
-        if (hint.chainId !== undefined)
-            policyAllowsChain(after, hint.chainId);
         observation.after_guard_verified = true;
         observation.stage = "complete";
         observation.guard_step = null;
@@ -284,7 +249,7 @@ function requestHint(result, requestId, observation) {
     if (request.pollingId !== requestId || request.kind !== "transaction" || !isMetaMaskEvmNamespace(request.namespace))
         return unknown("provider_request_identity_conflict");
     const chainId = request.chainId;
-    if (chainId !== undefined && (typeof chainId !== "number" || !CHAINS.has(chainId)))
+    if (chainId !== undefined && (typeof chainId !== "number" || !nativeChain(chainId)))
         return unknown("provider_request_chain_unsupported");
     const chainHint = chainId === undefined ? {} : { chainId: chainId };
     const hash = (value) => typeof value === "string" && /^0x[a-fA-F0-9]{64}$/u.test(value) ? value.toLowerCase() : undefined;
