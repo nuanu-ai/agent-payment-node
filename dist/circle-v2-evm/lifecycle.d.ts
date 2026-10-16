@@ -28,7 +28,9 @@ export interface CircleLifecyclePorts {
 }
 type Consent = () => void;
 export declare function approveCircleSource(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
-/** Each marker is fsynced before crossing its boundary. Marked recovery never enters signing or broadcast again. */
+/** Each marker is fsynced before crossing its boundary. Every refusable check runs before signing; after the
+ * submission fence the effect is observed only, never signed or broadcast again. A failure before that fence
+ * keeps the effect signed-but-unsent and resumable instead of turning it into a permanent unknown. */
 export declare function executeCircleEffect(input: CircleOperationV1, role: CircleRole, ports: CircleLifecyclePorts, token?: Consent): Promise<CircleOperationV1>;
 export declare function approveCircleMint(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
 export declare function observeCircle(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
