@@ -16,9 +16,11 @@ for (const sponsor of [false, true]) test(`finite observer attests finalized exa
   // Settlement is proven at the finalized head by the consumed nonce; the exact receipt only names the transaction.
   assert.equal(result.projection.transactionHash, f.wire.tx.hash);
   assert.equal(result.projection.blockNumber, "43"); assert.equal(result.projection.blockHash, f.wire.finalized.hash);
-  assert.deepEqual(result.projection.rpc, { attempts: 4, admissions: 4, physicalDispatches: 4, logicalReads: sponsor ? 12 : 11, errors: 0,
-    methods: { eth_chainId: 2, eth_getBlockByNumber: 3, eth_getTransactionByHash: 1, eth_getTransactionReceipt: 1, eth_getCode: 2, eth_call: sponsor ? 3 : 2 } });
-  assert.equal(f.batches.length, 4);
+  // Three POSTs: chain+finalized+locator, the inclusion header, the nonce state pinned to the finalized hash. No code,
+  // domain or header re-read (was four POSTs and eleven reads).
+  assert.deepEqual(result.projection.rpc, { attempts: 3, admissions: 3, physicalDispatches: 3, logicalReads: sponsor ? 7 : 6, errors: 0,
+    methods: { eth_chainId: 1, eth_getBlockByNumber: 2, eth_getTransactionByHash: 1, eth_getTransactionReceipt: 1, eth_call: sponsor ? 2 : 1 } });
+  assert.equal(f.batches.length, 3);
   const exposed = JSON.stringify(result);
   for (const secret of ["private", f.permit2Signature, f.input.rpcUrl, f.wire.tx.input]) assert.equal(exposed.includes(secret), false);
   assert.equal((await consumePermit2ObservationProof(result.proof, f.record, f.signed, "settlement")).outcome, "settled");
@@ -32,7 +34,7 @@ for (const sponsor of [false, true]) test(`finite observer proves expired unused
   const result = await observePermit2Production(input);
   assert.equal(result.projection.outcome, "expired_unused"); assert.ok(result.proof);
   assert.equal(result.projection.signedHash, null); assert.equal(result.projection.transactionHash, null);
-  assert.equal(result.projection.rpc.physicalDispatches, 3); assert.equal(result.projection.rpc.logicalReads, sponsor ? 9 : 8);
+  assert.equal(result.projection.rpc.physicalDispatches, 2); assert.equal(result.projection.rpc.logicalReads, sponsor ? 4 : 3);
   assert.equal((await consumePermit2ObservationProof(result.proof, f.record, null, "expired_unused")).outcome, "expired_unused");
 });
 
@@ -78,23 +80,20 @@ for (const fault of shapes) test(`settlement observer settles an unattributable 
   assert.equal(unused.projection.outcome, "hold", "without the consumed nonce nothing settled"); assert.equal(unused.proof, null);
 });
 
-const faults = ["unfinalized", "chain", "proxy_code", "permit2_code", "domain", "canonical", "http"] as const;
+const faults = ["unfinalized", "chain", "canonical", "http"] as const;
 for (const fault of faults) test(`finite settlement observer holds ${fault} and never retries`, async t => {
   const f = await observerFixture(t), w = f.wire;
   switch (fault) {
     // A transaction newer than the finalized head has not consumed the nonce at that head yet.
     case "unfinalized": w.finalized.number = "0x29"; w.settledBitmap = word(0n); break;
     case "chain": w.chain = "0x1"; break;
-    case "proxy_code": w.proxyCode = "0x6001"; break;
-    case "permit2_code": w.permit2Code = "0x6001"; break;
-    case "domain": w.domain = factHash("e"); break;
     case "canonical": w.unsupportedCanonical = true; break;
     case "http": w.httpStatus = 503; break;
   }
   const result = await observePermit2Production(f.input);
   assert.equal(result.projection.outcome, "hold"); assert.equal(result.proof, null);
   assert.equal(result.projection.rpc.physicalDispatches, f.batches.length);
-  assert.ok(f.batches.length <= 4); assert.equal(f.batches.flat().filter(call => call.method === "eth_getTransactionReceipt").length, 1);
+  assert.ok(f.batches.length <= 3); assert.equal(f.batches.flat().filter(call => call.method === "eth_getTransactionReceipt").length, 1);
   if (fault === "http") { assert.equal(f.batches.length, 1); assert.equal(result.projection.rpc.errors, 1); }
 });
 
@@ -107,7 +106,7 @@ test("settlement without any transaction hash is proven by the consumed nonce al
   assert.equal((await consumePermit2ObservationProof(result.proof, f.record, f.signed, "settlement")).outcome, "settled");
 });
 
-for (const fault of ["deadline_equal", "permit2_spent", "token_nonce", "canonical", "domain", "head_reorg"] as const)
+for (const fault of ["deadline_equal", "permit2_spent", "token_nonce", "canonical"] as const)
   test(`expired-unused observer holds ${fault}`, async t => {
     const f = await observerFixture(t, true); (f.input as { mode: string }).mode = "expired_unused";
     const input = { ...f.input, signed: null, locator: null, mode: "expired_unused" as const };
@@ -115,10 +114,8 @@ for (const fault of ["deadline_equal", "permit2_spent", "token_nonce", "canonica
     if (fault === "permit2_spent") f.wire.bitmap = word(1n << 7n);
     if (fault === "token_nonce") f.wire.tokenNonce = word(10n);
     if (fault === "canonical") f.wire.unsupportedCanonical = true;
-    if (fault === "domain") f.wire.domain = factHash("e");
-    if (fault === "head_reorg") f.wire.headReorg = true;
     const result = await observePermit2Production(input); assert.equal(result.projection.outcome, "hold"); assert.equal(result.proof, null);
-    assert.ok(f.batches.length <= 3);
+    assert.ok(f.batches.length <= 2);
   });
 
 test("a reverted locator never issues terminal authority while the nonce is unused", async t => {
@@ -161,8 +158,8 @@ test("repeated observation performs new finite reads with no cached proof or pai
   const f = await observerFixture(t);
   const first = await observePermit2Production(f.input), second = await observePermit2Production(f.input);
   assert.equal(first.projection.outcome, "settled"); assert.equal(second.projection.outcome, "settled");
-  assert.notEqual(first.proof, second.proof); assert.equal(f.batches.length, 8);
-  assert.equal(first.projection.rpc.physicalDispatches, 4); assert.equal(second.projection.rpc.physicalDispatches, 4);
+  assert.notEqual(first.proof, second.proof); assert.equal(f.batches.length, 6);
+  assert.equal(first.projection.rpc.physicalDispatches, 3); assert.equal(second.projection.rpc.physicalDispatches, 3);
   assert.ok(f.batches.flat().every(call => ["eth_chainId", "eth_getBlockByNumber", "eth_getCode", "eth_call",
     "eth_getTransactionByHash", "eth_getTransactionReceipt"].includes(call.method)));
 });
