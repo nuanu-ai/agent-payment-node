@@ -62,7 +62,8 @@ export declare function verifyCircleSourceAccount(account: CircleAccountPrefligh
     readonly approvalRequired: boolean;
     readonly nonceAtomic: string;
 };
-export declare function verifyCircleDestinationAccount(account: CircleAccountPreflight, chain: CircleDestinationChain, destinationProfile?: string): string;
+/** `gasPayer` is the operation's own destination custody wallet, which signs and pays the mint. */
+export declare function verifyCircleDestinationAccount(account: CircleAccountPreflight, chain: CircleDestinationChain, gasPayer: Address): string;
 export interface CircleGasEnvelope {
     readonly gasLimitAtomic: string;
     readonly maxFeePerGasAtomic: string;

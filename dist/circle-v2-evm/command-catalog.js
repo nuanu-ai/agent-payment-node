@@ -1,24 +1,25 @@
 import { deriveCircleFundingParameters } from "./funding-binding.js";
 import { exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { isCircleDestinationChain } from "./catalog.js";
 const option = (name, type, constraints, required = true) => ({ name, type, required,
     default: { kind: "none" }, constraints, sensitivity: "operator_input" });
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
-export const CIRCLE_EVM_GROUPS = [{ path: ["circle", "evm"], summary: "Finite CCTP V2 Fast Arbitrum USDC to Sei, Linea or Monad, with separate destination gas consent.", kind: "group" }];
+export const CIRCLE_EVM_GROUPS = [{ path: ["circle", "evm"], summary: "CCTP V2 Fast Arbitrum USDC to Sei, Linea or Monad for any profile, with separate destination gas consent.", kind: "group" }];
 export const CIRCLE_EVM_COMMANDS = [
-    command("prepare", [option("--profile", "profile", ["evm-live-buyer"]), option("--destination-profile", "profile", ["explicit_owned_gas_profile"]),
+    command("prepare", [option("--profile", "profile", ["local_evm_custody_source_signer"]), option("--destination-profile", "profile", ["local_evm_custody_destination_gas_signer"]),
         option("--destination-chain", "string", ["1329_or_59144_or_143"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"]),
-        option("--beneficiary", "address", ["canonical_nonzero_address", "all_four_funding_options_or_none"], false),
-        option("--gross-atomic", "atomic_usdc", ["positive_uint256", "all_four_funding_options_or_none"], false),
-        option("--max-issuer-fee-atomic", "atomic_usdc", ["positive_less_than_gross", "all_four_funding_options_or_none"], false),
-        option("--min-mint-atomic", "atomic_usdc", ["positive_at_most_gross_minus_max_fee", "all_four_funding_options_or_none"], false)], "Freeze V1 fixed 40100/100/40000 intent when all funding options are absent; all four explicit options select finite V2 funding with exact circle-cctp-v2 / circle-v2-evm-fast-42161-<destination>.v2 policy admission.", "payment_prepare"),
+        option("--beneficiary", "address", ["canonical_nonzero_address"]),
+        option("--gross-atomic", "atomic_usdc", ["positive_uint256"]),
+        option("--max-issuer-fee-atomic", "atomic_usdc", ["positive_less_than_gross"]),
+        option("--min-mint-atomic", "atomic_usdc", ["positive_at_most_gross_minus_max_fee"])], "Freeze one CCTP V2 Fast burn of --gross-atomic Arbitrum USDC from the --profile wallet to --beneficiary on the destination chain, minted by the --destination-profile wallet; admitted by each profile's active policy for circle-cctp-v2 / circle-v2-evm-fast-42161-<destination>.v2 and caps.", "payment_prepare"),
     command("approve-source", [operation], "Foreground-confirm, sign and send exact bounded approval and burn at most once.", "payment_submit"),
-    command("adopt-external-mint", [operation, option("--transaction-hash", "string", ["0x_64_lowercase_hex_characters"])], "Verify one explicit V1 or finite V2 third-party mint, preserve source charges and close only never-entered owned holds without signing or sending.", "recovery"),
+    command("adopt-external-mint", [operation, option("--transaction-hash", "string", ["0x_64_lowercase_hex_characters"])], "Verify one explicit third-party mint of this burn on its destination, preserve source charges and close only never-entered owned holds without signing or sending.", "recovery"),
     command("approve-mint", [operation], "Foreground-confirm the destination gas owner and mint the issuer-verified same burn nonce once.", "payment_submit"),
     command("observe", [operation], "Observe canonical source, issuer signature, destination mint and independent finality without signing or resending.", "network_read"),
     command("refresh-attestation", [operation], "Read-only issuer refresh for the same burn and nonce before mint; never reburn.", "network_read"),
     command("cleanup", [operation], "Explicit foreground approve-zero cleanup after confirmed approval/revert, or cancellation before private entry.", "payment_submit"),
-    command("cleanup-nonce", [operation], "Foreground-confirm one exact approve-zero for an expired unknown Monad approval or the retained Sei sealed burn nonce; finalized canonical retirement proof closes unused holds.", "payment_submit"),
+    command("cleanup-nonce", [operation], "Foreground-confirm one exact approve-zero at the nonce of an expired unknown v1 approval (any destination) or the retained Sei sealed burn nonce; finalized canonical retirement proof closes unused holds.", "payment_submit"),
     command("cleanup85-prepare", [operation], "Prepare the finite retained cleanup85 recovery frame without signing or sending.", "payment_prepare"),
     command("cleanup85-cancel", [operation], "Foreground-confirm one distinct native1wei cancellation85; the verified native backend is required.", "payment_submit"),
     command("cleanup86-approve", [operation], "After canonical FINALIZED cancellation85, foreground-confirm one zero approval86; only strictly unsigned v3 orphan or prepared generation1 may capture the finite next generation.", "payment_submit"),
@@ -44,14 +45,15 @@ export function bindCircleEvmCommand(path, input) {
         return { command: "circle.evm.adopt-external-mint", operationId: input["--operation"], transactionHash: input["--transaction-hash"] };
     }
     if (action === "prepare") {
-        const base = ["--profile", "--destination-profile", "--destination-chain", "--idempotency-key"], fields = ["--beneficiary", "--gross-atomic", "--max-issuer-fee-atomic", "--min-mint-atomic"];
-        if (!exactKeys(input, base) && !exactKeys(input, [...base, ...fields]))
+        // Every input is required: no default profile, beneficiary or amount. The fixed v1 shape is read-only.
+        const fields = ["--beneficiary", "--gross-atomic", "--max-issuer-fee-atomic", "--min-mint-atomic"];
+        if (!exactKeys(input, ["--profile", "--destination-profile", "--destination-chain", "--idempotency-key", ...fields]))
             invalid();
-        const funding = deriveCircleFundingParameters(Object.fromEntries(fields.filter(k => input[k] !== undefined).map((k, i) => [["recipient", "amountAtomic", "maxFeeAtomic", "minMintAtomic"][i], input[k]])));
-        const chain = input["--destination-chain"];
-        if (chain !== "1329" && chain !== "59144" && chain !== "143")
+        const funding = deriveCircleFundingParameters(Object.fromEntries(fields.map((k, i) => [["recipient", "amountAtomic", "maxFeeAtomic", "minMintAtomic"][i], input[k]])));
+        const chain = Number(input["--destination-chain"]);
+        if (funding === null || !/^[1-9][0-9]*$/u.test(input["--destination-chain"]) || !isCircleDestinationChain(chain))
             invalid();
-        return { command: "circle.evm.prepare", profile: input["--profile"], destinationProfile: input["--destination-profile"], destinationChain: Number(chain), idempotencyKey: input["--idempotency-key"], ...(funding === null ? {} : { funding }) };
+        return { command: "circle.evm.prepare", profile: input["--profile"], destinationProfile: input["--destination-profile"], destinationChain: chain, idempotencyKey: input["--idempotency-key"], funding };
     }
     if (!["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "cleanup-nonce", "cleanup85-prepare", "cleanup85-cancel", "cleanup86-approve", "status"].includes(action) || !exactKeys(input, ["--operation"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]))
         invalid();

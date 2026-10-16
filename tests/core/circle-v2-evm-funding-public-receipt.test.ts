@@ -8,10 +8,10 @@ import { circleFundingBinding, quoteCircleFundingFee } from "../../src/circle-v2
 import { advanceCircleFundingOperation, sealCircleFundingOperation, circleFundingFingerprint, publicKnownCircle } from "../../src/circle-v2-evm/funding-operation.js";
 import { circleEnvelope, advanceCircle } from "../../src/circle-v2-evm/operation-model.js";
 import { encodeCircleApproval, encodeCircleBurn } from "../../src/circle-v2-evm/protocol.js";
-import { initial, at } from "./circle-v2-evm-nonce-runtime-fixtures.js";
+import { initial, at, fundingIdentity } from "./circle-v2-evm-nonce-runtime-fixtures.js";
 const params = { recipient: getAddress(`0x${"55".repeat(20)}`), amountAtomic: "510000", maxFeeAtomic: "10000", minMintAtomic: "500000" };
 function funding(root: string) {
-  const legacy = initial(root), b = circleFundingBinding(143, "default", params), feeQuote = quoteCircleFundingFee(b, [{ finalityThreshold: 1000, minimumFee: 1 }], at, at);
+  const legacy = initial(root), b = circleFundingBinding(143, fundingIdentity(legacy), params), feeQuote = quoteCircleFundingFee(b, [{ finalityThreshold: 1000, minimumFee: 1 }], at, at);
   const { schemaVersion: _v, integrityHash: _h, transitions: _t, externalFulfillment: _e, nonceRetirement: _n, ...rest } = legacy;
   const effects = rest.effects.map(e => { const { envelopeHash: _old, ...envelope } = e.envelope; return { ...e, envelope: circleEnvelope({ ...envelope, data: e.role === "burn" ? encodeCircleBurn(143, b) : encodeCircleApproval(false, b) }) }; });
   let op = sealCircleFundingOperation({ ...rest, schemaVersion: "apn.circle-v2-evm-operation.v2", funding: b, feeQuote, feeQuoteAtomic: feeQuote.quotedFeeAtomic, state: "awaiting_source", policies: rest.policies.map(p => ({ ...p, activationDigest: "a".repeat(64) })), expiresAt: new Date(at + 900000).toISOString(), effects, transitions: [] });

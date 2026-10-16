@@ -11,7 +11,7 @@ import { cleanup85PublicState, cleanup85PublicTransport } from "./cleanup85-nati
 import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { CircleEvmService } from "../../src/circle-v2-evm/runtime.js";
 import { circleMechanism } from "../../src/circle-v2-evm/usage.js";
-import { circleRoute, CIRCLE_SOURCE_TOKEN } from "../../src/circle-v2-evm/catalog.js";
+import { circleLegacyRoute as circleRoute, CIRCLE_SOURCE_TOKEN } from "../../src/circle-v2-evm/catalog.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { Cleanup85UnsignedRetirementStore, CLEANUP85_UNSIGNED_ORIGINAL } from "../../src/circle-cleanup85-unsigned-retirement-store.js";
 import { resolveCleanup85NativeLineage, verifiedCleanup85NativeLineage, verifyCleanup85SuccessorFinancialAdmission, verifiedCleanup85SuccessorFinancialAdmission, type VerifiedCleanup85SuccessorFinancialAdmission } from "../../src/circle-cleanup85-unsigned-retirement.js";

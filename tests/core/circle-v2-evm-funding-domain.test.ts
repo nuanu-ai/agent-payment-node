@@ -15,15 +15,15 @@ import { CircleRepository, validateCircleFundingAdvance } from "../../src/circle
 import { circleFundingBinding, quoteCircleFundingFee } from "../../src/circle-v2-evm/funding-binding.js";
 import { circleFundingFingerprint, sealCircleFundingOperation, advanceCircleFundingOperation, validateCircleFundingOperation, validateKnownCircle, type CircleFundingOperationV2 } from "../../src/circle-v2-evm/funding-operation.js";
 import { advanceCircle, circleEnvelope, validateCircle } from "../../src/circle-v2-evm/operation-model.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { bindCircleAttestation, circleWord, decodeCircleMessage, decodeCircleSource, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, verifyCircleApproval, CIRCLE_ZERO } from "../../src/circle-v2-evm/protocol.js";
 import { verifyCircleMintPreflight, verifyCircleClosureFinality } from "../../src/circle-v2-evm/preflight.js";
-import { initial, at } from "./circle-v2-evm-nonce-runtime-fixtures.js";
+import { initial, at, fundingIdentity } from "./circle-v2-evm-nonce-runtime-fixtures.js";
 import { event, observation, message, snapshot } from "./circle-v2-evm-runtime-fixtures.js";
 const recipient = getAddress(`0x${"55".repeat(20)}`), feeRecipient = getAddress(`0x${"44".repeat(20)}`);
 const params = { recipient, amountAtomic: "1000000", maxFeeAtomic: "1000", minMintAtomic: "999000" };
 function funding(root: string, chain: 143 | 1329 | 59144, profile = circleRoute(chain).gasPayerProfile): CircleFundingOperationV2 {
-  const legacy = initial(root, chain, profile), b = circleFundingBinding(chain, profile, params), feeQuote = quoteCircleFundingFee(b, [{ finalityThreshold: 1000, minimumFee: 1 }], at, at);
+  const legacy = initial(root, chain, profile), b = circleFundingBinding(chain, fundingIdentity(legacy), params), feeQuote = quoteCircleFundingFee(b, [{ finalityThreshold: 1000, minimumFee: 1 }], at, at);
   const { schemaVersion: _v, integrityHash: _h, transitions: _t, externalFulfillment: _e, nonceRetirement: _n, ...rest } = legacy;
   const effects = rest.effects.map(e => { const { envelopeHash: _oldHash, ...envelope } = e.envelope;
     return { ...e, envelope: circleEnvelope({ ...envelope, data: e.role === "burn" ? encodeCircleBurn(chain, b) : encodeCircleApproval(false, b) }) }; });

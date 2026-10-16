@@ -3,6 +3,7 @@ import { getAddress } from "viem";
 import { hashObject } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity } from "../asset-usage-ledger.js";
 import type { StateStore } from "../state.js";
 import { bridgeFailure } from "./validation.js";
@@ -18,8 +19,9 @@ export class CircleV2SourceAdmission {
   private readonly identity: AssetUsageIdentity;
   private readonly reservationId: string;
   private policyDigest: string | null = null;
+  /** `recipient` is the Solana wallet that owns the destination USDC account; an owner recipient pin must list it (OD-1). */
   constructor(private readonly state: StateStore, private readonly profile: string, payer: string,
-    private readonly amountAtomic: string, private readonly operationId: string, private readonly now: () => Date) {
+    private readonly amountAtomic: string, private readonly operationId: string, private readonly now: () => Date, private readonly recipient: string) {
     this.ledger = new AssetUsageLedger(state.root);
     this.identity = { account: getAddress(payer), chain: "eip155:8453", asset: { kind: "token", identifier: BASE_USDC } };
     this.reservationId = assetUsageReservationId(this.identity, this.key());
@@ -31,16 +33,19 @@ export class CircleV2SourceAdmission {
     return active;
   }
   /** Read-only admission before the owner is asked: policy account, Base USDC bridge rail, CCTP mechanism and caps. */
-  async admit(): Promise<void> {
-    const active = await this.active(), at = this.now(), usage = await this.ledger.usage(this.identity, at);
+  async admit(): Promise<void> { const at = this.now(); await this.evaluate(await this.active(), (await this.ledger.usage(this.identity, at)).amountAtomic); }
+  private async evaluate(active: Awaited<ReturnType<CircleV2SourceAdmission["active"]>>, dailyUsageAtomic: string): Promise<void> {
+    const at = this.now();
     const admission = evaluateAssetPolicy(active.registry, { chain: this.identity.chain, asset: this.identity.asset, rail: "bridge",
-      mechanism: CIRCLE_V2_BASE_SOLANA_MECHANISM, amountAtomic: this.amountAtomic, dailyUsageAtomic: usage.amountAtomic,
+      mechanism: CIRCLE_V2_BASE_SOLANA_MECHANISM, amountAtomic: this.amountAtomic, dailyUsageAtomic,
       asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
     if (!bridgeMechanismAdmitted(admission, CIRCLE_V2_BASE_SOLANA_MECHANISM)) refused("mechanism_not_admitted");
+    assertRecipientAdmitted({ admission, mechanism: CIRCLE_V2_BASE_SOLANA_MECHANISM, recipient: this.recipient });
   }
   /** After consent and before signing: the ledger re-evaluates the active policy and caps atomically. */
   async reserve(): Promise<void> {
-    const active = await this.active();
+    // Mechanism and recipient pin of the admission row; the ledger reservation checks the caps (a replayed hold is not counted twice).
+    const active = await this.active(); await this.evaluate(active, "0");
     const reservation = await this.ledger.reserve({ ...this.identity, registry: active.registry, rail: "bridge",
       mechanism: CIRCLE_V2_BASE_SOLANA_MECHANISM, amountAtomic: this.amountAtomic, idempotencyKey: this.key(), now: this.now() });
     if (reservation.state !== "reserved") refused("usage_hold_unavailable");

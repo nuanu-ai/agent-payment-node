@@ -6,7 +6,7 @@ import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256, type Hex } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
+import { evmSentOutcome, evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -16,7 +16,7 @@ import type { StateStore } from "../state.js";
 import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { ApnError } from "../errors.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, type CircleDestinationChain } from "./catalog.js";
+import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, isCircleDestinationChain, type CircleDestinationChain } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, bindCircleAttestation, decodeCircleSource, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint,
   verifyCircleApproval, verifyCircleAttestationSigners, circleAttesterConfigurationHash, type CircleAttestation } from "./protocol.js";
 import { verifyCircleDestinationAccount, verifyCircleGasEnvelope, verifyCircleMintPreflight, verifyCircleClosureFinality } from "./preflight.js";
@@ -56,11 +56,14 @@ export class CircleFundingEvmService {
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly env: Readonly<Record<string, string | undefined>>, private readonly now: () => number = Date.now, ttyOptions: CircleFundingApprovalOptions = {}, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps()) { this.ttyOptions = fundingApprovalOptions(ttyOptions); this.repo = new CircleRepository(state.root); this.usage = new CircleUsage(state, now); this.custody = new LocalCircleFundingCustody(state, wrapping); this.operations = new OperationService(state); }
   async adoptExternalMint(id: string, transactionHash: Hex) { return adoptCircleFundingExternalMint(this.state,this.repo,this.usage,this.env,this.now,this.https,id,transactionHash); }
   async prepare(input: CircleFundingPrepareInput): Promise<CircleFundingOperationV2> {
-    const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile), route = circleRoute(input.destinationChain, destinationProfile);
-    if (profile !== "evm-live-buyer" || destinationProfile !== route.gasPayerProfile || !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(input.idempotencyKey)) circleBlocked("finite_route_profile_or_idempotency");
-    const funding = circleFundingBinding(input.destinationChain, destinationProfile, input.funding);
+    // Identity comes only from the explicit profiles: the source signer is custody(--profile), the mint signer and gas
+    // payer is custody(--destination-profile). Admission is each profile's own active policy (usage.policies below).
+    const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile);
+    if (!isCircleDestinationChain(input.destinationChain)) circleBlocked("unsupported_destination_chain");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(input.idempotencyKey)) circleBlocked("idempotency_key");
+    const route = circleRoute(input.destinationChain);
     await this.state.initialize(); const [sourceCustody, destinationCustody] = await Promise.all([evmNativeCustody(this.state, profile), evmNativeCustody(this.state, destinationProfile)]);
-    if (sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || destinationCustody.walletAddress !== route.gasPayer) circleBlocked("finite_route_owner");
+    const funding = circleFundingBinding(route.chainId, { sourceProfile: profile, sourceOwner: sourceCustody.walletAddress, destinationProfile, gasPayer: destinationCustody.walletAddress }, input.funding);
     const operationId = this.state.operationId(profile, input.idempotencyKey), idempotencyHash = this.state.idempotencyHash(input.idempotencyKey), requestHash = hashObject({ ...input, profile, destinationProfile });
     const keys = [`profile:${sourceCustody.profileHash}`, `profile:${destinationCustody.profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(sourceCustody.walletAddress), evmAddressLock(destinationCustody.walletAddress)];
     return this.state.withLocks(keys, async () => this.usage.withPolicyLocks([profile, destinationProfile], async () => {
@@ -71,10 +74,10 @@ export class CircleFundingEvmService {
       await assertExclusiveEvmRawSigner(this.state, destinationCustody.walletAddress, destinationCustody.profileHash);
       const { source, destination } = this.remotes(route.chainId), deployments = await currentCircleDeployments(source, destination, route.chainId), fee = await this.fee(funding);
       assertCircleFundingFee(funding, fee, this.now());
-      const sourceAccount = await source.account(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), src = this.sourceAccount(sourceAccount, funding.amountAtomic);
+      const sourceAccount = await source.account(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), src = this.sourceAccount(sourceAccount, sourceCustody.walletAddress, funding.amountAtomic);
       // This lane starts at zero allowance. Pre-existing grants require normal cleanup before preparing.
       if (!src.approvalRequired) circleBlocked("initial_zero_allowance_required");
-      const dst = verifyCircleDestinationAccount(await destination.account(destinationCustody.walletAddress, route.token, CIRCLE_TRANSMITTER), route.chainId, destinationProfile);
+      const dst = verifyCircleDestinationAccount(await destination.account(destinationCustody.walletAddress, route.token, CIRCLE_TRANSMITTER), route.chainId, destinationCustody.walletAddress);
       void dst;
       const approvalEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(false, funding), src.nonceAtomic);
       const burnEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_MESSENGER, encodeCircleBurn(route.chainId, funding), (BigInt(src.nonceAtomic) + 1n).toString(), "600000");
@@ -87,7 +90,7 @@ export class CircleFundingEvmService {
           { role: "burn", phase: "prepared", envelope: burnEnvelope, transactionHash: null, materialHash: null, proof: null }], source: null, attestation: null, destination: null,
         residualAllowanceAtomic: "0", usage: [], usageFinalized: false, transitions: [] });
       op = sealCircle({ ...op, policies: await this.usage.policies(op) }); op = sealCircle({ ...op, fingerprint: circleFundingFingerprint(op) });
-      const initial = advanceCircle(op, {}, "exact_finite_route_prepared", this.now()); await this.operations.assertCircleAccountsAvailable(initial); await this.repo.saveFunding(initial);
+      const initial = advanceCircle(op, {}, "exact_route_prepared", this.now()); await this.operations.assertCircleAccountsAvailable(initial); await this.repo.saveFunding(initial);
       const usage = await this.usage.reserve(initial), reserved = advanceCircle(initial, { usage }, "all_assets_reserved", this.now()); await this.repo.saveFunding(reserved); return reserved;
     }));
   }
@@ -120,11 +123,13 @@ export class CircleFundingEvmService {
     if (response.status !== 200) throw new ApnError("APN_HTTP_CONFIG", "Circle issuer API response is unavailable."); return JSON.parse(response.body) as unknown;
   }
   private async fee(funding: CircleFundingOperationV2["funding"]) { const value = await this.api(`/v2/burn/USDC/fees/3/${funding.destinationDomain}`); return quoteCircleFundingFee(funding, value, this.now(), this.now()); }
-  private sourceAccount(a: import("./preflight.js").CircleAccountPreflight, amount: string) { if (a.chainId !== 42161 || a.address !== CIRCLE_SOURCE_OWNER || circleUint(a.usdcBalanceAtomic) < BigInt(amount) || circleUint(a.nativeBalanceAtomic) < 75_000_000_000_000n || circleUint(a.allowanceAtomic) !== 0n || circleUint(a.latestNonceAtomic) !== circleUint(a.pendingNonceAtomic)) circleBlocked("funding_source_account"); return { approvalRequired: true, nonceAtomic: circleUint(a.latestNonceAtomic).toString() }; }
+  private sourceAccount(a: import("./preflight.js").CircleAccountPreflight, owner: string, amount: string) { if (a.chainId !== 42161 || a.address !== owner || circleUint(a.usdcBalanceAtomic) < BigInt(amount) || circleUint(a.nativeBalanceAtomic) < 75_000_000_000_000n || circleUint(a.allowanceAtomic) !== 0n || circleUint(a.latestNonceAtomic) !== circleUint(a.pendingNonceAtomic)) circleBlocked("funding_source_account"); return { approvalRequired: true, nonceAtomic: circleUint(a.latestNonceAtomic).toString() }; }
   private ports(initial: CircleFundingOperationV2): CircleFundingLifecyclePorts {
-    const { source, destination } = this.remotes(initial.destinationChain), route = circleRoute(initial.destinationChain, initial.destinationProfile);
+    const { source, destination } = this.remotes(initial.destinationChain), route = circleRoute(initial.destinationChain);
+    // The operation's own signers; the validator binds them to `funding.sourceOwner` and `funding.gasPayer`.
+    const owner = initial.sourceCustody.walletAddress, gasPayer = initial.destinationCustody.walletAddress;
     const rpc = (e: CircleEffect) => e.role === "mint" ? destination : source;
-    const allowance = async (tag = "latest") => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], tag));
+    const allowance = async (tag = "latest") => String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [owner, CIRCLE_MESSENGER], tag));
     // P2: one configuration, attester set and fresh fee quote per command; a finalized observation never changes.
     const memo = circleCommandMemo(this.now, () => this.preflightDeployments(source, destination, initial.destinationChain), digest => this.preflightAttesters(destination, digest),
       () => this.fee(initial.funding), (client, hash, tag) => client.observation(hash, tag));
@@ -139,7 +144,7 @@ export class CircleFundingEvmService {
         const scope = fundingRuntimeScope.getStore();
         if (scope === undefined || !scope.active || scope.state !== this.state || scope.fingerprint !== op.fingerprint) circleBlocked("private_funding_runtime_scope_required");
         const end = Date.parse(deadline); if (!Number.isFinite(end) || end > this.now() + 60_000 || end > Date.now() + 60_000) circleBlocked("funding_authority_deadline");
-        await exactChainConsent([`Circle finite funding ${role}`, `Operation: ${op.operationId}`, `Source: ${op.profile} / ${op.sourceCustody.walletAddress} / eip155:42161`, `Destination gas owner: ${op.destinationProfile} / ${op.destinationCustody.walletAddress} / eip155:${op.destinationChain}`, `Beneficiary: ${op.funding.recipient} (not asserted owned by gas profile)`, `Gross USDC: ${op.funding.amountAtomic}; maximum issuer fee: ${op.funding.maxFeeAtomic}; minimum net mint: ${op.funding.minMintAtomic}`, `Source full native capacity 75000000000000; destination cap ${route.destinationNativeCap}`, `Policies: ${canonicalJson(op.policies)}`, `Effects: ${canonicalJson(op.effects.filter(e => role === "source" ? ["approval", "burn"].includes(e.role) : e.role === role).map(e => e.envelope))}`, "No ambiguous resubmission; independent canonical finality and zero allowance required."], approvalCode("bridge", op.operationId, op.integrityHash, role), deadline, this.ttyOptions);
+        await exactChainConsent([`Circle CCTP V2 Fast ${role}`, `Operation: ${op.operationId}`, `Source: ${op.profile} / ${op.sourceCustody.walletAddress} / eip155:42161`, `Destination gas owner: ${op.destinationProfile} / ${op.destinationCustody.walletAddress} / eip155:${op.destinationChain}`, `Beneficiary: ${op.funding.recipient} (not asserted owned by gas profile)`, `Gross USDC: ${op.funding.amountAtomic}; maximum issuer fee: ${op.funding.maxFeeAtomic}; minimum net mint: ${op.funding.minMintAtomic}`, `Source full native capacity 75000000000000; destination cap ${route.destinationNativeCap}`, `Policies: ${canonicalJson(op.policies)}`, `Effects: ${canonicalJson(op.effects.filter(e => role === "source" ? ["approval", "burn"].includes(e.role) : e.role === role).map(e => e.envelope))}`, "No ambiguous resubmission; independent canonical finality and zero allowance required."], approvalCode("bridge", op.operationId, op.integrityHash, role), deadline, this.ttyOptions);
         if (this.now() >= end || Date.now() >= end) circleBlocked("funding_authority_expired");
         if (role !== "cancel") for (const e of op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role)) {
           if (scope.grants.has(e.role)) circleBlocked("funding_authority_reissue");
@@ -155,7 +160,7 @@ export class CircleFundingEvmService {
         const remote = rpc(effect), e = effect.envelope; verifyCircleGasEnvelope(e, e.chainId as 42161 | CircleDestinationChain); await remote.identity();
         const sourceEffect = effect.role === "approval" || effect.role === "burn";
         const [latest, pending, balance, sourceAllowance, principal] = await Promise.all([remote.call("eth_getTransactionCount", [e.from, "latest"]), remote.call("eth_getTransactionCount", [e.from, "pending"]), remote.call("eth_getBalance", [e.from, "pending"]),
-          sourceEffect ? allowance() : Promise.resolve(null), sourceEffect ? source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [CIRCLE_SOURCE_OWNER], "pending") : Promise.resolve(null)]);
+          sourceEffect ? allowance() : Promise.resolve(null), sourceEffect ? source.read(CIRCLE_SOURCE_TOKEN, "balanceOf", [owner], "pending") : Promise.resolve(null)]);
         if (circleUint(latest).toString() !== e.nonceAtomic || circleUint(pending).toString() !== e.nonceAtomic || circleUint(balance) < BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic)) circleBlocked("nonce_or_native_balance_changed");
         const remainingNative = effect.role === "mint" ? BigInt(route.destinationNativeCap) : effect.role === "approval" ? 75_000_000_000_000n : effect.role === "burn" ? 45_000_000_000_000n : 15_000_000_000_000n;
         if (circleUint(balance) < remainingNative) circleBlocked("funding_remaining_native_capacity");
@@ -163,11 +168,14 @@ export class CircleFundingEvmService {
         if (sourceEffect) { assertCircleFundingFee(op.funding, await memo.fee(), this.now()); if (circleUint(String(principal)) < BigInt(op.funding.amountAtomic)) circleBlocked("funding_source_principal_changed"); }
         const transaction = circleRpcTransaction(e), [rawEstimate, rawSimulation] = await Promise.all([remote.call("eth_estimateGas", [transaction, "pending"]), remote.call("eth_call", [transaction, "pending"])]);
         if (circleUint(rawEstimate) > BigInt(e.gasLimitAtomic)) circleBlocked("simulation_exceeds_gas_ceiling"); const simulated = circleHex(rawSimulation);
-        if (effect.role === "mint") { if (op.source === null || op.attestation === null) circleCorrupt("mint_without_source"); const observation = await observe(source, op.source.transactionHash, op.source.finalityTag === "finalized" ? "finalized" : "included"); if (observation === null) circleBlocked("source_reorg_before_mint"); assertObservedEnvelope(op.effects[1]!, observation.transaction); const proof = decodeCircleSource(observation, op.destinationChain, op.funding); if (proof.blockHash !== op.source.blockHash || proof.receiptHash !== op.source.receiptHash || proof.sourceMessageHash !== op.source.sourceMessageHash || await allowance() !== "0") circleBlocked("source_reorg_before_mint"); const snapshot = await memo.attesters(freshDeployments.digest); await verifyCircleAttestationSigners(op.attestation, op.attestation.attestation, snapshot, op.funding); const [block, rawUsed] = await Promise.all([destination.block("latest"), destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], "latest")]), used = String(rawUsed); verifyCircleMintPreflight(op.source, op.attestation, { destinationBlockAtomic: circleUint(block.number).toString(), usedNonceAtomic: used, attesterConfigurationHash: circleAttesterConfigurationHash(snapshot), transactionSimulationResult: simulated }, op.funding); }
+        if (effect.role === "mint") { if (op.source === null || op.attestation === null) circleCorrupt("mint_without_source"); const observation = await observe(source, op.source.transactionHash, op.source.finalityTag === "finalized" ? "finalized" : "included"); if (observation === null) circleBlocked("source_reorg_before_mint"); assertObservedEnvelope(op.effects[1]!, observation.transaction); const proof = decodeCircleSource(observation, op.destinationChain, op.funding); if (proof.blockHash !== op.source.blockHash || proof.receiptHash !== op.source.receiptHash || proof.sourceMessageHash !== op.source.sourceMessageHash) circleBlocked("source_reorg_before_mint"); const snapshot = await memo.attesters(freshDeployments.digest); await verifyCircleAttestationSigners(op.attestation, op.attestation.attestation, snapshot, op.funding); const [block, rawUsed] = await Promise.all([destination.block("latest"), destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], "latest")]), used = String(rawUsed); verifyCircleMintPreflight(op.source, op.attestation, { destinationBlockAtomic: circleUint(block.number).toString(), usedNonceAtomic: used, attesterConfigurationHash: circleAttesterConfigurationHash(snapshot), transactionSimulationResult: simulated }, op.funding); }
       }, seal: (op, e, guard) => this.custody.seal(op, e, guard), loadMaterial: (op, e) => this.custody.load(op, e),
       unsent: { outcome: async (_op, effect) => { const remote = rpc(effect); await remote.identity();
         return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
           nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") }); },
+        sentOutcome: async (_op, effect) => { const remote = rpc(effect); await remote.identity();
+          return evmSentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+            nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") }); },
         discard: (op, effect) => this.custody.discard(op, effect) },
       broadcast: async (e, raw, guard) => { guard(); const current = await this.required(initial.operationId); if (e.role === "mint" || e.role === "cleanup") await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(current); guard(); const effect = snapshotCircleFundingEffect(current, e); await this.custody.claimSend(current, effect, guard); guard(); if (keccak256(raw) !== e.transactionHash) circleBlocked("sealed_broadcast_hash_changed"); const returned = circleHex(await rpc(e).call("eth_sendRawTransaction", [raw], guard), 32); if (returned !== keccak256(raw)) circleBlocked("broadcast_hash_changed"); return returned; },
       observeEffect: async (op, effect) => {
@@ -206,9 +214,9 @@ export class CircleFundingEvmService {
         const snapshot = await memo.attesters((await deployments()).digest);
         return bindCircleAttestation(op.source, { ...response, sourceTxHash: op.source.transactionHash }, snapshot, op.funding);
       },
-      mintEnvelope: async op => { await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); if (op.attestation === null) circleCorrupt("attestation_missing"); const account = await destination.account(route.gasPayer, route.token, CIRCLE_TRANSMITTER), nonce = verifyCircleDestinationAccount(account, op.destinationChain, op.destinationProfile);
-        return destination.envelope(route.gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(op.attestation), nonce); },
-      cleanupEnvelope: async op => { await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); const nonce = circleUint(await source.call("eth_getTransactionCount", [CIRCLE_SOURCE_OWNER, "pending"])).toString(); return source.envelope(CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true, op.funding), nonce); },
+      mintEnvelope: async op => { await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); if (op.attestation === null) circleCorrupt("attestation_missing"); const account = await destination.account(gasPayer, route.token, CIRCLE_TRANSMITTER), nonce = verifyCircleDestinationAccount(account, op.destinationChain, gasPayer);
+        return destination.envelope(gasPayer, CIRCLE_TRANSMITTER, encodeCircleMint(op.attestation), nonce); },
+      cleanupEnvelope: async op => { await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); const nonce = circleUint(await source.call("eth_getTransactionCount", [owner, "pending"])).toString(); return source.envelope(owner, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true, op.funding), nonce); },
       usage: (op, target) => this.usage.follow(op, target),
     };
   }

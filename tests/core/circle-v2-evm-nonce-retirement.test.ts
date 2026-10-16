@@ -19,7 +19,7 @@ import { cleanupCircle } from "../../src/circle-v2-evm/lifecycle.js";
 import { CircleNonceRetirementStore } from "../../src/circle-v2-evm/nonce-retirement-store.js";
 import { LocalCircleCustody } from "../../src/circle-v2-evm/custody.js";
 import { retireCircleNonce, assertCircleNonceRetirementCase, type CircleNonceRetirementPorts } from "../../src/circle-v2-evm/nonce-retirement.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { encodeCircleApproval, encodeCircleBurn, type CircleReceiptProof } from "../../src/circle-v2-evm/protocol.js";
 const at = Date.parse("2026-10-09T01:00:00.000Z"), tx = `0x${"11".repeat(32)}` as Hex, cleanupTx = `0x${"cc".repeat(32)}` as Hex;
 function initial(root = join(tmpdir(), "circle-fixture"), chain: 143 | 1329 | 59144 = 143): CircleOperationV1 {

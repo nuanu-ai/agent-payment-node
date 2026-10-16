@@ -4,7 +4,8 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "../
 import { ApnError } from "../errors.js";
 import { validateEvmNativeCustody } from "../evm-native-custody.js";
 import { validateAssetUsageReservation } from "../asset-usage-ledger.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { assertStoredFieldsEqual } from "../stored-record-binding.js";
+import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint } from "./protocol.js";
 import { circleBlocked, circleCorrupt, circleSame, validateCircle, publicCircle } from "./operation-model.js";
 import { validateCircleFundingBinding, assertCircleFundingFee } from "./funding-binding.js";
@@ -24,12 +25,14 @@ export function advanceCircleFundingOperation(op, patch, reason, now) {
     const entry = { sequence: transitions.length, at: new Date(now).toISOString(), reason, previousHash: op.transitions.at(-1)?.snapshotHash ?? null, snapshotHash: hashObject(body) };
     return sealCircleFundingOperation({ ...body, transitions: [...transitions, entry] });
 }
-export function validateCircleFundingEnvelope(e, role, chain, attestation, destinationProfile, funding) {
+/** Source effects are signed by the binding's source wallet and the mint by its gas wallet; the operation validator binds
+ * both to the operation's own custody records. */
+export function validateCircleFundingEnvelope(e, role, chain, attestation, funding) {
     if (!isPlainRecord(e) || !exactKeys(e, ["chainId", "from", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash"]))
         circleCorrupt("envelope_shape");
-    const { envelopeHash, ...body } = e, route = circleRoute(chain, destinationProfile), destination = role === "mint";
+    const { envelopeHash, ...body } = e, route = circleRoute(chain), destination = role === "mint";
     const data = destination ? attestation === null ? null : encodeCircleMint(attestation) : role === "burn" ? encodeCircleBurn(chain, funding) : encodeCircleApproval(role === "cleanup", funding);
-    if (envelopeHash !== hashObject(body) || e.chainId !== (destination ? chain : 42161) || e.from !== (destination ? route.gasPayer : CIRCLE_SOURCE_OWNER) ||
+    if (envelopeHash !== hashObject(body) || e.chainId !== (destination ? chain : 42161) || e.from !== (destination ? funding.gasPayer : funding.sourceOwner) ||
         e.to !== (destination ? CIRCLE_TRANSMITTER : role === "burn" ? CIRCLE_MESSENGER : CIRCLE_SOURCE_TOKEN) || e.data !== data || e.valueAtomic !== "0")
         circleCorrupt("envelope_binding");
     for (const field of [e.nonceAtomic, e.gasLimitAtomic, e.maxFeePerGasAtomic, e.maxPriorityFeePerGasAtomic])
@@ -48,14 +51,16 @@ export function validateCircleFundingOperation(value) {
         circleCorrupt("integrity");
     if (op.fingerprint !== circleFundingFingerprint(op))
         circleCorrupt("funding_fingerprint");
-    const funding = validateCircleFundingBinding(op.funding), route = circleRoute(op.destinationChain, op.destinationProfile);
+    const funding = validateCircleFundingBinding(op.funding), route = circleRoute(op.destinationChain);
     assertCircleFundingFee(funding, op.feeQuote, Date.parse(op.preparedAt));
-    if (funding.destinationChain !== op.destinationChain || funding.destinationProfile !== op.destinationProfile || op.feeQuoteAtomic !== op.feeQuote.quotedFeeAtomic || Date.parse(op.expiresAt) !== Date.parse(op.preparedAt) + 900_000)
+    if (funding.destinationChain !== op.destinationChain || op.feeQuoteAtomic !== op.feeQuote.quotedFeeAtomic || Date.parse(op.expiresAt) !== Date.parse(op.preparedAt) + 900_000)
         circleCorrupt("funding_intent_binding");
     validateEvmNativeCustody(op.sourceCustody);
     validateEvmNativeCustody(op.destinationCustody);
-    if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||
-        op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > BigInt(funding.maxFeeAtomic) ||
+    // OWNR 5.2: the binding's identity is the operation's own profiles and custody wallets, never an owner constant.
+    assertStoredFieldsEqual(funding, { sourceProfile: op.profile, sourceOwner: op.sourceCustody.walletAddress, destinationProfile: op.destinationProfile,
+        gasPayer: op.destinationCustody.walletAddress }, () => circleCorrupt("funding_identity_binding"));
+    if (op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > BigInt(funding.maxFeeAtomic) ||
         !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"].includes(op.state) ||
         !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
         !["0", funding.amountAtomic].includes(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies))
@@ -70,18 +75,19 @@ export function validateCircleFundingOperation(value) {
     for (const u of op.usage)
         validateAssetUsageReservation(u);
     const expectedUsage = [
-        { account: CIRCLE_SOURCE_OWNER, chain: "eip155:42161", kind: "token", identifier: CIRCLE_SOURCE_TOKEN, amount: funding.amountAtomic },
-        { account: CIRCLE_SOURCE_OWNER, chain: "eip155:42161", kind: "native", identifier: null, amount: "30000000000000" },
-        { account: CIRCLE_SOURCE_OWNER, chain: "eip155:42161", kind: "native", identifier: null, amount: "30000000000000" },
-        { account: CIRCLE_SOURCE_OWNER, chain: "eip155:42161", kind: "native", identifier: null, amount: "15000000000000" },
-        { account: route.gasPayer, chain: `eip155:${op.destinationChain}`, kind: "native", identifier: null, amount: route.destinationNativeCap }
+        { account: funding.sourceOwner, chain: "eip155:42161", kind: "token", identifier: CIRCLE_SOURCE_TOKEN, amount: funding.amountAtomic },
+        { account: funding.sourceOwner, chain: "eip155:42161", kind: "native", identifier: null, amount: "30000000000000" },
+        { account: funding.sourceOwner, chain: "eip155:42161", kind: "native", identifier: null, amount: "30000000000000" },
+        { account: funding.sourceOwner, chain: "eip155:42161", kind: "native", identifier: null, amount: "15000000000000" },
+        { account: funding.gasPayer, chain: `eip155:${op.destinationChain}`, kind: "native", identifier: null, amount: route.destinationNativeCap }
     ];
     for (const [i, u] of op.usage.entries()) {
         const expected = expectedUsage[i];
         if (u.account !== expected.account || u.chain !== expected.chain || u.asset.kind !== expected.kind || u.asset.identifier !== expected.identifier || u.amountAtomic !== expected.amount || u.rail !== "bridge" || !op.policies.some(p => p.policyDigest === u.policyDigest))
             circleCorrupt("usage_binding");
     }
-    if (op.usageFinalized && op.state !== "external_fulfilled" && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => u.state !== "failed_before_effect") : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state))))
+    // A never-landed approval releases holds that its submission fence had exposed (`released_unsubmitted`); both mean nothing counted.
+    if (op.usageFinalized && op.state !== "external_fulfilled" && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => !["failed_before_effect", "released_unsubmitted"].includes(u.state)) : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state))))
         circleCorrupt("usage_finality");
     if (op.externalFulfillment !== undefined) {
         validateFundingExternalFulfillment(op.externalFulfillment, op);
@@ -98,7 +104,7 @@ export function validateCircleFundingOperation(value) {
         const e = inputEffect;
         if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted", "abandoned_unsent"].includes(e.phase))
             circleCorrupt("effect_shape");
-        validateCircleFundingEnvelope(e.envelope, e.role, op.destinationChain, op.attestation, op.destinationProfile, funding);
+        validateCircleFundingEnvelope(e.envelope, e.role, op.destinationChain, op.attestation, funding);
         if ((e.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(e.transactionHash)) || (e.materialHash !== null && !/^[a-f0-9]{64}$/u.test(e.materialHash)) ||
             (["sealed", "submission_started", "submitted", "confirmed", "reverted"].includes(e.phase) && (e.materialHash === null || e.transactionHash === null)) ||
             (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash)) ||

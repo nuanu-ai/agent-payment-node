@@ -4,7 +4,7 @@ import { HistoricalPaidRpc } from "./historical-paid-rpc.js";
 import type { StateStore } from "../state.js";
 import type { BridgeHttps } from "../lifi/https.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
-import { circleRoute } from "./catalog.js";
+import { circleLegacyRoute as circleRoute } from "./catalog.js";
 import { advanceCircle, circleBlocked, type CircleOperationV1 } from "./operation-model.js";
 import { CircleRepository } from "./repository.js";
 import type { CircleUsage } from "./usage.js";

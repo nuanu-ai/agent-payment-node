@@ -4,7 +4,7 @@ import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import { assetUsageReservationId, validateAssetUsageReservation } from "../asset-usage-ledger-record.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { verifyCircleDeployments } from "./preflight.js";
-import { CIRCLE_SOURCE_TOKEN, CIRCLE_RECIPIENT, circleRoute } from "./catalog.js";
+import { CIRCLE_SOURCE_TOKEN, CIRCLE_RECIPIENT, circleLegacyRoute as circleRoute } from "./catalog.js";
 import { circleBlocked, validateCircle, type CircleOperationV1 } from "./operation-model.js";
 import { CircleExternalStore } from "./external-store.js";
 import { CircleRepository } from "./repository.js";

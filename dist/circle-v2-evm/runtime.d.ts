@@ -6,13 +6,8 @@ import type { StateStore } from "../state.js";
 import { type TtyTransferApprovalOptions } from "../tty-approval.js";
 import { type CircleDestinationChain } from "./catalog.js";
 import { type CircleOperationV1 } from "./operation-model.js";
-export interface CirclePrepareInput {
-    readonly profile: string;
-    readonly destinationProfile: string;
-    readonly destinationChain: CircleDestinationChain;
-    readonly idempotencyKey: string;
-}
-/** A separate CCTP rail owns source custody and destination gas custody, never LI.FI source-only effects. */
+/** The read-only v1 schema (`apn.circle-v2-evm-operation.v1`): existing operations observe, mint, clean up, retire their
+ * nonce and adopt an external mint; new operations are prepared only as v2 (`CircleFundingEvmService`). */
 export declare class CircleEvmService {
     private readonly state;
     private readonly env;
@@ -26,7 +21,6 @@ export declare class CircleEvmService {
     private readonly retirements;
     private readonly cleanup85Recovery;
     constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number, ttyOptions?: TtyTransferApprovalOptions, https?: Pick<BridgeHttps, "request">, cleanup85Dependencies?: Cleanup85RecoveryDependencies);
-    prepare(input: CirclePrepareInput): Promise<CircleOperationV1>;
     status(id: string): Promise<{
         cleanup85_recovery?: {
             cleanup86?: {

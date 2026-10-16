@@ -14,7 +14,9 @@ export interface CircleFundingOperationV2 extends Omit<CircleOperationV1, "schem
 export declare function circleFundingFingerprint(op: Pick<CircleFundingOperationV2, "requestHash" | "funding" | "feeQuote" | "sourceCustody" | "destinationCustody" | "policies" | "deploymentDigest" | "effects" | "preparedAt" | "expiresAt">): string;
 export declare function sealCircleFundingOperation(input: Omit<CircleFundingOperationV2, "integrityHash"> | CircleFundingOperationV2): CircleFundingOperationV2;
 export declare function advanceCircleFundingOperation(op: CircleFundingOperationV2, patch: Partial<CircleFundingOperationV2>, reason: string, now: number): CircleFundingOperationV2;
-export declare function validateCircleFundingEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, destinationProfile: string, funding: CircleFundingBindingV2): void;
+/** Source effects are signed by the binding's source wallet and the mint by its gas wallet; the operation validator binds
+ * both to the operation's own custody records. */
+export declare function validateCircleFundingEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, funding: CircleFundingBindingV2): void;
 export declare function validateCircleFundingOperation(value: unknown): CircleFundingOperationV2;
 export declare function publicCircleFundingOperation(op: CircleFundingOperationV2): {
     next_actions: string[];

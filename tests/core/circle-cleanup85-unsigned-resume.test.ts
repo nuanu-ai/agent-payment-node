@@ -7,7 +7,7 @@ import { cleanup85PublicState, cleanup85PublicTransport, fixtureNow } from "./cl
 import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { CircleEvmService } from "../../src/circle-v2-evm/runtime.js";
 import { circleMechanism } from "../../src/circle-v2-evm/usage.js";
-import { circleRoute, CIRCLE_SOURCE_TOKEN } from "../../src/circle-v2-evm/catalog.js";
+import { circleLegacyRoute as circleRoute, CIRCLE_SOURCE_TOKEN } from "../../src/circle-v2-evm/catalog.js";
 import { Cleanup85NativeCancellation } from "../../src/circle-cleanup85-native-cancellation.js";
 import { hashObject } from "../../src/canonical.js";
 import { sealOperation } from "../../src/state-integrity.js";

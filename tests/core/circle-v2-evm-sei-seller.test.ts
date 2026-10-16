@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { getAddress } from "viem";
 import { hashObject, canonicalJson } from "../../src/canonical.js";
 import { StateStore } from "../../src/state.js";
-import { circleRoute, CIRCLE_SEI_SELLER, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_RECIPIENT } from "../../src/circle-v2-evm/catalog.js";
+import { circleLegacyRoute as circleRoute, CIRCLE_SEI_SELLER, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_RECIPIENT } from "../../src/circle-v2-evm/catalog.js";
 import { circleEnvelope, sealCircle, advanceCircle, validateCircle, type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
 import { decodeCircleSource, bindCircleAttestation, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, circleWord } from "../../src/circle-v2-evm/protocol.js";
 import { verifyCircleDestinationAccount } from "../../src/circle-v2-evm/preflight.js";
@@ -42,11 +42,11 @@ test("frozen seller profile and custody bind strict journal/nonce/fee while old 
   assert.throws(()=>validateCircle(sealCircle({...seller,destinationCustody:legacy.destinationCustody})));
   assert.throws(()=>validateCircle(sealCircle({...seller,destinationProfile:"evm-live-buyer"})));
 });
-test("seller account preflight cannot authorize buyer, arbitrary payer, non-Sei or wrong profile", () => {
+test("destination account preflight binds the operation's own gas wallet and chain", () => {
   const account={chainId:1329,address:CIRCLE_SEI_SELLER,nativeBalanceAtomic:"50000000000000000",usdcBalanceAtomic:"0",allowanceAtomic:"0",latestNonceAtomic:"3",pendingNonceAtomic:"3"};
-  assert.equal(verifyCircleDestinationAccount(account,1329,"evm-live-seller"),"3");
-  assert.throws(()=>verifyCircleDestinationAccount(account,1329)); assert.throws(()=>verifyCircleDestinationAccount({...account,address:CIRCLE_SOURCE_OWNER},1329,"evm-live-seller"));
-  assert.throws(()=>verifyCircleDestinationAccount(account,59144,"evm-live-seller"));
+  assert.equal(verifyCircleDestinationAccount(account,1329,CIRCLE_SEI_SELLER),"3");
+  assert.throws(()=>verifyCircleDestinationAccount(account,1329,CIRCLE_SOURCE_OWNER)); assert.throws(()=>verifyCircleDestinationAccount({...account,address:CIRCLE_SOURCE_OWNER},1329,CIRCLE_SEI_SELLER));
+  assert.throws(()=>verifyCircleDestinationAccount(account,59144,CIRCLE_SEI_SELLER)); assert.throws(()=>verifyCircleDestinationAccount({...account,nativeBalanceAtomic:"1"},1329,CIRCLE_SEI_SELLER));
 });
 test("same pinned burn and issuer attestation mint canonical USDC only through the frozen seller variant", async () => {
   const proof=decodeCircleSource(source(1329),1329), attested=await bindCircleAttestation(proof,await iris(proof),snapshot(1329)), route=circleRoute(1329,"evm-live-seller");
@@ -56,7 +56,9 @@ test("same pinned burn and issuer attestation mint canonical USDC only through t
   assert.throws(()=>decodeCircleDestination(proof,attested,observed,"1")); assert.throws(()=>decodeCircleDestination(proof,attested,observed,"0","evm-live-seller",issuerFeeRecipient));
   assert.equal(proof.sourceMessage,decodeCircleSource(source(1329),1329).sourceMessage); assert.equal(attested.feeExecutedAtomic,"6");
 });
-test("normal CLI has the explicit finite seller selector", () => {
-  const request=bindCircleEvmCommand("circle evm prepare",{"--profile":"evm-live-buyer","--destination-profile":"evm-live-seller","--destination-chain":"1329","--idempotency-key":"mm-sei-seller-20261009"});
+test("normal CLI: the fixed v1 prepare is read-only; any destination profile with all funding inputs binds", () => {
+  const base={"--profile":"evm-live-buyer","--destination-profile":"evm-live-seller","--destination-chain":"1329","--idempotency-key":"mm-sei-seller-20261009"};
+  assert.throws(()=>bindCircleEvmCommand("circle evm prepare",base),{code:"APN_INVALID_INPUT"});
+  const request=bindCircleEvmCommand("circle evm prepare",{...base,"--beneficiary":CIRCLE_RECIPIENT,"--gross-atomic":"40100","--max-issuer-fee-atomic":"100","--min-mint-atomic":"40000"});
   assert.equal(request.command,"circle.evm.prepare"); assert.equal((request as any).destinationProfile,"evm-live-seller"); assert.equal((request as any).destinationChain,1329);
 });
