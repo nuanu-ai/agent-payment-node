@@ -41,12 +41,7 @@ export class JupiterV1QuoteBuilder {
         }
         const build = await this.provider.buildExactIn(request, quoteResponse);
         routeConfigForQuoteBuild(quoteResponse, build, routeId);
-        let execution = await this.resolver.resolve(payer, quoteResponse, build, jupiterV1MaximumNativeExpense(input.amountAtomic), undefined, routeId);
-        if (this.options.refreshBuildAfterPublicReads === true) {
-            const refreshed = await this.provider.buildExactIn(request, quoteResponse);
-            routeConfigForQuoteBuild(quoteResponse, refreshed, routeId);
-            execution = await this.resolver.refreshQuoteBuild(execution, refreshed, this.options.refreshRpcLifetimeBeforeFreeze === true);
-        }
+        const execution = await this.resolver.resolve(payer, quoteResponse, build, jupiterV1MaximumNativeExpense(input.amountAtomic), undefined, routeId, this.options.freezeRpcLifetime === true);
         assertJupiterV1FreshMaterial(execution);
         const produced = await this.options.proveQuote(execution, input);
         const quote = snapshotFromJupiterV1QuoteProof(produced, execution, { profile: input.profile, account: input.account, recipient: input.recipient, amountAtomic: input.amountAtomic, slippageBps: input.slippageBps, now: input.now });

@@ -36,7 +36,7 @@ export function createJupiterV1Runtime(options) {
         const builder = new JupiterV1QuoteBuilder(new JupiterV1ReadOnlyProvider(async (input, init) => { await rpc.chargeOfficialRead(); return await (options.providerFetch ?? jupiterV1HttpsFetch)(input, init); }), new JupiterV1MaterialResolver(rpc), materials, {
             resolvePayer: async (profile, amount) => (await selectedOwner(route, profile, amount, "1")).account.address,
             resolveRouteId: async (profile, amount) => { await selectedOwner(route, profile, amount, "1"); return route.routeId; },
-            computeUnitPriceMicroLamports: 1000, refreshBuildAfterPublicReads: true, refreshRpcLifetimeBeforeFreeze: true,
+            computeUnitPriceMicroLamports: 1000, freezeRpcLifetime: true,
             proveQuote: async (execution, input) => {
                 const owner = await selectedOwner(route, input.profile, input.amountAtomic, execution.quoteResponse.otherAmountThreshold, input.account);
                 if (owner.account.address !== execution.payer || input.recipient !== execution.payer || input.slippageBps > input.ownerSlippageCapBps)
