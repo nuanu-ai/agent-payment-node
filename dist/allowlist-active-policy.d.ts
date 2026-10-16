@@ -21,12 +21,12 @@ export interface ActiveAssetPolicyContext {
 }
 /**
  * Load the profile's ACTIVE allowlist registry. Returns null when nothing is active (never activated or revoked).
- * Every staged revision and the whole activation chain are authenticated first; tamper fails closed with
- * APN_STATE_CORRUPT and an expired activation fails closed with APN_OPERATION_BLOCKED.
+ * Every staged revision and the whole activation chain are integrity-checked first (unkeyed digests: corruption
+ * fails closed with APN_STATE_CORRUPT); an expired activation fails closed with APN_OPERATION_BLOCKED.
  */
 export declare function loadActiveAssetPolicyRegistry(context: ActiveAssetPolicyContext, profile: string): Promise<ActiveAssetPolicy | null>;
 export declare function loadActiveAssetPolicyRegistry(stateRoot: string, profile: string, now: Date): Promise<ActiveAssetPolicy | null>;
-/** Decode an authenticated state already read while the caller holds the profile lock. */
+/** Decode an integrity-checked state already read while the caller holds the profile lock. */
 export declare function activeAssetPolicyFromState(state: AllowlistPolicyState, at: Date): ActiveAssetPolicy | null;
 /** The chain head when it is an activation. The store has already bound it to its staged record. */
 export declare function activeAllowlistPolicy(state: AllowlistPolicyState): {

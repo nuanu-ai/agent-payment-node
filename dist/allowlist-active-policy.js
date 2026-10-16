@@ -8,7 +8,7 @@ export async function loadActiveAssetPolicyRegistry(source, profile, now) {
     const state = await new AllowlistPolicyStore(typeof source === "string" ? source : source.state.root).read(profile);
     return activeAssetPolicyFromState(state, at);
 }
-/** Decode an authenticated state already read while the caller holds the profile lock. */
+/** Decode an integrity-checked state already read while the caller holds the profile lock. */
 export function activeAssetPolicyFromState(state, at) {
     const active = activeAllowlistPolicy(state);
     if (active === null)

@@ -59,6 +59,14 @@ export declare function compileAllowlistPolicyOverlay(raw: AllowlistPolicyOverla
     readonly registry: AssetPolicyRegistry;
 };
 export declare function validateAllowlistPolicyRecord(value: unknown): AllowlistPolicyRecord;
+/**
+ * A stored staged revision is checked against itself, never recompiled against the inventory this release ships.
+ * The dataset, inventory and mechanism rules apply when the owner stages a revision; the owner then activates the
+ * exact sealed registry the approval screen shows. A release with another dataset may refuse new staging, but it
+ * must not void stored policies (that blocked every allowlist-gated rail of the profile, and its own re-staging).
+ * The digests are unkeyed: they detect corruption, not a rewrite by the same local user.
+ */
+export declare function assertStoredAllowlistCompilation(overlaySchema: string, overlay: unknown, registryValue: unknown): void;
 /** One owner-supplied admission row: exact identity, one rail, positive owner caps and the rail's pinned mechanism. */
 export declare function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmissionInput;
 export declare function canonicalAllowlistAccount(family: string, value: unknown): string;
