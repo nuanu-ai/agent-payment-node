@@ -141,7 +141,7 @@ export class SecureStateStore {
         await this.beforeLockAcquire(key);
         const elapsed = Date.now() - started;
         if (strictDeadline && elapsed >= waitMs) throw busy(waitMs);
-        held.push(await this.acquireLock(key, Math.max(0, waitMs - elapsed), strictDeadline));
+        held.push(await this.acquireLock(key, Math.max(0, waitMs - elapsed), strictDeadline, waitMs));
       }
       return await action();
     } finally {
@@ -398,7 +398,7 @@ export class SecureStateStore {
     }
   }
 
-  private async acquireLock(key: string, waitMs: number, strictDeadline: boolean): Promise<HeldLock> {
+  private async acquireLock(key: string, waitMs: number, strictDeadline: boolean, reportedWaitMs: number): Promise<HeldLock> {
     const lockName = `${sha256(`lock\0${key}`)}.lock`;
     const path = this.resolveRelative(join("locks", lockName));
     const started = Date.now();
@@ -435,7 +435,7 @@ export class SecureStateStore {
       if (elapsed >= waitMs) break;
       await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, Math.min(10, waitMs - elapsed)));
     } while (true);
-    throw busy(waitMs);
+    throw busy(reportedWaitMs);
   }
 
   private async validateOpenedLock(path: string, handle: FileHandle): Promise<void> {

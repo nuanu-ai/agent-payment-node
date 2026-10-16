@@ -119,7 +119,7 @@ export class SecureStateStore {
                 const elapsed = Date.now() - started;
                 if (strictDeadline && elapsed >= waitMs)
                     throw busy(waitMs);
-                held.push(await this.acquireLock(key, Math.max(0, waitMs - elapsed), strictDeadline));
+                held.push(await this.acquireLock(key, Math.max(0, waitMs - elapsed), strictDeadline, waitMs));
             }
             return await action();
         }
@@ -424,7 +424,7 @@ export class SecureStateStore {
             await handle.close();
         }
     }
-    async acquireLock(key, waitMs, strictDeadline) {
+    async acquireLock(key, waitMs, strictDeadline, reportedWaitMs) {
         const lockName = `${sha256(`lock\0${key}`)}.lock`;
         const path = this.resolveRelative(join("locks", lockName));
         const started = Date.now();
@@ -461,7 +461,7 @@ export class SecureStateStore {
                 break;
             await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(10, waitMs - elapsed)));
         } while (true);
-        throw busy(waitMs);
+        throw busy(reportedWaitMs);
     }
     async validateOpenedLock(path, handle) {
         const opened = await handle.stat();
