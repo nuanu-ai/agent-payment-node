@@ -33,22 +33,22 @@ export class JupiterHistoricalRetirementReader extends SecureStateStore {
     async readBucketEntries(entries, rows) {
         if (entries.length === 0)
             return [];
-        const rootSnapshotHash = await historicalRetirementRootSnapshot(this.root), records = [];
+        // Each record is checked against its own hash, original operation and original row bytes only. The state root's
+        // path and inode are not part of the binding, so restoring or moving ~/.apn keeps the SOL usage bucket readable.
+        const records = [];
         for (const e of entries) {
             if (!e.isFile() || e.isSymbolicLink() || !HISTORICAL_JUPITER_IDS.some(id => `${id}.json` === e.name))
                 corrupt();
             const value = await this.readJson(`${HISTORICAL_RETIREMENT_NAMESPACE}/${e.name}`), record = validateHistoricalRetirementRecord(value);
-            if (`${record.operationId}.json` !== e.name || record.authentication.rootBinding !== hashObject({ root: this.root }))
+            if (`${record.operationId}.json` !== e.name)
                 corrupt();
             const row = rows.find(r => r.reservationId === record.originalOperation.usageLease.reservationId);
             if (row === undefined)
                 corrupt();
             const rawHash = await this.originalReservationRawHash(HISTORICAL_RETIREMENT_IDENTITY, row.reservationId), operation = await new SwapOperationRepository(this.root).loadAny(record.operationId);
-            assertHistoricalRetirementBindings(record, rootSnapshotHash, operation, row, rawHash);
+            assertHistoricalRetirementBindings(record, operation, row, rawHash);
             records.push(record);
         }
-        if (rootSnapshotHash !== await historicalRetirementRootSnapshot(this.root))
-            corrupt();
         return Object.freeze(records);
     }
     async writeJson() { corrupt(); }
