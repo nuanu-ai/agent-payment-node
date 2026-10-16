@@ -40,6 +40,13 @@ export declare class GaslessUsdtCommandExecute {
     private load;
     private preparePort;
     execute(profileHash: string, operationId: string): Promise<UsdtExecutionRecord>;
+    /** No other non-terminal money operation of any family may hold this Ethereum account (shared EntryPoint and EOA nonces). */
+    private assertAccountAvailable;
+    /**
+     * Resume reads the live journal: a submitted hash is observed (never resent), an interrupted unsent attempt is retired
+     * and its usage hold released under the effect lock, and a terminal or never-executed operation is returned as saved.
+     */
+    resume(profileHash: string, operationId: string): Promise<UsdtBoundOperation | UsdtExecutionRecord>;
     status(profileHash: string, operationId: string): Promise<{
         readonly operationId: string;
         readonly execution: UsdtExecutionRecord | null;

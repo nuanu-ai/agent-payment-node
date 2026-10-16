@@ -53,5 +53,6 @@ export declare class GaslessUsdtCommandPrepare {
     private readonly options;
     constructor(state: StateStore, clock: ClockPort, operations: GaslessUsdtOperationService, options?: UsdtCommandPrepareOptions);
     prepare(input: PrepareCommand): Promise<import("./bound-operation.js").UsdtAnyBoundOperation>;
+    private prepareNew;
 }
 export {};

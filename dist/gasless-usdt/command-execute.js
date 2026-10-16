@@ -16,6 +16,7 @@ import { GuardedUsdtSendService } from "./send.js";
 import { createInterface } from "node:readline/promises";
 import { approvalCode } from "../approval-code.js";
 import { decodeUsdtPaymasterData } from "./paymaster-data.js";
+import { OperationService } from "../operation-service.js";
 import { usdtEffectiveFeeCap } from "./quote.js";
 /** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
 export function usdtApprovalPrompt(bound, now) {
@@ -128,12 +129,34 @@ export class GaslessUsdtCommandExecute {
             }
             throw new ApnError("APN_OPERATION_BLOCKED", "Gasless USDT execution already has a journal record; inspect status.");
         }
+        await this.assertAccountAvailable(bound);
         await (this.options.approval ?? new TtyUsdtApproval()).approve(bound);
+        // The foreground prompt can take minutes; another family may have started on this account meanwhile.
+        await this.assertAccountAvailable(bound);
         const signer = this.options.signer ?? new LocalUsdtSigningService(this.state, this.wrapping, () => this.clock.now());
         const send = this.options.sendTransport ?? { send: usdtSendPort(this.options.transport ?? new GaslessHttps()) };
         return await new GuardedUsdtSendService(this.journal, signer, send, this.preparePort()).send(bound, {
             profile: bound.binding.profile, profileHash, operationId, bindingHash: bound.binding.bindingHash,
         });
+    }
+    /** No other non-terminal money operation of any family may hold this Ethereum account (shared EntryPoint and EOA nonces). */
+    async assertAccountAvailable(bound) {
+        await new OperationService(this.state).assertEvmAccountAvailable(this.state.profileHash(bound.binding.profile), USDT_GASLESS.chainId, bound.binding.plan.request.sender);
+    }
+    /**
+     * Resume reads the live journal: a submitted hash is observed (never resent), an interrupted unsent attempt is retired
+     * and its usage hold released under the effect lock, and a terminal or never-executed operation is returned as saved.
+     */
+    async resume(profileHash, operationId) {
+        const bound = await this.load(profileHash, operationId), execution = await this.journal.load(operationId);
+        if (execution === null)
+            return bound;
+        if (execution.state === "planned" || execution.state === "reserved") {
+            return await this.journal.abortUnsent(bound, this.clock.now()) ?? (await this.journal.load(operationId));
+        }
+        if (["submitting", "submitted_pending", "unknown_finality"].includes(execution.state))
+            return await this.observe(profileHash, operationId);
+        return execution;
     }
     async status(profileHash, operationId) {
         await this.load(profileHash, operationId);
