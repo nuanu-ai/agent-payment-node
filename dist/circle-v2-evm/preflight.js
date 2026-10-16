@@ -20,6 +20,11 @@ export function verifyCircleDeployments(source, destination) {
             snapshot.messageVersion !== 1 || snapshot.messageBodyVersion !== 1 || snapshot.tokenDecimals !== 6 ||
             snapshot.transmitterPaused || snapshot.minterPaused || snapshot.tokenPaused)
             circleFail("deployment_configuration");
+        // P5: live snapshots carry no implementation or code hashes, which Circle upgrades legitimately; the pinned proxy
+        // addresses, this functional configuration, attester-set signature recovery and the exact simulation stay. Only an
+        // anchored snapshot of a frozen recovery path (phase 4) still carries and compares them.
+        if (snapshot.contracts === undefined)
+            continue;
         const expected = CIRCLE_DEPLOYMENT_PINS[snapshot.chainId];
         for (const key of ["messenger", "transmitter", "minter", "token"]) {
             const actual = snapshot.contracts[key], pin = expected[key];

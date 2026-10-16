@@ -85,8 +85,8 @@ export class RelayObserveService {
             return result("source_finalized", "provider_status_unavailable_or_ambiguous", true);
         }
         const sourceBound = provider.chainIdentityObserved && provider.inTxHashes.includes(sourceHash.toLowerCase());
-        // One candidate fits the strict eight-POST budget. Multiple provider hashes
-        // are ambiguous here; selecting one could silently ignore a competing payout.
+        // One candidate fits the two-POST destination proof budget. Multiple provider
+        // hashes are ambiguous here; selecting one could silently ignore a competing payout.
         if (provider.txHashes.length > 1)
             return result("provider_candidate_unproven", "multiple_provider_candidates", true, provider.status, sourceBound);
         const candidateHashes = provider.txHashes;

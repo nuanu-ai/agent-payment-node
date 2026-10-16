@@ -9,7 +9,7 @@ import { decodeCircleSource, bindCircleAttestation, encodeCircleBurn, encodeCirc
 import type { CircleLifecyclePorts } from "../../src/circle-v2-evm/lifecycle.js";
 import { source, iris, snapshot } from "./circle-v2-evm-runtime-fixtures.js";
 
-test("each mint preflight verifies both chains once and passes its fresh digest to current attesters", async t => {
+test("one command verifies both chains once and passes its digest to current attesters; the next command re-verifies", async t => {
   const route = circleRoute(143), raw = source(143); Object.assign(raw.transaction as Record<string, unknown>, { nonce: "0x2", maxPriorityFeePerGas: "0x0" });
   const proof = decodeCircleSource(raw, 143), attestation = await bindCircleAttestation(proof, await iris(proof), snapshot(143));
   const burn = { role: "burn", phase: "confirmed", transactionHash: proof.transactionHash, envelope: circleEnvelope({ chainId: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_MESSENGER, data: encodeCircleBurn(143), valueAtomic: "0", nonceAtomic: "2", gasLimitAtomic: "500000", maxFeePerGasAtomic: "20000000", maxPriorityFeePerGasAtomic: "0" }) } as CircleEffect;
@@ -25,6 +25,7 @@ test("each mint preflight verifies both chains once and passes its fresh digest 
   t.mock.method(CircleRpc.prototype, "observation", async function(this: CircleRpc) { assert.equal(this.chainId, 42161); return raw; });
   t.mock.method(CircleRpc.prototype, "block", async () => ({ number: "0xa", hash: snapshot(143).blockHash }));
   t.mock.method(CircleRpc.prototype, "read", async (_to: unknown, name: string, args: readonly unknown[] = []) => { if (name === "signatureThreshold" || name === "getNumEnabledAttesters") return 2n; if (name === "getEnabledAttester") return wrongAttesters ? [CIRCLE_SOURCE_OWNER, route.gasPayer][Number(args[0])] : snapshot(143).enabledAttesters[Number(args[0])]; if (name === "usedNonces") return 0n; throw new Error(`unexpected_contract_read:${name}`); });
-  const ports = internal.ports(op); await ports.preflight(op, mint); await ports.preflight(op, mint); assert.equal(verifications, 2); assert.deepEqual(usedDigests, ["1".repeat(64), "2".repeat(64)]);
-  wrongAttesters = true; await assert.rejects(ports.preflight(op, mint), /signer/); assert.equal(verifications, 3); assert.deepEqual(usedDigests, ["1".repeat(64), "2".repeat(64), "3".repeat(64)]);
+  const ports = internal.ports(op); await ports.preflight(op, mint); await ports.preflight(op, mint); assert.equal(verifications, 1); assert.deepEqual(usedDigests, ["1".repeat(64)]);
+  await internal.ports(op).preflight(op, mint); assert.equal(verifications, 2); assert.deepEqual(usedDigests, ["1".repeat(64), "2".repeat(64)]);
+  wrongAttesters = true; await assert.rejects(internal.ports(op).preflight(op, mint), /signer/); assert.equal(verifications, 3); assert.deepEqual(usedDigests, ["1".repeat(64), "2".repeat(64), "3".repeat(64)]);
 });

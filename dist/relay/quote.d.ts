@@ -3,6 +3,8 @@ export declare const BNB_NATIVE = "0x0000000000000000000000000000000000000000";
 export declare const BASE_NATIVE = "0x0000000000000000000000000000000000000000";
 export declare const ETHEREUM_DEPOSITORY = "0x4cd00e387622c35bddb9b4c962c136462338bc31";
 export declare const RELAY_SOLVER = "0xf70da97812cb96acdf810712aa562db8dfa3dbef";
+/** Relay's own seven-day order deadline plus ten minutes of clock skew between Relay and this machine (BRDG-24). */
+export declare const RELAY_MAX_DEADLINE_SECONDS: number;
 export interface RelayQuoteIntent {
     readonly payer: string;
     readonly recipient: string;

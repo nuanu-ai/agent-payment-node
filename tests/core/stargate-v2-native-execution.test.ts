@@ -242,15 +242,14 @@ test("ambiguous send is durable unknown_finality and repeated execute observes w
   assert.equal(s.journal.history.filter(x => x.phase === "submission_started").length, 1);
 });
 
-test("source code mutation immediately before send refuses before signing", async () => {
-  const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal); let latest = false;
+test("the send preflight re-checks the pinned pools' functional configuration, not their immutable bytecode (P2)", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request(), s.ports, s.journal); let latestCodeReads = 0;
   const original = s.ports.sourceCall; (s.ports as any).sourceCall = async (method: string, params: readonly unknown[]) => {
-    if (method === "eth_getCode" && params[1] === "latest") { latest = true; return "0x60026000"; }
+    if (method === "eth_getCode" && params[1] === "latest") latestCodeReads++;
     return original(method as never, params);
   };
-  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
-    (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "source_code_changed");
-  assert.equal(latest, true); assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+  await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  assert.equal(latestCodeReads, 0); assert.equal(s.counts().signs, 1);
 });
 
 test("mutated fresh fee after approval requires reprepare and never signs", async () => {

@@ -44,10 +44,12 @@ export function decodeCircleMintEvents(attested, observation, feeRecipient, bind
     if (principal.args.from !== ZERO || principal.args.to !== e.recipient || principal.args.value !== net || principal.index >= mint.index)
         circleFail("mint_transfer_binding");
     if (fee > 0n) {
-        if (feeRecipient === undefined || getAddress(feeRecipient) === ZERO)
+        // The live rails pass no fee recipient: the attested fee amount is Circle's own mint, and the recipient's exact net
+        // principal is bound above. A caller that supplies an authenticated recipient still gets the exact binding.
+        if (feeRecipient !== undefined && getAddress(feeRecipient) === ZERO)
             circleFail("mint_fee_recipient_required");
         const issuer = decoded[1];
-        if (issuer.args.from !== ZERO || issuer.args.to !== getAddress(feeRecipient) || issuer.args.value !== fee || issuer.index <= principal.index || issuer.index >= mint.index)
+        if (issuer.args.from !== ZERO || issuer.args.to === ZERO || feeRecipient !== undefined && issuer.args.to !== getAddress(feeRecipient) || issuer.args.value !== fee || issuer.index <= principal.index || issuer.index >= mint.index)
             circleFail("mint_issuer_fee_binding");
     }
 }

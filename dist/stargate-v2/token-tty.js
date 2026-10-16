@@ -11,7 +11,7 @@ export class TtyStargateTokenApproval {
             "Agent Payment Node Stargate V2 USDC bridge approval",
             `Profile: ${op.profile}`,
             `Operation: ${op.operationId}`,
-            "Route: Optimism USDC -> Polygon USDC with LayerZero native POL drop",
+            `Route: Optimism USDC -> Polygon USDC${BigInt(op.nativeDropAtomic) > 0n ? " with LayerZero native POL drop" : ""}`,
             `Sender and recipient: ${op.owner} (self only)`,
             `Principal: ${op.amountAtomic} atomic USDC`,
             `Initial quoted Polygon USDC output: ${op.quote.quote.minimumOutputAtomic}`,
@@ -35,7 +35,7 @@ export class TtyStargateTokenApproval {
                 "The preparation quote is never used to sign the post-approval bridge.",
             ]),
             "Every approval or bridge broadcast is durably marked first. Ambiguous results are observed and never resent.",
-            "Completion requires exact safe source/destination events, USDC delivery, POL balance delta, and zero residual allowance.",
+            `Completion requires the exact safe source OFTSent and the GUID-bound destination OFTReceived for the USDC delivery${BigInt(op.nativeDropAtomic) > 0n ? ", the Executor's successful NativeDropApplied for the POL drop" : ""}, and zero residual allowance.`,
         ], code, op.expiresAt, this.options);
     }
     async approveCleanup(op) {

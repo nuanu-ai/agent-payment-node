@@ -4,6 +4,7 @@ import type { Address } from "../model.js";
 import type { StateStore } from "../state.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargateNativeOperation } from "./native-execution.js";
+import { type StargateScanCursor } from "./destination-scan.js";
 export type StargateRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getTransactionCount" | "eth_getCode" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "eth_sendRawTransaction" | "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getLogs";
 export declare class StargateJsonRpc {
     private readonly https;
@@ -47,7 +48,9 @@ export declare function stargateDestinationBalance(rpc: Pick<StargateJsonRpc, "c
     blockHash: `0x${string}`;
 }>;
 export declare function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex, finalityTag: StargateConfirmedReceipt["finality"]): Promise<StargateConfirmedReceipt | null>;
-export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0]): Promise<{
+/** BRDG-30: the GUID- and recipient-filtered OFTReceived is found by a resumable windowed scan up to the finality head,
+ * never one ever-growing range from the prepare block. */
+export declare function observeStargateDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateNativeExecutionPorts["observeDestination"]>[0], cursor?: StargateScanCursor): Promise<{
     mode: "oft_received";
     emitter: `0x${string}`;
     sourceTransactionHash: `0x${string}`;

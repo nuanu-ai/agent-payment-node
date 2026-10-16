@@ -223,7 +223,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const relayExecuteConfirmation = relayAuthorization?.confirm.bind(relayAuthorization);
   const relayExecute = relayAuthorization === undefined ? undefined
     : createRelayEthereumSourceRuntime(state, wrappingSecret, bound.rpcUrl ?? "", { confirm: relayExecuteConfirmation! },
-      clock, options.relayExecuteTransport);
+      clock, options.relayExecuteTransport, options.relayApprovalInclusionWait);
   const nativeRelayAuthorization = bound.request.command === "relay.native.execute"
     ? new TtyRelayNativeExecuteConfirmation(options.relayExecuteTtyOptions) : undefined;
   const relayNativeExecute = nativeRelayAuthorization === undefined ? undefined

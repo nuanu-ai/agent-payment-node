@@ -14,7 +14,8 @@ export interface CircleDeploymentSnapshot {
     readonly domain: number;
     readonly blockHash: Hex;
     readonly blockNumberAtomic: string;
-    readonly contracts: Readonly<Record<"messenger" | "transmitter" | "minter" | "token", CircleContractSnapshot>>;
+    /** Present only in anchored (frozen recovery) snapshots; live snapshots carry functional configuration only. */
+    readonly contracts?: Readonly<Record<"messenger" | "transmitter" | "minter" | "token", CircleContractSnapshot>>;
     readonly remoteDomain: number;
     readonly remoteMessenger: Hex;
     readonly pairedToken: Address;
