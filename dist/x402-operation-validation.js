@@ -6,8 +6,10 @@ import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
 import { isX402ResultStatus, validateX402Resource } from "./x402-http-request.js";
 import { X402_STATE_VERSION, TRANSITION_VERSION, ZERO_HASH, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-model.js";
+import { STATE_SHAPE, legalNextState, validateStateTuple } from "./x402-state-shape.js";
 import { validateAttempts, validateAuthorizationUsedScan, validateSettlementEvidence, validateSettlementResponseObservation, validateTransferMethodEvidence, validateTransactionHint, validateUnusedExpiryEvidence, } from "./x402-evidence-validation.js";
 import { address, allowedKeys, bytes32, canonicalText, exactRecord, hash, positive, record, stateCorrupt, timestamp, } from "./x402-state-validation-primitives.js";
+export { legalNextState, validateStateTuple } from "./x402-state-shape.js";
 export function validateX402OperationUnsafe(value) {
     const operation = record(value);
     const required = [
@@ -253,39 +255,6 @@ export function validateTransitions(values) {
     if (values.length === 0)
         stateCorrupt("x402 operation has no transitions.");
 }
-const STATE_SHAPE = {
-    awaiting_approval: { finalityClass: "pre_effect", terminal: false, reason: "x402_awaiting_authorization", proofClass: "x402_frozen_offer", nextActions: ["x402.fetch.approve", "operation.status"] },
-    authorization_material_pending: { finalityClass: "pre_effect", terminal: false, reason: "x402_authorization_material_pending", proofClass: "x402_authorization_recovery", nextActions: ["operation.resume", "operation.status"] },
-    authorized_not_sent: { finalityClass: "pre_effect", terminal: false, reason: "x402_authorized_not_sent", proofClass: "x402_authorization_verified", nextActions: ["operation.resume", "operation.status"] },
-    paid_request_pending: { finalityClass: "unknown_finality", terminal: false, reason: "x402_paid_request_pending", proofClass: "x402_unknown_finality", nextActions: ["operation.resume", "operation.status"] },
-    settlement_pending: { finalityClass: "unknown_finality", terminal: false, reason: "x402_settlement_pending", proofClass: "x402_unknown_finality", nextActions: ["operation.resume", "operation.status"] },
-    effect_unknown: { finalityClass: "unknown_finality", terminal: false, reason: "x402_effect_unknown", proofClass: "x402_unknown_finality", nextActions: ["operation.resume", "operation.status"] },
-    seller_result_recovery_pending: { finalityClass: "known_settled", terminal: false, reason: "x402_seller_result_recovery_pending", proofClass: "x402_settlement_verified_result_pending", nextActions: ["operation.resume", "operation.status"] },
-    completed: { finalityClass: "terminal", terminal: true, reason: "x402_completed", proofClass: "x402_safe_settlement", nextActions: ["receipt.get"] },
-    failed_before_effect: { finalityClass: "terminal", terminal: true, reason: "x402_failed_before_effect", proofClass: "x402_proven_no_effect", nextActions: ["receipt.get"] },
-    failed_expired_unused: { finalityClass: "terminal", terminal: true, reason: "x402_failed_expired_unused", proofClass: "x402_expired_unused_finalized", nextActions: ["receipt.get"] },
-    failed_settled_without_result: { finalityClass: "terminal", terminal: true, reason: "x402_failed_settled_without_result", proofClass: "x402_settled_result_unavailable", nextActions: ["receipt.get"] },
-};
-const LEGAL_NEXT = {
-    awaiting_approval: ["authorization_material_pending", "failed_before_effect"],
-    authorization_material_pending: ["authorization_material_pending", "authorized_not_sent", "failed_before_effect"],
-    authorized_not_sent: ["authorized_not_sent", "paid_request_pending", "effect_unknown", "failed_before_effect", "failed_expired_unused"],
-    paid_request_pending: ["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed"],
-    settlement_pending: ["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed", "failed_settled_without_result"],
-    effect_unknown: ["effect_unknown", "settlement_pending", "paid_request_pending", "seller_result_recovery_pending", "completed", "failed_expired_unused", "failed_settled_without_result"],
-    seller_result_recovery_pending: ["seller_result_recovery_pending", "effect_unknown", "completed", "failed_settled_without_result"],
-    completed: [], failed_before_effect: [], failed_expired_unused: [], failed_settled_without_result: [],
-};
-export function legalNextState(from, to) { return LEGAL_NEXT[from].includes(to); }
-export function validateStateTuple(state, terminal, reason, proofClass) {
-    if (typeof state !== "string" || !(state in STATE_SHAPE))
-        stateCorrupt("x402 state is invalid.");
-    const typedState = state;
-    const shape = STATE_SHAPE[typedState];
-    if (terminal !== shape.terminal || reason !== shape.reason || proofClass !== shape.proofClass)
-        stateCorrupt("x402 state classification is invalid.");
-    return typedState;
-}
 export function validateStateSummary(operation, evidence) {
     const state = validateStateTuple(operation.state, operation.terminal, operation.reason, operation.proofClass);
     const shape = STATE_SHAPE[state];
@@ -307,8 +276,11 @@ export function validateStateSummary(operation, evidence) {
         evidence.authorizationUsedScan === undefined && evidence.settlementEvidence === undefined && evidence.unusedExpiryEvidence === undefined;
     const noEffectEvidence = evidence.settlementResponseObservation === undefined && evidence.transactionHint === undefined && evidence.settlementEvidence === undefined && evidence.unusedExpiryEvidence === undefined;
     const erc7710UnusedExpiry = evidence.unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1";
+    // v2 proves non-use by nonce state alone; a scan left by an older release may remain only if it found nothing.
+    const stateUnusedExpiry = evidence.unusedExpiryEvidence?.schemaVersion === "apn.x402.unused-expiry-evidence.v2";
     const completeUnusedExpiryScan = erc7710UnusedExpiry ? evidence.authorizationUsedScan === undefined
-        : evidence.authorizationUsedScan?.status === "complete" && evidence.authorizationUsedScan.candidates.length === 0;
+        : stateUnusedExpiry ? (evidence.authorizationUsedScan?.candidates.length ?? 0) === 0
+            : evidence.authorizationUsedScan?.status === "complete" && evidence.authorizationUsedScan.candidates.length === 0;
     const preterminalUnusedExpiry = evidence.unusedExpiryEvidence !== undefined && evidence.settlementResponseObservation === undefined &&
         evidence.transactionHint === undefined && evidence.settlementEvidence === undefined && completeUnusedExpiryScan;
     const hasResultLink = operation.resultLink !== undefined;
@@ -331,7 +303,8 @@ export function validateStateSummary(operation, evidence) {
     if (state === "awaiting_approval" && (evidence.signatureCount !== 0 || evidence.attempts.length !== 0 || !noResponseEvidence || hasResultLink || hasReceiptLink)) {
         stateCorrupt("x402 awaiting approval contains later-phase evidence.");
     }
-    if (state === "authorization_material_pending" && (evidence.signatureCount !== 0 || evidence.attempts.length !== 0 || !noResponseEvidence || hasResultLink || hasReceiptLink)) {
+    if (state === "authorization_material_pending" && (evidence.signatureCount !== 0 || evidence.attempts.length !== 0 || (!noResponseEvidence && !(stateUnusedExpiry && preterminalUnusedExpiry)) ||
+        hasResultLink || hasReceiptLink)) {
         stateCorrupt("x402 authorization-pending state contains later-phase evidence.");
     }
     if (state === "authorized_not_sent" && (evidence.signatureCount !== 3 || evidence.attempts.length !== 0 || (!noEffectEvidence && !preterminalUnusedExpiry) ||
@@ -386,12 +359,15 @@ export function validateStateSummary(operation, evidence) {
     if (state === "failed_before_effect" && ((evidence.signatureCount !== 0 && !delegatedPreExposureMaterial) || evidence.attempts.length !== 0 ||
         !noResponseEvidence || hasResultLink || !hasReceiptLink))
         stateCorrupt("x402 failed-before-effect evidence is invalid.");
-    if (state === "failed_expired_unused" && (evidence.signatureCount !== 3 || evidence.unusedExpiryEvidence === undefined || evidence.settlementResponseObservation !== undefined ||
+    if (state === "failed_expired_unused" && ((evidence.signatureCount !== 3 && !(stateUnusedExpiry && evidence.signatureCount === 0 && evidence.attempts.length === 0)) ||
+        evidence.unusedExpiryEvidence === undefined || evidence.settlementResponseObservation !== undefined ||
         evidence.transactionHint !== undefined || evidence.settlementEvidence !== undefined ||
-        !completeUnusedExpiryScan || (!erc7710UnusedExpiry && (evidence.authorizationUsedScan === undefined ||
+        !completeUnusedExpiryScan || (!erc7710UnusedExpiry && !stateUnusedExpiry && (evidence.authorizationUsedScan === undefined ||
         BigInt(evidence.authorizationUsedScan.nextFromBlock) !== BigInt(evidence.authorizationUsedScan.targetSafeHead.number) + 1n)) ||
         hasResultLink || !hasReceiptLink))
         stateCorrupt("x402 expired-unused evidence is invalid.");
+    if (state === "abandoned_unknown" && (evidence.unusedExpiryEvidence !== undefined || evidence.settlementEvidence !== undefined || !hasReceiptLink))
+        stateCorrupt("x402 owner abandonment cannot replace a proven outcome.");
     if (state === "failed_settled_without_result") {
         const responseBacked = evidence.settlementResponseObservation !== undefined && evidence.transactionHint?.source === "payment_response";
         const scan = evidence.authorizationUsedScan;
@@ -407,7 +383,7 @@ export function validateStateSummary(operation, evidence) {
             evidence.settlementEvidence === undefined || evidence.unusedExpiryEvidence !== undefined || hasResultLink || !hasReceiptLink)
             stateCorrupt("x402 settled-without-result evidence is invalid.");
     }
-    if (hasResultLink && !["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed"].includes(state)) {
+    if (hasResultLink && !["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed", "abandoned_unknown"].includes(state)) {
         stateCorrupt("x402 result link is invalid for state.");
     }
     if (evidence.settlementEvidence !== undefined && evidence.transactionHint !== undefined && evidence.settlementEvidence.transactionHash !== evidence.transactionHint.transactionHash) {

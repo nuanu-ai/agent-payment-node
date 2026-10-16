@@ -235,6 +235,7 @@ class ProviderRpc extends TestRpc implements X402RpcPort {
       value: false,
       blockNumber: identity.number,
       blockHash: identity.hash,
+      blockTimestamp: identity.timestamp,
       blockTag: "tag" in block ? block.tag : "number",
       observedAt: identity.observedAt,
       rpcOrigin: identity.rpcOrigin,

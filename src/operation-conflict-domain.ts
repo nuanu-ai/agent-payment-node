@@ -53,6 +53,8 @@ export function storedOperationDomains(operation: StoredMoneyOperation): readonl
     if (operation.kind === "relay_unsigned") return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];
     if (operation.kind === "direct_transfer") return [evmConflictDomain(operation.record.chainId, operation.record.walletAddress)];
     if (operation.kind === "x402_fetch") {
+      // A local EIP-3009 authorization spends by its own random nonce, never the account nonce: it holds no account domain.
+      if (operation.strategy === "local" && operation.record.selectedOffer.resolved.assetTransferMethod === "eip3009") return [];
       // Provider-atomic x402 is Base-only; its record carries the network as CAIP-2 instead of a chain id.
       return [operation.strategy === "local" ? evmConflictDomain(operation.record.chainId, operation.record.wallet)
         : evmConflictDomain(8453, operation.record.provider.payer)];
