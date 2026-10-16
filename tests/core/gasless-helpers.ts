@@ -73,6 +73,13 @@ export class GaslessTestRpc implements GaslessRpcPort {
     }
     return structuredClone(this.current);
   }
+  /** The light pre-send check; `drift` applies to signed fees here exactly as to an approved-fee snapshot. */
+  async assertSignedFees(fees: GaslessFees) {
+    this.calls.push("fee_check");
+    if (this.transport > 0) { this.transport -= 1; throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless RPC transport is unavailable."); }
+    this.approvedFees.push({ maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas });
+    if (this.drift > 0) { this.drift -= 1; gaslessFailure("APN_OPERATION_BLOCKED", "gasless_bundler_fee_drift"); }
+  }
   async mirrorEstimate(intent: GaslessIntent, _fees?: GaslessFees) {
     this.calls.push("mirror_estimate");
     if (this.mirrorUnavailable > 0) { this.mirrorUnavailable -= 1; gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_mirror_estimate_unavailable"); }

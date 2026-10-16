@@ -6,22 +6,28 @@ import type { StateStore } from "../state.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./guard.js";
 import { validateGaslessMaterial } from "./material-validation.js";
+import { assertGaslessOwner } from "./owner.js";
 import type { GaslessFees } from "./model.js";
 import { GaslessObservationService, type GaslessSave } from "./observation.js";
 import type { GaslessOperationRecord, GaslessRole } from "./operation-model.js";
 import type { GaslessApprovalPort, GaslessBootstrapMaterial, GaslessCustodyPort,
   GaslessRpcPort, GaslessSealedMaterial, GaslessUserOperationMaterial } from "./ports.js";
 import { publicGaslessOperation } from "./receipt.js";
+import { GASLESS_RETRY_POSTS, GASLESS_STEP_POSTS } from "./rpc-budget.js";
 import { GASLESS_MIN_REMAINING_MS, gaslessFailure } from "./validation.js";
-import { gaslessSignedFees } from "./wire.js";
+import { gaslessSignedFees, gaslessWireFees } from "./wire.js";
 
-/** A transient check failure is retried inside the approved window, before a disclosure as well as after one. */
-const GUARD_ATTEMPTS = 18, GUARD_RETRY_MS = 5_000;
+/**
+ * A transient check failure is retried inside the approved window, before a disclosure as well as after one, while
+ * the invocation's retry allowance (`GASLESS_RETRY_POSTS`, part of its derived POST budget) still pays for the step.
+ */
+const GUARD_RETRY_MS = 5_000;
 const TRANSIENT_REASONS = new Set(["gasless_rpc_unavailable", "gasless_bundler_fee_drift",
   "gasless_provider_response", "gasless_mirror_estimate_unavailable"]);
 
 export class GaslessExecution {
   private readonly observation: GaslessObservationService;
+  private retryPosts = GASLESS_RETRY_POSTS;
   constructor(private readonly state: StateStore, private readonly rpc: GaslessRpcPort,
     private readonly custody: GaslessCustodyPort, private readonly now: () => number,
     private readonly save: GaslessSave, private readonly wait: WaitPort,
@@ -68,8 +74,11 @@ export class GaslessExecution {
     if (bootstrapResult.material === null) return op;
     const bootstrap = bootstrapResult.material as GaslessBootstrapMaterial;
     if (op.bootstrap.disclosureAttempts === 0) {
-      let fees: GaslessFees;
-      try { fees = await this.guard(op); } catch (error) { return await this.halt(op, error); }
+      // Only a local signature separates this invocation's bootstrap guard from the disclosure; reuse its fees.
+      let fees = bootstrapResult.fees;
+      if (fees === null) {
+        try { fees = await this.guard(op); } catch (error) { return await this.halt(op, error); }
+      }
       op = await this.save(op, { state: "bootstrap_pending", bootstrap: { ...op.bootstrap,
         phase: "disclosure_started", disclosureAttempts: 1, disclosedAt: this.at() } });
       let estimate;
@@ -86,8 +95,12 @@ export class GaslessExecution {
     const finalResult = await this.material(op, "user_operation", bootstrap); op = finalResult.op;
     if (finalResult.material === null) return op;
     const material = finalResult.material as GaslessUserOperationMaterial;
-    try { await this.guard(op, gaslessSignedFees(op.intent, material.userOperation)); }
-    catch (error) { return await this.halt(op, error); }
+    try {
+      const signed = gaslessSignedFees(op.intent, material.userOperation);
+      // After this invocation's guard only a local signature preceded the send; a resumed seal needs a full guard.
+      if (finalResult.fees !== null) await this.feeCheck(op, signed);
+      else await this.guard(op, signed);
+    } catch (error) { return await this.halt(op, error); }
     op = await this.save(op, { state: "user_operation_pending", userOperation: { ...op.userOperation,
       phase: "submitting", submissionAttempts: 1, submittedAt: this.at() }, failure: null });
     let acknowledged = false;
@@ -103,13 +116,13 @@ export class GaslessExecution {
     // with a separate bounded read budget; never turn a submitted response into an inline retry.
     return op;
   }
+  /** `fees` are this invocation's guard result when it signed the effect, and null when the effect was already signed. */
   private async material(op: GaslessOperationRecord, role: GaslessRole, bootstrap?: GaslessBootstrapMaterial):
-    Promise<{ op: GaslessOperationRecord; material: GaslessSealedMaterial | null }> {
-    let effect = role === "bootstrap" ? op.bootstrap : op.userOperation;
+    Promise<{ op: GaslessOperationRecord; material: GaslessSealedMaterial | null; fees: GaslessFees | null }> {
+    let effect = role === "bootstrap" ? op.bootstrap : op.userOperation, fees: GaslessFees | null = null;
     if (effect.signingAttempts === 0) {
-      let fees: GaslessFees;
-      try { fees = await this.guard(op); } catch (error) { return { op: await this.halt(op, error), material: null }; }
-      try { await this.policy?.reserve(op); } catch (error) { return { op: await this.halt(op, error), material: null }; }
+      try { fees = await this.guard(op); } catch (error) { return { op: await this.halt(op, error), material: null, fees }; }
+      try { await this.policy?.reserve(op); } catch (error) { return { op: await this.halt(op, error), material: null, fees }; }
       effect = { ...effect, phase: "signing_started", signingAttempts: 1, signingStartedAt: this.at() };
       op = await this.save(op, { state: role === "bootstrap" ? "bootstrap_pending" : "user_operation_pending", [this.key(role)]: effect });
       try { await this.custody.seal(op, role, op.intent.owner, bootstrap, role === "bootstrap" ? undefined : fees); }
@@ -121,7 +134,8 @@ export class GaslessExecution {
       if (loaded === null) gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_material_missing");
       material = await validateGaslessMaterial(loaded, op, role, bootstrap);
     } catch {
-      return { op: await this.unknown(op, role === "bootstrap" ? "gasless_bootstrap_unresolved" : "gasless_user_operation_unresolved"), material: null };
+      return { op: await this.unknown(op, role === "bootstrap" ? "gasless_bootstrap_unresolved" : "gasless_user_operation_unresolved"),
+        material: null, fees };
     }
     if (effect.materialHash === null || effect.phase === "unknown_finality") {
       // The original seal can be recovered without another signer invocation.
@@ -130,16 +144,26 @@ export class GaslessExecution {
       op = await this.save(op, { state: role === "bootstrap" ? "bootstrap_pending" : "user_operation_pending",
         [this.key(role)]: effect, failure: null });
     }
-    return { op, material };
+    return { op, material, fees };
   }
   /** The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. */
   private async mirror(op: GaslessOperationRecord, fees: GaslessFees): Promise<void> {
-    await this.steady(op, async () => { await this.rpc.mirrorEstimate(op.intent, fees); });
+    await this.steady(op, GASLESS_STEP_POSTS.mirror, async () => { await this.rpc.mirrorEstimate(op.intent, fees); });
+  }
+  /** Owner, policy and caps locally, then one bundler batch: the signed fees must still cover its slow tier. */
+  private async feeCheck(op: GaslessOperationRecord, signed: GaslessFees): Promise<void> {
+    await this.steady(op, GASLESS_STEP_POSTS.feeCheck, async () => {
+      assertGaslessRemaining(op, this.now());
+      await this.policy?.assert(op, true);
+      await assertGaslessOwner(this.state, op.intent);
+      await this.rpc.assertSignedFees(gaslessWireFees(op.intent, signed));
+      assertGaslessRemaining(op, this.now());
+    });
   }
   private key(role: GaslessRole): "bootstrap" | "userOperation" { return role === "bootstrap" ? "bootstrap" : "userOperation"; }
   private at(): string { return new Date(this.now()).toISOString(); }
   private async guard(op: GaslessOperationRecord, signed?: GaslessFees): Promise<GaslessFees> {
-    return await this.steady(op, async () => {
+    return await this.steady(op, GASLESS_STEP_POSTS.guard, async () => {
       await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
       const fees = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
       await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
@@ -150,12 +174,13 @@ export class GaslessExecution {
    * A price spike, rate limit or transport failure is waited out while the approved window still leaves room for the
    * remaining steps. An interrupt, an exhausted window and every definite refusal end the operation at once.
    */
-  private async steady<T>(op: GaslessOperationRecord, act: () => Promise<T>): Promise<T> {
-    for (let attempt = 1; ; attempt += 1) {
+  private async steady<T>(op: GaslessOperationRecord, cost: number, act: () => Promise<T>): Promise<T> {
+    for (;;) {
       try { return await act(); } catch (error) {
-        if (attempt >= GUARD_ATTEMPTS || !transient(error) ||
+        if (!transient(error) || this.retryPosts < cost ||
           Date.parse(op.intent.expiresAt) - this.now() <= GASLESS_MIN_REMAINING_MS + GUARD_RETRY_MS ||
           await this.wait.wait(GUARD_RETRY_MS) === "interrupted") throw error;
+        this.retryPosts -= cost;
       }
     }
   }

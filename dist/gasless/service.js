@@ -42,7 +42,7 @@ export class GaslessService {
                 address: owner.address, balance_atomic: snapshot.balanceAtomic, native_balance_wei: snapshot.nativeBalanceWei,
                 paymaster_allowance_atomic: snapshot.allowanceAtomic, delegation: snapshot.delegation,
                 block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read" };
-        });
+        }, "read");
     }
     async quote(input) {
         return await withGaslessRpcInvocation(async () => {
@@ -87,7 +87,7 @@ export class GaslessService {
                 delegation: snapshot.delegation, gas, fee_configuration: snapshot.feeConfiguration,
                 block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read",
                 quote_scope: "fee_snapshot_only_prepare_revalidates_policy_usage_and_quote" };
-        }, input.rpcMaxBatchItems);
+        }, "read", input.rpcMaxBatchItems);
     }
     async prepare(input) {
         return await withGaslessRpcInvocation(async () => {
@@ -95,7 +95,7 @@ export class GaslessService {
             const preparation = new GaslessPreparation({ state: this.context.state, records: this.records,
                 operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(), policy: this.policy });
             return publicGaslessOperation(await preparation.prepare(input));
-        });
+        }, "read");
     }
     async approve(operationId) {
         return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
@@ -110,7 +110,7 @@ export class GaslessService {
                     nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
                 });
             return publicGaslessOperation(await this.execution(op).approve(op, approval));
-        }));
+        }), "execute");
     }
     async approveSealed(operationId) {
         return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
@@ -120,7 +120,7 @@ export class GaslessService {
                     nextActions: [`apn gasless transfer approve-sealed --operation ${op.operationId}`]
                 });
             return publicGaslessOperation(await new GaslessSealedFirstSendExecution(this.context.state, d.rpcFor(op.intent.request.chainId), d.custody, this.policy, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch)).approve(op, d.approval));
-        }));
+        }), "first_send");
     }
     async resume(operationId, observationRpcEnv) {
         return await withGaslessRpcInvocation(async () => {
@@ -141,7 +141,7 @@ export class GaslessService {
             }
             return await this.locked(operationId, async (op) => publicGaslessOperation(op.terminal ? op : this.legacyPolicyOperation(op) ? await this.legacyRecovery(op)
                 : op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
-        });
+        }, "resume");
     }
     async status(operationId) { return await this.locked(operationId, async (op) => publicGaslessOperation(op)); }
     async receipt(operationId) {

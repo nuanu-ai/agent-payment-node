@@ -13,6 +13,7 @@ import type { GaslessBlock, GaslessChainId, GaslessCursor, GaslessDeployment, Ga
 import type { GaslessBootstrapMaterial, GaslessUserOperationMaterial } from "../../src/gasless/ports.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
 import { GaslessRpc, GaslessRpcRequestSession, gaslessRpcFactory, withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
+import { gaslessPostBudget, gaslessSnapshotPosts } from "../../src/gasless/rpc-budget.js";
 import { observeGasless, type GaslessObservationContext } from "../../src/gasless/rpc-observe.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "../../src/gasless/rpc-state.js";
 import { verifyGaslessOuterTransaction } from "../../src/gasless/rpc-transaction.js";
@@ -62,9 +63,11 @@ test("gasless production prepare and approval fit one public bundler request win
   t.diagnostic(JSON.stringify({ preparePosts, approvalPosts, bundlerRequests: bundler.length,
     afterApproval: bundler.filter(c => c.afterApproval).length,
     finalPhase: record.userOperation.phase, failure: record.failure }));
-  assert.ok(approvalPosts <= 24, `approve used ${approvalPosts} physical POSTs`);
+  // Guard+mirror before the screen, a guard before each owner signature, one estimate, one fee check and the send.
+  assert.equal(approvalPosts, 17, `approve used ${approvalPosts} physical POSTs`);
+  assert.ok(approvalPosts + 4 <= gaslessPostBudget("execute", Number.POSITIVE_INFINITY), "one full guard retry still fits");
   assert.equal(s.calls.slice(preparePosts).filter(c => c.methods.includes("eth_getBlockByNumber") &&
-    c.methods.includes("eth_chainId")).length, 5, "five distinct guard snapshots remain");
+    c.methods.includes("eth_chainId")).length, 3, "three guard snapshots: before the screen and before each signature");
   assert.equal(bundler.filter(c => c.method === "eth_sendUserOperation").length, 1);
   // One throwaway-key estimate runs before the approval screen; the owner's bootstrap estimate follows approval.
   assert.equal(bundler.filter(c => c.method === "eth_estimateUserOperationGas").length, 2);
@@ -129,27 +132,32 @@ for (const fault of ["code", "proxy"] as const) {
   });
 }
 
-test("gasless final guard 429 is terminal before the durable send marker", async t => {
+test("gasless pre-send fee check 429 is terminal before the durable send marker", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare(); s.setLimit(7);
+  // Bundler POSTs: prepare, guard, mirror, bootstrap guard, estimate, final guard, then the fee check is refused.
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare(); s.setLimit(6);
   const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
   const record = await s.record(id);
   assert.equal(record.userOperation.submissionAttempts, 0);
   assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
   assert.equal(record.failure, "gasless_rpc_http_429");
-  assert.equal(s.calls.filter(c => c.bundler).length, 8);
+  assert.equal(record.state, "unknown_finality");
+  assert.equal(record.userOperation.phase, "sealed");
+  assert.equal(s.calls.filter(c => c.bundler).length, 7);
 });
 
 test("gasless extra in-invocation reads exhaust the cap before any send marker", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
   const preparePosts = s.calls.length, confirm = s.approval.confirm.bind(s.approval);
-  s.approval.confirm = async input => { const accepted = await confirm(input); await s.rpc.assertChain(); return accepted; };
+  // Two foreign chain checks (6 POSTs) consume more than the retry allowance; the plan's own steps run out at the fee check.
+  s.approval.confirm = async input => { const accepted = await confirm(input);
+    await s.rpc.assertChain(); await s.rpc.assertChain(); return accepted; };
   const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
   const record = await s.record(id);
-  assert.equal(s.calls.length - preparePosts, 24);
+  assert.equal(s.calls.length - preparePosts, gaslessPostBudget("execute", Number.POSITIVE_INFINITY));
   assert.equal(record.userOperation.submissionAttempts, 0);
   assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
   assert.equal(record.failure, "gasless_rpc_request_budget");
@@ -174,8 +182,13 @@ test("gasless post-TTY duplicate batch ID is terminal before signing even if a r
   assert.equal(record.failure, "gasless_rpc_response");
 });
 
+type DriftFault = "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees";
 for (const boundary of ["before_bootstrap", "before_send"] as const) {
-  for (const fault of ["chain", "entrypoint", "balance", "allowance", "nonce", "fees"] as const) {
+  // After this invocation's final guard only a local signature precedes the send, so the pre-send fee check re-reads
+  // the bundler's chain, EntryPoint and price tiers; account state was read by that guard just before the signature.
+  const faults: readonly DriftFault[] = boundary === "before_bootstrap"
+    ? ["chain", "entrypoint", "balance", "allowance", "nonce", "fees"] : ["chain", "entrypoint", "fees"];
+  for (const fault of faults) {
     test(`gasless production ${fault} drift ${boundary} blocks the next effect`, async (t) => {
       const temporary = await temporaryState(); t.after(temporary.cleanup);
       const s = await bundledGaslessFixture(temporary.root); s.setLimit(100);
@@ -203,6 +216,35 @@ for (const boundary of ["before_bootstrap", "before_send"] as const) {
   }
 }
 
+for (const fault of ["balance", "allowance", "nonce"] as const) {
+  test(`gasless resumed sealed send runs the full guard and blocks ${fault} drift`, async t => {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await bundledGaslessFixture(temporary.root); s.setLimit(100);
+    const { id } = await s.prepare();
+    const seal = s.custody.seal.bind(s.custody);
+    s.custody.seal = async (...args) => {
+      const material = await seal(...args);
+      if (args[1] === "user_operation") s.setFault("fees");
+      return material;
+    };
+    const first = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+    assert.equal(first.ok, true, first.error?.message);
+    const stranded = await s.record(id);
+    assert.equal(stranded.state, "unknown_finality"); assert.equal(stranded.failure, "gasless_bundler_fee_drift");
+    assert.equal(stranded.userOperation.phase, "sealed"); assert.equal(stranded.userOperation.submissionAttempts, 0);
+    s.setFault(fault);
+    const before = s.calls.length;
+    const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
+    assert.equal(resumed.ok, true, resumed.error?.message);
+    const record = await s.record(id);
+    assert.ok(s.calls.slice(before).some(c => c.methods.includes("eth_getBlockByNumber") && c.methods.includes("eth_chainId")),
+      "a seal from an earlier invocation is guarded by a full snapshot");
+    assert.equal(record.userOperation.submissionAttempts, 0);
+    assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 0);
+    assert.equal(record.state, "unknown_finality");
+  });
+}
+
 test("gasless RPC binds full endpoint identities and verifies both chains plus EntryPoint support", async () => {
   const deployment = gaslessDeployment(8453);
   const transport = new TestTransport((_endpoint, method) => method === "eth_supportedEntryPoints"
@@ -226,7 +268,19 @@ test("gasless RPC factory is lazy and requires only the selected chain RPC confi
   assert.equal(first.bundlerEndpointHash, sha256(gaslessDeployment(8453).publicBundlerUrl));
 });
 
-test("gasless request sessions cap physical RPC and bundler POSTs at 24 and reset per invocation", async () => {
+test("gasless POST budgets are derived from each command's step plan", () => {
+  // Guard snapshot: chain+anchor batch, bundler batch, state batch, anchor recheck.
+  assert.equal(gaslessSnapshotPosts(Number.POSITIVE_INFINITY), 4);
+  assert.equal(gaslessPostBudget("read", Number.POSITIVE_INFINITY), 4);
+  // Guard+mirror (6), bootstrap guard (4), estimate (1), final guard (4), fee check (1), send (1) = 17, plus one guard retry.
+  assert.equal(gaslessPostBudget("execute", Number.POSITIVE_INFINITY), 21);
+  assert.equal(gaslessPostBudget("resume", Number.POSITIVE_INFINITY), 24);
+  assert.equal(gaslessPostBudget("first_send", Number.POSITIVE_INFINITY), 9);
+  // A batch cap splits the state batch and is counted, never silently exceeded.
+  assert.equal(gaslessPostBudget("read", 3), 3 + Math.ceil(30 / 3));
+});
+
+test("gasless request sessions cap physical RPC and bundler POSTs at the resume budget and reset per invocation", async () => {
   const deployment = gaslessDeployment(8453), calls: string[] = [];
   const transport: GaslessTransport = { request: async (endpoint, method, body) => {
     assert.equal(method, "POST");
@@ -242,12 +296,12 @@ test("gasless request sessions cap physical RPC and bundler POSTs at 24 and rese
     assert.equal(calls.length, 24);
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_BUDGET_EXCEEDED" });
     assert.equal(calls.length, 24);
-  });
-  await withGaslessRpcInvocation(async () => { await rpc.assertChain(); });
+  }, "resume");
+  await withGaslessRpcInvocation(async () => { await rpc.assertChain(); }, "resume");
   assert.equal(calls.length, 27);
   // The bundler price batch is one physical POST despite its three logical methods.
   const batch = (rpc as unknown as { bundlerState(): Promise<readonly unknown[]> }).bundlerState.bind(rpc);
-  await withGaslessRpcInvocation(async () => { await batch(); });
+  await withGaslessRpcInvocation(async () => { await batch(); }, "read");
   assert.equal(calls.length, 28);
 });
 
@@ -264,7 +318,7 @@ test("gasless concurrent invocations retain independent caps and JSON-RPC reques
   await Promise.all(Array.from({ length: 2 }, () => withGaslessRpcInvocation(async () => {
     for (let index = 0; index < 8; index += 1) await rpc.assertChain();
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_BUDGET_EXCEEDED" });
-  })));
+  }, "resume")));
   assert.equal(ids.length, 48);
   assert.equal(new Set(ids).size, 48);
 });
@@ -283,7 +337,7 @@ test("gasless HTTP 429 is terminal for its invocation without another transport 
     const after429 = calls;
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
     assert.equal(calls, after429);
-  });
+  }, "resume");
 });
 
 test("malformed HTTP 429 headers and oversized body are discarded before protocol parsing", async () => {
@@ -300,7 +354,7 @@ test("malformed HTTP 429 headers and oversized body are discarded before protoco
   await withGaslessRpcInvocation(async () => {
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_RATE_LIMITED" });
-  });
+  }, "resume");
   assert.equal(calls, 1);
 });
 
@@ -308,7 +362,7 @@ test("same-family queued POSTs recheck terminal 429 after pacing and never start
   let now = 0;
   const starts: number[] = [], waits: number[] = [];
   const pacer = new GaslessPostPacer(() => now, async milliseconds => { waits.push(milliseconds); now += milliseconds; });
-  const session = new GaslessRpcRequestSession(), signal = new AbortController().signal;
+  const session = new GaslessRpcRequestSession("resume"), signal = new AbortController().signal;
   const request = async () => { session.reserve(); return await pacer.run("https://public.pimlico.io", signal, async () => {
     session.assertActive(); starts.push(now);
     if (starts.length === 1) session.rejectHttp(429);
@@ -329,7 +383,7 @@ test("gasless generic non-200 HTTP response is terminal for its invocation", asy
     const after = calls;
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_PROTOCOL" });
     assert.equal(calls, after);
-  });
+  }, "resume");
 });
 
 test("gasless read batches bind every result ID and never fall back to sequential POSTs", async () => {
@@ -354,7 +408,7 @@ test("gasless read batches bind every result ID and never fall back to sequentia
     const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
     await withGaslessRpcInvocation(async () => {
       await assert.rejects(Promise.all([rpc.assertChain(), rpc.assertChain()]), { code: "APN_RPC_PROTOCOL" });
-    });
+    }, "resume");
     assert.equal(rpcPosts, 1, fault);
   }
 });
@@ -371,12 +425,12 @@ test("invocation batch cap partitions thirty queued reads and preserves every ID
   const rpc = new GaslessRpc(1, RPC_URL, BUNDLER_URL, transport);
   const read = (value: number) => (rpc as unknown as { rpcCall(method: string, params: unknown[]): Promise<unknown> })
     .rpcCall("eth_getBalance", [String(value), "latest"]);
-  const values = await withGaslessRpcInvocation(async () => await Promise.all(Array.from({ length: 30 }, (_, n) => read(n))), 3);
+  const values = await withGaslessRpcInvocation(async () => await Promise.all(Array.from({ length: 30 }, (_, n) => read(n))), "read", 3);
   assert.deepEqual(values, Array.from({ length: 30 }, (_, n) => String(n)));
   assert.deepEqual(batches.map(batch => batch.length), Array(10).fill(3));
   assert.equal(new Set(batches.flat().map(row => row.id)).size, 30);
   batches.length = 0;
-  await withGaslessRpcInvocation(async () => await Promise.all(Array.from({ length: 30 }, (_, n) => read(n))));
+  await withGaslessRpcInvocation(async () => await Promise.all(Array.from({ length: 30 }, (_, n) => read(n))), "read");
   assert.deepEqual(batches.map(batch => batch.length), [30]);
 });
 
@@ -396,7 +450,7 @@ test("a malformed, refused or timed-out capped chunk fails all queued reads with
     const read = (value: number) => (rpc as unknown as { rpcCall(method: string, params: unknown[]): Promise<unknown> })
       .rpcCall("eth_getBalance", [String(value), "latest"]);
     const outcomes = await withGaslessRpcInvocation(async () => await Promise.allSettled(
-      Array.from({ length: 9 }, (_, n) => read(n))), 3);
+      Array.from({ length: 9 }, (_, n) => read(n))), "read", 3);
     assert.equal(outcomes.length, 9);
     for (const outcome of outcomes) {
       assert.equal(outcome.status, "rejected");
@@ -410,11 +464,11 @@ test("a malformed, refused or timed-out capped chunk fails all queued reads with
 test("capped production snapshot keeps block pinning and rejects a reorg", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root);
-  await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address));
+  await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), "read");
   assert.equal(s.calls.filter(call => !call.bundler).length, 3);
   assert.equal(s.calls.filter(call => call.bundler).length, 1);
   s.calls.length = 0;
-  const snapshot = await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), 3);
+  const snapshot = await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), "read", 3);
   assert.equal(snapshot.owner, s.account.address);
   const rpcPosts = s.calls.filter(call => !call.bundler);
   assert.equal(rpcPosts.length, 12);
@@ -422,7 +476,7 @@ test("capped production snapshot keeps block pinning and rejects a reorg", async
   assert.ok(rpcPosts.some(call => call.methods.length === 3));
   assert.ok(rpcPosts.every(call => call.methods.length <= 3));
   s.setFault("reorg");
-  await assert.rejects(withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), 3),
+  await assert.rejects(withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), "read", 3),
     { code: "APN_RPC_PROTOCOL" });
 });
 

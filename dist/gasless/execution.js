@@ -3,12 +3,17 @@ import { ApnError } from "../errors.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./guard.js";
 import { validateGaslessMaterial } from "./material-validation.js";
+import { assertGaslessOwner } from "./owner.js";
 import { GaslessObservationService } from "./observation.js";
 import { publicGaslessOperation } from "./receipt.js";
+import { GASLESS_RETRY_POSTS, GASLESS_STEP_POSTS } from "./rpc-budget.js";
 import { GASLESS_MIN_REMAINING_MS, gaslessFailure } from "./validation.js";
-import { gaslessSignedFees } from "./wire.js";
-/** A transient check failure is retried inside the approved window, before a disclosure as well as after one. */
-const GUARD_ATTEMPTS = 18, GUARD_RETRY_MS = 5_000;
+import { gaslessSignedFees, gaslessWireFees } from "./wire.js";
+/**
+ * A transient check failure is retried inside the approved window, before a disclosure as well as after one, while
+ * the invocation's retry allowance (`GASLESS_RETRY_POSTS`, part of its derived POST budget) still pays for the step.
+ */
+const GUARD_RETRY_MS = 5_000;
 const TRANSIENT_REASONS = new Set(["gasless_rpc_unavailable", "gasless_bundler_fee_drift",
     "gasless_provider_response", "gasless_mirror_estimate_unavailable"]);
 export class GaslessExecution {
@@ -20,6 +25,7 @@ export class GaslessExecution {
     wait;
     policy;
     observation;
+    retryPosts = GASLESS_RETRY_POSTS;
     constructor(state, rpc, custody, now, save, wait, policy) {
         this.state = state;
         this.rpc = rpc;
@@ -91,12 +97,15 @@ export class GaslessExecution {
             return op;
         const bootstrap = bootstrapResult.material;
         if (op.bootstrap.disclosureAttempts === 0) {
-            let fees;
-            try {
-                fees = await this.guard(op);
-            }
-            catch (error) {
-                return await this.halt(op, error);
+            // Only a local signature separates this invocation's bootstrap guard from the disclosure; reuse its fees.
+            let fees = bootstrapResult.fees;
+            if (fees === null) {
+                try {
+                    fees = await this.guard(op);
+                }
+                catch (error) {
+                    return await this.halt(op, error);
+                }
             }
             op = await this.save(op, { state: "bootstrap_pending", bootstrap: { ...op.bootstrap,
                     phase: "disclosure_started", disclosureAttempts: 1, disclosedAt: this.at() } });
@@ -119,7 +128,12 @@ export class GaslessExecution {
             return op;
         const material = finalResult.material;
         try {
-            await this.guard(op, gaslessSignedFees(op.intent, material.userOperation));
+            const signed = gaslessSignedFees(op.intent, material.userOperation);
+            // After this invocation's guard only a local signature preceded the send; a resumed seal needs a full guard.
+            if (finalResult.fees !== null)
+                await this.feeCheck(op, signed);
+            else
+                await this.guard(op, signed);
         }
         catch (error) {
             return await this.halt(op, error);
@@ -140,21 +154,21 @@ export class GaslessExecution {
         // with a separate bounded read budget; never turn a submitted response into an inline retry.
         return op;
     }
+    /** `fees` are this invocation's guard result when it signed the effect, and null when the effect was already signed. */
     async material(op, role, bootstrap) {
-        let effect = role === "bootstrap" ? op.bootstrap : op.userOperation;
+        let effect = role === "bootstrap" ? op.bootstrap : op.userOperation, fees = null;
         if (effect.signingAttempts === 0) {
-            let fees;
             try {
                 fees = await this.guard(op);
             }
             catch (error) {
-                return { op: await this.halt(op, error), material: null };
+                return { op: await this.halt(op, error), material: null, fees };
             }
             try {
                 await this.policy?.reserve(op);
             }
             catch (error) {
-                return { op: await this.halt(op, error), material: null };
+                return { op: await this.halt(op, error), material: null, fees };
             }
             effect = { ...effect, phase: "signing_started", signingAttempts: 1, signingStartedAt: this.at() };
             op = await this.save(op, { state: role === "bootstrap" ? "bootstrap_pending" : "user_operation_pending", [this.key(role)]: effect });
@@ -171,7 +185,8 @@ export class GaslessExecution {
             material = await validateGaslessMaterial(loaded, op, role, bootstrap);
         }
         catch {
-            return { op: await this.unknown(op, role === "bootstrap" ? "gasless_bootstrap_unresolved" : "gasless_user_operation_unresolved"), material: null };
+            return { op: await this.unknown(op, role === "bootstrap" ? "gasless_bootstrap_unresolved" : "gasless_user_operation_unresolved"),
+                material: null, fees };
         }
         if (effect.materialHash === null || effect.phase === "unknown_finality") {
             // The original seal can be recovered without another signer invocation.
@@ -180,16 +195,26 @@ export class GaslessExecution {
             op = await this.save(op, { state: role === "bootstrap" ? "bootstrap_pending" : "user_operation_pending",
                 [this.key(role)]: effect, failure: null });
         }
-        return { op, material };
+        return { op, material, fees };
     }
     /** The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. */
     async mirror(op, fees) {
-        await this.steady(op, async () => { await this.rpc.mirrorEstimate(op.intent, fees); });
+        await this.steady(op, GASLESS_STEP_POSTS.mirror, async () => { await this.rpc.mirrorEstimate(op.intent, fees); });
+    }
+    /** Owner, policy and caps locally, then one bundler batch: the signed fees must still cover its slow tier. */
+    async feeCheck(op, signed) {
+        await this.steady(op, GASLESS_STEP_POSTS.feeCheck, async () => {
+            assertGaslessRemaining(op, this.now());
+            await this.policy?.assert(op, true);
+            await assertGaslessOwner(this.state, op.intent);
+            await this.rpc.assertSignedFees(gaslessWireFees(op.intent, signed));
+            assertGaslessRemaining(op, this.now());
+        });
     }
     key(role) { return role === "bootstrap" ? "bootstrap" : "userOperation"; }
     at() { return new Date(this.now()).toISOString(); }
     async guard(op, signed) {
-        return await this.steady(op, async () => {
+        return await this.steady(op, GASLESS_STEP_POSTS.guard, async () => {
             await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
             const fees = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
             await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
@@ -200,16 +225,17 @@ export class GaslessExecution {
      * A price spike, rate limit or transport failure is waited out while the approved window still leaves room for the
      * remaining steps. An interrupt, an exhausted window and every definite refusal end the operation at once.
      */
-    async steady(op, act) {
-        for (let attempt = 1;; attempt += 1) {
+    async steady(op, cost, act) {
+        for (;;) {
             try {
                 return await act();
             }
             catch (error) {
-                if (attempt >= GUARD_ATTEMPTS || !transient(error) ||
+                if (!transient(error) || this.retryPosts < cost ||
                     Date.parse(op.intent.expiresAt) - this.now() <= GASLESS_MIN_REMAINING_MS + GUARD_RETRY_MS ||
                     await this.wait.wait(GUARD_RETRY_MS) === "interrupted")
                     throw error;
+                this.retryPosts -= cost;
             }
         }
     }
