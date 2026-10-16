@@ -20,8 +20,10 @@ export interface MerchantTerms {
     readonly asset: MerchantAssetPin;
     /** Version 1 (x402engine Bitcoin-price lane): legacy mechanism, URL and delivery schema. */
     readonly legacy: boolean;
+    /** The operation's fee context is v1 (pinned GasPriceOracle, zero operator fee); new operations use v2. */
+    readonly feePins: boolean;
 }
 /** Terms of a new operation: payer custody(profile), `--url`, and the single challenge row naming a pinned asset. */
 export declare function merchantPrepareTerms(payer: string, url: string, frozen: FrozenMerchantChallenge, asset: MerchantAssetPin): MerchantTerms;
 /** Terms of a stored operation, from its own recorded custody, URL, asset and frozen row (version 1: the frozen legacy table). */
-export declare function merchantTerms(o: Pick<MerchantOperation, "schemaVersion" | "custody" | "frozen" | "url" | "asset">): MerchantTerms;
+export declare function merchantTerms(o: Pick<MerchantOperation, "schemaVersion" | "custody" | "frozen" | "url" | "asset" | "feeContext">): MerchantTerms;

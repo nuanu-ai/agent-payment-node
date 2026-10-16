@@ -1,7 +1,7 @@
 import { getAddress } from "viem";
 import type { CandidateAsset } from "../allowlist-inventory.js";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
-import { MEGAETH_USDM, MERCHANT_ASSET_PINS, type MerchantAssetPin } from "./asset-pins.js";
+import { MERCHANT_ASSET_PINS, type MerchantAssetPin } from "./asset-pins.js";
 
 /** MegaETH: the one chain whose transfer-proof fee model APN implements. Public keyless RPC. */
 export const MERCHANT_RPC = "https://mainnet.megaeth.com/rpc";
@@ -26,7 +26,18 @@ export const LEGACY_MERCHANT_URL = "https://x402engine.app/api/crypto/price?ids=
 export const LEGACY_MERCHANT_PAYEE = getAddress("0x7dd5Be069f2d2eAd75eC7C3423B116fF043c2629");
 export const LEGACY_MERCHANT_AMOUNT = "1000000000000000";
 export const LEGACY_MERCHANT_MECHANISM = { provider: "x402engine-erc20-transfer-proof", reference: "megaeth-usdm-crypto-price-v1" } as const;
-export const LEGACY_MERCHANT_ASSET: MerchantAssetPin = MEGAETH_USDM;
+/** USDm as v1 operations read it, with the deployment pins 0.5.41-0.5.43 checked; never used for a new prepare. */
+export const LEGACY_MERCHANT_ASSET: MerchantAssetPin = Object.freeze({
+  chain: "eip155:4326", networkName: "MegaETH", token: getAddress("0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7"),
+  name: "MegaUSD", symbol: "USDm", decimals: 18,
+  deployment: Object.freeze({
+    proxyCodeHash: "0xfdf85d183a122fe611bc878683b722b2b22633e13900c4b13767742b9f5f5a90",
+    implementation: getAddress("0xAC37677261885fDB372A37Ac8D5d47044196073C"),
+    implementationCodeHash: "0x781c9c39ab69e9b7d099ec75e5a28df41dc891c8fffbe0148c94ed5adc8b0c09",
+    domainVersion: "1",
+  }),
+  evidence: "docs/x402-merchant-usdm.md",
+});
 
 /** A stored v2 asset binding: the registry entry exactly as frozen at prepare. Never compared with the current registry. */
 export function validMerchantAssetPin(value: unknown): value is MerchantAssetPin {

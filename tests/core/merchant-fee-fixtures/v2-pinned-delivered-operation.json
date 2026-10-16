@@ -1,0 +1,279 @@
+{
+ "asset": {
+  "chain": "eip155:4326",
+  "decimals": 18,
+  "deployment": {
+   "domainVersion": "1",
+   "implementation": "0xAC37677261885fDB372A37Ac8D5d47044196073C",
+   "implementationCodeHash": "0x781c9c39ab69e9b7d099ec75e5a28df41dc891c8fffbe0148c94ed5adc8b0c09",
+   "proxyCodeHash": "0xfdf85d183a122fe611bc878683b722b2b22633e13900c4b13767742b9f5f5a90"
+  },
+  "evidence": "docs/x402-merchant-usdm.md",
+  "name": "MegaUSD",
+  "networkName": "MegaETH",
+  "symbol": "USDm",
+  "token": "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7"
+ },
+ "createdAt": "2026-10-09T04:00:00.000Z",
+ "custody": {
+  "profileHash": "43a75060e7eb0082ed5e2510ee0783f37d67237764d57ca5b0e39456fe6e6ac8",
+  "providerAccountBindingHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "providerCapabilityHash": "e7c2d4415d43a7f1af5afcbf2ab859a95271b4ef95f24758b9d1e04bf3cc4d58",
+  "providerId": "local",
+  "providerRevision": 1,
+  "schemaVersion": "apn.evm-native-custody.v1",
+  "walletAddress": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+  "walletBindingHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "walletCreatedAt": "2026-10-09T04:00:00.000Z"
+ },
+ "deliveryAttempts": [
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "proofHash": "b02ca4be4a804748df185a4be8b41e6e25a9f658e6cd8b9bc05e2611c47a3571",
+   "outcome": "started"
+  },
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "proofHash": "b02ca4be4a804748df185a4be8b41e6e25a9f658e6cd8b9bc05e2611c47a3571",
+   "outcome": "delivered",
+   "httpStatus": 200,
+   "bodyHash": "36abf3339a591d72549573e4628cd9b752e84bbb15e670008a1949e49a0a317c",
+   "headers": [
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "payment-response",
+     "opaque-preserved"
+    ]
+   ],
+   "result": {
+    "mediaType": "application/json",
+    "json": {
+     "bitcoin": {
+      "usd": 97234.12,
+      "usd_24h_change": 2.31
+     }
+    }
+   }
+  }
+ ],
+ "effectBinding": {
+  "nativeAmountAtomic": "360103",
+  "policyEndsAt": "2026-10-09T05:00:00.000Z"
+ },
+ "envelope": {
+  "gas": "120001",
+  "maxFeePerGas": "3",
+  "maxPriorityFeePerGas": "1",
+  "maximumNativeFee": "1000000000000",
+  "nonce": "0"
+ },
+ "events": [
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "eventHash": "c9a6b96329ade4f55ba68845973687825e1b28bb7210d898746bb4b33760d8a6",
+   "previousHash": null,
+   "snapshotHash": "39df84802037665e9947864249d48be03347e565c4d6640d60b5f58a6888776d",
+   "state": "prepared"
+  },
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "state": "signing_started",
+   "snapshotHash": "a58c728c25f0a439741eed989f7fc0a26a788db03552f3eac905dd382990f227",
+   "previousHash": "c9a6b96329ade4f55ba68845973687825e1b28bb7210d898746bb4b33760d8a6",
+   "eventHash": "23b717b42ab7d9f79855a31cfa345a8022ab2f174dcba38e36706d35e22a677e"
+  },
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "state": "submission_started",
+   "snapshotHash": "aac0fe7d8528f0d283a4cb6a02ad659a2fef603e2eafef875fe0ca65fb21f74d",
+   "previousHash": "23b717b42ab7d9f79855a31cfa345a8022ab2f174dcba38e36706d35e22a677e",
+   "eventHash": "29ceda5807c4905de6bec8f186457004258a0f7a1cf3a2c260b8e01be0a08ba6"
+  },
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "state": "unknown_finality",
+   "snapshotHash": "38aa25fb3ed96d1b8ef8e8dca4c23767419176cb10dd7486cb29bdb57aadcba8",
+   "previousHash": "29ceda5807c4905de6bec8f186457004258a0f7a1cf3a2c260b8e01be0a08ba6",
+   "eventHash": "f14c8a025b29505ae93c52c13051f04df2ebbd58553a30c87c8155c924bd8f10"
+  },
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "state": "payment_finalized",
+   "snapshotHash": "8e7ef84ce6ad2dc529c2a4a95fba04dd61e119a78b0f99e166c4bc5110729346",
+   "previousHash": "f14c8a025b29505ae93c52c13051f04df2ebbd58553a30c87c8155c924bd8f10",
+   "eventHash": "a6208ce28a3c15e3ee375b251953f551bd1b0ceb7768b5e1df7e879c0ecebfcb"
+  },
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "state": "delivery_unknown",
+   "snapshotHash": "3673bddefa71996690a16bddc99e84726a7b025b7b930aec33257078657f95aa",
+   "previousHash": "a6208ce28a3c15e3ee375b251953f551bd1b0ceb7768b5e1df7e879c0ecebfcb",
+   "eventHash": "e1450c17b5e1d33046efe4a2060603b91d6dbe67283e81a0b8264af161181558"
+  },
+  {
+   "at": "2026-10-09T04:00:00.000Z",
+   "state": "delivered",
+   "snapshotHash": "0505a4732adb46f7a1b5a6548c7cc2c0472cba4e5df9b8244dd6b24ecb53f0e7",
+   "previousHash": "e1450c17b5e1d33046efe4a2060603b91d6dbe67283e81a0b8264af161181558",
+   "eventHash": "367c1aa6db0f2241b4029b3b7db82544c00f4688808ef4b506530473abb631e8"
+  }
+ ],
+ "expiresAt": "2026-10-09T04:05:00.000Z",
+ "feeContext": {
+  "admissionEstimatedUpper": "360103",
+  "anchorHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "anchorNumber": "16",
+  "executionUpper": "360003",
+  "l1EstimatedUpper": "100",
+  "operatorEstimatedUpper": "0",
+  "oraclePinsDigest": "c5e34ba509c8430a597b5a5632239edd671e60b27c258831bb133f2269eb3c5e",
+  "schemaVersion": "apn.merchant-mega-fee.v1",
+  "unsignedBytes": "106",
+  "unsignedHash": "0xc6ee8e9c1564df2caab80ac39c0d377d156abed74b5b19ddf3df85527ee07a1d"
+ },
+ "fingerprint": "43aeefebd884a44954212fd602bb34ce949f595158733ee46359ccd92a199d3e",
+ "frozen": {
+  "accepted": {
+   "amount": "1000000000000000",
+   "asset": "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7",
+   "extra": {
+    "name": "USDm",
+    "version": "2"
+   },
+   "maxTimeoutSeconds": 300,
+   "network": "eip155:4326",
+   "payTo": "0x7dd5Be069f2d2eAd75eC7C3423B116fF043c2629",
+   "scheme": "exact"
+  },
+  "challenge": {
+   "accepts": [
+    {
+     "amount": "1000000000000000",
+     "asset": "0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7",
+     "extra": {
+      "name": "USDm",
+      "version": "2"
+     },
+     "maxTimeoutSeconds": 300,
+     "network": "eip155:4326",
+     "payTo": "0x7dd5Be069f2d2eAd75eC7C3423B116fF043c2629",
+     "scheme": "exact"
+    }
+   ],
+   "error": "Payment required",
+   "extensions": {
+    "bazaar": {
+     "info": {
+      "input": {
+       "method": "GET",
+       "type": "http"
+      }
+     }
+    }
+   },
+   "resource": {
+    "description": "Bitcoin price",
+    "mimeType": "application/json",
+    "url": "https://x402engine.app/api/crypto/price?ids=bitcoin"
+   },
+   "x402Version": 2
+  },
+  "challengeHash": "5747be711f39246c7a01f450deeb9ad0e64d4847da4d2f1088b68a55cfde96ce"
+ },
+ "idempotencyHash": "03832c43b5b261d751f54867d8ba82c2700565059259a9b145ed6ccea2ca911f",
+ "kind": "merchant_x402",
+ "operationId": "9a114307601a33d4fd3bbecf6f69252acbadcd740238254c2dbe035cf16d5ae0",
+ "policy": {
+  "activationDigest": "8f8f54ccb1f8b721821c9e7ac856af3883ff88d4400e6f64200f091cc9043e60",
+  "digest": "7dfccb9fd1473b3ce8b83ac76f731bf0a6fe1121fde70fc7836fd366b0d1a067",
+  "revision": 1
+ },
+ "profile": "x402-buyer",
+ "profileHash": "43a75060e7eb0082ed5e2510ee0783f37d67237764d57ca5b0e39456fe6e6ac8",
+ "receipt": {
+  "transactionHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "blockNumber": "16",
+  "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "finality": "finalized",
+  "status": "success",
+  "networkFeeWei": "200100",
+  "fullFee": {
+   "executionWei": "200000",
+   "l1Wei": "100",
+   "operatorWei": "0",
+   "signedExecutionCapWei": "360003",
+   "admissionEstimatedUpperWei": "360103",
+   "payerDebit": {
+    "before": "72057594037927936",
+    "after": "72057594037727836",
+    "aggregateDebit": "200100",
+    "transactionHashes": [
+     "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "evidenceHash": "240c8df8626364fd62cfce79cf9ca2a0db5503e97cea16b6cabb4a0cdfb16e95"
+   }
+  },
+  "canonical": {
+   "transactionIndex": "0",
+   "blockHeaderHash": "b460180247365923eb8441ff02849478a06cfe197dd82ddc2ca6ac21a8e4a1a4",
+   "finalizedNumber": "16",
+   "finalizedHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "finalizedHeaderHash": "b460180247365923eb8441ff02849478a06cfe197dd82ddc2ca6ac21a8e4a1a4"
+  },
+  "evidenceHash": "75759e7386cc2bddc3f2ac7cc2eeb403ed799a7e1b4bfa7308d2020973710847"
+ },
+ "requestHash": "fa2be2472f8f1d36efbcf72922eaab35bb59744ca52281fff489072553035465",
+ "schemaVersion": "apn.x402-merchant.v2",
+ "signingAttempts": 1,
+ "state": "delivered",
+ "submissionAttempts": 1,
+ "terminal": true,
+ "txHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "url": "https://x402engine.app/api/crypto/price?ids=bitcoin",
+ "canonicalObservations": [
+  {
+   "result": "verified",
+   "reason": "merchant_canonical_verified",
+   "chain": "eip155:4326",
+   "origin": "https://mainnet.megaeth.com",
+   "priorReceiptHash": "7cc671e1f8a1f52d3561bf5e87b9dc43c0c5a62d3a55673b409e2a1d64e0401f",
+   "deliveryCount": 0,
+   "priorDeliveryHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+   "currentReceiptHash": "7cc671e1f8a1f52d3561bf5e87b9dc43c0c5a62d3a55673b409e2a1d64e0401f",
+   "currentAnchors": {
+    "transactionIndex": "0",
+    "blockHeaderHash": "b460180247365923eb8441ff02849478a06cfe197dd82ddc2ca6ac21a8e4a1a4",
+    "finalizedNumber": "16",
+    "finalizedHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "finalizedHeaderHash": "b460180247365923eb8441ff02849478a06cfe197dd82ddc2ca6ac21a8e4a1a4"
+   },
+   "at": "2026-10-09T04:00:00.000Z",
+   "previousHash": null,
+   "observationHash": "0d77497f01877646c716d1187f1de22c5ffc13af35a5cb2fef099006f42f19d4"
+  },
+  {
+   "result": "verified",
+   "reason": "merchant_canonical_verified",
+   "chain": "eip155:4326",
+   "origin": "https://mainnet.megaeth.com",
+   "priorReceiptHash": "7cc671e1f8a1f52d3561bf5e87b9dc43c0c5a62d3a55673b409e2a1d64e0401f",
+   "deliveryCount": 2,
+   "priorDeliveryHash": "b0e6bba82395f693cf367c161af09c9f3c89840bc1c3eb73b28fbeacb6c2325e",
+   "currentReceiptHash": "7cc671e1f8a1f52d3561bf5e87b9dc43c0c5a62d3a55673b409e2a1d64e0401f",
+   "currentAnchors": {
+    "transactionIndex": "0",
+    "blockHeaderHash": "b460180247365923eb8441ff02849478a06cfe197dd82ddc2ca6ac21a8e4a1a4",
+    "finalizedNumber": "16",
+    "finalizedHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "finalizedHeaderHash": "b460180247365923eb8441ff02849478a06cfe197dd82ddc2ca6ac21a8e4a1a4"
+   },
+   "at": "2026-10-09T04:00:00.000Z",
+   "previousHash": "0d77497f01877646c716d1187f1de22c5ffc13af35a5cb2fef099006f42f19d4",
+   "observationHash": "e0e9f70ee9dfe68ddf816f0257ca760c12620fee34ff0bcd8b465197448e2e45"
+  }
+ ],
+ "integrityHash": "23c7fe156db188df8a4bbdc06059beaf56f3f9e37954e3844432071561541b8c"
+}

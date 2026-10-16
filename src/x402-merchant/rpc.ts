@@ -1,4 +1,4 @@
-import { merchantFeeQuote, checkMerchantFullFee, merchantActualFee, merchantOracleAt, merchantPayerDebit, type MerchantFeeContext } from "./mega-fee.js";
+import { merchantFeeQuote, checkMerchantFullFee, merchantActualFee, merchantOracleAt, merchantPayerDebit, merchantReceiptFee, type MerchantFeeContext } from "./mega-fee.js";
 import { decodeEventLog, decodeFunctionResult, encodeFunctionData, erc20Abi, getAddress, hashDomain, keccak256, type Hex } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
@@ -101,7 +101,7 @@ export async function merchantCurrent(rpc: MerchantRpcPort,t: MerchantTerms,froz
         refuse("merchant_token_domain");
     const gas = quantity(v.gas) * 12n / 10n + 1n, priority = quantity(v.tip), fee = quantity(head.baseFeePerGas) * 2n + priority;
     const e=frozenEnvelope??{nonce:quantity(v.nonce).toString(),gas:gas.toString(),maxFeePerGas:fee.toString(),maxPriorityFeePerGas:priority.toString(),maximumNativeFee};
-    const feeContext=await merchantFeeQuote(rpc,head,e,t);
+    const feeContext=await merchantFeeQuote(rpc,head,e,t,t.feePins);
     return {feeContext, nonce: quantity(v.nonce).toString(), gas: gas.toString(), maxFeePerGas: fee.toString(), maxPriorityFeePerGas: priority.toString(), native: quantity(v.native).toString(), token: String(decode("balanceOf", v.balance)) };
 }
 export function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope,t: MerchantTerms,feeContext?:MerchantFeeContext): void {
@@ -160,12 +160,14 @@ export async function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation
     if (gasUsed === 0n || quantity(r.type) !== 2n || effectiveGasPrice < baseFee || effectiveGasPrice > baseFee + BigInt(o.envelope.maxPriorityFeePerGas) ||
         (o.feeContext===undefined && r.l1Fee !== undefined && quantity(r.l1Fee) !== 0n) || r.blobGasUsed !== undefined && quantity(r.blobGasUsed) !== 0n) refuse("merchant_receipt_fee_type");
     if (gasUsed > BigInt(o.envelope.gas) || effectiveGasPrice > BigInt(o.envelope.maxFeePerGas) || gasUsed * effectiveGasPrice > BigInt(o.envelope.maximumNativeFee)) refuse("merchant_receipt_fee_ceiling");
-    const actual=o.feeContext===undefined?null:merchantActualFee(r);
+    // v1 fee contexts keep their pinned oracle rule; v2 (new operations) take the paid fee from the receipt's fee fields.
+    const pinnedFee=o.feeContext?.schemaVersion==="apn.merchant-mega-fee.v1",feeOf=pinnedFee?merchantActualFee:merchantReceiptFee;
+    const actual=o.feeContext===undefined?null:feeOf(r);
     let fullFee:MerchantReceipt["fullFee"]|undefined;
     if(actual!==null){
       if(o.effectBinding===undefined || BigInt(actual.total)>BigInt(o.envelope.maximumNativeFee) || BigInt(actual.total)>BigInt(o.effectBinding.nativeAmountAtomic))refuse("merchant_receipt_full_fee_budget");
-      await merchantOracleAt(rpc,quantity(r.blockNumber).toString(),hexHash(r.blockHash),gasUsed);
-      const payerDebit=await merchantPayerDebit(rpc,t.payer,fullBlock,r,o.effectBinding.nativeAmountAtomic);
+      if(pinnedFee)await merchantOracleAt(rpc,quantity(r.blockNumber).toString(),hexHash(r.blockHash),gasUsed);
+      const payerDebit=await merchantPayerDebit(rpc,t.payer,fullBlock,r,o.effectBinding.nativeAmountAtomic,feeOf);
       fullFee={executionWei:actual.execution,l1Wei:actual.l1,operatorWei:actual.operator,signedExecutionCapWei:o.feeContext!.executionUpper,admissionEstimatedUpperWei:o.feeContext!.admissionEstimatedUpper,payerDebit};
     }
     const status = quantity(r.status);

@@ -1,6 +1,10 @@
 import { getAddress } from "viem";
 
-/** EIP-1967 deployment pins of an upgradeable token, checked wherever APN reads that token (prepare, approval, receipt block, retirement). */
+/**
+ * EIP-1967 deployment pins of an upgradeable token. New entries carry none (PHASE2 P5): they break on every legitimate
+ * upgrade, while the token address and chain, the exact signed transfer and the receipt's Transfer log bind the payment.
+ * Records that stored pins (v1, and v2 written before this change) keep checking them.
+ */
 export interface MerchantTokenDeployment {
   readonly proxyCodeHash: string;
   readonly implementation: string;
@@ -10,8 +14,8 @@ export interface MerchantTokenDeployment {
 }
 
 /**
- * One ERC-20 an x402 transfer-proof payment may use: protocol data only (chain, token, identity and optional deployment
- * pins), never a merchant, payee or amount. A challenge row naming any other asset is refused. MegaETH is the only chain
+ * One ERC-20 an x402 transfer-proof payment may use: protocol data only (chain, token address, name, symbol, decimals),
+ * never a merchant, payee or amount. A challenge row naming any other asset is not payable. MegaETH is the only chain
  * whose fee model APN implements for this mechanism.
  */
 export interface MerchantAssetPin {
@@ -25,16 +29,10 @@ export interface MerchantAssetPin {
   readonly evidence: string;
 }
 
-/** MegaETH USDm (MegaUSD), the first entry. Its proxy and implementation pins are kept, keyed by chain and token (OWNR-19). */
+/** MegaETH USDm (MegaUSD), the first entry: identified by address and chain, without code pins (owner decision 2026-10-17). */
 export const MEGAETH_USDM: MerchantAssetPin = Object.freeze({
   chain: "eip155:4326", networkName: "MegaETH", token: getAddress("0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7"),
   name: "MegaUSD", symbol: "USDm", decimals: 18,
-  deployment: Object.freeze({
-    proxyCodeHash: "0xfdf85d183a122fe611bc878683b722b2b22633e13900c4b13767742b9f5f5a90",
-    implementation: getAddress("0xAC37677261885fDB372A37Ac8D5d47044196073C"),
-    implementationCodeHash: "0x781c9c39ab69e9b7d099ec75e5a28df41dc891c8fffbe0148c94ed5adc8b0c09",
-    domainVersion: "1",
-  }),
   evidence: "docs/x402-merchant-usdm.md",
 });
 

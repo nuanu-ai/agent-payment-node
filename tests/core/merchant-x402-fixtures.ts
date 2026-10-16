@@ -10,10 +10,10 @@ import { merchantTransferData } from "../../src/x402-merchant/rpc.js";
 import { privateKeyToAccount } from "viem/accounts";
 import type { MerchantOperation } from "../../src/x402-merchant/model.js";
 import type { HttpPort, HttpObservation } from "../../src/x402-model.js";
-import { LEGACY_MERCHANT_AMOUNT as MERCHANT_AMOUNT, LEGACY_MERCHANT_PAYEE as MERCHANT_PAYEE, LEGACY_MERCHANT_URL as MERCHANT_URL, MERCHANT_CHAIN, merchantAssetMechanism } from "../../src/x402-merchant/pins.js";
+import { LEGACY_MERCHANT_ASSET, LEGACY_MERCHANT_AMOUNT as MERCHANT_AMOUNT, LEGACY_MERCHANT_PAYEE as MERCHANT_PAYEE, LEGACY_MERCHANT_URL as MERCHANT_URL, MERCHANT_CHAIN, merchantAssetMechanism } from "../../src/x402-merchant/pins.js";
 import { MEGAETH_USDM } from "../../src/x402-merchant/asset-pins.js";
 /** The x402engine merchant (QA X402-MERCHANT-001) through the generic path: its URL, payee and amount come from its challenge. */
-export const MERCHANT_TOKEN=MEGAETH_USDM.token as `0x${string}`,MERCHANT_IMPLEMENTATION=MEGAETH_USDM.deployment!.implementation,MERCHANT_MECHANISM=merchantAssetMechanism(MEGAETH_USDM);
+export const MERCHANT_TOKEN=MEGAETH_USDM.token as `0x${string}`,MERCHANT_IMPLEMENTATION=LEGACY_MERCHANT_ASSET.deployment!.implementation,MERCHANT_MECHANISM=merchantAssetMechanism(MEGAETH_USDM);
 export { MERCHANT_AMOUNT, MERCHANT_PAYEE, MERCHANT_URL };
 import { MerchantService } from "../../src/x402-merchant/service.js";
 /** Any local profile pays: a generated key that never belonged to the owner. */

@@ -25,7 +25,7 @@ export interface MerchantReceipt {
     readonly status: "success" | "reverted";
     readonly evidenceHash: string;
     readonly networkFeeWei: string;
-    readonly fullFee?: {readonly executionWei:string;readonly l1Wei:string;readonly operatorWei:"0";readonly signedExecutionCapWei:string;readonly admissionEstimatedUpperWei:string;readonly payerDebit:{readonly before:string;readonly after:string;readonly aggregateDebit:string;readonly transactionHashes:readonly Hex[];readonly evidenceHash:string}};
+    readonly fullFee?: {readonly executionWei:string;readonly l1Wei:string;readonly operatorWei:string;readonly signedExecutionCapWei:string;readonly admissionEstimatedUpperWei:string;readonly payerDebit:{readonly before:string;readonly after:string;readonly aggregateDebit:string;readonly transactionHashes:readonly Hex[];readonly evidenceHash:string}};
     readonly canonical?: { readonly transactionIndex: string; readonly blockHeaderHash: string; readonly finalizedNumber: string; readonly finalizedHash: Hex; readonly finalizedHeaderHash: string };
 }
 export interface MerchantCanonicalObservation {
@@ -158,8 +158,8 @@ export function validateMerchant(v: unknown): MerchantOperation {
     if(o.receipt?.fullFee!==undefined){
       const f=o.receipt.fullFee,d=f.payerDebit;
       if(o.feeContext===undefined||!isPlainRecord(f)||!exactKeys(f,["executionWei","l1Wei","operatorWei","signedExecutionCapWei","admissionEstimatedUpperWei","payerDebit"])||!isPlainRecord(d)||!exactKeys(d,["before","after","aggregateDebit","transactionHashes","evidenceHash"])||
-        ![f.executionWei,f.l1Wei,f.operatorWei,f.signedExecutionCapWei,f.admissionEstimatedUpperWei,d.before,d.after,d.aggregateDebit].every(x=>/^(0|[1-9][0-9]{0,77})$/u.test(x))||f.operatorWei!=="0"||f.signedExecutionCapWei!==o.feeContext.executionUpper||f.admissionEstimatedUpperWei!==o.feeContext.admissionEstimatedUpper||
-        BigInt(f.executionWei)+BigInt(f.l1Wei)!==BigInt(o.receipt.networkFeeWei)||BigInt(o.receipt.networkFeeWei)>BigInt(o.envelope.nativeFeeReserveWei??f.admissionEstimatedUpperWei)||BigInt(d.before)-BigInt(d.after)!==BigInt(d.aggregateDebit)||BigInt(d.aggregateDebit)<BigInt(o.receipt.networkFeeWei)||
+        ![f.executionWei,f.l1Wei,f.operatorWei,f.signedExecutionCapWei,f.admissionEstimatedUpperWei,d.before,d.after,d.aggregateDebit].every(x=>/^(0|[1-9][0-9]{0,77})$/u.test(x))||o.feeContext.schemaVersion==="apn.merchant-mega-fee.v1"&&f.operatorWei!=="0"||f.signedExecutionCapWei!==o.feeContext.executionUpper||f.admissionEstimatedUpperWei!==o.feeContext.admissionEstimatedUpper||
+        BigInt(f.executionWei)+BigInt(f.l1Wei)+BigInt(f.operatorWei)!==BigInt(o.receipt.networkFeeWei)||BigInt(o.receipt.networkFeeWei)>BigInt(o.envelope.nativeFeeReserveWei??f.admissionEstimatedUpperWei)||BigInt(d.before)-BigInt(d.after)!==BigInt(d.aggregateDebit)||BigInt(d.aggregateDebit)<BigInt(o.receipt.networkFeeWei)||
         !/^[a-f0-9]{64}$/u.test(d.evidenceHash)||!Array.isArray(d.transactionHashes)||d.transactionHashes.length<1||d.transactionHashes.length>8||new Set(d.transactionHashes).size!==d.transactionHashes.length||d.transactionHashes.filter(h=>h===o.txHash).length!==1||d.transactionHashes.some(h=>!/^0x[a-f0-9]{64}$/u.test(h)))refuse("merchant_full_fee_receipt_binding");
     }
     if (o.receipt?.canonical !== undefined) {
@@ -211,7 +211,7 @@ export function publicMerchant(o: MerchantOperation) {
     return { kind: o.kind, operationId: o.operationId, state: o.state, terminal: o.terminal,
         mechanism: t.mechanism.provider, provider: { id: t.mechanism.provider, reference: t.mechanism.reference, protocolSnapshot: t.legacy ? "vendor/x402engine-transfer-proof/protocol-v1.json" : null, assetTransferMethod:"erc20-transfer-proof", eip3009:false, gasless:false },
         url: t.url, payer: t.payer, payee: t.payee, asset: { chain: t.chain, token: t.token, symbol: t.asset.symbol, decimals: t.asset.decimals }, legacyMechanism: t.legacy ? LEGACY_MERCHANT_MECHANISM : null, paymentFinalized: o.receipt?.status === "success", merchantDelivered: o.state === "delivered", transactionHash: o.txHash,
-        challengeHash: o.frozen.challengeHash, expiresAt: o.expiresAt, amountAtomic: o.frozen.accepted.amount, feeCeilingWei: o.envelope.maximumNativeFee,...(o.feeContext===undefined?{}:{feeBudgetSemantics:"pre_submission_full_fee_estimate_not_onchain_l1_cap",signedExecutionCapWei:o.feeContext.executionUpper,admissionEstimatedUpperWei:o.feeContext.admissionEstimatedUpper,l1EstimatedUpperWei:o.feeContext.l1EstimatedUpper}),
+        challengeHash: o.frozen.challengeHash, expiresAt: o.expiresAt, amountAtomic: o.frozen.accepted.amount, feeCeilingWei: o.envelope.maximumNativeFee,...(o.feeContext===undefined?{}:{feeBudgetSemantics:"pre_submission_full_fee_estimate_not_onchain_l1_cap",signedExecutionCapWei:o.feeContext.executionUpper,admissionEstimatedUpperWei:o.feeContext.admissionEstimatedUpper,l1EstimatedUpperWei:o.feeContext.l1EstimatedUpper,operatorEstimatedUpperWei:o.feeContext.operatorEstimatedUpper,feeRule:o.feeContext.schemaVersion}),
         failures:o.failures??[],retirementDigest:o.retirementDigest??null,retirementReceipt:o.state==="retired_unsent"?{kind:"merchant_unsent_retirement",tombstoneDigest:o.retirementDigest,consumedAtomic:"0",payment:false,delivery:false}:null,...(o.envelope.nativeFeeReserveWei===undefined?{}:{nativeFeeReserveWei:o.envelope.nativeFeeReserveWei}),
         currentCanonicalProof: o.canonicalObservations?.at(-1) ?? null, result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
 }
