@@ -110,8 +110,9 @@ test("LI.FI exhausted invocation budget leaves an effect unsigned for a fresh re
   const s = await lifiFixture(temporary.root); s.source.allowance = s.request.amountAtomic;
   const { id } = await s.prepare();
   s.approval.confirm = async () => {
+    // Leave exactly one POST of the derived invocation cap: too few to sign and still send.
     const budget = s.rpcSessions.at(-1)!.physicalBudget!;
-    (budget as unknown as { posts: number }).posts = 23;
+    (budget as unknown as { posts: number }).posts += budget.remaining() - 1;
     return true;
   };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
@@ -133,7 +134,7 @@ test("LI.FI exhausted send slot preserves one durable seal for a fresh resume", 
   s.custody.seal = async (...args) => {
     const material = await originalSeal(...args);
     const budget = s.rpcSessions.at(-1)!.physicalBudget!;
-    (budget as unknown as { posts: number }).posts = 24;
+    (budget as unknown as { posts: number }).posts += budget.remaining();
     return material;
   };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });

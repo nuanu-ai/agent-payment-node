@@ -138,6 +138,30 @@ export declare function bridgeDeploymentReadPlan(chainId: BridgeChainId, peerCha
     } | undefined;
     items: PlannedRead[];
 };
+/** Only Base Stargate, frozen after the Ecotone/EIP-6780 activation, may reuse its prepared ordinary-code proof on refresh. */
+export declare function bridgeRetainedRefreshEligible(chainId: BridgeChainId, tool: BridgeTool, frozen: BridgeBlock): boolean;
+/** The archive batch of a retained refresh: fresh fee code, every configuration read and both headers at the safe block. */
+export declare function bridgeRetainedDeploymentReadPlan(chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address, at: BridgeBlock, prepared: BridgeBlock): {
+    readRows: {
+        readonly kind: "call" | "storage";
+        readonly address: Address;
+        readonly data: Hex;
+        readonly expected: Hex;
+    }[];
+    directRows: {
+        readonly kind: "call" | "storage";
+        readonly address: Address;
+        readonly data: Hex;
+        readonly expected: Hex;
+    }[];
+    aggregateRows: {
+        readonly kind: "call" | "storage";
+        readonly address: Address;
+        readonly data: Hex;
+        readonly expected: Hex;
+    }[];
+    items: PlannedRead[];
+};
 /** The exact archive batch of the Base pinned fee proof, at the included block's canonical hash. */
 export declare function basePinnedFeeReadPlan(gas: bigint, block: BridgeBlock, safe: BridgeBlock): {
     codeRows: {

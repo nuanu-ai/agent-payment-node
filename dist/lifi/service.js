@@ -20,6 +20,7 @@ import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation } from "./base-deployment-migration.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { bridgeDestinationObservationRequests, bridgeSourceObservationRequests } from "./observation-budget.js";
+import { bridgeSendStepPostBudget } from "./send-budget.js";
 import { sha256 } from "../canonical.js";
 export class BridgeService {
     context;
@@ -166,12 +167,12 @@ export class BridgeService {
     }
     execution(op) {
         const d = this.dependencies(), m = op.intent.materialization;
-        const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeRpcPhysicalPolicy(op));
-        // The modeled worst-case first token guard spends 19 requests: two safe heads, 6+9 Ethereum/Base archive chunks and two account batches.
-        // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof. Arbitrum code remains fully fresh
-        // because this verifier lacks an exact fork activation point: two safe heads, four Base plus five Arbitrum chunks,
-        // and two source account/simulation batches total 13 physical reads.
-        // Four later guards reuse immutable evidence and spend one mutable account/simulation batch each.
+        // The invocation cap covers the derived sign-and-send step plus explicit retry headroom (Base USDC to Arbitrum Across: 24 + 4).
+        const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeRpcPhysicalPolicy(op), bridgeSendStepPostBudget(op, 3));
+        // The command session serves every guard of the invocation. The first full guard is counted in send-budget.ts from its read
+        // plans (Base USDC with Ethereum or Arbitrum USDC Across: two safe heads, 10+7 archive chunks and two account batches = 21).
+        // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof; Arbitrum code remains fully fresh.
+        // Later guards reuse immutable evidence and read the two mutable account/simulation batches again.
         const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
             archiveDeploymentBatchMaxItems: 3, providerScheduler: this.providerScheduler, physicalBudget });
         const lazy = (chainId, options) => {

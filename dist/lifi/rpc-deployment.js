@@ -73,6 +73,30 @@ export function bridgeDeploymentReadPlan(chainId, peerChainId, tool, token, at, 
     ];
     return { contract, feeContract, verificationCodeRows, readRows, directRows, aggregateGroups, traceProbe, items };
 }
+/** Only Base Stargate, frozen after the Ecotone/EIP-6780 activation, may reuse its prepared ordinary-code proof on refresh. */
+export function bridgeRetainedRefreshEligible(chainId, tool, frozen) {
+    return tool === "stargateV2" && chainId === 8453 && BigInt(frozen.timestampAtomic) >= BASE_ECOTONE_EIP6780_TIMESTAMP;
+}
+/** The archive batch of a retained refresh: fresh fee code, every configuration read and both headers at the safe block. */
+export function bridgeRetainedDeploymentReadPlan(chainId, peerChainId, tool, token, at, prepared) {
+    const contract = bridgeDeployment(chainId, peerChainId, tool, token), feeContract = chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
+    const tag = quantity(BigInt(at.numberAtomic)), readRows = [...contract.reads, ...feeContract.reads];
+    const aggregateRows = readRows.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data));
+    const directRows = readRows.filter((row) => !aggregateRows.includes(row));
+    const items = [
+        { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(chainId) },
+        // Base fee machinery is system/predeploy code and is never covered by retained ordinary-code proof.
+        ...feeContract.code.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable",
+            decoder: rpcHexValue(128 * 1024) })),
+        ...directRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
+            params: row.kind === "storage" ? [row.address, row.data, tag] : [{ to: row.address, data: row.data }, tag],
+            cachePolicy: "immutable", decoder: rpcHexValue(64 * 1024) })),
+        ...(aggregateRows.length === 0 ? [] : [deploymentAggregateItem(aggregateRows, tag)]),
+        { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
+        { method: "eth_getBlockByNumber", params: [quantity(BigInt(prepared.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
+    ];
+    return { readRows, directRows, aggregateRows, items };
+}
 /** The exact archive batch of the Base pinned fee proof, at the included block's canonical hash. */
 export function basePinnedFeeReadPlan(gas, block, safe) {
     const tag = { blockHash: block.hash, requireCanonical: true }, multicallHash = PORTFOLIO_NETWORK_RPC.find((row) => row.evmChainId === 8453)?.multicall3CodeHash;
