@@ -75,7 +75,7 @@ export function checkMerchantChallenge(value: unknown): FrozenMerchantChallenge 
  * from that row; the owner's admission (asset, mechanism, caps, optional recipient pin) bounds them. Any positive payment
  * window (`maxTimeoutSeconds`) is accepted; it is shown on consent and enforced by `assertMerchantPaymentWindow`.
  */
-export function checkGenericMerchantChallenge(value: unknown, assets: readonly MerchantAssetPin[]): FrozenMerchantChallenge & { readonly asset: MerchantAssetPin } {
+export function checkGenericMerchantChallenge(value: unknown, assets: readonly MerchantAssetPin[], chosen?: string): FrozenMerchantChallenge & { readonly asset: MerchantAssetPin } {
     challengeShape(value, false);
     const rows = value.accepts.map((r: unknown) => {
         if (!isPlainRecord(r) || !exactKeys(r, ["scheme", "network", "asset", "amount", "payTo", "maxTimeoutSeconds", ...(r.extra === undefined ? [] : ["extra"])]) ||
@@ -88,8 +88,20 @@ export function checkGenericMerchantChallenge(value: unknown, assets: readonly M
         return asset !== undefined && payee !== null && payee !== "0x0000000000000000000000000000000000000000" && amount &&
             Number.isSafeInteger(r.maxTimeoutSeconds) && (r.maxTimeoutSeconds as number) >= 1 ? { row: r, asset } : null;
     }).filter((x): x is { row: Record<string, unknown>; asset: MerchantAssetPin } => x !== null);
-    const frozen = freeze(value, rows.map((x) => x.row));
-    return { ...frozen, asset: rows[0]!.asset };
+    // Several pinned assets offered: the caller chooses one with --asset; without a choice, refuse and name them.
+    const offered = [...new Map(rows.map((x) => [x.asset.token, x.asset])).values()];
+    const selected = chosen === undefined ? rows : rows.filter((x) => x.asset.token === chosen);
+    if (chosen !== undefined && selected.length === 0)
+        throw new ApnError("APN_INVALID_INPUT", `The merchant does not offer the chosen asset; it offers: ${describe(offered)}.`,
+            { reason: "merchant_asset_not_offered", offeredAssets: offered.map((a) => `${a.symbol} ${a.token}`) });
+    if (chosen === undefined && offered.length > 1)
+        throw new ApnError("APN_INVALID_INPUT", `The merchant offers several pinned assets; choose one with --asset <token>: ${describe(offered)}.`,
+            { reason: "merchant_asset_choice_required", offeredAssets: offered.map((a) => `${a.symbol} ${a.token}`) });
+    const frozen = freeze(value, selected.map((x) => x.row));
+    return { ...frozen, asset: selected[0]!.asset };
+}
+function describe(assets: readonly MerchantAssetPin[]): string {
+    return assets.length === 0 ? "no pinned asset" : assets.map((a) => `${a.symbol} ${a.token} (${a.chain})`).join(", ");
 }
 /**
  * The merchant's payment window runs `maxTimeoutSeconds` from the challenge read APN acts on. Prepare, and every challenge
@@ -118,14 +130,14 @@ export function merchantChallenge(o: HttpObservation, ctx: MerchantContext = LEG
     return checkChallengeFor(ctx, decodeCanonicalBase64Json(headers[0]![1]));
 }
 /** A new merchant's 402: the single row naming any pinned asset selects the asset. */
-export function merchantGenericChallenge(o: HttpObservation, url: string, assets: readonly MerchantAssetPin[]): FrozenMerchantChallenge & { readonly asset: MerchantAssetPin } {
+export function merchantGenericChallenge(o: HttpObservation, url: string, assets: readonly MerchantAssetPin[], chosen?: string): FrozenMerchantChallenge & { readonly asset: MerchantAssetPin } {
     checkMerchantObservation(o, url);
     if (o.status !== 402)
         refuse("merchant_http_402_required");
     const headers = o.rawHeaderPairs.filter(([k]) => k.toLowerCase() === "payment-required");
     if (headers.length !== 1)
         refuse("merchant_payment_required_header");
-    return checkGenericMerchantChallenge(decodeCanonicalBase64Json(headers[0]![1]), assets);
+    return checkGenericMerchantChallenge(decodeCanonicalBase64Json(headers[0]![1]), assets, chosen);
 }
 export function merchantProof(frozen: FrozenMerchantChallenge, txHash: Hex, ctx: MerchantContext = LEGACY): string {
     const checked = checkChallengeFor(ctx, frozen.challenge);

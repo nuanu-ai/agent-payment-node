@@ -24,6 +24,8 @@ export declare class MerchantService {
     prepare(input: {
         profile: string;
         url: string;
+        /** Optional: the pinned asset to pay with when the merchant offers several. */
+        asset?: string;
         maximumNativeFee: string;
         nativeFeeReserveWei?: string;
         idempotencyKey: string;

@@ -16,6 +16,7 @@ import { checkMerchantEnvelope, merchantCurrent, merchantReceipt, hexHash } from
 import {} from "./custody.js";
 import { assertMerchantPaymentWindow, canonicalMerchantUrl, merchantChallenge, merchantDelivery, merchantGenericChallenge, merchantProof, refuse } from "./protocol.js";
 import { MERCHANT_ASSET_PINS } from "./asset-pins.js";
+import { MERCHANT_CHAIN, merchantAssetPin } from "./pins.js";
 import { merchantPrepareTerms, merchantTerms } from "./terms.js";
 export class MerchantService {
     state;
@@ -34,8 +35,12 @@ export class MerchantService {
         const profile = canonicalProfile(input.profile), key = canonicalIdempotencyKey(input.idempotencyKey), maximumNativeFee = input.maximumNativeFee;
         if (!/^[1-9][0-9]*$/u.test(maximumNativeFee) || BigInt(maximumNativeFee) > 10n ** 18n)
             refuse("merchant_fee_ceiling");
-        const url = canonicalMerchantUrl(input.url);
-        const profileHash = this.state.profileHash(profile), operationId = this.state.operationId(profile, key), idempotencyHash = this.state.idempotencyHash(key), requestHash = hashObject({ kind: "merchant_x402", profile, url, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) });
+        const url = canonicalMerchantUrl(input.url), registry = this.ports.assets ?? MERCHANT_ASSET_PINS;
+        // --asset names a pinned asset (any spelling of its address); an unpinned token is refused before any network read.
+        const chosen = input.asset === undefined ? undefined : merchantAssetPin(MERCHANT_CHAIN, input.asset, registry)?.token;
+        if (input.asset !== undefined && chosen === undefined)
+            refuse("merchant_asset_not_pinned");
+        const profileHash = this.state.profileHash(profile), operationId = this.state.operationId(profile, key), idempotencyHash = this.state.idempotencyHash(key), requestHash = hashObject({ kind: "merchant_x402", profile, url, ...(chosen === undefined ? {} : { asset: chosen }), maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) });
         await this.state.initialize();
         // The payer is custody(profile); its address lock is taken with the others, and custody is rechecked under it.
         const custody = await evmNativeCustody(this.state, profile), payer = custody.walletAddress;
@@ -52,7 +57,7 @@ export class MerchantService {
             // Only a profile whose active policy names its own wallet reaches the merchant; the challenge then names payee,
             // amount and asset, which the owner's admission (asset, mechanism, caps, optional payee pin) must cover.
             await this.owner.assertPayerPolicy(profile, payer);
-            const observation = await this.ports.http.get({ url }), selected = merchantGenericChallenge(observation, url, this.ports.assets ?? MERCHANT_ASSET_PINS);
+            const observation = await this.ports.http.get({ url }), selected = merchantGenericChallenge(observation, url, registry, chosen);
             const { asset, ...frozen } = selected, terms = merchantPrepareTerms(payer, url, frozen, asset);
             const policy = await this.owner.admit(profile, terms), current = await merchantCurrent(this.ports.rpc, terms, undefined, maximumNativeFee);
             const createdAt = this.ports.now().toISOString();

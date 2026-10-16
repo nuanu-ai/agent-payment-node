@@ -17,7 +17,9 @@ requirement's `extra` is preserved as merchant data and never used as a signing 
 
 **Challenge.** Exactly one `accepts` row must be `scheme: "exact"` on a pinned asset, with a canonical positive amount, a
 non-zero EVM `payTo` and a positive `maxTimeoutSeconds`; otherwise prepare refuses
-(`merchant_exact_requirement_missing_or_ambiguous`). `maxTimeoutSeconds` is the merchant's payment window (standard x402
+(`merchant_exact_requirement_missing_or_ambiguous`). When the challenge offers rows for several pinned assets, `--asset <token>` chooses
+one; without it prepare refuses (`merchant_asset_choice_required`) and its message lists every offered asset. A token that
+is not pinned (`merchant_asset_not_pinned`) or not offered (`merchant_asset_not_offered`) is refused. `maxTimeoutSeconds` is the merchant's payment window (standard x402
 merchants use about 60 seconds): it runs from the challenge read APN acts on, is shown on the consent screen, and prepare
 or approval refuses (`merchant_payment_window_expired`) once it has passed since the latest read, before consent, before
 signing and before the send. Rows for other networks or assets are ignored. The URL must be a

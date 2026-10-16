@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getAddress } from "viem";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { merchantPolicyAsset, MERCHANT_CHAIN, LEGACY_MERCHANT_MECHANISM, LEGACY_MERCHANT_ASSET, LEGACY_MERCHANT_URL } from "../../src/x402-merchant/pins.js";
 import { MERCHANT_ASSET_PINS } from "../../src/x402-merchant/asset-pins.js";
@@ -95,4 +96,16 @@ test("a payment window that passes during approval refuses before any signature 
  f.http.get=async()=>{const read=windowed(f.now(),5);f.advance(6000);return read;};
  await assert.rejects(f.service.approve(o.operationId),(e:unknown)=>(e as {details?:{reason?:string}}).details?.reason==="merchant_payment_window_expired");
  assert.equal(f.signs(),0);assert.equal(f.rpc.sends,0);assert.equal((await f.service.status(o.operationId)).state,"prepared");
+});
+
+test("several pinned assets offered: --asset chooses one; without it the refusal names every offered asset",()=>{
+ const SYNTH={chain:"eip155:4326" as const,networkName:"MegaETH" as const,token:getAddress("0x5e1d5e1d5e1d5e1d5e1d5e1d5e1d5e1d5e1d5e1d"),name:"Synthetic Dollar",symbol:"SYND",decimals:6,evidence:"test"};
+ const registry=[...MERCHANT_ASSET_PINS,SYNTH],c=structuredClone(challenge) as any;c.accepts.push({...c.accepts[0],asset:SYNTH.token,amount:"2500000"});
+ const reason=(r:string)=>(e:unknown)=>(e as {code?:string;details?:{reason?:string}}).code==="APN_INVALID_INPUT"&&(e as {details?:{reason?:string}}).details?.reason===r;
+ assert.throws(()=>checkGenericMerchantChallenge(c,registry),(e:unknown)=>reason("merchant_asset_choice_required")(e)&&/USDm 0xFAfD/u.test(String((e as Error).message))&&/SYND 0x5e1d/iu.test(String((e as Error).message))&&
+  JSON.stringify((e as {details?:{offeredAssets?:unknown}}).details?.offeredAssets)===JSON.stringify([`USDm ${MERCHANT_TOKEN}`,`SYND ${SYNTH.token}`]));
+ assert.equal(checkGenericMerchantChallenge(c,registry,SYNTH.token).accepted.amount,"2500000");assert.equal(checkGenericMerchantChallenge(c,registry,MERCHANT_TOKEN).asset.symbol,"USDm");
+ // One pinned asset offered needs no choice; a choice the merchant does not offer is refused with the offer list.
+ assert.equal(checkGenericMerchantChallenge(challenge,registry).asset.symbol,"USDm");
+ assert.throws(()=>checkGenericMerchantChallenge(challenge,registry,SYNTH.token),reason("merchant_asset_not_offered"));
 });

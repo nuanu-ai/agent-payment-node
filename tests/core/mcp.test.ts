@@ -259,7 +259,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
         defaults: {},
       },
       { name: "apn_x402_permit2_status", properties: ["profile", "operation"], required: ["profile", "operation"], defaults: {} },
-      { name: "apn_x402_merchant_prepare", properties: ["profile", "url", "max_native_fee_wei", "native_fee_reserve_wei", "idempotency_key"], required: ["profile", "url", "max_native_fee_wei", "idempotency_key"], defaults: {} },
+      { name: "apn_x402_merchant_prepare", properties: ["profile", "url", "asset", "max_native_fee_wei", "native_fee_reserve_wei", "idempotency_key"], required: ["profile", "url", "max_native_fee_wei", "idempotency_key"], defaults: {} },
       { name: "apn_x402_merchant_approve", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_x402_merchant_observe", properties: ["operation", "deliver"], required: ["operation"], defaults: {} },
       { name: "apn_x402_merchant_status", properties: ["operation"], required: ["operation"], defaults: {} },

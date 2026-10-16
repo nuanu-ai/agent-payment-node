@@ -26,7 +26,9 @@ export async function executeMerchantCli(bound, options, root) {
         return successEnvelope(request, requestId, { proofClass: o.state === "retired_unsent" ? "merchant_unsent_retired" : o.state === "delivered" ? (o.schemaVersion === "apn.x402-merchant.v1" ? "external_merchant_price_delivered" : "external_merchant_delivered") : o.receipt?.status === "success" ? "canonical_finalized_erc20_payment" : "merchant_local_journal", data: publicMerchant(o), operation: null, receipt: null, nextActions: [] });
     }
     catch (error) {
-        return failureEnvelope(request.command, requestId, new ApnError(error instanceof ApnError ? error.code : "APN_INTERNAL", "Merchant transfer-proof command could not proceed.", error instanceof ApnError ? error.details : undefined));
+        // Only the asset-choice refusals keep their message: APN builds it from registry data (symbols and addresses) to list the offer.
+        const actionable = error instanceof ApnError && ["merchant_asset_choice_required", "merchant_asset_not_offered"].includes(String(error.details?.reason));
+        return failureEnvelope(request.command, requestId, new ApnError(error instanceof ApnError ? error.code : "APN_INTERNAL", actionable ? error.message : "Merchant transfer-proof command could not proceed.", error instanceof ApnError ? error.details : undefined));
     }
 }
 //# sourceMappingURL=cli.js.map
