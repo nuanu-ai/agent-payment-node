@@ -2,7 +2,7 @@ import test from "node:test";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { temporaryState } from "./helpers.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
@@ -285,10 +285,26 @@ test("V1 sealed signature before transport remains observe-only after pre-send p
  const bindings=new JupiterV1ExecutionBindingStore(f.temp.root),material=await new (await import("../../src/swap/jupiter-solana/v1-material.js")).SavedJupiterV1MaterialStore(f.temp.root).load(op.quote.quoteHash);assert.ok(material);const binding=await bindings.load(result,material);assert.ok(binding);assert.ok(await bindings.loadSignature(result,binding));assert.equal(await bindings.loadClaim(result),null);
  const secrets=f.secretReads;await f.runtime("execute",op.operationId).execute(op.operationId,new Date());assert.equal(f.sends,0);assert.equal(f.secretReads,secrets);
 });
-test("V1 observation cap persists for the same operation across status process reopen",async t=>{
+// SWAP-19: observation is bounded per invocation, never by a lifetime per-operation cap; a long-lived operation stays observable.
+test("V1 observation reads are bounded per status invocation and never exhaust across many status calls",async t=>{
  const temp=await temporaryState();t.after(temp.cleanup);let network=0;const base=new SolanaRpc("https://example.com",async()=>{network++;throw new Error("not found");});
- for(let i=0;i<64;i++)await assert.rejects(new JupiterV1BudgetedRpc(base,temp.root,"observe","f".repeat(64)).call("getSignatureStatuses",[]));
- await assert.rejects(new JupiterV1BudgetedRpc(base,temp.root,"observe","f".repeat(64)).call("getSignatureStatuses",[]),/cap was exhausted/);assert.equal(network,64);
+ for(let i=0;i<40;i++){const rpc=new JupiterV1BudgetedRpc(base,temp.root,"observe","f".repeat(64));for(let j=0;j<3;j++)await assert.rejects(rpc.call("getSignatureStatuses",[]));}
+ assert.equal(network,120);
+ const one=new JupiterV1BudgetedRpc(base,temp.root,"observe","f".repeat(64));for(let i=0;i<64;i++)await assert.rejects(one.call("getSignatureStatuses",[]));
+ await assert.rejects(one.call("getSignatureStatuses",[]),/per-invocation observation read cap/u);assert.equal(network,184);
+ const marked=new JupiterV1BudgetedRpc(base,temp.root,"execute","e".repeat(64));marked.enterObservation();
+ for(let i=0;i<64;i++)await assert.rejects(marked.call("getSignatureStatuses",[]));
+ assert.deepEqual(await readdir(join(temp.root,"jupiter-v1-runtime-budgets")).catch(()=>[]),[]);
+});
+test("V1 status stays available across 35 consecutive status calls on a marked operation",async t=>{
+ if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest("V1 status stays available across 35 consecutive status calls on a marked operation");return;}
+ assert.equal(process.stdin.isTTY,true);assert.equal(process.stderr.isTTY,true);
+ process.stdout.write("PTY_CASE_ENTERED:V1 status stays available across 35 consecutive status calls on a marked operation\n");
+ const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-many-status");f.ambiguousSend();
+ const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());assert.equal(result.state,"unknown_finality");
+ for(let i=0;i<35;i++)assert.equal((await f.runtime("observe",op.operationId,false).status(op.operationId,new Date())).state,"unknown_finality");
+ for(let i=0;i<3;i++)assert.equal((await f.runtime("execute",op.operationId).execute(op.operationId,new Date())).state,"unknown_finality");
+ f.setFinal();assert.equal((await f.runtime("observe",op.operationId,false).status(op.operationId,new Date())).state,"finalized");assert.equal(f.sends,1);
 });
 
 /** Genuine process PTY, automatically fed only for this fixture's generated TEST seed and temporary state. */

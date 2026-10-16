@@ -9,6 +9,8 @@ import { type SavedJupiterV1MaterialStore } from "./v1-material.js";
 import { type JupiterV1SimulationProof } from "./v1-proof.js";
 import type { JupiterV1ResolvedMaterial } from "./v1-material.js";
 import { type SwapUnlandedProof } from "../unlanded.js";
+/** Logical reads one status or observe-only invocation may make; a new invocation starts again from zero. */
+export declare const JUPITER_V1_OBSERVATION_READ_CAP = 64;
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export declare class JupiterV1SingleSender {
     private readonly core;
@@ -65,7 +67,11 @@ export declare class JupiterV1BudgetedRpc extends SolanaRpc {
     private readonly stageKey;
     private calls;
     private priorQuoteCalls;
+    private observing;
+    private observationCalls;
     constructor(base: SolanaRpc, root: string, stage: "quote" | "prepare" | "execute" | "observe", operationId?: string);
+    /** Observing a marked operation: reads are bounded per invocation, never by a lifetime per-operation cap (SWAP-19). */
+    enterObservation(): void;
     get hasPersistentPacer(): boolean;
     get maximumAccountsPerRead(): 16 | 8;
     bindOperation(quoteHash: string): Promise<void>;

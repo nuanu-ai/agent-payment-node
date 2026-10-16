@@ -92,11 +92,11 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
   }
   override async execute(operationId:string,now:Date){
    const expired=await releaseExpiredUnsent(operationId);if(expired!==null)return expired;
-   const operation=await required(operationId);if(operation.submissionMarker!==null)return await super.status(operationId,now);await rpc.bindOperation(operation.quote.quoteHash);
+   const operation=await required(operationId);if(operation.submissionMarker!==null){rpc.enterObservation();return await super.status(operationId,now);}await rpc.bindOperation(operation.quote.quoteHash);
    if(!native.hasForegroundGrant(operation))await this.approve(operationId,now);
    return await super.execute(operationId,clock.now());
   }
-  override async status(operationId:string,now:Date){const expired=await releaseExpiredUnsent(operationId);return expired??await super.status(operationId,now);}
+  override async status(operationId:string,now:Date){rpc.enterObservation();const expired=await releaseExpiredUnsent(operationId);return expired??await super.status(operationId,now);}
  }
  const runtime=new JupiterRuntime({chain:JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain,builder,policy:async profile=>(await activePolicy(profile))?.registry??null,clock,
  protocolRegistry:route.protocolRegistry,usage,operations,ownerAdmission:admission,foregroundApproval:{approve:async()=>{throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED","Use Jupiter's finite Native foreground approval.");}},
