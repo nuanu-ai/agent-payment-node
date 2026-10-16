@@ -96,7 +96,9 @@ export class X402PaidRequest extends X402Lifecycle {
             const current = await this.context.state.loadX402Operation(operation.profileHash, operation.operationId);
             if (current === null)
                 throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
-            return await callback(current);
+            const result = await callback(current);
+            await this.followUsage(operation.profileHash, operation.operationId);
+            return result;
         }, lockWaitMs === undefined ? {} : { waitMs: lockWaitMs });
     }
     async completeAuthorization(operation, kind) {
