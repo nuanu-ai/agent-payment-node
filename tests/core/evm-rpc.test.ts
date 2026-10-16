@@ -187,7 +187,7 @@ test("receipt codec rejects log substitution, removed logs, malformed status and
   await assert.rejects(switched.receipt(8453, HASH), { code: "APN_CHAIN_MISMATCH" });
 });
 
-for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId} on-chain evidence verifies signed fields and exact pinned token deltas; logs or receipt status alone cannot prove delivery`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId} on-chain evidence verifies the signed fields with no historical balance read`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
@@ -197,30 +197,23 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId} on-chain
   await setup.core.transfer.approve(prepared.operation_id);
   const operation = (await setup.state.findOperation(prepared.operation_id))!;
   const receipt = (await setup.rpc.evm.receipt(chainId, operation.transactionHash!))!;
-  let recipientReceived = 100000000n, transactionValue = "0x0", wrongParent = false, balanceCalls = 0;
+  let transactionValue = "0x0", balanceCalls = 0;
   const call: EvmRpcCall = async (method, params) => {
     if (method === "eth_chainId") return toHex(chainId);
-    if (method === "eth_getBlockByNumber") return { ...BLOCK, number: params[0] === "safe" ? "0x303a" : params[0], hash: params[0] === "0x303a" || params[0] === "safe" ? EVM_BLOCK_HASH : HASH, parentHash: wrongParent ? EVM_BLOCK_HASH : HASH };
+    if (method === "eth_getBlockByNumber") return { ...BLOCK, number: params[0] === "safe" ? "0x303a" : params[0], hash: params[0] === "0x303a" || params[0] === "safe" ? EVM_BLOCK_HASH : HASH, parentHash: HASH };
     if (method === "eth_getTransactionByHash") return { hash: operation.transactionHash, blockHash: EVM_BLOCK_HASH, blockNumber: "0x303a", chainId: toHex(chainId), type: "0x2", from: operation.walletAddress, to: EVM_USDC[chainId], value: transactionValue, input: operation.transactionData, nonce: "0x7", gas: toHex(BigInt(operation.economics!.gasLimitAtomic)), maxFeePerGas: toHex(BigInt(operation.economics!.maxFeePerGasAtomic)), maxPriorityFeePerGas: toHex(BigInt(operation.economics!.maxPriorityFeePerGasAtomic)), accessList: [] };
-    if (method === "eth_call") {
-      balanceCalls += 1;
-      const input = params[0] as { data: string };
-      const sender = input.data.toLowerCase().endsWith(wallet.address.slice(2).toLowerCase());
-      return toHex(sender ? params[1] === "0x3039" ? 200000000n : 100000000n : params[1] === "0x3039" ? 0n : recipientReceived, { size: 32 });
-    }
+    if (method === "eth_call") { balanceCalls += 1; return toHex(0n, { size: 32 }); }
     throw new Error(`unexpected ${method}`);
   };
   const rpc = new EvmRpc(call, "https://rpc.example");
-  assert.equal((await rpc.evidence(operation, receipt)).tokenBalanceDeltasVerified, true);
-  recipientReceived = 99000000n;
-  assert.equal((await rpc.evidence(operation, receipt)).tokenBalanceDeltasVerified, false);
+  const evidence = await rpc.evidence(operation, receipt);
+  assert.equal(evidence.transactionVerified, true); assert.equal(evidence.tokenBalanceDeltasVerified, false);
+  assert.equal(evidence.senderDeltaAtomic, undefined);
   transactionValue = "0x1";
   assert.equal((await rpc.evidence(operation, receipt)).transactionVerified, false);
-  transactionValue = "0x0"; wrongParent = true;
-  await assert.rejects(rpc.evidence(operation, receipt), { code: "APN_RPC_PROTOCOL", details: { reason: "evm_block_identity_changed" } });
-  wrongParent = false; const before = balanceCalls;
+  transactionValue = "0x0";
   assert.equal((await rpc.evidence(operation, { ...receipt, status: "reverted" })).transactionVerified, true);
-  assert.equal(balanceCalls, before);
+  assert.equal(balanceCalls, 0, "token completion needs no archive balance read at N-1 or N");
 });
 
 test("Ethereum fees are execution-only without Base oracle calls, while chain mismatch still fails closed", async () => {

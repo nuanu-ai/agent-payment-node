@@ -6,7 +6,7 @@ import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { directCustodyPayload } from "./direct-public-effect.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
-/** Permanent dispatch fence. Absence of a receipt never grants another send. */
+/** Permanent dispatch fence: these exact bytes may have been sent, so recovery observes before any re-send of them and never signs anew. */
 export class EvmDirectSubmissionJournal extends SecureStateStore {
     async exists(operation) {
         const value = await this.readJson(this.path(operation));

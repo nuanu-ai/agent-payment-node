@@ -23,7 +23,7 @@ import { temporaryState } from "./helpers.js";
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
 
-for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process observes a recovered signature without signing or dispatch`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process dispatches the recovered signature once without signing`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   setup.rpc.chainId = chainId;
@@ -36,8 +36,8 @@ for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real 
   const resumed = spawnSync(process.execPath, [worker, "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(resumed.status, 0, resumed.stderr);
   const result = JSON.parse(resumed.stdout);
-  assert.equal(result.result.state, "unknown_finality");
-  assert.equal(result.approvals, 0); assert.equal(result.submissions, 0);
+  assert.equal(result.result.state, chainId === 1 ? "submitted_pending" : "completed");
+  assert.equal(result.approvals, 0); assert.equal(result.submissions, 1);
   const replay = spawnSync(process.execPath, [worker, "observe", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
   assert.equal(replay.status, 0, replay.stderr);
   const observed = JSON.parse(replay.stdout);
@@ -91,7 +91,11 @@ for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP 
   assert.equal((approved.operation as { state: string }).state, approvalState);
   assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1); assert.equal(signingRequests, 1);
   const afterApproval = { receiptCalls, loads: setup.wrapping.loads };
-  assert.deepEqual((await invoke("apn_operation_status", { operation: operation.operation_id })).operation, approved.operation);
+  // The offline status keeps the RPC placeholder that the CLI result fills with the endpoint it was given.
+  const statusView = (await invoke("apn_operation_status", { operation: operation.operation_id })).operation as Record<string, unknown>;
+  assert.deepEqual({ ...statusView, next_actions: null }, { ...(approved.operation as Record<string, unknown>), next_actions: null });
+  assert.deepEqual((approved.operation as { next_actions: string[] }).next_actions,
+    (statusView.next_actions as string[]).map(action => action.replace("--rpc-url <https-url>", `--rpc-url ${selection.rpc_url}`)));
   assert.equal(receiptCalls, afterApproval.receiptCalls); assert.equal(setup.wrapping.loads, afterApproval.loads);
   assert.equal(signingRequests, 1); assert.equal(setup.rpc.submissions.length, 1);
   const observe = approvalState === "submitted_pending";

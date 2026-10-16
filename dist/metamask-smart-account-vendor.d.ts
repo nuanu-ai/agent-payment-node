@@ -16,8 +16,8 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     [x: `bytes18[${string}]`]: undefined;
     [x: `bytes16[${string}]`]: undefined;
     [x: `bytes10[${string}]`]: undefined;
-    [x: `bytes3[${string}]`]: undefined;
     [x: `bytes12[${string}]`]: undefined;
+    [x: `bytes3[${string}]`]: undefined;
     [x: `bytes6[${string}]`]: undefined;
     [x: `bytes11[${string}]`]: undefined;
     [x: `bytes15[${string}]`]: undefined;
@@ -116,8 +116,8 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     bytes18?: never;
     bytes16?: never;
     bytes10?: never;
-    bytes3?: never;
     bytes12?: never;
+    bytes3?: never;
     bytes6?: never;
     bytes11?: never;
     bytes15?: never;

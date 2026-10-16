@@ -8,6 +8,7 @@ import { OperationService } from "./operation-service.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
+import { TransferService } from "./transfer-service.js";
 import type { GaslessService } from "./gasless/service.js";
 import type { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
@@ -41,6 +42,7 @@ export class OperationAbandonService {
       return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
     }
     if (found.kind !== "direct_transfer") return ineligible(found.kind);
+    if (found.record.providerDirect === undefined) return await new TransferService(this.context).abandonUndispatched(operationId);
     const profileHash = found.record.profileHash;
     return await this.context.state.withLocks([
       `profile:${profileHash}`,

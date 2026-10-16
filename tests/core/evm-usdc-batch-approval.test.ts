@@ -11,11 +11,11 @@ import { EVM_USDC } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 const cases = [
-  { chainId: 8453 as const, token: EVM_USDC[8453], preparePosts: 8, approvePosts: 15 },
-  { chainId: 42161 as const, token: EVM_USDC[42161], preparePosts: 5, approvePosts: 11 },
+  { chainId: 8453 as const, token: EVM_USDC[8453], preparePosts: 8, approvePosts: 9 },
+  { chainId: 42161 as const, token: EVM_USDC[42161], preparePosts: 5, approvePosts: 6 },
 ];
 
-for (const spec of cases) for (const adverse of [false, true]) test(`canonical ${spec.chainId} USDC full HTTPS ${adverse ? "post-sign refusal" : "prepare and approve"}`, async t => {
+for (const spec of cases) for (const adverse of [false, true]) test(`canonical ${spec.chainId} USDC full HTTPS ${adverse ? "post-sign movement still dispatches once" : "prepare and approve"}`, async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   const wallet = await ensureDirectWallet(setup);
@@ -75,11 +75,10 @@ for (const spec of cases) for (const adverse of [false, true]) test(`canonical $
   assert.equal(envelopes.length, spec.preparePosts);
   assert.ok(envelopes.some(methods => methods.includes("eth_getCode") && methods.includes("eth_call")));
   if (adverse) {
-    await assert.rejects(core.transfer.approve(prepared.operation_id),
-      { code: spec.chainId === 42161 ? "APN_FEE_BUDGET_EXCEEDED" : "APN_RPC_PROTOCOL" });
-    assert.equal(signed, 1); assert.equal(sends, 0);
-    assert.equal((await setup.state.findOperation(prepared.operation_id))?.state, "signed_not_submitted");
-    assert.ok(envelopes.length - spec.preparePosts < spec.approvePosts);
+    // A head or gas change after signing cannot refuse a signature every pre-sign check admitted; nothing is re-read.
+    assert.equal((await core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
+    assert.equal(signed, 1); assert.equal(sends, 1);
+    assert.equal(envelopes.length - spec.preparePosts, spec.approvePosts);
     return;
   }
   const approved = await core.transfer.approve(prepared.operation_id) as { state: string };

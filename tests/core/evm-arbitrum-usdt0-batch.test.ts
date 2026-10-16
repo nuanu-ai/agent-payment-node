@@ -8,6 +8,7 @@ import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { requireEvmFunding } from "../../src/evm-direct.js";
 import { EvmRpc } from "../../src/evm-rpc.js";
+import { EvmDirectSubmissionJournal } from "../../src/evm-direct-submission.js";
 import { checkEvmTransferFunding } from "../../src/evm-transfer-approval.js";
 import { HttpsBaseRpc } from "../../src/rpc.js";
 import { StateStore } from "../../src/state.js";
@@ -137,15 +138,12 @@ test("Arbitrum USD₮0 approval signs once and leaves fast receipt for explicit 
   assert.equal(observed.state, "completed"); assert.equal(setup.rpc.broadcastCount, 1);
 });
 
-test("v0.5.31-compatible signed Arbitrum USD₮0 operation observes the same hash without signing or dispatch", async t => {
+test("a signed Arbitrum USD₮0 operation left undispatched is sent once, unchanged, by resume without a new signature", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   let signedRaw: `0x${string}` | undefined;
   const setup = evmCore(temporary.root, undefined, undefined, undefined, native => ({ request: async request => {
     const result = await native.request(request);
-    if (request.operation === "directTransfer.approveAndSign") {
-      signedRaw = (result as { rawTransaction: `0x${string}` }).rawTransaction;
-      setup.rpc.fees = { ...setup.rpc.fees, gasLimitAtomic: "99999" };
-    }
+    if (request.operation === "directTransfer.approveAndSign") signedRaw = (result as { rawTransaction: `0x${string}` }).rawTransaction;
     return result;
   } }));
   setup.rpc.chainId = 42161; setup.rpc.decimals = 6; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
@@ -154,9 +152,11 @@ test("v0.5.31-compatible signed Arbitrum USD₮0 operation observes the same has
   await activateDirectPolicy(temporary.root, "default", { accounts: { evm: wallet.address },
     admissions: [...evmDirectAdmissions(), directAdmission("eip155:42161", token,
       { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "1000000" })], now: setup.clock.now() });
-  const frozenFees = setup.rpc.fees;
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: selection, amount: "0.1" }) as { operation_id: string };
-  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), { code: "APN_FEE_BUDGET_EXCEEDED" });
+  // A process lost between the signed record and its dispatch fence leaves the signature undispatched.
+  const fence = t.mock.method(EvmDirectSubmissionJournal.prototype, "fence", async () => { throw new Error("simulated loss before dispatch"); });
+  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), /simulated loss before dispatch/u);
+  fence.mock.restore();
   const saved = await setup.state.findOperation(prepared.operation_id);
   assert.ok(saved); assert.ok(signedRaw);
   assert.equal(saved.schemaVersion, "apn.state.v1");
@@ -173,6 +173,7 @@ test("v0.5.31-compatible signed Arbitrum USD₮0 operation observes the same has
       posts.push(calls.map(call => call.method));
       const replies = calls.map(call => {
         if (call.method === "eth_getTransactionReceipt") return { jsonrpc: "2.0", id: call.id, result: null };
+        if (call.method === "eth_getTransactionByHash") return { jsonrpc: "2.0", id: call.id, result: { hash: keccak256(signedRaw!) } };
         if (call.method === "eth_sendRawTransaction") {
           sends++;
           assert.deepEqual(call.params, [signedRaw], "resume must send the sealed v0.5.31 raw effect unchanged");
@@ -201,10 +202,11 @@ test("v0.5.31-compatible signed Arbitrum USD₮0 operation observes the same has
     return await setup.local.request(request);
   } } });
   const resumed = await core.transfer.resume(prepared.operation_id) as { state: string };
-  assert.equal(resumed.state, "unknown_finality", "a missing receipt cannot establish paid completion or allow another send");
-  assert.equal(newSigns, 0); assert.equal(sends, 0); assert.equal(latestNonceReads, 0);
-  assert.equal(posts.length, 2, "recovery asserts the selected chain and reads the receipt");
-  assert.ok(posts.length <= 24);
+  assert.equal(resumed.state, "submitted_pending", "the sealed bytes are dispatched; the receipt is observed in a later invocation");
+  assert.equal(newSigns, 0); assert.equal(sends, 1); assert.equal(latestNonceReads, 0);
+  assert.deepEqual(posts, [["eth_sendRawTransaction"]], "nothing is re-read between the saved signature and its one send");
+  assert.equal((await core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  assert.equal(sends, 1, "a dispatched signature is observed, never re-sent while the RPC still holds it");
   const retained = await state.findOperation(prepared.operation_id);
   assert.equal(retained?.rawTransactionHash, saved.rawTransactionHash);
   assert.equal(retained?.transactionHash, saved.transactionHash);

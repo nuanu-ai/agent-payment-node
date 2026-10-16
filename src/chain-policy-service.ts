@@ -1,5 +1,5 @@
 import { canonicalJson } from "./canonical.js";
-import { assertChainFeePolicy, chainAsset, chainDecimal, chainUsage, sealChainPolicy, type ChainPolicy } from "./chain-policy.js";
+import { assertChainFeePolicy, assertChainPrincipal, chainAsset, chainDecimal, chainUsage, sealChainPolicy, type ChainPolicy } from "./chain-policy.js";
 import { ChainPolicyStore } from "./chain-policy-store.js";
 import type { ChainAccount, ChainAssetAlias, ChainProvider, DirectRailName, DirectRailPort } from "./direct-rail-ports.js";
 import { ApnError } from "./errors.js";
@@ -92,11 +92,15 @@ export class ChainPolicyService {
     if (policy === null) throw new ApnError("APN_WALLET_POLICY_REQUIRED", "This mainnet asset is denied until foreground policy admission.");
     return policy;
   }
-  /** The chain policy caps only native fees, rent and resources; the owner allowlist policy caps the amount (one counter, no double count). */
+  /** The fee, rent and resource cap; prepare and the pre-sign reservation also check the principal caps with assertPrincipal. */
   async authorize(account: ChainAccount, alias: ChainAssetAlias, maximumFee: string): Promise<ChainPolicy> {
     const policy = await this.requiredPolicy(account, alias);
     assertChainFeePolicy(policy, account, chainAsset(account.rail, alias), maximumFee);
     return policy;
+  }
+  /** The admitted per-transfer and daily principal caps, beside the allowlist caps; this operation itself is never counted twice. */
+  async assertPrincipal(policy: ChainPolicy, operationId: string, amountAtomic: string): Promise<void> {
+    assertChainPrincipal(policy, amountAtomic, await this.records.listOperations(policy.account.profileHash), this.context.clock.now(), operationId);
   }
 }
 

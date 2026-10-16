@@ -1,4 +1,6 @@
-import { sealWallet } from "../../src/state-integrity.js";
+import { sealOperation, sealWallet } from "../../src/state-integrity.js";
+import { evmDirectFingerprint } from "../../src/evm-direct.js";
+import { DirectPublicEffectJournal } from "../../src/direct-public-effect.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from "node:fs/promises";
@@ -62,17 +64,17 @@ async function setup() {
   return { ...core, root, buyer, recipient: recipient.address, path, port, save, get op() { return op; }, set op(value) { op = value; }, calls: () => calls, setZero: () => { zero = false; }, setReorg: () => { reorg = true; } };
 }
 
-test("real normal Arb native prepare captures fresh FINALIZED source and public default custody without changing Circle history", async () => {
+test("Arbitrum native prepare neither locks nor reads profile default; an unsettled Circle source keeps its account held", async () => {
   const s = await setup(); try {
-    const before = await readFile(s.path); const service = new OperationService(s.state);
-    await assert.rejects(service.assertEvmAccountAvailable(s.op.profileHash, 42161, CIRCLE_SOURCE_OWNER), { code: "APN_OPERATION_BLOCKED" });
+    const before = await readFile(s.path);
+    let entered!: () => void, release!: () => void;
+    const inside = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+    const held = s.state.withLocks([`profile:${s.state.profileHash("default")}`], async () => { entered(); await gate; }); await inside;
     const value = await s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient: s.recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: "circle-direct" });
-    assert.equal(value.ok, true, JSON.stringify(value)); const rows = await s.state.listOperations(s.op.profileHash), prepared = rows[0]!;
-    assert.ok(prepared.evm?.circleNativeAdmission); assert.equal(s.calls(), 14); assert.deepEqual(await readFile(s.path), before);
-    const proof = await recheckCircleNativeAdmission(s.state, prepared, s.port); assert.ok(proof);
-    await service.assertFinalizedCircleNativeAccountAvailable(prepared.profileHash, prepared.walletAddress, proof!, prepared);
-    assert.equal(s.calls(), 29); assert.deepEqual(await readFile(s.path), before);
-    s.setZero(); await assert.rejects(recheckCircleNativeAdmission(s.state, prepared, s.port));
+    release(); await held;
+    assert.equal(value.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(value));
+    assert.equal(s.calls(), 0, "no Circle source or default custody read"); assert.deepEqual(await readFile(s.path), before);
+    assert.equal((await s.state.listOperations(s.op.profileHash)).length, 0);
   } finally { await rm(s.root, { recursive: true, force: true }); }
 });
 
@@ -89,32 +91,15 @@ test("INCLUDED source, reorg, missing approval proof, unknown approval and other
   }
 });
 
-test("actual normal native path rechecks after TTY and refuses changed allowance or default metadata before signing", async t => {
-  const { HttpsBaseRpc } = await import("../../src/rpc.js");
-  const { EncryptedWalletStore, walletEnvelopeIdentity } = await import("../../src/encrypted-wallet-store.js");
-  for (const variant of ["allowance", "metadata"] as const) {
-    const s = await setup(); try {
-      const prepared = await s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient: s.recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: `native-${variant}` });
-      assert.equal(prepared.ok, true); const operation = (await s.state.listOperations(s.op.profileHash))[0]!;
-      const publicIdentity = walletEnvelopeIdentity(await s.state.loadEncryptedWalletEnvelope(s.buyer), s.buyer);
-      t.mock.method(HttpsBaseRpc.prototype, "coinbaseGaslessCall", s.port.coinbaseGaslessCall);
-      t.mock.method(EncryptedWalletStore.prototype, "describe", async (_profile: string, _guard?: () => void, before?: (identity: typeof publicIdentity) => Promise<void>) => {
-        await before?.(publicIdentity);
-        return { identity: publicIdentity, secret: { version: 1 as const, privateKey: `0x${"01".repeat(32)}` as `0x${string}`, directEffects: {}, x402Effects: {} } };
-      });
-      t.mock.method(s.approval, "approve", async () => {
-        if (variant === "allowance") s.setZero();
-        else {
-          const wallet = (await s.state.loadWallet(s.state.profileHash("default")))!;
-          await s.state.writeWallet(sealWallet({ ...(({ integrityHash: _, ...body }) => body)(wallet), createdAt: new Date(Date.parse(wallet.createdAt) + 1000).toISOString() }));
-        }
-      });
-      const before = await readFile(s.path), refused = await s.core.execute({ command: "transfer.approve", operationId: operation.operationId });
-      assert.equal(refused.ok, false); assert.equal(s.rpc.broadcastCount, 0); assert.deepEqual(await readFile(s.path), before);
-      assert.equal(await new (await import("../../src/direct-public-effect.js")).DirectPublicEffectJournal(s.state).hasSigned((await s.state.findOperation(operation.operationId))!), false);
-      const again = await s.core.execute({ command: "transfer.approve", operationId: operation.operationId }); assert.equal(again.ok, false);
-    } finally { t.mock.restoreAll(); await rm(s.root, { recursive: true, force: true }); }
-  }
+test("a record prepared with the retired Circle rider is refused before the owner screen or any signature", async () => {
+  const s = await setup(); try {
+    const record = await riderRecord(s, "rider-refused"), before = await readFile(s.path);
+    const refused = await s.core.execute({ command: "transfer.approve", operationId: record.operationId });
+    assert.equal(refused.error?.code, "APN_REPREPARE_REQUIRED", JSON.stringify(refused));
+    const ended = (await s.state.findOperation(record.operationId))!;
+    assert.equal(ended.state, "failed_before_effect"); assert.equal(ended.reason, "circle_native_admission_retired");
+    assert.equal(s.approval.intents.length, 0); assert.equal(s.rpc.broadcastCount, 0); assert.deepEqual(await readFile(s.path), before);
+  } finally { await rm(s.root, { recursive: true, force: true }); }
 });
 
 test("verified source exclusion refuses forged proof, foreign owner, old unknown and a second unsettled Circle", async () => {
@@ -131,18 +116,30 @@ test("verified source exclusion refuses forged proof, foreign owner, old unknown
   } finally { await rm(s.root, { recursive: true, force: true }); }
 });
 
-test("normal prepare waits for the existing Circle profile controller lock; late pending nonce change refuses", async () => {
+test("the retired rider's recheck still refuses a late pending nonce change", async () => {
   const s = await setup(); try {
-    let entered!: () => void, release!: () => void;
-    const inside = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
-    const held = s.state.withLocks([`profile:${s.op.profileHash}`], async () => { entered(); await gate; }); await inside;
-    const pending = s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient: s.recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: "active-controller" });
-    await new Promise(resolve => setTimeout(resolve, 50)); assert.equal(s.calls(), 0); release(); await held;
-    assert.equal((await pending).ok, true); const operation = (await s.state.listOperations(s.op.profileHash))[0]!;
-    s.rpc.nonceAtomic = (BigInt(operation.economics!.nonceAtomic) + 1n).toString();
-    await assert.rejects(recheckCircleNativeAdmission(s.state, operation, s.port)); assert.equal(s.rpc.broadcastCount, 0);
+    const record = await riderRecord(s, "rider-nonce");
+    assert.ok(await recheckCircleNativeAdmission(s.state, record, s.port));
+    s.rpc.nonceAtomic = (BigInt(record.economics!.nonceAtomic) + 1n).toString();
+    await assert.rejects(recheckCircleNativeAdmission(s.state, record, s.port)); assert.equal(s.rpc.broadcastCount, 0);
   } finally { await rm(s.root, { recursive: true, force: true }); }
 });
+
+/** A record as 0.5.41 wrote it: a plain Arbitrum native prepare beside a settled-source Circle operation, plus the rider. */
+async function riderRecord(s: Awaited<ReturnType<typeof setup>>, key: string): Promise<OperationRecord> {
+  await rm(s.path);
+  const value = await s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient: s.recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: key });
+  assert.equal(value.ok, true, JSON.stringify(value)); await s.save();
+  const plain = (await s.state.listOperations(s.op.profileHash))[0]!;
+  const admission = (await verifyCircleNativeAdmission(s.state, s.port, s.buyer, CIRCLE_SOURCE_OWNER, s.recipient))!;
+  const { integrityHash: _old, ...body } = plain, evm = { ...plain.evm!, circleNativeAdmission: admission.binding };
+  const record = sealOperation({ ...body, evm, fingerprint: evmDirectFingerprint({ ...body, evm }) });
+  // Written as the old version left it; the current write guard rightly refuses to rewrite a frozen fingerprint.
+  await writeFile(join(s.root, "operations", record.profileHash, `${record.operationId}.json`), canonicalJson(record), { mode: 0o600 });
+  await rm(join(s.root, "direct-public-effects", record.profileHash, `${record.operationId}.prepared.json`));
+  await new DirectPublicEffectJournal(s.state).prepare(record);
+  return record;
+}
 
 
 test("caller-visible proof mutations cannot alter the detached one-source private authority", async () => {

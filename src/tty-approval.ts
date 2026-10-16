@@ -222,6 +222,9 @@ export class TtyTransferApproval implements TransferApprovalPort {
           `Pre-submission total fee quote budget: ${intent.evm.maxFeeWei} wei`,
           "Data/operator fees may vary at inclusion; the total quote budget is NOT an onchain-enforced total fee cap.",
         ]),
+        ...(intent.evm !== undefined || intent.gasLimitAtomic === undefined || intent.maxFeePerGasAtomic === undefined ? [] : [
+          `Maximum execution fee: ${BigInt(intent.gasLimitAtomic) * BigInt(intent.maxFeePerGasAtomic)} wei (signed gas limit x max fee per gas; Base adds its L1 data fee at inclusion)`,
+        ]),
         ...(intent.providerId === undefined ? [] : [`Provider: ${intent.providerId}`]),
         ...(intent.policyIdentity === undefined ? [] : [`Policy: ${intent.policyIdentity}`]),
         ...(intent.nonceAtomic === undefined ? [] : [`Nonce: ${intent.nonceAtomic}`]),

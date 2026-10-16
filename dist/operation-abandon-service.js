@@ -5,6 +5,7 @@ import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { OperationService } from "./operation-service.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
+import { TransferService } from "./transfer-service.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
@@ -44,6 +45,8 @@ export class OperationAbandonService {
         }
         if (found.kind !== "direct_transfer")
             return ineligible(found.kind);
+        if (found.record.providerDirect === undefined)
+            return await new TransferService(this.context).abandonUndispatched(operationId);
         const profileHash = found.record.profileHash;
         return await this.context.state.withLocks([
             `profile:${profileHash}`,

@@ -26,6 +26,8 @@ import {
   type ProfilePolicySetInput,
 } from "../../src/profile-policy.js";
 import { StateStore } from "../../src/state.js";
+import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy.js";
 
 export const WALLET = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1" as Address;
 export const RECIPIENT = "0x2222222222222222222222222222222222222222" as Address;
@@ -232,12 +234,23 @@ function policyRecord(binding: ProfilePolicyBinding, input: ProfilePolicySetInpu
   });
 }
 
+/**
+ * The owner's direct-rail Base USDC cap for a local wallet, as `allowlist policy activate` leaves it. The local
+ * `pay transfer prepare` is gated like every direct transfer; the window covers both historical test clocks and now.
+ */
+export async function activateBaseUsdcDirectPolicy(root: string, account: Address = WALLET, profile = "default"): Promise<void> {
+  if ((await new AllowlistPolicyStore(root).read(profile)).entries.length > 0) return;
+  await activateDirectPolicy(root, profile, { accounts: { evm: account }, admissions: [directAdmission("eip155:8453", BASE_USDC)],
+    effectiveAt: "2026-08-01T00:00:00.000Z", expiresAt: null });
+}
+
 export async function ensureWallet(core: ApnCore): Promise<void> {
   const result = await core.execute({ command: "wallet.ensure", profile: "default" });
   if (!result.ok) throw new Error(`wallet setup failed: ${result.error?.code ?? "unknown"}`);
 }
 
 export async function prepareTransfer(core: ApnCore, key = "payment-001"): Promise<string> {
+  await activateBaseUsdcDirectPolicy(core.context.state.root);
   const result = await core.execute({
     command: "transfer.prepare",
     profile: "default",

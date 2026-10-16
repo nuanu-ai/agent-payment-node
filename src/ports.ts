@@ -26,6 +26,7 @@ export interface NativeRequest {
     | "wallet.import"
     | "directTransfer.approveAndSign"
     | "effectMaterial.get"
+    | "directTransfer.signedMaterial.get"
     | "x402Exact.approveAndAuthorize"
     | "x402Exact.authorizationMaterial.get";
   readonly payload: Readonly<Record<string, unknown>>;
