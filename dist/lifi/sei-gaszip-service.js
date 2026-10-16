@@ -5,7 +5,8 @@ import { hashObject } from "../canonical.js";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { activeAssetPolicyFromState, loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
 import { withGaszipForegroundAuthority, gaszipEffectBinding, gaszipGuardRefused } from "./gaszip-authority.js";
@@ -64,9 +65,12 @@ export class SeiFundingService {
         const own = reference === undefined || reference === null ? null : await this.ledger.load(this.identity(r), reference);
         if (own !== null && (own.policyDigest !== p.digest || own.amountAtomic !== r.amountAtomic || !["reserved", "unknown_finality"].includes(own.state)))
             seiFail("prepared_usage_binding");
-        const daily = (BigInt(u.amountAtomic) - (own === null ? 0n : BigInt(own.amountAtomic))).toString();
-        evaluateAssetPolicy(p.registry, { chain: "eip155:8453", asset: { kind: "native", identifier: null }, rail: "bridge", mechanism: SEI_FUNDING.mechanism,
+        const daily = (BigInt(u.amountAtomic) - (own === null ? 0n : BigInt(own.amountAtomic))).toString(), admission = evaluateAssetPolicy(p.registry, { chain: "eip155:8453", asset: { kind: "native", identifier: null }, rail: "bridge", mechanism: SEI_FUNDING.mechanism,
             amountAtomic: r.amountAtomic, dailyUsageAtomic: daily, asOfDate: new Date(this.now()).toISOString().slice(0, 10), asOf: new Date(this.now()).toISOString() });
+        // The admission must name this exact GasZip mechanism; the deposit pays the sender, so the sender is the recipient a pin must list.
+        if (!bridgeMechanismAdmitted(admission, SEI_FUNDING.mechanism))
+            seiFail("mechanism_not_admitted");
+        assertRecipientAdmitted({ admission, mechanism: SEI_FUNDING.mechanism, recipient: r.owner.address });
         return p;
     }
     async required(id) { const r = await this.journal.findOperation(id); if (r === null)

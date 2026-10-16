@@ -41,7 +41,7 @@ async function fixture(lane:"sei"|"mega"){
  const code=calls.find(c=>c.method==="eth_getCode"&&c.url!==base)!;calls.push({...code,params:[prepare.owner.address,"latest"]});
  const tx=calls.find(c=>c.url===base&&c.method==="eth_getTransactionByHash")!.body.result;
  const sourceHash=tx.hash as Hex;
- const sourceRaw=serializeTransaction({type:"eip1559",chainId:8453,nonce:Number(BigInt(tx.nonce)),gas:BigInt(tx.gas),maxFeePerGas:BigInt(tx.maxFeePerGas),maxPriorityFeePerGas:BigInt(tx.maxPriorityFeePerGas),to:prepare.owner.address===MEGA_FUNDING.owner?MEGA_FUNDING.target:SEI_FUNDING.target,value:BigInt(tx.value),data:tx.input,accessList:tx.accessList},{r:tx.r,s:tx.s,yParity:Number(BigInt(tx.yParity))});
+ const sourceRaw=serializeTransaction({type:"eip1559",chainId:8453,nonce:Number(BigInt(tx.nonce)),gas:BigInt(tx.gas),maxFeePerGas:BigInt(tx.maxFeePerGas),maxPriorityFeePerGas:BigInt(tx.maxPriorityFeePerGas),to:lane==="mega"?MEGA_FUNDING.target:SEI_FUNDING.target,value:BigInt(tx.value),data:tx.input,accessList:tx.accessList},{r:tx.r,s:tx.s,yParity:Number(BigInt(tx.yParity))});
  const parsed=(lane==="sei"?seiJson:megaJson)(body) as Row;
  const inspect=lane==="sei"?inspectSeiDelivery:inspectMegaDelivery;
  const delivery=()=>inspect(parsed,sourceHash,prepare.owner.address,prepare.amountAtomic,String(BigInt(tx.blockNumber))) as SeiCorrelatedDelivery;

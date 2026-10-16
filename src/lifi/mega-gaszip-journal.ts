@@ -23,7 +23,8 @@ export function validateMegaFunding(value: unknown): MegaFundingRecord {
   if(r.schemaVersion!=="apn.mega-gaszip-operation.v1" || hashObject(body)!==integrityHash) megaFail("record_integrity");
   if(r.activationDigest!==undefined)stateIdentifier(r.activationDigest,"GasZip policy activation");
   for(const s of [r.operationId,r.profileHash,r.idempotencyHash,r.requestHash,r.policyDigest,r.quoteDigest]) stateIdentifier(s,"GasZip record identity");
-  if(r.profile!==MEGA_FUNDING.profile || r.owner.address!==MEGA_FUNDING.owner || r.profileHash!==r.owner.profileHash || r.profile!==r.owner.profile || megaUint(r.amountAtomic)!==MEGA_FUNDING.maximumAmount ||
+  // The payer is the record's own owner (recorded from custody at prepare); the policy caps the amount.
+  if(r.profileHash!==r.owner.profileHash || r.profile!==r.owner.profile || megaUint(r.amountAtomic)<=0n ||
     megaUint(r.maximumFeeAtomic)<=0n || megaUint(r.minimumOutputAtomic)<=0n ||
     megaUint(r.quoteExpectedAtomic)<megaUint(r.minimumOutputAtomic) || !Number.isFinite(Date.parse(r.expiresAt)) || !Number.isSafeInteger(r.policyRevision) || r.policyRevision<1) megaFail("record_terms");
   megaHash(r.plan.blockHash); for(const x of [r.plan.nonce,r.plan.gas,r.plan.maxFee,r.plan.tip,r.plan.l1FeeUpper,r.plan.operatorFeeUpper,r.plan.feeUpper]) megaUint(x);

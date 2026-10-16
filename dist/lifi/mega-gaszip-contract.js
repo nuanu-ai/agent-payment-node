@@ -4,9 +4,7 @@ import { ApnError } from "../errors.js";
 import { hashObject } from "../canonical.js";
 /** A separate GasZip direct deposit; never grants LI.FI GasZip execution. */
 export const MEGA_FUNDING = Object.freeze({ sourceChain: 8453, destinationChain: 4326, short: 514,
-    owner: getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"), profile: "default",
     target: getAddress("0x391E7C679d29bD940d63be94AD22A25d25b5A604"), data: "0x010202",
-    maximumAmount: 10000000000000n,
     mechanism: { provider: "gaszip", reference: "v2-direct-base-mega-self-010202.1" } });
 export function megaFail(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `mega_gaszip_${reason}`, { reason: `mega_gaszip_${reason}` }); }
 export function megaObject(v) {
@@ -80,8 +78,6 @@ export function inspectMegaFundingQuote(value, now) {
 }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
 export function inspectMegaDelivery(value, sourceHash, owner, amount, sourceBlock) {
-    if (owner !== MEGA_FUNDING.owner)
-        megaFail("owner_pin");
     const v = megaObject(value);
     megaExact(v, ["deposit", "txs"]);
     const d = megaObject(v.deposit);

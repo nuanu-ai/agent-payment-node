@@ -5,9 +5,7 @@ import { hashObject } from "../canonical.js";
 
 /** A separate GasZip direct deposit; never grants LI.FI GasZip execution. */
 export const MEGA_FUNDING = Object.freeze({ sourceChain: 8453, destinationChain: 4326, short: 514,
-  owner: getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"), profile: "default",
   target: getAddress("0x391E7C679d29bD940d63be94AD22A25d25b5A604"), data: "0x010202" as Hex,
-  maximumAmount: 10_000_000_000_000n,
   mechanism: { provider: "gaszip", reference: "v2-direct-base-mega-self-010202.1" } });
 export function megaFail(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", `mega_gaszip_${reason}`, { reason: `mega_gaszip_${reason}` }); }
 export function megaObject(v: unknown): Record<string, unknown> {
@@ -55,7 +53,6 @@ export function inspectMegaFundingQuote(value: unknown, now: number): MegaFundin
 export interface MegaCorrelatedDelivery { readonly hash: Hex; readonly amount: string; readonly signer: string; readonly nonce: string; readonly providerDigest: string; readonly grossNative?: true }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
 export function inspectMegaDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): MegaCorrelatedDelivery | GaszipProviderFailure | null {
-  if(owner!==MEGA_FUNDING.owner)megaFail("owner_pin");
   const v=megaObject(value); megaExact(v,["deposit","txs"]); const d=megaObject(v.deposit);
   if(Object.hasOwn(d,"seen"))return inspectGaszipNativeDelivery(value,sourceHash,owner,amount,sourceBlock,4326,514,0n,
     {fail:megaFail,object:megaObject,uint:megaUint,quantity:megaQuantity,hash:megaHash,address:megaAddress,exact:megaExact});
