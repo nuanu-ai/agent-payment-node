@@ -32,6 +32,9 @@ export async function capturedBytecode(): Promise<ReadonlyMap<string, Hex>> {
   for (const row of (await json("wrapped-native-runtime-blockscout-20260922.json")).contracts) put(row.chainId, row.address, row.deployedBytecode);
   for (const row of (await json("wbtc-runtime-readonly-20261009.json")).rows) put(row.chainId, row.address, row.result);
   for (const row of (await json("base-native-across-observation-rpc-20261008.json")).rows) if (row.method === "eth_getCode") put(8453, row.params[0], row.result);
+  for (const [chainId, name] of [[59144, "deployment-linea-rpc-20260921.json"], [143, "deployment-monad-rpc-20260920.json"]] as const) {
+    for (const row of (await json(name)).requests) if (row.request.method === "eth_getCode") put(chainId, row.request.params[0], row.response.result);
+  }
   for (const chainId of [1, 8453, 42161]) put(chainId, MULTICALL3_ADDRESS, (await readFile(resolve("tests/core/fixtures/multicall3-runtime-code.hex"), "utf8")).trim() as Hex);
   return code;
 }
@@ -50,6 +53,8 @@ export function chainEnvironment(chains: readonly BridgeChainId[], receipt: Rece
  */
 export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<string, Hex>, receipt: ReceiptRoute, options: {
   readonly nowSeconds: bigint; readonly allowance?: bigint; readonly nonce?: bigint;
+  /** callTracer answers for `debug_traceTransaction`, by transaction hash. */
+  readonly trace?: (hash: string) => unknown;
 }) {
   const expected = new Map<string, Hex>(), key = (chainId: number, kind: string, address: string, data: string) =>
     canonicalJson([chainId, kind, address.toLowerCase(), data.toLowerCase()]);
@@ -93,6 +98,7 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
     if (method === "eth_getTransactionCount") return `0x${(options.nonce ?? 3n).toString(16)}`;
     if (method === "eth_maxPriorityFeePerGas") return "0x3b9aca00";
     if (method === "eth_estimateGas") return "0x186a0";
+    if (method === "debug_traceTransaction" && options.trace !== undefined) return options.trace(params[0]);
     return assert.fail(`unexpected read ${method}`);
   };
   const transport = { request: async (endpoint: string, verb: string, body: string | null) => {
