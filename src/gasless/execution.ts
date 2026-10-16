@@ -5,6 +5,7 @@ import type { WaitPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./guard.js";
+import { assertGaslessIntentCurrent } from "./intent-validation.js";
 import { validateGaslessMaterial } from "./material-validation.js";
 import { assertGaslessOwner } from "./owner.js";
 import type { GaslessFees } from "./model.js";
@@ -154,6 +155,7 @@ export class GaslessExecution {
   private async feeCheck(op: GaslessOperationRecord, signed: GaslessFees): Promise<void> {
     await this.steady(op, GASLESS_STEP_POSTS.feeCheck, async () => {
       assertGaslessRemaining(op, this.now());
+      assertGaslessIntentCurrent(op.intent);
       await this.policy?.assert(op, true);
       await assertGaslessOwner(this.state, op.intent);
       await this.rpc.assertSignedFees(gaslessWireFees(op.intent, signed));

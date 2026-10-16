@@ -31,6 +31,7 @@ export declare class GaslessAssetPolicy {
     reserve(op: GaslessOperationRecord): Promise<void>;
     /** A saved operation is authoritative; a crash between journal and ledger writes is repaired on the next read. */
     reconcile(op: GaslessOperationRecord): Promise<void>;
+    /** Runs on every read (reconcile): only the saved binding's own fields, which `validateGaslessIntent` also checks. */
     private assertBinding;
     private checkedReservation;
 }

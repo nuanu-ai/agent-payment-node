@@ -1,6 +1,6 @@
 import { hashObject } from "../canonical.js";
 import { validateGaslessOperation } from "./operation-validation.js";
-import { gaslessIntentAsset } from "./registry.js";
+import { gaslessAsset } from "./registry.js";
 export function gaslessNextActions(op) {
     if (op.terminal)
         return op.state === "completed" ? [] : ["apn gasless transfer prepare --help"];
@@ -28,8 +28,8 @@ export function gaslessProofClass(op) {
 export function publicGaslessOperation(op) {
     validateGaslessOperation(op);
     const i = op.intent, proof = op.settlement ?? op.observation?.settlement ?? null, a = proof?.accounting ?? null;
-    // The stored record is re-validated above; its display unit comes from the registry row it names, never a literal.
-    const asset = gaslessIntentAsset(i);
+    // The display unit comes from the registry's token row, never a literal; a later pin or paymaster change cannot hide it.
+    const asset = gaslessAsset(i.request.chainId, i.token);
     const invalidation = op.observation?.permissionInvalidation;
     const fee = a === null ? null : BigInt(a.feeAtomic), delivered = a === null ? null : BigInt(a.deliveredAtomic);
     const effects = [op.bootstrap, op.userOperation].map((e) => ({ role: e.role, phase: e.phase,

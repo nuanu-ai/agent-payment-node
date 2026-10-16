@@ -19,12 +19,12 @@ export function localGaslessMechanism(chainId) {
         reference: `${chain}:${gaslessDeployment(chainId).paymaster}` };
 }
 export const baseLocalGaslessMechanism = () => localGaslessMechanism(8453);
+/** The usage identity of a saved intent comes from its own token, never from a later registry row (rule R2). */
 const identity = (intent) => {
     const chain = gaslessPolicyChain(intent.request.chainId);
     if (chain === null)
         return refused("gasless_allowlist_unsupported_chain");
-    return { account: intent.owner.address, chain,
-        asset: { kind: "token", identifier: gaslessDeployment(intent.request.chainId).token } };
+    return { account: intent.owner.address, chain, asset: { kind: "token", identifier: intent.token } };
 };
 const at = (now) => new Date(now);
 const refused = (reason) => gaslessFailure("APN_ALLOWLIST_REFUSED", reason);
@@ -206,11 +206,11 @@ export class GaslessAssetPolicy {
                 target === "failed_confirmed_revert" || target === "finalized"
                 ? { outcomeDigest: op.integrityHash } : {}) });
     }
+    /** Runs on every read (reconcile): only the saved binding's own fields, which `validateGaslessIntent` also checks. */
     assertBinding(op) {
-        const bound = op.intent.allowlist;
-        if (bound === undefined || bound.chain !== gaslessPolicyChain(op.intent.request.chainId) ||
-            bound.token !== gaslessDeployment(op.intent.request.chainId).token ||
-            canonicalJson(bound.mechanism) !== canonicalJson(localGaslessMechanism(op.intent.request.chainId)) ||
+        const bound = op.intent.allowlist, chain = gaslessPolicyChain(op.intent.request.chainId);
+        if (bound === undefined || chain === null || bound.chain !== chain || bound.token !== op.intent.token ||
+            canonicalJson(bound.mechanism) !== canonicalJson({ provider: "local", reference: `${chain}:${op.intent.paymaster}` }) ||
             bound.reservationId !== assetUsageReservationId(identity(op.intent), op.operationId))
             corrupt();
     }

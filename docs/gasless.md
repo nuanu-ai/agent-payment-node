@@ -74,6 +74,15 @@ available. New Local transfers on Avalanche use the
 [x402 facilitator route](#local-wallet-on-avalanche-x402-facilitator) instead.
 See [Pimlico chain support](https://docs.pimlico.io/guides/supported-chains#avalanche).
 
+A saved operation is checked on every read only against its own fields and
+hashes. A later APN release that changes a protocol pin (for example after a
+Circle USDC or paymaster upgrade), an asset row or the gas-offer calibration
+therefore never stops `status`, `resume`, `abandon` or another family's
+commands. Before any new signature, disclosure or send, the operation must
+still match the current registry and offer rules; otherwise it stops with
+`gasless_protocol_upgraded` or `gasless_offer_outdated` and you prepare a new
+transfer.
+
 The default bundler is the selected chain's public Pimlico endpoint. The
 registry exposes its exact URL. The RPC must support canonical block-hash
 state reads and safe-block observation. Credentials in user-info and URL

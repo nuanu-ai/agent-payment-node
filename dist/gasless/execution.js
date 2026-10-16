@@ -2,6 +2,7 @@ import { approvalCode } from "../approval-code.js";
 import { ApnError } from "../errors.js";
 import { assertGaslessEstimate } from "./economics.js";
 import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./guard.js";
+import { assertGaslessIntentCurrent } from "./intent-validation.js";
 import { validateGaslessMaterial } from "./material-validation.js";
 import { assertGaslessOwner } from "./owner.js";
 import { GaslessObservationService } from "./observation.js";
@@ -205,6 +206,7 @@ export class GaslessExecution {
     async feeCheck(op, signed) {
         await this.steady(op, GASLESS_STEP_POSTS.feeCheck, async () => {
             assertGaslessRemaining(op, this.now());
+            assertGaslessIntentCurrent(op.intent);
             await this.policy?.assert(op, true);
             await assertGaslessOwner(this.state, op.intent);
             await this.rpc.assertSignedFees(gaslessWireFees(op.intent, signed));
