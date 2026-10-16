@@ -1,37 +1,11 @@
 # LI.FI EVM cross-chain assets
 
-## Sei native quote and calldata inspection (C2-08 Phases 1–2)
+## Sei through LI.FI
 
-`src/lifi/sei-gaszip-quote.ts` inspects one LI.FI `GET /v1/quote` response for
-0.0002 native ETH on Ethereum chain 1 to native SEI on Sei EVM chain 1329, with
-the C2-08 buyer as both owner and recipient. It binds the `gasZipBridge` tool,
-native token metadata, action and included steps, quoted output and fixed LI.FI
-fee, plus the Ethereum transaction request's sender, chain, target, value,
-calldata and transaction ID. The complete response and transaction request have
-separate digests. Revalidation reparses the response and rejects any changed
-field or an age of 60 seconds or more since the caller's trusted fetch time.
-
-Phase 2 decodes and canonically re-encodes the exact `swapAndStartBridgeTokensViaGasZip`
-(`0x606326ff`) ABI from the [Etherscan exact-match verified GasZipFacet](https://etherscan.io/address/0x65d6b9a368be49bca4964b66e54f828cab64b8f9#code),
-whose source declares version 2.0.4. It binds all BridgeData fields, exactly one
-native FeeForwarder step with the pinned fee beneficiary, and GasZipData's
-right-padded buyer receiver and destination short ID 246. The latter was also
-observed in the official read-only [GasZip `/v2/chains`](https://backend.gas.zip/v2/chains)
-response for Sei EVM chain 1329 on 2026-09-26. The Diamond target, transaction
-value, quote amount and fee must agree. A token row marked `flagged` or carrying
-a provider `deny` is refused. The 2026-09-26 public LI.FI quote currently marks
-native SEI `flagged` with Hypernative `deny`, so that response fails inspection.
-
-The LI.FI response has no provider expiry or deadline. The 60 second rule is a
-local freshness limit, **not** a provider validity guarantee. The result always
-has `signable: false`, `execution_blocked: true` and `providerExpiry: null`.
-The decoded source amount is in Ethereum wei; the quote's SEI output floor is
-provider metadata and is not enforced by this source calldata. Static ABI
-decoding does not establish the current Diamond selector-to-facet mapping, fee
-beneficiary authority, destination credit, or recovery. Sei and `gasZipBridge` remain outside the executable LI.FI
-chain, asset, tool, allowlist, signer, sender and observer paths. Source and
-destination contract proofs, observer and recovery behavior, and active owner
-policy are still required before any execution design or funding attempt.
+Sei and LI.FI's `gasZipBridge` tool stay outside the executable LI.FI chain, asset,
+tool, allowlist, signer, sender and observer paths. The offline C2-08 LI.FI Sei quote
+inspector (`src/lifi/sei-gaszip-quote.ts`) had no caller and was removed; Sei is funded
+through the GasZip direct route below.
 
 ## Finite GasZip direct funding for Sei
 
@@ -41,7 +15,7 @@ the amount the asset policy and usage ledger admit to the official GasZip V2 dir
 `0x391E7C679d29bD940d63be94AD22A25d25b5A604` with exactly `0x0100f6`.
 APN requires that target to have empty code. The calldata selects the source
 sender as recipient and GasZip short chain ID 246. No approval is involved.
-The LI.FI Sei inspection described above keeps its existing execution block.
+LI.FI does not execute this route.
 
 The active Base native bridge admission must name exactly
 `{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`.
