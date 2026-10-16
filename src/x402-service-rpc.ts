@@ -18,14 +18,6 @@ export function selectX402Rpc(rpc: RpcPort, chainId: EvmChainId = 8453): RpcPort
   return rpc.forX402Network(chainId);
 }
 
-export function boundedX402PrepareRpc(rpc: RpcPort, timeoutMs: number): Pick<RpcPort, "assertBaseChain" | "getX402PrepareEvidence"> & Partial<X402RpcPort> {
-  const bounded = (rpc as Partial<X402RpcPort>).withTotalTimeout?.(timeoutMs);
-  if (bounded === undefined || typeof (bounded as Partial<RpcPort>).getX402PrepareEvidence !== "function") {
-    throw new ApnError("APN_RPC_CONFIG", "Bounded first-exposure checks require network-aware prepare reads.");
-  }
-  return bounded as X402RpcPort & Pick<RpcPort, "getX402PrepareEvidence">;
-}
-
 export async function assertX402RpcChain(rpc: Pick<RpcPort, "assertBaseChain"> & Partial<X402RpcPort>, chainId: EvmChainId = 8453) {
   const chain = rpc.assertX402Chain === undefined && chainId === 8453 ? await rpc.assertBaseChain() :
     await rpc.assertX402Chain?.(chainId);

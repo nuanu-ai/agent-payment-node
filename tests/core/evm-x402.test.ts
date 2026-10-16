@@ -120,22 +120,36 @@ for (const bodyBase64 of [undefined, null, "", Buffer.from('{"planId":"synthetic
   });
 }
 
-for (const failure of ["overfunded", "insufficient", "domain", "chain"] as const) test(`${networkName} current ${failure} blocks first exposure without losing the signed operation`, async (context) => {
+test(`${networkName} a current chain mismatch blocks first exposure without losing the signed operation`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const fixture = networkFixture(temporary.root, chainId); await initializeNetworkFixture(fixture, chainId);
   const prepared = await fixture.core.execute(REQUEST); assert.equal(prepared.ok, true, JSON.stringify(prepared));
   const operationId = (prepared.operation as { operationId: string }).operationId;
   assert.equal((await fixture.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
-  if (failure === "overfunded") fixture.rpc.x402Evidence = { ...fixture.rpc.x402Evidence, usdcAtomic: "100000001" };
-  if (failure === "insufficient") fixture.rpc.x402Evidence = { ...fixture.rpc.x402Evidence, usdcAtomic: "0" };
-  if (failure === "domain") fixture.rpc.x402Evidence = { ...fixture.rpc.x402Evidence, domainSeparator: `0x${"f".repeat(64)}` };
-  if (failure === "chain") fixture.rpc.chainId = 8453;
+  fixture.rpc.chainId = 8453;
   const resumed = await fixture.core.execute({ command: "operation.resume", operationId });
-  const codes = { overfunded: "APN_WALLET_OVERFUNDED_FOR_UNATTENDED_X402", insufficient: "APN_INSUFFICIENT_USDC", domain: "APN_X402_UNSUPPORTED_OFFER", chain: "APN_CHAIN_MISMATCH" };
-  assert.equal(resumed.error?.code, codes[failure], JSON.stringify(resumed));
+  assert.equal(resumed.error?.code, "APN_CHAIN_MISMATCH", JSON.stringify(resumed));
   assert.equal(fixture.http.calls.length, 1);
   const stored = (await fixture.state.findX402Operation(operationId))!;
   assert.equal(stored.state, "authorized_not_sent"); assert.equal(stored.attempts.length, 0);
+});
+
+// Balance, unattended cap and token domain are admitted once at prepare, as on Base: the signature binds the frozen
+// domain, an unfunded authorization never settles and expires at validBefore, and the per-payment cap is re-read locally.
+for (const change of ["overfunded", "insufficient", "domain"] as const) test(`${networkName} a later ${change} read does not re-run prepare admission at first exposure`, async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const fixture = networkFixture(temporary.root, chainId); await initializeNetworkFixture(fixture, chainId);
+  const prepared = await fixture.core.execute(REQUEST); assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  const operationId = (prepared.operation as { operationId: string }).operationId;
+  assert.equal((await fixture.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+  const reads = fixture.rpc.x402PrepareCalls;
+  if (change === "overfunded") fixture.rpc.x402Evidence = { ...fixture.rpc.x402Evidence, usdcAtomic: "100000001" };
+  if (change === "insufficient") fixture.rpc.x402Evidence = { ...fixture.rpc.x402Evidence, usdcAtomic: "0" };
+  if (change === "domain") fixture.rpc.x402Evidence = { ...fixture.rpc.x402Evidence, domainSeparator: `0x${"f".repeat(64)}` };
+  fixture.http.outcomes.push(networkPaid((await fixture.state.findX402Operation(operationId))!));
+  const resumed = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed));
+  assert.equal(fixture.http.calls.length, 2); assert.equal(fixture.rpc.x402PrepareCalls, reads);
 });
 
 test(`${networkName} settlement never takes Base token logs as its transaction and refuses foreign evidence even with resealed hashes`, async (context) => {
@@ -216,19 +230,16 @@ test(`${networkName} expiry requires finalized selected-network absence, not a t
   assert.equal(fixture.http.calls.length, 1); assert.equal(stored.attempts.length, 0);
 });
 
-test(`${networkName} first-exposure policy reads inherit the caller's bounded deadline`, async (context) => {
+test(`${networkName} first-exposure policy re-check reads local state only, no RPC`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const fixture = networkFixture(temporary.root, chainId); await initializeNetworkFixture(fixture, chainId);
   const prepared = await fixture.core.execute(REQUEST); assert.equal(prepared.ok, true);
   const operation = (await fixture.state.findX402Operation((prepared.operation as { operationId: string }).operationId))!;
   const { assertCurrentNetworkPolicy } = await import("../../src/x402-network-policy.js");
-  const timeouts: number[] = [];
-  fixture.rpc.withTotalTimeout = (timeout) => { timeouts.push(timeout); return fixture.rpc; };
-  await assertCurrentNetworkPolicy(fixture.core.context, operation, fixture.core.context.wait.nowMs() + 1000);
-  assert.equal(timeouts.length, 1); assert.ok(timeouts[0]! > 0 && timeouts[0]! <= 1000);
-  const reads = fixture.rpc.x402PrepareCalls;
-  await assert.rejects(assertCurrentNetworkPolicy(fixture.core.context, operation, fixture.core.context.wait.nowMs() - 1), { code: "APN_STATE_BUSY" });
-  assert.equal(fixture.rpc.x402PrepareCalls, reads);
+  const reads = fixture.rpc.x402PrepareCalls, x402Calls = fixture.rpc.x402Calls.length;
+  await assertCurrentNetworkPolicy(fixture.core.context, operation);
+  assert.equal(fixture.rpc.x402PrepareCalls, reads, "no prepare-evidence re-read");
+  assert.equal(fixture.rpc.x402Calls.length, x402Calls, "no chain or head re-read");
 });
 
 }

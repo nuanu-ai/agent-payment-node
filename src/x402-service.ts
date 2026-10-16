@@ -115,7 +115,6 @@ export class X402Service extends X402PaidRequest {
       const invocationStartedAtMs = this.context.clock.now().getTime();
       const chain = await assertX402RpcChain(rpc, network.chainId);
       const evidence = await rpc.getX402PrepareEvidence(wallet);
-      await assertX402RpcChain(rpc, network.chainId);
       const invocationCompletedAtMs = this.context.clock.now().getTime();
       const selected = selectPrepareOffer(discovered, underCap, evidence, wallet, {
         rpcOriginHash: sha256(chain.rpcOrigin),

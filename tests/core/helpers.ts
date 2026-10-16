@@ -134,8 +134,6 @@ export class TestRpc implements RpcPort {
   x402Evidence: X402PrepareEvidence = {
     address: WALLET,
     usdcAtomic: "50000000",
-    tokenName: "USD Coin",
-    tokenVersion: "2",
     domainSeparator: "0x02fa7265e7c5d81118673727957699e4d68f74cd74b7db77da710fe8a2c7834f",
     rpcOriginHash: sha256("https://rpc.example"),
     observedAt: "2026-08-26T00:00:00.000Z",

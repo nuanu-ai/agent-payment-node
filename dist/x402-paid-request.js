@@ -165,7 +165,7 @@ export class X402PaidRequest extends X402Lifecycle {
         if (operation.attempts.length >= 64)
             return publicX402Operation(operation);
         if (purpose === "payment" && !operation.attempts.some((attempt) => attempt.purpose === "payment"))
-            await assertCurrentNetworkPolicy(this.context, operation, callerDeadlineMs);
+            await assertCurrentNetworkPolicy(this.context, operation);
         try {
             const requestTimeoutMs = () => {
                 const nowMs = this.context.clock.now().getTime();

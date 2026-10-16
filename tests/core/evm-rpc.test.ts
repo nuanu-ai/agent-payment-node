@@ -241,7 +241,8 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
     if (method === "eth_getLogs") return [];
     if (method === "eth_call") {
       const input = params[0] as { to: string; data: string };
-      assert.equal(input.to, x402Network(chainId).token); assert.equal(params[1], "0x3039");
+      assert.equal(input.to, x402Network(chainId).token);
+      assert.ok(params[1] === "0x3039" || JSON.stringify(params[1]) === JSON.stringify({ blockHash: EVM_BLOCK_HASH, requireCanonical: true }));
       if (input.data.startsWith("0x70a08231")) return toHex(50000000n, { size: 32 });
       if (input.data === "0x06fdde03") return encodeAbiParameters([{ type: "string" }], ["USD Coin"]);
       if (input.data === "0x54fd4d50") return encodeAbiParameters([{ type: "string" }], ["2"]);
@@ -253,6 +254,8 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
   const wire = (rpc: unknown) => {
     (rpc as { call: typeof call }).call = call;
     (rpc as { callX402Logs: (params: readonly unknown[]) => Promise<unknown> }).callX402Logs = async (params) => ({ kind: "complete", value: await call("eth_getLogs", params) });
+    (rpc as { batchCall: (batch: readonly { method: string; params: readonly unknown[] }[]) => Promise<unknown[]> }).batchCall =
+      async (batch) => await Promise.all(batch.map(({ method, params }) => call(method, params)));
   };
   wire(ethereum); wire(base);
   assert.equal((await ethereum.assertX402Chain(chainId)).chainId, chainId);
@@ -265,9 +268,12 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
   assert.equal(filter.address, x402Network(chainId).token);
   const bounded = ethereum.withTotalTimeout(20000); wire(bounded);
   assert.equal((await bounded.assertX402Chain!(chainId)).chainId, chainId);
+  assert.equal(calls.filter(({ method }) => method === "eth_chainId").length, 1, "one eth_chainId per invocation and endpoint, shared by bounded copies");
   chain = "0x2105";
-  await assert.rejects(bounded.assertX402Chain!(chainId), { code: "APN_CHAIN_MISMATCH" });
-  assert.equal((await base.assertBaseChain()).chainId, 8453);
+  const fresh = new HttpsBaseRpc("https://rpc.example").forX402Network(chainId); wire(fresh);
+  await assert.rejects(fresh.assertX402Chain(chainId), { code: "APN_CHAIN_MISMATCH" });
+  const freshBase = new HttpsBaseRpc("https://rpc.example"); wire(freshBase);
+  assert.equal((await freshBase.assertBaseChain()).chainId, 8453);
   assert.equal(calls.some(({ method }) => method.startsWith("eth_send")), false);
 });
 
