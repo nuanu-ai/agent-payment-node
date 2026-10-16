@@ -28,6 +28,7 @@ async function harness(t: import("node:test").TestContext, sendAmbiguous = false
   const state = new StateStore(tmp.root), wrapping = { async load() { return Buffer.alloc(32, 7); }, async create() { return Buffer.alloc(32, 7); } };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
   let sends = 0, approvals = 0, nonce = 7n, actualQuote: unknown, transactionHash: string | null = null, badLog = false, badMembership = false;
+  let baseFee = 1_000_000_000n, rpcPosts = 0, receiptStatus = "0x1";
   if (allowConsent) t.mock.method(TtyOneClickSourceApproval.prototype, "approve", async () => {
     approvals++; onApprove?.(); clockNow += consentAdvanceMs;
   });
@@ -43,7 +44,7 @@ async function harness(t: import("node:test").TestContext, sendAmbiguous = false
     }
     if (endpoint.startsWith("https://1click.chaindefuser.com/v0/status"))
       return { status: 200, body: JSON.stringify({ quoteResponse: actualQuote, status: "SUCCESS" }) };
-    assert.equal(verb, "POST");
+    assert.equal(verb, "POST"); rpcPosts++;
     const rpc = JSON.parse(body!), { method, params, id } = rpc;
     if (method === "eth_sendRawTransaction") {
       sends++; transactionHash = keccak256(params[0]);
@@ -55,10 +56,10 @@ async function harness(t: import("node:test").TestContext, sendAmbiguous = false
         pad(payer as `0x${string}`).toLowerCase(), pad(deposit as `0x${string}`).toLowerCase()], data: word(badLog ? 1n : 3_000_000n), transactionHash,
         blockHash };
       return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id, result: { transactionHash, to: usdc,
-        from: payer, blockNumber: "0x63", blockHash, transactionIndex: "0x0", status: "0x1", logs: [log] } }) };
+        from: payer, blockNumber: "0x63", blockHash, transactionIndex: "0x0", status: receiptStatus, logs: [log] } }) };
     }
     const result = method === "eth_chainId" ? "0x2105" :
-      method === "eth_getBlockByNumber" ? { number: "0x63", hash: blockHash, baseFeePerGas: "0x3b9aca00",
+      method === "eth_getBlockByNumber" ? { number: "0x63", hash: blockHash, baseFeePerGas: `0x${baseFee.toString(16)}`,
         transactions: transactionHash === null ? [] : [badMembership ? `0x${"f".repeat(64)}` : transactionHash] } :
       method === "eth_getBalance" ? "0xde0b6b3a7640000" :
       method === "eth_getTransactionCount" ? `0x${nonce.toString(16)}` :
@@ -70,6 +71,8 @@ async function harness(t: import("node:test").TestContext, sendAmbiguous = false
   });
   return { service: new OneClickSourceService(state, wrapping, { APN_BASE_RPC_URL: "https://base.example.org" }),
     sends: () => sends, approvals: () => approvals, changeNonce: () => { nonce = 8n; },
+    tickBaseFee: () => { baseFee += 1n; }, advance: (ms: number) => { clockNow += ms; }, rpcPosts: () => rpcPosts,
+    revert: () => { receiptStatus = "0x0"; },
     badLog: () => { badLog = true; }, badMembership: () => { badMembership = true; } };
 }
 
@@ -117,4 +120,30 @@ test("safe Base source status rejects altered Transfer amount and block membersh
   await assert.rejects(h.service.status(submitted.operationId), { code: "APN_OPERATION_BLOCKED" });
   h.badMembership();
   await assert.rejects(h.service.status(submitted.operationId), { code: "APN_OPERATION_BLOCKED" });
+});
+
+test("one ambiguous send reserves its nonce only until its deadline passes and the chain does not know its hash", async t => {
+  const h = await harness(t, true);
+  const first = await h.service.submit(request) as any; assert.equal(first.sourceState, "unknown_finality"); assert.equal(h.sends(), 1);
+  // Before the old deadline the reservation refuses before staging, consent or signing.
+  await assert.rejects(h.service.submit({ ...request, idempotencyKey: "oneclick-second-try" }), /oneclick_source_nonce_reserved/u);
+  assert.equal(h.approvals(), 1); assert.equal(h.sends(), 1);
+  // After it, the unknown old hash cannot block the wallet: at most one of the two signed transactions can use nonce 7.
+  h.advance(200_000);
+  const second = await h.service.submit({ ...request, idempotencyKey: "oneclick-third-try" }) as any;
+  assert.equal(second.submissionAttempts, 1); assert.equal(h.approvals(), 2); assert.equal(h.sends(), 2);
+});
+test("a one-wei Base fee tick after consent stays inside the signed fee cap and sends", async t => {
+  const h = await harness(t, false, true, () => h.tickBaseFee());
+  const result = await h.service.submit(request) as any;
+  assert.equal(result.sourceState, "submitted_pending"); assert.equal(h.sends(), 1);
+});
+test("status persists the safe source receipt and a reverted source then answers from the journal with no RPC", async t => {
+  const h = await harness(t);
+  const submitted = await h.service.submit(request) as any; h.revert();
+  const observed = await h.service.status(submitted.operationId) as any;
+  assert.equal(observed.sourceState, "source_observed"); assert.equal(observed.sourceReceipt.status, "reverted");
+  const posts = h.rpcPosts(), again = await h.service.status(submitted.operationId) as any;
+  assert.equal(h.rpcPosts(), posts); assert.equal(again.sourceReceipt.status, "reverted"); assert.equal(again.providerStatusProvenance, "apn_journal");
+  assert.equal(again.tronDestinationFinalized, false);
 });

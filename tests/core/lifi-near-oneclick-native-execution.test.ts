@@ -128,21 +128,27 @@ test("TRX status keeps the 1Click claim separate from the solidified TRON proof"
   assert.equal(status.sourceReceipt.safe, true); assert.equal(status.sourceReceipt.status, "success");
   assert.equal(status.destinationClaimed, false); assert.equal(status.destinationProof.status, "awaiting_provider_destination_hash");
   assert.equal(status.destinationFinalized, false);
-  h.world.providerStatus = "SUCCESS"; h.world.destinationHashes = [delivery.txID];
-  const tron = tronWorld(delivery, {}, undefined, later);
-  t.mock.method(TronRpc.prototype, "call", async (method: never, body: never) => await tron.call(method, body));
-  status = await h.service.status(submitted.operationId as string) as Record<string, any>;
-  assert.equal(status.oneClickProviderStatus, "SUCCESS"); assert.equal(status.providerStatusProvenance, "oneclick_https_untrusted");
-  assert.deepEqual(status.providerDestinationTransactions, [delivery.txID]);
-  assert.equal(status.destinationProof.status, "finalized"); assert.equal(status.destinationProof.creditedAtomic, "13300000");
-  assert.equal(status.destinationFinalized, true);
-  // A provider SUCCESS naming an under-delivering transfer stays a claim, not finality.
+  // A provider SUCCESS naming an under-delivering transfer stays a claim, not finality, and nothing is stored.
+  h.world.providerStatus = "SUCCESS";
   const short = transfer("13000000", TRON_RECIPIENT, false, later); h.world.destinationHashes = [short.txID];
   const shortWorld = tronWorld(short, {}, undefined, later);
   t.mock.method(TronRpc.prototype, "call", async (method: never, body: never) => await shortWorld.call(method, body));
   status = await h.service.status(submitted.operationId as string) as Record<string, any>;
   assert.equal(status.destinationClaimed, true); assert.equal(status.destinationFinalized, false);
   assert.equal(status.destinationProof.reason, "credited_below_minimum_output");
+  h.world.destinationHashes = [delivery.txID];
+  const tron = tronWorld(delivery, {}, undefined, later);
+  t.mock.method(TronRpc.prototype, "call", async (method: never, body: never) => await tron.call(method, body));
+  status = await h.service.status(submitted.operationId as string) as Record<string, any>;
+  assert.equal(status.oneClickProviderStatus, "SUCCESS"); assert.equal(status.providerStatusProvenance, "oneclick_https_untrusted");
+  assert.deepEqual(status.providerDestinationTransactions, [delivery.txID]);
+  assert.equal(status.destinationProof.status, "finalized"); assert.equal(status.destinationProof.creditedAtomic, "13300000");
+  assert.equal(status.destinationFinalized, true); assert.equal(status.sourceState, "source_observed");
+  // The finalized proof ends the operation: later status answers from the journal without TRON or provider reads.
+  t.mock.method(TronRpc.prototype, "call", async () => { throw new Error("a finished operation must not read TRON"); });
+  status = await h.service.status(submitted.operationId as string) as Record<string, any>;
+  assert.equal(status.providerStatusProvenance, "apn_journal"); assert.equal(status.destinationFinalized, true);
+  assert.equal(status.destinationProof.creditedAtomic, "13300000"); assert.deepEqual(status.providerDestinationTransactions, [delivery.txID]);
 });
 
 test("SOL status proves the recipient's finalized balance delta from the provider-named signature", async t => {
