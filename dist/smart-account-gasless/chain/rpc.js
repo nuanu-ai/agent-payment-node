@@ -9,6 +9,7 @@ import { saRegistry } from "../registry.js";
 import { saBinding, saBlock, saExact, saHash, saHex, saIso, validateSmartAccountGaslessIntent } from "../schema.js";
 import { saSame } from "../integrity.js";
 import { captureSmartAccountGaslessSnapshot, recheckSmartAccountPreparation } from "./snapshot.js";
+import { classifyX402LogAvailabilityMessage } from "../../rpc-envelope.js";
 import { readChildSpent } from "./allowance.js";
 import { observeSmartAccountGasless, validateSmartAccountGaslessObserveInput } from "./observation.js";
 import { SaRpcBudgetError, SaRpcRangeError, recheckBlock, rpcQuantity, rpcRecord } from "./abi.js";
@@ -18,7 +19,10 @@ const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getCod
 const MAX_RESPONSE = 4 * 1024 * 1024;
 const PASS_START_BUDGET_MS = 45_000;
 const CALL_ACTIVE_MS = 15_000;
-const REQUEST_START_INTERVAL_MS = 1_000;
+/** No second pacer: the shared gasless HTTPS transport already spaces POSTs per provider family (750 ms). */
+const REQUEST_START_INTERVAL_MS = 0;
+/** Code pins proven by a guard are reused by the next guards of the same operation inside its TTL. */
+const PROVEN_PINS_MAX_AGE_MS = 300_000;
 const defaultPacing = () => ({
     minimumIntervalMs: REQUEST_START_INTERVAL_MS,
     monotonicNow: () => performance.now(),
@@ -69,6 +73,7 @@ export class SmartAccountGaslessRpc {
     sequence = 0n;
     queue = Promise.resolve();
     lastRequestStartedAt = null;
+    provenPins = null;
     constructor(options) {
         if (options.chainId !== 8453)
             saFail("sa_gasless_rpc_binding");
@@ -87,7 +92,15 @@ export class SmartAccountGaslessRpc {
             saFail("sa_gasless_rpc_binding");
         const call = this.pass();
         await this.assertChain(call);
-        const snapshot = await captureSmartAccountGaslessSnapshot(call, this.chainId, this.endpointOrigin, this.endpointHash, this.clock, binding);
+        const now = this.clock.now().getTime(), cached = this.provenPins;
+        const proven = cached !== null && now >= cached.at && now - cached.at < PROVEN_PINS_MAX_AGE_MS ? cached.pins : undefined;
+        const snapshot = await captureSmartAccountGaslessSnapshot(call, this.chainId, this.endpointOrigin, this.endpointHash, this.clock, binding, proven);
+        if (proven === undefined) {
+            const state = snapshot.safeState;
+            this.provenPins = { at: now, pins: { protocolCodeHashes: state.protocolCodeHashes, tokenProxyCodeHash: state.tokenProxyCodeHash,
+                    tokenImplementationAddress: state.tokenImplementationAddress, tokenImplementationCodeHash: state.tokenImplementationCodeHash,
+                    tokenDomainSeparator: state.tokenDomainSeparator, tokenDecimals: 6 } };
+        }
         if (expectedPreparationBlock !== undefined) {
             await recheckSmartAccountPreparation(call, expectedPreparationBlock, snapshot.preparationBlock);
         }
@@ -109,10 +122,10 @@ export class SmartAccountGaslessRpc {
             material.rootDelegationHash !== binding.rootDelegationHash)
             saFail("sa_gasless_evidence");
         await this.assertChain(call);
+        // The guard's safe block does not reorg, so the spent read at its number needs no header recheck.
         if (await readChildSpent(call, binding.delegationManager, childHash, safeBlock) !== "0") {
             saFail("sa_gasless_evidence");
         }
-        await recheckBlock(call, safeBlock);
     }
     async observe(input) {
         this.assertInput(input);
@@ -134,9 +147,9 @@ export class SmartAccountGaslessRpc {
     }
     assertInput(input) {
         validateSmartAccountGaslessObserveInput(input);
-        // Observation reads the token at today's address; the endpoint and the aggregate registry hash are not compared.
-        const intent = validateSmartAccountGaslessIntent(input.intent), registry = saRegistry(8453);
-        if (!saSame(intent, input.intent) || intent.token !== registry.token.address)
+        // Observation proves the record against its own token and manager; today's registry and endpoint are not compared.
+        const intent = validateSmartAccountGaslessIntent(input.intent);
+        if (!saSame(intent, input.intent))
             saFail("sa_gasless_rpc_binding");
     }
     async assertChain(call) {
@@ -180,8 +193,9 @@ export class SmartAccountGaslessRpc {
             clearTimeout(timer);
         }
         if (response.status !== 200 || Buffer.byteLength(response.body, "utf8") > MAX_RESPONSE) {
-            if (method === "eth_getLogs")
-                throw new SaRpcRangeError();
+            // A rate limit ends this pass with its progress kept; it is never a reason to narrow the window and re-ask.
+            if (method === "eth_getLogs" && response.status === 429)
+                throw new SaRpcBudgetError();
             saFail("sa_gasless_rpc_unavailable");
         }
         let parsed;
@@ -197,8 +211,14 @@ export class SmartAccountGaslessRpc {
             saFail("sa_gasless_evidence");
         }
         if (hasError) {
-            if (method === "eth_getLogs")
-                throw new SaRpcRangeError();
+            if (method === "eth_getLogs") {
+                const message = typeof record.error?.message === "string"
+                    ? String(record.error.message).slice(0, 512) : "";
+                if (/\b(?:rate[ -]limit(?:ed|ing)?|request limit|too many requests)\b/iu.test(message))
+                    throw new SaRpcBudgetError();
+                if (classifyX402LogAvailabilityMessage(message) === "range_unavailable")
+                    throw new SaRpcRangeError();
+            }
             saFail("sa_gasless_rpc_unavailable");
         }
         return record.result;

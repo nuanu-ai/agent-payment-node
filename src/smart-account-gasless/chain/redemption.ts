@@ -5,7 +5,6 @@ import type { SmartAccountGaslessIntent, SmartAccountGaslessMaterialDescriptor,
   SmartAccountGaslessPayload } from "../model.js";
 import { saFail } from "../reasons.js";
 import { saHash, saHex } from "../schema.js";
-import { saRegistry } from "../registry.js";
 import { SA_DELEGATION_ARRAY_PARAMETER, SA_REDEEM_SELECTOR, SA_SINGLE_DEFAULT, SA_TRANSFER_SELECTOR,
   rpcAddress, rpcHex } from "./abi.js";
 
@@ -98,8 +97,8 @@ function validateExecution(value: Hex, intent: SmartAccountGaslessIntent): void 
   // SingleDefault execution calldata is abi.encodePacked(address,uint256,bytes).
   if (value.length !== 2 + (20 + 32 + 68) * 2) saFail("sa_gasless_evidence");
   const target = rpcAddress(`0x${value.slice(2, 42)}`), callValue = BigInt(`0x${value.slice(42, 106)}`);
-  const callData = `0x${value.slice(106)}` as Hex, registry = saRegistry(8453);
-  if (target !== registry.token.address || callValue !== 0n || !callData.startsWith(SA_TRANSFER_SELECTOR) ||
+  const callData = `0x${value.slice(106)}` as Hex;
+  if (target !== intent.token || callValue !== 0n || !callData.startsWith(SA_TRANSFER_SELECTOR) ||
     callData.length !== 2 + 68 * 2 || rpcAddress(`0x${callData.slice(34, 74)}`) !== intent.request.recipient ||
     BigInt(`0x${callData.slice(74, 138)}`) !== BigInt(intent.request.grossAtomic)) saFail("sa_gasless_evidence");
   if (callData.slice(10, 34) !== "0".repeat(24)) saFail("sa_gasless_evidence");
