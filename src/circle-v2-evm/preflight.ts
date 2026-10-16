@@ -11,7 +11,8 @@ export interface CircleContractSnapshot { readonly address: string; readonly pro
 export interface CircleDeploymentSnapshot {
   readonly chainId: 42161 | CircleDestinationChain; readonly domain: number;
   readonly blockHash: Hex; readonly blockNumberAtomic: string;
-  readonly contracts: Readonly<Record<"messenger" | "transmitter" | "minter" | "token", CircleContractSnapshot>>;
+  /** Present only in anchored (frozen recovery) snapshots; live snapshots carry functional configuration only. */
+  readonly contracts?: Readonly<Record<"messenger" | "transmitter" | "minter" | "token", CircleContractSnapshot>>;
   readonly remoteDomain: number; readonly remoteMessenger: Hex; readonly pairedToken: Address;
   readonly localMinter: Address; readonly localMessageTransmitter: Address; readonly localTokenMessenger: Address;
   readonly messageVersion: number; readonly messageBodyVersion: number; readonly tokenDecimals: number;
@@ -32,6 +33,10 @@ export function verifyCircleDeployments(source: CircleDeploymentSnapshot, destin
       snapshot.localMessageTransmitter !== CIRCLE_TRANSMITTER || snapshot.localTokenMessenger !== CIRCLE_MESSENGER ||
       snapshot.messageVersion !== 1 || snapshot.messageBodyVersion !== 1 || snapshot.tokenDecimals !== 6 ||
       snapshot.transmitterPaused || snapshot.minterPaused || snapshot.tokenPaused) circleFail("deployment_configuration");
+    // P5: live snapshots carry no implementation or code hashes, which Circle upgrades legitimately; the pinned proxy
+    // addresses, this functional configuration, attester-set signature recovery and the exact simulation stay. Only an
+    // anchored snapshot of a frozen recovery path (phase 4) still carries and compares them.
+    if (snapshot.contracts === undefined) continue;
     const expected = CIRCLE_DEPLOYMENT_PINS[snapshot.chainId];
     for (const key of ["messenger", "transmitter", "minter", "token"] as const) {
       const actual = snapshot.contracts[key], pin = expected[key];

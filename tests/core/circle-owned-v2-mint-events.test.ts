@@ -38,8 +38,11 @@ for(const variant of ["recipient","token","fee","net","issuer","extra","duplicat
  if(variant==="finality")f.observation={...f.observation,finalityTag:"included"};
  assert.throws(()=>decodeCircleDestination(f.source,f.attestation,f.observation,"1",undefined,f.feeRecipient));
 });
-test("nonzero V2 fee requires authenticated issuer; foreign getter/code/reanchor fail closed",async()=>{
- const f=await load();assert.throws(()=>decodeCircleDestination(f.source,f.attestation,f.observation,"1"),/fee_recipient_required/);
+test("nonzero V2 fee binds the exact net principal without a historical getter; a supplied foreign issuer and foreign getter/code/reanchor fail closed",async()=>{
+ const f=await load();assert.equal(decodeCircleDestination(f.source,f.attestation,f.observation,"1").amountAtomic,f.attestation.receivedAtomic);
+ assert.throws(()=>decodeCircleDestination(f.source,f.attestation,f.observation,"1",undefined,getAddress(`0x${"66".repeat(20)}`)),/issuer_fee_binding/);
+ const zeroIssuer=structuredClone(f.observation);const issuerTransfer=(zeroIssuer.receipt as {logs:{topics:Hex[]}[]}).logs.filter(l=>l.topics[0]===toEventSelector("Transfer(address,address,uint256)"))[1]!;issuerTransfer.topics[2]=`0x${"00".repeat(32)}` as Hex;
+ assert.throws(()=>decodeCircleDestination(f.source,f.attestation,zeroIssuer,"1"),/issuer_fee_binding|noncanonical/);
  for(const variant of ["getter","configuration","code","reanchor"]){const r=rpc(f,(method,result,params)=>method==="eth_call"&&(variant==="configuration"||variant==="getter"&&(params[0] as {data:string}).data===toFunctionSelector("feeRecipient()"))?`0x${"00".repeat(32)}`:method==="eth_getCode"&&variant==="code"?"0x00":method==="eth_getBlockByNumber"&&variant==="reanchor"?{...result,hash:`0x${"11".repeat(32)}`}:result);await assert.rejects(readCircleMintFeeRecipient(r.rpc,f.observation));}
 });
 test("pinned V2 zero fee requires four-argument aggregate and exactly one principal mint",async()=>{

@@ -148,22 +148,54 @@ export declare const CIRCLE_RPC_ABI: readonly [{
         readonly type: "address";
     }];
 }];
+/** Read plans of the live rails in calls per client (P4): chain identity; functional configuration with its head;
+ * the attester set (head, threshold, count, at most 20 attesters); one account; one envelope (head, tip, estimate);
+ * one effect preflight (two nonces, balance, allowance, estimate, simulation, mint head and used nonce); one
+ * observation (transaction, receipt, finality head, canonical block). */
+export declare const CIRCLE_READ_PLAN: {
+    readonly identity: 1;
+    readonly configuration: 13;
+    readonly attesters: 23;
+    readonly account: 5;
+    readonly envelope: 3;
+    readonly preflight: 8;
+    readonly observation: 4;
+    readonly single: 1;
+};
+/** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
+ * eight observations and four single reads (allowance, used nonce, cleanup nonce, mint head), each retried once. */
+export declare const CIRCLE_COMMAND_REQUEST_BUDGET: number;
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
- * retry once; anchored observations restart wholly. Financial RPC is never retried. */
+ * retry once; anchored observations restart wholly. Financial RPC is never retried.
+ * `lean` (the live Circle rails) checks the chain id once per client, sends reads issued together as one JSON-RPC
+ * batch POST (every default Circle endpoint accepts batches) and observes without a header sandwich. `anchored`
+ * keeps the historical one-call-per-POST sequence for the frozen recovery paths. */
 export declare class CircleRpc {
     readonly chainId: number;
     private readonly https;
     private readonly maxRequests;
     private readonly archivePacer;
+    readonly mode: "lean" | "anchored";
     private sequence;
     private requests;
+    private posts;
     private readonly endpoint;
     private readonly archiveInterval;
+    private chainVerified;
+    private queued;
     private readonly scopes;
-    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number, archiveMinimumIntervalMs?: string | undefined, archivePacer?: CircleArchiveReadPacer);
+    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number, archiveMinimumIntervalMs?: string | undefined, archivePacer?: CircleArchiveReadPacer, mode?: "lean" | "anchored");
+    /** Read calls counted against the budget, and physical POSTs sent (a batch is one POST). */
+    get requestCount(): number;
+    get postCount(): number;
     guarded<T>(guard: () => void, action: () => Promise<T>): Promise<T>;
     call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
     private physicalCall;
+    /** Reads queued in the same tick leave as one POST; a lone read keeps the plain single-call wire shape. */
+    private flush;
+    private post;
+    private envelopeRecord;
+    private result;
     identity(): Promise<void>;
     read(to: Address, name: string, args?: readonly unknown[], tag?: string | {
         readonly blockHash: Hex;
@@ -171,16 +203,25 @@ export declare class CircleRpc {
     }): Promise<unknown>;
     block(tag: string): Promise<Record<string, unknown>>;
     observation(transactionHash: Hex, finalityTag: "included" | "safe" | "finalized"): Promise<CircleObservation | null>;
+    /** Two POSTs: transaction and receipt, then the finality head with the canonical block at the receipt height. A head
+     * at or above that height read with the canonical block makes a separate header recheck redundant (P2). */
+    private leanObservation;
     private anchoredObservation;
     account(address: Address, token: Address, spender: Address): Promise<CircleAccountPreflight>;
     envelope(from: Address, to: Address, data: Hex, nonceAtomic: string, gasLimit?: string): Promise<CircleEnvelope>;
 }
+/** The live rails read functional configuration only, at the latest head, as one batch: domains, remote messenger,
+ * local minter/transmitter, token pair, versions, decimals and paused flags (P1/P5). Implementation addresses and
+ * code hashes change on legitimate Circle upgrades and are not read. Frozen recovery paths pass `historicalBlock`
+ * and keep their anchored implementation snapshot. */
 export declare function readCircleDeployment(rpc: CircleRpc, destinationChain: CircleDestinationChain, historicalBlock?: Record<string, unknown>): Promise<CircleDeploymentSnapshot>;
 export declare function currentCircleDeployments(source: CircleRpc, destination: CircleRpc, chain: CircleDestinationChain): Promise<{
     source: CircleDeploymentSnapshot;
     destination: CircleDeploymentSnapshot;
     digest: string;
 }>;
+/** The live rails read the attester set at the latest head: threshold and count in one batch, then every enabled
+ * attester in a second. Signatures are recovered against this set; no block sandwich is needed for a current read. */
 export declare function readCircleAttesters(rpc: CircleRpc, deploymentDigest: string, historicalBlock?: Record<string, unknown>): Promise<CircleAttesterSnapshot>;
 export declare const circleRpcTransaction: (e: CircleEnvelope) => {
     from: `0x${string}`;

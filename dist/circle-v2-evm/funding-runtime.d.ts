@@ -68,7 +68,6 @@ export declare class CircleFundingEvmService {
     cleanup(id: string): Promise<CircleFundingOperationV2>;
     private required;
     private run;
-    private assertPriorSourcesCanonical;
     private preflightDeployments;
     private preflightAttesters;
     private remotes;
