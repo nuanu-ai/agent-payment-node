@@ -385,7 +385,7 @@ export class LocalWalletNative implements NativePort {
       if (intent.evm !== undefined && (rawTransaction.length - 2) / 2 > MAX_DIRECT_TRANSACTION_BYTES) throw protocol("Signed transaction exceeds its data-fee quote size bound.");
       const transactionHash = keccak256(rawTransaction);
       const effect: DirectEffectMaterial = {
-        payloadHash,
+        payloadHash, operationId: intent.operationId,
         transactionHash,
         rawTransaction,
         rawTransactionHash: transactionHash,
@@ -417,13 +417,11 @@ export class LocalWalletNative implements NativePort {
       const createPayloadHash = hashObject(payload);
       const recoveryBindingHash = hashObject(x402RecoveryBinding(intent));
       const existing = secret.x402Effects[slot];
-      if (existing !== undefined) {
-        if (existing.createPayloadHash !== createPayloadHash || existing.recoveryBindingHash !== recoveryBindingHash) {
-          throw rejected("APN_X402_AUTHORIZATION_MISMATCH", "Stored x402 authorization differs from the frozen request.");
-        }
-        ensureX402Live(intent.authorization.validBefore);
-        return publicX402Effect(existing);
+      if (existing !== undefined && (existing.createPayloadHash !== createPayloadHash || existing.recoveryBindingHash !== recoveryBindingHash)) {
+        throw rejected("APN_X402_AUTHORIZATION_MISMATCH", "Stored x402 authorization differs from the frozen request.");
       }
+      ensureX402Live(intent.authorization.validBefore); // never sign, or return, an authorization no chain can settle
+      if (existing !== undefined) return publicX402Effect(existing);
       const account = privateKeyToAccount(secret.privateKey);
       const signature = await account.signTypedData({
         domain: {
