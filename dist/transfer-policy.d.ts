@@ -14,6 +14,8 @@ export declare function requireFunding(snapshot: BalanceSnapshot, amountAtomic: 
 export declare function parseEffect(value: unknown): NativeEffect;
 export declare function verifyEffect(effect: NativeEffect, operation: OperationRecord): Promise<void>;
 export declare function hasExactTransfer(receipt: RpcReceipt, operation: OperationRecord): boolean;
+/** The token's only Transfer out of the sender in this receipt is the exact one, so no fee or extra debit hides beside it. */
+export declare function hasSoleExactTransfer(receipt: RpcReceipt, operation: OperationRecord): boolean;
 export declare function publicOperation(operation: OperationRecord): unknown;
 export declare function publicReceipt(receipt: ReceiptRecord): unknown;
 export { canonicalAddress, validateBalance };

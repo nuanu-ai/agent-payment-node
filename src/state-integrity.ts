@@ -161,8 +161,12 @@ function validateTransitions(values: readonly Transition[]): void {
 }
 
 function validateLocalDirect(operation: OperationRecord): void {
-  if (operation.state === "abandoned_unknown" || operation.transitions.some((transition) => transition.state === "abandoned_unknown")) {
-    stateCorrupt("Local direct operation cannot use provider owner abandonment.");
+  // The owner may abandon only a signature APN never dispatched; it is then the final transition.
+  const abandoned = operation.transitions.findIndex((transition) => transition.state === "abandoned_unknown");
+  if (abandoned !== -1 && (abandoned !== operation.transitions.length - 1 || operation.transitions[abandoned - 1]?.state !== "signed_not_submitted" ||
+      operation.reason !== "owner_abandoned_undispatched_signature" || operation.proofClass !== "owner_acknowledgement_only" ||
+      !operation.terminal || operation.transactionHash === undefined)) {
+    stateCorrupt("Local direct abandonment is valid only as the final transition of an undispatched signature.");
   }
   if (
     operation.transactionData === undefined || operation.economics === undefined ||

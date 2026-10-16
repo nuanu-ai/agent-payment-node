@@ -17,6 +17,7 @@ export declare class TransferService {
     resume(operationId: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
     recoverProviderRequest(operationId: string, providerRequestId: string): Promise<unknown>;
     status(operationId: string): Promise<unknown>;
+    abandonUndispatched(operationId: string): Promise<unknown>;
     receipt(operationId: string): Promise<unknown>;
     private inspectReceipt;
     private requiredOperation;

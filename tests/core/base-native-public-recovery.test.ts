@@ -19,14 +19,16 @@ expect {
   return spawnSync("/usr/bin/expect", ["-c", script], { encoding: "utf8", timeout: 40000,
     env: { PATH: "/usr/bin:/bin", LANG: "C", TERM: "xterm-256color", APN_NODE_EXEC: process.execPath, APN_WORKER: worker, APN_MODE: mode, APN_TEST_ROOT: root } });
 }
-for (const mode of ["fresh", "old-attempt-signed", "old-intent-mutation", "signed", "unknown", "lost-response", "generic-started", "receipt-mismatch", "missing-old", "tamper", "custody-change", "before-public", "dispatch-custody-change", "forged-attestation", "clone-wrong-op", "clone-wrong-wallet", "verification-race", "old-awaiting", "old-awaiting-generic", "dispatch-verification-race", "attempt-awaiting-generic"]) test(`genuine TTY ${mode}: recovery cannot decrypt, sign or send and retains nonce`, async t => {
+for (const mode of ["fresh", "old-attempt-signed", "old-intent-mutation", "signed", "unknown", "lost-response", "generic-started", "receipt-mismatch", "missing-old", "tamper", "custody-change", "before-public", "dispatch-custody-change", "forged-attestation", "clone-wrong-op", "clone-wrong-wallet", "verification-race", "old-awaiting", "old-awaiting-generic", "dispatch-verification-race", "attempt-awaiting-generic"]) test(`genuine TTY ${mode}: recovery never signs anew, sends at most the sealed bytes once, and retains nonce`, async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); const result = run(mode, temp.root);
   assert.equal(result.status, 0, result.stdout+result.stderr); assert.match(result.stdout, /RESULT:/);
 });
-for (const [mode, exit] of [["crash-marked", 77], ["crash-signed", 78], ["crash-approval-started", 79]] as const) test(`${mode}: actual process loss retains effect or marker and restart observes only`, async t => {
+for (const [mode, exit] of [["crash-marked", 77], ["crash-signed", 78], ["crash-approval-started", 79]] as const) test(`${mode}: actual process loss retains effect or marker; restart sends an undispatched seal once, else observes only`, async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); const crashed = run(mode, temp.root);
   assert.equal(crashed.status, exit, crashed.stdout+crashed.stderr);
-  const resumed = run(`restart-${mode}`, temp.root); assert.equal(resumed.status, 0, resumed.stdout+resumed.stderr); assert.match(resumed.stdout, /"recoveryKeyLoads":0/);
+  const resumed = run(`restart-${mode}`, temp.root); assert.equal(resumed.status, 0, resumed.stdout+resumed.stderr);
+  const sealed = mode === "crash-signed" ? 1 : 0;
+  assert.match(resumed.stdout, new RegExp(`"recoveryKeyLoads":${sealed},"recoverySends":${sealed},"recoverySigns":0`, "u"));
 });
 
 test("genuine TTY decline persists Native no-private-entry outcome and reopens as one safe terminal recovery", async t => {

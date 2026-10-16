@@ -2,7 +2,7 @@ import { type EvmAssetSelection } from "./evm-asset.js";
 import { type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
-import type { EvmBalanceSnapshot, EvmFeeQuote, EvmNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
+import type { EvmBalanceSnapshot, EvmFeeQuote, EvmNativePrepareReads, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence, EvmUnlandedEvidence } from "./evm-ports.js";
 export declare class EvmRpc implements EvmRpcPort {
     private readonly call;
     private readonly rpcOrigin;
@@ -43,5 +43,7 @@ export declare class EvmRpc implements EvmRpcPort {
     /** Bounded read-only transport for the native fee observer. */
     nativeFeeRead(method: "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getBlockByNumber" | "eth_call", params: readonly unknown[]): Promise<unknown>;
     evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
+    /** A finalized nonce past the frozen one, with no receipt for this hash from the same node, proves another transaction took it. */
+    unlandedEvidence(chainId: DirectEvmChainId, address: Address, transactionHash: Hex): Promise<EvmUnlandedEvidence>;
     confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
 }

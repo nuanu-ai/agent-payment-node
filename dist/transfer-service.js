@@ -213,6 +213,7 @@ export class TransferService {
         return await this.observation.recoverProviderRequest(operationId, providerRequestId);
     }
     async status(operationId) { return await this.observation.status(operationId); }
+    async abandonUndispatched(operationId) { return await this.observation.abandonUndispatched(operationId); }
     async receipt(operationId) { return await this.observation.receipt(operationId); }
     async inspectReceipt(operation, rpc) {
         return await this.observation.inspectReceipt(operation, rpc);

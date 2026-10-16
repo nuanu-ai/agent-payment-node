@@ -64,6 +64,8 @@ export function evmUsageTarget(state) {
         // A confirmed revert, or a different transaction proven final at the nonce, leaves the principal unspent.
         case "failed_confirmed_revert":
         case "failed_proven_superseded": return "failed_confirmed_revert";
+        // Local EVM abandonment exists only for a signature APN never dispatched, so the principal never left the account.
+        case "abandoned_unknown": return "failed_before_effect";
         default: return corrupt();
     }
 }
