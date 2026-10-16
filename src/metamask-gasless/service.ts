@@ -84,7 +84,9 @@ export class MetaMaskGaslessService {
   }
   private project(step: MetaMaskGaslessStep) {
     const result = publicMetaMaskGaslessOperation(step.operation);
-    return step.warning === undefined ? result : { ...result, transient_warning: step.warning };
+    const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
+      reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
+    return step.warning === undefined ? result : { ...result, transient_warning: step.warning, ...unsaved };
   }
   private dependencies(): MetaMaskGaslessDependencies {
     if (this.context.metaMaskGasless === undefined) mmFail("mm_gasless_capability_unavailable");

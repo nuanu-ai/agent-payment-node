@@ -2,8 +2,9 @@ import { canonicalJson, hashObject } from "../../canonical.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessMutable } from "../model.js";
 import { MM_ZERO_HASH } from "../model.js";
 import { mmImmutable, mmMutable, MM_DISPATCH_RESERVE_BYTES, MM_DISPATCH_RESERVE_TRANSITIONS, MM_FILE_LIMIT,
-  MM_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_TERMINAL,
-  type MetaMaskGaslessOperationIdentity, type MetaMaskGaslessOperationRecord } from "../operation-model.js";
+  MM_HISTORY_LIMIT, MM_NONTERMINAL_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_TERMINAL,
+  MM_TERMINAL_HISTORY_LIMIT, type MetaMaskGaslessOperationIdentity,
+  type MetaMaskGaslessOperationRecord } from "../operation-model.js";
 import { mmFail } from "../reasons.js";
 import { mmExact, mmHash, mmIso, mmSame } from "../validation.js";
 import { validateMetaMaskGaslessContinuity, validateMetaMaskGaslessOperation } from "./validation.js";
@@ -46,7 +47,9 @@ export function advanceMetaMaskGaslessOperation(operation: MetaMaskGaslessOperat
   const nextMutable = { ...mmMutable(current), ...patch } as MetaMaskGaslessMutable;
   if (mmSame(mmMutable(current), nextMutable)) return current;
   if (current.terminal) corrupt();
-  if (current.transitions.length >= MM_HISTORY_LIMIT) capacity();
+  // The last slot is reserved: only the single terminal transition may take it, so the limit never blocks closure.
+  const terminal = MM_TERMINAL.includes(nextMutable.state);
+  if (current.transitions.length >= (terminal ? MM_TERMINAL_HISTORY_LIMIT : MM_NONTERMINAL_HISTORY_LIMIT)) capacity();
   const entry = { ...nextMutable, at, previousHash: current.transitions.at(-1)!.transitionHash };
   const { integrityHash: _old, ...body } = current;
   const next = seal({ ...body, ...nextMutable, updatedAt: at, terminal: MM_TERMINAL.includes(nextMutable.state),
@@ -75,10 +78,44 @@ export function assertMetaMaskGaslessDispatchCapacity(operation: MetaMaskGasless
     Buffer.byteLength(canonicalJson(current), "utf8") + 1 + MM_DISPATCH_RESERVE_BYTES > MM_FILE_LIMIT) capacity();
 }
 
-/** Conservative pre-read gate; the exact resulting transition is still checked before persistence. */
-export function assertMetaMaskGaslessObservationCapacity(operation: MetaMaskGaslessOperationRecord): void {
+/** A dispatched, unresolved operation is the only kind an observation may read for. */
+export function assertMetaMaskGaslessObservable(operation: MetaMaskGaslessOperationRecord): void {
   const current = validateMetaMaskGaslessOperation(operation);
   if (current.submissionAttempts !== 1 || current.dispatchStartedAt === null || current.terminal) corrupt();
-  if (current.transitions.length >= MM_HISTORY_LIMIT ||
-    Buffer.byteLength(canonicalJson(current), "utf8") + 1 + MM_DISPATCH_RESERVE_BYTES > MM_FILE_LIMIT) capacity();
+}
+
+/**
+ * Whether a nonterminal observation can still be saved. It never gates a read or a terminal transition: once only
+ * the reserved slot is left, observation keeps running, a proved completion still takes that slot and the owner can
+ * still abandon. The byte reserve keeps the terminal transition inside the file limit.
+ */
+export function metaMaskGaslessObservationRoom(operation: MetaMaskGaslessOperationRecord): boolean {
+  const current = validateMetaMaskGaslessOperation(operation);
+  return current.transitions.length < MM_NONTERMINAL_HISTORY_LIMIT &&
+    Buffer.byteLength(canonicalJson(current), "utf8") + 1 + MM_DISPATCH_RESERVE_BYTES <= MM_FILE_LIMIT;
+}
+
+export function assertMetaMaskGaslessObservationCapacity(operation: MetaMaskGaslessOperationRecord): void {
+  assertMetaMaskGaslessObservable(operation);
+  if (!metaMaskGaslessObservationRoom(operation)) capacity();
+}
+
+/**
+ * A re-observation that differs only in when it was taken is not a new transition: the read times and, outside a
+ * proof phase, the evidence digest of the same unchanged result. State, reason, cursor, candidate, provider status
+ * and observation source all stay material, so every real change is still journaled.
+ */
+export function metaMaskGaslessObservationUnchanged(operation: MetaMaskGaslessOperationRecord,
+  patch: Partial<MetaMaskGaslessMutable>): boolean {
+  if (Object.keys(patch).some(key => !PATCH_KEYS.includes(key as typeof PATCH_KEYS[number]))) corrupt();
+  const current = mmMutable(operation);
+  return mmSame(timeless(current), timeless({ ...current, ...patch } as MetaMaskGaslessMutable));
+}
+
+function timeless(value: MetaMaskGaslessMutable): MetaMaskGaslessMutable {
+  const provider = value.providerObservation, observation = value.observation;
+  return { ...value,
+    providerObservation: provider === null ? null : { ...provider, observedAt: "" },
+    observation: observation === null ? null : { ...observation, observedAt: "",
+      ...(["success", "reverted"].includes(observation.phase) ? {} : { evidenceHash: null }) } };
 }

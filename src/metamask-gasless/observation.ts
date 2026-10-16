@@ -2,9 +2,11 @@ import type { StateStore } from "../state.js";
 import type { MetaMaskGaslessClock } from "./clock.js";
 import { mmDispatchIntent } from "./dispatch.js";
 import { mmPrivateHash } from "./identity.js";
-import { assertMetaMaskGaslessObservationCapacity } from "./journal/transitions.js";
-import type { MetaMaskGaslessMutable, MetaMaskGaslessProviderObservation, MetaMaskGaslessRpcObservation } from "./model.js";
-import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
+import { assertMetaMaskGaslessObservable, metaMaskGaslessObservationRoom,
+  metaMaskGaslessObservationUnchanged } from "./journal/transitions.js";
+import type { MetaMaskGaslessCursor, MetaMaskGaslessMutable, MetaMaskGaslessObservation, MetaMaskGaslessProviderObservation,
+  MetaMaskGaslessRpcObservation } from "./model.js";
+import { MM_TERMINAL, type MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
 import { mmClassify, mmFail, mmFailure, type MetaMaskGaslessFailure, type MetaMaskGaslessFailureReason } from "./reasons.js";
@@ -16,6 +18,8 @@ export interface MetaMaskGaslessStep {
   readonly operation: MetaMaskGaslessOperationRecord;
   /** Explicitly transient; never part of the stored operation or its receipt. */
   readonly warning?: MetaMaskGaslessFailure;
+  /** A nonterminal result read after only the reserved terminal slot was left; reported, never saved. */
+  readonly unsaved?: { readonly observation: MetaMaskGaslessObservation; readonly cursor: MetaMaskGaslessCursor };
 }
 /** An owner-named observation RPC with the environment variable that named it. */
 export interface MetaMaskGaslessObserver {
@@ -45,7 +49,7 @@ export class MetaMaskGaslessObservationService {
     if (op.terminal || op.submissionAttempts !== 1) return { operation: op };
     try {
       this.clock.check(op);
-      assertMetaMaskGaslessObservationCapacity(op);
+      assertMetaMaskGaslessObservable(op);
       const result = submitted ?? await this.readProvider(op);
       this.clock.check(op, result.hint === null ? [] : [result.hint.observedAt]);
       const providerObservation = this.retainProvider(op, result.hint);
@@ -80,6 +84,12 @@ export class MetaMaskGaslessObservationService {
       const patch = this.decide(op, chain, providerObservation, result.failure);
       const at = new Date(this.clock.check(op, [chain.observation.observedAt,
         ...(providerObservation === null ? [] : [providerObservation.observedAt])])).toISOString();
+      if (metaMaskGaslessObservationUnchanged(op, patch)) return { operation: op };
+      // Full history never blocks a read or the terminal transition; it only stops saving nonterminal results.
+      if (!MM_TERMINAL.includes(patch.state ?? op.state) && !metaMaskGaslessObservationRoom(op)) {
+        return { operation: op, warning: mmFailure("mm_gasless_record_capacity"),
+          unsaved: { observation: chain.observation, cursor: chain.cursor } };
+      }
       return { operation: await this.save(op, patch, at) };
     } catch (error) {
       const failure = mmClassify(error, "mm_gasless_internal");

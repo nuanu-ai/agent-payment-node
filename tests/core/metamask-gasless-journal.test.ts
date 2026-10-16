@@ -5,18 +5,20 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
-import { mmImmutable, type MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
+import { mmImmutable, MM_HISTORY_LIMIT, MM_NONTERMINAL_HISTORY_LIMIT, MM_TERMINAL_HISTORY_LIMIT,
+  type MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/operation-model.js";
 import { mmFailure } from "../../src/metamask-gasless/reasons.js";
 import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
 import { metaMaskGaslessReceipt, publicMetaMaskGaslessOperation,
   validateMetaMaskGaslessReceipt } from "../../src/metamask-gasless/journal/receipt.js";
 import { advanceMetaMaskGaslessOperation, assertMetaMaskGaslessDispatchCapacity,
-  assertMetaMaskGaslessObservationCapacity } from "../../src/metamask-gasless/journal/transitions.js";
+  assertMetaMaskGaslessObservationCapacity, metaMaskGaslessObservationRoom,
+  metaMaskGaslessObservationUnchanged } from "../../src/metamask-gasless/journal/transitions.js";
 import { validateMetaMaskGaslessContinuity,
   validateMetaMaskGaslessOperation } from "../../src/metamask-gasless/journal/validation.js";
 import { validateDirectory } from "../../src/secure-state-store.js";
-import { APPROVED, DISPATCHED, EXPIRES, TX_HASH, TX_HASH_B, approve, complete, makeOperation, mark, unknown } from
-  "./metamask-gasless-journal-fixtures/factory.js";
+import { APPROVED, DISPATCHED, EXPIRES, TX_HASH, TX_HASH_B, approve, complete, fillLegacyHistory, legacyAppend,
+  makeOperation, mark, unknown } from "./metamask-gasless-journal-fixtures/factory.js";
 
 const OPS = "metamask-gasless-operations";
 const RECEIPTS = "metamask-gasless-receipts";
@@ -217,24 +219,62 @@ test("repository namespaces reject malformed, symbolic-link, foreign-owner, over
   await assert.rejects(() => repository.writeOperation(duplicateKey), { code: "APN_STATE_CORRUPT" });
 });
 
-test("history exhaustion preserves the last durable guarded operation and rejects unpersisted completion", async t => {
+test("history keeps its last slot for the terminal transition and a legacy full journal can still close", async t => {
   const root = await temporaryRoot(t), repository = new MetaMaskGaslessOperationRepository(root);
+  const capacity = { code: "APN_OPERATION_BLOCKED", details: { reason: "mm_gasless_record_capacity" } };
+  const iso = (value: number) => new Date(value).toISOString();
   let operation = unknown(mark(approve(makeOperation())));
   let millis = Date.parse(operation.updatedAt);
-  while (operation.transitions.length < 96) {
+  while (operation.transitions.length < MM_NONTERMINAL_HISTORY_LIMIT) {
     millis += 1_000;
-    operation = unknown(operation, new Date(millis).toISOString());
+    operation = unknown(operation, iso(millis));
   }
-  assert.equal(operation.transitions.length, 96);
+  assert.equal(operation.transitions.length, 95);
+  assert.equal(metaMaskGaslessObservationRoom(operation), false);
+  assert.throws(() => assertMetaMaskGaslessObservationCapacity(operation), capacity);
+  assert.throws(() => unknown(operation, iso(millis + 1_000)), capacity);
+  const completed = complete(operation, iso(millis + 2_000));
+  assert.equal(completed.transitions.length, 96); assert.equal(completed.terminal, true);
+  const abandoned = advanceMetaMaskGaslessOperation(operation, { state: "abandoned_unknown",
+    failure: mmFailure("mm_gasless_owner_abandoned") }, iso(millis + 2_000));
+  assert.equal(abandoned.transitions.length, 96); assert.equal(abandoned.state, "abandoned_unknown");
+
+  // A release before the reserve could fill all 96 slots with nonterminal observations. That journal still loads,
+  // still refuses another nonterminal transition, and still takes exactly one terminal transition as its 97th.
+  const legacy = fillLegacyHistory(operation, MM_HISTORY_LIMIT, millis + 2_000);
+  assert.equal(legacy.transitions.length, 96); assert.equal(legacy.terminal, false);
   await repository.listAllOperations();
-  await writeCanonical(join(root, OPS, operation.profileHash, `${operation.operationId}.json`), operation);
-  await repository.repairReceipt(operation);
-  assert.throws(() => assertMetaMaskGaslessObservationCapacity(operation),
-    { code: "APN_OPERATION_BLOCKED", details: { reason: "mm_gasless_record_capacity" } });
-  assert.throws(() => complete(operation, new Date(millis + 1_000).toISOString()),
-    { code: "APN_OPERATION_BLOCKED", details: { reason: "mm_gasless_record_capacity" } });
-  const fresh = new MetaMaskGaslessOperationRepository(root), loaded = await fresh.loadOperation(operation.profileHash, operation.operationId);
-  assert.equal(loaded?.state, "unknown_finality");
-  assert.equal(loaded?.submissionAttempts, 1);
-  assert.equal(loaded?.transitions.length, 96);
+  await writeCanonical(join(root, OPS, legacy.profileHash, `${legacy.operationId}.json`), legacy);
+  await repository.repairReceipt(legacy);
+  const loaded = await new MetaMaskGaslessOperationRepository(root).loadOperation(legacy.profileHash, legacy.operationId);
+  assert.deepEqual(loaded, legacy);
+  assert.throws(() => unknown(legacy, iso(Date.parse(legacy.updatedAt) + 1_000)), capacity);
+  const closing = Date.parse(legacy.updatedAt) + 1_000;
+  const legacyAbandoned = advanceMetaMaskGaslessOperation(legacy, { state: "abandoned_unknown",
+    failure: mmFailure("mm_gasless_owner_abandoned") }, iso(closing));
+  assert.equal(legacyAbandoned.transitions.length, MM_TERMINAL_HISTORY_LIMIT);
+  const legacyCompleted = complete(legacy, iso(closing));
+  assert.equal(legacyCompleted.transitions.length, 97); assert.equal(legacyCompleted.state, "completed");
+  await repository.persist(legacyCompleted);
+  const receipt = await repository.loadReceipt(legacyCompleted.profileHash, legacyCompleted.operationId);
+  assert.equal(receipt.state, "completed"); assert.deepEqual(validateMetaMaskGaslessReceipt(receipt, legacyCompleted), receipt);
+
+  // A 97th nonterminal transition is forged history, not a legacy journal.
+  assert.throws(() => legacyAppend(legacy, { observation: { ...legacy.observation!, observedAt: iso(closing),
+    evidenceHash: hashObject({ forged: true }) } }, iso(closing)), { code: "APN_STATE_CORRUPT" });
+});
+
+test("a re-observation that changes only its read times is not a new transition", () => {
+  const operation = unknown(mark(approve(makeOperation("noop")))), later = "2026-09-09T00:03:00.000Z";
+  const same = { providerObservation: { ...operation.providerObservation!, observedAt: later },
+    observation: { ...operation.observation!, observedAt: later, evidenceHash: hashObject({ later }) } };
+  assert.equal(metaMaskGaslessObservationUnchanged(operation, same), true);
+  for (const material of [
+    { ...same, failure: mmFailure("mm_gasless_pending") },
+    { ...same, observation: { ...same.observation, reason: "mm_gasless_pending" as const, phase: "pending" as const } },
+    { ...same, providerObservation: { ...same.providerObservation, status: "failed" as const } },
+    { ...same, cursor: { ...operation.cursor, nextBlockAtomic: "101", previousEndBlock: operation.cursor.startBlock } },
+    { ...same, observation: { ...same.observation, source: { environmentName: "APN_BASE_ARCHIVE_RPC_URL",
+      endpointOrigin: "https://archive.example", endpointHash: hashObject("archive") } } },
+  ]) assert.equal(metaMaskGaslessObservationUnchanged(operation, material), false);
 });

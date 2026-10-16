@@ -4,7 +4,8 @@ import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../..
 import { OperationService } from "../../src/operation-service.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
-import { mmFixture } from "./metamask-gasless-helpers.js";
+import { mmFixture, mmWriteOperationFile } from "./metamask-gasless-helpers.js";
+import { fillLegacyHistory } from "./metamask-gasless-journal-fixtures/factory.js";
 
 class AbandonApproval implements OperationAbandonApprovalPort {
   calls: OperationAbandonIntent[] = [];
@@ -69,5 +70,23 @@ test("MetaMask gasless unknown relay is owner-abandoned only after its approval 
   assert.equal(f.provider.submissions.length, submissions);
   const receipt = await f.core.execute({ command: "receipt.get", operationId: id });
   assert.equal((receipt.receipt as { state: string }).state, "abandoned_unknown");
+  await new OperationService(f.state).assertProfileAvailable(after.profileHash);
+});
+
+test("MetaMask gasless owner abandonment still fits a journal an earlier release filled to the history limit", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const approval = new AbandonApproval();
+  const f = await mmFixture(temporary.root, 8453, "empty", { abandonApproval: approval }), { id } = await f.prepare();
+  f.rpc.phase = "pending"; f.rpc.candidate = null; f.provider.failSubmit = true;
+  assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  const full = fillLegacyHistory(await f.record(id), 96);
+  await mmWriteOperationFile(temporary.root, full);
+  f.now.setTime(f.now.getTime() + 600_000); f.provider.failObserve = true;
+  const abandoned = await f.core.execute({ command: "operation.abandon", operationId: id });
+  assert.equal(abandoned.ok, true, JSON.stringify(abandoned.error));
+  const after = await f.record(id);
+  assert.equal(after.state, "abandoned_unknown"); assert.equal(after.transitions.length, 97);
+  assert.equal(approval.calls.length, 1);
+  assert.equal(((await f.core.execute({ command: "receipt.get", operationId: id })).receipt as { state: string }).state, "abandoned_unknown");
   await new OperationService(f.state).assertProfileAvailable(after.profileHash);
 });
