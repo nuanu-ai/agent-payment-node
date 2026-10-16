@@ -28,7 +28,13 @@ export declare function bridgeRpcCall(chainId: BridgeChainId, environment: Reado
     readonly attempt: EvmRpcCall;
     readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
     readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>;
+    readonly receipts: BridgeReceiptRoute;
 };
+/** Where an adapter reads canonical receipts: a distinct receipt reader, and whether an empty primary receipt has a fallback. */
+export interface BridgeReceiptRoute {
+    readonly reader: boolean;
+    readonly fallback: boolean;
+}
 export declare function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options?: {
     readonly transport?: Pick<BridgeHttps, "request">;
     readonly wait?: (milliseconds: number) => Promise<void>;

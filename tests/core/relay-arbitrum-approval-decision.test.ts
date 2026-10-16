@@ -50,8 +50,8 @@ async function prepared(profile = "default") {
 }
 function responses(allowance: bigint, hash = blockHash) {
   const canonical = { ...head, hash };
-  return [["0xa4b1", head], [canonical, "0x3a352944000", word(500_000n), word(allowance)],
-    ["0xa4b1", canonical, "0x7", "0x7"]] as const;
+  return [["0xa4b1", canonical], ["0x3a352944000", word(500_000n), word(allowance)],
+    ["0x7", "0x7"]] as const;
 }
 let providerTick = 1000;
 function service(state: StateStore, allowances: readonly bigint[], options: {
@@ -70,9 +70,11 @@ function service(state: StateStore, allowances: readonly bigint[], options: {
       if (options.rateLimitAt === index)
         throw new ApnError("APN_RPC_RATE_LIMITED", "429", { httpStatus: 429 });
       if (index % 3 === 2) {
-        assert.deepEqual(batch[2]!.params[1], { blockHash: index >= 3 && options.secondHash ? options.secondHash : blockHash,
+        assert.deepEqual(batch[0]!.params[1], { blockHash: index >= 3 && options.secondHash ? options.secondHash : blockHash,
           requireCanonical: true });
       }
+      // A node refuses EIP-1898 reads pinned to a hash that stopped being canonical (the reorg case).
+      if (index === 4 && options.secondHash) return [{ error: { code: -32000, message: "block hash not canonical" } }, word(500_000n), word(500_000n)];
       return responses(allowances[Math.floor(index / 3)]!, index >= 3 && options.secondHash ? options.secondHash : blockHash)[index % 3]!;
     } }, () => guard, async () => {});
   const decision = new RelayArbitrumApprovalDecisionService(state, reader,
@@ -136,7 +138,7 @@ test("insufficient allowance and allowance drop return required without journal 
 test("reorg, stale policy, 429, forged saved operation and cross-profile access fail closed", async t => {
   const { temporary, state, operation } = await prepared(); t.after(temporary.cleanup);
   const wrong = service(state, [500_000n, 500_000n], { secondHash: `0x${"34".repeat(32)}` });
-  await assert.rejects(wrong.decision.decide("default", operation.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(wrong.decision.decide("default", operation.operationId), { code: "APN_RPC_PROTOCOL" });
   assert.equal(await new ArbitrumSourceEffectJournalRepository(temporary.root).load(
     operation.profileHash, operation.operationId), null);
   const stale = service(state, [500_000n, 500_000n], { policyRevision: 2 });

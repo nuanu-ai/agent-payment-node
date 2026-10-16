@@ -3,7 +3,6 @@ import { type SolanaRpcPort } from "../../solana/rpc.js";
 export declare const ORCA_STABLE_POOL: "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4";
 export declare const ORCA_STABLE_VAULT_A: "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
 export declare const ORCA_STABLE_VAULT_B: "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";
-export declare const ORCA_STABLE_FEE_RATE = 100;
 export declare function orcaStableInventory(): {
     readonly chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
     readonly mode: "read_only";
@@ -22,7 +21,7 @@ export declare function orcaStableInventory(): {
     readonly vaultA: "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
     readonly vaultB: "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";
     readonly tickSpacing: 1;
-    readonly feeRate: 100;
+    readonly feeRate: "read_from_pool_at_quote";
     readonly direction: "USDC_to_USDT_exact_input";
 };
 export interface OrcaStableQuoteRequest {
@@ -31,6 +30,7 @@ export interface OrcaStableQuoteRequest {
     readonly maximumPriceImpactBps: number;
 }
 export declare function quoteOrcaStableReadOnly(rpc: SolanaRpcPort, request: OrcaStableQuoteRequest): Promise<{
+    readonly feeRate: number;
     readonly slot: string;
     readonly sourceReserveAtomic: string;
     readonly destinationReserveAtomic: string;
@@ -63,6 +63,5 @@ export declare function quoteOrcaStableReadOnly(rpc: SolanaRpcPort, request: Orc
     readonly vaultA: "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
     readonly vaultB: "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";
     readonly tickSpacing: 1;
-    readonly feeRate: 100;
     readonly direction: "USDC_to_USDT_exact_input";
 }>;

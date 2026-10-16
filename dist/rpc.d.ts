@@ -19,6 +19,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     get observationMetrics(): Readonly<import("./rpc-observation-metrics.js").RpcObservationCounters>;
     private readonly x402ChainId;
     private pinnedAddresses;
+    /** One eth_chainId per command invocation and endpoint, shared by every bounded or network-selected copy. */
+    private chainIdCell;
     private readonly totalDeadlineMs;
     private readonly abortSignal;
     private directGuard;
@@ -29,8 +31,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly abortSignal?: AbortSignal;
         readonly directGuardState?: StateStore;
     });
-    armBnbDirectRpcGuard(): void;
-    armEvmDirectRpcGuard(): void;
+    /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
+    armEvmDirectRpcGuard(maxPhysicalRequests?: number): void;
     seiNativeBalance(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal: AbortSignal): HttpsBaseRpc;
@@ -42,10 +44,12 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly chainId: EvmChainId;
         readonly rpcOrigin: string;
     }>;
+    /** Proven once per instance (its IP is pinned); later Base reads in the same invocation do not re-ask. */
     assertBaseChain(): Promise<{
         readonly chainId: 8453;
         readonly rpcOrigin: string;
     }>;
+    private endpointChainId;
     getBalances(address: Address): Promise<BalanceSnapshot>;
     getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence>;
     getX402Head(tag: "safe" | "finalized"): Promise<X402RpcHead>;
@@ -60,6 +64,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     }): Promise<X402AuthorizationUsedLogs>;
     getX402TransferLogs(input: {
         readonly from: Address;
+        readonly to?: Address;
         readonly fromBlock: string;
         readonly toBlock: string;
     }): Promise<X402TransferLogs>;
@@ -81,8 +86,6 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown>;
     coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]>;
     private call;
-    /** Permit2 preflight's narrow abortable observation surface. */
-    permit2ReadCall(method: "eth_chainId" | "eth_getBlockByNumber" | "eth_call" | "eth_getProof", params: readonly unknown[], signal: AbortSignal): Promise<unknown>;
     batchCall(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]>;
     private callX402Logs;
     private resolvePublicAddresses;

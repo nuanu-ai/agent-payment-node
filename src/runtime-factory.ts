@@ -101,6 +101,7 @@ import { executePermit2ProductionCli } from "./x402-permit2/production-cli.js";
 import { successEnvelope, failureEnvelope } from "./output.js";
 import { randomUUID } from "node:crypto";
 import { ORCA_SOLANA_CHAIN } from "./swap/orca-solana/pins.js";
+import { solanaSwapCommandRequests } from "./swap/solana-read-plan.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 import type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
@@ -120,7 +121,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
   const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? (process.env.APN_SOLANA_RPC_URL || SOLANA_PUBLIC_RPC_URL), options.solanaRpcFetch,
-    new SolanaRpcBudget({ maxPhysicalRequests: bound.request.command.startsWith("swap.jupiter.") ? 64 : 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
+    new SolanaRpcBudget({ maxPhysicalRequests: solanaSwapCommandRequests(bound.request.command) ?? 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
       wait: options.solanaRpcWait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))) }),
     new SolanaRpcPacer(state, options.solanaRpcNow, options.solanaRpcWait));
   const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL,
@@ -142,11 +143,10 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const coinbaseRpcUrl = ["gasless.balance", "gasless.transfer.prepare", "gasless.transfer.approve", "operation.resume"].includes(bound.request.command)
     ? process.env.APN_BASE_RPC_URL : undefined;
   const effectiveRpcUrl = bound.rpcUrl;
+  // Every direct EVM network is capped and paced the same way, so every transfer prepare carries the guard state.
   const directGuardCommand = bound.request.command === "transfer.approve" || bound.request.command === "operation.resume" ||
     bound.request.command === "wallet.balance" && bound.request.asset?.chainId === 1329 && bound.request.asset.token === "native" ||
-    bound.request.command === "transfer.prepare" && (bound.request.asset === undefined ||
-      bound.request.asset.chainId === 1 || bound.request.asset.chainId === 56 || bound.request.asset.chainId === 8453 ||
-      bound.request.asset.chainId === 42161 || bound.request.asset.chainId === 1329);
+    bound.request.command === "transfer.prepare";
   const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl,
     directGuardCommand ? { directGuardState: state } : {}));
   const coinbaseRpc = options.rpc;
@@ -223,7 +223,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const relayExecuteConfirmation = relayAuthorization?.confirm.bind(relayAuthorization);
   const relayExecute = relayAuthorization === undefined ? undefined
     : createRelayEthereumSourceRuntime(state, wrappingSecret, bound.rpcUrl ?? "", { confirm: relayExecuteConfirmation! },
-      clock, options.relayExecuteTransport);
+      clock, options.relayExecuteTransport, options.relayApprovalInclusionWait);
   const nativeRelayAuthorization = bound.request.command === "relay.native.execute"
     ? new TtyRelayNativeExecuteConfirmation(options.relayExecuteTtyOptions) : undefined;
   const relayNativeExecute = nativeRelayAuthorization === undefined ? undefined
@@ -262,10 +262,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     : undefined);
   const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.") && options.jupiter === undefined
     ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
-      foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute",
-      stage: bound.request.command === "swap.jupiter.quote" ? "quote" : bound.request.command === "swap.jupiter.prepare" ? "prepare" :
-        bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" ? "execute" : "observe",
-      ...("operationId" in bound.request ? { operationId: bound.request.operationId } : {}) }) : undefined);
+      foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" }) : undefined);
   const stablePorts = () => ({ state, clock, accounts: chainAccounts, rpc: solanaRpc, verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
   return new ApnCore({
     state,
@@ -353,7 +350,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
     ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
       circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state,
-        circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)),
+        circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)),
         new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits,
         () => options.clock?.now().getTime() ?? Date.now()),
     } : {}),
@@ -393,8 +390,6 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         options.gaslessUsdtExecuteOptions),
     } : {}),
     bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
-      lineaArchiveDeploymentScalarCode: bound.request.command === "bridge.prepare" &&
-        process.env.APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE === "1",
       custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...((bound.request.command === "bridge.approve" || (bound.request.command === "operation.resume" && bound.request.observeOnly !== true)) ? { approval: new TtyBridgeApproval() } : {}) },
     chainAccounts, directRails,

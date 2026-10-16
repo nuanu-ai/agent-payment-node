@@ -63,6 +63,9 @@ export function publicGaslessOperation(op) {
             permit_deadline: "MAX_UINT256", permit_amount_atomic: i.feeCapAtomic,
             initial_allowance_atomic: i.initialSnapshot.allowanceAtomic,
             residual_allowance_atomic: proof?.safeAccount.allowanceAtomic ?? invalidation?.headAccount.allowanceAtomic ?? null,
+            // Informational; never holds a close. Present only on settlements read at latest (since 0.5.43), so receipts of
+            // older transitions, read at the safe head, rebuild byte for byte.
+            ...(proof?.accountBlock === undefined ? {} : { residual_allowance_read_at: "latest" }),
             guard_held: !op.terminal, automatic_revocation: false },
         gas: i.gas, effects, unsigned_envelope_hash: i.unsignedEnvelopeHash,
         user_operation_hash: op.userOperation.userOperationHash, transaction_hash: proof?.transactionHash ?? op.observation?.transactionHash ?? null,

@@ -1,12 +1,13 @@
 import type { Address, Hex } from "../model.js";
-import type { BridgeDeploymentIdentity, BridgeDestinationProof, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall } from "./model.js";
-/** Frozen and observed deployment identities are checked again at the exact destination receipt block. */
+import type { BridgeDestinationProof, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall } from "./model.js";
+/**
+ * The reviewed StargatePoolNative on Base. The pool is immutable code at a fixed address (a Stargate upgrade deploys a new
+ * pool), and Base has EIP-6780, so its registry code hash is a fact of the address: OFTReceived from it follows its
+ * successful native outflow without re-reading the code at the receipt block (P2).
+ */
 export interface NativeStargateDestinationPin {
     readonly pool: Address;
-    readonly frozenDeployment: BridgeDeploymentIdentity;
-    readonly observedDeployment: BridgeDeploymentIdentity;
-    readonly frozenPoolCodeHash: Hex;
-    readonly observedPoolCodeHash: Hex;
+    readonly poolCodeHash: Hex;
 }
 export declare function bridgeSourceProof(materialization: BridgeMaterialization, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeSourceProof;
 export declare function bridgeDestinationProof(source: BridgeSourceProof, materialization: BridgeMaterialization, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, nativeStargatePin?: NativeStargateDestinationPin): BridgeDestinationProof;

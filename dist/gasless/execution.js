@@ -41,7 +41,7 @@ export class GaslessExecution {
         if (op.terminal || op.state !== "awaiting_approval")
             return op;
         try {
-            await this.mirror(op, await this.guard(op));
+            await this.mirror(op, await this.checked(op));
         }
         catch (error) {
             return await this.halt(op, error);
@@ -86,7 +86,7 @@ export class GaslessExecution {
         }
         if (op.bootstrap.signingAttempts === 0 && !mirrored) {
             try {
-                await this.mirror(op, await this.guard(op));
+                await this.mirror(op, await this.checked(op));
             }
             catch (error) {
                 return await this.halt(op, error);
@@ -198,9 +198,14 @@ export class GaslessExecution {
         }
         return { op, material, fees };
     }
-    /** The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. */
-    async mirror(op, fees) {
-        await this.steady(op, GASLESS_STEP_POSTS.mirror, async () => { await this.rpc.mirrorEstimate(op.intent, fees); });
+    /**
+     * The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. The
+     * balance-layout witness is the guard snapshot just taken, a block whose state every keyless node still holds.
+     */
+    async mirror(op, guard) {
+        await this.steady(op, GASLESS_STEP_POSTS.mirror, async () => {
+            await this.rpc.mirrorEstimate(op.intent, guard.snapshot, guard.fees);
+        });
     }
     /** Owner, policy and caps locally, then one bundler batch: the signed fees must still cover its slow tier. */
     async feeCheck(op, signed) {
@@ -216,11 +221,14 @@ export class GaslessExecution {
     key(role) { return role === "bootstrap" ? "bootstrap" : "userOperation"; }
     at() { return new Date(this.now()).toISOString(); }
     async guard(op, signed) {
+        return (await this.checked(op, signed)).fees;
+    }
+    async checked(op, signed) {
         return await this.steady(op, GASLESS_STEP_POSTS.guard, async () => {
             await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
-            const fees = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
+            const checked = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
             await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
-            return fees;
+            return checked;
         });
     }
     /**

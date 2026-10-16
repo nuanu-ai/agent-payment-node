@@ -60,17 +60,17 @@ else {
     console.log("RESULT:"+JSON.stringify({ mode, recoveryKeyLoads: 0, recoverySends: 0, recoverySigns: 0, state: op.state })); process.exit(0);
   }
   if (mode === "dispatch-verification-race") {
-    const message = DirectPublicEffectJournal.prototype.attestationMessage;
+    // The race lands inside the locked section, right before its one binding proof (see verification-race below).
+    const prepared = DirectPublicEffectJournal.prototype.prepared;
     let changed = false;
-    DirectPublicEffectJournal.prototype.attestationMessage = async function(operation, effect) {
-      const result = await message.call(this, operation, effect);
+    DirectPublicEffectJournal.prototype.prepared = async function(operation) {
       const marked = await readFile(join(root, "direct-submissions", operation.profileHash, `${id}.json`), "utf8").then(() => true, () => false);
       if (marked && !changed) {
         changed = true;
         const wallet = (await state.loadWallet(operation.profileHash))!;
         await state.writeProviderProfile({ ...projectLegacyLocalProfile(wallet), revision: 2 });
       }
-      return result;
+      return await prepared.call(this, operation);
     };
   }
   const beforeApprovalKeys = wrapping.loads;
@@ -178,16 +178,18 @@ if (mode === "custody-change") {
   await state.writeWallet(sealWallet({ ...body, bindingHash: "a".repeat(64) }));
 }
 if (mode === "verification-race") {
-  const message = DirectPublicEffectJournal.prototype.attestationMessage;
+  // Recovery proves the public binding once per locked section and re-reads nothing after the ECDSA check: every
+  // wallet/provider lifecycle writer takes the profile lock that recovery holds (SURF-21). The racing write therefore
+  // lands inside that section just before the one proof, which must see it rather than an earlier or cached answer.
+  const prepared = DirectPublicEffectJournal.prototype.prepared;
   let changed = false;
-  DirectPublicEffectJournal.prototype.attestationMessage = async function(operation, effect) {
-    const result = await message.call(this, operation, effect);
+  DirectPublicEffectJournal.prototype.prepared = async function(operation) {
     if (!changed) {
       changed = true;
       const wallet = (await state.loadWallet(op.profileHash))!;
       await state.writeProviderProfile({ ...projectLegacyLocalProfile(wallet), revision: 2 });
     }
-    return result;
+    return await prepared.call(this, operation);
   };
 }
 const beforeKeys = wrapping.loads, beforeSends = physicalSends, beforeSigns = signCalls;

@@ -36,8 +36,11 @@ test("Base receipt includes L1 and Jovian operator fees with strict quantity/dat
   assert.deepEqual(fee, { l2ExecutionFeeWei: "1000", l1FeeWei: "20", operatorFeeWei: "20003", totalFeeWei: "21023" });
   verifyRelayBaseReceiptFee(fee, "21023");
   assert.throws(() => verifyRelayBaseReceiptFee(fee, "21022"));
-  for (const changed of [{ l1Fee: undefined }, { l1Fee: "0x00" }, { gasUsed: "0x064" }, { operatorFeeScalar: "0x00000002" }, { operatorFeeScalar: "0x100000000" }, { daFootprintGasScalar: undefined }, { operatorFeeConstant: undefined }, { operatorFee: "0x1" }])
+  for (const changed of [{ l1Fee: undefined }, { l1Fee: "0x00" }, { gasUsed: "0x064" }, { operatorFeeScalar: "0x00000002" }, { operatorFeeScalar: "0x100000000" }, { daFootprintGasScalar: "0x01" }, { operatorFeeConstant: undefined }, { operatorFee: "0x1" }])
     assert.throws(() => decodeRelayBaseReceiptFee({ ...raw, ...changed }));
+  // A pre-Jovian receipt has no DA footprint scalar; it does not enter the charged fee (BRDG-24).
+  const { daFootprintGasScalar: _jovian, ...preJovian } = raw;
+  assert.deepEqual(decodeRelayBaseReceiptFee(preJovian), fee);
   assert.equal(decodeRelayBaseReceiptFee({ gasUsed: "0x1", effectiveGasPrice: "0x1", l1Fee: "0x0", daFootprintGasScalar: "0x1" }).totalFeeWei, "1");
   assert.throws(() => verifyRelayBaseReceiptFee(undefined, "1000000000000"));
 });
@@ -50,19 +53,19 @@ test("finite Base source refuses missing or over-ceiling complete receipt fee", 
   const fee = decodeRelayBaseReceiptFee({ gasUsed: "0x1", effectiveGasPrice: "0x1", l1Fee: "0x0", daFootprintGasScalar: "0x1" });
   assert.equal(verifyRelayNativeSourceObservation(op, hash("a"), { ...observation, receipt: { ...observation.receipt, actualFee: fee } }), "confirmed");
 });
-test("Base Polygon requires milestone finalized port and rejects checkpoint reorg", async t => {
+test("Base Polygon requires milestone finalized port and rejects a non-canonical inclusion block", async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const op = await operation(new StateStore(tmp.root));
   const ports: RelayBnbProofPorts = { chainId: async () => 137,
     transaction: async () => ({ hash: hash("c"), chainId: 137, to: op.recipient, valueWei: BigInt(op.minOutputAtomic), blockNumber: 100n, blockHash: hash("b") }),
     receipt: async () => ({ transactionHash: hash("c"), status: "success", blockNumber: 100n, blockHash: hash("b") }),
     block: async number => ({ number, hash: number === 100n ? hash("b") : hash("d") }),
-    finalityCheckpoint: async () => ({ number: 115n, hash: hash("d") }), nativeTrace: async () => null };
+    finalityCheckpoint: async () => ({ number: 115n, hash: hash("d") }) };
   assert.equal((await proveRelayNativeDestination(op, hash("a"), [hash("c")], ports)).status, "unproven");
   const strict = { ...ports, polygonFinalizedCheckpoint: async () => ({ number: 115n, hash: hash("d") }) };
   const proof = await proveRelayNativeDestination(op, hash("a"), [hash("c")], strict);
   assert.equal(proof.status, "recipient_credit_proven");
   if (proof.status === "recipient_credit_proven") assert.equal(proof.proof.finalityKind, "polygon_milestone_finalized");
-  assert.equal((await proveRelayNativeDestination(op, hash("a"), [hash("c")], { ...strict, polygonFinalizedCheckpoint: async () => ({ number: 115n, hash: hash("e") }) })).status, "mismatch");
+  assert.equal((await proveRelayNativeDestination(op, hash("a"), [hash("c")], { ...strict, block: async number => ({ number, hash: hash("e") }) })).status, "mismatch");
   assert.equal((await proveRelayNativeDestination(op, hash("a"), [hash("c")], { ...strict, polygonFinalizedCheckpoint: async () => ({ number: 99n, hash: hash("d") }) })).status, "pending");
 });
 test("permanent payout claim survives new repository/recovery and rejects another intent", async t => {
@@ -134,7 +137,7 @@ test("Base operational acceptance requires canonical source, bound status, full 
   const destination = (): RelayBnbProofPorts => ({ chainId: async () => 137, transaction: async () => ({ hash: hash("c"), chainId: 137, to: op.recipient,
     valueWei: BigInt(op.minOutputAtomic), blockNumber: 200n, blockHash: hash("d") }), receipt: async () => ({ transactionHash: hash("c"), status: "success", blockNumber: 200n, blockHash: hash("d") }),
     block: async number => ({ number, hash: number === 200n ? hash("d") : hash("e") }), finalityCheckpoint: async () => null,
-    polygonFinalizedCheckpoint: async () => ({ number: 205n, hash: hash("e") }), nativeTrace: async () => null });
+    polygonFinalizedCheckpoint: async () => ({ number: 205n, hash: hash("e") }) });
   const status = new RelayKeylessStatusService(state, async () => new Response(JSON.stringify({ status: "success", originChainId: 8453, destinationChainId: 137,
     inTxHashes: [bound ? hash("a") : hash("f")], txHashes: [hash("c")] }), { status: 200 }));
   const service = new RelayNativeObserveService(state, source, destination, status, { now: () => now });
@@ -185,7 +188,7 @@ test("execute source observer settles only a complete under-cap canonical Base f
   }
 });
 test("execute missing malformed unsupported or over-cap Base fee preserves charged submitting hold without resend", async t => {
-  const changes = [{ l1Fee: undefined }, { effectiveGasPrice: undefined }, { gasUsed: undefined }, { daFootprintGasScalar: undefined },
+  const changes = [{ l1Fee: undefined }, { effectiveGasPrice: undefined }, { gasUsed: undefined }, { daFootprintGasScalar: "0x01" },
     { l1Fee: "0x00" }, { operatorFeeScalar: "0x00000002" }, { operatorFeeConstant: undefined },
     { l1Fee: "0xe8d4a51001" }, { operatorFeeScalar: "0xffffffff" }, { operatorFee: "0xe8d4a51001" }];
   for (const mega of [false, true]) for (const change of changes) for (const status of ["0x1", "0x0"]) {

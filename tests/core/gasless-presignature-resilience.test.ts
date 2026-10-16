@@ -48,11 +48,18 @@ test("a transport failure that never clears ends before any signature and names 
 test("an unavailable mirror estimate is retried within the allowance, and a misfit still ends at once", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
-  s.rpc.mirrorUnavailable = 2;
+  // The retry allowance is one guard's POSTs (3); a mirror retry costs 2, so one retry fits and a second does not.
+  s.rpc.mirrorUnavailable = 1;
   const stored = await approve(s, id);
   assert.equal(stored.state, "completed");
-  assert.equal(s.rpc.calls.filter((c) => c === "mirror_estimate").length, 3);
-  assert.deepEqual(s.wait.waits, [5000, 5000]);
+  assert.equal(s.rpc.calls.filter((c) => c === "mirror_estimate").length, 2);
+  assert.deepEqual(s.wait.waits, [5000]);
+  const third = await temporaryState(); t.after(third.cleanup);
+  const twice = await gaslessFixture(third.root), again = await twice.prepare();
+  twice.rpc.mirrorUnavailable = 2;
+  const exhausted = await approve(twice, again.id);
+  assert.equal(exhausted.state, "failed_before_effect"); assert.equal(exhausted.failure, "gasless_mirror_estimate_unavailable");
+  assert.equal(exhausted.bootstrap.signingAttempts, 0);
 
   const second = await temporaryState(); t.after(second.cleanup);
   const misfit = await gaslessFixture(second.root), prepared = await misfit.prepare();

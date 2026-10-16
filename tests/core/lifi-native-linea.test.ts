@@ -60,11 +60,7 @@ test("immutable Linea RPC baseline verifies the finalized canonical SpokePool pr
   assert.equal(proof.codeHash, "92be1364e421c29baa34aca55cac947d45f9ea91a05a16753aba3c97dc501ad0");
   assert.equal(proof.configurationHash, "37419cf0d4a7311341ed94f791aaa187951be14730c647036c7794c61ae965de");
   assert.equal(bridgeProtocolEmitter(59144, "across", BRIDGE_ZERO_ADDRESS), capture.sourceOfTruth.lineaSpokePool);
-  const unavailable: EvmRpcCall = async (method, params) => {
-    if (method === "debug_traceTransaction") throw new Error("method unavailable");
-    return await call(method, params);
-  };
-  await assert.rejects(new BridgeRpc(59144, capture.rpcOrigin, unavailable).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block));
+  // No trace capability probe on a fixed historical transaction (LIFI-13): the delivery's own trace fails closed instead.
 });
 
 test("Linea deployment identity refuses the former SpokePool, swapped proxy and implementation, wrong code and wrong configuration", async () => {
@@ -242,7 +238,7 @@ class RawBridgeQuotes extends BridgeQuoteRepository {
   async put(path: string, value: unknown): Promise<void> { await this.writeJson(path, value); }
 }
 
-test("a reverse Linea quote saved before the source gate is refused, and only real route drift is corrupt", async (t) => {
+test("a reverse Linea quote saved before the source gate is refused at prepare whatever its stored projection says", async (t) => {
   const now = new Date("2026-09-20T10:54:00.000Z"), step = reverseLineaStep((await lifiSteps("eth-linea", now))[0]);
   step.id = "synthetic-linea-ethereum-native-across";
   const provider = new LifiTestProvider([step], now), temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -260,9 +256,10 @@ test("a reverse Linea quote saved before the source gate is refused, and only re
   const legacy = await resaved((routes) => { for (const row of routes) Object.assign(row, { preparable: true, unavailableReason: null }); }, "linea-legacy-quote-001");
   assert.equal(legacy.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
   assert.equal(legacy.error?.message, "Bridge validation failed: source_execution_unreviewed.");
+  // The stored route projection is display only: prepare selects from a fresh parse of the hash-bound raw response.
   const tampered = await resaved((routes) => Object.assign(routes[0], { preparable: true, unavailableReason: null, quotedOutputAtomic: "1" }), "linea-tampered-quote-001");
-  assert.equal(tampered.error?.code, "APN_STATE_CORRUPT");
-  assert.equal(tampered.error?.message, "Bridge validation failed: bridge_quote_route_binding.");
+  assert.equal(tampered.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  assert.equal(tampered.error?.message, "Bridge validation failed: source_execution_unreviewed.");
   assert.equal(provider.materializeCalls, 0); assert.equal(r.source.calls.length, 0); assert.equal(r.destination.calls.length, 0);
   assert.equal(r.approval.calls.length, 0); assert.equal(r.wrapping.loads, 0);
 });

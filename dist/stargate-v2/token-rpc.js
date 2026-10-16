@@ -86,17 +86,20 @@ export async function requoteSend(call, sendParam, tag) {
         fail("APN_RPC_PROTOCOL", "lz_token_fee");
     return result.nativeFee;
 }
+/** Prepare records the pool and token runtime code once; later steps re-check only the functional configuration (P2/P5). */
 export async function readPoolConfig(call, chain, pool, token, eid, tag) {
-    if (quantity(await call("eth_chainId", [])) !== BigInt(chain))
-        fail("APN_CHAIN_MISMATCH", "pool_chain");
-    const [poolCode, tokenCode] = await Promise.all([call("eth_getCode", [pool, tag]), call("eth_getCode", [token, tag])]);
+    const [poolCode, tokenCode] = await Promise.all([call("eth_getCode", [pool, tag]), call("eth_getCode", [token, tag]), readPoolFunctional(call, chain, pool, token, eid, tag)]);
     if (typeof poolCode !== "string" || !CODE.test(poolCode) || poolCode === "0x" || typeof tokenCode !== "string" || !CODE.test(tokenCode) || tokenCode === "0x")
         fail("APN_RPC_PROTOCOL", "contract_code");
+    return { poolCodeHash: keccak256(poolCode), tokenCodeHash: keccak256(tokenCode) };
+}
+export async function readPoolFunctional(call, chain, pool, token, eid, tag) {
+    if (quantity(await call("eth_chainId", [])) !== BigInt(chain))
+        fail("APN_CHAIN_MISMATCH", "pool_chain");
     const read = async (name) => decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: name, data: await call("eth_call", [{ to: pool, data: encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: name }) }, tag]) });
     const [actualToken, actualEid, decimals, status, kind] = await Promise.all([read("token"), read("localEid"), read("sharedDecimals"), read("status"), read("stargateType")]);
     if (address(actualToken) !== token || actualEid !== eid || decimals !== 6 || status !== 1 || kind !== 0)
         fail("APN_RPC_PROTOCOL", "pool_config");
-    return { poolCodeHash: keccak256(poolCode), tokenCodeHash: keccak256(tokenCode) };
 }
 export async function readAllowance(call, owner, tag) {
     return decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "allowance",

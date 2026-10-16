@@ -21,7 +21,7 @@ export declare class TransferServiceObservation {
      * Every check that can refuse (policy, funding, fees, nonce) ran before signing. A persisted signature is only ever
      * dispatched, as these exact bytes, or kept resumable; nothing after signing may strand it.
      */
-    submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord>;
+    submitAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex, publicEffectProven?: boolean): Promise<LocalOperationRecord>;
     private dispatchAndInspect;
     resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
     /**

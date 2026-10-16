@@ -144,6 +144,8 @@ export class LocalWalletNative {
                 capturedAt = Date.parse((await Permit2ProductionSigningFence.consumeNativeScoped(fence, scope, checked.fact, owned.root, id)).capturedAt);
                 return assert();
             };
+            // Chain observed before and right after key load; around the signatures only local state (continuation, window, observation <=5 s old).
+            const local = async () => { const record = await assert(); immediate(); return record; };
             try {
                 await Permit2ProductionJournal.claimNativeSigningContinuation(journal, id, continuation, execution);
                 const record = await guard();
@@ -160,20 +162,15 @@ export class LocalWalletNative {
                     throw protocol("Permit2 actual payer differs from the saved local wallet.");
                 await guard();
                 if (plan.plan.eip2612 !== null) {
-                    await guard();
-                    immediate();
+                    await local();
                     tokenSignature = await account.signTypedData(plan.plan.eip2612.typedData);
-                    await assert();
-                    await guard();
+                    await local();
                 }
-                await guard();
-                immediate();
+                await local();
                 permit2Signature = await account.signTypedData(plan.plan.permit2);
-                const current = await assert();
-                await guard();
+                const current = await local();
                 const bundle = await createPermit2ProductionSigned(current, permit2Signature, tokenSignature, Permit2ProductionJournal.nativeSigningSecond(journal, id, execution));
-                await assert();
-                await guard();
+                await local();
                 return { bundle, grant: Permit2ProductionJournal.nativeOriginBinding(journal, id, execution) };
             }
             finally {
@@ -396,7 +393,7 @@ export class LocalWalletNative {
         if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
             hashObject(directCustodyPayload(frozen)) !== hashObject(payload))
             throw protocol("Native request differs from its saved fresh operation.");
-        await journal.prepared(frozen);
+        // beginSigning proves the prepared binding and custody itself; nothing else needs them first.
         if (await journal.hasSigned(frozen))
             throw protocol("A signed direct effect cannot be approved or recovered through signing.");
         const attempt = await journal.beginSigning(frozen);

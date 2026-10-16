@@ -8,15 +8,33 @@ const SERVICE = "ai.nuanu.apn.wrapping-secret.v1";
 const ACCOUNT = "default";
 const MAX_OUTPUT_BYTES = 4 * 1024;
 const SECURITY_TIMEOUT_MS = 15_000;
+/** Every cached secret still alive; the exit hook zeroes them, and a collected owner zeroes its own first. */
+const cachedSecrets = new Set();
+const releasedSecrets = new FinalizationRegistry((secret) => { secret.fill(0); cachedSecrets.delete(secret); });
+let exitHookInstalled = false;
+function privateCopy(secret) {
+    const copy = Buffer.alloc(secret.length);
+    secret.copy(copy);
+    return copy;
+}
+/**
+ * The login-Keychain wrapping secret. One instance belongs to one command invocation: the first successful `load` or
+ * `create` keeps a private in-memory copy for that instance, so every later read in the same command spawns no
+ * `security` process. It is never written anywhere, callers still receive (and zero) their own copy, and the cached
+ * copy is zeroed when the instance is collected or the process exits.
+ */
 export class MacOSLoginKeychainSecret {
     loginKeychain;
     security;
+    cached;
     constructor(options = {}) {
         const identity = options.identity ?? userInfo();
         this.loginKeychain = loginKeychainPath(identity.homedir);
         this.security = options.runSecurity ?? (async (args, input) => await runSecurity(args, identity, input));
     }
     async load() {
+        if (this.cached !== undefined)
+            return privateCopy(this.cached);
         const result = await this.security([
             "find-generic-password", "-a", ACCOUNT, "-s", SERVICE, "-w", this.loginKeychain,
         ]);
@@ -31,10 +49,23 @@ export class MacOSLoginKeychainSecret {
                 secret.fill(0);
                 throw keychainUnavailable();
             }
+            this.remember(secret);
             return secret;
         }
         finally {
             result.stdout.fill(0);
+        }
+    }
+    remember(secret) {
+        if (this.cached !== undefined)
+            return;
+        this.cached = privateCopy(secret);
+        cachedSecrets.add(this.cached);
+        releasedSecrets.register(this, this.cached);
+        if (!exitHookInstalled) {
+            exitHookInstalled = true;
+            process.once("exit", () => { for (const cached of cachedSecrets)
+                cached.fill(0); cachedSecrets.clear(); });
         }
     }
     async create() {
@@ -55,8 +86,10 @@ export class MacOSLoginKeychainSecret {
             throw error;
         }
         result.stdout.fill(0);
-        if (result.code === 0)
+        if (result.code === 0) {
+            this.remember(generated);
             return generated;
+        }
         generated.fill(0);
         const raced = await this.load();
         if (raced !== null)

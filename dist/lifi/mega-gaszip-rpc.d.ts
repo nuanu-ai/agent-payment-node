@@ -37,6 +37,11 @@ export declare function proveMegaSafeTransaction(rpc: MegaRpcPort, chain: 8453 |
     maxFee?: string;
     tip?: string;
     gasPrice?: string;
-}): Promise<MegaSafeProof | null>;
+}, known?: unknown): Promise<MegaSafeProof | null>;
+/**
+ * The payout is proved from the chain alone: the exact signed transaction from the provider's signer to the owner, its
+ * successful receipt with empty input and no logs at or below the safe head, its block membership, and an owner account
+ * that has no code, so the plain value transfer could not run code and credited exactly its value. No historical balances.
+ */
 export declare function proveMegaDelivery(rpc: MegaRpcPort, owner: string, d: MegaCorrelatedDelivery): Promise<MegaSafeProof | null>;
 export declare function proveMegaSource(rpc: MegaRpcPort, r: MegaFundingRecord): Promise<MegaSafeProof | null>;

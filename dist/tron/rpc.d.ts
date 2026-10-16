@@ -8,8 +8,11 @@ export declare class TronRpc implements TronRpcPort {
     private readonly endpoint?;
     private readonly fetcher;
     readonly originHash: string;
+    /** Block 0 is immutable and this client's endpoint fixed: one read proves the network for the whole invocation. */
+    private genesisBlock;
     constructor(endpoint?: string | undefined, fetcher?: typeof fetch);
     call(method: TronMethod, body: Readonly<Record<string, unknown>>): Promise<unknown>;
+    private post;
 }
 export interface TronBlock {
     readonly id: string;

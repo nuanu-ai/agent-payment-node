@@ -6,7 +6,6 @@ import { hashObject } from "../canonical.js";
 /** A separate GasZip direct deposit; never grants LI.FI GasZip execution. */
 export const SEI_FUNDING = Object.freeze({ sourceChain: 8453, destinationChain: 1329, short: 246,
   target: getAddress("0x391E7C679d29bD940d63be94AD22A25d25b5A604"), data: "0x0100f6" as Hex,
-  maximumAmount: 10_000_000_000_000n, maximumFee: 1_000_000_000_000n, minimumOutput: 250_000_000_000_000_000n,
   mechanism: { provider: "gaszip", reference: "v2-direct-base-sei-self-0100f6.1" } });
 export function seiFail(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", `sei_gaszip_${reason}`, { reason: `sei_gaszip_${reason}` }); }
 export function seiObject(v: unknown): Record<string, unknown> {
@@ -36,7 +35,8 @@ export function seiJson(text: string): unknown {
   } catch { return seiFail("json"); }
 }
 export function seiExact(v: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []): void {
-  if (required.some(k => !Object.hasOwn(v,k)) || Object.keys(v).some(k => !required.includes(k) && !optional.includes(k))) seiFail("schema");
+  // Required provider fields must be present; fields GasZip adds later are ignored (the chain proves every effect itself).
+  if (required.some(k => !Object.hasOwn(v,k))) seiFail("schema");
 }
 export interface SeiFundingQuote { readonly digest: string; readonly expiresAt: string; readonly expectedAtomic: string; readonly body: unknown }
 export function inspectSeiFundingQuote(value: unknown, now: number): SeiFundingQuote {
@@ -44,7 +44,7 @@ export function inspectSeiFundingQuote(value: unknown, now: number): SeiFundingQ
   if (v.calldata !== SEI_FUNDING.data || !Array.isArray(v.quotes) || v.quotes.length !== 1) seiFail("quote_lane");
   const q=seiObject(v.quotes[0]); seiExact(q,["chain","expected","gas","speed","usd"],["decimals","expectedNative"]);
   if (seiUint(q.chain) !== 1329n || (q.decimals !== undefined && seiUint(q.decimals) !== 18n) ||
-    (q.expectedNative !== undefined && seiUint(q.expectedNative) !== seiUint(q.expected)) || seiUint(q.expected)<SEI_FUNDING.minimumOutput ||
+    (q.expectedNative !== undefined && seiUint(q.expectedNative) !== seiUint(q.expected)) ||
     typeof q.speed !== "number" && typeof q.speed !== "string" || typeof q.usd !== "number" && typeof q.usd !== "string") seiFail("quote_output");
   seiUint(q.gas); const expires=seiUint(v.expires);
   if (expires>BigInt(Number.MAX_SAFE_INTEGER) || Number(expires)*1000-now<30_000 || Number(expires)*1000-now>90_000) seiFail("quote_expiry");

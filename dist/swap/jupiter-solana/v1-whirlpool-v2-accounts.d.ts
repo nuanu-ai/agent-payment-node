@@ -10,8 +10,8 @@ export interface WhirlpoolV2PoolState {
     readonly bump: number;
     readonly feeTierIndexSeed: number;
     readonly tickSpacing: 2 | 4;
-    readonly feeRate: 200 | 400;
-    readonly protocolFeeRate: 1300;
+    readonly feeRate: number;
+    readonly protocolFeeRate: number;
     readonly mintA: string;
     readonly mintB: string;
     readonly vaultA: string;
@@ -65,7 +65,9 @@ export declare function decodeWhirlpoolV2TickArray(a: JupiterV1SemanticAccount):
 export declare const WHIRLPOOL_V2_ORACLE_MUTABLE_RANGES: readonly MutableByteRange[];
 export declare function decodeWhirlpoolV2Oracle(a: JupiterV1SemanticAccount): WhirlpoolV2OracleState;
 export declare function assertWhirlpoolV2ClassicMint(a: JupiterV1SemanticAccount, mint: string): void;
+/** Memo sits under BPFLoader2, which has no upgrade instruction: its loader and executable flag are the whole pin. */
 export declare function assertWhirlpoolV2Memo(a: JupiterV1SemanticAccount): void;
+/** ATA (BPFLoader2), System and Compute Budget (native) cannot be upgraded; their loader is the pin, not their bytes. */
 export declare function assertWhirlpoolV2FixedPrograms(accounts: readonly JupiterV1SemanticAccount[]): void;
 export declare function assertWhirlpoolV2ClassicTokenAccount(a: JupiterV1SemanticAccount, mint: string, owner: string): void;
 export interface WhirlpoolV2AccountSnapshot {

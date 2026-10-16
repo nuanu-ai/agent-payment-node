@@ -20,7 +20,24 @@ export interface JupiterV1AddressTable {
     readonly deactivationSlot: string;
     readonly lastExtendedSlot: string;
 }
-export interface JupiterV1RuntimeProgramPin {
+/** One program's evidence in a material: authority evidence (current) or executable byte pins (APN 0.5.42 and earlier). */
+export type JupiterV1RuntimeProgramPin = JupiterV1ProgramAuthorityEvidence | JupiterV1ProgramByteEvidence;
+/**
+ * The program's loader account and, for an upgradeable program, its 45-byte ProgramData header as read: deployment slot
+ * and upgrade authority. No executable bytes are read or stored (SWAP-04).
+ */
+export interface JupiterV1ProgramAuthorityEvidence {
+    readonly programId: string;
+    readonly loader: string;
+    readonly programDataAddress: string | null;
+    readonly deploymentSlot: string | null;
+    readonly upgradeAuthority: string | null;
+    readonly accountHash: string;
+    readonly programDataHeaderHash: string | null;
+    readonly provenance: "upgrade_authority";
+}
+/** Historical: the complete ProgramData bytes were read and stored; kept only to read saved operations. */
+export interface JupiterV1ProgramByteEvidence {
     readonly programId: string;
     readonly loader: string;
     readonly programDataAddress: string | null;
@@ -90,7 +107,7 @@ export declare function jupiterV1MaterialDigest(value: Omit<JupiterV1ResolvedMat
 export declare function validateJupiterV1Material(value: unknown): JupiterV1ResolvedMaterial;
 export declare function assertJupiterV1FreshMaterial(material: JupiterV1ResolvedMaterial): void;
 export declare function validateJupiterV1PreparedMaterial(value: unknown): JupiterV1PreparedMaterial;
-/** Complete public ProgramData bytes are chunked below the shared store's 1 MiB per-file cap. */
+/** Materials are chunked below the shared store's 1 MiB per-file cap; byte-pinned historical ones held whole ProgramData. */
 export declare function jupiterV1GasDisplay(execution: JupiterV1ResolvedMaterial): Readonly<Record<string, string>>;
 export declare class SavedJupiterV1MaterialStore extends SecureStateStore {
     private initialized;

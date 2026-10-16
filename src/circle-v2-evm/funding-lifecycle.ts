@@ -54,7 +54,7 @@ export interface CircleFundingLifecyclePorts {
 type Consent = () => void;
 /** Phases whose signed bytes, if any, never crossed the submission fence: resumable with fresh consent (R3). */
 const UNSENT_SIGNING: readonly string[] = ["signing_started", "sealed"];
-interface Authority { readonly ports: CircleFundingLifecyclePorts; readonly binding: string; readonly deadline: number; readonly envelopes: ReadonlyMap<CircleRole, string>; readonly claimed: Set<CircleRole>; active: CircleRole | null; }
+interface Authority { readonly ports: CircleFundingLifecyclePorts; readonly binding: string; readonly deadline: number; readonly envelopes: ReadonlyMap<CircleRole, string>; readonly claimed: Set<CircleRole>; active: CircleRole | null; admitted: boolean; }
 const authorities = new WeakMap<Consent, Authority>();
 const effectGuards = new WeakMap<() => void, { readonly token: Consent; readonly ports: CircleFundingLifecyclePorts; readonly role: CircleRole }>();
 const consentBinding = (op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts) => hashObject({ context: ports.consentContext?.() ?? null, operationId: op.operationId, fingerprint: op.fingerprint, funding: op.funding, feeQuote: op.feeQuote, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
@@ -69,7 +69,7 @@ async function consent(op: CircleFundingOperationV2, role: "source" | "mint" | "
   await ports.approve(op, role, new Date(prompt).toISOString());
   if (ports.now() >= prompt) circleBlocked("consent_expired_after_tty");
   const deadline = Math.min(ports.now() + 60_000, window);
-  const token = () => {}; authorities.set(token, { ports, binding: consentBinding(op, ports), deadline, envelopes: new Map(op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role).map(e => [e.role, hashObject(e.envelope)])), claimed: new Set(), active: null });
+  const token = () => {}; authorities.set(token, { ports, binding: consentBinding(op, ports), deadline, envelopes: new Map(op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role).map(e => [e.role, hashObject(e.envelope)])), claimed: new Set(), active: null, admitted: false });
   return token;
 }
 async function cancellationConsent(op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<() => void> {
@@ -86,6 +86,14 @@ function checkConsent(token: Consent | undefined, op: CircleFundingOperationV2, 
   if (authority === undefined || authority.ports !== ports || authority.binding !== consentBinding(op, ports) || ports.now() >= authority.deadline ||
     effect !== undefined && (authority.active !== effect.role || authority.envelopes.get(effect.role) !== hashObject(snapshotCircleFundingEffect(op, effect).envelope))) circleBlocked("fresh_exact_effect_consent_required");
   return authority;
+}
+/** Consent, then the single owner, policy and conflict admission under the run's held profile, operation, address
+ * and policy locks (BRDG-11). Nothing between it and signing can change those facts, and the consent deadline already
+ * bounds the policy window, so an effect run under this consent does not repeat the admission. */
+async function admittedConsent(op: CircleFundingOperationV2, role: "source" | "mint" | "cleanup", ports: CircleFundingLifecyclePorts, resumeSignedSource = false): Promise<Consent> {
+  const token = await consent(op, role, ports, resumeSignedSource);
+  await ports.assertOwnerPolicyAndConflicts(op, role === "mint" ? "mint" : undefined);
+  checkConsent(token, op, ports).admitted = true; return token;
 }
 async function persist(op: CircleFundingOperationV2, patch: Partial<CircleFundingOperationV2>, reason: string, ports: CircleFundingLifecyclePorts) {
   const next = snapshotCircleFundingOperation(advanceCircle(op, patch, reason, ports.now())); await ports.save(next); return next;
@@ -104,7 +112,7 @@ export async function approveCircleFundingSource(input: CircleFundingOperationV2
   }
   const resumeSigned = op.effects.some(e => (e.role === "approval" || e.role === "burn") && UNSENT_SIGNING.includes(e.phase));
   if (!resumeSigned && ports.now() >= Date.parse(op.expiresAt)) circleBlocked("source_preparation_expired");
-  await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "source", ports, resumeSigned); await ports.assertOwnerPolicyAndConflicts(op); checkConsent(token, op, ports);
+  await ports.assertOwnerPolicyAndConflicts(op); const token = await admittedConsent(op, "source", ports, resumeSigned);
   for (const role of ["approval", "burn"] as const) {
     const effect = op.effects.find(e => e.role === role)!;
     if (["confirmed", "reverted"].includes(effect.phase)) continue;
@@ -127,8 +135,9 @@ export async function executeCircleFundingEffect(input: CircleFundingOperationV2
   const guard = () => { checkConsent(token, op, ports, effect); ports.effectAuthorityGuard?.(op); };
   effectGuards.set(guard, { token: token!, ports, role });
   try {
-    // The owner, policy, conflict and chain preflight run once, immediately before signing, under the run's held locks.
-    guard(); await ports.assertOwnerPolicyAndConflicts(op, role); guard(); await ports.preflight(op, effect); guard();
+    // The owner, policy and conflict admission runs once per consent under the run's held locks; the chain preflight
+    // runs once per effect, immediately before signing.
+    guard(); if (!authority.admitted) { await ports.assertOwnerPolicyAndConflicts(op, role); guard(); } await ports.preflight(op, effect); guard();
     if (effect.phase === "prepared") {
       guard(); op = await persist(op, { effects: updateEffect(op, role, { phase: "signing_started" }), state: role === "mint" ? "mint_unknown" : role === "cleanup" ? "cleanup_required" : "source_unknown" }, `${role}_signing_fence`, ports);
       effect = op.effects.find(e => e.role === role)!; guard();
@@ -163,12 +172,13 @@ export async function approveCircleFundingMint(input: CircleFundingOperationV2, 
     const envelope = await ports.mintEnvelope(op);
     op = await persist(op, { effects: [...op.effects, { role: "mint", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "mint_envelope_frozen", ports);
   }
-  const token = await consent(op, "mint", ports); await ports.assertOwnerPolicyAndConflicts(op, "mint"); checkConsent(token, op, ports);
+  const token = await admittedConsent(op, "mint", ports);
   op = await executeCircleFundingEffect(op, "mint", ports, token); return observeCircleFunding(op, ports);
 }
 export async function observeCircleFunding(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
   let op = snapshotCircleFundingOperation(input); if (op.terminal) return op;
   op = await abandonNeverLanding(op, ports); if (op.terminal) return op;
+  let burnJustObserved: CircleSourceProof | null = null;
   for (const initial of op.effects) {
     let effect = op.effects.find(e => e.role === initial.role)!;
     if (effect.phase === "signing_started" || effect.phase === "unknown" && effect.transactionHash === null) {
@@ -184,13 +194,15 @@ export async function observeCircleFunding(input: CircleFundingOperationV2, port
       op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "reverted", proof }), state: "cleanup_required" }, `${effect.role}_finalized_revert_requires_explicit_cleanup`, ports);
       continue;
     }
+    if (effect.role === "burn") burnJustObserved = proof as CircleSourceProof;
     op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "confirmed", proof }),
       ...(effect.role === "approval" ? { residualAllowanceAtomic: op.funding.amountAtomic } : {}) }, `${effect.role}_canonical_receipt`, ports);
   }
   let freshSource = false, freshDestination = false;
   const burn = op.effects.find(e => e.role === "burn")!;
   if (burn.transactionHash !== null && ["submitted", "unknown", "confirmed", "submission_started"].includes(burn.phase)) {
-    let source = await ports.observeSource(op, op.source !== null);
+    // P2: a burn receipt this pass just proved at inclusion is the same included source proof; it is not re-read.
+    let source = op.source === null && burnJustObserved !== null ? burnJustObserved : await ports.observeSource(op, op.source !== null);
     // A saved INCLUDED burn remains issuer-eligible while its independent finalized head is pending.
     if (source === null && op.source?.finalityTag === "included") source = await ports.observeSource(op, false);
     if (source !== null) {

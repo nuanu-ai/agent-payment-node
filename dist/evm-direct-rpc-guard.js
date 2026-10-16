@@ -12,6 +12,8 @@ export class EvmDirectRpcGuard {
         this.limit = limit;
         this.now = now;
         this.wait = wait;
+        if (!Number.isSafeInteger(limit) || limit < 1)
+            throw new ApnError("APN_RPC_CONFIG", "The direct EVM POST cap must be a positive integer.");
         const coordinator = { coordinate: async (family, work) => {
                 const familyHash = sha256(`rpc-provider-family\0${family}`);
                 return await state.withLocks([`rpc-provider-family:${familyHash}`], async () => await work(await state.loadRpcProviderPacing(familyHash), value => state.writeRpcProviderPacing(familyHash, value), await state.loadRpcProviderCooldown(familyHash), value => state.writeRpcProviderCooldown(familyHash, value)), remainingWaitMs === undefined ? {} : { waitMs: Math.min(5_000, Math.max(0, remainingWaitMs())) });

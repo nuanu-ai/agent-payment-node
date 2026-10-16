@@ -171,8 +171,11 @@ export class RelayDepositEffectService {
             if (effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent")
                 return journal;
             const resumedSeal = effect.phase === "sealed";
+            // P2: bytes signed in this invocation, under these held locks, go out on the nonce and admission just checked.
+            let signedNonce = null;
             if (effect.phase === "pending") {
                 const nonce = await this.revalidate(op, approvalHash);
+                signedNonce = nonce;
                 journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "mark_signing", role: "deposit", marker: randomBytes(32).toString("hex"), at: this.ports.now().toISOString() });
                 const raw = await this.ports.sign(op);
                 const signed = await verifySignedEnvelope(op, raw, undefined, nonce);
@@ -204,7 +207,7 @@ export class RelayDepositEffectService {
                 effect = journal.effects[1];
             }
             if (effect.phase === "sealed") {
-                const nonce = await this.revalidate(op, approvalHash);
+                const nonce = signedNonce ?? await this.revalidate(op, approvalHash);
                 const signed = await this.ports.custody.load(op);
                 if (signed === null || !same(signed.transactionHash, effect.attempt.transactionHash))
                     corrupt("sealed custody missing");

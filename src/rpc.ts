@@ -3,7 +3,7 @@ import { MAX_RPC_BATCH_CALLS, BATCH_READ_METHODS, readOnlyBatchMethod, parseRpcR
 export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, classifyX402LogAvailabilityMessage, acceptRpcHttpBody } from "./rpc-envelope.js";
 export { isPublicIp } from "./network-policy.js";
 import { performance } from "node:perf_hooks";
-import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, rpcString, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
+import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
 import { x402Network } from "./x402-network.js";
 import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import { sha256 } from "./canonical.js";
@@ -12,6 +12,7 @@ import { ApnError } from "./errors.js";
 import { EvmRpc } from "./evm-rpc.js";
 import type { EvmBalanceSnapshot } from "./evm-ports.js";
 import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
+import { directEvmStepBudget } from "./evm-direct-reads.js";
 import type { StateStore } from "./state.js";
 import { parseAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
@@ -35,6 +36,8 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   get observationMetrics() { return rpcObservationSnapshot(this.observationCounters); }
   private readonly x402ChainId: EvmChainId;
   private pinnedAddresses: Promise<readonly PinnedAddress[]> | undefined;
+  /** One eth_chainId per command invocation and endpoint, shared by every bounded or network-selected copy. */
+  private chainIdCell: { value?: Promise<bigint> } = {};
   private readonly totalDeadlineMs: number | undefined;
   private readonly abortSignal: AbortSignal | undefined;
   private directGuard: EvmDirectRpcGuard | undefined;
@@ -53,19 +56,16 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     this.x402ChainId = x402Network(options.x402ChainId).chainId;
   }
 
-  armBnbDirectRpcGuard(): void {
-    this.armEvmDirectRpcGuard();
-  }
-
-  armEvmDirectRpcGuard(): void {
+  /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
+  armEvmDirectRpcGuard(maxPhysicalRequests = 24): void {
     if (this.directGuardState === undefined) throw new ApnError("APN_RPC_CONFIG", "Direct EVM RPC guard state is unavailable.");
     if (this.abortSignal === undefined) {
-      this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState);
+      this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, maxPhysicalRequests);
       return;
     }
     const signal = this.abortSignal;
     const wait = rpcAbortableWait(signal);
-    this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait, () => this.remainingTimeoutMs());
+    this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, maxPhysicalRequests, Date.now, wait, () => this.remainingTimeoutMs());
   }
 
   async seiNativeBalance(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot> {
@@ -83,7 +83,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
       totalDeadlineMs: deadlineAtMs, abortSignal: controller.signal,
       directGuardState: this.directGuardState,
     });
-    bounded.pinnedAddresses = this.pinnedAddresses;
+    bounded.pinnedAddresses = this.pinnedAddresses; bounded.chainIdCell = this.chainIdCell;
     try {
       // DNS validation precedes the first POST and must share the same deadline.
       let onAbort: (() => void) | undefined;
@@ -93,15 +93,15 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
           controller.signal.addEventListener("abort", onAbort, { once: true });
         })]);
       } finally { if (onAbort !== undefined) controller.signal.removeEventListener("abort", onAbort); }
-      bounded.armEvmDirectRpcGuard();
-      return await bounded.evm.prepareSeiNative().balance(address, selection);
+      bounded.armEvmDirectRpcGuard(directEvmStepBudget(1329, "balance"));
+      return await bounded.evm.directReads(1329).balance(address, selection);
     } finally { clearTimeout(timeout); }
   }
 
   /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
   withAbortSignal(signal: AbortSignal): HttpsBaseRpc {
     const selected = new HttpsBaseRpc(this.endpoint.toString(), { abortSignal: signal, x402ChainId: this.x402ChainId });
-    selected.pinnedAddresses = this.pinnedAddresses;
+    selected.pinnedAddresses = this.pinnedAddresses; selected.chainIdCell = this.chainIdCell;
     return selected;
   }
 
@@ -118,7 +118,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
       totalDeadlineMs: performance.now() + milliseconds,
       x402ChainId: this.x402ChainId,
     });
-    bounded.pinnedAddresses = this.pinnedAddresses;
+    bounded.pinnedAddresses = this.pinnedAddresses; bounded.chainIdCell = this.chainIdCell;
     return bounded;
   }
 
@@ -126,20 +126,26 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const selected = new HttpsBaseRpc(this.endpoint.toString(), {
       x402ChainId: chainId, ...(this.totalDeadlineMs === undefined ? {} : { totalDeadlineMs: this.totalDeadlineMs }),
     });
-    selected.pinnedAddresses = this.pinnedAddresses;
+    selected.pinnedAddresses = this.pinnedAddresses; selected.chainIdCell = this.chainIdCell;
     return selected;
   }
 
   async assertX402Chain(chainId: EvmChainId): Promise<{ readonly chainId: EvmChainId; readonly rpcOrigin: string }> {
     if (chainId !== this.x402ChainId) throw new ApnError("APN_CHAIN_MISMATCH", "x402 RPC binding belongs to another network.");
-    await this.evm.assertChain(chainId);
+    if (await this.endpointChainId() !== BigInt(chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
     return { chainId, rpcOrigin: this.rpcOrigin };
   }
 
+  /** Proven once per instance (its IP is pinned); later Base reads in the same invocation do not re-ask. */
   async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
-    const chainId = rpcQuantity(await this.call("eth_chainId", []));
-    if (chainId !== BigInt(CHAIN_ID)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC endpoint is not Base chain ID 8453.");
+    if (await this.endpointChainId() !== BigInt(CHAIN_ID)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC endpoint is not Base chain ID 8453.");
     return { chainId: CHAIN_ID, rpcOrigin: this.rpcOrigin };
+  }
+
+  private async endpointChainId(): Promise<bigint> {
+    const cell = this.chainIdCell;
+    const pending = cell.value ??= this.call("eth_chainId", []).then(rpcQuantity);
+    try { return await pending; } catch (error) { if (cell.value === pending) delete cell.value; throw error; }
   }
 
   async getBalances(address: Address): Promise<BalanceSnapshot> {
@@ -156,29 +162,18 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
 
   async getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence> {
     const block = record(await this.call("eth_getBlockByNumber", ["safe", false]), "safe block");
-    const tag = block.number;
-    const number = rpcQuantity(tag).toString();
-    const hash = rpcHex(block.hash, 32);
+    const number = rpcQuantity(block.number).toString();
+    const hash = nonzeroBytes32(block.hash, "safe block hash");
     const timestamp = rpcQuantity(block.timestamp).toString();
-    const balanceData = `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}`;
-    const [balance, name, version, domainSeparator] = await Promise.all([
-      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: balanceData }, tag]),
-      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: "0x06fdde03" }, tag]),
-      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: "0x54fd4d50" }, tag]),
-      this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data: "0x3644e515" }, tag]),
+    // EIP-1898: both reads are pinned to this exact canonical block, so no header recheck follows them.
+    const pinned = { blockHash: hash, requireCanonical: true }, token = x402Network(this.x402ChainId).token;
+    const [balance, domainSeparator] = await this.batchCall([
+      { method: "eth_call", params: [{ to: token, data: `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}` }, pinned] },
+      { method: "eth_call", params: [{ to: token, data: "0x3644e515" }, pinned] },
     ]);
-    const recheckedBlock = record(await this.call("eth_getBlockByNumber", [tag, false]), "rechecked pinned block");
-    const recheckedNumber = rpcQuantity(recheckedBlock.number).toString();
-    const recheckedHash = rpcHex(recheckedBlock.hash, 32);
-    const recheckedTimestamp = rpcQuantity(recheckedBlock.timestamp).toString();
-    if (recheckedNumber !== number || recheckedHash !== hash || recheckedTimestamp !== timestamp) {
-      throw new ApnError("APN_RPC_PROTOCOL", "RPC pinned block identity changed around the x402 reads.");
-    }
     return {
       address,
       usdcAtomic: rpcUint256Data(balance, "USDC balance"),
-      tokenName: rpcString(name, "token name"),
-      tokenVersion: rpcString(version, "token version"),
       domainSeparator: rpcHex(domainSeparator, 32),
       rpcOriginHash: sha256(this.rpcOrigin),
       observedAt: new Date().toISOString(),
@@ -310,18 +305,19 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
 
   async getX402TransferLogs(input: {
     readonly from: Address;
+    readonly to?: Address;
     readonly fromBlock: string;
     readonly toBlock: string;
   }): Promise<X402TransferLogs> {
     const from = parseAtomic(input.fromBlock);
     const to = parseAtomic(input.toBlock);
     if (from > to || to - from + 1n > 2048n) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer range exceeds the fixed bound.");
-    const fromTopic = `0x${input.from.slice(2).toLowerCase().padStart(64, "0")}`;
+    const fromTopic = `0x${input.from.slice(2).toLowerCase().padStart(64, "0")}`, toTopic = input.to === undefined ? undefined : `0x${input.to.slice(2).toLowerCase().padStart(64, "0")}`;
     const result = await this.callX402Logs([{
       address: x402Network(this.x402ChainId).token,
       fromBlock: `0x${from.toString(16)}`,
       toBlock: `0x${to.toString(16)}`,
-      topics: [TRANSFER_TOPIC, fromTopic],
+      topics: toTopic === undefined ? [TRANSFER_TOPIC, fromTopic] : [TRANSFER_TOPIC, fromTopic, toTopic],
     }]);
     if (result.kind !== "complete") return result;
     if (!Array.isArray(result.value) || result.value.length > MAX_X402_LOGS) {
@@ -331,7 +327,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     for (const log of logs) {
       if (
         log.address.toLowerCase() !== x402Network(this.x402ChainId).token.toLowerCase() || log.topics.length !== 3 ||
-        log.topics[0] !== TRANSFER_TOPIC || log.topics[1] !== fromTopic || log.data.length !== 66 ||
+        log.topics[0] !== TRANSFER_TOPIC || log.topics[1] !== fromTopic || (toTopic !== undefined && log.topics[2] !== toTopic) || log.data.length !== 66 ||
         BigInt(log.blockNumber) < from || BigInt(log.blockNumber) > to
       ) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer log violates the exact filter.");
     }
@@ -428,16 +424,6 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const addresses = await (this.pinnedAddresses ??= this.resolvePublicAddresses());
     const raw = await this.postDirectGuarded(body, addresses, method, beforeSend);
     return parseRpcResultEnvelope(raw, id, method);
-  }
-
-  /** Permit2 preflight's narrow abortable observation surface. */
-  async permit2ReadCall(method: "eth_chainId" | "eth_getBlockByNumber" | "eth_call" | "eth_getProof",
-    params: readonly unknown[], signal: AbortSignal): Promise<unknown> {
-    if (!["eth_chainId", "eth_getBlockByNumber", "eth_call", "eth_getProof"].includes(method)) {
-      throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC method is not a read.");
-    }
-    if (signal.aborted) throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted.");
-    return await this.withAbortSignal(signal).call(method, params);
   }
 
   async batchCall(calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {

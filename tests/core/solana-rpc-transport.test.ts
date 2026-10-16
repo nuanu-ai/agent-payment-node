@@ -351,3 +351,25 @@ test("Solana unsuccessful send HTTP status is bounded evidence and never retried
  let posts=0;const rpc=new SolanaRpc("https://rpc.example",async()=>{posts++;return json({error:"untrusted SECRET"},403);});
  await assert.rejects(rpc.sendTransactionAtStart(["fixture"],()=>{}),error=>{assert.deepEqual((error as any).details,{httpStatus:403});assert.doesNotMatch(JSON.stringify(error),/SECRET/u);return true;});assert.equal(posts,1);
 });
+
+test("one Solana RPC instance proves the mainnet genesis once and answers it from memory afterwards", async () => {
+  const genesis = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+  const methods: string[][] = [];
+  const fetcher = (async (_url: URL, init: { body: string }) => {
+    const body = JSON.parse(init.body) as { id: string; method: string } | { id: string; method: string }[];
+    const items = Array.isArray(body) ? body : [body];
+    methods.push(items.map(item => item.method));
+    const reply = (item: { id: string; method: string }) => ({ jsonrpc: "2.0", id: item.id, result: item.method === "getGenesisHash" ? genesis : 7 });
+    return json(Array.isArray(body) ? items.map(reply) : reply(items[0]!));
+  }) as unknown as typeof fetch;
+  const rpc = new SolanaRpc("https://rpc.example", fetcher);
+  assert.equal(await rpc.call("getGenesisHash", []), genesis);
+  assert.equal(await rpc.call("getGenesisHash", []), genesis);
+  assert.deepEqual(await rpc.batch([{ method: "getGenesisHash", params: [] }, { method: "getBlockHeight", params: [] }]), [genesis, 7n]);
+  assert.deepEqual(await rpc.batch([{ method: "getGenesisHash", params: [] }]), [genesis]);
+  assert.deepEqual(methods, [["getGenesisHash"], ["getBlockHeight"]]);
+  const other = new SolanaRpc("https://rpc.example", (async (_url: URL, init: { body: string }) =>
+    json({ jsonrpc: "2.0", id: (JSON.parse(init.body) as { id: string }).id, result: "not-mainnet" })) as unknown as typeof fetch);
+  assert.equal(await other.call("getGenesisHash", []), "not-mainnet");
+  assert.equal(await other.call("getGenesisHash", []), "not-mainnet", "a foreign genesis is never remembered as proven");
+});

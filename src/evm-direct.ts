@@ -3,8 +3,9 @@ import { encodeFunctionData } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { evmUint, validateEvmAmount, validateEvmAsset, type EvmAsset } from "./evm-asset.js";
-import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel } from "./evm-direct-networks.js";
-import type { EvmBalanceSnapshot, EvmFeeQuote, EvmRpcPort, EvmTransactionInput } from "./evm-ports.js";
+import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, type DirectEvmChainId } from "./evm-direct-networks.js";
+import { directEvmStepBudget, type DirectEvmStep } from "./evm-direct-reads.js";
+import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcPort, EvmTransactionInput } from "./evm-ports.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import { canonicalAddress } from "./wallet-policy.js";
@@ -28,6 +29,18 @@ export interface EvmDirectBinding {
 export function requireEvmRpc(rpc: RpcPort): EvmRpcPort {
   if (rpc.evm === undefined) throw new ApnError("APN_RPC_CONFIG", "RPC adapter does not implement explicit EVM assets.");
   return rpc.evm;
+}
+
+/** The one batched reader every direct EVM transfer uses on every listed network; there is no scalar or per-lane variant. */
+export function requireDirectEvmReads(rpc: RpcPort, chainId: DirectEvmChainId): EvmDirectReads {
+  const reads = requireEvmRpc(rpc).directReads?.(chainId);
+  if (reads === undefined) throw new ApnError("APN_RPC_CONFIG", "Selected RPC does not support batched direct reads.");
+  return reads;
+}
+
+/** Arm the command's POST cap from the step's own read plan; every listed network is capped and paced the same way. */
+export function armDirectEvmStep(rpc: RpcPort, chainId: DirectEvmChainId, step: DirectEvmStep): void {
+  rpc.armEvmDirectRpcGuard?.(directEvmStepBudget(chainId, step));
 }
 
 export function evmTransaction(asset: EvmAsset, from: Address, recipient: Address, amountAtomic: string): EvmTransactionInput {

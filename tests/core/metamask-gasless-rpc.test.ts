@@ -142,7 +142,8 @@ test("static runtime fixture drives fixed EIP-1898 snapshots for all eight regis
 });
 
 test("snapshot shares only an identical safe and head block, retaining distinct pinned reads otherwise", async () => {
-  for (const [head, count, stateReads] of [[100n, 15, 11], [101n, 27, 22]] as const) {
+  // Reads are pinned by block hash with requireCanonical, so no header is rechecked after them (was 15 and 27).
+  for (const [head, count, stateReads] of [[100n, 14, 11], [101n, 25, 22]] as const) {
     const transport = new FakeRpcTransport(8453, { finality: 100n, head });
     const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
     const snapshot = await rpc.snapshot({ owner: vector.owner, delegationHash: vector.delegationHash,
@@ -260,12 +261,14 @@ test("a refused log range is halved within the budget and the redemption window 
 test("log refusals at the narrowest window are classified, bounded and keep only proved progress", async () => {
   const value = intent(block(8453, 100n));
   const cursor = { startBlock: value.initialSnapshot.safeBlock, nextBlockAtomic: "100", previousEndBlock: null };
+  // A range refusal narrows the window; a rate limit stops at once and never re-asks a narrower window.
+  const halved = [2000n, 1000n, 500n, 250n, 125n, 62n], once = [2000n];
   const cases = [
-    ["mm_gasless_rpc_log_range", () => ({ error: { code: -32005, message: "query returned more than 10000 results" } })],
-    ["mm_gasless_rpc_rate_limited", () => ({ status: 429 })],
-    ["mm_gasless_rpc_rate_limited", () => ({ error: { code: -32011, message: "request limit reached" } })],
+    ["mm_gasless_rpc_log_range", () => ({ error: { code: -32005, message: "query returned more than 10000 results" } }), halved],
+    ["mm_gasless_rpc_rate_limited", () => ({ status: 429 }), once],
+    ["mm_gasless_rpc_rate_limited", () => ({ error: { code: -32011, message: "request limit reached" } }), once],
   ] as const;
-  for (const [reason, refuse] of cases) {
+  for (const [reason, refuse, expectedWidths] of cases) {
     const transport = new FakeRpcTransport(8453, { finality: 30_000n, counter: () => 1n, refuseLogs: refuse });
     const observed = await new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport }).observe(value, cursor, null);
     assert.equal(observed.observation.phase, "unavailable", reason); assert.equal(observed.observation.reason, reason);
@@ -273,7 +276,7 @@ test("log refusals at the narrowest window are classified, bounded and keep only
     const widths = transport.calls.filter(call => call.method === "eth_getLogs").map(call => {
       const filter = call.params[0] as Json; return BigInt(filter.toBlock) - BigInt(filter.fromBlock) + 1n;
     });
-    assert.deepEqual(widths, [2000n, 1000n, 500n, 250n, 125n, 62n]);
+    assert.deepEqual(widths, expectedWidths, reason);
   }
   const transient = new FakeRpcTransport(8453, { finality: 30_000n, counter: () => 1n,
     refuseLogs: from => from >= 4100n ? { error: { code: -32000, message: "header not found" } } : undefined });
@@ -487,4 +490,24 @@ test("production snapshot reports SAFE protocol pin mismatch with no endpoint or
   const rpc = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
   await assert.rejects(rpc.snapshot({ owner: vector.owner, delegationHash: vector.delegationHash, grossAtomic: "1000000" }),
     { code: "APN_RPC_PROTOCOL", details: { reason: "mm_gasless_evidence_invalid", evidenceStage: "safe", evidencePredicate: "protocol_code_pin", evidenceMethod: "eth_getCode" } });
+});
+
+test("observation proves a saved operation against its own token, manager, enforcer and code pins (owner rule)", async () => {
+  const { mmObservedDeployment } = await import("../../src/metamask-gasless/recorded.js");
+  const saved = intent(block(8453, 100n)), today = mmRegistry(8453);
+  // A later release moved every pin; the saved operation still names what it was sent with.
+  const moved = { deploymentEvidenceHash: "f".repeat(64), row: { ...today.row, token: "0x1111111111111111111111111111111111111111" as Address,
+    tokenImplementationCodeHash: `0x${"2".repeat(64)}` as Hex, protocol: {
+      manager: { address: "0x3333333333333333333333333333333333333333" as Address, codeHash: `0x${"3".repeat(64)}` as Hex },
+      delegate: today.row.protocol.delegate,
+      limitedCalls: { address: "0x4444444444444444444444444444444444444444" as Address, codeHash: `0x${"4".repeat(64)}` as Hex },
+      exactBatch: { address: "0x5555555555555555555555555555555555555555" as Address, codeHash: `0x${"5".repeat(64)}` as Hex } } } };
+  const observed = mmObservedDeployment(saved, moved);
+  assert.equal(observed.deploymentEvidenceHash, saved.deploymentEvidenceHash);
+  assert.equal(observed.row.token, saved.token); assert.equal(observed.row.protocol.manager.address, saved.relayTo);
+  assert.equal(observed.row.protocol.limitedCalls.address, saved.unsignedDelegation.caveats[0].enforcer);
+  assert.equal(observed.row.protocol.exactBatch.address, saved.unsignedDelegation.caveats[1].enforcer);
+  assert.equal(observed.row.protocol.limitedCalls.codeHash, saved.initialSnapshot.safeState.protocolCodeHashes.limitedCalls);
+  assert.equal(observed.row.tokenImplementationCodeHash, saved.initialSnapshot.safeState.tokenImplementationCodeHash);
+  assert.equal(observed.row.finalityTag, today.row.finalityTag, "chain facts stay the chain's");
 });

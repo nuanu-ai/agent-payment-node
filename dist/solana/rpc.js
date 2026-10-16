@@ -92,6 +92,8 @@ export class SolanaRpc {
     pacer;
     originHash;
     budget;
+    /** Set only after this endpoint answered the mainnet genesis; a different answer is never cached. */
+    genesis;
     constructor(endpoint, fetcher = solanaHttpsFetch, budget, pacer) {
         this.endpoint = endpoint;
         this.fetcher = fetcher;
@@ -105,11 +107,15 @@ export class SolanaRpc {
         return this.endpoint === "https://solana-rpc.publicnode.com" || this.endpoint === "https://solana-rpc.publicnode.com/" ? 8 : 16;
     }
     async call(method, params) {
+        if (method === "getGenesisHash" && this.genesis !== undefined)
+            return this.genesis;
         const id = randomUUID();
         const value = await this.request({ jsonrpc: "2.0", id, method, params }, 1, method === "sendTransaction");
         const record = rpcRecord(value);
         if (!exactKeys(record, ["jsonrpc", "id", "result"]) || record.jsonrpc !== "2.0" || record.id !== id)
             protocolFailure();
+        if (method === "getGenesisHash" && record.result === SOLANA_GENESIS)
+            this.genesis = record.result;
         return record.result;
     }
     /** Guard the actual send transport start after persistent pacing has admitted the POST. */
@@ -127,6 +133,14 @@ export class SolanaRpc {
     async batch(reads) {
         if (reads.length < 1 || reads.length > 8 || reads.some(read => !READ_METHODS.has(read.method)))
             protocolFailure();
+        // The genesis this instance already proved is immutable and its endpoint fixed: answer it without another request.
+        const known = this.genesis;
+        if (known !== undefined && reads.some(read => read.method === "getGenesisHash")) {
+            const remaining = reads.filter(read => read.method !== "getGenesisHash");
+            const fetched = remaining.length === 0 ? [] : await this.batch(remaining);
+            let next = 0;
+            return reads.map(read => read.method === "getGenesisHash" ? known : fetched[next++]);
+        }
         // Public mainnet refuses account methods in JSON-RPC arrays; PublicNode
         // allows only one getMultipleAccounts per array. Single account reads work.
         // Choose compatibility before dispatch; never retry a failed HTTP request.
@@ -155,6 +169,8 @@ export class SolanaRpc {
         }
         if (seen.size !== requests.length)
             protocolFailure();
+        reads.forEach((read, index) => { if (read.method === "getGenesisHash" && results[index] === SOLANA_GENESIS)
+            this.genesis = SOLANA_GENESIS; });
         return results;
     }
     async request(body, logicalCalls, effect, beforePost) {

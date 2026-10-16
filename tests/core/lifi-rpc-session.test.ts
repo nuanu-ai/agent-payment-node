@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
-import { BridgeRpc, RpcProviderScheduler, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
+import { BridgeRpc, BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession, bridgeRpcCall } from "../../src/lifi/rpc.js";
 import { RPC_READ_METHODS, RpcHttpFailure, rpcProviderFamily } from "../../src/lifi/rpc-session.js";
 import { rpcBlockValue, rpcFeeBlockValue } from "../../src/lifi/rpc-batch-codec.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
@@ -667,89 +667,25 @@ test("archive deployment logical batches use sequential three-item chunks with g
   assert.deepEqual(fifteenBodies.map((body) => (JSON.parse(body) as Array<unknown>).length), [3, 3, 3, 3, 3]);
 });
 
-test("Linea opt-in sends pinned deployment code reads as scalar archive POSTs while keeping other reads batched", async () => {
-  const tag = "0x10", address = "0x0000000000000000000000000000000000000001";
-  const posts: Array<{ endpoint: string; rows: Array<{ id: string; method: string; params: readonly unknown[] }>; scalar: boolean }> = [];
-  const transport = { request: async (endpoint: string, _method: string, body: string) => {
-    const parsed = JSON.parse(body) as { id: string; method: string; params: readonly unknown[] } |
-      Array<{ id: string; method: string; params: readonly unknown[] }>;
-    const rows = Array.isArray(parsed) ? parsed : [parsed];
-    posts.push({ endpoint, rows, scalar: !Array.isArray(parsed) });
-    const result = rows.map((row) => ({ jsonrpc: "2.0", id: row.id,
-      result: row.method === "eth_chainId" ? "0xe708" : row.method === "eth_getBlockByNumber" ? block() : "0x1234" }));
-    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? result : result[0]) };
+test("a known three-item batch capability splits one logical batch into paced chunks the read plan counts once", async () => {
+  const posts: Array<{ host: string; rows: number }> = [];
+  const transport = { request: async (url: string, _verb: string, body: string) => {
+    const parsed = JSON.parse(body) as Array<{ id: string; method: string }> | { id: string; method: string };
+    const rows = Array.isArray(parsed) ? parsed : [parsed]; posts.push({ host: new URL(url).host, rows: rows.length });
+    const values = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: row.method === "eth_chainId" ? "0x2105" : "0x1" }));
+    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? values : values[0]) };
   } };
-  const descriptor = bridgeRpcCall(59144, { APN_LINEA_RPC_URL: "https://primary.example",
-    APN_LINEA_ARCHIVE_RPC_URL: "https://archive.example/path" }, { transport });
-  const items = [
-    { method: "eth_chainId", params: [], decoder: String },
-    ...[1, 2, 3].map((n) => ({ method: "eth_getCode", params: [address.slice(0, -1) + n, tag], decoder: String })),
-    { method: "eth_getBlockByNumber", params: [tag, false], decoder: passthrough },
-    { method: "eth_getStorageAt", params: [address, "0x0", tag], decoder: String },
-  ];
-  const off = new RpcReadSession({ wait: async () => {} });
-  await descriptor.sessionBatchCall(off)(items, "archive_deployment");
-  assert.deepEqual(posts.map((post) => post.rows.length), [3, 3]);
-  posts.length = 0;
-  const on = new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, maxHttpRequests: 26, wait: async () => {} });
-  const values = await descriptor.sessionBatchCall(on)(items, "archive_deployment");
-  assert.equal(values.length, 6);
-  assert.deepEqual(posts.map((post) => post.rows.length), [3, 1, 1, 1]);
-  assert.deepEqual(posts.map((post) => post.scalar), [false, true, true, true]);
-  assert.ok(posts.every((post) => post.endpoint === "https://archive.example/path"));
-  assert.deepEqual(posts.slice(1).map((post) => post.rows[0]!.method), ["eth_getCode", "eth_getCode", "eth_getCode"]);
-  assert.ok(posts.slice(1).every((post) => post.rows[0]!.params[1] === tag));
-  assert.equal(on.telemetry().httpRequests, 4);
-  assert.equal(on.telemetry().httpAttempts, 4);
-  assert.deepEqual(on.telemetry().attemptsByEndpointRole, { primary: 0, receipt: 0, archive: 4 });
-  assert.equal(on.telemetry().remainingHttpRequests, 22);
-});
-
-test("Linea scalar code opt-in does not change other chains or general archive batches", async () => {
-  const calls: Array<{ scalar: boolean; rows: Array<{ id: string }> }> = [];
-  const attempt = async (body: string) => {
-    const parsed = JSON.parse(body) as { id: string } | Array<{ id: string }>;
-    const rows = Array.isArray(parsed) ? parsed : [parsed];
-    calls.push({ scalar: !Array.isArray(parsed), rows });
-    const responses = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: "0x1" }));
-    return Array.isArray(parsed) ? responses : responses[0];
-  };
-  const items = [0, 1, 2].map((index) => ({ method: "eth_getCode", params: [`0x${index}`, "0x10"], decoder: String, batchAttempt: attempt }));
-  const session = new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, wait: async () => {} });
-  await session.readArchiveDeploymentBatch("https://archive.example", 1, items);
-  await session.readBatch("https://archive.example", 59144, items);
-  assert.deepEqual(calls.map((call) => call.scalar), [false, false]);
-});
-
-test("Linea scalar code reads have no retry and respect the physical request ceiling", async () => {
-  const items = (attempt: (body: string) => Promise<unknown>) => [
-    { method: "eth_chainId", params: [], decoder: String, batchAttempt: attempt },
-    { method: "eth_getCode", params: ["0x0000000000000000000000000000000000000001", "0x10"], decoder: String, batchAttempt: attempt },
-    { method: "eth_getCode", params: ["0x0000000000000000000000000000000000000002", "0x10"], decoder: String, batchAttempt: attempt },
-  ];
-  let calls = 0;
-  const failure = async (body: string) => {
-    calls += 1;
-    const parsed = JSON.parse(body) as { id: string } | Array<{ id: string }>;
-    if (!Array.isArray(parsed)) throw new RpcHttpFailure("eth_getCode", 503);
-    return parsed.map((row) => ({ jsonrpc: "2.0", id: row.id, result: "0xe708" }));
-  };
-  await assert.rejects(new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, wait: async () => {} })
-    .readArchiveDeploymentBatch("https://archive.example", 59144, items(failure)), { code: "APN_RPC_PROTOCOL" });
-  assert.equal(calls, 2);
-  calls = 0;
-  const success = async (body: string) => {
-    calls += 1;
-    const parsed = JSON.parse(body) as { id: string } | Array<{ id: string }>;
-    const rows = Array.isArray(parsed) ? parsed : [parsed];
-    const responses = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: "0x1" }));
-    return Array.isArray(parsed) ? responses : responses[0];
-  };
-  const capped = new RpcReadSession({ lineaArchiveDeploymentScalarCode: true, maxHttpRequests: 2, wait: async () => {} });
-  await assert.rejects(capped.readArchiveDeploymentBatch("https://archive.example", 59144, items(success)),
-    { code: "APN_RPC_BUDGET_EXCEEDED" });
-  assert.equal(calls, 2);
-  assert.equal(capped.telemetry().httpAttempts, 2);
+  const items = [{ method: "eth_chainId", params: [], decoder: String },
+    ...Array.from({ length: 6 }, (_, index) => ({ method: "eth_getBalance", params: [`0x${String(index + 1).padStart(40, "0")}`, "latest"],
+      cachePolicy: "none" as const, decoder: String }))];
+  for (const [url, shape] of [["https://base.drpc.org", [3, 3, 1]], ["https://mainnet.base.org", [7]]] as const) {
+    posts.length = 0;
+    const budget = new BridgeRpcPhysicalBudget(1), session = new RpcReadSession({ maxHttpRequests: 1, maxHttpAttempts: 1, wait: async () => {}, physicalBudget: budget });
+    const values = await bridgeRpcCall(8453, { APN_BASE_RPC_URL: url }, { transport }).sessionBatchCall(session)(items);
+    assert.equal(values.length, 7); assert.deepEqual(posts.map((post) => post.rows), shape);
+    assert.equal(session.telemetry().httpRequests, 1); assert.equal(budget.remaining(), 0);
+    assert.equal(session.telemetry().attemptsByEndpointRole.primary, shape.length);
+  }
 });
 
 test("archive deployment HTTP 500 is terminal after one physical request", async () => {
@@ -941,7 +877,7 @@ test("identical batches singleflight; order and endpoint isolate keys; rejection
   await session.readBatch("https://rpc.example", 1, [row]); assert.equal(rejected, 2);
 });
 
-test("Base source C1/C2 pins state to numeric block while pending stays pending and later economics are local", async () => {
+test("Base source account is one batch at the moving head while pending stays pending and later economics are local", async () => {
   const owner = `0x${"11".repeat(20)}` as `0x${string}`, token = BRIDGE_ASSET_REGISTRY[8453].tokens.find((row) => row.symbol === "USDC")!.address,
     spender = `0x${"33".repeat(20)}` as `0x${string}`, hash = `0x${"44".repeat(32)}`;
   const header = { number: "0x100", hash, timestamp: "0x10", baseFeePerGas: "0x2", transactions: [] };
@@ -949,9 +885,10 @@ test("Base source C1/C2 pins state to numeric block while pending stays pending 
   const attempt = async (body: string) => {
     transportCalls += 1; const requests = JSON.parse(body) as Array<{ id: string; method: string; params: readonly unknown[] }>; seen.push(requests);
     return requests.map((request) => {
-      if (transportCalls === 2 && request.method !== "eth_getTransactionCount" || transportCalls === 2 && request.params[1] !== "pending") {
-        const tag = request.method === "eth_getBlockByNumber" ? request.params[0] : request.method === "eth_estimateGas" ? request.params[1] : request.params.at(-1);
-        assert.equal(tag, "0x100");
+      // Every state read targets the head the transaction executes against; the pending nonce keeps its own tag.
+      if (request.method !== "eth_chainId" && request.method !== "eth_maxPriorityFeePerGas") {
+        const tag = request.method === "eth_getBlockByNumber" ? request.params[0] : request.params.at(-1);
+        assert.equal(tag, request.method === "eth_getTransactionCount" && request.params[1] === "pending" ? "pending" : "latest");
       }
       let result: unknown;
       if (request.method === "eth_chainId") result = "0x2105";
@@ -973,14 +910,12 @@ test("Base source C1/C2 pins state to numeric block while pending stays pending 
   const planned = { chainId: 8453 as const, from: owner, to: token, data: "0x" as const, valueAtomic: "0", gasLimitAtomic: "0" };
   const account = await rpc.account(owner, spender, token, [planned]);
   assert.equal(account.block.numberAtomic, "256"); assert.equal(account.latestNonceAtomic, "7"); assert.equal(account.pendingNonceAtomic, "7");
-  assert.equal(seen[0]!.some((row) => row.method === "eth_call"), false);
-  const feeCalls = seen[1]!.filter((row) => row.method === "eth_call" &&
+  const feeCalls = seen[0]!.filter((row) => row.method === "eth_call" &&
     ["0x420000000000000000000000000000000000000f", "0x4200000000000000000000000000000000000015"]
       .includes(String((row.params[0] as { to: unknown }).to).toLowerCase()));
-  assert.equal(feeCalls.length, 3); assert.ok(feeCalls.every((row) => row.params[1] === "0x100"));
-  assert.equal(seen[1]!.find((row) => row.method === "eth_getTransactionCount" && row.params[1] === "pending")!.params[1], "pending");
+  assert.equal(feeCalls.length, 3); assert.ok(feeCalls.every((row) => row.params[1] === "latest"));
   assert.equal((await rpc.estimate(planned)).gasLimitAtomic, "65536"); await rpc.prices();
   const quote = (await rpc.feeQuotes([{ economics: { nonceAtomic: "7", gasLimitAtomic: "65536", maxFeePerGasAtomic: "5", maxPriorityFeePerGasAtomic: "1", maximumGasCostAtomic: "327680" } }]))[0]!;
   assert.equal(quote.blockNumberAtomic, "256"); assert.equal(quote.blockHash, hash);
-  assert.equal(transportCalls, 2); assert.equal(session.telemetry().httpRequests, 2); assert.equal(session.telemetry().batchCount, 2);
+  assert.equal(transportCalls, 1); assert.equal(session.telemetry().httpRequests, 1); assert.equal(session.telemetry().batchCount, 1);
 });

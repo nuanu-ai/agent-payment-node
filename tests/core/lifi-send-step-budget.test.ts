@@ -7,47 +7,50 @@ import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { temporaryState } from "./helpers.js";
 import { approvalSafe, effects, invocation } from "./lifi-send-step-helpers.js";
 
-for (const receipt of ["primary", "fallback", "batch", "scalar"] as const) test(`Base USDC to Arbitrum Across send step signs and sends with derived headroom (${receipt} receipt)`, async (t) => {
+for (const receipt of ["primary", "fallback", "batch", "scalar"] as const) test(`Base USDC to Arbitrum Across send step signs after one POST and sends at the third (${receipt} receipt)`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const { s, op } = await approvalSafe(temporary.root), limit = bridgeSendStepPostBudget(op, 3);
-  assert.equal(limit, 24 + BRIDGE_SEND_STEP_RETRY_POSTS);
+  const { s, op } = await approvalSafe(temporary.root);
+  assert.equal(bridgeSendStepPostBudget(op), 3 + BRIDGE_SEND_STEP_RETRY_POSTS);
   const run = invocation(s, op, receipt, 0), sent = await run.execution.resume(op);
-  // Guard 21 (two safe heads, 10 Base and 7 Arbitrum deployment chunks, two account batches), seal, guard 2, send.
-  assert.deepEqual(run.seals, [21]); assert.equal(run.sendPost(), 24); assert.equal(run.chain.sent.length, 1);
+  // Guard 1 (source check, account, fee inputs and the bridge simulation in one primary batch), seal, account re-check, send.
+  assert.deepEqual(run.seals, [1]); assert.equal(run.sendPost(), 3); assert.equal(run.chain.sent.length, 1);
+  assert.ok(run.chain.posts.every((post) => post.role === "primary" || post.role === "receipt"));
   assert.equal(sent.effects[1]!.submissionAttempts, 1); assert.equal(sent.terminal, false);
-  // Four further retried POSTs before the send still fit; the 0.5.40 cap of 24 leaves the signed bridge unsent after one.
   const fresh = async () => { const state = await temporaryState(); t.after(state.cleanup); return await approvalSafe(state.root); };
+  // Retried POSTs earlier in the invocation still leave the step room to sign and send.
   const retried = await fresh(), late = invocation(retried.s, retried.op, receipt, BRIDGE_SEND_STEP_RETRY_POSTS);
-  assert.equal((await late.execution.resume(retried.op)).effects[1]!.submissionAttempts, 1); assert.equal(late.sendPost(), 24);
-  const old = await fresh(), edge = invocation(old.s, old.op, receipt, 1, { stepBudget: false });
-  const sealed = await edge.execution.resume(old.op);
-  assert.deepEqual(effects(sealed)[1], ["bridge", "sealed", 0]); assert.equal(edge.chain.sent.length, 0); assert.equal(edge.physical.remaining(), 0);
+  assert.equal((await late.execution.resume(retried.op)).effects[1]!.submissionAttempts, 1); assert.equal(late.sendPost(), 3);
+  // With only the guard's POST and one more left, nothing is signed: the re-check and the send must both fit after sealing.
+  const edge = await fresh(), tight = invocation(edge.s, edge.op, receipt, bridgeInvocationPostBudget(edge.op) - 2);
+  const unsigned = await tight.execution.resume(edge.op);
+  assert.deepEqual(effects(unsigned)[1], ["bridge", "unsealed", 0]); assert.deepEqual(tight.seals, []); assert.equal(tight.chain.sent.length, 0);
+  const room = await fresh(), exact = invocation(room.s, room.op, receipt, bridgeInvocationPostBudget(room.op) - 3);
+  assert.equal((await exact.execution.resume(room.op)).effects[1]!.submissionAttempts, 1); assert.equal(exact.physical.remaining(), 0);
 });
 
-test("an earlier exhausted send-step budget refuses before signing and a fresh invocation sends", async (t) => {
+test("an earlier exhausted invocation refuses before signing and a fresh invocation sends", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const { s, op } = await approvalSafe(temporary.root), limit = bridgeInvocationPostBudget(op, 3);
-  for (const spent of [limit - 10, limit - 21]) {
-    const run = invocation(s, op, "scalar", spent), refused = await run.execution.resume(op);
-    assert.deepEqual(effects(refused), [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]);
-    assert.equal(refused.terminal, false); assert.equal(refused.failure, null);
-    assert.deepEqual(run.seals, []); assert.equal(run.chain.sent.length, 0); assert.equal(run.physical.remaining(), 0);
-  }
+  const { s, op } = await approvalSafe(temporary.root), limit = bridgeInvocationPostBudget(op);
+  const run = invocation(s, op, "scalar", limit), refused = await run.execution.resume(op);
+  assert.deepEqual(effects(refused), [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]);
+  assert.equal(refused.terminal, false); assert.equal(refused.failure, null);
+  assert.deepEqual(run.seals, []); assert.equal(run.chain.sent.length, 0); assert.equal(run.chain.posts.length, 0);
   const fresh = invocation(s, op, "scalar", 0), sent = await fresh.execution.resume(op);
-  assert.equal(sent.effects[1]!.submissionAttempts, 1); assert.equal(fresh.sendPost(), 24); assert.equal(fresh.chain.sent.length, 1);
+  assert.equal(sent.effects[1]!.submissionAttempts, 1); assert.equal(fresh.sendPost(), 3); assert.equal(fresh.chain.sent.length, 1);
 });
 
 test("bridge service caps the post-approval send invocation at its derived step plus observation sessions", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const { s, op } = await approvalSafe(temporary.root); s.rpcSessions.length = 0;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: op.operationId }); assert.equal(resumed.ok, true, resumed.error?.message);
-  // Send step 28 plus source 19, destination 14 and residual 2: one observation-only resume can no longer starve its destination read.
-  assert.equal(s.rpcSessions[0]!.physicalBudget!.remaining(), bridgeInvocationPostBudget(op, 3));
-  assert.equal(bridgeInvocationPostBudget(op, 3), 28 + 19 + 14 + 2);
-  assert.equal(bridgeInvocationPostBudget({ ...op, effects: op.effects.map((e) => ({ ...e, submissionAttempts: 1 as const })) }, 3), 19 + 14 + 2);
+  // Send step 7 (guard 1, re-check 1, send 1, headroom 4) plus source 18, destination 6 and residual 2.
+  assert.equal(s.rpcSessions[0]!.physicalBudget!.remaining(), bridgeInvocationPostBudget(op));
+  assert.equal(bridgeInvocationPostBudget(op), 7 + 18 + 6 + 2);
+  assert.equal(bridgeInvocationPostBudget({ ...op, effects: op.effects.map((e) => ({ ...e, submissionAttempts: 1 as const })) }), 18 + 6 + 2);
+  assert.equal(bridgeInvocationPostBudget({ ...op, terminal: true }), 0);
 });
 
-test("every admitted route's derived send step, consent refresh and retry headroom fit the command session caps", () => {
+test("every admitted route's derived send step is a handful of primary POSTs", () => {
   const steps: number[] = [];
   for (const chainId of [1, 8453, 42161] as const) for (const asset of [BRIDGE_ASSET_REGISTRY[chainId].nativeCoin, ...BRIDGE_ASSET_REGISTRY[chainId].tokens]) {
     for (const peer of asset.peers) for (const tool of ["across", "stargateV2"] as const) {
@@ -57,9 +60,12 @@ test("every admitted route's derived send step, consent refresh and retry headro
           toToken: asset.kind === "native" ? BRIDGE_ZERO_ADDRESS : bridgePeerToken(asset, peer).address };
         bridgeDeployment(chainId, peer, tool, request.fromToken); bridgeDeployment(peer, chainId, tool, request.toToken);
       } catch { continue; }
-      const reads = bridgeSendStepPosts(request, tool, { consent: true, retained: null }, 3) - 1;
-      assert(reads <= 28 && reads + BRIDGE_SEND_STEP_RETRY_POSTS <= 30, `${chainId}->${peer} ${tool}: ${reads}`); steps.push(reads + 1);
+      const { fromToken: _source, ...route } = request;
+      steps.push(bridgeSendStepPosts(route, tool, { consent: true, effects: asset.kind === "native" ? 1 : 2 }));
     }
   }
-  assert.equal(steps.length, 25); assert.equal(Math.max(...steps), 26);
+  // Token routes: guard before and after consent, re-check, send, then the bridge's guard, re-check and send. The BNB
+  // composite destination adds its routing check to each full guard.
+  assert.equal(steps.length, 25); assert.equal(Math.max(...steps), 7); assert.equal(Math.min(...steps), 4);
+  assert.equal(bridgeSendStepPosts({ fromChainId: 1, toChainId: 56, toToken: BRIDGE_ZERO_ADDRESS }, "across", { consent: true, effects: 1 }), 6);
 });

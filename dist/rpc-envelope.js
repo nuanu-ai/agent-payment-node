@@ -51,6 +51,10 @@ export function parseRpcBatchResultEnvelope(raw, ids) {
     catch {
         throw new ApnError("APN_RPC_PROTOCOL", "RPC response is not strict JSON.");
     }
+    // A single object answering an array request is an endpoint that does not take JSON-RPC batches; say so by name.
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        throw new ApnError("APN_RPC_PROTOCOL", "The RPC endpoint answered a JSON-RPC batch with a single response; use an endpoint that accepts batches.", { reason: "rpc_batch_unsupported" });
+    }
     if (!Array.isArray(parsed) || parsed.length < ids.length || parsed.length > MAX_RPC_BATCH_ENVELOPES) {
         throw new ApnError("APN_RPC_PROTOCOL", "RPC batch response count is invalid.");
     }

@@ -165,7 +165,7 @@ export class JupiterV1ExecutionBindingStore extends SecureStateStore {
         await this.ready();
         const body = { schemaVersion: "apn.jupiter-v1-prepared-owner.v1", operationId: op.operationId, quoteHash: op.quote.quoteHash,
             materialDigest: material.execution.materialDigest, accountBindingHash: admission.accountBindingHash, policyDigest: op.policyDigest,
-            activationDigest: admission.activationDigest, runtimeCap: { authority: "runtime_cap", logicalPerStage: 64, cumulative: 192 }, maximumNativeExpenseLamports: material.execution.maximumNativeExpenseLamports };
+            activationDigest: admission.activationDigest, maximumNativeExpenseLamports: material.execution.maximumNativeExpenseLamports };
         const record = { ...body, preparedHash: domainHash("apn.jupiter-v1-prepared-owner.v1", canonicalJson(body)) };
         await this.ensureDirectory(`jupiter-v1-prepared/${op.ownerProfileHash}`);
         const path = `jupiter-v1-prepared/${op.ownerProfileHash}/${op.operationId}.json`;
@@ -180,8 +180,9 @@ export class JupiterV1ExecutionBindingStore extends SecureStateStore {
         const value = await this.readJson(`jupiter-v1-prepared/${op.ownerProfileHash}/${op.operationId}.json`);
         if (!isPlainRecord(value) || value.operationId !== op.operationId || value.quoteHash !== op.quote.quoteHash || value.materialDigest !== material.execution.materialDigest ||
             value.accountBindingHash !== admission.accountBindingHash || value.policyDigest !== op.policyDigest || value.activationDigest !== admission.activationDigest ||
-            value.maximumNativeExpenseLamports !== material.execution.maximumNativeExpenseLamports || canonicalJson(value.runtimeCap) !== canonicalJson({ authority: "runtime_cap", logicalPerStage: 64, cumulative: 192 }))
+            value.maximumNativeExpenseLamports !== material.execution.maximumNativeExpenseLamports)
             corrupt();
+        // Records of APN 0.5.42 and earlier also hold the retired durable read cap; their own hash still binds it (R2).
         const { preparedHash, ...body } = value;
         if (preparedHash !== domainHash("apn.jupiter-v1-prepared-owner.v1", canonicalJson(body)))
             corrupt();
@@ -268,7 +269,7 @@ export class JupiterV1LocalSigner {
             corrupt();
         const lines = detached(await jupiterV1ApprovalScreen(material, intent));
         const screenHash = domainHash("apn.jupiter-v1-native-tty.v1", canonicalJson({ operationId: operation.operationId, quote: operation.quote, owner,
-            admission, materialDigest: material.execution.materialDigest, intent, lines, runtimeCap: { logicalPerStage: 64, cumulative: 192, authority: "runtime_cap" } }));
+            admission, materialDigest: material.execution.materialDigest, intent, lines }));
         await exactChainConsent(lines, approvalCode("swap", operation.operationId, screenHash), intent.deadline, {});
         const after = await this.#operations.loadAny(operation.operationId);
         if (after === null || canonicalJson(after) !== canonicalJson(operation))

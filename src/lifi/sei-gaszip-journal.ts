@@ -23,8 +23,8 @@ export function validateSeiFunding(value: unknown): SeiFundingRecord {
   if(r.schemaVersion!=="apn.sei-gaszip-operation.v1" || hashObject(body)!==integrityHash) seiFail("record_integrity");
   if(r.activationDigest!==undefined)stateIdentifier(r.activationDigest,"GasZip policy activation");
   for(const s of [r.operationId,r.profileHash,r.idempotencyHash,r.requestHash,r.policyDigest,r.quoteDigest]) stateIdentifier(s,"GasZip record identity");
-  if(r.profileHash!==r.owner.profileHash || r.profile!==r.owner.profile || seiUint(r.amountAtomic)<=0n || seiUint(r.amountAtomic)>SEI_FUNDING.maximumAmount ||
-    seiUint(r.maximumFeeAtomic)>SEI_FUNDING.maximumFee || seiUint(r.minimumOutputAtomic)<SEI_FUNDING.minimumOutput ||
+  if(r.profileHash!==r.owner.profileHash || r.profile!==r.owner.profile || seiUint(r.amountAtomic)<=0n ||
+    seiUint(r.maximumFeeAtomic)<=0n || seiUint(r.minimumOutputAtomic)<=0n ||
     seiUint(r.quoteExpectedAtomic)<seiUint(r.minimumOutputAtomic) || !Number.isFinite(Date.parse(r.expiresAt)) || !Number.isSafeInteger(r.policyRevision) || r.policyRevision<1) seiFail("record_terms");
   seiHash(r.plan.blockHash); for(const x of [r.plan.nonce,r.plan.gas,r.plan.maxFee,r.plan.tip,r.plan.l1FeeUpper,r.plan.operatorFeeUpper,r.plan.feeUpper]) seiUint(x);
   if(seiUint(r.plan.feeUpper)!==seiUint(r.plan.gas)*seiUint(r.plan.maxFee)+seiUint(r.plan.l1FeeUpper)+seiUint(r.plan.operatorFeeUpper) ||

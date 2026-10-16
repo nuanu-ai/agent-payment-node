@@ -6,6 +6,7 @@ import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
 import type { RelayUnsignedPrepareService, RelayPreparePorts } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService, RelayPreflightPorts } from "./relay/preflight.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
+import type { RelayApprovalInclusionWait } from "./relay/source-runtime.js";
 import type { RelayObserveService } from "./relay/observe.js";
 import type { RelayBaseObserveService } from "./relay/base-observe.js";
 import type { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
@@ -60,6 +61,8 @@ export interface RuntimeFactoryOptions {
   readonly permit2PreflightPorts?: Permit2PreflightPorts;
   /** Synthetic CLI test seam; source runtime still owns confirmation, pacing, and source effect guards. */
   readonly relayExecuteTransport?: Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
+  /** Synthetic CLI test seam for the bounded in-run approval inclusion wait; production uses RELAY_APPROVAL_INCLUSION_WAIT. */
+  readonly relayApprovalInclusionWait?: RelayApprovalInclusionWait;
   readonly relayExecuteTtyOptions?: TtyTransferApprovalOptions;
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreparePorts?: RelayPreparePorts;

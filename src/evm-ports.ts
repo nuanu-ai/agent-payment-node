@@ -39,29 +39,11 @@ export interface EvmTransactionInput {
 }
 
 export interface EvmRpcPort {
-  /** Optional, command-scoped direct prepare read grouping. */
-  prepareLineaNative?(): EvmNativePrepareReads;
-  prepareSeiNative?(): EvmNativePrepareReads;
-  prepareUnichainNative?(): EvmNativePrepareReads;
-  prepareUnichainUsdc?(): EvmNativePrepareReads;
-  preparePolygonUsdc?(): EvmNativePrepareReads;
-  prepareBnbNative?(): EvmNativePrepareReads;
-  prepareEthereumNative?(): EvmNativePrepareReads;
-  prepareEthereumUsdc?(): EvmNativePrepareReads;
-  prepareEthereumWeth?(): EvmNativePrepareReads;
-  prepareBaseWeth?(): EvmNativePrepareReads;
-  prepareBaseUsdc?(): EvmNativePrepareReads;
-  prepareBaseNative?(): EvmNativePrepareReads;
-  prepareArbitrumNative?(): EvmNativePrepareReads;
-  prepareArbitrumUsdt0?(): EvmNativePrepareReads;
-  prepareArbitrumUsdc?(): EvmNativePrepareReads;
-  ethereumNativeFundingReads?(): EvmNativePrepareReads;
-  ethereumUsdcFundingReads?(): EvmNativePrepareReads;
-  ethereumWethFundingReads?(): EvmNativePrepareReads;
-  baseWethFundingReads?(): EvmNativePrepareReads;
-  baseUsdcFundingReads?(): EvmNativePrepareReads;
-  arbitrumUsdt0FundingReads?(): EvmNativePrepareReads;
-  arbitrumUsdcFundingReads?(): EvmNativePrepareReads;
+  /**
+   * One direct transfer step's reads on the selected network: one POST for balances, one for nonce and estimate,
+   * and one for the OP-stack oracle fees. The endpoint's chain identity rides in its first POST of the invocation.
+   */
+  directReads?(chainId: DirectEvmChainId): EvmDirectReads;
   assertChain(chainId: DirectEvmChainId): Promise<void>;
   balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
   nonce(chainId: DirectEvmChainId, address: Address, tag: "pending" | "latest"): Promise<string>;
@@ -77,7 +59,7 @@ export interface EvmRpcPort {
 export interface EvmUnlandedEvidence { readonly finalizedNonce: string; readonly receiptFound: boolean; readonly transactionKnown: boolean }
 export type EvmRpcCall =(method: string, params: readonly unknown[], beforeSend?: () => Promise<void>) => Promise<unknown>;
 export type EvmRpcBatchCall = (calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]) => Promise<readonly unknown[]>;
-export interface EvmNativePrepareReads {
+export interface EvmDirectReads {
   balance(address: Address, selection: EvmAssetSelection): Promise<EvmBalanceSnapshot>;
   nonceEstimate(address: Address, transaction: EvmTransactionInput): Promise<{ readonly nonce: string; readonly estimated: FeeEstimate }>;
   feeQuote(economics: Economics): Promise<EvmFeeQuote>;

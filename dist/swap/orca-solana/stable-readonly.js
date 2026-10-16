@@ -9,13 +9,12 @@ import { ORCA_SOLANA_CHAIN, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, TOKEN_PROGRAM, USD
 export const ORCA_STABLE_POOL = "4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4";
 export const ORCA_STABLE_VAULT_A = "4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL";
 export const ORCA_STABLE_VAULT_B = "4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9";
-export const ORCA_STABLE_FEE_RATE = 100;
 export function orcaStableInventory() {
     return { chain: ORCA_SOLANA_CHAIN, mode: "read_only", admitted: false, signable: false, executable: false,
         ownerBalanceVerified: false, tokenAccountVerified: false, fundingVerified: false, feesVerified: false,
         pool: ORCA_STABLE_POOL, program: WHIRLPOOL_PROGRAM, config: WHIRLPOOLS_CONFIG,
         sourceMint: USDC_MINT, destinationMint: SOLANA_USDT, vaultA: ORCA_STABLE_VAULT_A, vaultB: ORCA_STABLE_VAULT_B,
-        tickSpacing: 1, feeRate: ORCA_STABLE_FEE_RATE, direction: "USDC_to_USDT_exact_input" };
+        tickSpacing: 1, feeRate: "read_from_pool_at_quote", direction: "USDC_to_USDT_exact_input" };
 }
 export async function quoteOrcaStableReadOnly(rpc, request) {
     const amount = request.amountAtomic;
@@ -50,7 +49,7 @@ export async function quoteOrcaStableReadOnly(rpc, request) {
     const minimum = (BigInt(swap.amountOutAtomic) * BigInt(10_000 - request.slippageBps) + 9999n) / 10000n;
     if (minimum <= 0n)
         blocked("Minimum output is zero.", "orca_output_floor");
-    return { ...orcaStableInventory(), slot: read.slot.toString(), sourceReserveAtomic: sourceReserve.toString(),
+    return { ...orcaStableInventory(), feeRate: pool.feeRate, slot: read.slot.toString(), sourceReserveAtomic: sourceReserve.toString(),
         destinationReserveAtomic: destinationReserve.toString(), amountInAtomic: amount,
         expectedOutputAtomic: swap.amountOutAtomic, minimumOutputAtomic: minimum.toString(), feeAtomic: swap.feeAtomic,
         slippageBps: request.slippageBps, priceImpactBps: swap.priceImpactBps,
@@ -64,8 +63,7 @@ function pinnedPool(account) {
         pool.vaultA !== ORCA_STABLE_VAULT_A || pool.vaultB !== ORCA_STABLE_VAULT_B || pool.tickSpacing !== 1 ||
         pool.feeTierIndexSeed !== 1)
         blocked("Stable Whirlpool identity changed.", "orca_pool_pin_drift");
-    if (pool.feeRate !== ORCA_STABLE_FEE_RATE)
-        blocked("Stable Whirlpool fee changed.", "orca_pool_fee_drift");
+    // No fee-rate pin (SWAP-18): the swap math prices pool.feeRate from this same read.
     return pool;
 }
 function vaultAmount(account, mint) {

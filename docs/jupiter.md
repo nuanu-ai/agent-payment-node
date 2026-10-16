@@ -116,7 +116,7 @@ The V1 guard binds the official program identities, runtime executable bytes, ra
 
 The signer owns a canonical `ChainAccountStore`. It checks the same operation, owner, public account, envelope and active policy before TTY approval and before normal Keychain/decryption/signing. The exact fresh read material and simulation are saved as content-hashed chunks before signing. A public signature marker and encrypted exact signed bytes precede the fsynced first-send claim. The sender consumes that claim under the operation lock before one `sendTransaction` with `maxRetries: 0`. Crashes, transport ambiguity, missing status and blockhash expiry retain `unknown_finality`; status never signs, resends, requotes or opens wallet secrets.
 
-The root-approved runtime cap is 64 logical network attempts for quote (including official quote/build HTTP and RPC), 64 for execution and 64 for observation, at most 192 for one operation. Preparation reads local state. Failed attempts count before transport; execution and observation counters survive restarts. This is a `runtime_cap`, not a field in the owner's asset policy. The approved maximum native expense is 6,000,000 lamports including input, rent, base and priority fees; each live frozen build still needs its own fee proof.
+Each command's Solana reads are bounded by that command's own physical request budget, derived from its read plan (`src/swap/solana-read-plan.ts`: quote 15, approve and execute 19, status 4, plus 2 of headroom), and by persistent per-provider pacing. No read budget is stored or carried across commands (APN 0.5.43); the stage and cumulative caps of earlier releases are retired.
 
 Tony waived CI for this task. Local implementation and fixture tests do not establish paid acceptance. The historical September rows retain their original identifiers, titles and statuses. A fresh exact owner policy, real foreground approval, actual first send and finalized receipt remain required before the generic Jupiter row can close. The saved 7 October diagnostic build is expired and cannot be used for live signing.
 
@@ -400,3 +400,41 @@ The Orca keyless quote did simulate the same Whirlpool bytes on mainnet. Each
 lane still requires a fresh normal quote, complete program and account reads,
 exact-message simulation, exact active owner admission and genuine foreground
 approval before a single send.
+
+## Program authority pins and one route per pool (APN 0.5.43)
+
+Owner decision: Jupiter no longer pins executable bytes. Each upgradeable
+program is pinned by its ProgramData address and upgrade authority, read from
+45-byte loader headers: JUP6 `4Ec7ZxZS6Sbdg5UGSLHbAnM7GQHp2eFd4KYWRexAipQT` / authority
+`CvQZZ23qYDWF2RUpxYJ8y9K4skmuvYEEjH7fK58jtipQ`, Whirlpool `CtXfPzz36dH5Ws4UYKZvrQ1Xqzn42ecDW6y8NKuiN8nD` /
+`GwH3Hiv5mACLX3ufTw1pFsrhSPon5tdw252DBs4Rx4PV`, SPL Token `3gvYRKWyXRR9xKWe1ZjPhLY5ZJRN7KDB4rFZFGoJfFk2`
+with no authority. ATA and Memo (BPFLoader2), System and Compute Budget
+(native) are pinned by their loader. A new deployment by the same authority is
+accepted; another authority refuses with `solana_program_authority_changed`.
+There is no upgrade cooldown: the exact-message simulation against the
+programs as deployed, the exact compiled accounts and privileges, the encoded
+minimum output and the finalized receipt checks carry the safety.
+
+The twelve byte-pinned generations (four pools × 899161, 099da3, c422b2)
+collapse into one current route per pool:
+
+| Route | Mechanism digest |
+| --- | --- |
+| `whirlpool-v1-83-sol-usdc-authority` | `661c34724fb8d84d21077056341f1d38725f106eecb56253d6f31eca1cc4303e` |
+| `whirlpool-v1-fp-sol-usdc-authority` | `c1ea8de6f3359088e114f32d57e123f70ba236ad02c5bbd85fc8e1b028db4273` |
+| `whirlpool-swap-v2-esv-sol-usdc-authority` | `798d533799a59c7706050700e2d4f310b88a8c7c23005a056bd042475ca60630` |
+| `whirlpool-swap-v2-4h-sol-usdc-authority` | `c549ef3dd6d5fc9c1787a3411d0a98eb8232fcca41101965573c7e69374cd74c` |
+
+The historical generations stay as read-only parsers: their saved operations
+are observed, released and abandoned as before, but their saved quotes no
+longer prepare (`jupiter_v1_historical_route`). Route admission is unchanged,
+so a policy that names any generation of a pool admits its current route.
+Materials store 45-byte headers instead of complete ProgramData (18.2 MB →
+about 0.1 MB per quote and per execution); older chunked materials still load.
+
+A quote freezes the configured RPC blockhash inside the one resolve, so it
+needs one official build instead of two. Every account read sends at most
+eight keys (PublicNode's limit), each request pinned to the quote's context
+slot. Per quote: 2 official API calls (was 3) and 8 Solana POSTs including the
+simulation (was 17), about 0.1 MB received instead of 18.4 MB. The approval's pre-consent re-resolve shrinks the
+same way. Pool fee rates and adaptive-fee constants are read, not pinned.

@@ -28,9 +28,27 @@ export interface MacOSLoginKeychainSecretOptions {
   readonly runSecurity?: SecurityRunner;
 }
 
+/** Every cached secret still alive; the exit hook zeroes them, and a collected owner zeroes its own first. */
+const cachedSecrets = new Set<Buffer>();
+const releasedSecrets = new FinalizationRegistry<Buffer>((secret) => { secret.fill(0); cachedSecrets.delete(secret); });
+let exitHookInstalled = false;
+
+function privateCopy(secret: Buffer): Buffer {
+  const copy = Buffer.alloc(secret.length);
+  secret.copy(copy);
+  return copy;
+}
+
+/**
+ * The login-Keychain wrapping secret. One instance belongs to one command invocation: the first successful `load` or
+ * `create` keeps a private in-memory copy for that instance, so every later read in the same command spawns no
+ * `security` process. It is never written anywhere, callers still receive (and zero) their own copy, and the cached
+ * copy is zeroed when the instance is collected or the process exits.
+ */
 export class MacOSLoginKeychainSecret implements WrappingSecretPort {
   private readonly loginKeychain: string;
   private readonly security: SecurityRunner;
+  private cached: Buffer | undefined;
 
   constructor(options: MacOSLoginKeychainSecretOptions = {}) {
     const identity = options.identity ?? userInfo();
@@ -39,6 +57,7 @@ export class MacOSLoginKeychainSecret implements WrappingSecretPort {
   }
 
   async load(): Promise<Buffer | null> {
+    if (this.cached !== undefined) return privateCopy(this.cached);
     const result = await this.security([
       "find-generic-password", "-a", ACCOUNT, "-s", SERVICE, "-w", this.loginKeychain,
     ]);
@@ -51,9 +70,21 @@ export class MacOSLoginKeychainSecret implements WrappingSecretPort {
         secret.fill(0);
         throw keychainUnavailable();
       }
+      this.remember(secret);
       return secret;
     } finally {
       result.stdout.fill(0);
+    }
+  }
+
+  private remember(secret: Buffer): void {
+    if (this.cached !== undefined) return;
+    this.cached = privateCopy(secret);
+    cachedSecrets.add(this.cached);
+    releasedSecrets.register(this, this.cached);
+    if (!exitHookInstalled) {
+      exitHookInstalled = true;
+      process.once("exit", () => { for (const cached of cachedSecrets) cached.fill(0); cachedSecrets.clear(); });
     }
   }
 
@@ -74,7 +105,10 @@ export class MacOSLoginKeychainSecret implements WrappingSecretPort {
       throw error;
     }
     result.stdout.fill(0);
-    if (result.code === 0) return generated;
+    if (result.code === 0) {
+      this.remember(generated);
+      return generated;
+    }
 
     generated.fill(0);
     const raced = await this.load();

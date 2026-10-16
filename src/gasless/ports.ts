@@ -46,9 +46,9 @@ export interface GaslessRpcPort extends GaslessObservationPort {
   snapshot(owner: Address, approvedGas?: GaslessGas): Promise<GaslessSnapshot>;
   /**
    * Estimates the offer's exact UserOperation shape at `fees`, signed by a throwaway key under a fee-token balance
-   * override whose storage layout the adapter proves against the chain before using it.
+   * override whose storage layout the adapter proves against `witness`, the guard snapshot this invocation just took.
    */
-  mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
+  mirrorEstimate(intent: GaslessIntent, witness: GaslessSnapshot, fees?: GaslessFees): Promise<GaslessEstimate>;
   /**
    * The light pre-send check after a guard already ran in this invocation: one bundler batch proving its chain, the
    * EntryPoint and that the signed fees still cover the bundler's slow tier.

@@ -196,9 +196,10 @@ for (const queuedExpiry of [false, true]) test(`production sealed first-send use
   const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
   s.setLimit(100);
   const confirm = s.approval.confirm.bind(s.approval);
-  // Six foreign POSTs exceed the retry allowance, so the derived budget runs out at the pre-send fee check.
+  // Five foreign POSTs exceed the retry allowance (3), so the derived budget runs out at the pre-send fee check.
+  const bundlerBatch = s.rpc as unknown as { bundlerState(): Promise<unknown> };
   s.approval.confirm = async input => { const accepted = await confirm(input);
-    await s.rpc.assertChain(); await s.rpc.assertChain(); return accepted; };
+    await s.rpc.assertChain(); await bundlerBatch.bundlerState(); await bundlerBatch.bundlerState(); return accepted; };
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
   const before = await s.record(id);
   assert.equal(before.state, "unknown_finality"); assert.equal(before.userOperation.phase, "sealed");

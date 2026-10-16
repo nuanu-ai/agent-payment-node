@@ -35,7 +35,9 @@ export class X402RpcReconciler {
     if (input.unusedExpiryEvidence !== undefined || input.settlementEvidence !== undefined) return { operation: input, unusedAtSafe: false };
     const chain = await assertX402RpcChain(this.rpc, x402Network(input.network).chainId);
     const state = await this.rpc.getX402AuthorizationState(input.wallet, input.authorization.nonce, { tag: "safe" });
-    if (state.blockTag !== "safe" || state.rpcOrigin !== chain.rpcOrigin) return { operation: input, unusedAtSafe: false };
+    // A lagging endpoint whose safe head is behind the prepared block proves nothing about this authorization.
+    if (state.blockTag !== "safe" || state.rpcOrigin !== chain.rpcOrigin ||
+      BigInt(state.blockNumber) < BigInt(input.preparedBlock.number)) return { operation: input, unusedAtSafe: false };
     if (state.value) {
       const evidence = stateSettlementEvidence(input, { ...state, value: true, blockTag: "safe" }, chain.rpcOrigin,
         await this.matchingTransaction(input, state.blockNumber));

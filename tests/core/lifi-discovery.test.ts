@@ -129,7 +129,7 @@ test("LI.FI quote route and owner tampering is rejected even when outer checksum
   const result = await s.core.execute({ command: "bridge.routes", profile: s.profile, request: s.request }); assert.equal(result.ok, true);
   const hash = (result.data as any).quote_hash as string, path = join(temporary.root, "bridge-quotes", s.state.profileHash(s.profile), `${hash}.json`);
   const original = JSON.parse(await readFile(path, "utf8"));
-  for (const mutate of [(r: any) => { r.routes[0].routeId = "different"; }, (r: any) => { r.owner.profile = "other"; }, (r: any) => { r.rawResponse = "{}"; }]) {
+  for (const mutate of [(r: any) => { r.routes = "different"; }, (r: any) => { r.owner.profile = "other"; }, (r: any) => { r.rawResponse = "{}"; }]) {
     const value = structuredClone(original); mutate(value); const { snapshotHash: _h, ...body } = value; value.snapshotHash = hashObject(body);
     assert.throws(() => validateBridgeQuote(value), { code: "APN_STATE_CORRUPT" });
   }
@@ -143,7 +143,9 @@ test("LI.FI RPC environment requires each exact admitted chain endpoint and reje
     assert.throws(() => bridgeRpcFactory({ APN_BASE_RPC_URL: url })(8453), { code: "APN_RPC_CONFIG" });
   }
   const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example/rpc", APN_ETHEREUM_RPC_URL: "https://ethereum.example/rpc" });
-  assert.equal(rpc(8453).origin, "https://base.example"); assert.equal(rpc(1).origin, "https://ethereum.example"); assert.equal(rpc(8453), rpc(8453));
+  assert.equal(rpc(8453).origin, "https://base.example"); assert.equal(rpc(1).origin, "https://ethereum.example");
+  // Every adapter reads through a command session; a sessionless call gets its own bounded one.
+  assert.notEqual(rpc(8453), rpc(8453)); assert.equal(rpc(8453).chainId, 8453);
 });
 
 test("LI.FI public provider API contract uses fixed endpoints, finite tools, one inventory per admitted asset pair and bounded status normalization", async () => {

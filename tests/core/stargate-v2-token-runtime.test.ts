@@ -15,17 +15,14 @@ const OWNER = getAddress("0x1111111111111111111111111111111111111111");
 const TX = `0x${"12".repeat(32)}` as Hex, OTHER_TX = `0x${"13".repeat(32)}` as Hex, GUID = `0x${"34".repeat(32)}` as Hex;
 const BASELINE = `0x${"56".repeat(32)}` as Hex, EVENT_BLOCK = `0x${"78".repeat(32)}` as Hex, SAFE = `0x${"9a".repeat(32)}` as Hex;
 const DROP = 50_000n;
-const SOURCE_TEST_CODE = "0x6002" as Hex, SOURCE_TEST_CODE_HASH = keccak256(SOURCE_TEST_CODE);
 
-test("token source receipt verifies pinned TokenMessaging code when PacketSent is present",async()=>{
+test("token source receipt does not re-read TokenMessaging code after the send (BRDG-31)",async()=>{
   const topics=encodeEventTopics({abi:LAYERZERO_ENDPOINT_V2_ABI,eventName:"PacketSent"}),data=encodeAbiParameters(parseAbiParameters("bytes encodedPayload,bytes options,address sendLibrary"),["0x01","0x",OWNER]);
-  const reads:unknown[][]=[]; const source=(code:Hex)=>({call:async(method:string,params:unknown[])=>{if(method==="eth_getTransactionReceipt")return{transactionHash:TX,status:"0x1",blockNumber:"0xa",blockHash:EVENT_BLOCK,logs:[{address:LAYERZERO_ENDPOINT_V2,topics,data}]};if(method==="eth_getBlockByNumber")return{number:"0xa",hash:EVENT_BLOCK};if(method==="eth_getCode"){reads.push(params);return code;}throw new Error(method);}});
+  const methods:string[]=[]; const source={call:async(method:string)=>{methods.push(method);if(method==="eth_getTransactionReceipt")return{transactionHash:TX,status:"0x1",blockNumber:"0xa",blockHash:EVENT_BLOCK,logs:[{address:LAYERZERO_ENDPOINT_V2,topics,data}]};if(method==="eth_getBlockByNumber")return{number:"0xa",hash:EVENT_BLOCK};throw new Error(method);}};
   assert.equal(STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH,"0x40eefa854ab4e4564009d7d4c08b0e2d341f6b6a354c201c326096468b300827");
   assert.equal(STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH,"0xae66157283b0894d904b84d87efe27ea850e5eae61351827f4fcf7c3c04d593f");
-  assert.ok(await confirmedStargateTokenSourceReceipt(source(SOURCE_TEST_CODE) as any,TX,"safe",SOURCE_TEST_CODE_HASH));
-  assert.deepEqual(reads,[[STARGATE_TOKEN_SOURCE_MESSAGING,"safe"]]);
-  await assert.rejects(confirmedStargateTokenSourceReceipt(source(TEST_CODE) as any,TX,"safe",SOURCE_TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
-  await assert.rejects(confirmedStargateTokenSourceReceipt(source(SOURCE_TEST_CODE) as any,TX,"safe",TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
+  assert.ok(await confirmedStargateTokenSourceReceipt(source as any,TX,"safe"));
+  assert.equal(methods.includes("eth_getCode"),false);
 });
 
 function bridgeAdmission(mechanism: Readonly<{ provider: string; reference: string }> = STARGATE_TOKEN_MECHANISM, dailyLimitAtomic = "150") {
@@ -146,8 +143,7 @@ test("service status and receipt reconcile legal terminal targets and reject ill
 });
 
 type DestinationMutation = "nonce" | "sender" | "oapp" | "guid" | "duplicate-drop" | "duplicate-delivery" | "failed-drop" |
-  "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances" | "tx-hash" | "tx-to" |
-  "tx-input" | "tx-block-hash" | "tx-block-number";
+  "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances" | "receipt-hash" | "receipt-block" | "receipt-status";
 const TEST_CODE = "0x6001" as Hex, TEST_CODE_HASH = keccak256(TEST_CODE), PACKET_NONCE = 27308n;
 const sourcePacket = { srcEid: 30111 as const, sender: pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }), nonceAtomic: PACKET_NONCE.toString(),
   dstEid: 30109 as const, receiver: pad(STARGATE_TOKEN_DESTINATION_MESSAGING, { size: 32 }) };
@@ -177,8 +173,6 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
   if (mutation === "duplicate-drop") byAddress[STARGATE_TOKEN_DESTINATION_EXECUTOR]!.push({ ...drop, logIndex: "0x8" });
   if (mutation === "duplicate-delivery") byAddress[LAYERZERO_ENDPOINT_V2]!.push({ ...delivered, logIndex: "0x4" });
   if (mutation === "dedup") for (const rows of Object.values(byAddress)) rows.push(structuredClone(rows[0]));
-  const executeData = encodeFunctionData({ abi: LAYERZERO_EXECUTOR_ABI, functionName: "execute302", args: [{ receiver: STARGATE_TOKEN_DESTINATION_MESSAGING,
-    origin, guid: mutation === "guid" ? OTHER_TX : GUID, message: "0x0100", extraData: "0x", gasLimit: 170_000n }] });
   return { ranges, codeReads, transactionReads, call: async (method: string, params: readonly any[]) => {
     if (method === "eth_getBlockByNumber") {
       const tag = String(params[0]); if (tag === "safe" || tag === "latest") throw new Error(`weaker finality tag ${tag} forbidden`);
@@ -190,13 +184,16 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
     if (method === "eth_getLogs") { const filter = params[0], from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock); ranges.push({ from, to });
       if (to - from + 1n > 100n) throw new Error("provider rejects ranges above 100 blocks");
       if (mutation === "provider-error" && from === 209n) throw new Error("provider range failure");
-      return Object.values(byAddress).flat().filter(row => BigInt(row.blockNumber) >= from && BigInt(row.blockNumber) <= to);
+      // A filtered provider returns only the requested emitter's rows matching every given topic.
+      return (byAddress[filter.address] ?? []).filter(row => BigInt(row.blockNumber) >= from && BigInt(row.blockNumber) <= to &&
+        (filter.topics as (Hex | null)[]).every((topic, index) => topic === null || row.topics[index] === topic));
     }
-    if (method === "eth_getTransactionByHash") { transactionReads.push([...params]); return {
-      hash: mutation === "tx-hash" ? OTHER_TX : TX, blockHash: mutation === "tx-block-hash" ? SAFE : EVENT_BLOCK,
-      blockNumber: mutation === "tx-block-number" ? "0x131" : `0x${deliveryBlock.toString(16)}`,
-      to: mutation === "tx-to" ? STARGATE_TOKEN_DESTINATION_POOL : STARGATE_TOKEN_DESTINATION_EXECUTOR,
-      input: mutation === "tx-input" ? "0x1234" : executeData };
+    if (method === "eth_getTransactionByHash") { transactionReads.push([...params]); throw new Error("delivery transaction is not read"); }
+    if (method === "eth_getTransactionReceipt") { transactionReads.push([...params]);
+      const logs = Object.values(byAddress).flat().filter((row, index, all) => row.transactionHash === params[0] &&
+        all.findIndex(other => other.transactionHash === row.transactionHash && other.logIndex === row.logIndex) === index);
+      return { transactionHash: mutation === "receipt-hash" ? OTHER_TX : params[0], status: mutation === "receipt-status" ? "0x0" : "0x1",
+        blockHash: mutation === "receipt-block" ? SAFE : EVENT_BLOCK, blockNumber: `0x${deliveryBlock.toString(16)}`, logs };
     }
     if (method === "eth_getBalance") return `0x${(mutation === "low-balances" ? 1n : 1_000_000n + DROP).toString(16)}`;
     if (method === "eth_call") return encodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", result: mutation === "low-balances" ? 1n : 1_000_100n });
@@ -210,46 +207,44 @@ const destinationInput = { sourceTransactionHash: TX, guid: GUID, recipient: OWN
   sourcePacket, finalityTag: "finalized" as const };
 
 for (const mode of ["split", "combined"] as const) test(`live-shaped ${mode} finalized native drop and delivery bind one packet`, async () => {
-  const rpc = destinationRpc(mode), evidence = await observeStargateTokenDestination(rpc as any, destinationInput, undefined, TEST_CODE_HASH);
+  const rpc = destinationRpc(mode), evidence = await observeStargateTokenDestination(rpc as any, destinationInput);
   assert.equal(evidence?.finality, "finalized"); assert.equal(evidence?.packetDelivery?.nonceAtomic, PACKET_NONCE.toString());
   assert.equal(evidence?.nativeDrop?.nonceAtomic, PACKET_NONCE.toString());
   assert.equal(evidence?.nativeDrop?.transactionHash, mode === "split" ? OTHER_TX : TX);
-  assert.deepEqual(rpc.codeReads,[[STARGATE_TOKEN_DESTINATION_MESSAGING,"0x150"]]);
+  // BRDG-31: no TokenMessaging code read; PacketDelivered (and a same-transaction drop) come from the delivery receipt.
+  assert.deepEqual(rpc.codeReads, []);
   assert.deepEqual(rpc.transactionReads,[[TX]]);
-});
-
-test("source and destination TokenMessaging runtime hashes cannot be swapped or independently changed",async()=>{
-  const destination=destinationRpc();
-  await assert.rejects(observeStargateTokenDestination(destination as any,destinationInput,undefined,SOURCE_TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
-  await assert.rejects(observeStargateTokenDestination({call:async(method:string,params:readonly any[])=>{
-    if(method==="eth_getBlockByNumber")return params[0]==="finalized"?{number:"0x150",hash:SAFE}:{number:"0x9",hash:BASELINE};
-    if(method==="eth_getCode")return "0x6003";throw new Error(method);
-  }} as any,destinationInput,undefined,TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_PROTOCOL");
+  assert.deepEqual(rpc.ranges.map(row => [row.from, row.to]), mode === "split" ? [[9n,108n],[109n,208n],[209n,308n],[205n,304n]] : [[9n,108n],[109n,208n],[209n,308n]]);
 });
 
 test("destination scanner uses complete inclusive <=100-block chunks and deduplicates identical provider rows", async () => {
-  const rpc = destinationRpc("split", "dedup"), evidence = await observeStargateTokenDestination(rpc as any, destinationInput, undefined, TEST_CODE_HASH);
-  assert.ok(evidence); assert.deepEqual(rpc.ranges.map(row=>[row.from,row.to]),[[9n,108n],[109n,208n],[209n,308n],[309n,336n]]);
+  const rpc = destinationRpc("split", "dedup"), evidence = await observeStargateTokenDestination(rpc as any, destinationInput);
+  assert.ok(evidence); assert.deepEqual(rpc.ranges.map(row=>[row.from,row.to]),[[9n,108n],[109n,208n],[209n,308n],[205n,304n]]);
 });
 
 test("destination scanner propagates a bounded provider chunk error without weakening or skipping", async () => {
-  const rpc=destinationRpc("split","provider-error"); await assert.rejects(observeStargateTokenDestination(rpc as any,destinationInput,undefined,TEST_CODE_HASH),/provider range failure/u);
+  const rpc=destinationRpc("split","provider-error"); await assert.rejects(observeStargateTokenDestination(rpc as any,destinationInput),/provider range failure/u);
   assert.equal(rpc.ranges.every(row=>row.to-row.from+1n<=100n),true);
 });
 
-test("destination scanner refuses a finalized horizon above its 256-query ceiling",async()=>{
-  let queries=0;const rpc={call:async(method:string,params:readonly any[])=>{if(method==="eth_getBlockByNumber")return params[0]==="finalized"?{number:"0x6409",hash:SAFE}:{number:"0x9",hash:BASELINE};if(method==="eth_getCode")return TEST_CODE;if(method==="eth_getLogs"){queries++;return [];}throw new Error(method);}};
-  await assert.rejects(observeStargateTokenDestination(rpc as any,destinationInput,undefined,TEST_CODE_HASH),(error:any)=>error.code==="APN_RPC_CONFIG"&&error.details.reason==="destination_scan_range");assert.equal(queries,0);
+test("a late finalized horizon is scanned in bounded windows that resume from the saved cursor and never dead-end (BRDG-30)",async()=>{
+  const windows:[bigint,bigint][]=[];let saved:bigint|null=null;const cursor={load:async()=>saved,save:async(next:bigint)=>{saved=next;}};
+  const rpc={call:async(method:string,params:readonly any[])=>{if(method==="eth_getBlockByNumber")return params[0]==="finalized"?{number:"0x6409",hash:SAFE}:{number:"0x9",hash:BASELINE};
+    if(method==="eth_getLogs"){windows.push([BigInt(params[0].fromBlock),BigInt(params[0].toBlock)]);return [];}throw new Error(method);}};
+  assert.equal(await observeStargateTokenDestination(rpc as any,destinationInput,undefined,cursor),null);
+  assert.equal(windows.length,32); assert.deepEqual(windows[0],[9n,108n]); assert.equal(saved,9n+32n*100n);
+  assert.equal(await observeStargateTokenDestination(rpc as any,destinationInput,undefined,cursor),null);
+  assert.deepEqual(windows[32],[3209n,3308n]); assert.equal(saved,9n+64n*100n);
 });
 
-for (const mutation of ["nonce","sender","oapp","guid","duplicate-drop","duplicate-delivery","failed-drop","noncanonical","bad-order"] as const)
-  test(`${mutation} packet/drop/delivery evidence fails closed`,async()=>assert.equal(await observeStargateTokenDestination(destinationRpc("split",mutation) as any,destinationInput,undefined,TEST_CODE_HASH),null));
+for (const mutation of ["nonce","sender","oapp","duplicate-drop","duplicate-delivery","failed-drop","noncanonical","bad-order"] as const)
+  test(`${mutation} packet/drop/delivery evidence fails closed`,async()=>assert.equal(await observeStargateTokenDestination(destinationRpc("split",mutation) as any,destinationInput),null));
 
-for (const mutation of ["tx-hash","tx-to","tx-input","tx-block-hash","tx-block-number"] as const)
-  test(`${mutation} delivery transaction binding fails closed`,async()=>assert.equal(await observeStargateTokenDestination(destinationRpc("split",mutation) as any,destinationInput,undefined,TEST_CODE_HASH),null));
+for (const mutation of ["receipt-hash","receipt-block","receipt-status"] as const)
+  test(`${mutation} delivery receipt binding fails closed`,async()=>assert.equal(await observeStargateTokenDestination(destinationRpc("split",mutation) as any,destinationInput),null));
 
 test("post-finality balances are corroborative and cannot replace or invalidate exact packet events",async()=>{
-  const evidence=await observeStargateTokenDestination(destinationRpc("split","low-balances") as any,destinationInput,undefined,TEST_CODE_HASH);assert.ok(evidence);assert.ok(BigInt(evidence!.tokenDeltaAtomic)<0n);assert.ok(BigInt(evidence!.nativeDeltaAtomic)<0n);
+  const evidence=await observeStargateTokenDestination(destinationRpc("split","low-balances") as any,destinationInput);assert.ok(evidence);assert.ok(BigInt(evidence!.tokenDeltaAtomic)<0n);assert.ok(BigInt(evidence!.nativeDeltaAtomic)<0n);
 });
 
 test("Polygon finalized unavailability fails closed without safe or latest fallback", async () => {
@@ -257,10 +252,10 @@ test("Polygon finalized unavailability fails closed without safe or latest fallb
     if (method === "eth_getBlockByNumber") { tags.push(String(params[0])); throw new Error("finalized unavailable"); }
     throw new Error(`unexpected ${method}`);
   } };
-  await assert.rejects(observeStargateTokenDestination(rpc as any, destinationInput, undefined, TEST_CODE_HASH), /finalized unavailable/u);
+  await assert.rejects(observeStargateTokenDestination(rpc as any, destinationInput), /finalized unavailable/u);
   assert.deepEqual(tags, ["finalized"]);
 });
 
 test("destination baseline hash mismatch refuses reorged evidence", async () => {
-  await assert.rejects(observeStargateTokenDestination(destinationRpc("split","baseline") as any, destinationInput, undefined, TEST_CODE_HASH), (error: any) => error.code === "APN_RPC_PROTOCOL");
+  await assert.rejects(observeStargateTokenDestination(destinationRpc("split","baseline") as any, destinationInput), (error: any) => error.code === "APN_RPC_PROTOCOL");
 });

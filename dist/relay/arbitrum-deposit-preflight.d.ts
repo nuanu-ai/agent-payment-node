@@ -9,7 +9,8 @@ export interface RelayArbitrumDepositPreflightPorts {
     readonly batch: (calls: readonly RelayArbitrumReadCall[]) => Promise<readonly unknown[]>;
     readonly now: () => Date;
 }
-/** Three read-only batches total. The third binds nonce and block base fee to the funding block. */
+/** Three read-only batches total. The third binds the confirmed nonce to the funding block hash (EIP-1898); the
+ * chain and base fee come from the funding head already read, with no header re-read (P2). */
 export declare function preflightRelayArbitrumDeposit(operation: RelayUnsignedOperation, active: ActiveAssetPolicy, publicAccount: string, dailyUsageAtomic: string, now: Date, ports: RelayArbitrumDepositPreflightPorts): Promise<Readonly<{
     kind: "relay_arbitrum_read_only_deposit_preflight";
     operationId: string;

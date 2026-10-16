@@ -60,8 +60,9 @@ export declare function preflightRelayArbitrumSourceDraft(draft: RelayArbitrumSo
     spender: string;
     observationBlockNumber: string;
     observationBlockHash: `0x${string}`;
+    baseFeePerGasWei: string;
     rpcBatches: 2;
-    rpcMethods: 6;
+    rpcMethods: 5;
     tokenBalanceAtomic: string;
     allowanceAtomic: string;
     nativeBalanceWei: string;

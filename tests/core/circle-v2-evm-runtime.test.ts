@@ -239,14 +239,14 @@ test("bound policy expiry at the single pre-signing preflight prevents signing a
   let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); let preflights = 0, confirms = 0;
   const p = ports(op, { now: () => now, authorizationDeadline: async () => new Date(at + 2).toISOString(), assertOwnerPolicyAndConflicts: async () => { confirms++; }, preflight: async () => { preflights++; now += 1; } });
   await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.current().effects[0]!.phase, "prepared");
-  assert.equal(p.sends(), 0); assert.equal(preflights, 1); assert.equal(confirms, 3);
+  assert.equal(p.sends(), 0); assert.equal(preflights, 1); assert.equal(confirms, 2);
 });
-test("owner, policy and chain preflight run once per effect before signing and never after the seal", async () => {
+test("owner, policy and conflict admission runs once after consent; the chain preflight runs once per effect before signing and never after the seal", async () => {
   let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const order: string[] = [];
   const p = ports(op, { assertOwnerPolicyAndConflicts: async () => { order.push("owner"); }, preflight: async () => { order.push("preflight"); } });
   const seal = p.p.seal, broadcast = p.p.broadcast;
   p.p.seal = async (o, e, g) => { order.push("seal"); return seal(o, e, g); }; p.p.broadcast = async (e, r, g) => { order.push("send"); return broadcast(e, r, g); };
-  await approveCircleSource(op, p.p); assert.deepEqual(order, ["owner", "owner", "owner", "preflight", "seal", "send"]);
+  await approveCircleSource(op, p.p); assert.deepEqual(order, ["owner", "owner", "preflight", "seal", "send"]);
 });
 test("policy expiry after a submission fence or queued dispatch remains observation-only", async () => {
   for (const delayed of ["fence", "dispatch"] as const) {

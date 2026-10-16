@@ -460,74 +460,48 @@ test("prepare binds current-invocation safe evidence without inventing a block-a
   }
 });
 
-test("production prepare RPC pins every eth_call and rechecks the exact block identity", async (t) => {
+test("production prepare reads chain ID once, one safe header and one batch pinned to its hash", async (t) => {
+  const rpc = new HttpsBaseRpc("https://rpc.example");
+  const hash = `0x${"b".repeat(64)}`;
+  const posts: string[] = [];
+  const calls: [string, readonly unknown[]][] = [];
+  const answer = (method: string, params: readonly unknown[]): unknown => {
+    calls.push([method, params]);
+    if (method === "eth_chainId") return "0x2105";
+    if (method === "eth_getBlockByNumber") return { number: "0x3039", hash, timestamp: "0x6a91d200" };
+    const data = (params[0] as { readonly data?: string }).data;
+    if (data?.startsWith("0x70a08231")) return encodeAbiParameters([{ type: "uint256" }], [50_000_000n]);
+    if (data === "0x3644e515") return encodeAbiParameters([{ type: "bytes32" }], [tokenDomainSeparator("USD Coin", "2")]);
+    throw new Error(`unexpected RPC read ${method} ${String(data)}`);
+  };
+  type Batch = readonly { method: string; params: readonly unknown[] }[];
+  const wire = (target: HttpsBaseRpc, batchCall: (batch: Batch) => Promise<readonly unknown[]>) => {
+    (target as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call = async (method, params) => {
+      posts.push(method); return answer(method, params);
+    };
+    (target as unknown as { batchCall(batch: Batch): Promise<readonly unknown[]> }).batchCall = batchCall;
+  };
+  wire(rpc, async (batch) => { posts.push("batch"); return batch.map(({ method, params }) => answer(method, params)); });
+  await rpc.assertBaseChain();
+  const evidence = await rpc.getX402PrepareEvidence(WALLET);
+  await rpc.assertBaseChain();
+  assert.deepEqual(posts, ["eth_chainId", "eth_getBlockByNumber", "batch"], "chain ID once, safe header and one pinned batch: 3 POSTs (was 8)");
+  assert.equal(evidence.usdcAtomic, "50000000"); assert.equal(evidence.domainSeparator, tokenDomainSeparator("USD Coin", "2"));
+  assert.deepEqual(evidence.block, { number: "12345", hash, timestamp: String(0x6a91d200) });
+  const pinned = { blockHash: hash, requireCanonical: true };
+  assert.deepEqual(calls.filter(([method]) => method === "eth_call").map(([, params]) => params[1]), [pinned, pinned]);
+  assert.equal(calls.some(([, params]) => ["0x06fdde03", "0x54fd4d50"].includes(String((params[0] as { data?: string } | undefined)?.data))), false,
+    "name() and version() are bound by DOMAIN_SEPARATOR and are not read");
+
+  // An endpoint that cannot serve the hash-pinned batch refuses prepare before any record is written.
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
-  const rpc = new HttpsBaseRpc("https://rpc.example");
-  const initialHash = `0x${"b".repeat(64)}`;
-  const changedHash = `0x${"c".repeat(64)}`;
-  const tag = "0x3039";
-  const calls: readonly [string, readonly unknown[]][] = [];
-  const mutableCalls = calls as [string, readonly unknown[]][];
-  let blockReads = 0;
-  (rpc as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call = async (method, params) => {
-    mutableCalls.push([method, params]);
-    if (method === "eth_chainId") return "0x2105";
-    if (method === "eth_getBlockByNumber") {
-      blockReads += 1;
-      return { number: tag, hash: blockReads === 1 ? initialHash : changedHash, timestamp: "0x6a91d200" };
-    }
-    const data = (params[0] as { readonly data?: string }).data;
-    if (data?.startsWith("0x70a08231")) return encodeAbiParameters([{ type: "uint256" }], [50_000_000n]);
-    if (data === "0x06fdde03") return encodeAbiParameters([{ type: "string" }], ["USD Coin"]);
-    if (data === "0x54fd4d50") return encodeAbiParameters([{ type: "string" }], ["2"]);
-    if (data === "0x3644e515") return encodeAbiParameters([{ type: "bytes32" }], [tokenDomainSeparator("USD Coin", "2")]);
-    throw new Error(`unexpected RPC method ${method}`);
-  };
-  const http = challenge();
-  const result = await makeCore({ root: temporary.root, rpc, http }).execute({
-    ...PREPARE_REQUEST,
-    idempotencyKey: "safe-reorg-001",
-  });
-  assert.equal(result.error?.code, "APN_RPC_PROTOCOL");
-  assert.equal(http.calls.length, 1);
-  assert.equal(blockReads, 2, "the safe head and exact pinned block must both be read");
-  const blockTags = mutableCalls.filter(([method]) => method === "eth_getBlockByNumber").map(([, params]) => params);
-  assert.deepEqual(blockTags, [["safe", false], [tag, false]], "the second identity read must recheck the pinned height, not a newer safe head");
-  const callTags = mutableCalls.filter(([method]) => method === "eth_call").map(([, params]) => (params[1]));
-  assert.deepEqual(callTags, [tag, tag, tag, tag]);
+  const refused = new HttpsBaseRpc("https://rpc.example");
+  wire(refused, async () => { throw new ApnError("APN_RPC_PROTOCOL", "header not found or not canonical"); });
+  const failed = await makeCore({ root: temporary.root, rpc: refused, http: challenge() }).execute({ ...PREPARE_REQUEST, idempotencyKey: "pinned-002" });
+  assert.equal(failed.error?.code, "APN_RPC_PROTOCOL");
   assert.deepEqual(await readdir(join(temporary.root, "x402-operations", new StateStore(temporary.root).profileHash("default"))).catch(() => []), []);
-
-  for (const [label, rechecked] of [
-    ["number", { number: "0x303a", hash: initialHash, timestamp: "0x6a91d200" }],
-    ["timestamp", { number: tag, hash: initialHash, timestamp: "0x6a91d201" }],
-  ] as const) {
-    const variant = new HttpsBaseRpc("https://rpc.example");
-    const variantCalls: [string, readonly unknown[]][] = [];
-    let variantBlockReads = 0;
-    (variant as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call = async (method, params) => {
-      variantCalls.push([method, params]);
-      if (method === "eth_getBlockByNumber") {
-        variantBlockReads += 1;
-        return variantBlockReads === 1
-          ? { number: tag, hash: initialHash, timestamp: "0x6a91d200" }
-          : rechecked;
-      }
-      const data = (params[0] as { readonly data?: string }).data;
-      if (data?.startsWith("0x70a08231")) return encodeAbiParameters([{ type: "uint256" }], [50_000_000n]);
-      if (data === "0x06fdde03") return encodeAbiParameters([{ type: "string" }], ["USD Coin"]);
-      if (data === "0x54fd4d50") return encodeAbiParameters([{ type: "string" }], ["2"]);
-      if (data === "0x3644e515") return encodeAbiParameters([{ type: "bytes32" }], [tokenDomainSeparator("USD Coin", "2")]);
-      throw new Error(`unexpected RPC method ${method}`);
-    };
-    await assert.rejects(variant.getX402PrepareEvidence(WALLET), { code: "APN_RPC_PROTOCOL" }, label);
-    assert.deepEqual(
-      variantCalls.filter(([method]) => method === "eth_getBlockByNumber").map(([, params]) => params),
-      [["safe", false], [tag, false]],
-      label,
-    );
-  }
 });
 
 test("global idempotency and active-operation scans cover direct and x402 stores before seller or RPC", async (t) => {

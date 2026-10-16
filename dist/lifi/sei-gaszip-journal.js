@@ -15,8 +15,8 @@ export function validateSeiFunding(value) {
         stateIdentifier(r.activationDigest, "GasZip policy activation");
     for (const s of [r.operationId, r.profileHash, r.idempotencyHash, r.requestHash, r.policyDigest, r.quoteDigest])
         stateIdentifier(s, "GasZip record identity");
-    if (r.profileHash !== r.owner.profileHash || r.profile !== r.owner.profile || seiUint(r.amountAtomic) <= 0n || seiUint(r.amountAtomic) > SEI_FUNDING.maximumAmount ||
-        seiUint(r.maximumFeeAtomic) > SEI_FUNDING.maximumFee || seiUint(r.minimumOutputAtomic) < SEI_FUNDING.minimumOutput ||
+    if (r.profileHash !== r.owner.profileHash || r.profile !== r.owner.profile || seiUint(r.amountAtomic) <= 0n ||
+        seiUint(r.maximumFeeAtomic) <= 0n || seiUint(r.minimumOutputAtomic) <= 0n ||
         seiUint(r.quoteExpectedAtomic) < seiUint(r.minimumOutputAtomic) || !Number.isFinite(Date.parse(r.expiresAt)) || !Number.isSafeInteger(r.policyRevision) || r.policyRevision < 1)
         seiFail("record_terms");
     seiHash(r.plan.blockHash);

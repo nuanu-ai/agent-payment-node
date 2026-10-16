@@ -3,7 +3,7 @@ import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { ApnError } from "../errors.js";
 import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
-import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
+import { evmRpcQuantity } from "../evm-rpc-codec.js";
 import type { ReadOnlyRpcBatchCall } from "../rpc.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import type { StateStore } from "../state.js";
@@ -20,7 +20,8 @@ export interface RelayArbitrumDepositPreflightPorts {
   readonly now: () => Date;
 }
 
-/** Three read-only batches total. The third binds nonce and block base fee to the funding block. */
+/** Three read-only batches total. The third binds the confirmed nonce to the funding block hash (EIP-1898); the
+ * chain and base fee come from the funding head already read, with no header re-read (P2). */
 export async function preflightRelayArbitrumDeposit(operation: RelayUnsignedOperation,
   active: ActiveAssetPolicy, publicAccount: string, dailyUsageAtomic: string, now: Date,
   ports: RelayArbitrumDepositPreflightPorts) {
@@ -37,21 +38,14 @@ export async function preflightRelayArbitrumDeposit(operation: RelayUnsignedOper
   });
   if (quote.quoteDigest !== draft.quoteDigest || quote.orderId !== draft.orderId) blocked("quote_changed");
   const reference = { blockHash: funding.observationBlockHash, requireCanonical: true };
-  const blockTag = `0x${BigInt(funding.observationBlockNumber).toString(16)}`;
   const rows = await ports.batch([
-    { method: "eth_chainId", params: [] },
-    { method: "eth_getBlockByNumber", params: [blockTag, false] },
     { method: "eth_getTransactionCount", params: [draft.owner, reference] },
     { method: "eth_getTransactionCount", params: [draft.owner, "pending"] },
   ]);
-  if (!Array.isArray(rows) || rows.length !== 4) blocked("nonce_batch_shape");
-  if (evmRpcQuantity(rows[0]) !== 42161n) blocked("source_chain");
-  const block = evmRpcRecord(rows[1]);
-  if (evmRpcQuantity(block.number).toString() !== funding.observationBlockNumber ||
-    evmRpcHex(block.hash, 32) !== funding.observationBlockHash) blocked("source_block_changed");
-  const baseFee = evmRpcQuantity(block.baseFeePerGas);
-  const confirmedNonce = evmRpcQuantity(rows[2]);
-  const pendingNonce = evmRpcQuantity(rows[3]);
+  if (!Array.isArray(rows) || rows.length !== 2) blocked("nonce_batch_shape");
+  const baseFee = BigInt(funding.baseFeePerGasWei);
+  const confirmedNonce = evmRpcQuantity(rows[0]);
+  const pendingNonce = evmRpcQuantity(rows[1]);
   const feeWithinQuote = evmFrozenFeeAdmitted(baseFee, { maxFeePerGasWei: BigInt(quote.deposit.maxFeePerGas),
     maxPriorityFeePerGasWei: BigInt(quote.deposit.maxPriorityFeePerGas) });
   const nonceUncontended = confirmedNonce === pendingNonce;

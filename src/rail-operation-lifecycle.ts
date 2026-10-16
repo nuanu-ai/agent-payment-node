@@ -40,7 +40,8 @@ export class RailOperationLifecycle {
     }
     this.assertEffect(operation, effect);
     operation = await this.move(operation, "signed_not_submitted", "encrypted_effect_bound", "durable_signed_effect", effect);
-    return await this.firstLocalSubmit(operation, adapter, effect);
+    // The approval revalidated the chain immediately before signing; only the owner's local policy is re-read before the send.
+    return await this.firstLocalSubmit(operation, adapter, effect, true);
   }
   /** The claim lock serializes recovery, while RPC revalidation and the one send run outside money-operation locks. */
   async executeLocalSolanaClaimed(initial: RailOperationRecord, adapter: DirectRailPort, mayStartSigning = false): Promise<unknown> {
@@ -48,6 +49,7 @@ export class RailOperationLifecycle {
     const state = this.context.state;
     let signed: RailOperationRecord;
     let effect: RailSignedEffect;
+    let revalidatedBeforeSeal = false;
     if (initial.state === "signing_started") {
       const recovered = await state.withLocks(keys, async () => {
         const latest = await this.required(initial.operationId);
@@ -92,7 +94,7 @@ export class RailOperationLifecycle {
           return { signed: await this.move(latest, "signed_not_submitted", "encrypted_effect_bound", "durable_signed_effect", value), effect: value } as const;
         });
         if ("done" in sealed) return publicRailOperation(sealed.done);
-        signed = sealed.signed; effect = sealed.effect;
+        signed = sealed.signed; effect = sealed.effect; revalidatedBeforeSeal = true;
       }
     } else if (initial.state === "signed_not_submitted") {
       const recovered = await state.withLocks(keys, async () => {
@@ -107,13 +109,18 @@ export class RailOperationLifecycle {
       signed = recovered.signed; effect = recovered.effect;
     } else return publicRailOperation(initial);
 
-    try { await this.revalidate(signed, adapter); }
-    catch {
-      return await state.withLocks(keys, async () => {
-        const latest = await this.required(initial.operationId);
-        return publicRailOperation(latest.integrityHash === signed.integrityHash
-          ? await this.move(latest, "failed_before_effect", "never_submitted_frozen_effect_no_longer_valid", "durable_pre_effect") : latest);
-      });
+    // A signature sealed seconds ago in this invocation was revalidated right before sealing; only a recovered one is re-checked.
+    if (!revalidatedBeforeSeal) {
+      try { await this.revalidate(signed, adapter); }
+      catch (error) {
+        // A failed read proves nothing about the signed bytes: they stay sealed and resumable for their one send.
+        if (!railEffectProvenUnsendable(error)) throw error;
+        return await state.withLocks(keys, async () => {
+          const latest = await this.required(initial.operationId);
+          return publicRailOperation(latest.integrityHash === signed.integrityHash
+            ? await this.move(latest, "failed_before_effect", "never_submitted_frozen_effect_no_longer_valid", "durable_pre_effect") : latest);
+        });
+      }
     }
     const committed = await state.withLocks(keys, async () => {
       const latest = await this.required(initial.operationId);
@@ -232,9 +239,14 @@ export class RailOperationLifecycle {
     if (operation.allowlist !== undefined) await this.allowlist.confirm(railAllowlistSubject(operation), operation.allowlist);
     return current;
   }
-  async firstLocalSubmit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect): Promise<RailOperationRecord> {
-    try { await this.revalidate(operation, adapter); }
-    catch {
+  /**
+   * The first send of a never-sent signature. A signature sealed in this invocation re-checks only owner policy (no RPC);
+   * a recovered one is revalidated against the chain once. Only proof that it can no longer be sent ends it unsent.
+   */
+  async firstLocalSubmit(operation: RailOperationRecord, adapter: DirectRailPort, effect: RailSignedEffect, sealedNow = false): Promise<RailOperationRecord> {
+    try { if (sealedNow) await this.assertCurrentRailPolicy(operation); else await this.revalidate(operation, adapter); }
+    catch (error) {
+      if (!railEffectProvenUnsendable(error)) throw error;
       return await this.move(operation, "failed_before_effect", "never_submitted_frozen_effect_no_longer_valid", "durable_pre_effect");
     }
     return await this.submit(operation, adapter, effect);
@@ -313,5 +325,10 @@ export class RailOperationLifecycle {
   }
 }
 
+/** Expiry, funding, fee, owner-policy or custody refusals prove the frozen effect must not be sent; RPC failures prove nothing. */
+function railEffectProvenUnsendable(error: unknown): boolean {
+  return error instanceof ApnError && ["APN_REPREPARE_REQUIRED", "APN_FEE_BUDGET_EXCEEDED", "APN_INSUFFICIENT_GAS", "APN_INSUFFICIENT_ASSET",
+    "APN_PROFILE_DRIFT", "APN_WALLET_MISMATCH", "APN_ALLOWLIST_REFUSED", "APN_OPERATION_BLOCKED"].includes(error.code);
+}
 export function binding(operation: RailOperationRecord): RailEffectBinding { return { account: operation.account, operationId: operation.operationId, fingerprint: operation.fingerprint, prepared: operation.prepared, send: operation.send ?? null }; }
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "The direct-rail effect or operation binding is invalid."); }

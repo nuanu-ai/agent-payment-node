@@ -28,14 +28,16 @@ async function command(binary, args, cwd) {
   });
 }
 
+const AT_BLOCK = new Set(["0x317", "latest"]);
+const atBlock = tag => AT_BLOCK.has(tag) || (typeof tag === "object" && tag?.blockHash === BLOCK_HASH);
 function rpcAnswer(method, params, owner) {
   const word = number => `0x${number.toString(16).padStart(64, "0")}`;
   if (method === "eth_chainId") return "0x2105";
   if (method === "eth_getBlockByNumber") return { number: "0x317", hash: BLOCK_HASH, baseFeePerGas: "0x1dcd6500", transactions: [] };
-  if (method === "eth_getBalance") { assert.equal(params[0], owner); assert.equal(params[1], "0x317"); return "0xde0b6b3a7640000"; }
-  if (method === "eth_getCode") { assert.equal(params[0], WETH); assert.equal(params[1], "0x317"); return "0x6000"; }
+  if (method === "eth_getBalance") { assert.equal(params[0], owner); assert.ok(atBlock(params[1])); return "0xde0b6b3a7640000"; }
+  if (method === "eth_getCode") { assert.equal(params[0], WETH); assert.ok(atBlock(params[1])); return "0x6000"; }
   if (method === "eth_call") {
-    const call = params[0]; assert.equal(params[1], "0x317");
+    const call = params[0]; assert.ok(atBlock(params[1]));
     if (call.to.toLowerCase() === WETH.toLowerCase()) {
       if (call.data === "0x313ce567") return word(18n);
       assert.ok(call.data.startsWith("0x70a08231")); return word(1_000_000_000n);
@@ -49,7 +51,7 @@ function rpcAnswer(method, params, owner) {
   throw new Error(`unexpected RPC ${method}`);
 }
 
-test("installed APN CLI prepares and reopens synthetic Base WETH within eight physical HTTPS POSTs", { timeout: 240000 }, async t => {
+test("installed APN CLI prepares and reopens synthetic Base WETH within three physical HTTPS POSTs", { timeout: 240000 }, async t => {
   const sandbox = await mkdtemp(join(await realpath(tmpdir()), "apn-base-weth-installed-"));
   t.after(async () => rm(sandbox, { recursive: true, force: true }));
   const packed = await command("npm", ["pack", "--ignore-scripts", "--json", "--pack-destination", sandbox], source);
@@ -129,8 +131,8 @@ test("installed APN CLI prepares and reopens synthetic Base WETH within eight ph
   assert.equal(prepared.operation.chain, "eip155:8453");
   assert.equal(prepared.operation.token, WETH);
   assert.equal(prepared.operation.amount.atomic, "100000000");
-  assert.equal(posts.length, 8);
-  assert.deepEqual(posts[1], ["eth_getBalance", "eth_getCode", "eth_call", "eth_call"]);
+  assert.equal(posts.length, 3);
+  assert.deepEqual(posts[0], ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_call", "eth_call"]);
   assert.equal(posts.flat().includes("eth_sendRawTransaction"), false);
   const journal = await new StateStore(stateRoot).findOperation(prepared.operation.operation_id);
   assert.equal(journal.state, "awaiting_approval");

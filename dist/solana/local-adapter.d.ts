@@ -29,6 +29,7 @@ export declare class SolanaLocalAdapter implements DirectRailPort {
      * frozen fee, rent and funding bounds, and simulates the exact bytes with `sigVerify: false`.
      */
     bindSend(account: ChainAccount, prepared: RailPreparedTransfer): Promise<RailSendBinding>;
+    /** The lifecycle revalidated immediately before calling this; sealing re-proves only the simulated bytes, never the chain. */
     sign(binding: RailEffectBinding): Promise<RailSignedEffect>;
     sealRevalidated(binding: RailEffectBinding): Promise<RailSignedEffect>;
     recoverEffect(binding: RailEffectBinding): Promise<RailSignedEffect | null>;

@@ -108,8 +108,9 @@ export async function proveJupiterV1Simulation(reader, guarded) {
             if (a.data.length !== 82 || beforeData.length !== 82 || before.owner !== TOKEN ||
                 !a.data.subarray(0, 36).equals(beforeData.subarray(0, 36)) || !a.data.subarray(44).equals(beforeData.subarray(44)))
                 reject("Jupiter V1 read-only USDC mint identity changed.");
+            // A program account cannot be written by a transaction; its stored snapshot is the 45-byte prefix APN read (SWAP-04).
         }
-        else if (!a.data.equals(beforeData))
+        else if (before.executable ? !a.data.subarray(0, beforeData.length).equals(beforeData) : !a.data.equals(beforeData))
             reject("Jupiter V1 simulation mutated read-only account data.");
     }
     if (v2 && v.fee === null)

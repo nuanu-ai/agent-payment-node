@@ -102,11 +102,22 @@ test("an approved transfer runs one mirror estimate before the screen and before
   assert.ok(calls.indexOf("mirror_estimate") < calls.indexOf("estimate"));
 });
 
+test("the mirror estimate proves the balance layout at the fresh guard block, never the prepare block (no archive state)", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id, operation } = await s.prepare();
+  const fresh = `0x${"cd".repeat(32)}`;
+  s.setBlockHash(fresh);
+  const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(response.ok, true, response.error?.message);
+  assert.notEqual(operation.intent.initialSnapshot.block.hash, fresh);
+  assert.deepEqual(s.layoutWitnessBlocks, [{ blockHash: fresh, requireCanonical: true }]);
+});
+
 test("the real bundler request signs with a throwaway sender and overrides only that sender's USDC balance", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root), { operation } = await s.prepare();
   const loads = s.wrapping.loads;
-  const estimate = await s.rpc.mirrorEstimate(operation.intent,
+  const estimate = await s.rpc.mirrorEstimate(operation.intent, operation.intent.initialSnapshot,
     { maxFeePerGas: operation.intent.gas.maxFeePerGas, maxPriorityFeePerGas: operation.intent.gas.maxPriorityFeePerGas });
   assert.match(estimate.responseHash, /^[a-f0-9]{64}$/u);
   const [wire, entryPoint, override] = s.estimates.at(-1)! as [Record<string, any>, string, Record<string, any>];
@@ -234,8 +245,8 @@ for (const [spike, state] of [[2, "submitted_pending"], [100, "unknown_finality"
     if (spike === 2) {
       assert.deepEqual(s.wait.waits, [5000, 5000]); assert.equal(s.rpc.sends.length, 1);
     } else {
-      // Each fee check retry is one bundler POST; the allowance of one guard's POSTs bounds them to four.
-      assert.equal(stored.failure, "gasless_bundler_fee_drift"); assert.equal(s.wait.waits.length, 4);
+      // Each fee check retry is one bundler POST; the allowance of one guard's POSTs bounds them to three.
+      assert.equal(stored.failure, "gasless_bundler_fee_drift"); assert.equal(s.wait.waits.length, 3);
       assert.equal(stored.userOperation.phase, "sealed");
       assert.equal(s.rpc.sends.length, 0); assert.equal(stored.userOperation.submissionAttempts, 0);
     }

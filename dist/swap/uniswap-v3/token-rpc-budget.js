@@ -2,7 +2,11 @@ import { randomBytes } from "node:crypto";
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
-export const TOKEN_OPERATION_RPC_CAP = 64;
+/**
+ * Per-command RPC telemetry of one token operation. Each command is bounded by its own request-session cap, enforced
+ * here at settle and by the transport before every request; there is no cumulative per-operation cap (SWAP-19), so a
+ * command retried after a rate limit never exhausts the operation. Rows stay bounded however often commands run.
+ */
 export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
     async reserve(binding, command, cap, requestSessionCap = cap, budgetClass = cap === 0 ? "recovery" : "approval_effect") {
         stateIdentifier(binding, "Uniswap token RPC binding");
@@ -10,11 +14,7 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
         await this.initialize();
         await this.ensureDirectory("uniswap-token-rpc-budgets");
         return await this.withLocks([`uniswap-token-rpc-budget:${binding}`], async () => {
-            const current = await this.load(binding), used = usage(current?.rows ?? []);
-            if (used + cap > TOKEN_OPERATION_RPC_CAP)
-                throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Uniswap token operation RPC budget is exhausted.", {
-                    reason: "operation_physical_requests", physicalRequests: used.toString(), remainingPhysicalRequests: Math.max(0, TOKEN_OPERATION_RPC_CAP - used).toString(),
-                });
+            const current = await this.load(binding);
             const row = { reservation, command, cap, requestSessionCap, budgetClass, physicalRequests: null, attempts: null, logicalItems: null,
                 methodClasses: null, batchSizes: null, budgetRejects: null };
             await this.writeJson(this.path(binding), { schemaVersion: "apn.uniswap-token-rpc-budget.v1", binding,
@@ -90,15 +90,15 @@ function mergeRows(target, source) {
     return rows;
 }
 /**
- * Zero-cap recovery rows (status, observe-only execute and cleanup) never count toward the operation cap; only the most
- * recent ones are kept, so a long-lived operation can be observed indefinitely without its journal outgrowing the state cap.
+ * Only the most recent recovery rows (status, observe-only execute and cleanup) and effect rows are kept, so a long-lived
+ * or often-retried operation never outgrows the state cap.
  */
-const RECOVERY_ROWS_KEPT = 16;
+const RECOVERY_ROWS_KEPT = 16, EFFECT_ROWS_KEPT = 16;
 function retained(rows) {
-    const recovery = rows.filter((row) => row.cap === 0), drop = new Set(recovery.slice(0, Math.max(0, recovery.length - RECOVERY_ROWS_KEPT)));
+    const recovery = rows.filter((row) => row.cap === 0), effects = rows.filter((row) => row.cap !== 0);
+    const drop = new Set([...recovery.slice(0, Math.max(0, recovery.length - RECOVERY_ROWS_KEPT)), ...effects.slice(0, Math.max(0, effects.length - EFFECT_ROWS_KEPT))]);
     return rows.filter((row) => !drop.has(row));
 }
-function usage(rows) { return rows.reduce((sum, row) => sum + (row.cap === 0 ? 0 : row.physicalRequests ?? row.cap), 0); }
 function validRow(value) {
     if (!isPlainRecord(value))
         return false;

@@ -19,9 +19,8 @@ export interface JupiterV1QuoteBuilderOptions {
     readonly computeUnitPriceMicroLamports: number;
     /** Internal authoritative policy selection, never a caller-controlled pool selector. */
     readonly resolveRouteId?: (profile: string, amountAtomic: string) => Promise<JupiterV1RouteId>;
-    /** Canonical factory only: obtain the final official lifetime after bulky public code reads. */
-    readonly refreshBuildAfterPublicReads?: boolean;
-    readonly refreshRpcLifetimeBeforeFreeze?: boolean;
+    /** Canonical factory: the configured RPC supplies the frozen blockhash after the account reads (one official build). */
+    readonly freezeRpcLifetime?: boolean;
 }
 export declare class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder<JupiterV1QuoteRequest> {
     private readonly provider;

@@ -1,20 +1,18 @@
-import { encodeFunctionData, getAddress, parseAbi } from "viem";
+import { encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
 import { performance } from "node:perf_hooks";
-import { isPlainRecord, sha256 } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
-import { evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, recheckEvmBlock } from "../evm-rpc-codec.js";
-import { GaslessHttps, type GaslessTransport } from "../gasless/https.js";
+import { evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcWord } from "../evm-rpc-codec.js";
 import type { Address } from "../model.js";
-import { parseJsonWithDuplicateRejection } from "../x402-strict-json.js";
+import type { ReadOnlyRpcBatchCall } from "../rpc.js";
 import type { Permit2PrepareReadPort, Permit2PrepareEvidence, Permit2OwnerAdmission } from "./prepare.js";
 import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "./registry.js";
 
 const asset = X402_PERMIT2_ASSETS[0]!;
-const FACILITATOR_SUPPORTED = "https://facilitator.payai.network/supported";
-const MAX_RPC_CALLS = 10;
-const RPC_TIMEOUT_MS = 2_000;
+/** The read plan: [chainId, finalized header], then one batch pinned to that block's hash. Nothing is retried. */
+const READ_PLAN_POSTS = 2;
+const RPC_TIMEOUT_MS = 5_000;
 const READ_DEADLINE_MS = 15_000;
 const activeRpcSources = new WeakSet<Permit2ReadRpcSource>();
 const TOKEN = parseAbi([
@@ -27,9 +25,8 @@ const PERMIT2 = parseAbi(["function nonceBitmap(address owner,uint256 wordPos) v
 
 /** A configured RPC source and the authenticated APN state are required; no signer or sender is accepted. */
 export interface Permit2ReadRpcSource {
-  /** One read-only request, no retry. Implementations must honor abort before sending and in flight. */
-  call(method: "eth_chainId" | "eth_getBlockByNumber" | "eth_call" | "eth_getProof",
-    params: readonly unknown[], signal: AbortSignal): Promise<unknown>;
+  /** One read-only JSON-RPC batch POST, no retry. Implementations must honor abort before sending and in flight. */
+  batch(calls: readonly ReadOnlyRpcBatchCall[], signal: AbortSignal): Promise<readonly unknown[]>;
 }
 export interface Permit2UsageReader {
   usage(identity: { readonly account: string; readonly chain: string;
@@ -42,7 +39,6 @@ export interface Permit2ProductionReadOptions {
   readonly localAccount: () => Promise<Address>;
   readonly usage: Permit2UsageReader;
   readonly rpc: Permit2ReadRpcSource;
-  readonly transport?: GaslessTransport;
   readonly now?: () => Date;
 }
 
@@ -53,6 +49,10 @@ export interface Permit2ReadCheckpoint {
   readonly blockNumber: string;
   readonly blockHash: string;
   readonly blockTimestamp: number;
+  /**
+   * Hash of the facilitator capability source. Since APN 0.5.43 this is the seller's checked 402 challenge hash: the
+   * seller chooses the facilitator and declares eip2612GasSponsoring there; 0.5.42 records hold PayAI's /supported digest.
+   */
   readonly facilitatorSupportedDigest: string;
 }
 export interface Permit2CheckedReadPort extends Permit2PrepareReadPort {
@@ -61,9 +61,13 @@ export interface Permit2CheckedReadPort extends Permit2PrepareReadPort {
   }>;
 }
 
-/** Production read adapter for the existing unsigned prepare boundary. It never creates an operation or reservation. */
+/**
+ * Production read adapter for the existing unsigned prepare boundary. It never creates an operation or reservation.
+ * Two POSTs: chain id with the finalized header, then balance, allowance, token domain, EIP-2612 nonce, the Permit2
+ * nonce word and both pinned runtime codes in one batch pinned by EIP-1898 {blockHash, requireCanonical}. No facilitator
+ * read gates it: the seller picks the facilitator, and one that cannot settle leaves the signature to expire unused.
+ */
 export function createPermit2ProductionReadPort(options: Permit2ProductionReadOptions): Permit2CheckedReadPort {
-  const transport = options.transport ?? new GaslessHttps();
   const now = options.now ?? (() => new Date());
   let busy = false;
   const readChecked: Permit2CheckedReadPort["readChecked"] = async (request) => {
@@ -72,23 +76,21 @@ export function createPermit2ProductionReadPort(options: Permit2ProductionReadOp
     activeRpcSources.add(options.rpc);
     try {
     const deadline = performance.now() + READ_DEADLINE_MS;
-    let rpcCalls = 0;
-    const rpc = async (method: string, params: readonly unknown[]): Promise<unknown> => {
-      if (method !== "eth_chainId" && method !== "eth_getBlockByNumber" &&
-          method !== "eth_call" && method !== "eth_getProof") {
-        blocked("The Permit2 read requested an unapproved RPC method.", "x402_permit2_read_budget");
-      }
-      if (++rpcCalls > MAX_RPC_CALLS) blocked("The Permit2 read budget was exhausted.", "x402_permit2_read_budget");
+    let posts = 0;
+    const batch = async (calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> => {
+      if (++posts > READ_PLAN_POSTS) blocked("The Permit2 read budget was exhausted.", "x402_permit2_read_budget");
       const remaining = Math.min(RPC_TIMEOUT_MS, deadline - performance.now());
       if (remaining <= 0) blocked("The Permit2 read deadline expired.", "x402_permit2_read_deadline");
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), remaining);
       try {
-        return await Promise.race([
-          options.rpc.call(method, params, controller.signal),
+        const values = await Promise.race([
+          options.rpc.batch(calls, controller.signal),
           new Promise<never>((_resolve, reject) => controller.signal.addEventListener("abort", () =>
             reject(new ApnError("APN_RPC_PROTOCOL", "The Permit2 RPC read timed out.")), { once: true })),
         ]);
+        if (!Array.isArray(values) || values.length !== calls.length) throw new ApnError("APN_RPC_PROTOCOL", "The Permit2 RPC batch answer is incomplete.");
+        return values;
       } finally { clearTimeout(timeout); }
     };
     if (!options.profile || !options.stateRoot || !equalAddress(request.payer, await options.localAccount()) ||
@@ -122,50 +124,36 @@ export function createPermit2ProductionReadPort(options: Permit2ProductionReadOp
       maximumPerTransferAtomic: admission.caps.maximumPerTransferAtomic,
       dailyLimitAtomic: admission.caps.dailyLimitAtomic, usedTodayAtomic: usage, policyDigest: active.digest };
 
-    if (evmRpcQuantity(await rpc("eth_chainId", [])) !== BigInt(asset.chainId)) {
+    const [chainId, rawBlock] = await batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["finalized", false] }]);
+    if (evmRpcQuantity(chainId) !== BigInt(asset.chainId)) {
       throw new ApnError("APN_CHAIN_MISMATCH", "The configured Permit2 RPC is not Avalanche C-Chain.");
     }
-    const block = await evmRpcBlock(rpc, "finalized");
+    const block = evmRpcBlockResult(rawBlock, "finalized");
     const blockTime = evmRpcQuantity(block.raw.timestamp);
     if (blockTime > BigInt(Math.floor(start.getTime() / 1000)) ||
         BigInt(Math.floor(start.getTime() / 1000)) - blockTime > 30n) {
       blocked("The finalized Avalanche block is stale.", "x402_permit2_chain_evidence_required");
     }
-    const call = async (to: Address, abi: typeof TOKEN | typeof PERMIT2, functionName: string, args: readonly unknown[] = []) => {
-      const data = encodeFunctionData({ abi, functionName, args } as Parameters<typeof encodeFunctionData>[0]);
-      return evmRpcHex(await rpc("eth_call", [{ to, data }, block.tag]), 32);
-    };
-    const balance = await call(asset.token, TOKEN, "balanceOf", [request.payer]);
-    const allowance = await call(asset.token, TOKEN, "allowance", [request.payer, PERMIT2_ADDRESS]);
-    const domain = await call(asset.token, TOKEN, "DOMAIN_SEPARATOR");
-    const nonce = await call(asset.token, TOKEN, "nonces", [request.payer]);
-    const bitmap = await call(PERMIT2_ADDRESS, PERMIT2, "nonceBitmap", [request.payer, BigInt(request.nonceBitmapWordIndex)]);
-    const proxyCodeHash = proofCodeHash(await rpc("eth_getProof", [X402_EXACT_PERMIT2_PROXY, [], block.tag]), X402_EXACT_PERMIT2_PROXY);
-    const permit2CodeHash = proofCodeHash(await rpc("eth_getProof", [PERMIT2_ADDRESS, [], block.tag]), PERMIT2_ADDRESS);
+    // EIP-1898: every read below is pinned to this canonical finalized block, so no header recheck follows them.
+    const pinned = { blockHash: block.hash, requireCanonical: true };
+    const call = (to: Address, abi: typeof TOKEN | typeof PERMIT2, functionName: string, args: readonly unknown[] = []): ReadOnlyRpcBatchCall =>
+      ({ method: "eth_call", params: [{ to, data: encodeFunctionData({ abi, functionName, args } as Parameters<typeof encodeFunctionData>[0]) }, pinned] });
+    const values = await batch([
+      call(asset.token, TOKEN, "balanceOf", [request.payer]),
+      call(asset.token, TOKEN, "allowance", [request.payer, PERMIT2_ADDRESS]),
+      call(asset.token, TOKEN, "DOMAIN_SEPARATOR"),
+      call(asset.token, TOKEN, "nonces", [request.payer]),
+      call(PERMIT2_ADDRESS, PERMIT2, "nonceBitmap", [request.payer, BigInt(request.nonceBitmapWordIndex)]),
+      { method: "eth_getCode", params: [X402_EXACT_PERMIT2_PROXY, pinned] },
+      { method: "eth_getCode", params: [PERMIT2_ADDRESS, pinned] },
+    ]);
+    const [balance, allowance, domain, nonce, bitmap] = values.slice(0, 5).map(value => evmRpcHex(value, 32));
+    // Both contracts are immutable at fixed addresses, so the code hash is a deployment fact, not an upgrade pin.
+    const proxyCodeHash = keccak256(evmRpcHex(values[5])), permit2CodeHash = keccak256(evmRpcHex(values[6]));
     if (permit2CodeHash.toLowerCase() !== PERMIT2_CODE_HASH.toLowerCase() ||
-        domain.toLowerCase() !== asset.tokenDomainSeparator.toLowerCase() ||
+        domain!.toLowerCase() !== asset.tokenDomainSeparator.toLowerCase() ||
         proxyCodeHash.toLowerCase() !== asset.proxyCodeHash.toLowerCase()) {
       blocked("The token domain or exact proxy code changed.", "x402_permit2_chain_evidence_required");
-    }
-    await recheckEvmBlock(rpc, block);
-
-    let response;
-    try {
-      const remaining = Math.min(3_000, deadline - performance.now());
-      if (remaining <= 0) blocked("The Permit2 read deadline expired.", "x402_permit2_read_deadline");
-      response = await withTimeout(transport.request(FACILITATOR_SUPPORTED, "GET", null, 256 * 1024, "APN_HTTP_CONFIG"), remaining);
-    }
-    catch { return blocked("The facilitator capability read failed.", "x402_permit2_facilitator_unavailable"); }
-    if (response.status !== 200 || Buffer.byteLength(response.body, "utf8") > 256 * 1024) {
-      blocked("The facilitator capability read failed.", "x402_permit2_facilitator_unavailable");
-    }
-    let supported: unknown;
-    try { supported = parseJsonWithDuplicateRejection(response.body); }
-    catch { return blocked("The facilitator capability response is malformed.", "x402_permit2_facilitator_unavailable"); }
-    if (!isPlainRecord(supported) || !Array.isArray(supported.kinds) ||
-        !supported.kinds.some(kind => isPlainRecord(kind) && kind.x402Version === 2 &&
-          kind.scheme === "exact" && kind.network === asset.chain)) {
-      blocked("The facilitator no longer advertises Avalanche exact v2.", "x402_permit2_facilitator_unavailable");
     }
     const end = instant(now());
     const current = await loadActiveAssetPolicyRegistry(options.stateRoot, options.profile, end);
@@ -186,36 +174,22 @@ export function createPermit2ProductionReadPort(options: Permit2ProductionReadOp
         performance.now() > deadline) {
       blocked("The Permit2 read deadline expired.", "x402_permit2_read_deadline");
     }
-    const extensions = Array.isArray(supported.extensions) ? supported.extensions : [];
+    // The facilitator is the seller's: its pinned exact-Permit2 route, with EIP-2612 sponsorship exactly when the seller's
+    // checked 402 declares it (prepare ANDs this with that declaration).
     const evidence: Permit2PrepareEvidence = { chainId: asset.chainId, account: getAddress(request.payer),
       observedAtSeconds: Number(blockTime), balanceAtomic: evmRpcWord(balance).toString(),
-      allowanceAtomic: evmRpcWord(allowance).toString(), tokenDomainSeparator: domain,
+      allowanceAtomic: evmRpcWord(allowance).toString(), tokenDomainSeparator: domain!,
       proxyCodeHash, permit2Deployed: true, nonceBitmapWordIndex: request.nonceBitmapWordIndex,
-      nonceBitmapWord: bitmap, eip2612Nonce: evmRpcWord(nonce).toString(),
+      nonceBitmapWord: bitmap!, eip2612Nonce: evmRpcWord(nonce).toString(),
       facilitator: { available: true, network: asset.chain, scheme: "exact", asset: asset.token,
         assetTransferMethod: "permit2", permit2Address: PERMIT2_ADDRESS,
-        exactProxy: X402_EXACT_PERMIT2_PROXY, eip2612GasSponsoring: extensions.includes("eip2612GasSponsoring") } };
+        exactProxy: X402_EXACT_PERMIT2_PROXY, eip2612GasSponsoring: true } };
     return { owner, evidence, checkpoint: { policyRevision: active.revision, registryVersion: active.registry.registryVersion, activationDigest: active.activationDigest,
       blockNumber: block.number, blockHash: block.hash, blockTimestamp: Number(blockTime),
-      facilitatorSupportedDigest: sha256(response.body) } };
+      facilitatorSupportedDigest: request.challengeHash } };
     } finally { busy = false; activeRpcSources.delete(options.rpc); }
   };
   return { readChecked, read: async request => { const { owner, evidence } = await readChecked(request); return { owner, evidence }; } };
-}
-
-function proofCodeHash(value: unknown, address: Address): `0x${string}` {
-  const proof = evmRpcRecord(value);
-  if (!equalAddress(proof.address, address)) throw new ApnError("APN_RPC_PROTOCOL", "Permit2 code proof address changed.");
-  return evmRpcHex(proof.codeHash, 32);
-}
-
-async function withTimeout<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
-      timeout = setTimeout(() => reject(new ApnError("APN_PROVIDER_UNAVAILABLE", "The Permit2 facilitator read timed out.")), milliseconds);
-    })]);
-  } finally { if (timeout !== undefined) clearTimeout(timeout); }
 }
 
 function equalAddress(value: unknown, expected: string): boolean {
