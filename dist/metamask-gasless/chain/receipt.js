@@ -1,12 +1,13 @@
 import { mmAssertStableQuote } from "../economics.js";
-import { mmRegistry } from "../registry.js";
+import { mmRecordedDeployment } from "../recorded.js";
 import { mmFail } from "../reasons.js";
 import { addressWord, MM_APPROVAL_TOPIC, MM_INCREASED_COUNT_TOPIC, MM_TRANSFER_TOPIC, rpcAddress, rpcHex, rpcQuantity, topicAddress, twoWords } from "./abi.js";
 /** Validate complete receipt logs against the exact one-root/mode-bound USDC settlement. */
-export function verifyMetaMaskReceiptAccounting(intent, outerSender, logs) {
-    const row = mmRegistry(intent.request.chainId).row;
+export function verifyMetaMaskReceiptAccounting(intent, outerSender, logs, row = mmRecordedDeployment(intent)) {
+    // The token, manager and enforcer this operation was prepared against, not today's registry (owner rule).
+    const limitedCalls = row.protocol.limitedCalls?.address ?? mmFail("mm_gasless_state_corrupt"), manager = row.protocol.manager?.address ?? mmFail("mm_gasless_state_corrupt");
     const tokenLogs = logs.filter(log => log.address === row.token);
-    const countLogs = logs.filter(log => log.address === row.protocol.limitedCalls.address);
+    const countLogs = logs.filter(log => log.address === limitedCalls);
     const sponsored = intent.quote.feeMode === "sponsored";
     if (tokenLogs.length !== (sponsored ? 1 : 2) || countLogs.length !== 1)
         mmFail("mm_gasless_evidence_invalid");
@@ -33,7 +34,7 @@ export function verifyMetaMaskReceiptAccounting(intent, outerSender, logs) {
     }
     const count = countLogs[0];
     if (count.topics.length !== 4 || count.topics[0] !== MM_INCREASED_COUNT_TOPIC ||
-        topicAddress(count.topics[1]) !== row.protocol.manager.address ||
+        topicAddress(count.topics[1]) !== manager ||
         topicAddress(count.topics[2]) !== outerSender || count.topics[3] !== intent.delegationHash) {
         mmFail("mm_gasless_evidence_invalid");
     }
@@ -48,14 +49,14 @@ export function verifyMetaMaskReceiptAccounting(intent, outerSender, logs) {
         secondTransferIndexAtomic: sponsored ? null : transferIndexes[1], counterIndexAtomic: count.logIndexAtomic };
 }
 /** Validate one scan log before treating its transaction hash as a candidate. */
-export function verifyScanLog(value, intent, from, to) {
-    const row = mmRegistry(intent.request.chainId).row;
+export function verifyScanLog(value, intent, from, to, row = mmRecordedDeployment(intent)) {
+    const limitedCalls = row.protocol.limitedCalls?.address ?? mmFail("mm_gasless_state_corrupt"), manager = row.protocol.manager?.address ?? mmFail("mm_gasless_state_corrupt");
     const topics = value.topics;
     const number = rpcQuantity(value.blockNumber);
-    if (rpcAddress(value.address) !== row.protocol.limitedCalls.address || value.removed !== false ||
+    if (rpcAddress(value.address) !== limitedCalls || value.removed !== false ||
         number < from || number > to || !Array.isArray(topics) || topics.length !== 4 ||
         rpcHex(topics[0], 32, 32) !== MM_INCREASED_COUNT_TOPIC ||
-        rpcHex(topics[1], 32, 32) !== addressTopic(row.protocol.manager.address) ||
+        rpcHex(topics[1], 32, 32) !== addressTopic(manager) ||
         rpcHex(topics[3], 32, 32) !== intent.delegationHash)
         mmFail("mm_gasless_evidence_invalid");
     topicAddress(rpcHex(topics[2], 32, 32));
