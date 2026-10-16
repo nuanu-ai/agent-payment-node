@@ -311,3 +311,28 @@ test("MM lost session points at the operation holding the profile instead of a r
     assert.deepEqual(plain.next_actions, ["Run the foreground wallet connect handoff again."]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("MM gasless prepare waits for an unresolved operation of another profile bound to the same address", async () => {
+  const root = await sandbox();
+  try {
+    const f = await mmFixture(root), alias = "mm-alias";
+    await f.state.writeProviderProfile({ ...f.publicProfile, profile: alias, profile_hash: f.state.profileHash(alias) });
+    const { id } = await f.prepare(); f.rpc.phase = "pending"; f.rpc.candidate = null;
+    assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+    assert.equal((await f.record(id)).state, "unknown_finality");
+    const aliasPrepare = (key: string) => f.core.execute({ command: "gasless.transfer.prepare", profile: alias,
+      request: f.request, idempotencyKey: key });
+    const blocked = await aliasPrepare("mm-alias-0001");
+    assert.equal(blocked.ok, false, "a second profile on the same address must not dispatch on Base while the first is unresolved");
+    assert.equal(blocked.error?.code, "APN_OPERATION_BLOCKED");
+    assert.equal(blocked.error?.details?.blockingOperationId, id);
+    assert.equal(blocked.error?.details?.blockingAccount, f.binding.address);
+    assert.equal((await f.core.metaMaskGasless.records.listAllOperations()).length, 1);
+    f.advance(600_000);
+    assert.equal((await new ApnCore({ state: f.state, clock: f.clock, wait: f.wait, metaMaskGasless: f.dependencies,
+      operationAbandonApproval: { approve: async () => undefined } }).execute({ command: "operation.abandon", operationId: id })).ok, true);
+    const released = await aliasPrepare("mm-alias-0002");
+    assert.equal(released.ok, true, JSON.stringify(released.error));
+    assert.equal(f.provider.submissions.length, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

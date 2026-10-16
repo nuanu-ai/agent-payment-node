@@ -662,6 +662,10 @@ they may repair local operation or receipt records after an interrupted write. P
 contains hashed provider identities and accounting, without the private
 request UUID, session token, unsigned wire or provider response. Unresolved
 operations block competing payments and wallet lifecycle changes for the profile.
+A new MetaMask Agent gasless transfer also waits for unresolved operations of
+every other APN profile bound to the same server-wallet address on that chain:
+once the account carries the pinned designation, an earlier signed delegation
+could be redeemed, so the account is held, not just the profile.
 
 ### MetaMask owner abandonment
 
