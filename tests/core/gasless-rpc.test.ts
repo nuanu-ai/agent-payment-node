@@ -516,6 +516,21 @@ test("capped production snapshot keeps block pinning and rejects a reorg", async
     { code: "APN_RPC_PROTOCOL" });
 });
 
+test("a per-chain RPC batch cap splits every invocation's reads and re-derives its budget (GASL-18)", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root);
+  // The same endpoints as the fixture, with APN_BASE_RPC_MAX_BATCH_ITEMS=3 applied by the RPC itself.
+  const capped = new GaslessRpc(8453, "https://rpc.example/base", "https://bundler.example/base", s.transport, undefined, 3);
+  const snapshot = await withGaslessRpcInvocation(async () => await capped.snapshot(s.account.address), "read");
+  assert.equal(snapshot.owner, s.account.address);
+  const rpcPosts = s.calls.filter(call => !call.bundler);
+  assert.ok(rpcPosts.every(call => call.methods.length <= 3));
+  assert.equal(rpcPosts.length, gaslessSnapshotPosts(3) - 1, "every split POST is inside the budget re-derived at the cap");
+  assert.throws(() => gaslessRpcFactory({ APN_BASE_RPC_URL: RPC_URL, APN_BASE_RPC_MAX_BATCH_ITEMS: "1" })(8453),
+    (error: any) => error.code === "APN_RPC_CONFIG" && /APN_BASE_RPC_MAX_BATCH_ITEMS/u.test(String(error.details?.nextActions)));
+  assert.equal(gaslessRpcFactory({ APN_BASE_RPC_URL: RPC_URL, APN_BASE_RPC_MAX_BATCH_ITEMS: "3" })(8453).chainId, 8453);
+});
+
 test("gasless shared provider-family pacer separates physical POST starts across clients", async () => {
   let time = 10_000;
   const waits: number[] = [], starts: Array<{ family: string; at: number }> = [];

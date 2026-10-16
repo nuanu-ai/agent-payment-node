@@ -17,13 +17,8 @@ export interface UsdtCommandPrepareOptions {
     readonly wait?: (milliseconds: number) => Promise<void>;
     readonly pacingNow?: () => number;
 }
-/**
- * Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. One observation
- * pass permits ten: the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two
- * batches when the locator is missing or contradicted, and the scanned receipt's three reads.
- */
 declare const READ_ADMISSIONS: {
-    readonly execute: 7;
+    readonly execute: number;
     readonly "prepare-v2": 8;
     readonly observe: 10;
 };
