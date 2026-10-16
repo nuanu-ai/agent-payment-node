@@ -3,12 +3,21 @@ import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
 import { appendX402Transition, deliversX402Result, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
 import { settlementResponseTransaction, terminalClassification } from "./x402-service-rpc.js";
+import { X402Usage } from "./x402-usage.js";
 export class X402Lifecycle {
     context;
     operations;
+    usage;
     constructor(context) {
         this.context = context;
         this.operations = new OperationService(context.state);
+        this.usage = new X402Usage(context);
+    }
+    /** Moves the shared usage hold forward to the durable journal state; callers hold the operation lock. */
+    async followUsage(profileHash, operationId) {
+        const latest = await this.context.state.loadX402Operation(profileHash, operationId);
+        if (latest !== null)
+            await this.usage.follow(latest);
     }
     async beginPaidAttempt(operation, purpose) {
         if (purpose === "result_recovery" && operation.attempts.some((attempt) => attempt.purpose === "result_recovery")) {

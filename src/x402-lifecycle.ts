@@ -16,12 +16,21 @@ import {
   type X402TerminalState,
 } from "./x402-state-integrity.js";
 import { settlementResponseTransaction, terminalClassification } from "./x402-service-rpc.js";
+import { X402Usage } from "./x402-usage.js";
 
 export class X402Lifecycle {
   protected readonly operations: OperationService;
+  protected readonly usage: X402Usage;
 
   constructor(protected readonly context: RuntimeContext) {
     this.operations = new OperationService(context.state);
+    this.usage = new X402Usage(context);
+  }
+
+  /** Moves the shared usage hold forward to the durable journal state; callers hold the operation lock. */
+  protected async followUsage(profileHash: string, operationId: string): Promise<void> {
+    const latest = await this.context.state.loadX402Operation(profileHash, operationId);
+    if (latest !== null) await this.usage.follow(latest);
   }
 
   protected async beginPaidAttempt(

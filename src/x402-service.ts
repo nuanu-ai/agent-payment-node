@@ -244,6 +244,8 @@ export class X402Service extends X402PaidRequest {
       }
       // Nothing was signed yet, so an approval after validBefore ends with no effect instead of a stranded signature.
       if (this.authorizationExpired(current)) return publicX402Operation(await this.commitTerminal(current, "failed_before_effect"));
+      // The shared daily usage sees this spend before anything is signed.
+      await this.usage.reserve(current);
       const pending = await this.transition(current, "authorization_material_pending");
       return await this.completeAuthorization(pending, "create");
     });

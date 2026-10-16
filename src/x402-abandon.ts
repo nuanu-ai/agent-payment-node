@@ -20,7 +20,10 @@ export class X402AbandonService extends X402Lifecycle {
       const recovered = await this.recoverOrphanReceipt(loaded);
       const current = recovered ?? loaded;
       if (current.state === "abandoned_unknown" || current.terminal) {
-        if (current.state === "abandoned_unknown") return publicX402Operation(current);
+        if (current.state === "abandoned_unknown") {
+          await this.followUsage(profileHash, operationId);
+          return publicX402Operation(current);
+        }
         throw new ApnError("APN_OPERATION_BLOCKED", "The x402 operation is already terminal.");
       }
       const nowUnix = BigInt(Math.floor(this.context.clock.now().getTime() / 1000));
@@ -36,7 +39,9 @@ export class X402AbandonService extends X402Lifecycle {
       }
       await this.context.requireOperationAbandonApproval().approve(abandonIntent(current));
       const settled = current.state === "paid_request_pending" ? await this.markInterruptedPaidAttempt(current, "effect_unknown") : current;
-      return publicX402Operation(await this.commitTerminal(settled, "abandoned_unknown"));
+      const abandoned = await this.commitTerminal(settled, "abandoned_unknown");
+      await this.followUsage(profileHash, operationId);
+      return publicX402Operation(abandoned);
     });
   }
 }
