@@ -401,8 +401,12 @@ declare const schemaV2: z.ZodObject<{
     protocolInputHash: z.ZodString;
 }, z.core.$strict>;
 declare const schemaV3: z.ZodObject<{
-    kind: z.ZodLiteral<"non_evm_source_journal">;
     reason: z.ZodNullable<z.ZodString>;
+    route: z.ZodEnum<{
+        base_usdc_to_solana_usdc_circle_cctp_v2: "base_usdc_to_solana_usdc_circle_cctp_v2";
+        base_usdc_to_tron_usdt_lifi_near_intents: "base_usdc_to_tron_usdt_lifi_near_intents";
+    }>;
+    kind: z.ZodLiteral<"non_evm_source_journal">;
     integrityHash: z.ZodString;
     profileHash: z.ZodString;
     transactionHash: z.ZodNullable<z.ZodString>;
@@ -493,10 +497,6 @@ declare const schemaV3: z.ZodObject<{
         }, z.core.$strict>]>>;
         reason: z.ZodNullable<z.ZodString>;
     }, z.core.$strict>>;
-    route: z.ZodEnum<{
-        base_usdc_to_solana_usdc_circle_cctp_v2: "base_usdc_to_solana_usdc_circle_cctp_v2";
-        base_usdc_to_tron_usdt_lifi_near_intents: "base_usdc_to_tron_usdt_lifi_near_intents";
-    }>;
     draftIntegrityHash: z.ZodString;
     signedTransaction: z.ZodNullable<z.ZodString>;
     safeSourceProof: z.ZodNullable<z.ZodUnion<readonly [z.ZodObject<{

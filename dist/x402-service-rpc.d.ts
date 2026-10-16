@@ -19,3 +19,4 @@ export declare function terminalClassification(state: X402TerminalState): {
 export declare function settlementResponseTransaction(response: SettlementResponseObservation): string | undefined;
 export declare function remainingWaitMs(deadline: number, nowMs: number): number;
 export declare function waitTimeout(seconds: number, observations: number): X402SettlementWaitProjection;
+export declare function waitOutcome(outcome: X402SettlementWaitProjection["outcome"], seconds: number, observations: number): X402SettlementWaitProjection;

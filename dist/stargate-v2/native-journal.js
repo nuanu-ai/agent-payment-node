@@ -1,6 +1,7 @@
 import { lstat, mkdir, open, readFile, realpath, rename } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { canonicalJson } from "../canonical.js";
+import { evmAddressLock } from "../evm-address-ownership.js";
 import { StateStore } from "../state.js";
 import { address, fail, validateRecord, validateAdvance } from "./native-record.js";
 export class FileStargateNativeJournal {
@@ -19,9 +20,10 @@ export class FileStargateNativeJournal {
         await this.locks.initialize();
         return await this.locks.withLocks([`stargate-native:${id}`], work, { waitMs: 30_000 });
     }
-    async withOwnerChainLock(owner, chainId, work) {
+    /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
+    async withOwnerLock(owner, work) {
         await this.locks.initialize();
-        return await this.locks.withLocks([`stargate-source:${chainId}:${address(owner).toLowerCase()}`], work, { waitMs: 30_000 });
+        return await this.locks.withLocks([evmAddressLock(address(owner))], work, { waitMs: 30_000 });
     }
     async load(id) {
         try {

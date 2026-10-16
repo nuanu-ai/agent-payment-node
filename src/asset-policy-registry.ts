@@ -5,7 +5,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import { tronAddress } from "./tron/codec.js";
-import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
+import { MAX_SWAP_ADMISSION_OPTIONS, swapRouteDigest, validateSwapAdmissionMechanism, type SwapAdmissionMechanism } from "./swap/route-admission.js";
 
 export const ASSET_POLICY_REGISTRY_SCHEMA = "apn.asset-policy-registry.v1" as const;
 /** Version 2 replaces the single asset cap pair with exactly one owner cap pair per admitted rail. */
@@ -52,9 +52,11 @@ export interface AssetPolicyRow {
     gasless: Readonly<{ provider: string; reference: string }>;
     x402: Readonly<{ provider: string; reference: string }>;
     bridge: Readonly<{ provider: string; reference: string }>;
-    swap: SwapMechanismPin;
+    /** A legacy full pin or a route admission; either admits by route identity (protocol, router, pools). */
+    swap: SwapAdmissionMechanism;
   }>>;
-  readonly mechanismOptions?: Readonly<{ bridge: readonly AssetMechanismOption[] }>;
+  /** Alternatives: bridge pins with their own caps, or several admitted swap routes under the swap rail caps. */
+  readonly mechanismOptions?: Readonly<{ bridge?: readonly AssetMechanismOption[]; swap?: readonly SwapAdmissionMechanism[] }>;
   /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
   readonly gaslessRecipient?: string;
 }
@@ -290,10 +292,13 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
       invalid("A gasless recipient pin must be one canonical EVM address.");
     }
   }
-  if (value.mechanismOptions !== undefined) {
+  const swapOptions = isPlainRecord(value.mechanismOptions) ? value.mechanismOptions.swap : undefined;
+  if (swapOptions !== undefined) validateSwapOptions(value.rails.swap, swapOptions, (value.mechanismPins as AssetPolicyRow["mechanismPins"])?.swap);
+  if (value.mechanismOptions !== undefined && !(swapOptions !== undefined && isPlainRecord(value.mechanismOptions) &&
+      exactKeys(value.mechanismOptions, ["swap"]))) {
     const options = value.mechanismOptions as { bridge: AssetMechanismOption[] };
     if (schema !== ASSET_POLICY_REGISTRY_SCHEMA_V2 || !value.rails.bridge ||
-      !isPlainRecord(value.mechanismOptions) || !exactKeys(value.mechanismOptions, ["bridge"]) ||
+      !isPlainRecord(value.mechanismOptions) || !exactKeys(value.mechanismOptions, swapOptions === undefined ? ["bridge"] : ["bridge", "swap"]) ||
       !Array.isArray(options.bridge) || options.bridge.length < 2 ||
       options.bridge.length > 16 || (value.mechanismPins as AssetPolicyRow["mechanismPins"])?.bridge !== undefined) invalid("Bridge mechanism alternatives are invalid.");
     const keys = new Set<string>();
@@ -310,8 +315,18 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
   }
   const mechanismPins = value.mechanismPins as Record<string, unknown> | undefined;
   const swapPin = mechanismPins?.swap;
-  if (value.rails.swap !== (swapPin !== undefined)) invalid("Swap admission requires exactly one immutable swap mechanism pin.");
+  if (value.rails.swap !== (swapPin !== undefined || swapOptions !== undefined)) invalid("Swap admission requires exactly one immutable swap mechanism pin.");
   if (mechanismPins !== undefined && "direct" in mechanismPins) invalid("Direct admission cannot carry mechanism metadata.");
+}
+
+/** Two to sixteen distinct admitted swap routes in place of the single legacy pin; the swap rail caps apply to each. */
+function validateSwapOptions(admitted: boolean, value: unknown, single: unknown): void {
+  if (!admitted || single !== undefined || !Array.isArray(value) || value.length < 2 || value.length > MAX_SWAP_ADMISSION_OPTIONS) {
+    invalid("Swap mechanism alternatives are invalid.");
+  }
+  if (new Set(value.map((option) => swapRouteDigest(validateSwapAdmissionMechanism(option)))).size !== value.length) {
+    invalid("Swap mechanism alternatives contain a duplicate route.");
+  }
 }
 
 function canonicalEvmRecipient(value: string): string | null {
@@ -326,7 +341,7 @@ function validateMechanismPins(value: unknown): void {
     invalid("Asset mechanism pins are invalid.");
   }
   for (const [rail, pin] of Object.entries(value)) {
-    if (rail === "swap") { validateSwapMechanismPin(pin); continue; }
+    if (rail === "swap") { validateSwapAdmissionMechanism(pin); continue; }
     if (!isPlainRecord(pin) || !exactKeys(pin, ["provider", "reference"]) || typeof pin.provider !== "string" ||
         typeof pin.reference !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.provider) ||
         !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u.test(pin.reference)) invalid("Asset mechanism pins are invalid.");

@@ -8,7 +8,16 @@ import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
 import { type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { type StargateReadBatch, type StargateV2QuoteEvidence } from "./quote.js";
-export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality";
+export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality" | "failed_confirmed_revert";
+export type StargateNativeUsageTarget = "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
+export interface StargateNativePolicyBinding {
+    readonly policyDigest: string;
+    readonly policyRevision: number;
+    readonly mechanism: Readonly<{
+        provider: string;
+        reference: string;
+    }>;
+}
 export interface StargateNativeTransition {
     readonly phase: StargateNativePhase;
     readonly at: string;
@@ -26,7 +35,7 @@ export interface StargateNativeEnvelope {
     readonly maxPriorityFeePerGasAtomic: string;
 }
 export interface StargateNativeOperation {
-    readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2";
+    readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2" | "apn.stargate-v2-native-operation.v3";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
@@ -60,6 +69,8 @@ export interface StargateNativeOperation {
     readonly guid?: Hex;
     readonly sourceReceipt?: StargateSourceReceipt;
     readonly destinationEvidence?: StargateDestinationEvidence;
+    /** v3: owner admission frozen at prepare; the principal is held in the shared asset-usage ledger before signing. */
+    readonly policy?: StargateNativePolicyBinding;
     readonly integrityHash: string;
 }
 export interface StargateSourceReceipt {
@@ -150,6 +161,14 @@ export interface StargateNativeExecutionPorts {
         address: Address;
     }>>;
     readonly approve: (operation: StargateNativeOperation) => Promise<void>;
+    readonly admitPolicy: (input: Readonly<{
+        profile: string;
+        owner: Address;
+        amountAtomic: string;
+    }>) => Promise<StargateNativePolicyBinding>;
+    /** Confirms the active owner policy is the prepared one and holds the principal under the shared caps. */
+    readonly reserveUsage: (operation: StargateNativeOperation) => Promise<void>;
+    readonly followUsage: (operation: StargateNativeOperation, target: StargateNativeUsageTarget) => Promise<void>;
     readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
     readonly waitSourceReceipt: (transactionHash: Hex, finalityTag: StargateV2FinalityTag) => Promise<StargateConfirmedReceipt | null>;
     readonly observeDestination: (input: Readonly<{
@@ -170,7 +189,8 @@ export interface StargateNativeJournal {
     load(operationId: string): Promise<StargateNativeOperation | null>;
     save(next: StargateNativeOperation): Promise<void>;
     withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
-    withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
+    /** The kernel per-account EVM lock (`evmAddressLock`) every EVM writer holds around its nonce check and send. */
+    withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
 }
 export declare class LocalStargateNativeSigner {
     private readonly state;

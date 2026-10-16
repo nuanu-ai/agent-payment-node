@@ -296,7 +296,8 @@ test("authorized resume persists one paid attempt, strict settlement, and protec
   assert.match(operation.resultLink?.resultHash ?? "", /^[a-f0-9]{64}$/u);
   const result = await fixture.core.context.state.loadX402Result(operation.profileHash, operation.operationId);
   assert.equal(result?.bodyText, '{"forecast":"sunny"}');
-  assert.equal(JSON.stringify(resumed).includes("forecast"), false);
+  // The paid body is delivered at once; settlement proof continues on the next resume.
+  assert.deepEqual((resumed.data as { readonly body?: unknown } | null)?.body, { forecast: "sunny" });
   assert.equal(JSON.stringify(resumed).includes("order=redacted"), false);
   const rawPairs = paidObservation({
     paymentResponseHeader: canonicalPaymentResponseHeader({
@@ -564,7 +565,7 @@ test("UTF-8 Content-Type parameters are accepted and normalized to the base medi
   }
 });
 
-test("invalid result and duplicate control headers remain bounded non-terminal with one send", async (t) => {
+test("an unreadable result body keeps its payment response; duplicate control headers stay non-terminal with one send", async (t) => {
   const settlementHeader = canonicalPaymentResponseHeader({
     success: true,
     transaction: X402_TRANSACTION,
@@ -682,15 +683,34 @@ test("invalid result and duplicate control headers remain bounded non-terminal w
       const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
       assert.equal(resumed.ok, true, JSON.stringify(resumed));
       const operation = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
-      assert.equal(operation.state, "effect_unknown");
-      assert.equal(operation.attempts[0]?.phase, "ambiguous");
-      assert.equal(operation.resultLink, undefined);
+      if (BODY_ONLY.has(item.label)) {
+        // The body is the seller's problem; the PAYMENT-RESPONSE and its transaction are still evidence.
+        assert.equal(operation.state, "settlement_pending");
+        assert.equal(operation.attempts[0]?.phase, "observed");
+        assert.equal(operation.transactionHint?.transactionHash, X402_TRANSACTION);
+        const result = await fixture.core.context.state.loadX402Result(operation.profileHash, operation.operationId);
+        if (item.label === "oversized-media") assert.equal(operation.resultLink, undefined);
+        else {
+          assert.equal(result?.bodyEncoding, "base64", item.label);
+          assert.deepEqual(Buffer.from(result!.bodyText, "base64"), Buffer.from(item.response.bodyBytes));
+          assert.notEqual(resumed.data, null, "the stored body is returned at once");
+        }
+      } else {
+        assert.equal(operation.state, "effect_unknown");
+        assert.equal(operation.attempts[0]?.phase, "ambiguous");
+        assert.equal(operation.resultLink, undefined);
+      }
       await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
       assert.equal(fixture.http.calls.length, 2);
       assert.equal(fixture.rpc.submissions.length, 0);
     });
   }
 });
+
+const BODY_ONLY = new Set([
+  "mixed-case-media", "malformed-json", "malformed-content-type-parameter", "duplicate-content-type-parameter",
+  "unknown-content-type-parameter", "non-utf8-content-type-parameter", "oversized-media",
+]);
 
 test("authorization deadline requires one full second and derives a whole-second timeout", async (t) => {
   await t.test("native-expiry-race", async (nested) => {

@@ -3,7 +3,8 @@ import { requireEvmFunding, requireEvmRpc, evmTransaction, validateEvmFeeQuote }
 import { directEvmNetwork } from "./evm-direct-networks.js";
 import { validateEconomics } from "./transfer-policy.js";
 import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
-function frozenEconomicsRemainExecutable(current, frozen) {
+/** The frozen signed envelope still lands: same nonce, gas within the signed limit, and today's base fee within the signed max fee. */
+export function frozenEconomicsRemainExecutable(current, frozen) {
     const freshMaximumFee = BigInt(current.maxFeePerGasAtomic);
     const freshPriorityFee = BigInt(current.maxPriorityFeePerGasAtomic);
     const freshBaseFeeTwice = freshMaximumFee - freshPriorityFee;

@@ -23,6 +23,17 @@ export declare class BridgeExecution {
     private approved;
     resume(op: BridgeOperationRecord, approval?: BridgeApprovalPort): Promise<BridgeOperationRecord>;
     run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord>;
+    private claims;
+    /**
+     * signing_started with no sealed material and no SEND claim: the process stopped between the durable marker and custody,
+     * so nothing was signed into custody and nothing could have been broadcast. The effect returns to unsealed; the normal
+     * path then runs the full guard again and re-signs the identical envelope (same nonce and fields; RFC 6979 gives the same
+     * bytes, and the idempotent SIGN claim proves the same intent), or ends it on the expiry path. A SEND claim keeps its own
+     * observe-only path.
+     */
+    private releaseUnsignedSeal;
+    /** Catches the journal up with a SEND claim from the exact sealed material, without signing or sending, then observes. */
+    private recordClaimedSend;
     private guard;
     private authorityPolicy;
     private allowlist;

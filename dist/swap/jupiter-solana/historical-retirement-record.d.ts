@@ -77,7 +77,9 @@ export declare function hashBucket(identity: AssetUsageIdentity): string;
 /** Pure sealing is useful for codec fixtures and does not grant permission to persist it. */
 export declare function sealHistoricalRetirementRecord(body: Omit<HistoricalRetirementRecord, "recordHash">): HistoricalRetirementRecord;
 export declare function validateHistoricalRetirementRecord(value: unknown): HistoricalRetirementRecord;
-export declare function assertHistoricalRetirementBindings(record: HistoricalRetirementRecord, rootSnapshotHash: string, operation: SwapOperationRecord | null, reservation: AssetUsageReservation | undefined, originalRowRawHash: string): void;
+/** Binds the record to its own hash, the original operation and the original row bytes. The state root's filesystem
+ * identity (path, device, inode) is deliberately not compared: a moved or restored ~/.apn keeps the same records. */
+export declare function assertHistoricalRetirementBindings(record: HistoricalRetirementRecord, operation: SwapOperationRecord | null, reservation: AssetUsageReservation | undefined, originalRowRawHash: string): void;
 export declare function sameIdentity(a: AssetUsageIdentity, b: AssetUsageIdentity): boolean;
 /** Replace only exact original holds. No actual spend/finality claim is derived from this projection. */
 export declare function historicalRetirementUsage(records: readonly AssetUsageReservation[], retirements: readonly HistoricalRetirementRecord[], now: Date): string;

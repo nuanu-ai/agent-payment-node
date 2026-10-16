@@ -3,42 +3,29 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { getAddress } from "viem";
 import { ApnCore } from "../../src/core.js";
 import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
-import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
-import { prepareUsdtOperation, UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
+import { UsdtBoundOperationRepository } from "../../src/gasless-usdt/bound-operation.js";
+import { preparePolicyBoundUsdtV2 } from "../../src/gasless-usdt/policy-prepare-v2.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
+import { v2Fixture } from "./gasless-usdt-v2-fixture.js";
 
 const PROFILE_HASH = "a".repeat(64);
-const POLICY_DIGEST = "b".repeat(64);
-const SENDER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
-const RECIPIENT = getAddress("0x000000000000000000000000000000000000dEaD");
-const OPERATION_INPUT = {
-  policyDigest: POLICY_DIGEST,
-  sender: SENDER,
-  recipient: RECIPIENT,
-  grossAtomic: 1_000_000n,
-  maxFeeAtomic: 500_000n,
-  minReceivedAtomic: 500_000n,
-  nonce: 7n,
-  expiresAt: 1_700_000_900,
-  now: 1_700_000_000,
-} as const;
 const REQUEST_ID = "12345678-1234-4234-8234-123456789abc";
 
 test("MCP status/resume are byte-equivalent to CLI and leave the USDT journal unchanged", async t => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const repository = new UsdtOperationRepository(temporary.root);
-  const service = new GaslessUsdtOperationService(repository);
-  const operation = await prepareUsdtOperation(repository, { profileHash: PROFILE_HASH, ...OPERATION_INPUT }, "mcp-usdt-001");
+  // The live bound journal written by `gasless usdt prepare`; resume of a never-executed operation is a local read.
+  const f = v2Fixture("expected"), repository = new UsdtBoundOperationRepository(temporary.root);
+  const operation = await repository.create(PROFILE_HASH, await preparePolicyBoundUsdtV2({ prepare: f.prepare, sponsor: f.sponsor },
+    f.request), "mcp-usdt-001", f.now());
   const path = join(repository.directory, PROFILE_HASH, `${operation.operationId}.json`);
   const before = await readFile(path, "utf8");
-  const options = { stateRoot: temporary.root, gaslessUsdt: service, ids: { next: () => REQUEST_ID } };
+  const options = { stateRoot: temporary.root, ids: { next: () => REQUEST_ID } };
   const connection = await connectMcp(options);
   t.after(connection.close);
 

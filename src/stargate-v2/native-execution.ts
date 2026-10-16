@@ -11,6 +11,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { ApnError } from "../errors.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -21,7 +22,12 @@ import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } fro
 import { stargateV2RouteFinalityPolicy, type StargateV2FinalityPolicyProvenance, type StargateV2FinalityTag,
   type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct, type StargateReadBatch, type StargateV2QuoteEvidence } from "./quote.js";
-export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality";
+export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality" |
+  "failed_confirmed_revert";
+export type StargateNativeUsageTarget = "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
+export interface StargateNativePolicyBinding {
+  readonly policyDigest: string; readonly policyRevision: number; readonly mechanism: Readonly<{ provider: string; reference: string }>;
+}
 export interface StargateNativeTransition { readonly phase: StargateNativePhase; readonly at: string; readonly reason: string }
 export interface StargateNativeEnvelope {
   readonly chainId: 1; readonly from: Address; readonly to: Address; readonly data: Hex; readonly valueAtomic: string;
@@ -29,7 +35,7 @@ export interface StargateNativeEnvelope {
   readonly maxPriorityFeePerGasAtomic: string;
 }
 export interface StargateNativeOperation {
-  readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2";
+  readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2" | "apn.stargate-v2-native-operation.v3";
   readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string;
   readonly owner: Address; readonly recipient: Address; readonly amountAtomic: string; readonly maxNativeDebitAtomic: string;
   readonly finalityPolicy: StargateV2RouteFinalityPolicy;
@@ -42,6 +48,8 @@ export interface StargateNativeOperation {
   readonly preparedAt: string; readonly expiresAt: string; readonly phase: StargateNativePhase;
   readonly transitions: readonly StargateNativeTransition[]; readonly transactionHash?: Hex; readonly guid?: Hex;
   readonly sourceReceipt?: StargateSourceReceipt; readonly destinationEvidence?: StargateDestinationEvidence;
+  /** v3: owner admission frozen at prepare; the principal is held in the shared asset-usage ledger before signing. */
+  readonly policy?: StargateNativePolicyBinding;
   readonly integrityHash: string;
 }
 export interface StargateSourceReceipt {
@@ -80,6 +88,10 @@ export interface StargateNativeExecutionPorts {
   readonly signer: Readonly<{ kind: "imported_evm_signer"; address: Address; signTransaction: (tx: StargateNativeEnvelope) => Promise<Hex> }>;
   readonly signerIdentity: () => Promise<Readonly<{ profile: string; address: Address }>>;
   readonly approve: (operation: StargateNativeOperation) => Promise<void>;
+  readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; amountAtomic: string }>) => Promise<StargateNativePolicyBinding>;
+  /** Confirms the active owner policy is the prepared one and holds the principal under the shared caps. */
+  readonly reserveUsage: (operation: StargateNativeOperation) => Promise<void>;
+  readonly followUsage: (operation: StargateNativeOperation, target: StargateNativeUsageTarget) => Promise<void>;
   readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
   readonly waitSourceReceipt: (transactionHash: Hex, finalityTag: StargateV2FinalityTag) => Promise<StargateConfirmedReceipt | null>;
   readonly observeDestination: (input: Readonly<{ sourceTransactionHash: Hex; guid: Hex; recipient: Address; sourceEid: 30101; destinationPool: Address;
@@ -91,7 +103,8 @@ export interface StargateNativeExecutionPorts {
 export interface StargateNativeJournal {
   load(operationId: string): Promise<StargateNativeOperation | null>; save(next: StargateNativeOperation): Promise<void>;
   withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
-  withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T>;
+  /** The kernel per-account EVM lock (`evmAddressLock`) every EVM writer holds around its nonce check and send. */
+  withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
 }
 
 export class LocalStargateNativeSigner {
@@ -171,9 +184,10 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
   const checkedSource = sourceBlock as Record<string, unknown>;
   if (rpcQuantity(checkedSource.number) !== BigInt(quote.block.numberAtomic) ||
     hex32(checkedSource.hash) !== quote.block.hash) fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
+  const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString() });
   const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
   const body = {
-    schemaVersion: "apn.stargate-v2-native-operation.v2" as const, operationId, profile, profileHash, idempotencyHash,
+    schemaVersion: "apn.stargate-v2-native-operation.v3" as const, operationId, profile, profileHash, idempotencyHash, policy,
     owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy,
     finalityPolicyProvenance: "pinned_v2" as const, sourcePool: SOURCE_POOL,
     destinationPool: DESTINATION_POOL, sourceEid: SOURCE_EID, destinationEid: DESTINATION_EID, quote, sourceCodeHash: config.codeHash,
@@ -191,7 +205,7 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
 export async function executeStargateV2NativeEth(operationId: string, ports: StargateNativeExecutionPorts,
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
   const initial = await journal.load(operationId); if (initial === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
-  return await journal.withOwnerChainLock(initial.owner, SOURCE_CHAIN, async () =>
+  return await journal.withOwnerLock(initial.owner, async () =>
     await journal.withLock(operationId, async () => await executeLocked(operationId, ports, journal)));
 }
 
@@ -199,14 +213,18 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
   let operation = await journal.load(operationId); if (operation === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
   if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase)) return await observeOnly(operation, ports, journal);
-  if (operation.phase === "observed") return operation; if (operation.finalityPolicyProvenance === "derived_legacy_v1") fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
+  if (operation.phase === "observed" || operation.phase === "failed_confirmed_revert") return await followPhaseUsage(operation, ports);
+  if (operation.finalityPolicyProvenance === "derived_legacy_v1") fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
+  if (operation.policy === undefined) fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");
   const now = ports.now ?? Date.now;
-  if (Date.parse(operation.expiresAt) <= now()) fail("APN_REPREPARE_REQUIRED", "expired");
+  // Nothing was marked for sending, so an expired operation releases any hold an interrupted earlier run took.
+  const expired = async (reason: string) => { await ports.followUsage(operation!, "failed_before_effect"); return fail("APN_REPREPARE_REQUIRED", reason); };
+  if (Date.parse(operation.expiresAt) <= now()) await expired("expired");
   if (operation.phase === "prepared") {
     await ports.approve(operation);
     operation = transition(operation, "approved", "foreground_owner_confirmation", now()); await journal.save(operation);
   }
-  if (Date.parse(operation.expiresAt) <= now()) fail("APN_REPREPARE_REQUIRED", "expired_after_approval");
+  if (Date.parse(operation.expiresAt) <= now()) await expired("expired_after_approval");
   const fresh = await quoteStargateV2Direct({ sourceChainId: 1, destinationChainId: 130, sourceToken: "native", destinationToken: "native",
     recipient: operation.recipient, amountAtomic: operation.amountAtomic }, ports.sourceCall);
   assertLane(fresh);
@@ -220,6 +238,12 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   if (config.codeHash !== operation.sourceCodeHash) fail("APN_REPREPARE_REQUIRED", "source_code_changed");
   const destination = await readPoolConfig(ports.destinationCall, DESTINATION_CHAIN, DESTINATION_POOL, DESTINATION_EID, "latest");
   if (destination.codeHash !== operation.destinationCodeHash) fail("APN_REPREPARE_REQUIRED", "destination_code_changed");
+  // One fee rule: the frozen envelope must be includable now; its signed gas × maxFeePerGas stays the approved spend bound.
+  const head = await ports.sourceCall("eth_getBlockByNumber", ["latest", false]);
+  if (head === null || typeof head !== "object" || Array.isArray(head)) fail("APN_RPC_PROTOCOL", "source_head");
+  if (!evmFrozenFeeAdmitted(rpcQuantity((head as Record<string, unknown>).baseFeePerGas), { maxFeePerGasWei: BigInt(operation.envelope.maxFeePerGasAtomic),
+    maxPriorityFeePerGasWei: BigInt(operation.envelope.maxPriorityFeePerGasAtomic) })) fail("APN_REPREPARE_REQUIRED", "fee_spike");
+  await ports.reserveUsage(operation);
   // Re-read the encrypted profile after every network preflight and immediately before signing.
   const identity = await ports.signerIdentity();
   if (canonicalProfile(identity.profile) !== operation.profile || address(identity.address) !== operation.owner ||
@@ -234,9 +258,19 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
     if (returned.toLowerCase() !== transactionHash.toLowerCase()) fail("APN_RPC_AMBIGUOUS", "returned_transaction_hash");
     operation = transition(operation, "submitted", "broadcast_returned_exact_hash", now()); await journal.save(operation);
   } catch {
-    operation = transition(operation, "unknown_finality", "broadcast_result_ambiguous_no_resend", now()); await journal.save(operation); return operation;
+    operation = transition(operation, "unknown_finality", "broadcast_result_ambiguous_no_resend", now()); await journal.save(operation);
+    return await followPhaseUsage(operation, ports);
   }
+  await followPhaseUsage(operation, ports);
   return await observeOnly(operation, ports, journal);
+}
+
+/** The ledger state a phase proves; phases before the attempt marker imply nothing yet. */
+async function followPhaseUsage(operation: StargateNativeOperation, ports: StargateNativeExecutionPorts): Promise<StargateNativeOperation> {
+  const phase = operation.phase, target: StargateNativeUsageTarget | undefined = phase === "submitted" ? "submitted" :
+    phase === "unknown_finality" ? "unknown_finality" : phase === "observed" ? "finalized" : phase === "failed_confirmed_revert" ? "failed_confirmed_revert" : undefined;
+  if (target !== undefined) await ports.followUsage(operation, target);
+  return operation;
 }
 
 async function observeOnly(input: StargateNativeOperation, ports: StargateNativeExecutionPorts,
@@ -246,7 +280,13 @@ async function observeOnly(input: StargateNativeOperation, ports: StargateNative
   const receipt = await ports.waitSourceReceipt(operation.transactionHash, operation.finalityPolicy.source.blockTag);
   if (receipt === null) {
     if (operation.phase !== "unknown_finality") { operation = transition(operation, "unknown_finality", "source_receipt_not_safe", (ports.now ?? Date.now)()); await journal.save(operation); }
-    return operation;
+    return await followPhaseUsage(operation, ports);
+  }
+  if (receipt.status === "reverted") {
+    // A revert at the route's source finality is final: nothing was bridged and the same bytes are never resent.
+    if (receipt.transactionHash !== operation.transactionHash || receipt.finality !== operation.finalityPolicy.source.blockTag) fail("APN_RPC_PROTOCOL", "source_revert_receipt");
+    operation = transition(operation, "failed_confirmed_revert", "source_reverted_at_finality", (ports.now ?? Date.now)()); await journal.save(operation);
+    return await followPhaseUsage(operation, ports);
   }
   const source = sourceReceipt(operation, receipt);
   const destination = await ports.observeDestination({ sourceTransactionHash: source.transactionHash, guid: source.guid,
@@ -260,13 +300,13 @@ async function observeOnly(input: StargateNativeOperation, ports: StargateNative
         { phase: "submitted" as const, at: new Date((ports.now ?? Date.now)()).toISOString(), reason: "source_safe_destination_pending" }];
       operation = seal({ ...operation, phase: "submitted" as const, sourceReceipt: source, transitions }); await journal.save(operation);
     }
-    return operation;
+    return await followPhaseUsage(operation, ports);
   }
-  if (destination.mode === "balance_delta") return operation;
+  if (destination.mode === "balance_delta") return await followPhaseUsage(operation, ports);
   validateDestination(operation, source, destination);
   operation = seal({ ...operation, phase: "observed" as const, guid: source.guid, sourceReceipt: source, destinationEvidence: destination,
     transitions: [...operation.transitions, { phase: "observed" as const, at: new Date((ports.now ?? Date.now)()).toISOString(), reason: "destination_delivery_safe" }] });
-  await journal.save(operation); return operation;
+  await journal.save(operation); return await followPhaseUsage(operation, ports);
 }
 
 function sourceReceipt(operation: StargateNativeOperation, receipt: StargateConfirmedReceipt): StargateSourceReceipt {

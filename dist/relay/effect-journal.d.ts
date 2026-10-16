@@ -2,7 +2,7 @@ import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { RelayQuoteTransaction } from "./quote.js";
 export type RelayEffectRole = "approval" | "deposit";
-export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submission_marked" | "tx_known" | "confirmed" | "failed";
+export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submission_marked" | "tx_known" | "confirmed" | "failed" | "abandoned_unsent";
 export interface RelayEffect {
     readonly role: RelayEffectRole;
     readonly phase: RelayEffectPhase;
@@ -55,6 +55,12 @@ export type RelayEffectEvent = Readonly<{
     kind: "observe";
     role: RelayEffectRole;
     outcome: "confirmed" | "failed";
+    at: string;
+}>
+/** Sealed bytes that never crossed `submitting` and provably can never land (their nonce was consumed at safe depth). */
+ | Readonly<{
+    kind: "record_never_landed";
+    role: RelayEffectRole;
     at: string;
 }>;
 export declare function validateRelayEffectJournal(value: unknown, op: RelayUnsignedOperation): RelayEffectJournal;

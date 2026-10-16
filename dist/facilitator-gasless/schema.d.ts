@@ -65,6 +65,16 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         preparedAt: z.ZodString;
         expiresAt: z.ZodString;
         policyHash: z.ZodString;
+        allowlist: z.ZodOptional<z.ZodObject<{
+            policyDigest: z.ZodString;
+            policyRevision: z.ZodNumber;
+            activationDigest: z.ZodString;
+            mechanism: z.ZodObject<{
+                provider: z.ZodString;
+                reference: z.ZodString;
+            }, z.core.$strict>;
+            reservationId: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strict>;
     transitions: z.ZodArray<z.ZodObject<{
         at: z.ZodString;

@@ -423,6 +423,23 @@ export class EvmRpc {
         await this.assertChain(operation.chainId);
         return evidence;
     }
+    /** A finalized nonce past the frozen one, with no receipt for this hash from the same node, proves another transaction took it. */
+    async unlandedEvidence(chainId, address, transactionHash) {
+        if (this.batchCall === undefined)
+            throw new ApnError("APN_RPC_CONFIG", "Unlanded-transfer evidence requires one batched RPC read.");
+        const [identity, nonce, receipt, transaction] = await this.batchCall([
+            { method: "eth_chainId", params: [] }, { method: "eth_getTransactionCount", params: [address, "finalized"] },
+            { method: "eth_getTransactionReceipt", params: [transactionHash] }, { method: "eth_getTransactionByHash", params: [transactionHash] },
+        ]);
+        if (evmRpcQuantity(identity) !== BigInt(directEvmChain(chainId)))
+            throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+        if (receipt !== null)
+            evmRpcRecord(receipt);
+        if (transaction !== null && evmRpcHex(evmRpcRecord(transaction).hash, 32) !== transactionHash.toLowerCase()) {
+            throw new ApnError("APN_RPC_PROTOCOL", "EVM transaction lookup returned a different hash.");
+        }
+        return { finalizedNonce: evmRpcQuantity(nonce).toString(), receiptFound: receipt !== null, transactionKnown: transaction !== null };
+    }
     async confirmedAtNonce(chainId, address, nonce, startBlock) {
         await this.assertChain(chainId);
         const latest = await evmRpcBlock(this.call, directEvmRequiresSafeHead(chainId) ? "safe" : "latest");

@@ -12,6 +12,9 @@ import { JupiterV1MaterialResolver } from "./v1-resolver.js";
 import { routeConfigForMaterial } from "./v1-route-config.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
+import { proveSolanaUnlanded } from "../unlanded.js";
+/** Logical reads one status or observe-only invocation may make; a new invocation starts again from zero. */
+export const JUPITER_V1_OBSERVATION_READ_CAP = 64;
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
     core;
@@ -87,6 +90,20 @@ export class JupiterV1SingleSender {
         });
     }
 }
+/**
+ * Every program-byte, account and simulation check that can fail runs before consent, against the same frozen message.
+ * After the prompt only the lifetime reserve, the local owner re-check, the marker, the signature and the one send remain,
+ * so the frozen blockhash is not spent on bulky public reads after the human typed the code.
+ */
+export async function proveJupiterV1Preconsent(rpc, clock, op, materialValue) {
+    const material = validateJupiterV1PreparedMaterial(materialValue);
+    const fresh = await new JupiterV1MaterialResolver(rpc).resolve(material.execution.payer, material.execution.quoteResponse, material.execution.rawBuildResponse, material.execution.maximumNativeExpenseLamports, material.execution.quoteRpcLifetime, routeConfigForMaterial(material.execution).routeId);
+    if (fresh.transactionBase64 !== material.execution.transactionBase64 || fresh.messageHash !== material.execution.messageHash ||
+        fresh.lookupBindingDigest !== material.execution.lookupBindingDigest || canonicalJson(fresh.programPins) !== canonicalJson(material.execution.programPins))
+        blocked("Jupiter's frozen message, lookup or runtime executable identity changed.");
+    const guarded = await guardJupiterV1WhirlpoolMaterial(fresh, { now: clock.now().getTime(), deadline: op.quote.expiresAt }), simulation = await proveJupiterV1Simulation(rpc, guarded);
+    return detached({ operationId: op.operationId, materialDigest: material.execution.materialDigest, fresh, simulation });
+}
 export class JupiterV1ExecutionDriver {
     d;
     constructor(d) {
@@ -99,12 +116,12 @@ export class JupiterV1ExecutionDriver {
             blocked("A fresh genuine TTY grant is required before Jupiter's first effect marker.");
         const admission = await this.d.admission.assert(op, material);
         await this.d.bindings.assertPrepared(op, admission, material);
-        // Re-resolve the same frozen official build. No new quote, lifetime, transaction, or route bytes are substituted.
-        const fresh = await new JupiterV1MaterialResolver(this.d.rpc).resolve(material.execution.payer, material.execution.quoteResponse, material.execution.rawBuildResponse, material.execution.maximumNativeExpenseLamports, material.execution.quoteRpcLifetime, routeConfigForMaterial(material.execution).routeId);
-        if (fresh.transactionBase64 !== material.execution.transactionBase64 || fresh.messageHash !== material.execution.messageHash ||
-            fresh.lookupBindingDigest !== material.execution.lookupBindingDigest || canonicalJson(fresh.programPins) !== canonicalJson(material.execution.programPins))
-            blocked("Jupiter's frozen message, lookup or runtime executable identity changed.");
-        const guarded = await guardJupiterV1WhirlpoolMaterial(fresh, { now: this.d.clock.now().getTime(), deadline: op.quote.expiresAt }), simulation = await proveJupiterV1Simulation(this.d.rpc, guarded);
+        // The executable bytes and the exact-message simulation were proved before the prompt; only their use remains here.
+        const proved = this.d.preconsent.get(op.operationId);
+        this.d.preconsent.delete(op.operationId);
+        if (proved === undefined || proved.materialDigest !== material.execution.materialDigest)
+            blocked("Jupiter's pre-consent executable and simulation proof is missing; approve again in this terminal.");
+        const { fresh, simulation } = proved;
         const height = rpcAtomic(await this.d.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
         if (height > BigInt(fresh.lifetime.lastValidBlockHeight))
             blocked("Jupiter's frozen blockhash expired before signing.");
@@ -162,7 +179,7 @@ export class JupiterV1ExecutionDriver {
                 corrupt();
             if (op.submissionMarker === null)
                 blocked("Jupiter observation requires its durable effect marker.");
-            if (["finalized", "failed_confirmed_revert"].includes(op.state))
+            if (["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(op.state))
                 return op;
             if (op.state === "submitting")
                 op = await this.d.core.recordPossibleSend(op, "unknown_finality", this.d.clock.now());
@@ -186,6 +203,23 @@ export class JupiterV1ExecutionDriver {
             }
         });
     }
+    async proveUnlanded(input) { return await proveJupiterV1Unlanded(this.d, input); }
+}
+/** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
+ * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */
+export async function proveJupiterV1Unlanded(d, input) {
+    return await d.core.operations.withLocks([`jupiter-v1-operation:${input.operation.operationId}`], async () => {
+        const op = await d.core.operations.loadAny(input.operation.operationId);
+        if (op === null)
+            corrupt();
+        if (op.submissionMarker === null || op.receiptProof !== null || !["submitting", "submitted", "unknown_finality"].includes(op.state))
+            return null;
+        const material = validateJupiterV1PreparedMaterial(input.material);
+        return await proveSolanaUnlanded(d.rpc, { lastValidBlockHeight: material.execution.lifetime.lastValidBlockHeight, loadSignature: async () => {
+                const binding = await d.bindings.load(op, material);
+                return binding === null ? null : await d.bindings.loadSignature(op, binding);
+            } });
+    });
 }
 async function guardReceipt(fresh) {
     return await guardJupiterV1WhirlpoolMaterial(fresh);
@@ -248,6 +282,8 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
     stageKey;
     calls = 0;
     priorQuoteCalls = 0;
+    observing;
+    observationCalls = 0;
     constructor(base, root, stage, operationId) {
         super();
         this.base = base;
@@ -255,8 +291,11 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
         this.originHash = base.originHash;
         this.budget = base.budget;
         this.journal = new JupiterV1StageBudgetStore(root);
-        this.stageKey = sha256(`jupiter-v1-runtime-stage:${stage}:${stage === "execute" || stage === "observe" ? operationId : randomUUID()}`);
+        this.stageKey = sha256(`jupiter-v1-runtime-stage:${stage}:${stage === "execute" ? operationId : randomUUID()}`);
+        this.observing = stage === "observe";
     }
+    /** Observing a marked operation: reads are bounded per invocation, never by a lifetime per-operation cap (SWAP-19). */
+    enterObservation() { this.observing = true; }
     get hasPersistentPacer() { return this.base.hasPersistentPacer; }
     get maximumAccountsPerRead() { return this.base.maximumAccountsPerRead; }
     async bindOperation(quoteHash) { if (this.stage === "execute")
@@ -264,7 +303,15 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
     async bindQuote(quoteHash) { if (this.stage !== "quote")
         corrupt(); await this.journal.bindQuote(quoteHash, this.calls); }
     async chargeOfficialRead() { await this.charge(); }
-    async charge() { this.calls = await this.journal.charge(this.stageKey, this.priorQuoteCalls); }
+    async charge() {
+        if (this.observing) {
+            if (this.observationCalls >= JUPITER_V1_OBSERVATION_READ_CAP)
+                blocked("Jupiter's per-invocation observation read cap was reached; run status again.");
+            this.observationCalls++;
+            return;
+        }
+        this.calls = await this.journal.charge(this.stageKey, this.priorQuoteCalls);
+    }
     async call(method, params) {
         await this.charge();
         if (method === "getBlockHeight" && typeof this.base.batch === "function") {

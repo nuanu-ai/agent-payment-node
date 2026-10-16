@@ -456,3 +456,18 @@ test("settlement fails closed without recording a request-session overrun", asyn
   await assert.rejects(journal.settle(binding, approval, { ...telemetry, httpAttempts: 14, httpRequests: 14 }, 1), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.equal((await journal.load(binding))!.rows[1]?.physicalRequests, null);
 });
+
+// SWAP-19: zero-cap recovery rows never count toward the cap and only the latest are kept, so status never wedges.
+test("a long-lived token operation stays observable: 40 status calls keep a bounded journal and never refuse", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const journal = new UniswapTokenRpcBudgetJournal(temp.root), binding = "d".repeat(64);
+  const effect = await journal.reserve(binding, "swap.uniswap-token.approve", 60, 60, "approval_effect");
+  await journal.settle(binding, effect, { ...new RpcReadSession().telemetry(), httpAttempts: 60, httpRequests: 60 }, 0);
+  for (let i = 0; i < 40; i++) {
+    const reservation = await journal.reserve(binding, "swap.uniswap-token.status", 0, 8, "recovery");
+    await journal.settle(binding, reservation, { ...new RpcReadSession().telemetry(), httpAttempts: 3, httpRequests: 3 }, 0);
+  }
+  const rows = (await journal.load(binding))!.rows;
+  assert.equal(rows.filter((row) => row.cap === 0).length, 16);
+  assert.deepEqual(rows.filter((row) => row.cap !== 0).map((row) => row.reservation), [effect]);
+  await assert.rejects(journal.reserve(binding, "extra-effect", 5), { code: "APN_RPC_BUDGET_EXCEEDED" });
+});

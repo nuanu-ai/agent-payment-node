@@ -29,6 +29,11 @@ export class CircleFundingEffectStore extends SecureStateStore {
     for (const role of ["mint", "cleanup"] as const) for (const suffix of ["", "-sign", "-send"] as const)
       if (await this.readJson(`circle-v2-evm-funding-effects/${op.operationId}-${role}${suffix}.json`) !== null) circleBlocked("external_owned_private_entry");
   }
+  /** Only for an effect already recorded `abandoned_unsent`; its permanent sign claim stays and refuses any re-signing. */
+  async discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void> {
+    if (effect.phase !== "abandoned_unsent") circleBlocked("discard_requires_never_landed_effect");
+    await this.removeFile(this.path(op, effect.role));
+  }
   async load(op: CircleFundingOperationV2, effect: CircleEffect, guard?: () => void): Promise<CircleFundingMaterial | null> {
     const value = await this.readJson(this.path(op, effect.role)); if (value === null) return null;
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"])) circleCorrupt("material_envelope");
@@ -81,6 +86,10 @@ export class LocalCircleFundingCustody {
   private readonly wallets: EncryptedWalletStore; private readonly material: CircleFundingEffectStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort) { this.wallets = new EncryptedWalletStore(state, wrapping); this.material = new CircleFundingEffectStore(state.root, wrapping); }
   async load(op: CircleFundingOperationV2, effect: CircleEffect) { return await this.material.load(op, effect); }
+  async discard(op: CircleFundingOperationV2, effect: CircleEffect) {
+    const custody = effect.role === "mint" ? op.destinationCustody : op.sourceCustody;
+    await this.state.withLocks([`custody:${custody.profileHash}`], async () => this.material.discard(op, effect));
+  }
   async claimSend(op: CircleFundingOperationV2, effect: CircleEffect, guard: () => void): Promise<void> {
     const gate = () => { assertCircleFundingEffectGuard(op, effect, guard); assertCircleFundingRuntimeAuthority(this.state, op, effect); };
     gate(); if (effect.phase !== "submission_started") circleBlocked("funding_submission_gate"); await this.material.claim(op, effect, "send", gate);

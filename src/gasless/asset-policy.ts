@@ -9,12 +9,15 @@ import type { GaslessAllowlistBinding, GaslessIntent } from "./model.js";
 import type { GaslessChainId } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import { gaslessDeployment } from "./registry.js";
-import { gaslessFailure } from "./validation.js";
+import { GASLESS_EIP7702_CHAINS, gaslessFailure } from "./validation.js";
 
-export const BASE_GASLESS_CHAIN = "eip155:8453" as const;
-export const ETHEREUM_GASLESS_CHAIN = "eip155:1" as const;
-export function gaslessPolicyChain(chainId: GaslessChainId): typeof BASE_GASLESS_CHAIN | typeof ETHEREUM_GASLESS_CHAIN | null {
-  return chainId === 8453 ? BASE_GASLESS_CHAIN : chainId === 1 ? ETHEREUM_GASLESS_CHAIN : null;
+export type GaslessPolicyChain = `eip155:${number}`;
+/**
+ * Every executable Circle gasless chain moves USDC only under the owner's allowlist and asset-usage caps, exactly like
+ * a direct transfer. Only the historical, non-executable Avalanche row of this adapter has no policy chain.
+ */
+export function gaslessPolicyChain(chainId: GaslessChainId): GaslessPolicyChain | null {
+  return GASLESS_EIP7702_CHAINS.includes(chainId) ? `eip155:${chainId}` : null;
 }
 /** The reference names the canonical Circle USDC paymaster for the selected network. */
 export function localGaslessMechanism(chainId: GaslessChainId) {
@@ -25,11 +28,11 @@ export function localGaslessMechanism(chainId: GaslessChainId) {
 }
 export const baseLocalGaslessMechanism = () => localGaslessMechanism(8453);
 
-const identity = (intent: Pick<GaslessIntent, "owner" | "request">): AssetUsageIdentity => {
+/** The usage identity of a saved intent comes from its own token, never from a later registry row (rule R2). */
+const identity = (intent: Pick<GaslessIntent, "owner" | "request" | "token">): AssetUsageIdentity => {
   const chain = gaslessPolicyChain(intent.request.chainId);
   if (chain === null) return refused("gasless_allowlist_unsupported_chain");
-  return { account: intent.owner.address, chain,
-    asset: { kind: "token", identifier: gaslessDeployment(intent.request.chainId).token } };
+  return { account: intent.owner.address, chain, asset: { kind: "token", identifier: intent.token } };
 };
 const at = (now: number): Date => new Date(now);
 const refused = (reason: string): never => gaslessFailure("APN_ALLOWLIST_REFUSED", reason);
@@ -193,11 +196,11 @@ export class GaslessAssetPolicy {
         ? { outcomeDigest: op.integrityHash } : {}) });
   }
 
+  /** Runs on every read (reconcile): only the saved binding's own fields, which `validateGaslessIntent` also checks. */
   private assertBinding(op: GaslessOperationRecord): void {
-    const bound = op.intent.allowlist;
-    if (bound === undefined || bound.chain !== gaslessPolicyChain(op.intent.request.chainId) ||
-      bound.token !== gaslessDeployment(op.intent.request.chainId).token ||
-      canonicalJson(bound.mechanism) !== canonicalJson(localGaslessMechanism(op.intent.request.chainId)) ||
+    const bound = op.intent.allowlist, chain = gaslessPolicyChain(op.intent.request.chainId);
+    if (bound === undefined || chain === null || bound.chain !== chain || bound.token !== op.intent.token ||
+      canonicalJson(bound.mechanism) !== canonicalJson({ provider: "local", reference: `${chain}:${op.intent.paymaster}` }) ||
       bound.reservationId !== assetUsageReservationId(identity(op.intent), op.operationId)) corrupt();
   }
 

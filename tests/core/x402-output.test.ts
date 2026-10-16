@@ -182,7 +182,7 @@ async function completeJourney(t: TestContext, withCanaries = false): Promise<Jo
   const sent = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(sent.ok, true, JSON.stringify(sent));
   assert.equal((sent.operation as { readonly state?: unknown } | null)?.state, "settlement_pending");
-  assert.equal(sent.data, null, "a non-terminal result link must not expose seller content");
+  assert.equal((sent.data as { readonly kind?: unknown } | null)?.kind, "x402_result", "the paid body is returned as soon as it is stored");
   armSettlement(fixture.rpc, await durableOperation(fixture));
   const completed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(completed.ok, true, JSON.stringify(completed));
@@ -439,6 +439,7 @@ test("public x402 projection snapshots every state tuple and excludes protected 
     failed_before_effect: ["terminal", "x402_failed_before_effect", ["receipt.get"], "x402_proven_no_effect"],
     failed_expired_unused: ["terminal", "x402_failed_expired_unused", ["receipt.get"], "x402_expired_unused_finalized"],
     failed_settled_without_result: ["terminal", "x402_failed_settled_without_result", ["receipt.get"], "x402_settled_result_unavailable"],
+    abandoned_unknown: ["terminal", "x402_owner_abandoned_unknown", ["receipt.get"], "x402_owner_acknowledgement_only"],
   };
   for (const [state, [finalityClass, reason, nextActions, proofClass]] of Object.entries(cases) as Array<[
     X402State,

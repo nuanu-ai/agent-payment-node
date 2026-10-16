@@ -1,6 +1,6 @@
 import { hashObject } from "../canonical.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
-import { retainedUnsentBridgeRpcFailure } from "./operation-model.js";
+import { BRIDGE_TELEMETRY_ROWS, retainedUnsentBridgeRpcFailure } from "./operation-model.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "./deployments.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
@@ -9,6 +9,7 @@ import { approvalIncluded } from "./transaction.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 import { ApnError } from "../errors.js";
 import { observationRpcFailure } from "./observation-diagnostics.js";
+import { bridgeRpcBudgetDeferred } from "./rpc-session-helpers.js";
 export class BridgeObservation {
     sourcePort;
     destinationPort;
@@ -48,6 +49,9 @@ export class BridgeObservation {
             }
             catch (error) {
                 reliable = false;
+                // An exhausted read budget means "not read in this invocation": the next resume observes again; no state changes.
+                if (bridgeRpcBudgetDeferred(error))
+                    break;
                 op = await this.save(op, { state: "unknown_finality", observationTelemetry: appendObservationTelemetry(op, "source_observation", effect.role, "failure", beforeTelemetry, source.readTelemetry?.() ?? null), failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, error, "APN_INTERNAL") });
                 continue;
             }
@@ -134,6 +138,8 @@ export class BridgeObservation {
                 proof = await this.destinationCandidate(op, hint, destination);
             }
             catch (error) {
+                if (bridgeRpcBudgetDeferred(error))
+                    return op;
                 const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge", error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
                 if (error instanceof DestinationPending)
                     return await this.waiting(op, telemetry);
@@ -158,6 +164,8 @@ export class BridgeObservation {
                 proof = await this.destinationCandidate(op, hint, destination);
             }
             catch (error) {
+                if (bridgeRpcBudgetDeferred(error))
+                    return op;
                 const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge", error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
                 if (error instanceof DestinationPending)
                     return await this.waiting(op, telemetry);
@@ -188,18 +196,19 @@ export class BridgeObservation {
     }
     async residualFrom(op, source) {
         const m = op.intent.materialization, account = await source.account(m.sender, m.approvalAddress, m.request.fromToken);
-        if (account.chainId !== m.request.fromChainId || account.rpcOrigin !== op.intent.sourceRpcOrigin ||
+        if (account.chainId !== m.request.fromChainId ||
             account.owner !== m.sender || account.token !== m.request.fromToken || account.spender !== m.approvalAddress)
             bridgeFailure("APN_RPC_PROTOCOL", "residual_allowance_identity");
         return { amountAtomic: account.allowanceAtomic, block: account.block, rpcOrigin: account.rpcOrigin };
     }
+    /**
+     * Proven delivery needs no residual read: the allowance was exactly the principal (or the native constant zero) and the
+     * proven source Transfer consumed exactly that amount, so the residual at the safe bridge block is zero.
+     */
     async finish(op, reason = "delivery_correlated") {
-        const residual = await this.residualObservation(op);
-        if (!residual.ok)
-            return await this.save(op, { state: "unknown_finality", observationTelemetry: residual.observationTelemetry,
-                failure: { reason: "residual_allowance_unavailable", residualAllowance: null } });
-        return await this.save(op, { state: "completed", observationTelemetry: residual.observationTelemetry,
-            failure: { reason, residualAllowance: residual.value } });
+        const proof = op.effects.at(-1).safeProof;
+        return await this.save(op, { state: "completed",
+            failure: { reason, residualAllowance: { amountAtomic: "0", block: proof.block, rpcOrigin: proof.rpcOrigin } } });
     }
     async finishDestinationFailure(op, reason) {
         const residual = await this.residualObservation(op);
@@ -265,7 +274,7 @@ export class BridgeObservation {
             failure: exceptional ? { reason: `provider_${provider}_unproved`, residualAllowance: null } : null });
     }
     async historicalDeployment(op, rpc, proof, frozen) {
-        if (rpc.origin !== frozen.rpcOrigin || proof.rpcOrigin !== frozen.rpcOrigin || proof.chainId !== frozen.chainId)
+        if (rpc.chainId !== frozen.chainId || proof.chainId !== frozen.chainId)
             bridgeFailure("APN_RPC_CONFIG", "observation_RPC_identity");
         const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId, frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken, proof.block, true);
         if (current.contractHash !== frozen.contractHash)
@@ -291,7 +300,7 @@ function appendObservationTelemetry(op, stage, effectRole, outcome, before, afte
     const roleAttempts = { primary: Math.max(0, after.attemptsByEndpointRole.primary - prior.attemptsByEndpointRole.primary),
         receipt: Math.max(0, after.attemptsByEndpointRole.receipt - prior.attemptsByEndpointRole.receipt),
         archive: Math.max(0, after.attemptsByEndpointRole.archive - prior.attemptsByEndpointRole.archive) };
-    return [...existing, { schemaVersion: "apn.bridge-observation-telemetry.v1", stage, effectRole, outcome,
+    return [...existing.slice(1 - BRIDGE_TELEMETRY_ROWS), { schemaVersion: "apn.bridge-observation-telemetry.v1", stage, effectRole, outcome,
             physicalRequests: roleAttempts.primary + roleAttempts.receipt + roleAttempts.archive,
             httpAttempts: Math.max(0, after.httpAttempts - prior.httpAttempts),
             logicalRpcItems: Math.max(0, after.logicalItems - prior.logicalItems), batchCount: Math.max(0, after.batchCount - prior.batchCount),
@@ -325,7 +334,7 @@ class DestinationPending extends Error {
 export function replaceEffect(op, effect) {
     return op.effects.map((e) => e.role === effect.role ? effect : e);
 }
-function proofIdentity(proof) { return { ...proof, safeBlock: null }; }
+function proofIdentity(proof) { return { ...proof, safeBlock: null, rpcOrigin: null }; }
 function reusableProviderObservation(op) {
     const observation = op.providerObservation, bridge = op.effects.at(-1);
     if (observation?.status !== "completed_observed")

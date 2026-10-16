@@ -172,7 +172,8 @@ test("CLI refuses policy and nonce drift before dispatch, and observation never 
     const service = new GaslessUsdtCommandExecute(new StateStore(f.temporary.root), { now: () => NOW }, new Wrapping(), {
       approval: { async approve() {} }, signer: f.signer, preparePort: port,
       sendTransport: { async send() { sends++; throw new Error("ambiguous send response"); } },
-      recoveryPort: { async userOperationReceipt() { return null; }, async canonicalFinalizedReceipt() { throw new Error("unexpected receipt"); } },
+      recoveryPort: { async userOperationReceipt() { return null; }, async canonicalFinalizedReceipt() { throw new Error("unexpected receipt"); },
+        scanUserOperation: unfinishedScan },
     });
     if (drift !== "ambiguous") {
       await assert.rejects(() => service.execute(f.bound.profileHash, f.bound.operationId), { code: "APN_OPERATION_BLOCKED" });
@@ -368,6 +369,10 @@ test("guarded send blocks changed policy or nonce before any dispatch", async t 
 const USER_OPERATION_EVENT = toEventSelector("UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)");
 const TRANSFER_EVENT = toEventSelector("Transfer(address indexed from, address indexed to, uint256 value)");
 const TX = `0x${"cc".repeat(32)}` as const;
+/** The canonical scan has not reached a finalized block after the paymaster's validUntil: never negative proof. */
+async function unfinishedScan() {
+  return { status: "not_found" as const, final: false, finalizedBlock: 26_002_960n, endBlock: 26_002_960n, endBlockHash: null };
+}
 function observedReceipt(hash: `0x${string}`, success: boolean, sender: `0x${string}`): UsdtChainReceipt {
   const logs = [{ address: USDT_GASLESS.entryPoint,
     topics: [USER_OPERATION_EVENT, hash, padHex(sender, { size: 32 }), padHex(USDT_GASLESS.paymaster, { size: 32 })],
@@ -389,7 +394,8 @@ test("recovery finalizes an observed pending UserOperation once and replays with
   let lookups = 0;
   const port: UsdtRecoveryPort = { userOperationReceipt: async () => { lookups++; return { userOpHash: signed.userOperationHash,
     sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
-    success: true, transactionHash: TX }; }, canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, true, OWNER) };
+    success: true, transactionHash: TX }; }, canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, true, OWNER),
+    scanUserOperation: async () => { throw new Error("a consistent locator needs no scan"); } };
   const recovery = new UsdtRecoveryService(journal, port, () => NOW);
   const result = await recovery.observe(f.bound);
   assert.equal(result.state, "finalized");
@@ -408,7 +414,8 @@ test("recovery releases usage only for canonical failed UserOperationEvent", asy
   await journal.markSubmitting(f.bound, f.port, signed.userOperationHash);
   const recovery = new UsdtRecoveryService(journal, { userOperationReceipt: async () => ({ userOpHash: signed.userOperationHash,
     sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
-    success: false, transactionHash: TX }), canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, false, OWNER) }, () => NOW);
+    success: false, transactionHash: TX }), canonicalFinalizedReceipt: async () => observedReceipt(signed.userOperationHash, false, OWNER),
+    scanUserOperation: async () => { throw new Error("a consistent locator needs no scan"); } }, () => NOW);
   const result = await recovery.observe(f.bound);
   assert.equal(result.state, "failed_confirmed_revert");
   assert.equal(result.settlement, null);
@@ -430,7 +437,8 @@ test("pre-send crash, pending, malformed, mismatched and unavailable observation
         sender: OWNER, entryPoint: USDT_GASLESS.entryPoint, paymaster: USDT_GASLESS.paymaster,
         success: true, transactionHash: TX };
     }, canonicalFinalizedReceipt: async () => caseName === "malformed" ? null :
-      observedReceipt(caseName === "wrong_chain_event" ? `0x${"bb".repeat(32)}` : signed.userOperationHash, true, OWNER) };
+      observedReceipt(caseName === "wrong_chain_event" ? `0x${"bb".repeat(32)}` : signed.userOperationHash, true, OWNER),
+    scanUserOperation: unfinishedScan };
     const recovery = new UsdtRecoveryService(journal, port, () => NOW);
     assert.equal((await recovery.observe(f.bound)).state, "unknown_finality", caseName);
     assert.equal((await recovery.observe(f.bound)).state, "unknown_finality", caseName);

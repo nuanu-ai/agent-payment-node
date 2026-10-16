@@ -66,10 +66,11 @@ outside this bounded direct journey. The Coinbase `awal` route has no USDT path.
 
 Both assets start denied. Two owner decisions are needed. The owner allowlist
 policy must admit the asset on the `direct` rail; its per-operation and daily
-caps are the only principal caps (see `docs/allowlist-direct-integration.md`).
-The chain policy below, admitted in a foreground terminal, now caps only the
-fee and rent in SOL; its principal flags are still required by the command but
-are not enforced. These example limits illustrate the syntax.
+caps apply (see `docs/allowlist-direct-integration.md`). The chain policy
+below, admitted in a foreground terminal, caps the fee and rent in SOL and
+enforces its per-transfer and UTC-daily principal limits too, at prepare and
+again before signing; a transfer must fit both. These example limits
+illustrate the syntax.
 
 ```sh
 apn policy admit-solana --profile solana-local --asset usdc \

@@ -4,6 +4,7 @@ import { BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.j
 import { ApnError } from "./errors.js";
 import { validateEvmTransferEvidence } from "./direct-terminal-receipt.js";
 import { validateEvmDirectBinding, validateEvmOperation } from "./evm-direct.js";
+import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { evmUint } from "./evm-asset.js";
 import { validateCoinbaseGaslessAllowlist } from "./coinbase-gasless-policy.js";
 import { formatAtomic, parseAtomic } from "./money.js";
@@ -106,7 +107,9 @@ export function validateOperation(value: unknown): OperationRecord {
     !/^0x[0-9a-fA-F]{40}$/u.test(operation.recipient)
   ) stateCorrupt("Operation frozen transfer identity is invalid.");
   if (operation.evm !== undefined) validateEvmOperation(operation);
-  else if (operation.allowlist !== undefined || operation.allowlistLease !== undefined) stateCorrupt("Only an explicit EVM asset operation carries a direct allowlist binding.");
+  else if (operation.providerDirect !== undefined && (operation.allowlist !== undefined || operation.allowlistLease !== undefined)) {
+    stateCorrupt("Only a local direct EVM operation carries a direct allowlist binding.");
+  } else if (operation.providerDirect === undefined) validateEvmAllowlist(operation);
   if (operation.providerDirect === undefined) validateLocalDirect(operation);
   else validateProviderDirect(operation, operation.providerDirect);
   return operation;
@@ -161,8 +164,12 @@ function validateTransitions(values: readonly Transition[]): void {
 }
 
 function validateLocalDirect(operation: OperationRecord): void {
-  if (operation.state === "abandoned_unknown" || operation.transitions.some((transition) => transition.state === "abandoned_unknown")) {
-    stateCorrupt("Local direct operation cannot use provider owner abandonment.");
+  // The owner may abandon only a signature APN never dispatched; it is then the final transition.
+  const abandoned = operation.transitions.findIndex((transition) => transition.state === "abandoned_unknown");
+  if (abandoned !== -1 && (abandoned !== operation.transitions.length - 1 || operation.transitions[abandoned - 1]?.state !== "signed_not_submitted" ||
+      operation.reason !== "owner_abandoned_undispatched_signature" || operation.proofClass !== "owner_acknowledgement_only" ||
+      !operation.terminal || operation.transactionHash === undefined)) {
+    stateCorrupt("Local direct abandonment is valid only as the final transition of an undispatched signature.");
   }
   if (
     operation.transactionData === undefined || operation.economics === undefined ||
@@ -238,17 +245,15 @@ function validateProviderDirect(operation: OperationRecord, binding: ProviderDir
   if (operation.state === "awaiting_approval" && operation.providerEffect !== undefined) {
     stateCorrupt("Provider request exists before foreground approval.");
   }
-  if (operation.state === "abandoned_unknown" && (
-    binding.executionMode !== "provider_atomic_send" || operation.transactionHash !== undefined ||
-    operation.providerEffect !== undefined || operation.reason !== "owner_acknowledged_unresolved_effect" ||
-    operation.proofClass !== "owner_acknowledgement_only"
-  )) stateCorrupt("Provider direct owner abandonment classification is invalid.");
+  // Owner abandonment keeps any last known transaction hash or provider request reference (R4 exit).
+  if (operation.state === "abandoned_unknown" && (operation.reason !== "owner_acknowledged_unresolved_effect" ||
+    operation.proofClass !== "owner_acknowledgement_only")) stateCorrupt("Provider direct owner abandonment classification is invalid.");
   const allowed: Readonly<Record<string, readonly OperationState[]>> = {
     awaiting_approval: ["started", "failed_before_effect"],
     started: ["provider_pending", "provider_acknowledged", "ambiguous_effect", "failed_before_effect", "failed_provider_rejected"],
-    provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected"],
-    provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect"],
-    evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect"],
+    provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected", "abandoned_unknown"],
+    provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect", "abandoned_unknown"],
+    evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect", "abandoned_unknown"],
     ambiguous_effect: ["provider_pending", "provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert", "abandoned_unknown",
       ...(binding.coinbaseGasless === undefined ? [] : ["ambiguous_effect" as const])],
     abandoned_unknown: [],
@@ -280,20 +285,20 @@ function validateCoinbaseGasless(operation: OperationRecord, value: NonNullable<
     value.chainId !== CHAIN_ID || value.token !== BASE_USDC || value.grossAtomic !== operation.amountAtomic ||
     value.netAtomic !== operation.amountAtomic || value.feeAtomic !== "0" || value.senderNativeDebitWei !== "0" ||
     value.sponsorship !== "coinbase_cdp_paymaster" || value.exclusiveAccountUseRequired !== true ||
-    value.awalPackage !== "awal" || value.awalVersion !== "2.12.1" || value.awalCommand !== "send_base_usdc" ||
-    typeof value.rpcOrigin !== "string" || value.rpcOrigin.length === 0 || value.entryPoint !== "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" ||
-    value.entryPointCodeHash !== "0xc93c806e738300b5357ecdc2e971d6438d34d8e4e17b99b758b1f9cac91c8e70" ||
-    value.accountCodeHash !== "0xaaa52c8cc8a0e3fd27ce756cc6b4e70c51423e9b597b11f32d3e49f8b1fc890d" ||
-    value.accountImplementation !== "0x00000110dCdEdC9581cb5eCB8467282f2926534d" ||
-    value.accountImplementationCodeHash !== "0x136185896fc519277ec953c0b3d048fc0c9f607b8d04022e60f23ef8dbc6c4d5") {
+    value.awalPackage !== "awal" || typeof value.awalVersion !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+$/u.test(value.awalVersion) ||
+    value.awalCommand !== "send_base_usdc" || typeof value.rpcOrigin !== "string" || value.rpcOrigin.length === 0 ||
+    // Shape only: the AWAL version and Coinbase code pins gate new prepares (coinbaseGaslessSnapshot) and each
+    // approval (coinbaseGaslessPreconditionsMatch). A later release that follows an upgrade keeps old records readable.
+    ![value.entryPoint, value.accountImplementation].every(item => typeof item === "string" && /^0x[0-9a-fA-F]{40}$/u.test(item)) ||
+    ![value.entryPointCodeHash, value.accountCodeHash, value.accountImplementationCodeHash]
+      .every(item => typeof item === "string" && /^0x[0-9a-f]{64}$/u.test(item))) {
     stateCorrupt("Coinbase gasless immutable binding is invalid.");
   }
   const gross = parseAtomic(value.grossAtomic, { positive: true }), minimum = parseAtomic(value.minReceivedAtomic, { positive: true });
   if (value.allowlist !== undefined) validateCoinbaseGaslessAllowlist(operation);
   parseAtomic(value.maxFeeAtomic); if (minimum > gross) stateCorrupt("Coinbase gasless amount bounds are invalid.");
   validateCoinbaseBlock(value.safeBlock);
-  if (operation.providerEffect !== undefined || operation.state === "abandoned_unknown" ||
-    operation.transitions.some(row => row.state === "abandoned_unknown") || operation.coinbaseGaslessCursor === undefined) {
+  if (operation.providerEffect !== undefined || operation.coinbaseGaslessCursor === undefined) {
     stateCorrupt("Coinbase gasless journal posture is invalid.");
   }
   const cursor = operation.coinbaseGaslessCursor;

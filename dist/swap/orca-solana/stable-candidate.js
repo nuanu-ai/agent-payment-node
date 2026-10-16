@@ -60,7 +60,8 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service,
             blocked("Owner policy changed before stable candidate recovery.", "orca_stable_policy_drift");
         const { schemaVersion: _schema, profileHash: _profileHash, quoteHash: _quoteHash, ...quoteInput } = staged.quote;
         const operation = await service.prepare({ quote: quoteInput, assetPolicy: active.registry,
-            protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey, approvalCapAtomic: "0", now });
+            protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey, approvalCapAtomic: "0", now,
+            laneMechanismDigest: ORCA_STABLE_GUARDED_MECHANISM_DIGEST });
         if (await materialStore.load(operation.operationId, operation) === null)
             throw new ApnError("APN_STATE_CORRUPT", "Stable Orca material disappeared during recovery.");
         return { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, quote: staged.quote, operation,
@@ -78,7 +79,7 @@ export async function prepareOrcaStableGuardedCandidateCore(rpc, ports, service,
         evidence: proof.evidence, preview: proof.preview }, request.idempotencyKey));
     const operation = await service.prepare({ quote: proof.quoteInput, assetPolicy: proof.active.registry,
         protocolRegistry: ORCA_PROTOCOL_REGISTRY, idempotencyKey: request.idempotencyKey,
-        approvalCapAtomic: "0", now: proof.commitNow });
+        approvalCapAtomic: "0", now: proof.commitNow, laneMechanismDigest: ORCA_STABLE_GUARDED_MECHANISM_DIGEST });
     if (await materialStore.load(operation.operationId, operation) === null)
         throw new ApnError("APN_STATE_CORRUPT", "Stable Orca material disappeared during preparation.");
     return { schemaVersion: ORCA_STABLE_CANDIDATE_SCHEMA, quote: proof.boundQuote, operation,

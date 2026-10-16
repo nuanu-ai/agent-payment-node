@@ -11,7 +11,7 @@ import { JUPITER_V1_FINITE_ROUTES, routeConfigForMaterial, routeConfigForQuote, 
  JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE, JUPITER_V1_WHIRLPOOL_V2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_ROUTE,
  JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_ROUTE,
  JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE, JUPITER_V1_WHIRLPOOL_RUNTIME_C422B2_ROUTE, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_ROUTE,
- JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_ROUTE } from "../../src/swap/jupiter-solana/v1-route-config.js";
+ JUPITER_V1_WHIRLPOOL_V2_RUNTIME_C422B2_ROUTE, JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_ROUTE, JUPITER_V1_CURRENT_ROUTES } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { validateJupiterV1Material, type JupiterV1ResolvedMaterial } from "../../src/swap/jupiter-solana/v1-material.js";
 import { guardJupiterV1WhirlpoolMaterial } from "../../src/swap/jupiter-solana/v1-guard.js";
 import { JupiterV1MaterialResolver } from "../../src/swap/jupiter-solana/v1-resolver.js";
@@ -140,7 +140,7 @@ function publicPort(m: JupiterV1ResolvedMaterial) {
  } };
  return { rpc, methods };
 }
-test("resolver rereads the new Whirlpool bytes only under the selected c422b2 generation", async () => {
+test("resolver identifies the c422b2 or 099da3 Whirlpool generation from the reread bytes, not from the requested generation", async () => {
  const fresh = syntheticC422b2Material("fp"), p = publicPort(fresh);
  const m = await new JupiterV1MaterialResolver(p.rpc).resolve(fresh.payer, fresh.quoteResponse, fresh.rawBuildResponse, "6000000", undefined,
   JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_ROUTE.routeId);
@@ -149,9 +149,9 @@ test("resolver rereads the new Whirlpool bytes only under the selected c422b2 ge
  await guardJupiterV1WhirlpoolMaterial(m);
  for (const [served, routeId] of [[fresh, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE.routeId], [runtime099da3Material("fp"), JUPITER_V1_WHIRLPOOL_FP_RUNTIME_C422B2_ROUTE.routeId]] as const) {
   const q = publicPort(served);
-  await assert.rejects(new JupiterV1MaterialResolver(q.rpc).resolve(served.payer, served.quoteResponse, served.rawBuildResponse, "6000000", undefined, routeId),
-   /runtime executable pin changed/u);
-  assert.equal(q.methods.includes("getFeeForMessage"), false);
+  const identified = await new JupiterV1MaterialResolver(q.rpc).resolve(served.payer, served.quoteResponse, served.rawBuildResponse, "6000000", undefined, routeId);
+  assert.equal(routeConfigForMaterial(identified), routeConfigForMaterial(served));
+  assert.notEqual(routeConfigForMaterial(identified).routeId, routeId);
  }
 });
 
@@ -170,7 +170,7 @@ test("SYNTHETIC upgraded 83 and Esv guard, simulation and receipt keep the exact
 });
 
 for (const { lane, previous, fresh } of lanes.filter(l => l.lane === "83" || l.lane === "esv"))
- test(`SYNTHETIC ${lane}: only both assets' exact c422b2 admission selects the new generation`, async t => {
+ test(`SYNTHETIC ${lane}: an admission of any generation of the pool selects the current c422b2 generation; another pool refuses`, async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const profile = `synthetic-${lane}-c422b2`, payer = syntheticC422b2Material(lane).payer;
   const store = new ChainAccountStore(temp.root, { async load() { return Buffer.alloc(32, 77); }, async create() { return Buffer.alloc(32, 77); } });
@@ -179,8 +179,13 @@ for (const { lane, previous, fresh } of lanes.filter(l => l.lane === "83" || l.l
   let active = registry(fresh.mechanismPin);
   const admission = new JupiterV1OwnerAdmission(store, async () => ({ profile, registry: active, digest: active.policyDigest, revision: 1, accounts: { solana: payer }, activationDigest: "a".repeat(64), activatedAt: active.effectiveAt! }), new AssetUsageLedger(temp.root), () => new Date());
   assert.equal((await admission.resolveRoute(profile, "1000000", "115960", payer)).route, fresh);
-  active = registry(previous.mechanismPin); assert.equal((await admission.resolveRoute(profile, "1000000", "115960", payer)).route, previous);
+  active = registry(previous.mechanismPin); const resolved = await admission.resolveRoute(profile, "1000000", "115960", payer);
+  assert.equal(resolved.route, fresh); assert.ok(resolved.routes.includes(previous) && resolved.routes.includes(fresh));
   for (const pair of [[previous.mechanismPin, fresh.mechanismPin], [fresh.mechanismPin, previous.mechanismPin]]) {
+   active = registry(pair[0]!, pair[1]!); assert.equal((await admission.resolveRoute(profile, "1000000", "115960", payer)).route, fresh);
+  }
+  const other = JUPITER_V1_CURRENT_ROUTES.find(route => route.pool !== fresh.pool)!;
+  for (const pair of [[fresh.mechanismPin, other.mechanismPin], [other.mechanismPin, previous.mechanismPin]]) {
    active = registry(pair[0]!, pair[1]!); await assert.rejects(admission.resolveRoute(profile, "1000000", "115960", payer));
   }
  });

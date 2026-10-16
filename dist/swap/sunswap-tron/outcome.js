@@ -6,6 +6,7 @@ import { SUNSWAP_V2_ROUTER } from "./catalog.js";
 import { validateSunSwapPreparedMaterial } from "./prepared.js";
 import { validateSunSwapReceipt } from "./receipt.js";
 import { normalizeTronEvidence } from "./tron-call.js";
+import { proveTronUnlanded } from "../unlanded.js";
 /** Failed contract results TRON records in a block: state, including the call value, is rolled back and only fees burn. */
 const FAILED_RESULTS = new Set(["REVERT", "BAD_JUMP_DESTINATION", "OUT_OF_MEMORY", "PRECOMPILED_CONTRACT", "STACK_TOO_SMALL",
     "STACK_TOO_LARGE", "ILLEGAL_OPERATION", "STACK_OVERFLOW", "OUT_OF_ENERGY", "OUT_OF_TIME", "JVM_STACK_OVER_FLOW",
@@ -55,6 +56,12 @@ export class SunSwapOutcomeObserver {
             conflict();
         return { outcome: succeeded ? "succeeded" : "reverted", proof: { receiptHash: finalized.receiptHash,
                 transactionHash: txid, observedAt: observedAt.toISOString(), finalized: true } };
+    }
+    /** Expiration passed at the solidified head and no solidified record of the exact transaction id. */
+    async proveUnlanded(materialValue) {
+        const material = validateSunSwapPreparedMaterial(materialValue, "stored");
+        return await proveTronUnlanded(this.rpc, { transactionId: material.execution.transaction.txID,
+            expirationMs: material.execution.intent.expirationMs });
     }
 }
 /** A solidified failed call: exact bytes, one failed result on both records, fees within the frozen bounds, no logs. */

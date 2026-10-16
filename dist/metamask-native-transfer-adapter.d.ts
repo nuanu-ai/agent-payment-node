@@ -31,6 +31,11 @@ export type MetaMaskNativeSubmission = ({
 };
 /** Normal pinned CLI GETs only. No YAML decoder, policy mutation or remote rolling-usage prediction. */
 export declare function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId, deadline?: MetaMaskNativeDeadlineInput, expectedPayer?: string): Promise<FixedMetaMaskNativePolicy>;
+/** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
+export declare class MetaMaskNativeHandoffNotStarted extends Error {
+    readonly causeError: unknown;
+    constructor(causeError: unknown);
+}
 /** Owner alone persists the one-effect handoff marker before this statically bound call. */
 export declare function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission>;
 /** Transient read evidence only. No field grants financial authority or changes a held journal. */

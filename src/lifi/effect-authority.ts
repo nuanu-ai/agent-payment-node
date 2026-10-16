@@ -75,24 +75,43 @@ export async function withBridgeEffectAuthority<T>(op: BridgeOperationRecord, no
   try { return await work(authority, approvedAt); }
   finally { live = false; for (const callback of issued) { signGrants.delete(callback); physicalGrants.delete(callback); } }
 }
-/** Permanent create-only barriers live outside rollbackable operation/usage journals. A lost result never permits another effect. */
+/**
+ * Permanent create-only SIGN and SEND barriers for every LI.FI route. They live outside the rollbackable operation and usage
+ * journals: SIGN binds the effect before custody signs, SEND binds its exact sealed bytes before the one broadcast. The same
+ * claim again is the same effect (a no-op); a different claim for that boundary is refused. A lost result never permits a
+ * second, different effect, and a SEND claim the journal has not recorded means "observe, never send again".
+ */
 export class BridgeEffectClaims extends SecureStateStore {
-  async assertUnsignedBridge(op: BridgeOperationRecord): Promise<void> {
-    stateIdentifier(op.profileHash, "bridge claim profile"); stateIdentifier(op.operationId, "bridge claim operation");
-    const entries = await this.readDirectory(`bridge-effect-claims/${op.profileHash}`);
-    // Any scoped claim entry blocks release, even malformed JSON, an unsafe file, or an unknown boundary name.
-    if (entries.some(entry => entry.name.startsWith(`${op.operationId}-bridge-`))) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "The expired bridge remainder has a permanent effect claim.",
-        { reason: "bridge_expired_effect_claim_present" });
+  /** Releasing unsent effects to a terminal state is refused while any of them holds a SEND claim: a broadcast may exist. */
+  async assertNoUnrecordedSend(op: BridgeOperationRecord): Promise<void> {
+    for (const effect of op.effects) if (effect.submissionAttempts === 0 && await this.sendClaim(op, effect.role) !== null) {
+      throw new ApnError("APN_OPERATION_BLOCKED", "An unsent bridge effect has a permanent send claim.", { reason: "bridge_expired_effect_claim_present" });
     }
   }
-  async claim(op: BridgeOperationRecord, role: "approval" | "bridge", boundary: "sign" | "send", material?: BridgeSealedMaterial): Promise<void> {
-    await this.initialize();
-    const directory = `bridge-effect-claims/${op.profileHash}`;
-    await this.ensureDirectory(directory);
-    await this.writeJson(`${directory}/${op.operationId}-${role}-${boundary}.json`, {
-      schemaVersion: "apn.bridge-effect-claim.v1", boundary, effectBinding: bridgeEffectBinding(op, role),
-      ...(material === undefined ? {} : { materialHash: material.materialHash, transactionHash: material.transactionHash }),
-    }, true);
+  /** The exact sealed bytes this effect's SEND claim bound, or null when no send was ever claimed. */
+  async sendClaim(op: BridgeOperationRecord, role: "approval" | "bridge"): Promise<{ materialHash: string; transactionHash: Hex } | null> {
+    // Presence is read from the directory, so even a malformed or empty SEND claim counts as a claim and blocks.
+    const name = `${op.operationId}-${role}-send.json`;
+    if (!(await this.readDirectory(`bridge-effect-claims/${op.profileHash}`)).some(entry => entry.name === name)) return null;
+    const value = await this.readJson(this.path(op, role, "send"));
+    const claim = (value ?? {}) as Record<string, unknown>;
+    if (claim.schemaVersion !== "apn.bridge-effect-claim.v1" || claim.boundary !== "send" || claim.effectBinding !== bridgeEffectBinding(op, role) ||
+      typeof claim.materialHash !== "string" || typeof claim.transactionHash !== "string") conflict();
+    return { materialHash: claim.materialHash as string, transactionHash: claim.transactionHash as Hex };
   }
+  async claim(op: BridgeOperationRecord, role: "approval" | "bridge", boundary: "sign" | "send", material?: BridgeSealedMaterial): Promise<void> {
+    const path = this.path(op, role, boundary), body = { schemaVersion: "apn.bridge-effect-claim.v1", boundary, effectBinding: bridgeEffectBinding(op, role),
+      ...(material === undefined ? {} : { materialHash: material.materialHash, transactionHash: material.transactionHash }) };
+    const existing = await this.readJson(path);
+    if (existing !== null) { if (hashObject(existing) !== hashObject(body)) conflict(); return; }
+    await this.initialize(); await this.ensureDirectory(`bridge-effect-claims/${op.profileHash}`);
+    await this.writeJson(path, body, true);
+  }
+  private path(op: BridgeOperationRecord, role: "approval" | "bridge", boundary: "sign" | "send"): string {
+    stateIdentifier(op.profileHash, "bridge claim profile"); stateIdentifier(op.operationId, "bridge claim operation");
+    return `bridge-effect-claims/${op.profileHash}/${op.operationId}-${role}-${boundary}.json`;
+  }
+}
+function conflict(): never {
+  throw new ApnError("APN_OPERATION_BLOCKED", "A different permanent effect claim already exists for this bridge effect.", { reason: "bridge_effect_claim_conflict" });
 }

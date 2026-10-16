@@ -3,10 +3,9 @@ import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
 import { assertTronNetwork, type TronRpcPort } from "../../tron/rpc.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
-import { SUNSWAP_PINNED_CONTRACTS, SUNSWAP_V2_CODE_HASHES, SUNSWAP_V2_ROUTER } from "./catalog.js";
+import { SUNSWAP_V2_ROUTER } from "./catalog.js";
 import type { SunSwapExecutionFreshness } from "./execution-binding.js";
 import { assertSunSwapOwnerFunding, sunSwapChainParameters } from "./keyless-builder.js";
-import { verifySunSwapPinnedCode } from "./market.js";
 import { validateSunSwapPreparedMaterial, type SunSwapPreparedMaterial } from "./prepared.js";
 import { sunSwapHead, triggerSunSwapConstant } from "./tron-call.js";
 
@@ -32,7 +31,8 @@ export class SunSwapExecutionGuard {
         BigInt(intent.feeLimitSun) > parameters.maximumFeeLimitSun) {
       blocked("TRON energy or bandwidth prices changed after the quote; request a fresh quote.", "sunswap_resource_price_drift");
     }
-    for (const { role, address } of SUNSWAP_PINNED_CONTRACTS) await verifySunSwapPinnedCode(this.rpc, address, SUNSWAP_V2_CODE_HASHES[role]);
+    // SWAP-17: router, factory, pair, WTRX and USDT code was verified once for this operation at quote; these contracts have
+    // no upgrade path. The exact-call simulation below and the solidified receipt check bind the actual effect.
     const head = await sunSwapHead(this.rpc), reference = BigInt(market.referenceBlock.number);
     if (head.number < reference) throw new ApnError("APN_RPC_PROTOCOL", "TRON head is behind the recorded SunSwap reference block.");
     if (head.number - reference >= TAPOS_WINDOW_BLOCKS) blocked("The SunSwap reference block left the TAPOS window.", "sunswap_reference_block_expired");

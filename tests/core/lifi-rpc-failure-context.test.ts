@@ -145,7 +145,7 @@ test("LI.FI bridge simulation transport failure after safe approval defers with 
   }
 });
 
-test("LI.FI deferred bridge guard after safe approval ends on the expired path, even when the residual read first fails", async (t) => {
+test("LI.FI deferred bridge guard after safe approval ends on the expired path, even when the residual read fails", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
   failBridgeSimulation(s, operation);
@@ -156,16 +156,10 @@ test("LI.FI deferred bridge guard after safe approval ends on the expired path, 
   const loads = s.wrapping.loads; s.now.setTime(Date.parse(operation.intent.expiresAt) + 60_000); s.source.failAccount = true;
   const unresolved = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(unresolved.ok, true, unresolved.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!;
-  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "unsent_apn_reprepare_required");
-  assert.equal(record.failure?.residualAllowance, null);
-
-  s.source.failAccount = false;
-  const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
-  assert.equal(resumed.ok, true, resumed.error?.message);
+  // The residual allowance is reported, never required: the expired unsent bridge ends on the first resume.
   const recovered = (await s.core.bridges.records.findOperation(id))!;
   assert.equal(recovered.state, "failed_after_approval"); assert.equal(recovered.failure?.reason, "unsent_apn_reprepare_required");
-  assert.equal(recovered.failure?.residualAllowance?.amountAtomic, operation.intent.materialization.request.amountAtomic);
+  assert.equal(recovered.failure?.residualAllowance, null); assert.equal(recovered.failure?.residualAllowanceStatus, "unavailable");
   assert.deepEqual(pendingEffects(recovered), [
     { role: "approval", phase: "safe_success", submissionAttempts: 1 },
     { role: "bridge", phase: "unsealed", submissionAttempts: 0 },

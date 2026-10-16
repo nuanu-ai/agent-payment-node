@@ -334,13 +334,17 @@ test("Relay retirement refuses existing effects and corrupted marker; parallel r
   await assert.rejects(retire.retire({ profile: "default", operationId: first.operationId }), { code: "APN_STATE_CORRUPT" });
 });
 
-test("Relay retirement refuses even an unattempted effect journal", async t => {
+test("Relay retirement closes an unattempted effect journal and no effect can start after it", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root), first = await serviceFor(state, () => {}).prepare(input);
-  await new RelayEffectJournalRepository(temporary.root).create(first.profileHash, first.operationId, instant.toISOString());
-  await assert.rejects(new RelayRetireService(state, { now: () => instant }).retire({ profile: "default", operationId: first.operationId }),
-    { code: "APN_OPERATION_BLOCKED" });
+  const journals = new RelayEffectJournalRepository(temporary.root);
+  const journal = await journals.create(first.profileHash, first.operationId, instant.toISOString());
   await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  const retired = await new RelayRetireService(state, { now: () => instant }).retire({ profile: "default", operationId: first.operationId });
+  assert.equal(retired.state, "retired");
+  await new OperationService(state).assertProfileAvailable(first.profileHash);
+  await assert.rejects(journals.transition(first.profileHash, first.operationId, journal.integrityHash,
+    { kind: "mark_signing", role: "approval", marker: "a".repeat(64), at: instant.toISOString() }), { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("Relay retirement refuses a matching usage reservation", async t => {

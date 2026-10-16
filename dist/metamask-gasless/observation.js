@@ -43,10 +43,9 @@ export class MetaMaskGaslessObservationService {
             let chain;
             try {
                 const rpc = this.observer?.rpc ?? this.rpcFor(op.intent.request.chainId);
-                if (rpc.chainId !== op.intent.request.chainId || (this.observer === undefined &&
-                    (rpc.endpointHash !== op.intent.initialSnapshot.endpointHash || rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin))) {
+                // Any endpoint of the chain may observe; it proves the frozen safe anchor before any evidence counts.
+                if (rpc.chainId !== op.intent.request.chainId)
                     mmFail("mm_gasless_rpc_binding");
-                }
                 chain = await rpc.observe(mmDispatchIntent(op), op.cursor, providerObservation);
                 chain = { ...chain, observation: { ...chain.observation, ...this.source() } };
                 this.clock.check(op, [chain.observation.observedAt,

@@ -194,10 +194,7 @@ export declare const intentSchema: z.ZodObject<{
         policyDigest: z.ZodString;
         policyRevision: z.ZodNumber;
         activationDigest: z.ZodString;
-        chain: z.ZodEnum<{
-            "eip155:1": "eip155:1";
-            "eip155:8453": "eip155:8453";
-        }>;
+        chain: z.ZodString;
         token: z.ZodString;
         mechanism: z.ZodObject<{
             provider: z.ZodLiteral<"local">;
@@ -1016,10 +1013,7 @@ export declare const operationSchema: z.ZodObject<{
             policyDigest: z.ZodString;
             policyRevision: z.ZodNumber;
             activationDigest: z.ZodString;
-            chain: z.ZodEnum<{
-                "eip155:1": "eip155:1";
-                "eip155:8453": "eip155:8453";
-            }>;
+            chain: z.ZodString;
             token: z.ZodString;
             mechanism: z.ZodObject<{
                 provider: z.ZodLiteral<"local">;

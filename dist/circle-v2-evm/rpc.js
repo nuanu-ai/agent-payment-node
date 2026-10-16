@@ -62,8 +62,10 @@ export class CircleRpc {
         }
     }
     async physicalCall(method, params, gate, financialConsent) {
+        // The read budget bounds read volume; the one fenced financial send per effect is outside it, so an exhausted
+        // read budget can never turn a signed effect past its submission fence into an ambiguous unknown (R3).
         gate();
-        if (!METHODS.has(method) || ++this.requests > this.maxRequests)
+        if (!METHODS.has(method) || method !== "eth_sendRawTransaction" && ++this.requests > this.maxRequests)
             circleBlocked("rpc_method_or_budget");
         if (method === "eth_sendRawTransaction" && !financialConsent)
             circleBlocked("financial_rpc_consent_required");

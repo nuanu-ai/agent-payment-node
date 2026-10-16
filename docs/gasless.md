@@ -19,12 +19,16 @@ The local path reserves a maximum USDC fee and sends the remainder. Circle's
 token paymaster supplies native gas; APN approves and accounts for the fee in
 canonical USDC.
 
-For **local Base USDC** (`eip155:8453`) and **local Ethereum USDC** (`eip155:1`),
-prepare requires an active owner asset policy for the exact local wallet account
-and canonical token on that chain. Base uses
-`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`; Ethereum uses
-`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`. Admit the `gasless` rail
-with positive per-operation and UTC daily caps and the corresponding exact mechanism:
+On **every executable local chain** (Ethereum `eip155:1`, Optimism `eip155:10`,
+Unichain `eip155:130`, Polygon PoS `eip155:137`, Base `eip155:8453` and Arbitrum
+One `eip155:42161`), prepare requires an active owner asset policy for the exact
+local wallet account and canonical USDC on that chain, as for a direct transfer.
+Base uses `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`; Ethereum uses
+`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`; the other chains use their native
+USDC from the same registry. Admit the `gasless` rail with positive
+per-operation and UTC daily caps and the chain's exact mechanism
+`{ "provider": "local", "reference": "eip155:<chain-id>:<Circle paymaster>" }`,
+for example:
 
 ```json
 { "provider": "local", "reference": "eip155:8453:0x0578cFB241215b77442a541325d6A4E6dFE700Ec" }
@@ -45,9 +49,10 @@ replaces gross reserved usage with the proven USDC fee after allowance cleanup;
 the settlement record keeps that fee separate from the zero delivered amount.
 Safe permission invalidation also releases usage when
 the payment was never submitted; attempted submissions with unknown financial
-results remain reserved. Historical unbound local Base or Ethereum
-operations without this binding cannot be approved or replayed; signed ones
-remain available for observation. These controls have synthetic test evidence,
+results remain reserved. Historical unbound local operations without this
+binding (Base and Ethereum before the allowlist, the other chains before
+0.5.42) cannot be approved or replayed; signed ones remain available for
+observation. These controls have synthetic test evidence,
 not a fresh mainnet transfer acceptance.
 
 Use an existing local EVM wallet profile and an explicit public HTTPS RPC for
@@ -73,6 +78,15 @@ prepare lookups, status, receipts and permission-invalidation observation remain
 available. New Local transfers on Avalanche use the
 [x402 facilitator route](#local-wallet-on-avalanche-x402-facilitator) instead.
 See [Pimlico chain support](https://docs.pimlico.io/guides/supported-chains#avalanche).
+
+A saved operation is checked on every read only against its own fields and
+hashes. A later APN release that changes a protocol pin (for example after a
+Circle USDC or paymaster upgrade), an asset row or the gas-offer calibration
+therefore never stops `status`, `resume`, `abandon` or another family's
+commands. Before any new signature, disclosure or send, the operation must
+still match the current registry and offer rules; otherwise it stops with
+`gasless_protocol_upgraded` or `gasless_offer_outdated` and you prepare a new
+transfer.
 
 The default bundler is the selected chain's public Pimlico endpoint. The
 registry exposes its exact URL. The RPC must support canonical block-hash
@@ -126,13 +140,24 @@ status are the preparation quote.
 
 A quote above your maximum fee is refused at preparation.
 
-After approval, every check retries a transient failure inside the approval
-window: a quote above your maximum fee, bundler price drift, a rate limit, a
-provider error, an RPC transport failure, or a mirror estimate the bundler
-could not run. A retry waits 5 seconds, takes at most 18 checks, and stops
-while the window still leaves room for the remaining steps. Interrupting the
-command stops the wait at once. A retry never re-signs, never re-discloses and
-never re-sends.
+An approval runs three full guard snapshots: before the approval screen (with
+the throwaway-key mirror estimate), before the bootstrap signature and before
+the UserOperation signature. Only a local signature follows each of the last
+two, so the bootstrap disclosure uses the bootstrap guard's prices and the send
+is preceded by one bundler batch that proves the bundler chain, EntryPoint
+support and that the signed prices still cover its slow tier. A seal from an
+earlier invocation is always guarded by a full snapshot before its disclosure
+or send. The whole approval takes 17 HTTP requests; its request budget is
+derived from these steps plus one more guard's worth of requests for retries.
+
+Every check retries a transient failure inside the approval window while that
+retry allowance still pays for the step: a quote above your maximum fee,
+bundler price drift, a provider error, an RPC transport failure, or a mirror
+estimate the bundler could not run. One guard retry, two mirror retries or four
+pre-send price checks fit. A retry waits 5 seconds and stops while the window
+still leaves room for the remaining steps. Interrupting the command stops the
+wait at once. A retry never re-signs, never re-discloses and never re-sends.
+An HTTP refusal (such as 429) ends the invocation at once.
 
 These refusals are never retried: an expired window, a changed owner binding,
 nonce or paymaster allowance, a balance below the transfer, and a mirror
@@ -440,6 +465,23 @@ apn gasless transfer approve --operation <operation-id>
 
 `--max-fee` and `--min-received` keep the shared command shape. This route
 charges no fee, so any `--min-received` up to the amount is satisfied.
+
+Prepare requires an active owner asset policy for the local wallet account and
+Avalanche USDC (`eip155:43114`, `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E`)
+that admits the `gasless` rail with positive per-operation and UTC daily caps
+and this exact mechanism:
+
+```json
+{ "provider": "payai-x402-facilitator", "reference": "eip155:43114:https://facilitator.payai.network" }
+```
+
+Approval reserves the gross amount in the common asset usage ledger before the
+owner signs and rechecks the unchanged policy and caps right before the
+authorization leaves APN. After exposure the full amount stays charged until
+finalized evidence proves delivery (`completed`) or an unused, expired
+authorization (`expired_unused`, which releases the charge). Avalanche
+operations prepared before 0.5.42 carry no policy binding and cannot be
+approved; exposed ones remain observation only.
 
 Preparation checks the bound local wallet, the chain ID, the USDC balance at a
 finalized block and the facilitator's current support for Avalanche `exact`

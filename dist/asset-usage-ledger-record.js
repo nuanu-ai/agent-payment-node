@@ -32,6 +32,8 @@ export function validateAssetUsageReservation(value) {
     }
     return value;
 }
+/** A stored row is checked against its own fields and digest only, never against lane constants (chain lists,
+ * owner accounts) that a later release may change; lanes apply those when they create or settle a row. */
 function validateBody(value) {
     digest(value.reservationId, "Reservation id", true);
     digest(value.idempotencyHash, "Idempotency hash", true);
@@ -53,14 +55,14 @@ function validateBody(value) {
     }
     if (value.metamaskNativeActualFee !== undefined) {
         const p = value.metamaskNativeActualFee;
-        if (!isPlainRecord(p) || !exactKeys(p, ["kind", "operationId", "quoteHash", "receiptHash", "actualFee", "reservedFee"]) || !isPlainRecord(value.metamaskNativeReservation) || value.metamaskNativeReservation.operationId !== p.operationId || value.metamaskNativeReservation.quoteHash !== p.quoteHash || p.kind !== "metamask_native_actual_fee" || ![p.operationId, p.quoteHash, p.receiptHash].every(x => typeof x === "string" && DIGEST.test(x)) || value.state !== "finalized" || !/^0x[0-9a-fA-F]{40}$/.test(String(value.account)) || !["eip155:1", "eip155:10", "eip155:143", "eip155:59144", "eip155:1329"].includes(String(value.chain)) || value.rail !== "direct" || !isPlainRecord(value.asset) || value.asset.kind !== "native" || value.asset.identifier !== null || value.idempotencyHash !== idempotency(`apn.metamask-native:${p.operationId}:native`) || value.reservationId !== assetUsageReservationId(value, `apn.metamask-native:${p.operationId}:native`) || p.reservedFee !== value.amountAtomic || p.actualFee !== value.consumedAtomic || atomic(p.actualFee, true, true) > atomic(p.reservedFee, true, true) || value.outcomeDigest !== hashObject(p))
+        if (!isPlainRecord(p) || !exactKeys(p, ["kind", "operationId", "quoteHash", "receiptHash", "actualFee", "reservedFee"]) || !isPlainRecord(value.metamaskNativeReservation) || value.metamaskNativeReservation.operationId !== p.operationId || value.metamaskNativeReservation.quoteHash !== p.quoteHash || p.kind !== "metamask_native_actual_fee" || ![p.operationId, p.quoteHash, p.receiptHash].every(x => typeof x === "string" && DIGEST.test(x)) || value.state !== "finalized" || !/^0x[0-9a-fA-F]{40}$/.test(String(value.account)) || !/^eip155:[1-9][0-9]*$/u.test(String(value.chain)) || value.rail !== "direct" || !isPlainRecord(value.asset) || value.asset.kind !== "native" || value.asset.identifier !== null || value.idempotencyHash !== idempotency(`apn.metamask-native:${p.operationId}:native`) || value.reservationId !== assetUsageReservationId(value, `apn.metamask-native:${p.operationId}:native`) || p.reservedFee !== value.amountAtomic || p.actualFee !== value.consumedAtomic || atomic(p.actualFee, true, true) > atomic(p.reservedFee, true, true) || value.outcomeDigest !== hashObject(p))
             corrupt("MetaMask native actual fee proof binding is invalid.");
     }
     if (value.cleanup85NativeActual !== undefined || value.cleanup85NativeReservation !== undefined)
         validateCleanup85NativeUsage(value);
     if (value.merchantNativeActualFee !== undefined) {
         const p = value.merchantNativeActualFee;
-        if (!isPlainRecord(p) || !exactKeys(p, ["kind", "operationId", "fingerprint", "receiptHash", "actualFee", "reservedFee"]) || p.kind !== "merchant_mega_native_actual_fee" || ![p.operationId, p.fingerprint, p.receiptHash].every(x => typeof x === "string" && DIGEST.test(x)) || value.state !== "finalized" || value.account !== "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14" || value.chain !== "eip155:4326" || value.rail !== "x402" || !isPlainRecord(value.asset) || value.asset.kind !== "native" || value.asset.identifier !== null || value.idempotencyHash !== idempotency(`apn.merchant-native:${p.operationId}`) || value.reservationId !== assetUsageReservationId(value, `apn.merchant-native:${p.operationId}`) || p.reservedFee !== value.amountAtomic || p.actualFee !== value.consumedAtomic || value.outcomeDigest !== hashObject(p))
+        if (!isPlainRecord(p) || !exactKeys(p, ["kind", "operationId", "fingerprint", "receiptHash", "actualFee", "reservedFee"]) || p.kind !== "merchant_mega_native_actual_fee" || ![p.operationId, p.fingerprint, p.receiptHash].every(x => typeof x === "string" && DIGEST.test(x)) || value.state !== "finalized" || !/^eip155:[1-9][0-9]*$/u.test(String(value.chain)) || value.rail !== "x402" || !isPlainRecord(value.asset) || value.asset.kind !== "native" || value.asset.identifier !== null || value.idempotencyHash !== idempotency(`apn.merchant-native:${p.operationId}`) || value.reservationId !== assetUsageReservationId(value, `apn.merchant-native:${p.operationId}`) || p.reservedFee !== value.amountAtomic || p.actualFee !== value.consumedAtomic || value.outcomeDigest !== hashObject(p))
             corrupt("Merchant native actual fee proof binding is invalid.");
     }
     if (!["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "released_unsubmitted", "failed_confirmed_revert"].includes(value.state))

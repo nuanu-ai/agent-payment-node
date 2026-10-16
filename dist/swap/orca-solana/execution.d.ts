@@ -5,6 +5,7 @@ import { type SwapOperationRecord } from "../model.js";
 import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
+import type { SwapUnlandedProof } from "../unlanded.js";
 import type { OrcaLocalOwnerAdmission } from "./admission.js";
 import { type OrcaExecutionBindingStore, type OrcaExecutionFreshness, type OrcaLocalSigner, type OrcaSingleSender } from "./effects.js";
 import { type OrcaKeylessMaterial } from "./material.js";
@@ -30,7 +31,7 @@ export interface OrcaExecutionDriverDependencies {
     readonly bindings: Pick<OrcaExecutionBindingStore, "save" | "load">;
     readonly signer: Pick<OrcaLocalSigner, "sign">;
     readonly sender: Pick<OrcaSingleSender, "sendOnce">;
-    readonly observer: Pick<OrcaReceiptObserver, "observeOutcome">;
+    readonly observer: Pick<OrcaReceiptObserver, "observeOutcome" | "proveUnlanded">;
     readonly effects: Pick<ChainWalletStoragePort, "effect">;
     readonly clock: ClockPort;
 }
@@ -44,6 +45,11 @@ export declare class OrcaSolanaExecutionDriver implements GuardedSwapExecutionDr
     constructor(d: OrcaExecutionDriverDependencies);
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
+    /**
+     * The execution binding carries the frozen lifetime of the only bytes that can be signed. Without a binding nothing was
+     * signed, but no lifetime is known either, so no chain proof exists; the operation stays observable.
+     */
+    proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
     private observeExact;
     private releaseUnsent;
 }

@@ -15,14 +15,14 @@ export class WalletService {
     constructor(context) {
         this.context = context;
     }
-    async doctorKeychain() {
-        const profile = "default";
+    async doctorKeychain(profileInput) {
+        const profile = canonicalProfile(profileInput);
         const profileHash = this.context.state.profileHash(profile);
         const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
         if (artifacts.stored === null && artifacts.encrypted === null) {
             const wrapping = await this.context.requireKeychainProbe().load();
             wrapping?.fill(0);
-            return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
+            return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: [`apn wallet ensure --profile ${profile}`] };
         }
         // Explicit custody diagnostic. Public wallet status does not load wrapping secrets.
         const probe = this.context.requireKeychainProbe();

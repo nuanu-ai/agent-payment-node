@@ -8,7 +8,7 @@ import { validateGaslessIntent } from "./intent-validation.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation } from "./model.js";
 import { gaslessObservationRpcEnv, gaslessObservationSource } from "./observation-source.js";
 import type { GaslessObservationPort, GaslessObservationRpcFactory } from "./ports.js";
-import { gaslessRpcInvocation, withinGaslessRpcInvocation, type GaslessRpcRequestSession } from "./rpc.js";
+import { gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation, type GaslessRpcRequestSession } from "./rpc.js";
 import { recheckBlock, rpcJson, rpcQuantity, rpcRecord, type GaslessRpcCall, type GaslessRpcMethod } from "./rpc-codec.js";
 import { observeGasless } from "./rpc-observe.js";
 import { verifyProtocolAt } from "./rpc-state.js";
@@ -44,8 +44,13 @@ export function gaslessObservationRpcFactory(environment: Readonly<Record<string
   const transport = new GaslessHttps();
   return (chainId, environmentName) => {
     const name = gaslessObservationRpcEnv(environmentName), rpcUrl = environment[name];
-    if (rpcUrl === undefined || rpcUrl.length === 0) gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_missing");
-    return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing());
+    const action = `Set ${name} to a public, credential-free HTTPS ${gaslessDeployment(chainId).network} RPC endpoint without a query string or fragment, or resume without --observation-rpc-env.`;
+    if (rpcUrl === undefined || rpcUrl.length === 0) throw gaslessConfigError("gasless_observation_rpc_missing", action);
+    try { return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing()); }
+    catch (error) {
+      if (error instanceof ApnError && error.code === "APN_RPC_CONFIG") throw new ApnError(error.code, error.message, { nextActions: [action] });
+      throw error;
+    }
   };
 }
 
@@ -96,9 +101,9 @@ export class GaslessObservationRpc implements GaslessObservationPort {
     }
     // Validate the original anchor before accepting even partial scan progress from another provider.
     await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
-    await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block);
+    await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block, true);
     const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin,
-      deployment: this.deployment, rpc: this.rpcCall }, intent, identity, cursor);
+      deployment: this.deployment, rpc: this.rpcCall, codeProven: true }, intent, identity, cursor);
     if (this.unavailable) throw observationUnavailable();
     await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
     return { ...result, source: gaslessObservationSource(intent, this.environmentName, this) };

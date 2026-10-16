@@ -37,5 +37,8 @@ export declare class MegaFundingService {
     prepare(input: MegaFundingPrepareRequest): Promise<unknown>;
     approve(id: string): Promise<unknown>;
     private usage;
+    /** A signed effect APN proved never landed ends before effect: its bytes are scrubbed and never sent again. */
+    private unlanded;
+    private retireUnlanded;
     status(id: string): Promise<unknown>;
 }

@@ -13,6 +13,7 @@ import { cleanupStargateV2Token, encodeStargateNativeDrop, executeStargateV2Toke
   STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_POOL,
   STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_TOKEN, type StargateTokenExecutionPorts, type StargateTokenJournal, type StargateTokenOperation } from "../../src/stargate-v2/token-execution.js";
 import { StateStore } from "../../src/state.js";
+import { evmAddressLock } from "../../src/evm-address-ownership.js";
 import { TtyStargateTokenApproval } from "../../src/stargate-v2/token-tty.js";
 import { temporaryState } from "./helpers.js";
 
@@ -50,11 +51,12 @@ class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperat
   async save(op: StargateTokenOperation) { if (this.failPhaseOnce === op.phase && !this.failed && !this.failAfterSave) { this.failed=true; throw new Error("journal crash"); }
     this.value = structuredClone(op); this.history.push(structuredClone(op)); if (this.failPhaseOnce === op.phase && !this.failed) { this.failed=true; throw new Error("journal crash"); } }
   async withLock<T>(_id: string, work: () => Promise<T>) { const prior = this.tail; let release!:()=>void; this.tail = new Promise<void>(r=>release=r); await prior; try { return await work(); } finally { release(); } }
-  async withOwnerChainLock<T>(_owner: `0x${string}`, _chainId: number, work: () => Promise<T>) { return await work(); }
+  async withOwnerLock<T>(_owner: `0x${string}`, work: () => Promise<T>) { return await work(); }
 }
 function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; bridgeRevert?: boolean;
   residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; reserveError?: boolean; signErrorOnce?: boolean;
   bridgeSimulationRevert?: boolean; bridgeEstimateGas?: bigint; feeSpikeAfterApproval?: boolean; preparedMaxFee?: bigint; preparedPriority?: bigint; freshPriorityAfterApproval?: bigint;
+  baseFeeBeforeApproval?: bigint; baseFeeAfterApproval?: bigint; postApprovalPreparedMaxFee?: bigint;
   approvalPendingPolls?: number; approveAdvancesMs?: number; postApprovalMinimumOutput?: bigint; postApprovalFee?: bigint;
   sourcePacketMutation?: "sender"|"receiver"|"guid";
   postApprovalNativeCap?: bigint; confirmPolicyErrorAfterApproval?: boolean; nowMs?: number; saveErrorPhaseOnce?: string; saveErrorAfterSave?: boolean;
@@ -66,7 +68,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
   let usageState: "reserved"|"submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert" = "reserved", followFailed = false;
   const sourceCall: StargateTokenExecutionPorts["sourceCall"] = async (method, params) => {
     if (method === "eth_chainId") return "0xa";
-    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK, baseFeePerGas: options.feeSpikeAfterApproval && approvalConsumed ? "0x2" : "0x0" };
+    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK, baseFeePerGas: `0x${(approvalConsumed ? (options.feeSpikeAfterApproval ? 2n : options.baseFeeAfterApproval ?? 0n) : options.baseFeeBeforeApproval ?? 0n).toString(16)}` };
     if (method === "eth_getCode") return "0x60016000";
     if (method === "eth_getBalance") return "0x1fffffffffffff";
     if (method === "eth_getTransactionCount") return `0x${(options.preflightNonceDrift ? 8n : (approvalConsumed ? 8n : nonce)).toString(16)}`;
@@ -110,7 +112,7 @@ function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: 
     destinationBalances: async () => ({ tokenAtomic: "500000", nativeAtomic: "1000000000000000000", blockNumberAtomic: "9", blockHash: DEST_BLOCK }),
     prepareEnvelope: async tx => { let bridge = false; try { bridge = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: tx.data }).functionName === "sendToken"; } catch {}
       if (bridge) { preparedBridges++; if (allowance === 0n) throw new Error("0x7c75c3d2 Transfer_TransferFailed"); } else preparedApprovals++;
-      return { nonceAtomic: tx.nonceAtomic ?? (approvalConsumed ? "8" : "7"), gasLimitAtomic: "100000", maxFeePerGasAtomic: (options.preparedMaxFee ?? 2n).toString(), maxPriorityFeePerGasAtomic: (options.preparedPriority ?? 1n).toString(), nativeBalanceAtomic: "9000000000000000000" }; },
+      return { nonceAtomic: tx.nonceAtomic ?? (approvalConsumed ? "8" : "7"), gasLimitAtomic: "100000", maxFeePerGasAtomic: (approvalConsumed && options.postApprovalPreparedMaxFee !== undefined ? options.postApprovalPreparedMaxFee : options.preparedMaxFee ?? 2n).toString(), maxPriorityFeePerGasAtomic: (options.preparedPriority ?? 1n).toString(), nativeBalanceAtomic: "9000000000000000000" }; },
     signer: { kind: "imported_evm_signer", address: OWNER, signTransaction: async tx => { signs++; if (options.signErrorOnce && signs === 1) throw new Error("signing failed"); if (options.legacy) return await ACCOUNT.signTransaction({ type: "legacy", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), gasPrice: BigInt(tx.maxFeePerGasAtomic) }); return await ACCOUNT.signTransaction({ type: "eip1559", chainId: 10, to: tx.to, data: tx.data, value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic), maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] }); } },
     signerIdentity: async () => ({ profile: "owner", address: OWNER }), approve: async () => { approvals++; nowMs += options.approveAdvancesMs ?? 0; }, approveCleanup: async () => { approvals++; },
     admitPolicy: async () => ({ policyDigest: "a".repeat(64), policyRevision: 1, mechanism: STARGATE_TOKEN_MECHANISM }), confirmPolicy: async () => { if (approvalConsumed && options.confirmPolicyErrorAfterApproval) throw new Error("policy drift"); },
@@ -342,9 +344,34 @@ for (const [name, options, reason] of [
   ["fee-spike", {feeSpikeAfterApproval:true}, "fee_spike"],
 ] as const) test(`post-approval ${name} enters cleanup with zero bridge effects`, async () => { const s=setup(options), prepared=await prepareStargateV2Token(request({idempotencyKey:`staged-${name}`}),s.ports,s.journal); const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(required.phase,"cleanup_required"); assert.equal(required.cleanupReason,reason); assert.equal(s.counts().sends,1); assert.equal(s.counts().signs,1); assert.equal(required.transactionHash,undefined); const cleaned=await cleanupStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(cleaned.phase,"cleaned"); });
 
+test("a fresh market tip above the signed priority fee no longer forces a paid revoke: the signed envelope is still includable", async () => {
+  const s=setup({freshPriorityAfterApproval:3n}),prepared=await prepareStargateV2Token(request({idempotencyKey:"ceiling-priority-fee",maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}),s.ports,s.journal);
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.cleanupReason,undefined);
+  assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1});
+});
+
+test("BRDG-29: a base fee that rose after the approval but still fits under the signed max fee sends the bridge instead of a paid revoke", async () => {
+  // Old rule: 2 × 1 + 1 = 3 > 2 refused and forced approve-zero; the frozen envelope pays base 1 + tip 1 ≤ 2.
+  const s=setup({baseFeeAfterApproval:1n}),prepared=await prepareStargateV2Token(request({idempotencyKey:"brdg29-rise-within-cap"}),s.ports,s.journal);
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.equal(observed.cleanupReason,undefined);
+  assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1});
+});
+
+test("BRDG-29: a fresh post-approval fee estimate above the approved cap is evidence only and the bridge is signed with the approved fields", async () => {
+  const s=setup({postApprovalPreparedMaxFee:5n}),prepared=await prepareStargateV2Token(request({idempotencyKey:"brdg29-post-approval-estimate"}),s.ports,s.journal);
+  const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed");
+  assert.equal(observed.postApprovalQuote?.sourceSnapshot.quotedMaxFeePerGasWei,"5"); assert.equal(observed.postApprovalQuote?.sendEnvelope.maxFeePerGasAtomic,"2");
+  assert.equal(stargateV2TokenCanonicalReceipt(observed).feeApproval.approvedMaxFeePerGasWei,"2");
+});
+
+test("BRDG-29: an envelope that cannot be included is refused before the approval is signed, so no approval or revoke is paid", async () => {
+  const s=setup({baseFeeBeforeApproval:2n}),prepared=await prepareStargateV2Token(request({idempotencyKey:"brdg29-before-approval"}),s.ports,s.journal);
+  await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,s.journal),(error:any)=>error.code==="APN_REPREPARE_REQUIRED"&&error.details.reason==="fee_spike");
+  assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:1}); assert.equal(s.journal.value?.phase,"approved"); assert.equal(s.journal.value?.approvalTransactionHash,undefined);
+});
+
 for (const [name,options,fees] of [
   ["max-fee",{feeSpikeAfterApproval:true},{maxFeePerGasWei:"2",maxPriorityFeePerGasWei:"2"}],
-  ["priority-fee",{freshPriorityAfterApproval:3n},{maxFeePerGasWei:"4",maxPriorityFeePerGasWei:"2"}],
 ] as const) test(`fresh ${name} above its owner ceiling requires cleanup before bridge signing`,async()=>{const s=setup(options),prepared=await prepareStargateV2Token(request({idempotencyKey:`ceiling-${name}`,...fees}),s.ports,s.journal);const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal);assert.equal(required.phase,"cleanup_required");assert.equal(required.cleanupReason,"fee_spike");assert.deepEqual(s.counts(),{sends:1,signs:1,approvals:1});});
 
 test("staged total debit includes approval gas, message value, and protocol-bounded bridge ceiling", async () => { const cap=10_500_000n, s=setup(), op=await prepareStargateV2Token(request({idempotencyKey:"staged-debit-math",maxNativeDebitAtomic:cap.toString()}),s.ports,s.journal); const approval=BigInt(op.approvalEnvelope!.gasLimitAtomic)*BigInt(op.approvalEnvelope!.maxFeePerGasAtomic), bridge=BigInt(op.sendEnvelope.gasLimitAtomic)*BigInt(op.sendEnvelope.maxFeePerGasAtomic); assert.equal(BigInt(op.maximumDebitAtomic),approval+FEE+bridge); assert.ok(BigInt(op.maximumDebitAtomic)<=cap); const budget=(cap-approval-FEE)/2n; assert.equal(op.bridgeSimulation?.gasCeilingAtomic,(budget>5_000_000n?5_000_000n:budget).toString()); });
@@ -447,10 +474,17 @@ test("distinct operations for one owner serialize through preflight and only one
   assert.equal([a.phase, b.phase].some(phase => phase === "cleaned" || phase === "cleanup_required"), true);
 });
 
-test("owner-chain lock permits different owners or source chains to proceed concurrently", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const journal = new FileStargateTokenJournal(temporary.root);
+test("BRDG-35: the owner lock is the kernel evmAddressLock shared with every EVM family; different owners still proceed concurrently", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root); await state.initialize();
+  const journal = new FileStargateTokenJournal(temporary.root, state);
   const other = getAddress("0x2222222222222222222222222222222222222222"); let active = 0, peak = 0;
   const work = async () => { active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 20)); active--; };
-  await Promise.all([journal.withOwnerChainLock(OWNER, 10, work), journal.withOwnerChainLock(other, 10, work), journal.withOwnerChainLock(OWNER, 1, work)]);
-  assert.equal(peak, 3);
+  await Promise.all([journal.withOwnerLock(OWNER, work), journal.withOwnerLock(other, work)]);
+  assert.equal(peak, 2);
+  const order: string[] = []; let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
+  const family = state.withLocks([evmAddressLock(OWNER)], async () => { order.push("other-family"); await held; order.push("other-family-done"); });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const stargate = journal.withOwnerLock(OWNER, async () => { order.push("stargate"); });
+  await new Promise(resolve => setTimeout(resolve, 50)); release(); await Promise.all([family, stargate]);
+  assert.deepEqual(order, ["other-family", "other-family-done", "stargate"]);
 });

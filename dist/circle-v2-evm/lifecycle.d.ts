@@ -1,3 +1,4 @@
+import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 import type { Hex } from "viem";
 import type { CircleMaterial } from "./custody.js";
 import { type CircleEffect, type CircleEnvelope, type CircleOperationV1, type CircleRole } from "./operation-model.js";
@@ -25,10 +26,17 @@ export interface CircleLifecyclePorts {
     mintEnvelope(op: CircleOperationV1): Promise<CircleEnvelope>;
     cleanupEnvelope(op: CircleOperationV1): Promise<CircleEnvelope>;
     usage(op: CircleOperationV1, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<CircleOperationV1["usage"]>;
+    /** Never-lands proof and discard for signed-but-unsent bytes. Production runtimes always provide it; injected test ports may omit it. */
+    unsent?: Readonly<{
+        outcome(op: CircleOperationV1, effect: CircleEffect): Promise<EvmUnsentOutcome>;
+        discard(op: CircleOperationV1, effect: CircleEffect): Promise<void>;
+    }>;
 }
 type Consent = () => void;
 export declare function approveCircleSource(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
-/** Each marker is fsynced before crossing its boundary. Marked recovery never enters signing or broadcast again. */
+/** Each marker is fsynced before crossing its boundary. Every refusable check runs before signing; after the
+ * submission fence the effect is observed only, never signed or broadcast again. A failure before that fence
+ * keeps the effect signed-but-unsent and resumable instead of turning it into a permanent unknown. */
 export declare function executeCircleEffect(input: CircleOperationV1, role: CircleRole, ports: CircleLifecyclePorts, token?: Consent): Promise<CircleOperationV1>;
 export declare function approveCircleMint(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;
 export declare function observeCircle(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1>;

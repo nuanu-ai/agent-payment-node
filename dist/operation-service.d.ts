@@ -7,7 +7,6 @@ import { type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operati
 import { MegaFundingJournal, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
-import { type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
@@ -42,9 +41,6 @@ export type StoredMoneyOperation = {
 } | {
     readonly kind: "permit2_production";
     readonly record: Permit2ProductionRecord;
-} | {
-    readonly kind: "permit2_legacy_conflict";
-    readonly record: Permit2LegacyConflict;
 } | {
     readonly kind: "relay_unsigned";
     readonly record: RelayUnsignedOperation;
@@ -106,6 +102,8 @@ export declare class OperationService {
     assertProfileAvailable(profileHash: string): Promise<void>;
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
+    assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
     /** Only the real current foreground owner may exclude its exact own native journal claim. */
     assertMetaMaskNativeOwnedAccountAvailable(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
     assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void>;
@@ -116,7 +114,6 @@ export declare class OperationService {
     assertRailAccountAvailable(profileHash: string, rail: "solana" | "tron", account: string): Promise<void>;
     private assertConflictDomainsAvailable;
     private permit2ProductionOperations;
-    private permit2LegacyOperations;
     private profileOperations;
     private circleOperations;
     /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
@@ -129,7 +126,7 @@ export declare class OperationService {
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;
     relayStatus(operation: RelayUnsignedOperation): Promise<import("./relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
-    /** Source finality ends this operation's spend attempt. Destination delivery is observed separately. */
+    /** Source finality or a finality-proven revert ends this spend attempt. Destination delivery is observed separately. */
     private relaySourceCompletion;
     private relayLifecycle;
     private listAllBridgeOperations;

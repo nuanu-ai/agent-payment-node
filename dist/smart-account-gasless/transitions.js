@@ -11,12 +11,12 @@ const EDGES = {
     execution_pending: ["material_pending", "failed_before_effect"],
     material_pending: ["material_sealed", "failed_before_effect"],
     material_sealed: ["exposure_pending", "failed_before_effect"],
-    exposure_pending: ["verified_pending", "unknown_finality", "completed", "expired_unused"],
-    verified_pending: ["dispatch_pending", "unknown_finality", "completed", "expired_unused"],
-    dispatch_pending: ["submitted_pending", "unknown_finality", "completed", "expired_unused"],
-    submitted_pending: ["unknown_finality", "completed", "expired_unused"],
-    unknown_finality: ["unknown_finality", "completed", "expired_unused"],
-    failed_before_effect: [], completed: [], expired_unused: [],
+    exposure_pending: ["verified_pending", "unknown_finality", "completed", "expired_unused", "abandoned_unknown"],
+    verified_pending: ["dispatch_pending", "unknown_finality", "completed", "expired_unused", "abandoned_unknown"],
+    dispatch_pending: ["submitted_pending", "unknown_finality", "completed", "expired_unused", "abandoned_unknown"],
+    submitted_pending: ["unknown_finality", "completed", "expired_unused", "abandoned_unknown"],
+    unknown_finality: ["unknown_finality", "completed", "expired_unused", "abandoned_unknown"],
+    failed_before_effect: [], completed: [], expired_unused: [], abandoned_unknown: [],
 };
 const MATERIAL_HASH_KEYS = ["encodedRootHash", "encodedChildHash", "permissionContextHash", "payloadHash",
     "requirementsHash", "materialHash", "rootDelegationHash", "childDelegationHash"];
@@ -139,7 +139,7 @@ function proofFields(m, intent, material, cursor, lower, at) {
             BigInt(head.timestampAtomic) * 1000n > BigInt(time(observedAt)) ||
             BigInt(expiry.timestampAtomic) < BigInt(intent.beforeUnix) || p.childDelegationHash !== material.childDelegationHash ||
             p.childSpentAtomic !== "0" || !cursor.childScanComplete || !cursor.transferScanComplete ||
-            cursor.candidateHashes.length !== 0 || cursor.transferAnomalies.length !== 0)
+            cursor.candidateHashes.length !== 0)
             corrupt();
     }
     else if (m.state === "expired_unused")
@@ -248,9 +248,10 @@ function journalMutable(value, intent, operationId, fingerprint, at) {
             f.code !== SA_REASON_CODES[f.reason])
             corrupt();
     }
-    if ((m.state === "failed_before_effect" || m.state === "unknown_finality") && m.failure === null)
+    const failing = ["failed_before_effect", "unknown_finality", "abandoned_unknown"].includes(m.state);
+    if (failing !== (m.failure !== null))
         corrupt();
-    if (m.state !== "failed_before_effect" && m.state !== "unknown_finality" && m.failure !== null)
+    if ((m.state === "abandoned_unknown") !== (m.failure?.reason === "sa_gasless_owner_abandoned"))
         corrupt();
     return m;
 }

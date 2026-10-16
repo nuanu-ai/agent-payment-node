@@ -11,6 +11,7 @@ import {
 } from "./allowlist-inventory.js";
 import {
   sealAssetPolicyRegistry,
+  validateAssetPolicyRegistry,
   type AssetPolicyRegistry,
   type AssetRailAdmission,
   type UnsignedAssetPolicyRegistry,
@@ -18,7 +19,7 @@ import {
 import { parseAtomic } from "./money.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
-import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
+import { MAX_SWAP_ADMISSION_OPTIONS, swapRouteDigest, validateSwapAdmissionMechanism, type SwapAdmissionMechanism } from "./swap/route-admission.js";
 import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
 
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA = "apn.allowlist-policy-overlay.v1" as const;
@@ -34,7 +35,7 @@ export interface AllowlistMechanismPin {
   readonly reference: string;
 }
 
-export type AllowlistAdmissionMechanismPin = AllowlistMechanismPin | SwapMechanismPin;
+export type AllowlistAdmissionMechanismPin = AllowlistMechanismPin | SwapAdmissionMechanism;
 
 export interface AllowlistPolicyAdmissionInput {
   readonly chain: string;
@@ -46,8 +47,8 @@ export interface AllowlistPolicyAdmissionInput {
   readonly mechanism?: AllowlistAdmissionMechanismPin;
   /** Optional exact recipient for Ethereum/Base local or Base Coinbase gasless transfers. */
   readonly recipient?: string;
-  /** Bridge only: exact alternative pins, each with its own per-transfer ceiling. */
-  readonly mechanisms?: readonly (AllowlistMechanismPin & { readonly maximumPerTransferAtomic: string })[];
+  /** Bridge: exact alternative pins, each with its own per-transfer ceiling. Swap: two to sixteen admitted routes under one cap. */
+  readonly mechanisms?: readonly (AllowlistMechanismPin & { readonly maximumPerTransferAtomic: string })[] | readonly SwapAdmissionMechanism[];
 }
 
 export interface AllowlistPolicyOverlayInput {
@@ -112,12 +113,13 @@ export function compileAllowlistPolicyOverlay(
       decimals: asset.decimals,
       rails,
       caps: {
-        maximumPerTransferAtomic: admission.maximumPerTransferAtomic ?? maximumMechanismCap(admission.mechanisms!),
+        maximumPerTransferAtomic: admission.maximumPerTransferAtomic ?? maximumMechanismCap(admission.mechanisms as BridgeAlternatives),
         dailyLimitAtomic: admission.dailyLimitAtomic,
       },
       ...(admission.mechanism === undefined ? {} : { mechanismPins: { [admission.rail]: admission.mechanism } }),
       ...(admission.recipient === undefined ? {} : { gaslessRecipient: admission.recipient }),
-      ...(admission.mechanisms === undefined ? {} : { mechanismOptions: { bridge: admission.mechanisms } }),
+      ...(admission.mechanisms === undefined ? {} : { mechanismOptions: admission.rail === "swap"
+        ? { swap: admission.mechanisms as readonly SwapAdmissionMechanism[] } : { bridge: admission.mechanisms as BridgeAlternatives } }),
     } as const;
     const current = chains.get(asset.chain);
     if (current === undefined) {
@@ -152,12 +154,35 @@ export function validateAllowlistPolicyRecord(value: unknown): AllowlistPolicyRe
   if (domainHash(ALLOWLIST_POLICY_RECORD_SCHEMA, canonicalJson(body)) !== recordDigest) {
     corrupt("Allowlist policy record integrity validation failed.");
   }
-  const compiled = compileAllowlistPolicyOverlay(overlayBody(value.overlay));
-  if (canonicalJson(compiled.overlay) !== canonicalJson(value.overlay) ||
-      canonicalJson(compiled.registry) !== canonicalJson(value.registry)) {
-    corrupt("Allowlist policy record does not match its frozen inventory compilation.");
-  }
+  assertStoredAllowlistCompilation(ALLOWLIST_POLICY_OVERLAY_SCHEMA, value.overlay, value.registry);
   return value as unknown as AllowlistPolicyRecord;
+}
+
+/**
+ * A stored staged revision is checked against itself, never recompiled against the inventory this release ships.
+ * The dataset, inventory and mechanism rules apply when the owner stages a revision; the owner then activates the
+ * exact sealed registry the approval screen shows. A release with another dataset may refuse new staging, but it
+ * must not void stored policies (that blocked every allowlist-gated rail of the profile, and its own re-staging).
+ * The digests are unkeyed: they detect corruption, not a rewrite by the same local user.
+ */
+export function assertStoredAllowlistCompilation(overlaySchema: string, overlay: unknown, registryValue: unknown): void {
+  if (!isPlainRecord(overlay) || overlay.schemaVersion !== overlaySchema || typeof overlay.overlayDigest !== "string" ||
+      typeof overlay.profile !== "string" || !PROFILE.test(overlay.profile) || typeof overlay.overlayVersion !== "string" ||
+      typeof overlay.effectiveAt !== "string" || !Array.isArray(overlay.admissions) ||
+      !(typeof overlay.account === "string" || (isPlainRecord(overlay.accounts) &&
+        Object.entries(overlay.accounts).every(([family, account]) => ["evm", "solana", "tron"].includes(family) && typeof account === "string")))) {
+    corrupt("Allowlist policy overlay schema is invalid.");
+  }
+  const { overlayDigest, ...body } = overlay;
+  if (overlay.profileHash !== allowlistProfileHash(overlay.profile) || domainHash(overlaySchema, canonicalJson(body)) !== overlayDigest) {
+    corrupt("Allowlist policy overlay integrity validation failed.");
+  }
+  let registry: AssetPolicyRegistry;
+  try { registry = validateAssetPolicyRegistry(registryValue); } catch { return corrupt("Allowlist policy registry is invalid."); }
+  if (registry.registryVersion !== overlay.overlayVersion || registry.publishedAt !== overlay.effectiveAt ||
+      registry.effectiveAt !== overlay.effectiveAt || registry.expiresAt !== overlay.expiresAt) {
+    corrupt("Allowlist policy registry does not belong to its staged overlay.");
+  }
 }
 
 function overlayInput(value: AllowlistPolicyOverlayInput, inventory: AllowlistInventory): AllowlistPolicyOverlayInput {
@@ -201,6 +226,7 @@ export function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmis
     invalid("Allowlist admission row is invalid.", "invalid_admission");
   }
   const alternatives = value.mechanisms;
+  if (alternatives !== undefined && value.rail === "swap") return swapAlternatives(value);
   if (alternatives !== undefined && (value.rail !== "bridge" || value.mechanism !== undefined ||
       value.maximumPerTransferAtomic !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > 16)) {
     invalid("Bridge alternatives require two to sixteen exact pins and no legacy cap or pin.", "invalid_mechanisms");
@@ -246,6 +272,24 @@ export function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmis
     ...(mechanisms === undefined ? {} : { mechanisms }) };
 }
 
+type BridgeAlternatives = readonly (AllowlistMechanismPin & { readonly maximumPerTransferAtomic: string })[];
+/** Swap rows may admit several routes (for example Orca and Jupiter on one pool asset) under the row's own caps. */
+function swapAlternatives(value: Record<string, unknown>): AllowlistPolicyAdmissionInput {
+  const alternatives = value.mechanisms;
+  if (value.mechanism !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > MAX_SWAP_ADMISSION_OPTIONS) {
+    invalid("Swap alternatives require two to sixteen admitted routes and no single pin.", "invalid_mechanisms");
+  }
+  const mechanisms = alternatives.map((item: unknown) => swapMechanismPin(item)!);
+  if (new Set(mechanisms.map((item) => swapRouteDigest(item))).size !== mechanisms.length) {
+    invalid("Swap alternatives contain a duplicate route.", "duplicate_mechanism");
+  }
+  const maximum = positiveAtomic(value.maximumPerTransferAtomic, "maximum_per_transfer"), daily = positiveAtomic(value.dailyLimitAtomic, "daily_limit");
+  if (BigInt(maximum) > BigInt(daily)) invalid("Per-transfer cap cannot exceed daily cap.", "cap_order");
+  if (value.recipient !== undefined) invalid("Recipient pins are available only for Ethereum/Base local or Base Coinbase gasless admissions.", "recipient_not_applicable");
+  return { chain: value.chain as string, kind: value.kind as "native" | "token", ...(value.identifier === undefined ? {} : { identifier: value.identifier as string }),
+    rail: "swap", maximumPerTransferAtomic: maximum, dailyLimitAtomic: daily, mechanisms };
+}
+
 function maximumMechanismCap(value: readonly { readonly maximumPerTransferAtomic: string }[]): string {
   return value.reduce((max, item) => BigInt(item.maximumPerTransferAtomic) > BigInt(max) ? item.maximumPerTransferAtomic : max, "0");
 }
@@ -259,17 +303,10 @@ function mechanismPin(value: unknown): AllowlistMechanismPin | undefined {
   return value as unknown as AllowlistMechanismPin;
 }
 
-function swapMechanismPin(value: unknown): SwapMechanismPin | undefined {
+function swapMechanismPin(value: unknown): SwapAdmissionMechanism | undefined {
   if (value === undefined) return undefined;
-  try { return validateSwapMechanismPin(value); }
+  try { return validateSwapAdmissionMechanism(value); }
   catch { return invalid("Pinned swap mechanism metadata is invalid.", "invalid_swap_mechanism"); }
-}
-
-function overlayBody(value: unknown): AllowlistPolicyOverlayInput {
-  if (!isPlainRecord(value) || value.schemaVersion !== ALLOWLIST_POLICY_OVERLAY_SCHEMA || typeof value.overlayDigest !== "string" ||
-      typeof value.profileHash !== "string") corrupt("Allowlist policy overlay schema is invalid.");
-  const { schemaVersion: _schema, profileHash: _profileHash, overlayDigest: _digest, ...body } = value;
-  return body as unknown as AllowlistPolicyOverlayInput;
 }
 
 function positiveAtomic(value: unknown, field: string): string {

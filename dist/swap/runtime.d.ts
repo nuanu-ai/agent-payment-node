@@ -7,6 +7,7 @@ import { type SwapProtocolRegistry } from "./protocol-registry.js";
 import { type SwapQuoteInput, type SwapQuoteSnapshot } from "./quote.js";
 import { SwapOperationRepository } from "./repository.js";
 import { GuardedSwapService } from "./service.js";
+import type { SwapUnlandedProof } from "./unlanded.js";
 export declare const GUARDED_SWAP_APPROVAL_SCHEMA: "apn.guarded-swap-approval.v1";
 export interface GuardedSwapPreparedMaterial {
     readonly quote: SwapQuoteInput | SwapQuoteSnapshot;
@@ -63,6 +64,11 @@ export interface GuardedSwapExecutionDriver {
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     /** Must only observe. It may never sign or send. */
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
+    /**
+     * Observe only, after observe found no inclusion: chain proof that the marked effect can never land (expired lifetime,
+     * deadline or expiration at finality, and no inclusion of any persisted transaction). Null while unproven.
+     */
+    proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
 }
 export interface GuardedSwapExecutionInput {
     readonly operation: SwapOperationRecord;

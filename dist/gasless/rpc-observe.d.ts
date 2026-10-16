@@ -7,6 +7,8 @@ export interface GaslessObservationContext {
     readonly deployment: GaslessDeployment;
     readonly rpc: GaslessRpcCall;
     readonly bundler?: GaslessRpcCall;
+    /** True when this invocation already verified the pinned code hashes through `rpc`; absent means read them. */
+    readonly codeProven?: boolean;
     /** Retained for existing callers; canonical observation never uses an execution snapshot. */
     readonly snapshot?: (owner: Address) => Promise<GaslessSnapshot>;
 }

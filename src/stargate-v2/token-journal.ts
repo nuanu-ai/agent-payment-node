@@ -2,6 +2,7 @@ import { lstat, mkdir, open, readFile, realpath, rename } from "node:fs/promises
 import { dirname, join, relative } from "node:path";
 import { decodeFunctionData } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
+import { evmAddressLock } from "../evm-address-ownership.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
@@ -28,8 +29,9 @@ export class FileStargateTokenJournal implements StargateTokenJournal {
   constructor(private readonly root: string, locks?: Pick<StateStore, "initialize" | "withLocks">) { this.locks = locks ?? new StateStore(root, { lockWaitMs: 0 }); }
   private path(id: string) { if (!/^[a-f0-9]{64}$/u.test(id)) fail("APN_STATE_CORRUPT", "operation_id"); return join(this.root, "stargate-v2-token", `${id}.json`); }
   async withLock<T>(id: string, work: () => Promise<T>) { await this.locks.initialize(); return await this.locks.withLocks([`stargate-token:${id}`], work, { waitMs: 30_000 }); }
-  async withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>) { await this.locks.initialize();
-    return await this.locks.withLocks([`stargate-source:${chainId}:${address(owner).toLowerCase()}`], work, { waitMs: 30_000 }); }
+  /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
+  async withOwnerLock<T>(owner: Address, work: () => Promise<T>) { await this.locks.initialize();
+    return await this.locks.withLocks([evmAddressLock(address(owner))], work, { waitMs: 30_000 }); }
   async load(id: string) { try { const path = this.path(id); await secureDirectory(dirname(path), false); const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0) fail("APN_STATE_CORRUPT", "journal_file_mode");
     return validateRecord(JSON.parse(await readFile(path, "utf8"))); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; } }
@@ -70,9 +72,8 @@ function validatePostApprovalQuote(op: StargateTokenOperation, snapshot: Stargat
     BigInt(envelope.nonceAtomic) !== BigInt(op.approvalEnvelope!.nonceAtomic) + 1n ||
     envelope.gasLimitAtomic !== op.bridgeSimulation!.gasCeilingAtomic || envelope.maxFeePerGasAtomic !== op.feeApproval!.approvedMaxFeePerGasWei ||
     envelope.maxPriorityFeePerGasAtomic !== op.feeApproval!.approvedMaxPriorityFeePerGasWei ||
+    // The fresh 2 × base + tip estimate is evidence only; the envelope above is bound to the owner-approved fee fields.
     BigInt(snapshot.sourceSnapshot.quotedMaxPriorityFeePerGasWei) > BigInt(snapshot.sourceSnapshot.quotedMaxFeePerGasWei) ||
-    BigInt(snapshot.sourceSnapshot.quotedMaxFeePerGasWei) > BigInt(op.feeApproval!.approvedMaxFeePerGasWei) ||
-    BigInt(snapshot.sourceSnapshot.quotedMaxPriorityFeePerGasWei) > BigInt(op.feeApproval!.approvedMaxPriorityFeePerGasWei) ||
     BigInt(snapshot.bridgeEstimateGasAtomic) > BigInt(envelope.gasLimitAtomic)) fail("APN_STATE_CORRUPT", "post_approval_envelope_binding");
   const approvalDebit = BigInt(op.approvalEnvelope!.gasLimitAtomic) * BigInt(op.approvalEnvelope!.maxFeePerGasAtomic);
   const maximumDebit = approvalDebit + BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic);

@@ -10,10 +10,11 @@ import { GuardedSwapService } from "../service.js";
 import { JupiterV1OwnerAdmission, detached } from "./v1-admission.js";
 import { JupiterV1QuoteBuilder } from "./v1-builder.js";
 import { JupiterV1ExecutionBindingStore, JupiterV1LocalSigner } from "./v1-effects.js";
-import { JupiterV1ExecutionDriver, JupiterV1SingleSender, JupiterV1BudgetedRpc } from "./v1-execution.js";
+import { JupiterV1ExecutionDriver, JupiterV1SingleSender, JupiterV1BudgetedRpc, proveJupiterV1Preconsent } from "./v1-execution.js";
 import { SavedJupiterV1MaterialStore, validateJupiterV1PreparedMaterial, assertJupiterV1RpcOrigin } from "./v1-material.js";
 import { JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 import { proveJupiterV1Quote } from "./v1-proof.js";
+import { JUPITER_V1_NATIVE_OVERHEAD_LAMPORTS } from "./v1-guard.js";
 import { JupiterV1ReadOnlyProvider, jupiterV1HttpsFetch } from "./v1-provider.js";
 import { JupiterV1MaterialResolver } from "./v1-resolver.js";
 const canonicalRuntimes = new WeakMap();
@@ -23,29 +24,32 @@ export function assertJupiterV1Runtime(runtime, root) { if (canonicalRuntimes.ge
 export function createJupiterV1Runtime(options) {
     const { state, clock } = options, rpc = new JupiterV1BudgetedRpc(options.rpc, state.root, options.stage, options.operationId), usage = new AssetUsageLedger(state.root), operations = new SwapOperationRepository(state.root), core = new GuardedSwapService(operations, usage), materials = new SavedJupiterV1MaterialStore(state.root), bindings = new JupiterV1ExecutionBindingStore(state.root), native = new JupiterV1LocalSigner(state.root, options.wrappingSecret), activePolicy = (profile) => loadActiveAssetPolicyRegistry({ state, clock }, profile);
     const admission = new JupiterV1OwnerAdmission({ account: profile => native.publicOwner(profile), ownerBinding: profile => native.publicOwner(profile) }, activePolicy, usage, () => clock.now());
-    const sender = new JupiterV1SingleSender(core, materials, bindings, native, rpc, clock), execution = new JupiterV1ExecutionDriver({ core, materials, bindings, admission, native, sender, rpc, clock });
+    const preconsent = new Map();
+    const sender = new JupiterV1SingleSender(core, materials, bindings, native, rpc, clock), execution = new JupiterV1ExecutionDriver({ core, materials, bindings, admission, native, sender, rpc, clock, preconsent });
     const cached = new Map();
-    async function selectedOwner(route, profile, amount, minimum, account) { const result = await admission.resolveRoute(profile, amount, minimum, account); if (result.route.routeId !== route.routeId)
+    async function selectedOwner(route, profile, amount, minimum, account) { const result = await admission.resolveRoute(profile, amount, minimum, account); if (!result.routes.some(r => r.routeId === route.routeId))
         blocked("Jupiter active policy differs from the finite runtime mechanism."); return result.owner; }
     function make(route) {
         const prior = cached.get(route.routeId);
         if (prior !== undefined)
             return prior;
         const builder = new JupiterV1QuoteBuilder(new JupiterV1ReadOnlyProvider(async (input, init) => { await rpc.chargeOfficialRead(); return await (options.providerFetch ?? jupiterV1HttpsFetch)(input, init); }), new JupiterV1MaterialResolver(rpc), materials, {
-            resolvePayer: async (profile) => (await selectedOwner(route, profile, "1000000", "1")).account.address,
-            resolveRouteId: async (profile) => { await selectedOwner(route, profile, "1000000", "1"); return route.routeId; },
-            maximumNativeExpenseLamports: "6000000", computeUnitPriceMicroLamports: 1000, refreshBuildAfterPublicReads: true, refreshRpcLifetimeBeforeFreeze: true,
+            resolvePayer: async (profile, amount) => (await selectedOwner(route, profile, amount, "1")).account.address,
+            resolveRouteId: async (profile, amount) => { await selectedOwner(route, profile, amount, "1"); return route.routeId; },
+            computeUnitPriceMicroLamports: 1000, refreshBuildAfterPublicReads: true, refreshRpcLifetimeBeforeFreeze: true,
             proveQuote: async (execution, input) => {
                 const owner = await selectedOwner(route, input.profile, input.amountAtomic, execution.quoteResponse.otherAmountThreshold, input.account);
-                if (owner.account.address !== execution.payer || input.recipient !== execution.payer || input.amountAtomic !== "1000000" || input.slippageBps !== 50)
-                    blocked("Jupiter V1 admits only the exact owned 1,000,000-lamport SOL to USDC lane.");
+                if (owner.account.address !== execution.payer || input.recipient !== execution.payer || input.slippageBps > input.ownerSlippageCapBps)
+                    blocked("Jupiter V1 admits only the owned payer as recipient within the owner slippage cap.");
                 return await proveJupiterV1Quote(rpc, execution, { profile: input.profile, account: input.account, recipient: input.recipient,
                     amountAtomic: input.amountAtomic, slippageBps: input.slippageBps, now: input.now }, new Date(input.now.getTime() + 90000).toISOString());
             }
         });
         class JupiterRuntime extends GuardedSwapRuntime {
             async quote(request, now) {
-                if (request.amountAtomic !== "1000000" || request.recipient !== request.account || request.slippageBps !== 50 || request.ownerSlippageCapBps < 50)
+                // Any amount and slippage within the owner caps: the policy's per-transfer and daily caps are evaluated for this exact
+                // amount below, and the catalog refuses slippage above the owner's slippage cap before this point.
+                if (request.recipient !== request.account || request.slippageBps > request.ownerSlippageCapBps)
                     blocked("Jupiter V1 request is outside the admitted exact lane.");
                 await selectedOwner(route, request.profile, request.amountAtomic, "1", request.account);
                 const result = await super.quote(detached(request), now);
@@ -79,6 +83,10 @@ export function createJupiterV1Runtime(options) {
                     blocked("Jupiter operation is not awaiting its first foreground approval.");
                 const material = detached(validateJupiterV1PreparedMaterial(await materials.load(operation.quote.quoteHash))), owner = await admission.assert(operation, material);
                 await bindings.assertPrepared(operation, owner, material);
+                // Program bytes, accounts and the exact-message simulation are proved now, before the prompt (SWAP-03). These reads
+                // count against the same execute-stage budget, bound to the quote's own reads, as the send that follows.
+                await rpc.bindOperation(operation.quote.quoteHash);
+                const proved = await proveJupiterV1Preconsent(rpc, clock, operation, material);
                 const intent = detached({ operationId: operation.operationId, profile: operation.quote.profile, account: operation.quote.account, recipient: operation.quote.recipient,
                     inputAmountAtomic: operation.quote.inputAmountAtomic, expectedOutputAtomic: operation.quote.expectedOutputAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic,
                     slippageBps: operation.quote.slippageBps, gasOrEnergy: material.gasOrEnergy, deadline: operation.quote.expiresAt, quoteHash: operation.quote.quoteHash,
@@ -91,6 +99,7 @@ export function createJupiterV1Runtime(options) {
                 if (canonicalJson(owner) !== canonicalJson(freshOwner))
                     blocked("Jupiter owner admission changed during approval.");
                 const artifact = validateGuardedSwapApprovalArtifact(answer, fresh, intent, clock.now());
+                preconsent.set(operationId, proved);
                 if (fresh.state === "reserved")
                     return fresh;
                 const policy = await activePolicy(operation.quote.profile);
@@ -105,18 +114,20 @@ export function createJupiterV1Runtime(options) {
                 if (expired !== null)
                     return expired;
                 const operation = await required(operationId);
-                if (operation.submissionMarker !== null)
+                if (operation.submissionMarker !== null) {
+                    rpc.enterObservation();
                     return await super.status(operationId, now);
+                }
                 await rpc.bindOperation(operation.quote.quoteHash);
                 if (!native.hasForegroundGrant(operation))
                     await this.approve(operationId, now);
                 return await super.execute(operationId, clock.now());
             }
-            async status(operationId, now) { const expired = await releaseExpiredUnsent(operationId); return expired ?? await super.status(operationId, now); }
+            async status(operationId, now) { rpc.enterObservation(); const expired = await releaseExpiredUnsent(operationId); return expired ?? await super.status(operationId, now); }
         }
         const runtime = new JupiterRuntime({ chain: JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain, builder, policy: async (profile) => (await activePolicy(profile))?.registry ?? null, clock,
             protocolRegistry: route.protocolRegistry, usage, operations, ownerAdmission: admission, foregroundApproval: { approve: async () => { throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use Jupiter's finite Native foreground approval."); } },
-            execution, approvals: new GuardedSwapApprovalRepository(state.root), rpc, effectStore: native, signer: native, sender, observer: execution, caps: { approvalCapAtomic: "0", maximumNativeExpenseLamports: "6000000", logicalReadStageCap: "64", cumulativeReadCap: "192" } });
+            execution, approvals: new GuardedSwapApprovalRepository(state.root), rpc, effectStore: native, signer: native, sender, observer: execution, caps: { approvalCapAtomic: "0", nativeOverheadLamports: JUPITER_V1_NATIVE_OVERHEAD_LAMPORTS.toString(), logicalReadStageCap: "64", cumulativeReadCap: "192" } });
         cached.set(route.routeId, runtime);
         return runtime;
     }

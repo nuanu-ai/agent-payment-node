@@ -22,7 +22,7 @@ import { StateProfileRepository } from "../../src/profile-repository.js";
 import { StateStore } from "../../src/state.js";
 import { mmPrivateHash, mmWalletIdentityHash } from "../../src/metamask-gasless/identity.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessRequest } from "../../src/metamask-gasless/model.js";
-import { ensureWallet, makeCore, TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { WALLET, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
 import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { lifiFixture } from "./lifi-helpers.js";
@@ -41,7 +41,7 @@ import { X402_URL } from "./x402-vectors.js";
 const MM_PROVIDER = "metamask-agent-wallet";
 const BRIDGE_QUOTE = "a".repeat(64);
 
-test("pending MM preparation blocks every guarded wallet lifecycle command before effects or profile upgrade", async (t) => {
+test("pending MM preparation blocks wallet lifecycle mutations before effects or profile upgrade", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root);
   const { id } = await f.prepare("mm-lifecycle-pending-0001");
@@ -103,12 +103,9 @@ test("pending MM preparation blocks every guarded wallet lifecycle command befor
     { command: "wallet.connect", profile: f.profile, providerId: MM_PROVIDER, authenticationMethod: "browser" },
     { command: "wallet.ensure-solana", profile: f.profile, provider: "local", acceptRisk: true },
     { command: "wallet.ensure-tron", profile: f.profile, provider: "local", acceptRisk: true },
-    { command: "wallet.permission.list", profile: f.profile },
     { command: "wallet.permission.sync", profile: f.profile, expectedRevision: 1 },
     { command: "wallet.permission.disable", profile: f.profile, expectedRevision: 1 },
     { command: "wallet.permission.forget", profile: f.profile, expectedRevision: 1 },
-    { command: "wallet.status", profile: f.profile },
-    { command: "wallet.balance", profile: f.profile },
   ];
   for (const request of requests) {
     const result = await core.execute(request);
@@ -122,6 +119,51 @@ test("pending MM preparation blocks every guarded wallet lifecycle command befor
   assert.deepEqual(f.provider.calls, providerCallsBefore);
   assert.deepEqual(f.rpc.calls, mmRpcCallsBefore);
   assert.deepEqual(await f.state.loadProviderProfile(f.state.profileHash(f.profile)), profileBefore);
+  assert.deepEqual(await f.record(id), operationBefore);
+});
+
+test("pending MM preparation never blocks wallet status, balance or permission list and skips profile upkeep", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root);
+  const { id } = await f.prepare("mm-lifecycle-read-0001");
+  const profileHash = f.state.profileHash(f.profile);
+  const profileBefore = await f.state.loadProviderProfile(profileHash);
+  const operationBefore = await f.record(id);
+  const reads: string[] = [];
+  // A changed provider identity would be saved as drift outside an operation; here it is only reported.
+  const otherAddress = "0x00000000000000000000000000000000000000b2";
+  const observation = { address: otherAddress, account_binding_hash: accountBindingHash(MM_PROVIDER, otherAddress),
+    observed_at: "2026-09-09T00:00:00.000Z" };
+  const adapter: ProviderAdapterBundle = {
+    provider_id: MM_PROVIDER,
+    trust_class: f.publicProfile.trust_class,
+    capabilities: metamaskDirectCapabilitySnapshot(),
+    lifecycle: {
+      async connect() { throw new Error("forbidden connect"); },
+      async probeStatus() { reads.push("status"); },
+      async logout() { throw new Error("forbidden logout"); },
+    },
+    reads: {
+      async observeBalance() { reads.push("balance"); return observation as never; },
+      async crossCheckAddress() { reads.push("crossCheck"); },
+    },
+  };
+  const rpc = new TestRpc();
+  const core = new ApnCore({
+    state: f.state, metaMaskGasless: f.dependencies, profileRepository: new StateProfileRepository(f.state),
+    providerRegistry: new ProviderRegistry([{ provider_id: MM_PROVIDER, create: () => adapter }]),
+    native: new TestNative(), rpc, http: new TestHttp(), rpcUrl: "https://rpc.example", clock: f.clock,
+  });
+  const status = await core.execute({ command: "wallet.status", profile: f.profile });
+  assert.equal(status.ok, true, status.error?.message);
+  assert.equal((status.data as { status: string }).status, "drift_blocked");
+  const balance = await core.execute({ command: "wallet.balance", profile: f.profile });
+  assert.equal(balance.ok, true, balance.error?.message);
+  assert.equal(rpc.balanceCalls, 1);
+  const list = await core.execute({ command: "wallet.permission.list", profile: f.profile });
+  assert.notEqual(list.error?.code, "APN_OPERATION_BLOCKED");
+  assert.deepEqual(reads, ["status", "balance", "crossCheck"]);
+  assert.deepEqual(await f.state.loadProviderProfile(profileHash), profileBefore);
   assert.deepEqual(await f.record(id), operationBefore);
 });
 
@@ -275,7 +317,7 @@ test("unresolved non-MM money journals block MM preparation only on the same net
   });
 });
 
-test("a durable MM dispatch marker keeps wallet lifecycle blocked with the saved locator", async (t) => {
+test("a durable MM dispatch marker keeps wallet lifecycle mutations blocked with the saved locator", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root); f.rpc.phase = "pending";
   const { id } = await f.prepare("mm-dispatched-lifecycle-0001");
@@ -288,14 +330,11 @@ test("a durable MM dispatch marker keeps wallet lifecycle blocked with the saved
   const native = new TestNative();
   const core = new ApnCore({ state: f.state, metaMaskGasless: f.dependencies,
     profileRepository: new StateProfileRepository(f.state), native, clock: f.clock });
-  for (const request of [
-    { command: "wallet.ensure", profile: f.profile },
-    { command: "wallet.status", profile: f.profile },
-  ] as const) {
-    const result = await core.execute(request);
-    assert.equal(result.error?.code, "APN_OPERATION_BLOCKED", request.command);
-    assert.deepEqual(result.error?.details, { blockingOperationId: id, blockingState: "submitted_pending" }, request.command);
-  }
+  const ensured = await core.execute({ command: "wallet.ensure", profile: f.profile });
+  assert.equal(ensured.error?.code, "APN_OPERATION_BLOCKED");
+  assert.deepEqual(ensured.error?.details, { blockingOperationId: id, blockingState: "submitted_pending" });
+  // A status read is never blocked by an operation; this runtime simply has no provider registry wired.
+  assert.notEqual((await core.execute({ command: "wallet.status", profile: f.profile })).error?.code, "APN_OPERATION_BLOCKED");
   assert.equal(native.calls.length, 0); assert.equal(f.provider.submissions.length, 1);
   assert.deepEqual(await f.record(id), record);
 });
@@ -304,6 +343,7 @@ async function localDirectOperation(root: string) {
   const state = new StateStore(root), profile = "compat-local-direct", idempotencyKey = "compat-local-direct-0001";
   const core = new ApnCore({ state, native: new CanonicalDirectTestNative(root), rpc: new TestRpc(), clock: new TestClock() });
   assert.equal((await core.execute({ command: "wallet.ensure", profile })).ok, true);
+  await activateBaseUsdcDirectPolicy(root, WALLET, profile);
   const result = await core.execute({ command: "transfer.prepare", profile, recipient: MM_TEST_RECIPIENT,
     amount: "1", idempotencyKey });
   assert.equal(result.ok, true, JSON.stringify(result));

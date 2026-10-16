@@ -8,7 +8,9 @@ import { activeAssetPolicyFromState, loadActiveAssetPolicyRegistry } from "../al
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
-import { withGaszipForegroundAuthority, gaszipEffectBinding } from "./gaszip-authority.js";
+import { withGaszipForegroundAuthority, gaszipEffectBinding, gaszipGuardRefused } from "./gaszip-authority.js";
+import { gaszipNonceConsumed, gaszipUnlandedReason, gaszipUsageState } from "./gaszip-outcome.js";
+import { ApnError } from "../errors.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
 import { assertExclusiveEvmOwner, assertExclusiveEvmOwnerIncludingGrants, evmAddressLock } from "../evm-address-ownership.js";
 import { OperationService } from "../operation-service.js";
@@ -17,7 +19,7 @@ import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { assertBridgeOwner, bridgeOwner } from "./owner.js";
 import { BridgeHttps } from "./https.js";
-import { MEGA_FUNDING, inspectMegaDelivery, inspectMegaFundingQuote, megaFail, megaHash, megaJson, megaUint } from "./mega-gaszip-contract.js";
+import { MEGA_FUNDING, inspectMegaDelivery, inspectMegaFundingQuote, megaFail, megaHash, megaJson, megaQuantity, megaUint } from "./mega-gaszip-contract.js";
 import { MegaFundingJournal, publicMegaFunding, sealMegaFunding } from "./mega-gaszip-journal.js";
 import { MegaFundingRpc, assertMegaFundingFresh, readMegaFundingPlan, proveMegaDelivery, proveMegaSource } from "./mega-gaszip-rpc.js";
 import { gaszipObservationRefusal } from "./gaszip-native-delivery.js";
@@ -191,29 +193,60 @@ export class MegaFundingService {
             await this.journal.claimSendLocked(saved);
             saved = sealMegaFunding({ ...saved, state: "submitting", submissionAttempts: 1 });
             await this.journal.saveLocked(saved);
-            let sent = false;
+            let sent = false, unsent = null;
             try {
                 const returned = await this.rpc("source").call("eth_sendRawTransaction", [saved.rawTransaction], guard);
                 if (megaHash(returned) !== saved.transactionHash)
                     megaFail("send_hash");
                 sent = true;
             }
-            catch { /* Every fenced failure retains unknown finality and never repeats the send. */ }
-            saved = sealMegaFunding({ ...saved, state: sent ? "submitted" : "unknown_finality" });
+            catch (error) {
+                // A refused guard proves the bytes never left APN; a definite JSON-RPC refusal proves the node did not take them.
+                // Every other failure keeps unknown finality and is never resent.
+                unsent = gaszipGuardRefused(guard) ? "authority_refused_before_transport" :
+                    error instanceof ApnError && error.details?.reason === "mega_gaszip_send_rejected" ? "send_rejected" : null;
+            }
+            saved = unsent === null ? sealMegaFunding({ ...saved, state: sent ? "submitted" : "unknown_finality" }) : this.unlanded(saved, unsent);
             await this.journal.saveLocked(saved);
+            if (saved.terminal)
+                await this.usage(saved, "failed_before_effect");
             return publicMegaFunding(saved);
         }))));
     }
     async usage(r, state) {
-        if (r.usageReservationId === null || await this.ledger.load(this.identity(r), r.usageReservationId) === null)
+        const current = r.usageReservationId === null ? null : await this.ledger.load(this.identity(r), r.usageReservationId);
+        if (current === null || r.usageReservationId === null)
             return;
+        // The hold moved to unknown finality before signing; bytes proven never sent release it as unsubmitted.
+        const target = state === "failed_before_effect" && ["unknown_finality", "released_unsubmitted"].includes(current.state) ? "released_unsubmitted" : state;
         await this.ledger.transition({ ...this.identity(r), reservationId: r.usageReservationId, policyDigest: r.policyDigest,
-            state, now: new Date(this.now()), ...(r.outcomeDigest === null ? {} : { outcomeDigest: r.outcomeDigest }) });
+            state: target, now: new Date(this.now()), ...(r.outcomeDigest === null ? {} : { outcomeDigest: r.outcomeDigest }) });
+    }
+    /** A signed effect APN proved never landed ends before effect: its bytes are scrubbed and never sent again. */
+    unlanded(r, reason) {
+        return sealMegaFunding({ ...r, state: "failed_before_effect", terminal: true, rawTransaction: null, transactionHash: null,
+            outcomeDigest: hashObject({ id: r.operationId, ...gaszipUnlandedReason(reason, r.transactionHash) }) });
+    }
+    async retireUnlanded(r, reason) {
+        const ended = await this.state.withLocks(this.locks(r), async () => {
+            const saved = await this.required(r.operationId);
+            if (saved.terminal || saved.transactionHash !== r.transactionHash || saved.state !== r.state)
+                return saved;
+            // Every broadcast follows the create-only first-send marker. A marker the journal never recorded is an interrupted send
+            // step: it becomes an observed unknown attempt, never a resend.
+            const next = reason === "signed_never_sent" && saved.state === "sealed" && await this.journal.sendClaimedLocked(saved)
+                ? sealMegaFunding({ ...saved, state: "unknown_finality", submissionAttempts: 1 }) : this.unlanded(saved, reason);
+            await this.journal.saveLocked(next);
+            return next;
+        });
+        if (ended.terminal)
+            await this.usage(ended, gaszipUsageState(ended.state));
+        return ended;
     }
     async status(id) {
         let r = await this.required(id);
         if (r.terminal) {
-            await this.usage(r, r.state === "completed" ? "finalized" : r.state === "failed_confirmed_revert" ? "failed_confirmed_revert" : "failed_before_effect");
+            await this.usage(r, gaszipUsageState(r.state));
             return publicMegaFunding(r);
         }
         if (r.state === "prepared") {
@@ -223,7 +256,10 @@ export class MegaFundingService {
                 const saved = await this.required(id);
                 if (saved.state !== "prepared")
                     return saved;
-                await this.journal.assertNoEffectClaimsLocked(saved);
+                // Signing follows the durable signing_started save, so a first-sign marker on a prepared record signed nothing; only a
+                // first-send marker could mean a broadcast.
+                if (await this.journal.sendClaimedLocked(saved))
+                    megaFail("effect_marker_blocks_retirement");
                 const next = sealMegaFunding({ ...saved, state: "failed_before_effect", terminal: true, outcomeDigest: hashObject({ id, reason: "unsigned_quote_expired" }) });
                 await this.journal.saveLocked(next);
                 return next;
@@ -232,15 +268,18 @@ export class MegaFundingService {
                 await this.usage(ended, "failed_before_effect");
             return publicMegaFunding(ended);
         }
+        // Approve never resumes a record that left "prepared", and the send step always runs to a recorded outcome, so a signed
+        // effect still at signing_started or sealed was never broadcast.
+        if (r.state === "signing_started" || r.state === "sealed")
+            return publicMegaFunding(await this.retireUnlanded(r, "signed_never_sent"));
         if (r.transactionHash === null)
             return publicMegaFunding(r);
-        let phase = "source_proof", source = null, destination = null, claimHash = null;
+        let phase = "source_proof", source = null, destination = null, claimHash = null, failed = false;
         try {
             source = await proveMegaSource(this.rpc("source"), r);
             if (source === null)
-                return publicMegaFunding(r);
-            if (source.actualFee === null || BigInt(source.actualFee) > BigInt(r.maximumFeeAtomic))
-                megaFail("source_actual_fee_cap");
+                return await gaszipNonceConsumed(this.rpc("source"), r.owner.address, r.plan.nonce, megaQuantity)
+                    ? publicMegaFunding(await this.retireUnlanded(r, "nonce_consumed_unlanded")) : publicMegaFunding(r);
             if (source.status === "success") {
                 phase = "provider_correlation";
                 const response = await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`, "GET", null, 256 * 1024, "APN_HTTP_CONFIG");
@@ -249,19 +288,29 @@ export class MegaFundingService {
                 const d = inspectMegaDelivery(megaJson(response.body), r.transactionHash, r.owner.address, r.amountAtomic, source.blockNumber);
                 if (d === null)
                     return publicMegaFunding(r);
-                phase = "destination_proof";
-                const proof = await proveMegaDelivery(this.rpc("destination"), r.owner.address, d);
-                if (proof === null)
-                    return publicMegaFunding(r);
-                if (BigInt(proof.amount) < BigInt(r.minimumOutputAtomic))
-                    megaFail("delivery_owner_floor");
-                destination = { ...proof, providerDigest: d.providerDigest };
-                claimHash = d.hash;
+                if ("providerFailure" in d) {
+                    destination = d;
+                    failed = true;
+                }
+                else {
+                    phase = "destination_proof";
+                    const proof = await proveMegaDelivery(this.rpc("destination"), r.owner.address, d);
+                    if (proof === null)
+                        return publicMegaFunding(r);
+                    // A proved payout below the owner's floor still arrived: it ends as a destination failure, not an open operation.
+                    failed = BigInt(proof.amount) < BigInt(r.minimumOutputAtomic);
+                    destination = { ...proof, providerDigest: d.providerDigest, ...(failed ? { belowOwnerFloor: true } : {}) };
+                    claimHash = d.hash;
+                }
             }
         }
         catch (error) {
             return gaszipObservationRefusal(error, id, phase, "apn mega funding status");
         }
+        if (source === null)
+            return publicMegaFunding(r);
+        // The Base L1 part is not capped by the signature: an actual fee over the owner's quote ceiling is reported, never a wedge.
+        const sourceProof = { ...source, feeCapExceeded: source.actualFee === null || BigInt(source.actualFee) > BigInt(r.maximumFeeAtomic) };
         r = await this.state.withLocks([...this.locks(r), "mega-gaszip:destination-claims"], async () => {
             const saved = await this.required(id);
             if (saved.terminal)
@@ -270,13 +319,13 @@ export class MegaFundingService {
                 megaFail("observation_record_drift");
             if (claimHash !== null)
                 await this.journal.claimDestinationLocked(claimHash, id);
-            const outcomeDigest = hashObject({ source, destination });
-            const next = sealMegaFunding({ ...saved, state: source.status === "success" ? "completed" : "failed_confirmed_revert",
-                terminal: true, sourceProof: source, destinationProof: destination, outcomeDigest });
+            const outcomeDigest = hashObject({ source: sourceProof, destination });
+            const next = sealMegaFunding({ ...saved, state: sourceProof.status !== "success" ? "failed_confirmed_revert" : failed ? "destination_failed" : "completed",
+                terminal: true, sourceProof, destinationProof: destination, outcomeDigest });
             await this.journal.saveLocked(next);
             return next;
         });
-        await this.usage(r, r.state === "completed" ? "finalized" : "failed_confirmed_revert");
+        await this.usage(r, gaszipUsageState(r.state));
         return publicMegaFunding(r);
     }
 }

@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import { GASZIP_TERMINAL_STATES, type GaszipTerminalState } from "./gaszip-outcome.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { keccak256, parseTransaction, recoverTransactionAddress, type Hex } from "viem";
 import { SEI_FUNDING, seiFail, seiHash, seiUint } from "./sei-gaszip-contract.js";
@@ -11,7 +12,7 @@ export interface SeiFundingRecord {
   readonly providerBinding: BridgeProviderBinding; readonly amountAtomic: string; readonly minimumOutputAtomic: string;
   readonly maximumFeeAtomic: string; readonly quoteDigest: string; readonly quoteExpectedAtomic: string; readonly expiresAt: string;
   readonly policyDigest: string; readonly policyRevision: number; readonly activationDigest?: string; readonly plan: SeiFundingPlan;
-  readonly state: "prepared"|"signing_started"|"sealed"|"submitting"|"submitted"|"unknown_finality"|"completed"|"failed_before_effect"|"failed_confirmed_revert";
+  readonly state: "prepared"|"signing_started"|"sealed"|"submitting"|"submitted"|"unknown_finality"|GaszipTerminalState;
   readonly terminal: boolean; readonly rawTransaction: Hex|null; readonly transactionHash: Hex|null; readonly submissionAttempts: 0|1;
   readonly usageReservationId: string|null; readonly outcomeDigest: string|null; readonly sourceProof: unknown|null; readonly destinationProof: unknown|null;
   readonly integrityHash: string;
@@ -28,16 +29,16 @@ export function validateSeiFunding(value: unknown): SeiFundingRecord {
   seiHash(r.plan.blockHash); for(const x of [r.plan.nonce,r.plan.gas,r.plan.maxFee,r.plan.tip,r.plan.l1FeeUpper,r.plan.operatorFeeUpper,r.plan.feeUpper]) seiUint(x);
   if(seiUint(r.plan.feeUpper)!==seiUint(r.plan.gas)*seiUint(r.plan.maxFee)+seiUint(r.plan.l1FeeUpper)+seiUint(r.plan.operatorFeeUpper) ||
     seiUint(r.plan.feeUpper)>seiUint(r.maximumFeeAtomic) || seiUint(r.plan.tip)>seiUint(r.plan.maxFee)) seiFail("record_fee");
-  const terminal=["completed","failed_before_effect","failed_confirmed_revert"].includes(r.state);
-  if(terminal!==r.terminal || !["prepared","signing_started","sealed","submitting","submitted","unknown_finality","completed","failed_before_effect","failed_confirmed_revert"].includes(r.state)) seiFail("record_state");
+  const terminal=GASZIP_TERMINAL_STATES.includes(r.state);
+  if(terminal!==r.terminal || !["prepared","signing_started","sealed","submitting","submitted","unknown_finality",...GASZIP_TERMINAL_STATES].includes(r.state)) seiFail("record_state");
   if(r.transactionHash===null ? r.rawTransaction!==null : r.rawTransaction===null || keccak256(r.rawTransaction)!==r.transactionHash) seiFail("record_transaction");
   if(r.rawTransaction!==null){ const t=parseTransaction(r.rawTransaction);
     if(t.type!=="eip1559" || t.chainId!==8453 || t.to?.toLowerCase()!==SEI_FUNDING.target.toLowerCase() || t.data!==SEI_FUNDING.data || t.value!==seiUint(r.amountAtomic) ||
       t.nonce?.toString()!==r.plan.nonce || t.gas?.toString()!==r.plan.gas || t.maxFeePerGas?.toString()!==r.plan.maxFee ||
       t.maxPriorityFeePerGas?.toString()!==r.plan.tip || (t.accessList??[]).length!==0 || t.r===undefined || t.s===undefined) seiFail("record_envelope"); }
   if((r.state==="prepared" || r.state==="signing_started" || r.state==="failed_before_effect") && r.rawTransaction!==null ||
-    r.submissionAttempts!==0 && r.submissionAttempts!==1 || ["submitting","submitted","completed","failed_confirmed_revert"].includes(r.state) && r.submissionAttempts!==1 ||
-    r.state==="completed" && (r.sourceProof===null || r.destinationProof===null || r.outcomeDigest===null)) seiFail("record_phase");
+    r.submissionAttempts!==0 && r.submissionAttempts!==1 || ["submitting","submitted","completed","failed_confirmed_revert","destination_failed"].includes(r.state) && r.submissionAttempts!==1 ||
+    (r.state==="completed" || r.state==="destination_failed") && (r.sourceProof===null || r.destinationProof===null || r.outcomeDigest===null)) seiFail("record_phase");
   return r;
 }
 export function publicSeiFunding(r: SeiFundingRecord): unknown { const {rawTransaction:_raw,...rest}=validateSeiFunding(r); return rest; }
@@ -54,6 +55,8 @@ export class SeiFundingJournal extends SecureStateStore {
   async assertNoEffectClaimsLocked(r:SeiFundingRecord):Promise<void>{
     if(await this.readJson(`sei-gaszip-first-sign/${r.operationId}.json`)!==null || await this.readJson(`sei-gaszip-first-send/${r.operationId}.json`)!==null)seiFail("effect_marker_blocks_retirement");
   }
+  /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */
+  async sendClaimedLocked(r:{operationId:string}):Promise<boolean>{return await this.readJson(`sei-gaszip-first-send/${r.operationId}.json`)!==null;}
   async claimSigningLocked(r:SeiFundingRecord):Promise<void>{
     await this.ensureDirectory("sei-gaszip-first-sign");await this.writeJson(`sei-gaszip-first-sign/${r.operationId}.json`,{operationId:r.operationId,fingerprint:r.integrityHash,nonce:r.plan.nonce},true);
   }

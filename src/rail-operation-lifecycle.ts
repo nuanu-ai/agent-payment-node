@@ -287,6 +287,14 @@ export class RailOperationLifecycle {
   /** After the foreground decision and every pre-send check, before signing or a provider send. Refusals end the operation. */
   async reserveUsage(operation: RailOperationRecord): Promise<DirectAssetUsageLease> {
     try {
+      const policy = await this.policies.requiredPolicy(operation.account, operation.prepared.asset.alias);
+      if (policy.policyHash !== operation.policyHash) throw new ApnError("APN_PROFILE_DRIFT", "The chain policy changed after preparation.");
+      await this.policies.assertPrincipal(policy, operation.operationId, operation.prepared.amountAtomic);
+    } catch (error) {
+      await this.move(operation, "failed_before_effect", "chain_policy_refused_at_approval", "durable_pre_effect");
+      throw error;
+    }
+    try {
       if (operation.allowlist === undefined) {
         refuse("allowlist_binding_missing", "This transfer was prepared before the owner allowlist gate; prepare a new transfer.");
       }

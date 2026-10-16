@@ -23,6 +23,8 @@ export interface GaslessObservationContext {
   readonly deployment: GaslessDeployment;
   readonly rpc: GaslessRpcCall;
   readonly bundler?: GaslessRpcCall;
+  /** True when this invocation already verified the pinned code hashes through `rpc`; absent means read them. */
+  readonly codeProven?: boolean;
   /** Retained for existing callers; canonical observation never uses an execution snapshot. */
   readonly snapshot?: (owner: Address) => Promise<GaslessSnapshot>;
 }
@@ -161,8 +163,9 @@ async function inspect(context: GaslessObservationContext, intent: GaslessIntent
   const [effectAccount, safeAccount] = await Promise.all([
     readAccountAt(context.rpc, context.deployment, intent.owner.address, included, false),
     readAccountAt(context.rpc, context.deployment, intent.owner.address, safe, true),
-    verifyProtocolAt(context.rpc, context.deployment, included),
-    verifyProtocolAt(context.rpc, context.deployment, safe),
+    // Immutable code needs one proof; the included-block read in this same batch carries it when it is still owed.
+    verifyProtocolAt(context.rpc, context.deployment, included, context.codeProven !== true),
+    verifyProtocolAt(context.rpc, context.deployment, safe, false),
   ]).then(([effect, current]) => [effect, current] as const);
   const accounting = gaslessAccounting(intent, userOperationHash, protocolReceipt);
   await recheckBlock(context.rpc, included); await recheckBlock(context.rpc, safe);

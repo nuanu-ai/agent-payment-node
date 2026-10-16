@@ -85,9 +85,8 @@ export declare class MetaMaskSmartAccountDirectAdapter implements DirectExecutio
         disposition: "pending";
         recoveryToken: string;
         providerState: string;
-        reason?: never;
-        transactionHash?: never;
     }>;
+    private acknowledge;
     private preflightRecord;
     private resumeEffect;
     private submit;

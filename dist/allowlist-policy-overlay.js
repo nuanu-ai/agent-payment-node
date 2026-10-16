@@ -3,11 +3,11 @@ import { getAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { ALLOWLIST_DATASET_SCHEMA, loadAllowlistInventory, } from "./allowlist-inventory.js";
-import { sealAssetPolicyRegistry, } from "./asset-policy-registry.js";
+import { sealAssetPolicyRegistry, validateAssetPolicyRegistry, } from "./asset-policy-registry.js";
 import { parseAtomic } from "./money.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
-import { validateSwapMechanismPin } from "./swap/pin.js";
+import { MAX_SWAP_ADMISSION_OPTIONS, swapRouteDigest, validateSwapAdmissionMechanism } from "./swap/route-admission.js";
 import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA = "apn.allowlist-policy-overlay.v1";
 export const ALLOWLIST_POLICY_RECORD_SCHEMA = "apn.allowlist-policy-record.v1";
@@ -47,7 +47,8 @@ export function compileAllowlistPolicyOverlay(raw, inventory = loadAllowlistInve
             },
             ...(admission.mechanism === undefined ? {} : { mechanismPins: { [admission.rail]: admission.mechanism } }),
             ...(admission.recipient === undefined ? {} : { gaslessRecipient: admission.recipient }),
-            ...(admission.mechanisms === undefined ? {} : { mechanismOptions: { bridge: admission.mechanisms } }),
+            ...(admission.mechanisms === undefined ? {} : { mechanismOptions: admission.rail === "swap"
+                    ? { swap: admission.mechanisms } : { bridge: admission.mechanisms } }),
         };
         const current = chains.get(asset.chain);
         if (current === undefined) {
@@ -83,12 +84,39 @@ export function validateAllowlistPolicyRecord(value) {
     if (domainHash(ALLOWLIST_POLICY_RECORD_SCHEMA, canonicalJson(body)) !== recordDigest) {
         corrupt("Allowlist policy record integrity validation failed.");
     }
-    const compiled = compileAllowlistPolicyOverlay(overlayBody(value.overlay));
-    if (canonicalJson(compiled.overlay) !== canonicalJson(value.overlay) ||
-        canonicalJson(compiled.registry) !== canonicalJson(value.registry)) {
-        corrupt("Allowlist policy record does not match its frozen inventory compilation.");
-    }
+    assertStoredAllowlistCompilation(ALLOWLIST_POLICY_OVERLAY_SCHEMA, value.overlay, value.registry);
     return value;
+}
+/**
+ * A stored staged revision is checked against itself, never recompiled against the inventory this release ships.
+ * The dataset, inventory and mechanism rules apply when the owner stages a revision; the owner then activates the
+ * exact sealed registry the approval screen shows. A release with another dataset may refuse new staging, but it
+ * must not void stored policies (that blocked every allowlist-gated rail of the profile, and its own re-staging).
+ * The digests are unkeyed: they detect corruption, not a rewrite by the same local user.
+ */
+export function assertStoredAllowlistCompilation(overlaySchema, overlay, registryValue) {
+    if (!isPlainRecord(overlay) || overlay.schemaVersion !== overlaySchema || typeof overlay.overlayDigest !== "string" ||
+        typeof overlay.profile !== "string" || !PROFILE.test(overlay.profile) || typeof overlay.overlayVersion !== "string" ||
+        typeof overlay.effectiveAt !== "string" || !Array.isArray(overlay.admissions) ||
+        !(typeof overlay.account === "string" || (isPlainRecord(overlay.accounts) &&
+            Object.entries(overlay.accounts).every(([family, account]) => ["evm", "solana", "tron"].includes(family) && typeof account === "string")))) {
+        corrupt("Allowlist policy overlay schema is invalid.");
+    }
+    const { overlayDigest, ...body } = overlay;
+    if (overlay.profileHash !== allowlistProfileHash(overlay.profile) || domainHash(overlaySchema, canonicalJson(body)) !== overlayDigest) {
+        corrupt("Allowlist policy overlay integrity validation failed.");
+    }
+    let registry;
+    try {
+        registry = validateAssetPolicyRegistry(registryValue);
+    }
+    catch {
+        return corrupt("Allowlist policy registry is invalid.");
+    }
+    if (registry.registryVersion !== overlay.overlayVersion || registry.publishedAt !== overlay.effectiveAt ||
+        registry.effectiveAt !== overlay.effectiveAt || registry.expiresAt !== overlay.expiresAt) {
+        corrupt("Allowlist policy registry does not belong to its staged overlay.");
+    }
 }
 function overlayInput(value, inventory) {
     if (!isPlainRecord(value) || !exactKeys(value, [
@@ -133,6 +161,8 @@ export function validateAllowlistAdmission(value) {
         invalid("Allowlist admission row is invalid.", "invalid_admission");
     }
     const alternatives = value.mechanisms;
+    if (alternatives !== undefined && value.rail === "swap")
+        return swapAlternatives(value);
     if (alternatives !== undefined && (value.rail !== "bridge" || value.mechanism !== undefined ||
         value.maximumPerTransferAtomic !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > 16)) {
         invalid("Bridge alternatives require two to sixteen exact pins and no legacy cap or pin.", "invalid_mechanisms");
@@ -182,6 +212,24 @@ export function validateAllowlistAdmission(value) {
         ...(mechanism === undefined ? {} : { mechanism }), ...(recipient === undefined ? {} : { recipient }),
         ...(mechanisms === undefined ? {} : { mechanisms }) };
 }
+/** Swap rows may admit several routes (for example Orca and Jupiter on one pool asset) under the row's own caps. */
+function swapAlternatives(value) {
+    const alternatives = value.mechanisms;
+    if (value.mechanism !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > MAX_SWAP_ADMISSION_OPTIONS) {
+        invalid("Swap alternatives require two to sixteen admitted routes and no single pin.", "invalid_mechanisms");
+    }
+    const mechanisms = alternatives.map((item) => swapMechanismPin(item));
+    if (new Set(mechanisms.map((item) => swapRouteDigest(item))).size !== mechanisms.length) {
+        invalid("Swap alternatives contain a duplicate route.", "duplicate_mechanism");
+    }
+    const maximum = positiveAtomic(value.maximumPerTransferAtomic, "maximum_per_transfer"), daily = positiveAtomic(value.dailyLimitAtomic, "daily_limit");
+    if (BigInt(maximum) > BigInt(daily))
+        invalid("Per-transfer cap cannot exceed daily cap.", "cap_order");
+    if (value.recipient !== undefined)
+        invalid("Recipient pins are available only for Ethereum/Base local or Base Coinbase gasless admissions.", "recipient_not_applicable");
+    return { chain: value.chain, kind: value.kind, ...(value.identifier === undefined ? {} : { identifier: value.identifier }),
+        rail: "swap", maximumPerTransferAtomic: maximum, dailyLimitAtomic: daily, mechanisms };
+}
 function maximumMechanismCap(value) {
     return value.reduce((max, item) => BigInt(item.maximumPerTransferAtomic) > BigInt(max) ? item.maximumPerTransferAtomic : max, "0");
 }
@@ -198,18 +246,11 @@ function swapMechanismPin(value) {
     if (value === undefined)
         return undefined;
     try {
-        return validateSwapMechanismPin(value);
+        return validateSwapAdmissionMechanism(value);
     }
     catch {
         return invalid("Pinned swap mechanism metadata is invalid.", "invalid_swap_mechanism");
     }
-}
-function overlayBody(value) {
-    if (!isPlainRecord(value) || value.schemaVersion !== ALLOWLIST_POLICY_OVERLAY_SCHEMA || typeof value.overlayDigest !== "string" ||
-        typeof value.profileHash !== "string")
-        corrupt("Allowlist policy overlay schema is invalid.");
-    const { schemaVersion: _schema, profileHash: _profileHash, overlayDigest: _digest, ...body } = value;
-    return body;
 }
 function positiveAtomic(value, field) {
     try {

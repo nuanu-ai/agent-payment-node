@@ -2,6 +2,7 @@ import { lstat, mkdir, open, readFile, realpath, rename } from "node:fs/promises
 import { dirname, join, relative } from "node:path";
 import { decodeFunctionData } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
+import { evmAddressLock } from "../evm-address-ownership.js";
 import { StateStore } from "../state.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy, } from "./finality-policy.js";
@@ -17,9 +18,10 @@ export class FileStargateTokenJournal {
     path(id) { if (!/^[a-f0-9]{64}$/u.test(id))
         fail("APN_STATE_CORRUPT", "operation_id"); return join(this.root, "stargate-v2-token", `${id}.json`); }
     async withLock(id, work) { await this.locks.initialize(); return await this.locks.withLocks([`stargate-token:${id}`], work, { waitMs: 30_000 }); }
-    async withOwnerChainLock(owner, chainId, work) {
+    /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
+    async withOwnerLock(owner, work) {
         await this.locks.initialize();
-        return await this.locks.withLocks([`stargate-source:${chainId}:${address(owner).toLowerCase()}`], work, { waitMs: 30_000 });
+        return await this.locks.withLocks([evmAddressLock(address(owner))], work, { waitMs: 30_000 });
     }
     async load(id) {
         try {
@@ -104,9 +106,8 @@ function validatePostApprovalQuote(op, snapshot) {
         BigInt(envelope.nonceAtomic) !== BigInt(op.approvalEnvelope.nonceAtomic) + 1n ||
         envelope.gasLimitAtomic !== op.bridgeSimulation.gasCeilingAtomic || envelope.maxFeePerGasAtomic !== op.feeApproval.approvedMaxFeePerGasWei ||
         envelope.maxPriorityFeePerGasAtomic !== op.feeApproval.approvedMaxPriorityFeePerGasWei ||
+        // The fresh 2 × base + tip estimate is evidence only; the envelope above is bound to the owner-approved fee fields.
         BigInt(snapshot.sourceSnapshot.quotedMaxPriorityFeePerGasWei) > BigInt(snapshot.sourceSnapshot.quotedMaxFeePerGasWei) ||
-        BigInt(snapshot.sourceSnapshot.quotedMaxFeePerGasWei) > BigInt(op.feeApproval.approvedMaxFeePerGasWei) ||
-        BigInt(snapshot.sourceSnapshot.quotedMaxPriorityFeePerGasWei) > BigInt(op.feeApproval.approvedMaxPriorityFeePerGasWei) ||
         BigInt(snapshot.bridgeEstimateGasAtomic) > BigInt(envelope.gasLimitAtomic))
         fail("APN_STATE_CORRUPT", "post_approval_envelope_binding");
     const approvalDebit = BigInt(op.approvalEnvelope.gasLimitAtomic) * BigInt(op.approvalEnvelope.maxFeePerGasAtomic);

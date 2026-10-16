@@ -99,4 +99,5 @@ export interface StargateTokenExecutionPorts {
 }
 export interface StargateTokenJournal { load(id: string): Promise<StargateTokenOperation | null>; save(op: StargateTokenOperation): Promise<void>;
   withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
-  withOwnerChainLock<T>(owner: Address, chainId: number, work: () => Promise<T>): Promise<T> }
+  /** The kernel per-account EVM lock (`evmAddressLock`) every EVM writer holds around its nonce check and send. */
+  withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T> }

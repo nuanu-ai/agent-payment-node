@@ -1,5 +1,6 @@
 import { ApnError } from "../errors.js";
 import { assertGaslessSnapshot } from "./economics.js";
+import { assertGaslessIntentCurrent } from "./intent-validation.js";
 import { assertGaslessOwner } from "./owner.js";
 import { GASLESS_MIN_REMAINING_MS, assertGaslessExecutionChain, gaslessFailure } from "./validation.js";
 import { gaslessWireFees } from "./wire.js";
@@ -23,6 +24,7 @@ export async function guardGaslessOperation(state, rpc, op, now, signed) {
 /** Read-only facts shared by original-window execution and fresh sealed-first-send consent. */
 export async function checkGaslessCurrentState(state, rpc, op, signed) {
     assertGaslessExecutionChain(op.intent.request.chainId);
+    assertGaslessIntentCurrent(op.intent);
     await assertGaslessOwner(state, op.intent);
     const s = op.intent.initialSnapshot;
     if (rpc.chainId !== op.intent.request.chainId || rpc.rpcOrigin !== s.rpcOrigin ||

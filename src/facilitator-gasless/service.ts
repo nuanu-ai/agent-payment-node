@@ -1,3 +1,4 @@
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { ApnError } from "../errors.js";
 import { gaslessOwner } from "../gasless/owner.js";
 import type { GaslessApprovalPort } from "../gasless/ports.js";
@@ -10,6 +11,7 @@ import type { FacilitatorPort } from "./facilitator.js";
 import { facilitatorFail } from "./failure.js";
 import { FACILITATOR_KIND, type FacilitatorOperationRecord } from "./operation-model.js";
 import { FacilitatorGaslessOperationRepository, type FacilitatorGaslessRepositoryPort } from "./operation-repository.js";
+import { FacilitatorGaslessPolicy } from "./policy.js";
 import { FacilitatorPreparation } from "./prepare.js";
 import { publicFacilitatorOperation } from "./receipt.js";
 import { AVALANCHE_FACILITATOR as R } from "./registry.js";
@@ -28,8 +30,10 @@ export interface FacilitatorGaslessDependencies {
 export class FacilitatorGaslessService {
   readonly records: FacilitatorGaslessRepositoryPort;
   readonly operations: OperationService;
+  readonly policy: FacilitatorGaslessPolicy;
 
   constructor(private readonly context: RuntimeContext) {
+    this.policy = new FacilitatorGaslessPolicy(context.state.root, () => context.clock.now().getTime());
     this.records = context.facilitatorGasless?.records ?? new FacilitatorGaslessOperationRepository(context.state.root);
     this.operations = new OperationService(context.state, context.providerX402Repository, undefined, undefined, undefined,
       context.metaMaskGasless?.records, context.smartAccountGasless?.records, this.records);
@@ -48,7 +52,8 @@ export class FacilitatorGaslessService {
   async prepare(input: { readonly profile: string; readonly request: unknown; readonly idempotencyKey: string }) {
     const d = this.dependencies();
     return publicFacilitatorOperation(await new FacilitatorPreparation({ state: this.context.state, records: this.records,
-      operations: this.operations, rpc: d.rpc, facilitator: d.facilitator, now: () => this.context.clock.now().getTime() }).prepare(input));
+      operations: this.operations, rpc: d.rpc, facilitator: d.facilitator, now: () => this.context.clock.now().getTime(),
+      policy: this.policy }).prepare(input));
   }
 
   async approve(operationId: string) {
@@ -83,19 +88,21 @@ export class FacilitatorGaslessService {
     return new FacilitatorExecution(this.context.state, d.rpc, d.facilitator, d.signer, () => this.context.clock.now().getTime(),
       async (op, patch) => {
         const next = transitionFacilitator(op, patch, this.context.clock.now().toISOString());
-        await this.records.persist(next);
+        await this.records.persist(next); await this.policy.reconcile(next);
         return next;
-      });
+      }, this.policy);
   }
 
   private async locked<T>(input: string, work: (op: FacilitatorOperationRecord) => Promise<T>): Promise<T> {
     const id = canonicalOperationId(input), first = await this.operations.required(id);
     if (first.kind !== FACILITATOR_KIND) facilitatorFail("facilitator_gasless_input");
-    return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${id}`], async () => {
+    return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${id}`], async () =>
+      await this.context.state.withLocks([`profile:${allowlistProfileHash(first.record.intent.profile)}`], async () => {
       const current = await this.operations.required(id);
       if (current.kind !== FACILITATOR_KIND) facilitatorFail("facilitator_gasless_state_corrupt");
       await this.records.repairReceipt(current.record);
+      await this.policy.reconcile(current.record);
       return await work(current.record);
-    });
+    }));
   }
 }

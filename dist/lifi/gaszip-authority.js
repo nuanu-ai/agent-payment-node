@@ -3,6 +3,10 @@ import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 /** Only callbacks minted in a live foreground scope may authorize a physical send. */
 const physicalGuards = new WeakMap();
+/** Guards that refused. The transport calls a guard before connecting and again before request.end, so a refusal proves the
+ * signed bytes never left APN. */
+const refusedGuards = new WeakSet();
+export function gaszipGuardRefused(guard) { return refusedGuards.has(guard); }
 const refuse = () => { throw new ApnError("APN_OPERATION_BLOCKED", "GasZip live effect authority is unavailable or expired."); };
 export function gaszipEffectBinding(value, lane) {
     return hashObject({ lane, operationId: value.operationId, profile: value.profile, owner: value.owner,
@@ -37,8 +41,17 @@ export async function withGaszipForegroundAuthority(binding, operationExpiresAt,
                 refuse();
             armed = true;
             let checks = 0;
-            const guard = () => { assert(candidate); if (++checks > 2 || keccak256(raw) !== hash)
-                refuse(); };
+            const guard = () => {
+                try {
+                    assert(candidate);
+                    if (++checks > 2 || keccak256(raw) !== hash)
+                        refuse();
+                }
+                catch (error) {
+                    refusedGuards.add(guard);
+                    throw error;
+                }
+            };
             physicalGuards.set(guard, raw);
             callbacks.push(guard);
             return guard;

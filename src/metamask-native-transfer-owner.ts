@@ -22,9 +22,11 @@ import { canonicalProfile } from "./wallet-policy.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { exactChainConsent } from "./tty-approval.js";
 import { approvalCode } from "./approval-code.js";
+import type { OperationAbandonIntent } from "./operation-abandon-approval.js";
 import { validateMetaMaskNativeFeeQuote, validateMetaMaskNativeFeeReceipt,
   type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeChainId, type MetaMaskNativeFeeReceiptEvidence } from "./metamask-native-fee-evidence.js";
-import { readFixedMetaMaskNativePolicy, readFixedMetaMaskNativeRequest, submitOwnedMetaMaskNative, type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
+import { MetaMaskNativeHandoffNotStarted, readFixedMetaMaskNativePolicy, readFixedMetaMaskNativeRequest, submitOwnedMetaMaskNative,
+  type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
 import { prepareFixedMetaMaskNativeQuote, readFixedMetaMaskNativeBalances, readFixedMetaMaskNativeNonce, observeFixedMetaMaskNativeTransfer } from "./metamask-native-transfer-rpc.js";
 
 export const METAMASK_NATIVE_OWNER_PROFILE = "metamask-live-v042" as const;
@@ -129,7 +131,7 @@ interface NativeOperation {
   readonly requestHash: string;
   readonly context: MetaMaskNativeOwnedContext;
   readonly reservations: readonly AssetUsageReservation[];
-  readonly state: "prepared" | "failed_before_effect" | "effect_started" | "acknowledged" | "unknown" | "confirmed";
+  readonly state: "prepared" | "failed_before_effect" | "effect_started" | "acknowledged" | "unknown" | "confirmed" | "abandoned_unknown";
   readonly effectAttempts: 0 | 1;
   readonly transactionHash: `0x${string}` | null;
   readonly providerRequestId: string | null;
@@ -146,8 +148,9 @@ function validateOperation(value: unknown): NativeOperation {
   if (o.schemaVersion !== "apn.metamask-native-operation.v1" || recordHash !== hashObject(body) || !/^[a-f0-9]{64}$/.test(o.operationId) ||
     o.context.operationId !== o.operationId || canonicalProfile(o.context.profile) !== o.context.profile || o.context.profileHash !== new StateStore(o.context.stateRoot).profileHash(o.context.profile) ||
     o.context.accountBindingHash !== nativeAccountBindingHash("metamask-agent-wallet",getAddress(o.context.quote.sender)) || !storedVendorPolicyAllowsChain(o.context.vendorPolicyHash,o.context.quote.chainId,o.context.quote.sender) ||
-    o.context.profile === METAMASK_NATIVE_OWNER_PROFILE && o.context.quote.sender.toLowerCase() !== METAMASK_NATIVE_OWNER_ADDRESS || !["prepared","failed_before_effect","effect_started","acknowledged","unknown","confirmed"].includes(o.state) ||
-    o.effectAttempts !== (o.state === "prepared" || o.state === "failed_before_effect" ? 0 : 1) || !Array.isArray(o.reservations) || o.reservations.length > 2 || o.effectAttempts === 1 && o.reservations.length !== 2) corrupt("Native transfer journal binding is invalid.");
+    o.context.profile === METAMASK_NATIVE_OWNER_PROFILE && o.context.quote.sender.toLowerCase() !== METAMASK_NATIVE_OWNER_ADDRESS || !["prepared","failed_before_effect","effect_started","acknowledged","unknown","confirmed","abandoned_unknown"].includes(o.state) ||
+    // failed_before_effect after the marker is the proven no-spawn outcome (the vendor child never started).
+    (o.state === "failed_before_effect" ? o.effectAttempts !== 0 && o.effectAttempts !== 1 : o.effectAttempts !== (o.state === "prepared" ? 0 : 1)) || !Array.isArray(o.reservations) || o.reservations.length > 2 || o.effectAttempts === 1 && o.reservations.length !== 2) corrupt("Native transfer journal binding is invalid.");
   if(!isPlainRecord(o.context)||!exactKeys(o.context,["stateRoot","profile","profileHash","accountBindingHash","capabilityHash","profileRevision","policyDigest","policyRevision","activationDigest","vendorPolicyHash","vendorProjectHash","quote","operationId","consentExpiresAt","issuedDay"])||
     ![o.requestHash,o.context.profileHash,o.context.accountBindingHash,o.context.capabilityHash,o.context.policyDigest,o.context.activationDigest,o.context.vendorProjectHash].every(x=>typeof x==="string"&&/^[a-f0-9]{64}$/.test(x))||
     !Number.isSafeInteger(o.context.profileRevision)||o.context.profileRevision<1||!Number.isSafeInteger(o.context.policyRevision)||o.context.policyRevision<1||
@@ -182,14 +185,14 @@ class NativeJournal extends SecureStateStore {
       if(!item.isFile()||item.isSymbolicLink()||!/^[a-f0-9]{64}\.json$/.test(item.name))corrupt("Native transfer journal directory is invalid.");
       const op=await this.read(item.name.slice(0,-5));if(op===null)corrupt("Native transfer journal disappeared.");
       if(op.operationId!==exceptId&&op.context.quote.chainId===chainId&&op.context.quote.sender.toLowerCase()===account.toLowerCase()&&
-        op.state!=="confirmed"&&op.state!=="failed_before_effect")blocked("Another native transfer for this account and chain is unresolved.");
+        !["confirmed","failed_before_effect","abandoned_unknown"].includes(op.state))blocked("Another native transfer for this account and chain is unresolved.");
     }
   }
   async assertSignedDomainAvailable(chainId:number|string,account:string,exceptId?:string):Promise<void> {
     for(const item of await this.readDirectory("metamask-native-operations")) {
       if(!item.isFile()||item.isSymbolicLink()||!/^[a-f0-9]{64}\.json$/.test(item.name))corrupt("Native transfer journal directory is invalid.");
       const op=await this.read(item.name.slice(0,-5));if(op===null)corrupt("Native transfer journal disappeared.");
-      if(op.operationId!==exceptId&&String(op.context.quote.chainId)===String(chainId)&&op.context.quote.sender.toLowerCase()===account.toLowerCase()&&(op.effectAttempts===1||op.providerRequestId!==null||op.transactionHash!==null)&&op.state!=="confirmed")blocked("An unresolved native transfer holds this EVM account and chain.");
+      if(op.operationId!==exceptId&&String(op.context.quote.chainId)===String(chainId)&&op.context.quote.sender.toLowerCase()===account.toLowerCase()&&(op.effectAttempts===1||op.providerRequestId!==null||op.transactionHash!==null)&&!["confirmed","failed_before_effect","abandoned_unknown"].includes(op.state))blocked("An unresolved native transfer holds this EVM account and chain.");
     }
   }
   async matchingHold(reservation:AssetUsageReservation):Promise<NativeOperation|null> {
@@ -209,7 +212,7 @@ class NativeJournal extends SecureStateStore {
     const next = validateOperation({ ...body, recordHash: hashObject(body) }), old = await this.read(next.operationId);
     if (old !== null && (old.requestHash !== next.requestHash || canonicalJson(old.context) !== canonicalJson(next.context) ||
       old.diagnostic!==undefined && canonicalJson(old.diagnostic)!==canonicalJson(next.diagnostic) || old.createdAt !== next.createdAt || old.effectAttempts > next.effectAttempts || old.transactionHash !== null && old.transactionHash !== next.transactionHash ||
-      old.state === "confirmed" || old.state === "failed_before_effect")) blocked("Native transfer journal cannot replace an existing outcome.");
+      old.state === "confirmed" || old.state === "failed_before_effect" || old.state === "abandoned_unknown")) blocked("Native transfer journal cannot replace an existing outcome.");
     await this.ensureDirectory("metamask-native-operations");
     await this.writeJson(`metamask-native-operations/${next.operationId}.json`, next, old === null);
     return next;
@@ -327,6 +330,12 @@ export async function runFixedMetaMaskNativeTransfer(stateRoot: string, chainInp
       return publicOperation(op);
     } catch (error) {
       if (op !== undefined) {
+        if (op.effectAttempts===1 && op.state==="effect_started" && error instanceof MetaMaskNativeHandoffNotStarted) {
+          // Proven no handoff: the vendor child never started, so the marker closes as failed before effect.
+          op=await journal.persist(patch(op,{state:"failed_before_effect"}));
+          for (const r of reservations) await ledger.transition({...transitionIdentity(r),state:"failed_before_effect",now:new Date(),outcomeDigest:hashObject({id,kind:"failed_before_effect"}),expectedCurrentStates:["reserved"]});
+          throw error.causeError;
+        }
         if (op.effectAttempts===1) {
           if (op.state==="effect_started") {const diagnostic=takeMetaMaskNativeProcessFailureDiagnostic(error)??(error instanceof ApnError&&"nativeDiagnostic" in error?validateMetaMaskNativeDiagnostic(error.nativeDiagnostic):undefined)??validateMetaMaskNativeDiagnostic({stage:scope===undefined?"owner_guard":scopes.get(scope)?.guardStage??"owner_guard",code:Date.now()>=Date.parse(nativeContextDeadline(context))||scope!==undefined&&performance.now()>=(scopes.get(scope)?.monotonicDeadline??0)?"deadline":"refused",exitCode:null,signal:null,durationMs:Math.floor(scope===undefined?0:performance.now()-(scopes.get(scope)?.startedAt??performance.now())),remainingMs:Math.max(0,Math.min(60000,Math.floor(Math.min(Date.parse(nativeContextDeadline(context))-Date.now(),scope===undefined?60000:(scopes.get(scope)?.monotonicDeadline??0)-performance.now())))),stderrClass:"none",providerCode:"none"});op=await journal.persist(patch(op,{state:"unknown",diagnostic}));}
           for (const r of reservations) await ledger.transition({...transitionIdentity(r),state:"unknown_finality",now:new Date()});
@@ -367,6 +376,33 @@ export async function readFixedMetaMaskNativeTransfer(stateRoot:string,idInput:s
     return {...publicOperation(op),...(readObservation===undefined?{}:{read_observation:readObservation})};
   });
 }
+export async function metaMaskNativeOperationExists(stateRoot:string,id:string):Promise<boolean> {
+  return await new NativeJournal(stateRoot).read(canonicalOperationId(id))!==null;
+}
+/**
+ * Owner release (R4) of a native transfer whose outcome stayed unknown after its quote expired. It observes once,
+ * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed.
+ */
+export async function abandonFixedMetaMaskNativeTransfer(stateRoot:string,idInput:string,
+  approve:(intent:OperationAbandonIntent)=>Promise<void>,now:()=>Date) {
+  const id=canonicalOperationId(idInput), journal=new NativeJournal(stateRoot);
+  const initial=await journal.read(id);
+  if(initial===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
+  if(initial.state==="abandoned_unknown")return publicOperation(initial);
+  const eligible=(o:NativeOperation)=>["effect_started","acknowledged","unknown"].includes(o.state)&&now().getTime()>=Date.parse(o.context.quote.expiresAt);
+  if(!eligible(initial))blocked("Only a native transfer with an unknown outcome can be abandoned, and only after its quote expired.");
+  try { await readFixedMetaMaskNativeTransfer(stateRoot,id,true); } catch { /* Observation is best effort; consent decides. */ }
+  return journal.withLocks([`operation:${id}`],async()=>{
+    const op=await journal.read(id); if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
+    if(op.state==="confirmed"||op.state==="abandoned_unknown")return publicOperation(op);
+    if(!eligible(op))blocked("Only a native transfer with an unknown outcome can be abandoned, and only after its quote expired.");
+    const q=op.context.quote;
+    await approve({operationId:id,fingerprint:op.requestHash,profile:op.context.profile,providerId:"metamask-agent-wallet",walletAddress:q.sender,
+      recipient:q.seller,amountAtomic:"1000",amountDecimal:"0.001",chainLabel:`eip155:${q.chainId}`,assetLabel:`USDC (${q.token})`,unit:"USDC",
+      outcomeNote:`Financial outcome: UNKNOWN. The MetaMask Guard may have signed and broadcast this transfer${op.transactionHash===null?".":`; its transaction ${op.transactionHash} may still land.`}`});
+    return publicOperation(await journal.persist(patch(op,{state:"abandoned_unknown"})));
+  });
+}
 /** Durable, read-only proof extraction for the common ledger; accepts no DTO as permission. */
 export async function readMetaMaskNativeSettlement(stateRoot:string,id:string) {
   const op=await new NativeJournal(stateRoot).read(id);
@@ -389,12 +425,12 @@ export async function readMetaMaskNativeReservation(stateRoot:string,id:string) 
 }
 export async function assertMetaMaskNativeFailedBeforeEffect(stateRoot:string,id:string):Promise<void> {
   const op=await new NativeJournal(stateRoot).read(id);
-  if(op===null||op.effectAttempts!==0||op.state!=="failed_before_effect")blocked("MetaMask capacity release requires durable no-private-effect outcome.");
+  if(op===null||op.state!=="failed_before_effect")blocked("MetaMask capacity release requires durable no-private-effect outcome.");
 }
 
 /** Existing-only durable guard also protects a hold whose public marker was removed. */
 export async function assertMetaMaskNativeGenericCapacityRelease(stateRoot:string,value:AssetUsageReservation):Promise<void> {
   const reservation=validateAssetUsageReservation(value),op=await new NativeJournal(stateRoot).matchingHold(reservation);
   if(op===null){if(reservation.metamaskNativeReservation!==undefined)blocked("MetaMask hold has no authentic normal owner journal.");return;}
-  if(op.effectAttempts!==0||op.state!=="failed_before_effect")blocked("MetaMask native hold requires canonical normal-owner settlement.");
+  if(op.state!=="failed_before_effect")blocked("MetaMask native hold requires canonical normal-owner settlement.");
 }

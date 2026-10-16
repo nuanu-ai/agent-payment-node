@@ -7,7 +7,7 @@ import { inspectPermit2ProductionReceipt } from "./production-receipt-facts.js";
 import { validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./production-repository.js";
 import { permit2ProductionOperationDigest, validatePermit2ProductionSigned, type Permit2ProductionSigned } from "./production-signed.js";
 import { Permit2ObserverRpc, type Permit2ObservationMetrics } from "./production-observer-rpc.js";
-import { assertExpiredUnused, assertObserverChain, assertObserverIdentity, observerBlock, observerIdentityCalls,
+import { assertExpiredUnused, assertObserverChain, assertObserverIdentity, nonceConsumed, observerBlock, observerIdentityCalls,
   observerNonceCalls, observerReceipt, observerTransaction, type Permit2ObservedBlock } from "./production-observer-facts.js";
 
 export type Permit2ObservationMode = "settlement" | "expired_unused";
@@ -46,46 +46,46 @@ export async function observePermit2Production(input: Permit2ProductionObservati
   const supplied = input.signed === null ? null : JSON.parse(canonicalJson(input.signed)) as Permit2ProductionSigned;
   freezeObservationValue(record); freezeObservationValue(supplied);
   if (record.material.wallet.profile !== profile || typeof stateRoot !== "string" || !stateRoot || typeof endpoint !== "string" ||
-      !["settlement", "expired_unused"].includes(mode) || mode === "settlement" && (!permit2FactHash(locator) || supplied === null) ||
+      !["settlement", "expired_unused"].includes(mode) || mode === "settlement" && (locator !== null && !permit2FactHash(locator) || supplied === null) ||
       mode === "expired_unused" && locator !== null) invalid();
-  let signed: Permit2ProductionSigned | null = null, block: Permit2ObservedBlock | null = null;
+  let signed: Permit2ProductionSigned | null = null, block: Permit2ObservedBlock | null = null, transactionHash: string | null = null;
   let rpc: Permit2ObserverRpc | null = null;
   let tokenPermitOutcome: Permit2ObservationProjection["tokenPermitOutcome"] = null;
   const projection = (outcome: Permit2ObservationProjection["outcome"], reason: Permit2ObservationProjection["reason"]): Permit2ObservationProjection => Object.freeze({
     mode, outcome, reason, operationDigest: permit2ProductionOperationDigest(record), materialHash: record.material.materialHash,
     requestHash: record.material.checked.requestHash, challengeHash: record.material.checked.challengeHash,
-    signedHash: signed?.signedHash ?? null, transactionHash: locator, blockNumber: block?.number ?? null, blockHash: block?.hash ?? null,
+    signedHash: signed?.signedHash ?? null, transactionHash, blockNumber: block?.number ?? null, blockHash: block?.hash ?? null,
     tokenPermitOutcome, rpc: rpc?.metrics() ?? Object.freeze({ attempts: 0, admissions: 0, physicalDispatches: 0, logicalReads: 0, errors: 0, methods: Object.freeze({}) }) });
   try {
     if (supplied !== null) signed = await validatePermit2ProductionSigned(supplied, record);
     rpc = new Permit2ObserverRpc(endpoint, new StateStore(stateRoot));
     const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["finalized", false] },
-      ...(mode === "settlement" ? [{ method: "eth_getTransactionByHash", params: [locator] },
+      ...(mode === "settlement" && locator !== null ? [{ method: "eth_getTransactionByHash", params: [locator] },
         { method: "eth_getTransactionReceipt", params: [locator] }] : [])]);
     assertObserverChain(first[0]);
     const head = observerBlock(first[1], "finalized");
-    let reverted = false;
-    if (mode === "settlement") {
-      const transaction = observerTransaction(first[2], locator!), receipt = observerReceipt(first[3], first[2]);
-      const facts = await inspectPermit2ProductionReceipt(record, signed!, transaction, receipt);
-      if (facts.attribution.transactionHash !== locator || BigInt(facts.attribution.blockNumber) > BigInt(head.number)) invalid();
-      block = observerBlock((await rpc.batch([{ method: "eth_getBlockByNumber", params: [transaction.blockNumber, false] }]))[0], transaction.blockNumber);
-      if (block.hash !== facts.attribution.blockHash) invalid();
-      tokenPermitOutcome = facts.attribution.tokenPermitOutcome;
-      reverted = facts.receiptStatus === "reverted_locator";
-    } else { block = head; }
+    if (mode === "settlement" && locator !== null) {
+      // A transaction hash only names the settlement; the consumed nonce bit below decides it, whatever the facilitator's call shape.
+      try {
+        const transaction = observerTransaction(first[2], locator), receipt = observerReceipt(first[3], first[2]);
+        const facts = await inspectPermit2ProductionReceipt(record, signed!, transaction, receipt);
+        const included = observerBlock((await rpc.batch([{ method: "eth_getBlockByNumber", params: [transaction.blockNumber, false] }]))[0], transaction.blockNumber);
+        if (facts.receiptStatus !== "reverted_locator" && facts.attribution.transactionHash === locator &&
+            BigInt(facts.attribution.blockNumber) <= BigInt(head.number) && included.hash === facts.attribution.blockHash) {
+          transactionHash = locator; tokenPermitOutcome = facts.attribution.tokenPermitOutcome;
+        }
+      } catch { /* batched, relayed or suffixed calls cannot be attributed byte for byte; the nonce bit still settles them */ }
+    }
+    block = head;
     const identity = observerIdentityCalls(record.material, block);
-    const reads = await rpc.batch([...identity, ...(mode === "expired_unused" ? observerNonceCalls(record.material, block) : [])]);
+    const reads = await rpc.batch([...identity, ...observerNonceCalls(record.material, block)]);
     assertObserverIdentity(record.material, reads.slice(0, 3));
     if (mode === "expired_unused") assertExpiredUnused(record.material, block, reads.slice(3));
-    const rechecked = await rpc.batch([{ method: "eth_chainId", params: [] },
-      { method: "eth_getBlockByNumber", params: [block.tag, false] },
-      ...(head.hash === block.hash ? [] : [{ method: "eth_getBlockByNumber", params: [head.tag, false] }])]);
+    else if (!nonceConsumed(record.material, reads[3])) return Object.freeze({ projection: projection("hold", "unavailable_or_mismatch"), proof: null });
+    const rechecked = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: [block.tag, false] }]);
     assertObserverChain(rechecked[0]);
     const again = observerBlock(rechecked[1], block.tag);
-    if (again.hash !== block.hash || again.timestamp !== block.timestamp || rechecked.length === 3 &&
-        observerBlock(rechecked[2], head.tag).hash !== head.hash) invalid();
-    if (reverted) return Object.freeze({ projection: projection("hold", "reverted_locator"), proof: null });
+    if (again.hash !== block.hash || again.timestamp !== block.timestamp) invalid();
     const checked = projection(mode === "settlement" ? "settled" : "expired_unused", "checked");
     const proof = Object.freeze({ kind: "checked-permit2-production-observation" as const });
     proofs.set(proof, { binding: binding(record, signed, mode), projection: checked });

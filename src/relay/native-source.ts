@@ -1,5 +1,4 @@
 /** One durable native deposit for an exact fixed Relay BNB or Base funding quote. */
-import { randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject, canonicalJson, domainHash } from "../canonical.js";
@@ -14,12 +13,14 @@ import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
+import { relaySignedNonce } from "./approval-effect.js";
 import { isGrantedPermissionRecord } from "../metamask-smart-account-record.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { ClockPort } from "../ports.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { HttpsBaseRpc } from "../rpc.js";
-import { SecureStateStore } from "../secure-state-store.js";
 import type { StateStore } from "../state.js";
 import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
 import { ETHEREUM_DEPOSITORY } from "./quote.js";
@@ -27,122 +28,14 @@ import { BASE_RELAY_SIGNED_BYTES, verifyRelayBaseFunding } from "./base-source-g
 import { decodeRelayBaseReceiptFee, verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 
-const HASH = /^[a-f0-9]{64}$/u, TX_HASH = /^0x[a-f0-9]{64}$/u;
+const HASH = /^[a-f0-9]{64}$/u;
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", "Relay native source execution is blocked.", { reason }); }
 function corrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT", `Relay native source state is invalid: ${reason}.`); }
 type Rpc = Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
-type Phase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "failed_before_effect";
-export interface RelayNativeSourceJournal {
-  readonly schemaVersion: "apn.relay-native-source-journal.v1";
-  readonly profileHash: string; readonly operationId: string; readonly operationIntegrityHash: string;
-  readonly quoteDigest: string; readonly requestId: string; readonly depositEnvelopeHash: string;
-  readonly phase: Phase; readonly marker: string | null; readonly markedAt: string | null;
-  readonly transactionHash: string | null; readonly observedAt: string | null; readonly integrityHash: string;
-}
-/** Provider locator stays in the durable owner journal, never in CLI or MCP output. */
-export function publicRelayNativeSourceJournal(journal: RelayNativeSourceJournal) {
-  const { requestId: _requestId, ...publicFields } = journal;
-  return publicFields;
-}
-function journalBody(j: RelayNativeSourceJournal): Omit<RelayNativeSourceJournal, "integrityHash"> {
-  const { integrityHash: _, ...body } = j; return body;
-}
-function validateJournal(value: unknown, op: RelayUnsignedOperation): RelayNativeSourceJournal {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) corrupt("journal shape");
-  const j = value as RelayNativeSourceJournal;
-  const keys = ["schemaVersion", "profileHash", "operationId", "operationIntegrityHash", "quoteDigest", "requestId",
-    "depositEnvelopeHash", "phase", "marker", "markedAt", "transactionHash", "observedAt", "integrityHash"];
-  if (Object.keys(j).sort().join() !== keys.sort().join() || j.schemaVersion !== "apn.relay-native-source-journal.v1" ||
-    j.profileHash !== op.profileHash || j.operationId !== op.operationId || j.operationIntegrityHash !== op.integrityHash ||
-    j.quoteDigest !== op.quoteDigest || j.requestId !== op.statusLocator?.requestId ||
-    j.depositEnvelopeHash !== hashObject(op.nativeQuote!.deposit) || !["pending", "signing_started", "sealed", "submitting", "confirmed", "failed", "failed_before_effect"].includes(j.phase) ||
-    j.integrityHash !== hashObject(journalBody(j))) corrupt("journal binding");
-  if (j.phase === "pending") {
-    if (j.marker !== null || j.markedAt !== null || j.transactionHash !== null || j.observedAt !== null) corrupt("pending journal");
-  } else {
-    if (typeof j.marker !== "string" || !HASH.test(j.marker) || typeof j.markedAt !== "string" ||
-      !Number.isFinite(Date.parse(j.markedAt))) corrupt("journal marker");
-    if (["signing_started", "failed_before_effect"].includes(j.phase) ? j.transactionHash !== null :
-      typeof j.transactionHash !== "string" || !TX_HASH.test(j.transactionHash)) corrupt("journal hash");
-    if (["confirmed", "failed", "failed_before_effect"].includes(j.phase) ?
-      typeof j.observedAt !== "string" || !Number.isFinite(Date.parse(j.observedAt)) : j.observedAt !== null) corrupt("journal observation");
-  }
-  return j;
-}
-export class RelayNativeSourceJournalRepository extends SecureStateStore {
-  private path(op: RelayUnsignedOperation): string { return `relay-native-source-journals/${op.profileHash}/${op.operationId}.json`; }
-  async load(op: RelayUnsignedOperation): Promise<RelayNativeSourceJournal | null> {
-    const value = await this.readJson(this.path(op)); return value === null ? null : validateJournal(value, op);
-  }
-  async hasEffectClaim(op: RelayUnsignedOperation): Promise<boolean> {
-    if (op.sourceChainId !== 8453) return false;
-    return await this.readJson(`relay-native-signing-claims/${op.operationId}.json`) !== null ||
-      await this.readJson(`relay-native-broadcast-claims/${op.operationId}.json`) !== null;
-  }
-  async claimSigning(op: RelayUnsignedOperation, nonce: bigint): Promise<void> {
-    if (op.sourceChainId !== 8453) return;
-    await this.ensureDirectory("relay-native-signing-claims");
-    await this.writeJson(`relay-native-signing-claims/${op.operationId}.json`, {
-      schemaVersion: "apn.relay-native-signing-claim.v1", operationId: op.operationId,
-      operationIntegrityHash: op.integrityHash, sourceChainId: op.sourceChainId,
-      owner: op.sourceAccount, quoteDigest: op.quoteDigest, nonce: nonce.toString(),
-      depositEnvelopeHash: hashObject(op.nativeQuote!.deposit),
-    }, true);
-  }
-  /** Independent create-only fence survives restoration of an older mutable journal. */
-  async claimBroadcast(op: RelayUnsignedOperation, raw: Hex): Promise<void> {
-    if (op.sourceChainId !== 8453) return;
-    const transactionHash = keccak256(raw);
-    await this.ensureDirectory("relay-native-broadcast-claims");
-    await this.writeJson(`relay-native-broadcast-claims/${op.operationId}.json`, {
-      schemaVersion: "apn.relay-native-broadcast-claim.v1", operationId: op.operationId,
-      operationIntegrityHash: op.integrityHash, sourceChainId: op.sourceChainId,
-      owner: op.sourceAccount, quoteDigest: op.quoteDigest, transactionHash,
-      wireHash: hashObject({ raw }), depositEnvelopeHash: hashObject(op.nativeQuote!.deposit),
-    }, true);
-  }
-  async advance(op: RelayUnsignedOperation, expected: string | null, phase: Phase, hash: string | null = null,
-    now: Date = new Date()): Promise<RelayNativeSourceJournal> {
-    await this.initialize();
-    return this.withLocks([`relay-native-journal:${op.operationId}`], async () => {
-      const old = await this.load(op);
-      if ((old?.integrityHash ?? null) !== expected) blocked("stale_journal");
-      const previous = old?.phase ?? null;
-      if (!((previous === null && phase === "pending") || (previous === "pending" && phase === "signing_started") ||
-         (previous === "signing_started" && phase === "sealed") || (previous === "sealed" && phase === "submitting") ||
-         (previous === "signing_started" && phase === "failed_before_effect") ||
-         (previous === "submitting" && (phase === "confirmed" || phase === "failed")))) blocked("journal_transition");
-      const fields = previous === null ? { schemaVersion: "apn.relay-native-source-journal.v1" as const,
-        profileHash: op.profileHash, operationId: op.operationId, operationIntegrityHash: op.integrityHash,
-        quoteDigest: op.quoteDigest, requestId: op.statusLocator!.requestId,
-        depositEnvelopeHash: hashObject(op.nativeQuote!.deposit), phase, marker: null, markedAt: null,
-        transactionHash: null, observedAt: null } : { ...journalBody(old!), phase,
-          marker: phase === "signing_started" ? randomBytes(32).toString("hex") : old!.marker,
-          markedAt: phase === "signing_started" ? now.toISOString() : old!.markedAt,
-          transactionHash: phase === "sealed" ? hash : old!.transactionHash,
-          observedAt: phase === "confirmed" || phase === "failed" || phase === "failed_before_effect" ? now.toISOString() : old!.observedAt };
-      const next = validateJournal({ ...fields, integrityHash: hashObject(fields) }, op);
-      await this.ensureDirectory(`relay-native-source-journals/${op.profileHash}`);
-      await this.writeJson(this.path(op), next, previous === null);
-      return next;
-    });
-  }
-}
-
-/** Persist the single dispatch marker before the send. Replays only return the marker. */
-export async function dispatchRelayNativeDepositOnce(op: RelayUnsignedOperation,
-  journal: RelayNativeSourceJournal, store: RelayNativeSourceJournalRepository,
-  send: (raw: Hex) => Promise<string>, raw: Hex, now: Date): Promise<RelayNativeSourceJournal> {
-  if (journal.phase === "submitting") return journal;
-  if (journal.phase !== "sealed" || keccak256(raw) !== journal.transactionHash) blocked("sealed_dispatch_required");
-  const marked = await store.advance(op, journal.integrityHash, "submitting", null, now);
-  try {
-    await store.claimBroadcast(op, raw);
-    await send(raw);
-  } catch { /* An ambiguous or previously claimed send is never repeated. */ }
-  return marked;
-}
+export { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce, publicRelayNativeSourceJournal,
+  type RelayNativeSourceJournal } from "./native-source-journal.js";
+import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce, type RelayNativeSourceJournal } from "./native-source-journal.js";
 function custodyKey(op: RelayUnsignedOperation): string {
   return domainHash("apn.relay-native-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
 }
@@ -267,13 +160,14 @@ export class RelayNativeSourceRuntime {
       { method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] },
       { method: "eth_getBalance", params: [op.sourceAccount, reference] },
       { method: "eth_getTransactionCount", params: [op.sourceAccount, "pending"] },
-      { method: "eth_gasPrice", params: [] }, { method: "eth_chainId", params: [] },
+      { method: "eth_chainId", params: [] },
     ]);
-    if (rows.length !== 5 || evmRpcQuantity(rows[4]) !== BigInt(op.sourceChainId) || evmRpcQuantity(evmRpcRecord(rows[0]).number) !== number ||
+    if (rows.length !== 4 || evmRpcQuantity(rows[3]) !== BigInt(op.sourceChainId) || evmRpcQuantity(evmRpcRecord(rows[0]).number) !== number ||
       evmRpcHex(evmRpcRecord(rows[0]).hash, 32) !== hash) blocked("bnb_source_block_changed");
     const d = op.nativeQuote!.deposit;
     if (evmRpcQuantity(rows[1]) < BigInt(d.value) + BigInt(op.depositNetworkFeeCeilingWei!) ||
-      evmRpcQuantity(rows[3]) > BigInt(d.maxFeePerGas) || evmRpcQuantity(rows[3]) <= 0n) blocked("native_funding_or_fee");
+      !evmFrozenFeeAdmitted(evmRpcQuantity(block.baseFeePerGas), { maxFeePerGasWei: BigInt(d.maxFeePerGas),
+        maxPriorityFeePerGasWei: BigInt(d.maxPriorityFeePerGas) })) blocked("native_funding_or_fee");
     if (op.sourceChainId === 8453) {
       await verifyRelayBaseFunding(op, rpc, `0x${number.toString(16)}`);
       const [again] = await rpc.batchCall([{ method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] }]);
@@ -366,7 +260,18 @@ export class RelayNativeSourceRuntime {
             outcomeDigest: hashObject({ operationId: op.operationId, quoteDigest: op.quoteDigest, reason: "no_source_marker" }) });
         } else if (prior !== null && prior.state !== "failed_before_effect") corrupt("usage without source marker");
       }
-      if (j?.phase === "confirmed" || j?.phase === "failed" || j?.phase === "failed_before_effect") {
+      if (j?.phase === "sealed") {
+        // Saved bytes never sent end only when another transaction consumed their nonce at safe depth; otherwise they resume.
+        const saved = await this.custody(op);
+        const outcome = saved !== null && saved.hash === j.transactionHash ? await this.unsentOutcome(rpc, op, saved) : null;
+        if (outcome === "never_lands") {
+          j = await this.journals.advance(op, j.integrityHash, "abandoned_unsent", null, this.clock.now());
+          await this.discardCustody(op);
+        }
+        // The node already knows these exact bytes: never send them again; fence them as possibly sent and only observe.
+        if (outcome === "own_transaction_known") j = await this.journals.advance(op, j.integrityHash, "submitting", null, this.clock.now());
+      }
+      if (j?.phase === "confirmed" || j?.phase === "failed" || j?.phase === "failed_before_effect" || j?.phase === "abandoned_unsent") {
         await this.settleUsage(op, j);
         return j;
       }
@@ -449,19 +354,39 @@ export class RelayNativeSourceRuntime {
     } finally { authority?.dispose(); }
   }
   private async settleUsage(op: RelayUnsignedOperation, j: RelayNativeSourceJournal): Promise<void> {
-    if (j.phase !== "confirmed" && j.phase !== "failed" && j.phase !== "failed_before_effect") return;
+    if (j.phase !== "confirmed" && j.phase !== "failed" && j.phase !== "failed_before_effect" && j.phase !== "abandoned_unsent") return;
     const identity = this.usageIdentity(op);
     const reservationId = assetUsageReservationId(identity, `relay-native-execute:${op.operationId}`);
     const current = await this.usage.load(identity, reservationId);
     if (current === null) corrupt("usage reservation missing");
-    const target = j.phase === "confirmed" ? "finalized" :
-      j.phase === "failed_before_effect" ? "failed_before_effect" : "failed_confirmed_revert";
+    // Never-landing bytes moved nothing: a still-reserved hold closes as no effect; a Base hold already counted at signing is released.
+    const target = j.phase === "confirmed" ? "finalized" : j.phase === "failed_before_effect" ? "failed_before_effect" :
+      j.phase === "abandoned_unsent" ? (current.state === "reserved" ? "failed_before_effect" : "released_unsubmitted") : "failed_confirmed_revert";
     if (current.state === target) return;
     if (target === "failed_confirmed_revert" && current.state === "reserved")
       await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest!,
         state: "submitted", expectedCurrentStates: ["reserved"], now: this.clock.now() });
     await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest!,
       state: target, now: this.clock.now(), outcomeDigest: j.integrityHash });
+  }
+  private async unsentOutcome(rpc: Rpc, op: RelayUnsignedOperation, saved: { raw: Hex; hash: Hex }) {
+    const [count, own] = await rpc.batchCall([{ method: "eth_getTransactionCount", params: [op.sourceAccount, "safe"] },
+      { method: "eth_getTransactionByHash", params: [saved.hash] }]);
+    return evmUnsentOutcome(async method => method === "eth_getTransactionCount" ? count : own,
+      { account: op.sourceAccount, nonce: relaySignedNonce(saved.raw), transactionHash: saved.hash });
+  }
+  /** Only after the journal records the sealed bytes as never landing. */
+  private async discardCustody(op: RelayUnsignedOperation): Promise<void> {
+    const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
+    const work = async () => {
+      const wallet = await this.wallets.describe(profile); if (wallet === null) return;
+      try {
+        if (!same(wallet.identity.address, op.sourceAccount)) corrupt("encrypted_wallet_owner");
+        if (wallet.secret.directEffects[custodyKey(op)] === undefined) return;
+        delete wallet.secret.directEffects[custodyKey(op)]; await this.wallets.save(wallet.identity, wallet.secret);
+      } finally { this.wallets.clear(wallet.secret); }
+    };
+    if (this.#heldCustody.has(op)) await work(); else await this.state.withLocks([walletCustodyLock(this.state, profile)], work);
   }
   /** The only closure without a chain result: journal has no hash or send marker,
    * and encrypted custody is proven empty under its mutation lock. */

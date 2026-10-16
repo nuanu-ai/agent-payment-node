@@ -15,7 +15,7 @@ export interface WaitPort {
 export interface NativeRequest {
     readonly version: "apn.native.v1";
     readonly requestId: string;
-    readonly operation: "wallet.describe" | "wallet.ensure" | "wallet.import" | "directTransfer.approveAndSign" | "effectMaterial.get" | "x402Exact.approveAndAuthorize" | "x402Exact.authorizationMaterial.get";
+    readonly operation: "wallet.describe" | "wallet.ensure" | "wallet.import" | "directTransfer.approveAndSign" | "effectMaterial.get" | "directTransfer.signedMaterial.get" | "x402Exact.approveAndAuthorize" | "x402Exact.authorizationMaterial.get";
     readonly payload: Readonly<Record<string, unknown>>;
 }
 export interface NativePort {
@@ -110,6 +110,8 @@ export interface X402AuthorizationState {
     readonly value: boolean;
     readonly blockNumber: string;
     readonly blockHash: Hex;
+    /** Timestamp of the block the state was read at; it proves when an EIP-3009 validBefore has passed. */
+    readonly blockTimestamp: string;
     readonly blockTag: "safe" | "finalized" | "number";
     readonly observedAt: string;
     readonly rpcOrigin: string;

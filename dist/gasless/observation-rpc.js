@@ -6,7 +6,7 @@ import { parsePublicHttpsUrl } from "../network-policy.js";
 import { GaslessHttps } from "./https.js";
 import { validateGaslessIntent } from "./intent-validation.js";
 import { gaslessObservationRpcEnv, gaslessObservationSource } from "./observation-source.js";
-import { gaslessRpcInvocation, withinGaslessRpcInvocation } from "./rpc.js";
+import { gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation } from "./rpc.js";
 import { recheckBlock, rpcJson, rpcQuantity, rpcRecord } from "./rpc-codec.js";
 import { observeGasless } from "./rpc-observe.js";
 import { verifyProtocolAt } from "./rpc-state.js";
@@ -25,9 +25,17 @@ export function gaslessObservationRpcFactory(environment) {
     const transport = new GaslessHttps();
     return (chainId, environmentName) => {
         const name = gaslessObservationRpcEnv(environmentName), rpcUrl = environment[name];
+        const action = `Set ${name} to a public, credential-free HTTPS ${gaslessDeployment(chainId).network} RPC endpoint without a query string or fragment, or resume without --observation-rpc-env.`;
         if (rpcUrl === undefined || rpcUrl.length === 0)
-            gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_missing");
-        return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing());
+            throw gaslessConfigError("gasless_observation_rpc_missing", action);
+        try {
+            return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing());
+        }
+        catch (error) {
+            if (error instanceof ApnError && error.code === "APN_RPC_CONFIG")
+                throw new ApnError(error.code, error.message, { nextActions: [action] });
+            throw error;
+        }
     };
 }
 /** One explicit observation source. No bundler, key, estimate or send capability exists here. */
@@ -78,9 +86,9 @@ export class GaslessObservationRpc {
         }
         // Validate the original anchor before accepting even partial scan progress from another provider.
         await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
-        await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block);
+        await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block, true);
         const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin,
-            deployment: this.deployment, rpc: this.rpcCall }, intent, identity, cursor);
+            deployment: this.deployment, rpc: this.rpcCall, codeProven: true }, intent, identity, cursor);
         if (this.unavailable)
             throw observationUnavailable();
         await recheckBlock(this.rpcCall, intent.initialSnapshot.block);

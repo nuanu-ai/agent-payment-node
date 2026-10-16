@@ -41,7 +41,7 @@ export function orcaSwapInstructions(planValue) {
                 writable(ORCA_SOL_USDC_POOL), writable(plan.wsolAccount), writable(ORCA_SOL_VAULT), writable(plan.usdcAccount), writable(ORCA_USDC_VAULT),
                 writable(plan.tickArrays[0]), writable(plan.tickArrays[1]), writable(plan.tickArrays[2]), writable(plan.oracle)
             ] },
-        getCloseAccountInstruction({ account: wsol, destination: address(plan.owner), owner }),
+        ...(plan.wsolAccountKept === true ? [] : [getCloseAccountInstruction({ account: wsol, destination: address(plan.owner), owner })]),
     ];
 }
 export function compileOrcaSwap(plan, lifetime) {
@@ -117,7 +117,8 @@ function mergedRole(plan, key) {
             ...plan.tickArrays, plan.oracle].includes(key) };
 }
 export function validatePlan(plan) {
-    if (typeof plan !== "object" || plan === null || !Array.isArray(plan.tickArrays) || plan.tickArrays.length !== 3)
+    if (typeof plan !== "object" || plan === null || !Array.isArray(plan.tickArrays) || plan.tickArrays.length !== 3 ||
+        (plan.wsolAccountKept !== undefined && plan.wsolAccountKept !== true))
         invalid("Orca swap plan is invalid.");
     [plan.owner, plan.wsolAccount, plan.usdcAccount, plan.oracle, ...plan.tickArrays].forEach(solanaAddress);
     const keys = [plan.owner, plan.wsolAccount, plan.usdcAccount, plan.oracle, ...plan.tickArrays, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT];

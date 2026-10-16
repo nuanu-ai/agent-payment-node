@@ -47,10 +47,12 @@ export function assertDirectTerminalReceiptAuthority(operation: OperationRecord,
       if (operation.reason !== "confirmed_receipt_revert" || operation.proofClass !== "confirmed_receipt") corrupt();
     } else if (operation.evm.asset.kind === "native") {
       if (operation.reason !== "confirmed_exact_native_transfer" || operation.proofClass !== "included_native_transaction_and_receipt") corrupt();
-    } else if (operation.reason !== "confirmed_exact_erc20_transfer" || operation.proofClass !== "included_transfer_event_and_block_balance_deltas" ||
-        receipt.exactTransferLog !== true || evidence.tokenBalanceDeltasVerified !== true || evidence.senderDeltaAtomic !== operation.amountAtomic || evidence.recipientDeltaAtomic !== operation.amountAtomic) corrupt();
+    } else if (operation.reason !== "confirmed_exact_erc20_transfer" || receipt.exactTransferLog !== true ||
+        // The sole exact Transfer log now proves a token transfer; records completed by 0.5.41 and earlier keep their balance-delta proof.
+        (operation.proofClass !== "included_exact_transfer_event" && (operation.proofClass !== "included_transfer_event_and_block_balance_deltas" ||
+        evidence.tokenBalanceDeltasVerified !== true || evidence.senderDeltaAtomic !== operation.amountAtomic || evidence.recipientDeltaAtomic !== operation.amountAtomic))) corrupt();
   } else if (receipt.blockNumberAtomic !== undefined || receipt.evmEvidence !== undefined ||
-      !["failed_before_effect", "failed_proven_superseded"].includes(operation.state)) corrupt();
+      !["failed_before_effect", "failed_proven_superseded", "abandoned_unknown"].includes(operation.state)) corrupt();
 }
 
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "Generic direct receipt does not prove its exact operation state."); }

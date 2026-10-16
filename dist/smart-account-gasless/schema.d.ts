@@ -7,16 +7,19 @@ export declare function saHash(value: unknown, reason?: SmartAccountGaslessReaso
 export declare function saHex(value: unknown, bytes?: number, reason?: SmartAccountGaslessReason): Hex;
 export declare function saAddress(value: unknown, reason?: SmartAccountGaslessReason): Address;
 export declare function saCanonicalAddress(value: unknown, reason?: SmartAccountGaslessReason): Address;
+/** A non-empty, duplicate-free list of canonical facilitator addresses. */
+export declare function saFacilitators(value: unknown, reason?: SmartAccountGaslessReason): readonly Address[];
 export declare function saIso(value: unknown, reason?: SmartAccountGaslessReason): string;
 export declare function saUnix(value: unknown, reason?: SmartAccountGaslessReason): number;
 export declare function saOrigin(value: unknown, reason?: SmartAccountGaslessReason): string;
 export declare function saRequest(value: unknown, reason?: SmartAccountGaslessReason): SmartAccountGaslessRequest;
-export declare function saBinding(value: unknown): SmartAccountGaslessBinding;
+/** `stored` validates a saved record against its own values; otherwise the binding is compared with today's registry. */
+export declare function saBinding(value: unknown, stored?: boolean): SmartAccountGaslessBinding;
 export declare function saBlock(value: unknown): SmartAccountGaslessBlock;
 export declare function saBlockOrder(first: SmartAccountGaslessBlock, second: SmartAccountGaslessBlock): void;
-export declare function saSnapshot(value: unknown, binding: SmartAccountGaslessBinding): SmartAccountGaslessSnapshot;
-export declare function saProviderBinding(value: unknown): SmartAccountGaslessProviderBinding;
-export declare function saRequirements(value: unknown): SmartAccountGaslessRequirements;
+export declare function saSnapshot(value: unknown, binding: SmartAccountGaslessBinding, stored?: boolean): SmartAccountGaslessSnapshot;
+export declare function saProviderBinding(value: unknown, stored?: boolean): SmartAccountGaslessProviderBinding;
+export declare function saRequirements(value: unknown, stored?: boolean): SmartAccountGaslessRequirements;
 export declare function saStateCounters(value: unknown): Pick<SmartAccountGaslessMutable, "state" | "signingAttempts" | "exposureAttempts" | "submissionAttempts">;
 /** Stored public input has a closed deep schema; all failures are sanitized state corruption. */
 export declare function validateSmartAccountGaslessIntent(value: unknown): SmartAccountGaslessIntent;

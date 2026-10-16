@@ -1,7 +1,6 @@
 import { evmAddressLock } from "../evm-address-ownership.js";
 import { walletCustodyLock } from "../encrypted-wallet-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
-import { bridgeRpcPhysicalPolicy } from "./rpc-execution-budget.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
 import { canonicalOperationId } from "../transfer-policy.js";
@@ -20,7 +19,7 @@ import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation } from "./base-deployment-migration.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { bridgeDestinationObservationRequests, bridgeSourceObservationRequests } from "./observation-budget.js";
-import { bridgeSendStepPostBudget } from "./send-budget.js";
+import { BRIDGE_RESIDUAL_OBSERVATION_REQUESTS, bridgeInvocationPostBudget } from "./send-budget.js";
 import { sha256 } from "../canonical.js";
 export class BridgeService {
     context;
@@ -167,8 +166,9 @@ export class BridgeService {
     }
     execution(op) {
         const d = this.dependencies(), m = op.intent.materialization;
-        // The invocation cap covers the derived sign-and-send step plus explicit retry headroom (Base USDC to Arbitrum Across: 24 + 4).
-        const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeRpcPhysicalPolicy(op), bridgeSendStepPostBudget(op, 3));
+        // The invocation cap is derived from this operation's read plans for every route: the sign-and-send step with its retry
+        // headroom plus the source, destination and residual observation sessions. An exhausted cap defers to the next resume.
+        const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeInvocationPostBudget(op, 3));
         // The command session serves every guard of the invocation. The first full guard is counted in send-budget.ts from its read
         // plans (Base USDC with Ethereum or Arbitrum USDC Across: two safe heads, 10+7 archive chunks and two account batches = 21).
         // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof; Arbitrum code remains fully fresh.
@@ -189,7 +189,8 @@ export class BridgeService {
         // native delivery reads, and the destination deployment chunks (Base USDC needs 17, the BNB composite 19).
         const destinationRequests = bridgeDestinationObservationRequests(m.request, m.tool, op.intent.decoded.composite !== undefined, common.archiveDeploymentBatchMaxItems);
         const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: destinationRequests, maxHttpAttempts: destinationRequests + 2 });
-        const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 2, maxHttpAttempts: 3 });
+        const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: BRIDGE_RESIDUAL_OBSERVATION_REQUESTS,
+            maxHttpAttempts: BRIDGE_RESIDUAL_OBSERVATION_REQUESTS + 1 });
         return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation }, physicalBudget);
     }
     async save(op, patch) {

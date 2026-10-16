@@ -111,9 +111,13 @@ export class StargateTokenService {
 
 function assertServiceUsageTarget(op: StargateTokenOperation): void {
   if (op.usageTarget === undefined) return;
+  // Every phase in which token-execution.ts durably marks a target before reconciling it with the ledger:
+  // the v5 bridge reserves in post_approval_quote_bound; a source proof recorded before a transient missing receipt
+  // marks "submitted" while unknown_finality; a zero residual allowance finishes cleanup as "cleaned" before the release.
   const legal: Readonly<Record<NonNullable<StargateTokenOperation["usageTarget"]>, readonly StargateTokenOperation["phase"][]>> = {
-    reserved: ["approved", "allowance_observed", "cleanup_required"], submitted: ["submitted"], unknown_finality: ["unknown_finality"],
-    finalized: ["observed"], failed_before_effect: ["cleanup_required"], failed_confirmed_revert: ["cleanup_required"],
+    reserved: ["approved", "allowance_observed", "post_approval_quote_bound", "cleanup_required"], submitted: ["submitted", "unknown_finality"],
+    unknown_finality: ["unknown_finality"], finalized: ["observed"], failed_before_effect: ["cleanup_required", "cleaned"],
+    failed_confirmed_revert: ["cleanup_required", "cleaned"],
   };
   if (!legal[op.usageTarget].includes(op.phase)) throw new ApnError("APN_STATE_CORRUPT", "The Stargate token usage reconciliation target is incompatible with the journal phase.");
 }

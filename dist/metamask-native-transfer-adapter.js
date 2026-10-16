@@ -122,8 +122,56 @@ export async function readFixedMetaMaskNativePolicy(chainId, deadline, expectedP
     return policy;
 }
 const quantity = (value) => `0x${BigInt(value).toString(16)}`;
+/** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
+export class MetaMaskNativeHandoffNotStarted extends Error {
+    causeError;
+    constructor(causeError) {
+        super("MetaMask native handoff did not start.");
+        this.causeError = causeError;
+    }
+}
 /** Owner alone persists the one-effect handoff marker before this statically bound call. */
 export async function submitOwnedMetaMaskNative(scope, context) {
+    let prepared;
+    // Every check that can fail runs before the child process is spawned (R3); its failure proves no handoff.
+    try {
+        prepared = await prepareNativeHandoff(scope, context);
+    }
+    catch (error) {
+        throw new MetaMaskNativeHandoffNotStarted(error);
+    }
+    const { deadline, quote, handoffRunner, payload } = prepared;
+    // EIP-1559 fees force the ordinary type2 path; the normal parser accepts no authorization list.
+    let result;
+    try {
+        result = await handoffRunner.runJson(["wallet", "send-transaction", "--chain-id", String(quote.chainId), "--payload", payload,
+            "--intent", `APN ${context.operationId}: native-paid fixed 1000 atomic USDC to Seller`, "--json"], nativeDeadlineRemaining(deadline), deadline);
+    }
+    catch (error) {
+        const diagnostic = takeMetaMaskNativeProcessFailureDiagnostic(error);
+        const observed = takeMetaMaskNativeProcessFailureIdentifiers(error);
+        const bound = observed !== undefined && (observed.sender === undefined || observed.sender === quote.sender.toLowerCase()) &&
+            (observed.chainId === undefined || observed.chainId === quote.chainId) &&
+            (observed.vendorProjectHash === undefined || observed.vendorProjectHash === context.vendorProjectHash);
+        // Rejection remains UNKNOWN even when the real failed child emitted a recoverable identifier.
+        return { disposition: "unknown", reason: "provider_private_handoff_outcome_unknown", ...(diagnostic === undefined ? {} : { diagnostic }),
+            ...(bound && observed.transactionHash !== undefined ? { transactionHash: observed.transactionHash } : {}),
+            ...(bound && observed.requestId !== undefined ? { requestId: observed.requestId } : {}) };
+    }
+    // The effect has happened: no guard runs after it. The pre-send guard required the quote nonce to be the pending
+    // nonce, so re-running it after a broadcast (nonce + 1) turned every successful send into an unknown outcome. The
+    // durable effect marker and the stored hash or request id are the guards from here on.
+    let hint;
+    try {
+        hint = submissionHint(result, quote.sender);
+    }
+    finally {
+        result.stdout.fill(0);
+    }
+    return { ...hint, ...(result.nativeDiagnostic === undefined ? {} : { diagnostic: result.nativeDiagnostic }) };
+}
+/** Everything before the vendor child process: claim, policy, resolver, last owner guard and the exact payload. */
+async function prepareNativeHandoff(scope, context) {
     claimMetaMaskNativeOwnedScope(scope, context);
     const deadline = assertMetaMaskNativeOwnedScope(scope, context);
     nativeDeadlineRemaining(deadline);
@@ -154,45 +202,7 @@ export async function submitOwnedMetaMaskNative(scope, context) {
     const payload = JSON.stringify({ to: t.to, data: t.data, value: "0x0", gas: quantity(t.gasLimitAtomic),
         nonce: quantity(t.nonceAtomic), maxFeePerGas: quantity(t.maxFeePerGasAtomic),
         maxPriorityFeePerGas: quantity(t.maxPriorityFeePerGasAtomic) });
-    // EIP-1559 fees force the ordinary type2 path; the normal parser accepts no authorization list.
-    let result;
-    try {
-        result = await handoffRunner.runJson(["wallet", "send-transaction", "--chain-id", String(quote.chainId), "--payload", payload,
-            "--intent", `APN ${context.operationId}: native-paid fixed 1000 atomic USDC to Seller`, "--json"], nativeDeadlineRemaining(deadline), deadline);
-    }
-    catch (error) {
-        const diagnostic = takeMetaMaskNativeProcessFailureDiagnostic(error);
-        const observed = takeMetaMaskNativeProcessFailureIdentifiers(error);
-        const bound = observed !== undefined && (observed.sender === undefined || observed.sender === quote.sender.toLowerCase()) &&
-            (observed.chainId === undefined || observed.chainId === quote.chainId) &&
-            (observed.vendorProjectHash === undefined || observed.vendorProjectHash === context.vendorProjectHash);
-        // Rejection remains UNKNOWN even when the real failed child emitted a recoverable identifier.
-        try {
-            await assertMetaMaskNativeOwnedContextCurrent(scope, context);
-            assertMetaMaskNativeOwnedScope(scope, context);
-        }
-        catch { /* The source deadline is never extended to recover a rejected invocation. */ }
-        return { disposition: "unknown", reason: "provider_private_handoff_outcome_unknown", ...(diagnostic === undefined ? {} : { diagnostic }),
-            ...(bound && observed.transactionHash !== undefined ? { transactionHash: observed.transactionHash } : {}),
-            ...(bound && observed.requestId !== undefined ? { requestId: observed.requestId } : {}) };
-    }
-    let hint;
-    try {
-        hint = submissionHint(result, quote.sender);
-    }
-    finally {
-        result.stdout.fill(0);
-    }
-    try {
-        await assertMetaMaskNativeOwnedContextCurrent(scope, context);
-        assertMetaMaskNativeOwnedScope(scope, context);
-    }
-    catch {
-        return { disposition: "unknown", reason: "provider_handoff_guard_expired_or_changed", diagnostic: validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, stage: "post_handoff", code: Date.now() >= Date.parse(deadline.utcExpiresAt) || performance.now() >= deadline.monotonicDeadlineMs ? "deadline" : "refused", exitCode: result.nativeDiagnostic?.exitCode ?? null, signal: result.nativeDiagnostic?.signal ?? null, durationMs: result.nativeDiagnostic?.durationMs ?? 0, remainingMs: Math.max(0, Math.min(60000, Math.floor(Math.min(Date.parse(deadline.utcExpiresAt) - Date.now(), deadline.monotonicDeadlineMs - performance.now())))), stderrClass: result.nativeDiagnostic?.stderrClass ?? "none", providerCode: result.nativeDiagnostic?.providerCode ?? "none" }),
-            ...("transactionHash" in hint ? { transactionHash: hint.transactionHash } : {}),
-            ...("requestId" in hint ? { requestId: hint.requestId } : {}) };
-    }
-    return { ...hint, ...(result.nativeDiagnostic === undefined ? {} : { diagnostic: result.nativeDiagnostic }) };
+    return { deadline, quote, handoffRunner, payload };
 }
 function readDiagnostic(value) {
     try {

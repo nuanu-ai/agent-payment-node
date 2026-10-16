@@ -22,7 +22,7 @@ export class JupiterHistoricalRetirementReader extends SecureStateStore {
  async forBucketDuringPublication(identity: AssetUsageIdentity, rows: readonly AssetUsageReservation[],
    expectedRecord: HistoricalRetirementRecord): Promise<readonly HistoricalRetirementRecord[]> {
    if(!sameIdentity(identity,HISTORICAL_RETIREMENT_IDENTITY))return [];
-   const entries=await this.readDirectory(HISTORICAL_RETIREMENT_NAMESPACE),operationId=expectedRecord.operationId;
+   const entries=await this.readDirectoryWithStagedWrites(HISTORICAL_RETIREMENT_NAMESPACE),operationId=expectedRecord.operationId;
    const target=this.resolveRelative(`${HISTORICAL_RETIREMENT_NAMESPACE}/${operationId}.json`),prefix=`.${sha256(target).slice(0,12)}.`;
    const staged=entries.filter(e=>e.name.startsWith(prefix));
    if(staged.length!==1||!/^\.[a-f0-9]{12}\.[a-f0-9]{24}\.tmp$/u.test(staged[0]!.name)||!staged[0]!.isFile()||staged[0]!.isSymbolicLink())corrupt();
@@ -32,17 +32,18 @@ export class JupiterHistoricalRetirementReader extends SecureStateStore {
  }
  private async readBucketEntries(entries: readonly import("node:fs").Dirent[], rows: readonly AssetUsageReservation[]): Promise<readonly HistoricalRetirementRecord[]> {
    if(entries.length===0)return [];
-   const rootSnapshotHash=await historicalRetirementRootSnapshot(this.root), records:HistoricalRetirementRecord[]=[];
+   // Each record is checked against its own hash, original operation and original row bytes only. The state root's
+   // path and inode are not part of the binding, so restoring or moving ~/.apn keeps the SOL usage bucket readable.
+   const records:HistoricalRetirementRecord[]=[];
    for(const e of entries){
      if(!e.isFile()||e.isSymbolicLink()||!HISTORICAL_JUPITER_IDS.some(id=>`${id}.json`===e.name))corrupt();
      const value=await this.readJson(`${HISTORICAL_RETIREMENT_NAMESPACE}/${e.name}`),record=validateHistoricalRetirementRecord(value);
-     if(`${record.operationId}.json`!==e.name || record.authentication.rootBinding!==hashObject({root:this.root}))corrupt();
+     if(`${record.operationId}.json`!==e.name)corrupt();
      const row=rows.find(r=>r.reservationId===record.originalOperation.usageLease!.reservationId);
      if(row===undefined)corrupt();
      const rawHash=await this.originalReservationRawHash(HISTORICAL_RETIREMENT_IDENTITY,row.reservationId),operation=await new SwapOperationRepository(this.root).loadAny(record.operationId);
-     assertHistoricalRetirementBindings(record,rootSnapshotHash,operation,row,rawHash);records.push(record);
+     assertHistoricalRetirementBindings(record,operation,row,rawHash);records.push(record);
    }
-   if(rootSnapshotHash!==await historicalRetirementRootSnapshot(this.root))corrupt();
    return Object.freeze(records);
  }
  protected override async writeJson():Promise<void>{corrupt();}

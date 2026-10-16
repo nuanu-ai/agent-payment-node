@@ -1,4 +1,5 @@
 import { gaszipNativeNet } from "./gaszip-native-delivery.js";
+import { gaszipSendRefused } from "./gaszip-outcome.js";
 import { assertGaszipPhysicalGuard } from "./gaszip-authority.js";
 import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi } from "viem";
@@ -42,6 +43,9 @@ export class SeiFundingRpc {
         catch {
             return seiFail("rpc_json");
         }
+        // A well-formed JSON-RPC error answer to the one send is a definite refusal, unless it says the node already holds the bytes.
+        if (method === "eth_sendRawTransaction" && gaszipSendRefused(v, id))
+            seiFail("send_rejected");
         if (v.jsonrpc !== "2.0" || v.id !== id || !Object.hasOwn(v, "result") || Object.hasOwn(v, "error"))
             seiFail("rpc_result");
         return v.result;
@@ -136,7 +140,7 @@ export async function proveSeiDelivery(rpc, owner, d) {
             return null;
         const t = seiObject(tv);
         signedBudget = { gas: seiQuantity(t.gas).toString(), gasPrice: seiQuantity(t.gasPrice).toString() };
-        amount = await gaszipNativeNet(tv, d, owner, 1329, SEI_FUNDING.minimumOutput, { fail: seiFail, object: seiObject, uint: seiUint, quantity: seiQuantity, hash: seiHash, address: seiAddress, exact: seiExact });
+        amount = await gaszipNativeNet(tv, d, owner, 1329, 0n, { fail: seiFail, object: seiObject, uint: seiUint, quantity: seiQuantity, hash: seiHash, address: seiAddress, exact: seiExact });
     }
     const p = await proveSeiSafeTransaction(rpc, 1329, d.hash, { from: d.signer, to: owner, data: "0x", value: amount, nonce: d.nonce, ...signedBudget });
     if (p === null)

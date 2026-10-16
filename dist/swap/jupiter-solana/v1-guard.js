@@ -9,6 +9,11 @@ import { routeConfigForMaterial, jupiterV1RegisteredProgramPins } from "./v1-rou
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { REVIEWED_WHIRLPOOL_FP, validateReviewedWhirlpoolFpPool } from "./v1-whirlpool-fp.js";
 export function reject(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
+/** Lamports beyond the exact input that one swap may spend or temporarily need: network fee (at most 20,000) and the
+ * temporary wSOL account rent, with margin. It is the same overhead the original 1,000,000 / 6,000,000 lane used. */
+export const JUPITER_V1_NATIVE_OVERHEAD_LAMPORTS = 5000000n;
+export function jupiterV1MaximumNativeExpense(inputAtomic) { if (!/^[1-9][0-9]{0,19}$/u.test(inputAtomic) || BigInt(inputAtomic) > (1n << 64n) - 1n)
+    reject("Jupiter V1 input amount is outside u64."); return (BigInt(inputAtomic) + JUPITER_V1_NATIVE_OVERHEAD_LAMPORTS).toString(); }
 export function semanticAccount(material, key) { const row = material.semanticAccounts.find(a => a.address === key); return row ?? reject("Jupiter V1 semantic snapshot is incomplete."); }
 function raw(a) { return a.existence === "absent" ? null : { owner: a.owner, lamports: BigInt(a.lamports), executable: a.executable, space: Buffer.from(a.dataBase64, "base64").length, data: Buffer.from(a.dataBase64, "base64") }; }
 export function tokenState(a, mint, owner) { const d = Buffer.from(a.dataBase64, "base64"), key = (o) => getAddressDecoder().decode(d.subarray(o, o + 32)); if (a.existence !== "present" || a.owner !== TOKEN || a.executable || d.length !== 165 || key(0) !== mint || key(32) !== owner || d[108] !== 1 || d.readUInt32LE(72) !== 0 || d.readUInt32LE(129) !== 0 || d.readBigUInt64LE(121) !== 0n)
@@ -30,7 +35,7 @@ async function evaluate(material, options, requireFresh) {
     if (options.deadline !== undefined && (!Number.isFinite(Date.parse(options.deadline)) || (options.now ?? Date.now()) >= Date.parse(options.deadline)))
         reject("Jupiter V1 consent deadline expired.");
     const q = material.quoteResponse, b = material.rawBuildResponse, p = material.payer, pool = q.routePlan[0].swapInfo.ammKey, config = routeConfigForMaterial(material);
-    if (q.inAmount !== "1000000" || BigInt(material.maximumNativeExpenseLamports) > 6000000n)
+    if (BigInt(material.maximumNativeExpenseLamports) > BigInt(jupiterV1MaximumNativeExpense(q.inAmount)))
         reject("Jupiter V1 route or cap is outside the admitted lane.");
     const source = await associatedTokenAddress(p, SOL, TOKEN), destination = await associatedTokenAddress(p, USDC, TOKEN), ix = b.swapInstruction, d = Buffer.from(ix.data, "base64");
     let native, namedRoles;
@@ -94,7 +99,8 @@ async function evaluate(material, options, requireFresh) {
     metas(limit, [], "02c05c1500");
     metas(price, [], "03e803000000000000");
     const fee = BigInt(material.networkFeeLamports), rent = BigInt(material.tokenAccountRentLamports), cap = BigInt(material.maximumNativeExpenseLamports);
-    if (fee < 1400n || fee > 20000n || 1000000n + fee + (src.existence === "absent" ? rent : 0n) > cap || BigInt(semanticAccount(material, p).lamports) < 1000000n + fee + (src.existence === "absent" ? rent : 0n))
+    const input = BigInt(q.inAmount);
+    if (fee < 1400n || fee > 20000n || input + fee + (src.existence === "absent" ? rent : 0n) > cap || BigInt(semanticAccount(material, p).lamports) < input + fee + (src.existence === "absent" ? rent : 0n))
         reject("Jupiter V1 prospective expense or payer balance exceeds cap.");
     for (const pin of jupiterV1RegisteredProgramPins(config)) {
         const a = semanticAccount(material, pin.programId), actual = material.programPins.find(x => x.programId === pin.programId), pd = semanticAccount(material, pin.programDataAddress);

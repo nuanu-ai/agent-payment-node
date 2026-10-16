@@ -58,7 +58,7 @@ class HistoricalRetirementStore extends SecureStateStore {
   }
   async entries(relativePath: string): Promise<readonly import("node:fs").Dirent[]> {
     await this.guard.check();
-    const value = await this.readDirectory(relativePath);
+    const value = await this.readDirectoryWithStagedWrites(relativePath); // recovery inspects its own staged inode
     await this.pinIfPresent(relativePath);
     await this.guard.check();
     return value;
@@ -104,14 +104,13 @@ class HistoricalRetirementStore extends SecureStateStore {
           canonicalJson(target.record) !== canonicalJson(temporary.record)) corrupt();
       record = target.record;
     }
-    if (record.operationId !== operationId || record.authentication.rootBinding !== hashObject({ root: this.root })) corrupt();
-    const rootSnapshot = await historicalRetirementRootSnapshot(this.root);
+    if (record.operationId !== operationId) corrupt();
     const lease = record.originalOperation.usageLease;
     if (lease === null) corrupt();
     const row = bucketRowsOriginal(rows, lease.reservationId, lease);
     const operation = await new SwapOperationRepository(this.root).loadAny(operationId);
     const rawHash = await new JupiterHistoricalRetirementReader(this.root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
-    assertHistoricalRetirementBindings(record, rootSnapshot, operation, row, rawHash);
+    assertHistoricalRetirementBindings(record, operation, row, rawHash);
     const latest = await lstat(temporaryPath, { bigint: true });
     if (latest.dev !== temporary.dev || latest.ino !== temporary.ino || latest.nlink !== expectedLinks ||
         latest.uid !== BigInt(process.geteuid?.() ?? -1) || (latest.mode & 0o777n) !== 0o600n || BigInt(latest.size) !== BigInt(temporary.bytes.byteLength)) corrupt();
@@ -317,7 +316,7 @@ async function assertAccountingPublication(token: OwnedJupiterHistoricalRetireme
   await guard.check([HISTORICAL_RETIREMENT_NAMESPACE, "asset-usage"]);
   await assertScope(token, context);
   const rawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
-  assertHistoricalRetirementBindings(record, rootSnapshot, operation, row, rawHash);
+  assertHistoricalRetirementBindings(record, operation, row, rawHash);
   scopeDeadline(context);
   if (record.accountingAt.slice(0, 10) !== new Date().toISOString().slice(0, 10)) refuse();
 }
@@ -446,7 +445,7 @@ export async function consumeJupiterHistoricalRetirement(
       historicalOutcome: "unknown", transactionMayHaveBeenSubmitted: true,
       actualNativeFeeAtomic: null, effectAt: null,
     });
-    assertHistoricalRetirementBindings(record, rootSnapshot, finalOperation, finalRow, finalRawHash);
+    assertHistoricalRetirementBindings(record, finalOperation, finalRow, finalRawHash);
     await assertScope(token, context);
     const accountingStore = new HistoricalRetirementStore(root, guard, { token, context, record });
     stage = "publication";
@@ -485,13 +484,12 @@ export async function recoverCommittedJupiterHistoricalRetirement(
       await guard.check();
       return null;
     }
-    const rootSnapshot = await historicalRetirementRootSnapshot(root);
     const lease = record.originalOperation.usageLease;
     if (lease === null) corrupt();
     const row = bucketRowsOriginal(rows, lease.reservationId, lease);
     const rawHash = await new JupiterHistoricalRetirementReader(root).originalReservationRawHash(NATIVE_IDENTITY, lease.reservationId);
     const currentOperation = await new SwapOperationRepository(root).loadAny(operationId);
-    assertHistoricalRetirementBindings(record, rootSnapshot, currentOperation, row, rawHash);
+    assertHistoricalRetirementBindings(record, currentOperation, row, rawHash);
     await store.recoverExactProjectionTemps(operationId, record);
     await finishPostCommit(record, store);
     await guard.check();

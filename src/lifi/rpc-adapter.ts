@@ -113,7 +113,7 @@ export class BridgeRpc implements BridgeRpcPort {
   async refreshDeployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, frozen: BridgeDeploymentIdentity) {
     const contract = bridgeDeployment(this.chainId, peerChainId, tool, token), feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
     const contractHash = hashObject({ protocol: contract, feeContract });
-    if (frozen.chainId !== this.chainId || frozen.peerChainId !== peerChainId || frozen.tool !== tool || frozen.rpcOrigin !== this.origin ||
+    if (frozen.chainId !== this.chainId || frozen.peerChainId !== peerChainId || frozen.tool !== tool ||
       frozen.contractHash !== contractHash || !/^[a-f0-9]{64}$/u.test(frozen.codeHash)) {
       bridgeFailure("APN_OPERATION_BLOCKED", "bridge_prepared_deployment_binding_changed");
     }

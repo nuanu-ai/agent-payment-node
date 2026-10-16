@@ -782,7 +782,7 @@ test("signer-time token nonce race retains ambiguity without authenticated publi
   assert.equal(restarted.approval.intents.length, 0); assert.equal(native.rpc.submissions.length, 0);
 });
 
-test("persisted native effect response loss recovers the same hash by observation without sending", async (t) => {
+test("persisted native effect response loss dispatches the same sealed bytes once, then recovers by observation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); let signerCalls = 0, effectReads = 0;
   let persisted: { transactionHash: Hex; rawTransactionHash: Hex } | undefined;
   const native = evmCore(temporary.root, undefined, undefined, undefined, (port) => ({ request: async (request) => {
@@ -808,20 +808,21 @@ test("persisted native effect response loss recovers the same hash by observatio
     if (request.operation === "effectMaterial.get") effectReads += 1;
     return await port.request(request);
   } }));
-  const beforeRecoveryLoads = native.wrapping.loads;
-  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "unknown_finality");
-  assert.equal(native.wrapping.loads, beforeRecoveryLoads, "public recovery never reopens encrypted custody");
+  const beforeRecoveryLoads = native.wrapping.loads; native.rpc.receiptEnabled = false;
+  assert.equal((await restarted.core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  assert.equal(native.wrapping.loads, beforeRecoveryLoads + 1, "the sealed bytes are read back once from encrypted custody, never re-signed");
+  assert.equal(native.rpc.submissions.length, 1); assert.equal(native.rpc.returnedHash, persisted.transactionHash);
   const recovered = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id); assert.ok(recovered);
   assert.equal(recovered.transactionHash, persisted.transactionHash); assert.equal(recovered.rawTransactionHash, persisted.rawTransactionHash);
   assert.equal(recovered.fingerprint, started!.fingerprint); assert.equal(effectReads, 0);
-  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "unknown_finality");
+  assert.equal((await usage.load(asset, reservation.reservationId))?.state, "submitted");
   const afterRecoveryLoads = native.wrapping.loads;
   for (const observeOnly of [undefined, true] as const) {
-    assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, observeOnly) as { state: string }).state, "unknown_finality");
+    assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, observeOnly) as { state: string }).state, "submitted_pending");
   }
   await assert.rejects(restarted.core.transfer.approve(prepared.operation_id), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(effectReads, 0); assert.equal(native.wrapping.loads, afterRecoveryLoads); assert.equal(signerCalls, 1);
-  assert.equal(native.rpc.submissions.length, 0); assert.equal(restarted.approval.intents.length, 0);
+  assert.equal(native.rpc.submissions.length, 1); assert.equal(restarted.approval.intents.length, 0);
   // Independent fake read evidence proves same-hash finalization without creating a dispatch witness.
   const { EVM_BLOCK_HASH } = await import("./evm-helpers.js");
   Object.assign(native.rpc.evm, { receipt: async (chainId: Parameters<typeof native.rpc.evm.receipt>[0], transactionHash: Hex) => {
@@ -834,7 +835,7 @@ test("persisted native effect response loss recovers the same hash by observatio
   assert.equal(completed?.state, "completed"); assert.equal(completed?.terminal, true); assert.equal(completed?.transactionHash, persisted.transactionHash);
   assert.equal((await usage.load(asset, reservation.reservationId))?.state, "finalized");
   assert.equal((await restarted.core.transfer.resume(prepared.operation_id, undefined, true) as { state: string }).state, "completed");
-  assert.equal(native.rpc.submissions.length, 0); assert.equal(restarted.approval.intents.length, 0);
+  assert.equal(native.rpc.submissions.length, 1); assert.equal(restarted.approval.intents.length, 0);
   assert.equal(signerCalls, 1); assert.equal(effectReads, 0); assert.equal(native.wrapping.loads, afterRecoveryLoads);
 });
 

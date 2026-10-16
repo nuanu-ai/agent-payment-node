@@ -1,13 +1,13 @@
 import { type AllowlistInventory, type CandidateKind, type CandidateRail } from "./allowlist-inventory.js";
 import { type AssetPolicyRegistry } from "./asset-policy-registry.js";
-import { type SwapMechanismPin } from "./swap/pin.js";
+import { type SwapAdmissionMechanism } from "./swap/route-admission.js";
 export declare const ALLOWLIST_POLICY_OVERLAY_SCHEMA: "apn.allowlist-policy-overlay.v1";
 export declare const ALLOWLIST_POLICY_RECORD_SCHEMA: "apn.allowlist-policy-record.v1";
 export interface AllowlistMechanismPin {
     readonly provider: string;
     readonly reference: string;
 }
-export type AllowlistAdmissionMechanismPin = AllowlistMechanismPin | SwapMechanismPin;
+export type AllowlistAdmissionMechanismPin = AllowlistMechanismPin | SwapAdmissionMechanism;
 export interface AllowlistPolicyAdmissionInput {
     readonly chain: string;
     readonly kind: CandidateKind;
@@ -18,10 +18,10 @@ export interface AllowlistPolicyAdmissionInput {
     readonly mechanism?: AllowlistAdmissionMechanismPin;
     /** Optional exact recipient for Ethereum/Base local or Base Coinbase gasless transfers. */
     readonly recipient?: string;
-    /** Bridge only: exact alternative pins, each with its own per-transfer ceiling. */
+    /** Bridge: exact alternative pins, each with its own per-transfer ceiling. Swap: two to sixteen admitted routes under one cap. */
     readonly mechanisms?: readonly (AllowlistMechanismPin & {
         readonly maximumPerTransferAtomic: string;
-    })[];
+    })[] | readonly SwapAdmissionMechanism[];
 }
 export interface AllowlistPolicyOverlayInput {
     readonly overlayVersion: string;
@@ -59,6 +59,14 @@ export declare function compileAllowlistPolicyOverlay(raw: AllowlistPolicyOverla
     readonly registry: AssetPolicyRegistry;
 };
 export declare function validateAllowlistPolicyRecord(value: unknown): AllowlistPolicyRecord;
+/**
+ * A stored staged revision is checked against itself, never recompiled against the inventory this release ships.
+ * The dataset, inventory and mechanism rules apply when the owner stages a revision; the owner then activates the
+ * exact sealed registry the approval screen shows. A release with another dataset may refuse new staging, but it
+ * must not void stored policies (that blocked every allowlist-gated rail of the profile, and its own re-staging).
+ * The digests are unkeyed: they detect corruption, not a rewrite by the same local user.
+ */
+export declare function assertStoredAllowlistCompilation(overlaySchema: string, overlay: unknown, registryValue: unknown): void;
 /** One owner-supplied admission row: exact identity, one rail, positive owner caps and the rail's pinned mechanism. */
 export declare function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmissionInput;
 export declare function canonicalAllowlistAccount(family: string, value: unknown): string;

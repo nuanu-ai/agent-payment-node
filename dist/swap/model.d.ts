@@ -1,7 +1,12 @@
 import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import { type SwapQuoteSnapshot } from "./quote.js";
 export declare const SWAP_OPERATION_SCHEMA: "apn.swap-operation.v1";
-export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
+export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert" | "expired_unlanded" | "abandoned_unknown";
+/**
+ * Every state with no further transition. expired_unlanded: the chain proved the marked effect can never land.
+ * abandoned_unknown: no chain proof is possible and the owner accepted the unknown outcome; the input stays charged.
+ */
+export declare const SWAP_TERMINAL_STATES: readonly SwapOperationState[];
 export interface SwapSubmissionMarker {
     readonly markerHash: string;
     readonly markedAt: string;

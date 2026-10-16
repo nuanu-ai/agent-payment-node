@@ -13,9 +13,8 @@ import { MegaFundingJournal, publicMegaFunding } from "./lifi/mega-gaszip-journa
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
-import { Permit2LegacyConflictRepository } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
-import { conflictDomainKey, evmConflictDomain, railConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
+import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys, sharedEvmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import { publicX402Operation, } from "./x402-state-integrity.js";
 import { publicProviderX402Operation, } from "./provider-x402-model.js";
@@ -35,8 +34,7 @@ import { FacilitatorGaslessOperationRepository } from "./facilitator-gasless/ope
 import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
 import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
-import { RelayEffectJournalRepository } from "./relay/effect-journal.js";
-import { RelayNativeSourceJournalRepository } from "./relay/native-source.js";
+import { relaySourceTerminal } from "./relay/lifecycle.js";
 export class OperationService {
     state;
     providerX402;
@@ -145,6 +143,10 @@ export class OperationService {
     async assertEvmAccountAvailable(profileHash, chainId, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
     }
+    /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
+    async assertEvmAccountSharedAvailable(profileHash, chainId, account) {
+        await this.assertConflictDomainsAvailable(profileHash, () => [sharedEvmConflictDomain(chainId, account)]);
+    }
     /** Only the real current foreground owner may exclude its exact own native journal claim. */
     async assertMetaMaskNativeOwnedAccountAvailable(scope, context) {
         assertMetaMaskNativeOwnedScope(scope, context);
@@ -199,13 +201,9 @@ export class OperationService {
         await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
     }
     async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources, cleanup85Parent, nativeOwner) {
-        let wanted;
-        try {
-            wanted = new Set(domains().map(conflictDomainKey));
-        }
-        catch {
-            wanted = new Set();
-        }
+        const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
+        if (this.state.root !== undefined)
+            await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
         if (this.state.root !== undefined) {
             for (const wantedKey of wanted) {
                 const [family, network, account] = wantedKey.split(":");
@@ -236,7 +234,8 @@ export class OperationService {
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash)
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
-            const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)));
+            const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)) &&
+                !(domain.shared === true && coexisting.has(conflictDomainKey(domain))));
             // An unreadable network or account on either side blocks the whole profile.
             if (held !== null && wanted.size > 0 && shared === undefined)
                 continue;
@@ -253,9 +252,6 @@ export class OperationService {
     async permit2ProductionOperations(profileHash) {
         return this.state.root === undefined ? [] : new Permit2ProductionRepository(this.state.root).listOperations(profileHash);
     }
-    async permit2LegacyOperations(profileHash) {
-        return this.state.root === undefined ? [] : new Permit2LegacyConflictRepository(this.state.root).listOperations(profileHash);
-    }
     async profileOperations(profileHash) {
         return [
             ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip", record })),
@@ -263,7 +259,6 @@ export class OperationService {
             ...(await this.megaFunding.listOperations(profileHash)).map(record => ({ kind: "mega_gaszip", record })),
             ...(await this.merchantOperations(profileHash)).map(record => ({ kind: "merchant_x402", record })),
             ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production", record })),
-            ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict", record })),
             ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned", record })),
             ...(await this.facilitatorGasless.listOperations(profileHash)).map((record) => ({ kind: "facilitator_gasless_transfer", record })),
             ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
@@ -403,8 +398,6 @@ export class OperationService {
             return publicMerchant(operation.record);
         if (operation.kind === "permit2_production")
             return publicPermit2Production(operation.record);
-        if (operation.kind === "permit2_legacy_conflict")
-            throw new ApnError("APN_OPERATION_BLOCKED", "Legacy Permit2 execution remains blocked.");
         if (operation.kind === "relay_unsigned")
             return this.relayStatus(operation.record);
         if (operation.kind === "direct_transfer")
@@ -430,21 +423,14 @@ export class OperationService {
         const completion = retirement === null ? await this.relaySourceCompletion(operation) : null;
         return publicRelayUnsignedOperation(operation, retirement, completion);
     }
-    /** Source finality ends this operation's spend attempt. Destination delivery is observed separately. */
+    /** Source finality or a finality-proven revert ends this spend attempt. Destination delivery is observed separately. */
     async relaySourceCompletion(operation) {
-        if (operation.arbitrumDraft !== undefined)
-            return null;
-        if (operation.nativeQuote !== undefined) {
-            const journal = await new RelayNativeSourceJournalRepository(this.state.root).load(operation);
-            return journal?.phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
-        }
-        const journal = await new RelayEffectJournalRepository(this.state.root).load(operation.profileHash, operation.operationId);
-        return journal?.effects[1].phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
+        return relaySourceTerminal(this.state.root, operation);
     }
     async relayLifecycle(operation) {
         if (await new RelayRetirementRepository(this.state.root).load(operation) !== null)
             return "retired";
-        return await this.relaySourceCompletion(operation) === null ? "active" : "source_confirmed";
+        return (await this.relaySourceCompletion(operation))?.state ?? "active";
     }
     // Test and embedding ports written before the compatibility reader expose the
     // original current-record methods. Keep those ports working while the concrete

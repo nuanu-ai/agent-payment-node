@@ -44,7 +44,7 @@ export function validateX402ReceiptUnsafe(value) {
         stateCorrupt("x402 receipt discriminant is invalid.");
     hash(receipt.operationId);
     const terminalState = validateStateTuple(receipt.terminalState, true, receipt.reason, receipt.proofClass);
-    if (!["completed", "failed_before_effect", "failed_expired_unused", "failed_settled_without_result"].includes(terminalState))
+    if (!["completed", "failed_before_effect", "failed_expired_unused", "failed_settled_without_result", "abandoned_unknown"].includes(terminalState))
         stateCorrupt("x402 receipt terminal state is invalid.");
     const resource = exactRecord(receipt.resource, ["origin", "path", "urlHash"]);
     if (typeof resource.origin !== "string" || new URL(resource.origin).origin !== resource.origin || !resource.origin.startsWith("https://") || typeof resource.path !== "string" || !resource.path.startsWith("/"))
@@ -69,9 +69,11 @@ export function validateX402ReceiptUnsafe(value) {
     if ([settlementEvidence, unusedExpiryEvidence].some((evidence) => evidence !== undefined && (evidence.network !== receipt.network || evidence.token !== receipt.token)))
         stateCorrupt("Receipt evidence belongs to another network or token.");
     if ((settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" && receipt.transferMethod !== "erc7710") ||
-        (settlementEvidence?.schemaVersion === "apn.x402.settlement-evidence.v1" && receipt.transferMethod === "erc7710") ||
+        (settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.erc7710-settlement-evidence.v1" &&
+            receipt.transferMethod === "erc7710") ||
         (unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1" && receipt.transferMethod !== "erc7710") ||
-        (unusedExpiryEvidence?.schemaVersion === "apn.x402.unused-expiry-evidence.v1" && receipt.transferMethod === "erc7710"))
+        (unusedExpiryEvidence?.schemaVersion !== undefined && unusedExpiryEvidence.schemaVersion !== "apn.x402.erc7710-unused-expiry-evidence.v1" &&
+            receipt.transferMethod === "erc7710"))
         stateCorrupt("x402 receipt transfer method conflicts with its evidence.");
     if (receipt.result !== undefined) {
         const result = exactRecord(receipt.result, ["resultHash", "mediaType", "byteLength", "resultIntegrityHash"]);
@@ -84,10 +86,15 @@ export function validateX402ReceiptUnsafe(value) {
         stateCorrupt("x402 completed receipt is incomplete.");
     if (terminalState === "failed_settled_without_result" && (settlementEvidence === undefined || receipt.result !== undefined || unusedExpiryEvidence !== undefined))
         stateCorrupt("x402 spent-without-result receipt is invalid.");
-    if (terminalState === "failed_expired_unused" && (unusedExpiryEvidence === undefined || receipt.settlementResponseHash !== undefined || settlementEvidence !== undefined || receipt.result !== undefined))
+    // A finalized nonce-state proof (v2) outranks a seller's settlement claim or an unpaid delivered body.
+    const stateUnused = unusedExpiryEvidence?.schemaVersion === "apn.x402.unused-expiry-evidence.v2";
+    if (terminalState === "failed_expired_unused" && (unusedExpiryEvidence === undefined || settlementEvidence !== undefined ||
+        (!stateUnused && (receipt.settlementResponseHash !== undefined || receipt.result !== undefined))))
         stateCorrupt("x402 expired-unused receipt is invalid.");
     if (terminalState === "failed_before_effect" && (receipt.settlementResponseHash !== undefined || settlementEvidence !== undefined || unusedExpiryEvidence !== undefined || receipt.result !== undefined))
         stateCorrupt("x402 failed-before-effect receipt is invalid.");
+    if (terminalState === "abandoned_unknown" && (settlementEvidence !== undefined || unusedExpiryEvidence !== undefined))
+        stateCorrupt("x402 abandonment receipt cannot carry a proven outcome.");
     hash(receipt.operationBindingHash);
     hash(receipt.previousLinkHash);
     timestamp(receipt.createdAt);

@@ -10,7 +10,7 @@ const option = (name: CommandOption["name"], type: CommandOption["type"], constr
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "Jupiter mechanism inventory, durable unsigned simulated V1 quote or operation status.",
   failures: ["Classified refusal, exact foreground approval or observation of the same signature."] } as const;
-const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert"], non_terminal: ["quoted", "prepared", "awaiting_approval",
+const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"], non_terminal: ["quoted", "prepared", "awaiting_approval",
   "reserved", "submitting", "submitted", "unknown_finality"] } as const;
 const profile = option("--profile", "profile", ["existing_profile_name"]);
 const account = option("--account", "string", ["canonical_32_byte_base58_solana_address"]);

@@ -86,11 +86,11 @@ test("inventories expose frozen chain identities without admission and runtime f
   assert.equal(uniswap.context.uniswap, undefined); assert.equal(uniswap.context.sunswap, undefined); assert.equal(uniswap.context.jupiter, undefined);
   const core = new ApnCore({ state: new StateStore(temporary.root) });
   const sun = await core.execute({ command: "swap.sunswap.inventory" });
-  assert.equal(sun.ok, true); assert.equal((sun.data as any).admitted, false); assert.equal((sun.data as any).execution, "dormant");
+  assert.equal(sun.ok, true); assert.equal((sun.data as any).ownerAdmission.evaluated, false); assert.equal((sun.data as any).execution, "dormant");
   assert.equal((sun.data as any).catalog.router.address, SUNSWAP_V2_ROUTER); assert.equal((sun.data as any).catalog.usdt.address, SUNSWAP_USDT);
   assert.deepEqual((sun.data as any).catalog, SUNSWAP_PIN_CATALOG);
   const jupiter = await core.execute({ command: "swap.jupiter.inventory" });
-  assert.equal(jupiter.ok, true); assert.equal((jupiter.data as any).admitted, false); assert.equal((jupiter.data as any).execution, "dormant");
+  assert.equal(jupiter.ok, true); assert.equal((jupiter.data as any).ownerAdmission.evaluated, false); assert.equal((jupiter.data as any).execution, "dormant");
   assert.equal((jupiter.data as any).catalog.genesis, SOLANA_MAINNET_GENESIS); assert.equal((jupiter.data as any).catalog.api, JUPITER_SWAP_API_V2);
   assert.equal((jupiter.data as any).catalog.program, JUPITER_V6_PROGRAM); assert.equal((jupiter.data as any).catalog.nativeInput, WRAPPED_SOL_MINT);
   assert.equal((jupiter.data as any).catalog.outputToken, SOLANA_USDC_MINT);

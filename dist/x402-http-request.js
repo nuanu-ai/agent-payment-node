@@ -10,6 +10,8 @@ const FORBIDDEN_HEADERS = new Set([
     "keep-alive", "authorization", "proxy-authorization", "proxy-authenticate", "cookie", "set-cookie",
     "forwarded", "via", "x-api-key", "api-key", "payment-signature", "payment-required", "payment-response",
     "x-payment", "x-payment-response", "x-real-ip", "accept-encoding",
+    // Not an HTTP header anyone sends, and a JavaScript object cannot round-trip it as an ordinary key.
+    "__proto__",
 ]);
 export function decodeX402RequestBody(value) {
     if (value === null)

@@ -119,9 +119,8 @@ export class SmartAccountGaslessRpc {
         const call = this.pass();
         try {
             await this.assertChain(call);
-            // Another provider must first prove the same chain history at the operation's frozen safe anchor.
-            if (this.observationOnly)
-                await recheckBlock(call, input.intent.initialSnapshot.safeBlock, "sa_gasless_rpc_binding");
+            // Any endpoint of the chain may observe once it proves the same history at the operation's frozen safe anchor.
+            await recheckBlock(call, input.intent.initialSnapshot.safeBlock, "sa_gasless_rpc_binding");
             return await observeSmartAccountGasless({ call, clock: this.clock, validator: this.validator }, input);
         }
         catch (error) {
@@ -135,10 +134,9 @@ export class SmartAccountGaslessRpc {
     }
     assertInput(input) {
         validateSmartAccountGaslessObserveInput(input);
+        // Observation reads the token at today's address; the endpoint and the aggregate registry hash are not compared.
         const intent = validateSmartAccountGaslessIntent(input.intent), registry = saRegistry(8453);
-        if (!saSame(intent, input.intent) || (!this.observationOnly && (intent.initialSnapshot.endpointHash !== this.endpointHash ||
-            intent.initialSnapshot.endpointOrigin !== this.endpointOrigin)) || intent.deploymentEvidenceHash !== registry.evidenceHash ||
-            intent.token !== registry.token.address)
+        if (!saSame(intent, input.intent) || intent.token !== registry.token.address)
             saFail("sa_gasless_rpc_binding");
     }
     async assertChain(call) {

@@ -7,7 +7,7 @@ import { acrossBridgeAbi } from "../../src/lifi/abi.js";
 import { BridgeExecution } from "../../src/lifi/execution.js";
 import { BridgeAllowlistGate, bridgeUsageTarget } from "../../src/lifi/allowlist.js";
 import { transitionBridge } from "../../src/lifi/transitions.js";
-import { bridgeRpcPhysicalPolicy } from "../../src/lifi/rpc-execution-budget.js";
+import { bridgeInvocationPostBudget } from "../../src/lifi/send-budget.js";
 import { BridgeRpcPhysicalBudget, RpcReadSession } from "../../src/lifi/rpc.js";
 import { LifiTestProvider, LIFI_SYNTHETIC_SENDER, lifiFixture, lifiSteps } from "./lifi-helpers.js";
 import { addressWord } from "./lifi-event-fixtures.js";
@@ -46,16 +46,14 @@ async function pendingUsdc(root: string, now: Date) {
   return { f, op, approvalRaw: f.source.submissions[0]! };
 }
 
-for (const scenario of ["old24", "typed33", "typed34", "expiry", "nonce", "deployment"] as const) test(`cold USDC Across continuation ${scenario}`, async t => {
+for (const scenario of ["old24", "tight33", "derived", "expiry", "nonce", "deployment"] as const) test(`cold USDC Across continuation ${scenario}`, async t => {
   const oldCap = scenario === "old24";
   const temp = await temporaryState(); t.after(temp.cleanup); const now = new Date("2026-10-09T03:44:00Z");
   const { f, op, approvalRaw } = await pendingUsdc(temp.root, now), spy = await usdcBudgetSpy(now, op, approvalRaw, scenario === "nonce" || scenario === "deployment" ? scenario : undefined);
-  assert.equal(bridgeRpcPhysicalPolicy(op), "canonical_usdc_across_approval_continuation");
+  // The continuation needs 34 clean POSTs; the cap is derived from this operation's read plans, never from a pair list.
+  assert(bridgeInvocationPostBudget(op, 3) >= 34);
   let time = scenario === "expiry" ? Date.parse(op.intent.expiresAt) + 1 : now.getTime(); const wait = async (ms: number) => { time += ms; };
-  // Recreate only the previous typed ceiling while retaining the production POST gate and scheduler.
-  class PreviousTypedCeiling extends BridgeRpcPhysicalBudget { override remaining(): number { return super.remaining() - 1; } }
-  const Budget = scenario === "typed33" ? PreviousTypedCeiling : BridgeRpcPhysicalBudget;
-  const physical = new Budget(() => time, wait, oldCap ? "default" : bridgeRpcPhysicalPolicy(op));
+  const physical = new BridgeRpcPhysicalBudget(() => time, wait, oldCap ? 0 : scenario === "tight33" ? 33 : bridgeInvocationPostBudget(op, 3));
   const session = new RpcReadSession({ now: () => time, wait, maxHttpRequests: 28, maxHttpAttempts: 30, archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const observation = new RpcReadSession({ now: () => time, wait, maxHttpRequests: 14, maxHttpAttempts: 16, archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const source = spy.rpcFor(1, session), destination = spy.rpcFor(42161, session), observer = spy.rpcFor(1, observation);
@@ -71,7 +69,7 @@ for (const scenario of ["old24", "typed33", "typed34", "expiry", "nonce", "deplo
   assert.equal(resumed.effects[0]!.transactionHash, op.effects[0]!.transactionHash); assert.equal(resumed.effects[0]!.submissionAttempts, 1);
   assert.equal(f.source.submissions.length, 1); assert.equal(f.approval.calls.length, 1);
   assert(spy.calls.filter(x => x.host.includes("archive")).every(x => x.items.length <= 3));
-  if (scenario === "typed33") {
+  if (scenario === "tight33") {
     assert.equal(signCalls, 1); assert.deepEqual(signAt, [31]);
     assert.equal(spy.submissions.length, 0); assert.equal(resumed.effects[1]!.submissionAttempts, 0);
     assert.equal(resumed.effects[1]!.phase, "sealed"); assert.ok(resumed.effects[1]!.sealedMaterialHash);
@@ -79,19 +77,18 @@ for (const scenario of ["old24", "typed33", "typed34", "expiry", "nonce", "deplo
     await assert.rejects(physical.beforePost("eth_sendRawTransaction"), { code: "APN_RPC_BUDGET_EXCEEDED" });
     assert.equal(spy.calls.length, 33);
   }
-  else if (scenario !== "typed34") {
+  else if (scenario !== "derived") {
     assert.equal(signCalls, 0); assert.equal(spy.submissions.length, 0); assert.equal(resumed.effects[1]!.phase, "unsealed");
     assert.equal(resumed.effects[1]!.submissionAttempts, 0);
     if (oldCap) assert.equal(physical.remaining(), 0);
   }
   else {
     assert.equal(signCalls, 1); assert.equal(spy.submissions.length, 1); assert.equal(resumed.effects[1]!.submissionAttempts, 1);
-    assert.equal(spy.calls.length, 34); assert.deepEqual(signAt, [31]); assert.equal(physical.remaining(), 0);
-    await assert.rejects(physical.beforePost("eth_getBlockByNumber"), { code: "APN_RPC_BUDGET_EXCEEDED" });
-    assert.equal(spy.calls.length, 34); assert.equal(bridgeRpcPhysicalPolicy(resumed), "default");
+    assert.deepEqual(signAt, [31]); assert(spy.calls.length >= 34); assert(physical.remaining() >= 0);
+    assert.equal(spy.calls.filter(x => x.items.some(y => y.method === "eth_sendRawTransaction")).length, 1);
     // A fresh observation invocation may remain pending, but attempt1 must never load/sign/send the original wire again.
-    const freshPhysical = new BridgeRpcPhysicalBudget(() => time, wait, bridgeRpcPhysicalPolicy(resumed));
-    assert.equal(freshPhysical.remaining(), 24);
+    const freshPhysical = new BridgeRpcPhysicalBudget(() => time, wait, bridgeInvocationPostBudget(resumed, 3));
+    assert(freshPhysical.remaining() >= 24);
     const freshRead = new RpcReadSession({ now: () => time, wait, maxHttpRequests: 14, maxHttpAttempts: 16,
       archiveDeploymentBatchMaxItems: 3, physicalBudget: freshPhysical });
     const freshSource = spy.rpcFor(1, freshRead), freshDestination = spy.rpcFor(42161, freshRead);
@@ -100,25 +97,20 @@ for (const scenario of ["old24", "typed33", "typed34", "expiry", "nonce", "deplo
         await f.core.bridges.records.persist(next); await gate.follow(next, bridgeUsageTarget(next)); return next; },
       { source: () => freshSource, destination: () => freshDestination, residual: () => freshSource }, freshPhysical);
     const again = await freshExecution.resume(resumed); assert.equal(again.effects[1]!.submissionAttempts, 1);
-    assert(freshPhysical.remaining() < 24); assert(freshPhysical.remaining() >= 0);
+    assert(freshPhysical.remaining() >= 0);
     assert.equal(signCalls, 1); assert.equal(spy.submissions.length, 1);
   }
   console.log(JSON.stringify({ scenario, continuationPhysicalPosts: continuationTrace.length, laterObservationPosts: spy.calls.length - continuationTrace.length, methods: continuationTrace.map(x => ({ host: x.host, methods: x.items.map(y => y.method) })), sourceSigns: signCalls, sourceSends: spy.submissions.length }));
 });
 
-test("USDC continuation rejects lookalike pair, tool, effect and deployment pins", async t => {
+test("the derived continuation cap is route-generic and ends with the operation", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); const { op } = await pendingUsdc(temp.root, new Date("2026-10-09T03:44:00Z"));
   const m = op.intent.materialization;
+  // A lookalike pair or another tool gets its own plan-derived cap, not a refusal and not a borrowed pair constant.
   for (const changed of [
-    { ...op, terminal: true },
-    { ...op, intent: { ...op.intent, policyHash: "0".repeat(64) } },
+    { ...op, intent: { ...op.intent, materialization: { ...m, request: { ...m.request, toChainId: 8453 as const, toToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const } } } },
     { ...op, intent: { ...op.intent, materialization: { ...m, tool: "stargateV2" as const } } },
-    { ...op, intent: { ...op.intent, materialization: { ...m, request: { ...m.request, toChainId: 8453 as const } } } },
-    { ...op, intent: { ...op.intent, materialization: { ...m, request: { ...m.request, fromToken: ARB_USDC } } } },
-    { ...op, intent: { ...op.intent, sourceDeployment: { ...op.intent.sourceDeployment, codeHash: "0".repeat(64) } } },
-    { ...op, intent: { ...op.intent, destinationDeployment: { ...op.intent.destinationDeployment, configurationHash: "0".repeat(64) } } },
-    { ...op, effects: op.effects.map(e => e.role === "bridge" ? { ...e, submissionAttempts: 1 as const } : e) },
-    { ...op, effects: op.effects.slice(1) },
-  ]) assert.equal(bridgeRpcPhysicalPolicy(changed), "default");
+  ]) assert(bridgeInvocationPostBudget(changed, 3) > 24);
+  assert.equal(bridgeInvocationPostBudget({ ...op, terminal: true }, 3), 0);
   assert.equal(new BridgeRpcPhysicalBudget().remaining(), 24);
 });

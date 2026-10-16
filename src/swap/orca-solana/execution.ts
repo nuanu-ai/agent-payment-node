@@ -7,6 +7,7 @@ import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
+import type { SwapUnlandedProof } from "../unlanded.js";
 import { assertInjectedProtocol } from "../uniswap-ethereum/execution/binding.js";
 import type { OrcaLocalOwnerAdmission } from "./admission.js";
 import { latestLifetime, orcaMessageFee, requireOrcaFunds } from "./builder.js";
@@ -36,6 +37,8 @@ export class OrcaExecutionGuard {
         market.wsolAccount !== plan.wsolAccount || market.usdcAccount !== plan.usdcAccount) {
       blocked("The pool moved away from the approved tick arrays; quote again.", "orca_tick_array_moved");
     }
+    // A wSOL account created or closed since the quote would change what the approved bytes unwrap or leave behind.
+    if ((market.wsol !== null) !== (plan.wsolAccountKept === true)) blocked("The owner's wSOL account changed since the quote; quote again.", "orca_wsol_account_changed");
     if (BigInt(market.swap.amountOutAtomic) < BigInt(operation.quote.minimumOutputAtomic)) {
       blocked("The pool no longer yields the approved minimum output.", "orca_output_below_minimum");
     }
@@ -44,10 +47,10 @@ export class OrcaExecutionGuard {
     const lifetime = await latestLifetime(this.rpc), compiled = compileOrcaSwap(plan, lifetime);
     const fee = await orcaMessageFee(this.rpc, compiled.messageBase64);
     if (fee > BigInt(execution.networkFeeLamports)) blocked("The network fee exceeds the approved fee.", "orca_fee_drift");
-    requireOrcaFunds(market.owner.ownerLamports, BigInt(plan.amountInLamports) + fee + rent + market.tokenAccountRentLamports);
+    requireOrcaFunds(market.owner.ownerLamports, BigInt(plan.amountInLamports) + fee + rent + (market.wsol === null ? market.tokenAccountRentLamports : 0n));
     const simulation = await simulateOrcaSwap(this.rpc, compiled.unsignedPayload, { owner: plan.owner, wsolAccount: plan.wsolAccount,
       usdcAccount: plan.usdcAccount, before: market.owner, minimumOutputAtomic: plan.minimumOutputAtomic,
-      maximumSolSpendLamports: execution.maximumSolSpendLamports, computeUnitLimit: plan.computeUnitLimit }, false, market.slot.toString());
+      maximumSolSpendLamports: execution.maximumSolSpendLamports, computeUnitLimit: plan.computeUnitLimit, wsolKept: market.wsol }, false, market.slot.toString());
     const height = rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
     if (height > BigInt(lifetime.lastValidBlockHeight)) blocked("The fresh blockhash expired before signing.", "orca_lifetime_expired");
     return { lifetime, unsignedPayload: compiled.unsignedPayload, messageHash: compiled.messageHash, networkFeeLamports: fee.toString(),
@@ -63,7 +66,7 @@ export interface OrcaExecutionDriverDependencies {
   readonly bindings: Pick<OrcaExecutionBindingStore, "save" | "load">;
   readonly signer: Pick<OrcaLocalSigner, "sign">;
   readonly sender: Pick<OrcaSingleSender, "sendOnce">;
-  readonly observer: Pick<OrcaReceiptObserver, "observeOutcome">;
+  readonly observer: Pick<OrcaReceiptObserver, "observeOutcome" | "proveUnlanded">;
   readonly effects: Pick<ChainWalletStoragePort, "effect">;
   readonly clock: ClockPort;
 }
@@ -109,7 +112,7 @@ export class OrcaSolanaExecutionDriver implements GuardedSwapExecutionDriver {
     let operation = validateSwapOperation(input.operation);
     if (operation.submissionMarker === null) blocked("Orca observation is available only after the submission marker.", "orca_resume_before_marker");
     const material = validateOrcaKeylessMaterial(input.material);
-    if (["finalized", "failed_confirmed_revert"].includes(operation.state)) return operation;
+    if (["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(operation.state)) return operation;
     const binding = await this.d.bindings.load(operation, material);
     const account = binding === null ? null : await this.d.admission.localAccount(operation);
     const effect = binding === null || account === null ? null : await this.d.effects.effect(account, operation.operationId, binding.bindingHash);
@@ -117,6 +120,21 @@ export class OrcaSolanaExecutionDriver implements GuardedSwapExecutionDriver {
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());
     if (binding === null || effect === null) return operation;
     return await this.observeExact(operation, binding, material, effect.transactionId);
+  }
+
+  /**
+   * The execution binding carries the frozen lifetime of the only bytes that can be signed. Without a binding nothing was
+   * signed, but no lifetime is known either, so no chain proof exists; the operation stays observable.
+   */
+  async proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null> {
+    const operation = validateSwapOperation(input.operation), material = validateOrcaKeylessMaterial(input.material);
+    const binding = await this.d.bindings.load(operation, material);
+    if (binding === null) return null;
+    return await this.d.observer.proveUnlanded(binding.lifetime.lastValidBlockHeight, async () => {
+      const account = await this.d.admission.localAccount(operation);
+      const effect = account === null ? null : await this.d.effects.effect(account, operation.operationId, binding.bindingHash);
+      return effect === null ? null : effect.transactionId;
+    });
   }
 
   private async observeExact(operation: SwapOperationRecord, binding: OrcaExecutionBinding, material: OrcaKeylessMaterial,

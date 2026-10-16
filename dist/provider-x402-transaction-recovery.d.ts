@@ -31,6 +31,8 @@ export declare class ProviderX402TransactionRecoveryService {
     constructor(context: RuntimeContext);
     recover(request: RecoveryRequest): Promise<ProviderX402RecoveryProjection>;
     private evidence;
+    /** A transaction already proving another provider payment can never prove this one. */
+    private assertTransactionUnclaimed;
     private requiredOperation;
     private assertCompatible;
     private projectCommitted;
