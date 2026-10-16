@@ -54,6 +54,24 @@ function identity(sender: string): AssetUsageIdentity {
   return { account: sender, chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } };
 }
 function usageKey(operationId: string): string { return `gasless-usdt-execution:${operationId}`; }
+/**
+ * Ethereum's safe head moves once per epoch, so execution takes a fresh safe snapshot instead of the prepared one. It must
+ * be at or after the prepared block (the same block only with the same hash), keep the exact EntryPoint and EOA nonces and
+ * delegation the signed UserOperation and authorization use, and hold at least the gross the batch can debit (N + F).
+ * The prepared block itself is deterministic state: a different balance reported for it is provider equivocation.
+ */
+export function usdtSafeSnapshotFresh(bound: UsdtBoundOperation, snapshot: {
+  readonly chainId: bigint; readonly blockNumber: bigint; readonly blockHash: string;
+  readonly account: { readonly usdtBalanceAtomic: bigint; readonly entryPointNonce: bigint; readonly eoaNonce: bigint; readonly delegation: string };
+}): boolean {
+  const b = bound.binding, prepared = BigInt(b.safeBlockNumber);
+  return snapshot.chainId === 1n && snapshot.blockNumber >= prepared &&
+    (snapshot.blockNumber !== prepared || snapshot.blockHash === b.safeBlockHash) &&
+    snapshot.account.entryPointNonce.toString() === b.account.entryPointNonce &&
+    snapshot.account.eoaNonce.toString() === b.account.eoaNonce && snapshot.account.delegation === b.account.delegation &&
+    snapshot.account.usdtBalanceAtomic >= BigInt(b.plan.request.grossAtomic) &&
+    (snapshot.blockHash !== b.safeBlockHash || snapshot.account.usdtBalanceAtomic.toString() === b.account.usdtBalanceAtomic);
+}
 function recordBody(record: UsdtExecutionRecord): Omit<UsdtExecutionRecord, "integrityHash"> {
   const { integrityHash: _ignored, ...body } = record; return body;
 }
@@ -211,10 +229,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
       active.digest !== b.policyDigest || active.revision !== b.policyRevision || active.activationDigest !== b.activationDigest ||
       active.accounts.evm !== b.plan.request.sender) fail("policy_changed");
     const snapshot = await port.safeSnapshot(b.plan.request.sender);
-    if (snapshot.chainId !== 1n || snapshot.blockNumber.toString() !== b.safeBlockNumber ||
-      snapshot.blockHash !== b.safeBlockHash || snapshot.account.entryPointNonce.toString() !== b.account.entryPointNonce ||
-      snapshot.account.eoaNonce.toString() !== b.account.eoaNonce || snapshot.account.delegation !== b.account.delegation ||
-      snapshot.account.usdtBalanceAtomic.toString() !== b.account.usdtBalanceAtomic) fail("safe_snapshot_changed");
+    if (!usdtSafeSnapshotFresh(bound, snapshot)) fail("safe_snapshot_changed");
     if (bound.schemaVersion === "apn.gasless-usdt-bound-operation.v2") {
       if (snapshot.pins === undefined) fail("sponsor_snapshot_missing");
       this.exposureSnapshots.set(bound.operationId, { ...snapshot, pins: snapshot.pins });

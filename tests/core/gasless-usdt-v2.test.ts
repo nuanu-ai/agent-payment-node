@@ -260,3 +260,31 @@ test("policy revocation during fresh sponsor authentication fences before custod
   assert.equal(sends, 0); assert.equal(f.wrapping.loads, 0);
   assert.equal((await execute.status(f.bound.profileHash, f.bound.operationId)).execution?.state, "failed_before_effect");
 });
+
+test("v2 execute re-guards at a later safe block with incoming USDT and re-attests the sponsor at that block", async t => {
+  const f = await setup("expected", "03"); t.after(f.temporary.cleanup); let sends = 0;
+  const later = `0x${"34".repeat(32)}` as const;
+  f.f.state.snapshot = { ...f.f.state.snapshot, blockNumber: 26_002_982n, blockHash: later,
+    account: { ...f.f.state.snapshot.account, usdtBalanceAtomic: 1_500_000n } };
+  const execute = new GaslessUsdtCommandExecute(f.state, { now: f.f.now }, f.wrapping,
+    { preparePort: f.f.prepare, signer: f.signer, approval: { approve: async () => {} }, sendTransport: { send: async op => { sends++; return usdtUserOperationHash(op); } } });
+  const result = await execute.execute(f.bound.profileHash, f.bound.operationId);
+  assert.equal(result.state, "submitted_pending"); assert.equal(sends, 1);
+  assert.equal(result.safeBlockNumber, f.bound.binding.safeBlockNumber, "the journal keeps the prepared anchor");
+  const auth = f.f.state.reads.at(-1) as { params: unknown[] }[];
+  for (const call of auth) assert.deepEqual(call.params[1], { blockHash: later, requireCanonical: true });
+});
+
+test("v2 execute refuses an older safe block, another block at the prepared height and a balance below gross", async t => {
+  for (const change of [{ blockNumber: 26_002_949n }, { blockHash: `0x${"34".repeat(32)}` as const },
+    { usdtBalanceAtomic: 999_999n }]) {
+    const f = await setup("expected"); t.after(f.temporary.cleanup); let sends = 0;
+    const { usdtBalanceAtomic, ...block } = change as { usdtBalanceAtomic?: bigint; blockNumber?: bigint; blockHash?: `0x${string}` };
+    f.f.state.snapshot = { ...f.f.state.snapshot, ...block, account: { ...f.f.state.snapshot.account,
+      ...(usdtBalanceAtomic === undefined ? {} : { usdtBalanceAtomic }) } };
+    const execute = new GaslessUsdtCommandExecute(f.state, { now: f.f.now }, f.wrapping,
+      { preparePort: f.f.prepare, signer: f.signer, approval: { approve: async () => {} }, sendTransport: { send: async op => { sends++; return usdtUserOperationHash(op); } } });
+    await assert.rejects(execute.execute(f.bound.profileHash, f.bound.operationId), /safe_snapshot_changed/u);
+    assert.equal(sends, 0); assert.equal(f.wrapping.loads, 0);
+  }
+});
