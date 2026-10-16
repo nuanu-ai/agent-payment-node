@@ -30,6 +30,11 @@ export declare class GuardedSwapService {
      * inclusion. The principal lease is released and the operation is terminal. Nothing is re-signed or resent.
      */
     expireUnlanded(operation: SwapOperationRecord, now: Date, proof: SwapUnlandedProof): Promise<SwapOperationRecord>;
+    /**
+     * Owner exit when no chain proof is possible: the marked swap's outcome stays unknown, so its input stays charged as
+     * spent (the lease finalizes) and the operation is terminal. Nothing is signed or sent.
+     */
+    abandonUnknown(operation: SwapOperationRecord, now: Date, acknowledgementDigest: string): Promise<SwapOperationRecord>;
     resumeDirective(operation: SwapOperationRecord): "prepare_or_approve" | "observe_only" | "terminal";
 }
 export declare function swapIdempotencyHash(value: unknown): string;
