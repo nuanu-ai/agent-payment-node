@@ -46,6 +46,7 @@ function run(loader, expectRejected) {
       const sdk = await load();
       for (const field of ["SIGNABLE_DELEGATION_TYPED_DATA", "decodeDelegations", "encodeDelegations", "toDelegationStruct", "ExecutionMode", "ROOT_AUTHORITY", "createExecution", "getSmartAccountsEnvironment", "getErc20PeriodTransferEnforcerAvailableAmount", "redelegatePermissionContextAction", "DelegationManager", "ALL_METAMASK_FACILITATOR_ADDRESSES", "METAMASK_FACILITATOR_ADDRESSES", "makePermissionDecoderConfigs", "createErc20TokenAllowanceCaveats", "createx402DelegationProvider", "x402Erc7710Client", "ANY_BENEFICIARY", "decodeAllowedCalldataTerms", "decodeERC20TransferAmountTerms", "decodeRedeemerTerms", "decodeTimestampTerms", "decodeValueLteTerms", "hashDelegation"]) assert.ok(field in sdk, field);
       assert.equal(globalThis.APNParentUUIDEvaluated, undefined);
+      assert.equal(process.env.DO_NOT_TRACK, "1", "the SDK analytics opt-out is set before any SDK call");
     }
     assert.equal(effects, 0);
   `;
