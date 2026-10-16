@@ -4,7 +4,7 @@ import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../..
 import { OperationService } from "../../src/operation-service.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
-import { mmFixture, mmWriteOperationFile } from "./metamask-gasless-helpers.js";
+import { MM_TEST_RECIPIENT, mmFixture, mmWriteOperationFile } from "./metamask-gasless-helpers.js";
 import { fillLegacyHistory } from "./metamask-gasless-journal-fixtures/factory.js";
 
 class AbandonApproval implements OperationAbandonApprovalPort {
@@ -89,4 +89,23 @@ test("MetaMask gasless owner abandonment still fits a journal an earlier release
   assert.equal(approval.calls.length, 1);
   assert.equal(((await f.core.execute({ command: "receipt.get", operationId: id })).receipt as { state: string }).state, "abandoned_unknown");
   await new OperationService(f.state).assertProfileAvailable(after.profileHash);
+});
+
+test("MetaMask abandonment shows the dispatched gross and, for a fixed net, the approved ceiling beside it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const approval = new AbandonApproval();
+  const f = await mmFixture(temporary.root, 42161, "empty", { abandonApproval: approval });
+  f.provider.fees = ["17443", "17479"]; f.rpc.state = { ...f.rpc.state, usdcBalanceAtomic: "40000" };
+  const request = { chainId: 42161 as const, recipient: MM_TEST_RECIPIENT, grossAtomic: "25000", maxFeeAtomic: "24000",
+    minReceivedAtomic: "1000", fixedNet: { netAtomic: "1000", maxGrossAtomic: "25000" } };
+  const prepared = await f.core.execute({ command: "gasless.transfer.prepare", profile: f.profile, request, idempotencyKey: "mm-abandon-fixed-net" });
+  assert.equal(prepared.ok, true, JSON.stringify(prepared.error)); const id = (prepared.operation as { operation_id: string }).operation_id;
+  f.rpc.phase = "pending"; f.rpc.candidate = null; f.provider.failSubmit = true;
+  assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  assert.equal((await f.record(id)).dispatch?.quote.feeAtomic, "17479");
+  f.now.setTime(f.now.getTime() + 600_000); f.provider.failObserve = true;
+  assert.equal((await f.core.execute({ command: "operation.abandon", operationId: id })).ok, true);
+  const shown = approval.calls[0]!;
+  assert.deepEqual([shown.amountAtomic, shown.amountDecimal, shown.budgetCeilingAtomic, shown.budgetCeilingDecimal],
+    ["18479", "0.018479", "25000", "0.025"]);
 });

@@ -19,6 +19,7 @@ import { MetaMaskGaslessPreparation } from "./prepare.js";
 import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
+import { canonicalProfile } from "../wallet-policy.js";
 
 export interface MetaMaskGaslessDependencies {
   readonly rpcFor: MetaMaskGaslessRpcFactory;
@@ -53,7 +54,29 @@ export class MetaMaskGaslessService {
     const d = this.dependencies();
     const preparation = new MetaMaskGaslessPreparation({ state: this.context.state, records: this.records,
       operations: this.operations, rpcFor: d.rpcFor, provider: d.provider, clock: this.context.clock, ids: this.context.ids });
-    return publicMetaMaskGaslessOperation(await preparation.prepare(input));
+    try { return publicMetaMaskGaslessOperation(await preparation.prepare(input)); }
+    catch (error) { throw await this.sessionGuidance(error, input.profile); }
+  }
+  /**
+   * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
+   * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile instead
+   * of at a command that would only be refused.
+   */
+  private async sessionGuidance(error: unknown, profileInput: string): Promise<unknown> {
+    if (!(error instanceof ApnError) || error.code !== "APN_PROVIDER_SESSION_REQUIRED") return error;
+    let blocking: string;
+    try {
+      await this.operations.assertProfileAvailable(this.context.state.profileHash(canonicalProfile(profileInput)));
+      return error;
+    } catch (guard) {
+      if (!(guard instanceof ApnError) || guard.code !== "APN_OPERATION_BLOCKED" ||
+        typeof guard.details?.blockingOperationId !== "string") return error;
+      blocking = guard.details.blockingOperationId;
+    }
+    return new ApnError(error.code, error.message, { ...error.details, blockingOperationId: blocking, nextActions: [
+      `apn operation status --operation ${blocking}`,
+      `Wallet connect for this profile waits until operation ${blocking} is terminal. Follow its next actions; if its outcome is still unknown after its approval window, release it with apn operation abandon --operation ${blocking}. Then run the foreground wallet connect handoff again.`,
+    ] });
   }
   async approve(operationId: string) {
     return await this.locked(operationId, async op => {
