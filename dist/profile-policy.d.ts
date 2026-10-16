@@ -33,7 +33,12 @@ export declare function canonicalPolicyInput(input: ProfilePolicySetInput): Prof
 export declare function sealProfilePolicy(value: Omit<ProfilePolicyRecord, "integrityHash">): ProfilePolicyRecord;
 export declare function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBinding): ProfilePolicyRecord;
 export declare function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, chainId?: EvmChainId): unknown;
-export declare function fundingPosture(usdcAtomic: string, ethAtomic: string, policy: ProfilePolicyRecord | null): unknown;
+export interface FundingPosture {
+    readonly classification: string;
+    readonly next_actions: readonly string[];
+    readonly [field: string]: unknown;
+}
+export declare function fundingPosture(usdcAtomic: string, ethAtomic: string, policy: ProfilePolicyRecord | null): FundingPosture;
 export declare function requireProfilePolicy(policy: ProfilePolicyRecord | null): ProfilePolicyRecord;
 export declare function effectiveX402Cap(policy: ProfilePolicyRecord, callerCapInput?: string): string;
 export declare function assertUnattendedX402Balance(policy: ProfilePolicyRecord, usdcAtomic: string): void;

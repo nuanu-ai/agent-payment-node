@@ -256,7 +256,10 @@ decrease is non-interactive. Omitting the optional ETH argument preserves its
 existing value. `wallet balance` reports `policy_unconfigured`, `within_limit`
 or `overfunded`, including exact excess. APN cannot stop inbound funding and
 never sweeps or refunds automatically; an overfunded wallet is blocked from
-starting a new unattended x402 purchase until the owner resolves it.
+starting a new unattended x402 purchase until the owner resolves it. Its
+`funding_guidance` and `next_actions` follow that posture per asset: an asset
+at or above its owner limit is never suggested for funding, and an excess is
+named with its asset, amount and effect on unattended x402.
 
 Prepare and approve a direct transfer:
 
