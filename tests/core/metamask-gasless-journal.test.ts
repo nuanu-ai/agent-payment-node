@@ -130,7 +130,7 @@ test("nonterminal observation revisions may drop an unconfirmed candidate withou
   assert.equal(revised.transitions.at(-2)?.observation?.candidateTxHash, TX_HASH);
 });
 
-test("exact nested schemas, registry identity, hashes, and transition reconstruction fail closed", () => {
+test("exact nested schemas, hashes, and transition reconstruction fail closed; registry changes do not", () => {
   const initial = makeOperation(), later = unknown(mark(approve(initial)));
   const nested = structuredClone(initial) as unknown as Record<string, unknown>;
   (nested.intent as Record<string, unknown>).privateKey = "synthetic-secret";
@@ -139,7 +139,9 @@ test("exact nested schemas, registry identity, hashes, and transition reconstruc
   const foreignRegistry = structuredClone(initial) as unknown as Record<string, unknown>;
   (foreignRegistry.intent as Record<string, unknown>).deploymentEvidenceHash = "f".repeat(64);
   foreignRegistry.fingerprint = hashObject(mmImmutable(foreignRegistry as unknown as MetaMaskGaslessOperationRecord));
-  assert.throws(() => validateMetaMaskGaslessOperation(reseal(foreignRegistry)), { code: "APN_STATE_CORRUPT" });
+  // A saved record is checked against its own frozen deployment, never today's registry (R2): adding a chain or
+  // refreshing registry provenance changes the aggregate hash and must not turn saved operations into corrupt state.
+  assert.doesNotThrow(() => validateMetaMaskGaslessOperation(reseal(foreignRegistry)));
 
   const truncated = structuredClone(later) as unknown as Record<string, unknown>;
   truncated.transitions = (truncated.transitions as unknown[]).slice(0, -1);
@@ -152,10 +154,10 @@ test("exact nested schemas, registry identity, hashes, and transition reconstruc
   assert.throws(() => validateMetaMaskGaslessOperation(reseal(extra)), { code: "APN_STATE_CORRUPT" });
   for (const proofKey of ["protocolHash", "tokenImplementationHash"] as const) {
     const proofDrift = structuredClone(complete(later)) as unknown as Record<string, unknown>;
-    (proofDrift.settlement as Record<string, unknown>)[proofKey] = "f".repeat(64);
+    (proofDrift.settlement as Record<string, unknown>)[proofKey] = "not-a-hash";
     const transitions = proofDrift.transitions as Record<string, unknown>[];
     const last = transitions.at(-1)!;
-    (last.settlement as Record<string, unknown>)[proofKey] = "f".repeat(64);
+    (last.settlement as Record<string, unknown>)[proofKey] = "not-a-hash";
     const { transitionHash: _transitionHash, ...transitionBody } = last;
     last.transitionHash = hashObject(transitionBody);
     assert.throws(() => validateMetaMaskGaslessOperation(reseal(proofDrift)), { code: "APN_STATE_CORRUPT" });
@@ -204,6 +206,9 @@ test("repository namespaces reject malformed, symbolic-link, foreign-owner, over
   const malformedId = "e".repeat(64), malformedPath = join(operationsRoot, first.profileHash, `${malformedId}.json`);
   await writeFile(malformedPath, "{not-json}\n", { mode: 0o600 });
   await assert.rejects(() => repository.loadOperation(first.profileHash, malformedId), { code: "APN_STATE_CORRUPT" });
+  // A lookup reads only the record it names: one bad record never breaks `operation status` of another operation.
+  assert.deepEqual(await repository.findOperation(first.operationId), first);
+  await assert.rejects(() => repository.findOperation(malformedId), { code: "APN_STATE_CORRUPT" });
   await rm(malformedPath);
   await writeFile(malformedPath, JSON.stringify({ payload: "x".repeat(1024 * 1024) }), { mode: 0o600 });
   await assert.rejects(() => repository.loadOperation(first.profileHash, malformedId), { code: "APN_STATE_CORRUPT" });

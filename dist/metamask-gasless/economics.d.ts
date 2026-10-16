@@ -1,4 +1,5 @@
 import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessQuote, MetaMaskGaslessQuoteMaterial, MetaMaskGaslessRequest } from "./model.js";
+import { type MmDeploymentView } from "./recorded.js";
 import { type MetaMaskGaslessFailureReason } from "./reasons.js";
 export declare function mmEconomics(request: MetaMaskGaslessRequest): {
     gross: bigint;
@@ -10,12 +11,13 @@ export declare function mmActualGross(quote: MetaMaskGaslessQuoteMaterial, reaso
 export declare function mmUnusedGross(request: MetaMaskGaslessRequest, quote: MetaMaskGaslessQuoteMaterial): string;
 export declare function mmQuoteHash(quote: MetaMaskGaslessQuoteMaterial): string;
 /** Validate each quote independently; convergence and final G=N+F are separate checks. */
-export declare function mmQuote(value: unknown, request: MetaMaskGaslessRequest, binding: MetaMaskGaslessBinding, requestedNet: string, reason?: MetaMaskGaslessFailureReason): MetaMaskGaslessQuote;
+export declare function mmQuote(value: unknown, request: MetaMaskGaslessRequest, binding: MetaMaskGaslessBinding, requestedNet: string, reason?: MetaMaskGaslessFailureReason, row?: MmDeploymentView): MetaMaskGaslessQuote;
 export declare function mmAssertStableQuote(request: MetaMaskGaslessRequest, quote: MetaMaskGaslessQuote, reason?: MetaMaskGaslessFailureReason): void;
 /**
  * The owner approves a maximum, not one exact price. A quote taken after that approval is admissible when its fee
  * stays inside the effective cap, the recipient still clears the floor and the gross still splits exactly.
  */
-export declare function mmRepriceWithinCap(value: unknown, request: MetaMaskGaslessRequest, binding: MetaMaskGaslessBinding, reason?: MetaMaskGaslessFailureReason): MetaMaskGaslessQuote;
-export declare function mmPolicyHash(profileHash: string, binding: MetaMaskGaslessBinding, request: MetaMaskGaslessRequest): string;
+export declare function mmRepriceWithinCap(value: unknown, request: MetaMaskGaslessRequest, binding: MetaMaskGaslessBinding, reason?: MetaMaskGaslessFailureReason, row?: MmDeploymentView): MetaMaskGaslessQuote;
+export declare function mmPolicyHash(profileHash: string, binding: MetaMaskGaslessBinding, request: MetaMaskGaslessRequest, token?: `0x${string}`): string;
+/** A saved intent is checked against the deployment it froze, never against today's registry. */
 export declare function mmAssertIntentEconomics(intent: MetaMaskGaslessIntent, profileHash: string): void;

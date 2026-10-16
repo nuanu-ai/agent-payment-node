@@ -64,8 +64,6 @@ export function smartAccountGaslessSnapshot(value, binding, rpc, op) {
         snapshot.endpointOrigin !== rpc.endpointOrigin)
         saFail("sa_gasless_rpc_binding");
     if (op !== undefined) {
-        if (rpc.endpointHash !== op.intent.initialSnapshot.endpointHash || rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin)
-            saFail("sa_gasless_rpc_binding");
         try {
             saBlockOrder(op.intent.initialSnapshot.preparationBlock, snapshot.preparationBlock);
             saBlockOrder(op.intent.initialSnapshot.safeBlock, snapshot.safeBlock);

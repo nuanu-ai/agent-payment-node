@@ -49,8 +49,6 @@ export function smartAccountGaslessSnapshot(value: unknown, binding: SmartAccoun
   if (rpc.chainId !== 8453 || snapshot.chainId !== rpc.chainId || snapshot.endpointHash !== rpc.endpointHash ||
     snapshot.endpointOrigin !== rpc.endpointOrigin) saFail("sa_gasless_rpc_binding");
   if (op !== undefined) {
-    if (rpc.endpointHash !== op.intent.initialSnapshot.endpointHash || rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin)
-      saFail("sa_gasless_rpc_binding");
     try {
       saBlockOrder(op.intent.initialSnapshot.preparationBlock, snapshot.preparationBlock);
       saBlockOrder(op.intent.initialSnapshot.safeBlock, snapshot.safeBlock);

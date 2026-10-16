@@ -57,7 +57,7 @@ export function verifyChildScanLog(value, intent, childHash, from, to) {
         number < from || number > to || !Array.isArray(topics) || topics.length !== 4 ||
         rpcHex(topics[0], 32, 32) !== SA_INCREASED_SPENT_TOPIC ||
         rpcHex(topics[1], 32, 32) !== addressTopic(registry.protocol.manager.address) ||
-        rpcHex(topics[2], 32, 32) !== addressTopic(intent.provider.facilitatorAddresses[0]) ||
+        !intent.provider.facilitatorAddresses.some(address => rpcHex(topics[2], 32, 32) === addressTopic(address)) ||
         rpcHex(topics[3], 32, 32) !== childHash)
         saFail("sa_gasless_evidence");
     twoWords(rpcHex(value.data, 64, 64));

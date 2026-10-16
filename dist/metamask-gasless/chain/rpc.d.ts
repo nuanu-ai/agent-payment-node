@@ -38,6 +38,11 @@ export declare class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
         readonly feeMode?: "sponsored";
     }): Promise<MetaMaskGaslessSnapshot>;
     observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
+    /**
+     * Observation reads today's deployment addresses, so the saved operation must name the same token, manager and
+     * enforcers; the aggregate registry hash, the endpoint and the prepare-time code pins of a saved record are not
+     * compared, so adding a chain, rotating the RPC or a token upgrade never strands an operation.
+     */
     private assertIntent;
     private assertChain;
     private call;

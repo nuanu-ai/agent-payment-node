@@ -37,9 +37,11 @@ function caveatHash(caveat) {
 export function mmValidateUnsigned(value, input, reason = "mm_gasless_quote_invalid") {
     const result = mmExact(value, ["unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"], reason);
     const d = mmExact(result.unsignedDelegation, ["delegator", "delegate", "authority", "salt", "caveats"], reason);
-    const registry = mmRegistry(input.chainId).row;
+    const protocol = (input.deployment ?? mmRegistry(input.chainId).row).protocol;
+    const manager = protocol.manager?.address ?? mmFail(reason), limitedCalls = protocol.limitedCalls?.address ?? mmFail(reason);
+    const batch = input.feeMode === "sponsored" ? MM_SINGLE_ENFORCER.address : protocol.exactBatch?.address ?? mmFail(reason);
     if (mmCanonicalAddress(d.delegator, reason) !== input.owner || d.delegate !== MM_ANY_BENEFICIARY ||
-        d.authority !== MM_ROOT_AUTHORITY || result.relayTo !== registry.protocol.manager.address || result.mode !== (input.feeMode === "sponsored" ? MM_SINGLE_MODE : MM_BATCH_MODE))
+        d.authority !== MM_ROOT_AUTHORITY || result.relayTo !== manager || result.mode !== (input.feeMode === "sponsored" ? MM_SINGLE_MODE : MM_BATCH_MODE))
         mmFail(reason);
     const salt = mmHex(d.salt, 32, reason);
     if (!Array.isArray(d.caveats) || d.caveats.length !== 2)
@@ -47,7 +49,7 @@ export function mmValidateUnsigned(value, input, reason = "mm_gasless_quote_inva
     const terms = mmExactBatchTerms(input);
     for (let i = 0; i < 2; i++) {
         const c = mmExact(d.caveats[i], ["enforcer", "terms", "args"], reason);
-        if (c.enforcer !== (i === 0 ? registry.protocol.limitedCalls.address : (input.feeMode === "sponsored" ? MM_SINGLE_ENFORCER.address : registry.protocol.exactBatch.address)) ||
+        if (c.enforcer !== (i === 0 ? limitedCalls : batch) ||
             c.terms !== (i === 0 ? MM_ONE_CALL_TERMS : terms) || c.args !== "0x")
             mmFail(reason);
     }
@@ -57,7 +59,7 @@ export function mmValidateUnsigned(value, input, reason = "mm_gasless_quote_inva
     ], [delegationTypeHash, delegation.delegate, delegation.delegator, delegation.authority,
         keccak256(concatHex(delegation.caveats.map(caveatHash))), BigInt(salt)]));
     const signingDigest = hashTypedData({ domain: { name: "DelegationManager", version: "1", chainId: input.chainId,
-            verifyingContract: registry.protocol.manager.address }, types: MM_DELEGATION_TYPES, primaryType: "Delegation",
+            verifyingContract: manager }, types: MM_DELEGATION_TYPES, primaryType: "Delegation",
         message: { delegate: delegation.delegate, delegator: delegation.delegator, authority: delegation.authority,
             caveats: delegation.caveats.map(({ enforcer, terms: t }) => ({ enforcer, terms: t })), salt: BigInt(salt) } });
     if (mmHex(result.delegationHash, 32, reason) !== structHash || mmHex(result.signingDigest, 32, reason) !== signingDigest)
