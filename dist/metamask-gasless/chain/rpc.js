@@ -114,19 +114,20 @@ export class MetaMaskGaslessRpc {
         this.assertIntent(intent);
         await this.assertChain();
         // Another provider must first prove the same chain history at the operation's frozen safe anchor.
-        if (this.observationOnly)
-            await recheckBlock(this.callRpc, intent.initialSnapshot.safeBlock, "mm_gasless_rpc_binding");
+        // Any endpoint of the chain may observe once it proves the same history at the operation's frozen safe anchor.
+        await recheckBlock(this.callRpc, intent.initialSnapshot.safeBlock, "mm_gasless_rpc_binding");
         return await observeMetaMaskGasless({ deployment: this.deployment, call: this.callRpc, clock: this.clock }, intent, cursor, provider);
     }
+    /**
+     * Observation reads today's deployment addresses, so the saved operation must name the same token, manager and
+     * enforcers; the aggregate registry hash, the endpoint and the prepare-time code pins of a saved record are not
+     * compared, so adding a chain, rotating the RPC or a token upgrade never strands an operation.
+     */
     assertIntent(intent) {
-        const frozen = this.observationOnly ? intent.initialSnapshot : this;
         if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
-            intent.initialSnapshot.endpointHash !== frozen.endpointHash || intent.initialSnapshot.endpointOrigin !== frozen.endpointOrigin ||
-            intent.token !== this.deployment.row.token || intent.deploymentEvidenceHash !== this.deployment.deploymentEvidenceHash ||
-            intent.relayTo !== this.deployment.row.protocol.manager.address)
+            intent.token !== this.deployment.row.token || intent.relayTo !== this.deployment.row.protocol.manager.address) {
             mmFail("mm_gasless_rpc_binding");
-        validateMetaMaskGaslessSnapshot(intent.initialSnapshot, { chainId: this.chainId,
-            endpointHash: frozen.endpointHash, endpointOrigin: frozen.endpointOrigin, grossAtomic: intent.preparedGrossAtomic ?? intent.request.grossAtomic, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) });
+        }
         mmQuote(intent.quote, intent.request, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt");
         mmAssertStableQuote(intent.request, intent.quote, "mm_gasless_state_corrupt");
         mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,

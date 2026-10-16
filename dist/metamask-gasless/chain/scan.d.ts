@@ -52,3 +52,5 @@ export type MetaMaskScanResult =
  * Once it is 1, the bounded log scan finds the redeeming transaction for full inspection.
  */
 export declare function scanMetaMaskRedemption(context: MetaMaskScanContext, intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor): Promise<MetaMaskScanResult>;
+/** `callCounts(manager, delegationHash)` at one canonical block pinned by hash, against the pinned enforcer code. */
+export declare function mmRedemptionCount(context: MetaMaskScanContext, delegationHash: Hex, at: MetaMaskGaslessBlock): Promise<bigint>;

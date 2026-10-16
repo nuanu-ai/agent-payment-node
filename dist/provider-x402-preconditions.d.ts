@@ -10,5 +10,4 @@ export declare function requireProviderX402Profile(context: RuntimeContext, prof
 export declare function requireProviderX402Adapter(context: RuntimeContext, profile: ProviderProfileRecord): ExecutableProviderX402Adapter;
 export declare function observeProviderX402Balance(context: RuntimeContext, profile: ProviderProfileRecord, adapter: ProviderAdapterBundle): Promise<ProviderBalanceObservation>;
 export declare function assertFrozenProviderX402Policy(operation: ProviderX402OperationRecord, policy: ProfilePolicyRecord, balance: ProviderBalanceObservation): void;
-export declare function assertProviderX402RpcBinding(context: RuntimeContext, operation: ProviderX402OperationRecord): void;
 export declare function canonicalProviderX402RpcUrl(value: string): string;

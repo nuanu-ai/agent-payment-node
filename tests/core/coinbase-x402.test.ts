@@ -18,6 +18,7 @@ import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import { BASE_USDC, TRANSFER_TOPIC } from "../../src/constants.js";
 import { COINBASE_GASLESS_MECHANISM } from "../../src/coinbase-gasless-policy.js";
 import { ApnCore } from "../../src/core.js";
+import { ApnError } from "../../src/errors.js";
 import { runCli } from "../../src/cli.js";
 import { canonicalizeNormalizedProviderJson } from "../../src/normalized-provider-json.js";
 import type { OutputEnvelope } from "../../src/commands.js";
@@ -776,7 +777,7 @@ test("provider_result_invalid persists only the redacted rejection shape across 
   assert.equal(effect.calls.length, 1);
 });
 
-test("AWAL x402 treats non-2xx, partial payment metadata, amount mismatch and protected data as ambiguous", async () => {
+test("AWAL x402 treats non-2xx, partial payment metadata and amount mismatch as ambiguous and delivers paid seller data", async () => {
   const protocolCases: readonly unknown[] = [
     { status: 402, statusText: "Payment Required", data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "OK", data: {}, paymentMade: false, amountPaid: 1_250_000 },
@@ -787,7 +788,8 @@ test("AWAL x402 treats non-2xx, partial payment metadata, amount mismatch and pr
     { status: 200, statusText: 200, data: {}, paymentMade: true, amountPaid: 1_250_000 },
     { status: 200, statusText: "x".repeat(513), data: {}, paymentMade: true, amountPaid: 1_250_000 },
   ];
-  const protectedValues: readonly unknown[] = [
+  // Paid seller data is delivered verbatim, whatever it looks like; only secret-bearing fields are redacted.
+  const sellerValues: readonly unknown[] = [
     { neutral: "owner@example.com" },
     { neutral: "Bearer abcdefghijklmnopqrstuvwxyz" },
     { neutral: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwcm90ZWN0ZWQifQ.signature12" },
@@ -800,15 +802,29 @@ test("AWAL x402 treats non-2xx, partial payment metadata, amount mismatch and pr
     "123456",
     "OTP: 123456",
     "one-time code 123456",
-    { sessionToken: "PROTECTED_CANARY" },
+    { cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG", mint: "EPjFWdd5AufqSSqeM2qJ1zVfeZ6zXwQ5Vt1hTZxGwxEn" },
   ];
-  const cases = [
-    ...protocolCases,
-    ...protectedValues.map((data) => ({
-      status: 200, statusText: "OK", data, paymentMade: true, amountPaid: 1_250_000,
-    })),
-  ];
-  for (const value of cases) {
+  const launchWith = (value: unknown): AwalX402LaunchPort => () => {
+    const child = new EventEmitter() as EventEmitter & { pid: number; stdout: EventEmitter; stderr: EventEmitter; kill(): boolean };
+    child.pid = 42; child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => true;
+    queueMicrotask(() => { child.emit("spawn"); child.stdout.emit("data", Buffer.from(JSON.stringify(value))); child.emit("close", 0); });
+    return child;
+  };
+  const input = { url: X402_URL, amountAtomic: X402_REQUIREMENTS.amount, correlationId: "a".repeat(64), requestDigest: "b".repeat(64) };
+  for (const data of sellerValues) {
+    const result = await new AwalX402Adapter(async () => "/exact/awal",
+      launchWith({ status: 200, statusText: "OK", data, paymentMade: true, amountPaid: 1_250_000 })).execute(input);
+    assert.equal(result.disposition, "seller_result", JSON.stringify(data));
+    assert.deepEqual(JSON.parse((result as { result: { canonical_json: string } }).result.canonical_json), data);
+  }
+  const secret = await new AwalX402Adapter(async () => "/exact/awal", launchWith({ status: 200, statusText: "OK",
+    data: { sessionToken: "PROTECTED_CANARY", nested: { password: "PROTECTED_CANARY", note: "kept" } },
+    paymentMade: true, amountPaid: 1_250_000 })).execute(input);
+  assert.equal(secret.disposition, "seller_result");
+  assert.equal(JSON.stringify(secret).includes("PROTECTED_CANARY"), false);
+  assert.deepEqual(JSON.parse((secret as { result: { canonical_json: string } }).result.canonical_json),
+    { nested: { note: "kept", password: "[redacted]" }, sessionToken: "[redacted]" });
+  for (const value of protocolCases) {
     const launch: AwalX402LaunchPort = () => {
       const child = new EventEmitter() as EventEmitter & { pid: number; stdout: EventEmitter; stderr: EventEmitter; kill(): boolean };
       child.pid = 42;
@@ -829,10 +845,6 @@ test("AWAL x402 treats non-2xx, partial payment metadata, amount mismatch and pr
       requestDigest: "b".repeat(64),
     });
     assert.equal(result.disposition, "ambiguous");
-    for (const protectedValue of [
-      "owner@example.com", "Bearer", "eyJhbGci", "protected-session", "protected-cookie",
-      "/Users/tony", "PRIVATE KEY", "AbCdEfGh", "123456", "OTP", "one-time code", "PROTECTED_CANARY",
-    ]) assert.equal(JSON.stringify(result).includes(protectedValue), false);
   }
 });
 
@@ -968,9 +980,9 @@ test("AWAL x402 zeroizes captured provider buffers on process, size and timeout 
   assert.equal(launchFailure.disposition, "not_started");
 });
 
-test("durable validation downgrades injected protected seller values without persistence or replay", async (t) => {
-  const canary = "owner@example.com";
-  const canonical = canonicalJson({ neutral: canary });
+test("durable validation downgrades an injected unredacted secret field without persistence or replay", async (t) => {
+  const canary = "owner-password-canary";
+  const canonical = canonicalJson({ password: canary });
   const effect = new FixtureX402();
   effect.result = {
     disposition: "seller_result",
@@ -1004,7 +1016,7 @@ test("protected seller values cannot cross CLI or MCP output surfaces", async (t
   for (const surface of ["cli", "mcp"] as const) {
     await t.test(surface, async (sub) => {
       const canary = "one-time code 123456";
-      const canonical = canonicalJson({ neutral: canary });
+      const canonical = canonicalJson({ privateKey: canary });
       const effect = new FixtureX402();
       effect.result = {
         disposition: "seller_result",
@@ -1399,29 +1411,39 @@ test("staged preparation crash boundaries are addressable and only explicit resu
   });
 });
 
-test("full normalized RPC URL is frozen for approve and every settlement observation", async (t) => {
-  await t.test("approve path/query drift", async (sub) => {
+test("a provider x402 operation is bound to Base, not to one RPC URL, for approve and every observation", async (t) => {
+  await t.test("approve through another Base URL", async (sub) => {
     const fixture = await setup(sub);
-    const operationId = await prepare(fixture.core, "provider-rpc-approve-drift");
-    const drifted = restartedCore(fixture, "https://rpc.example/other?tenant=two");
-    const response = await drifted.execute({ command: "x402.fetch.approve", operationId });
-    assert.equal(response.ok, false);
-    assert.equal(response.error?.code, "APN_REPREPARE_REQUIRED");
-    assert.equal(fixture.effect.calls.length, 0);
+    const operationId = await prepare(fixture.core, "provider-rpc-approve-rotated");
+    const rotated = restartedCore(fixture, "https://rpc.example/other?tenant=two");
+    const response = await rotated.execute({ command: "x402.fetch.approve", operationId });
+    assert.equal(response.ok, true, JSON.stringify(response));
+    assert.equal(fixture.effect.calls.length, 1);
+    const repeated = await rotated.execute({ command: "x402.fetch.prepare", profile: "provider-one", url: X402_URL,
+      idempotencyKey: "provider-rpc-approve-rotated", maxAmountAtomic: "2000000" });
+    assert.equal((repeated.operation as { operationId?: unknown }).operationId, operationId,
+      "the same key through another RPC URL is the same operation");
   });
 
-  await t.test("resume path/query drift", async (sub) => {
+  await t.test("resume through another Base URL", async (sub) => {
     const fixture = await setup(sub);
-    const operationId = await prepare(fixture.core, "provider-rpc-resume-drift");
+    const operationId = await prepare(fixture.core, "provider-rpc-resume-rotated");
     await fixture.core.execute({ command: "x402.fetch.approve", operationId });
     armExactSettlement(fixture);
-    const transferCalls = fixture.rpc.transferCalls;
-    const drifted = restartedCore(fixture, "https://rpc.example/other?tenant=two");
-    const response = await drifted.execute({ command: "operation.resume", operationId });
-    assert.equal(response.ok, false);
-    assert.equal(response.error?.code, "APN_RPC_CONFIG");
-    assert.equal(fixture.rpc.transferCalls, transferCalls);
+    const rotated = restartedCore(fixture, "https://rpc.example/other?tenant=two");
+    const response = await rotated.execute({ command: "operation.resume", operationId });
+    assert.equal(response.ok, true, JSON.stringify(response));
+    assert.equal((response.operation as { state?: unknown }).state, "completed");
     assert.equal(fixture.effect.calls.length, 1);
+  });
+
+  await t.test("chain mismatch still refuses", async (sub) => {
+    const fixture = await setup(sub);
+    const operationId = await prepare(fixture.core, "provider-rpc-wrong-chain");
+    fixture.rpc.chainId = 1;
+    const response = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+    assert.equal(response.ok, false);
+    assert.equal(fixture.effect.calls.length, 0);
   });
 });
 
@@ -1860,7 +1882,7 @@ test("fixed-window settlement rejects zero, multiple, another, reverted and unav
   }
 });
 
-test("frozen settlement lower-block mismatch is durable ambiguity and can never complete", async (t) => {
+test("a frozen lower-block mismatch is ambiguity while it lasts and a transient RPC error is never a contradiction", async (t) => {
   const fixture = await setup(t);
   const operationId = await prepare(fixture.core, "provider-lower-block-mismatch");
   await fixture.core.execute({ command: "x402.fetch.approve", operationId });
@@ -1880,10 +1902,24 @@ test("frozen settlement lower-block mismatch is durable ambiguity and can never 
   fixture.rpc.blockHashOverrides.set("1000", `0x${"f".repeat(64)}` as Hex);
   const mismatch = await fixture.core.execute({ command: "operation.resume", operationId });
   assert.equal((mismatch.operation as { state?: unknown }).state, "ambiguous_effect");
+  assert.equal((mismatch.operation as { reason?: unknown }).reason, "settlement_evidence_contradiction");
   fixture.rpc.blockHashOverrides.delete("1000");
-  const recoveredRpc = await fixture.core.execute({ command: "operation.resume", operationId });
-  assert.equal((recoveredRpc.operation as { state?: unknown }).state, "ambiguous_effect");
+  const consistent = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((consistent.operation as { state?: unknown }).state, "completed", JSON.stringify(consistent));
   assert.equal(fixture.effect.calls.length, 1);
+
+  // An HTTP 429/5xx surfaces as APN_RPC_PROTOCOL from the RPC client; it must stay retryable.
+  const other = await setup(t);
+  const otherId = await prepare(other.core, "provider-transient-503");
+  await other.core.execute({ command: "x402.fetch.approve", operationId: otherId });
+  armExactSettlement(other);
+  const original = other.rpc.getX402TransferLogs.bind(other.rpc);
+  other.rpc.getX402TransferLogs = async () => { throw new ApnError("APN_RPC_PROTOCOL", "RPC HTTP 503"); };
+  const transient = await other.core.execute({ command: "operation.resume", operationId: otherId });
+  assert.equal((transient.operation as { reason?: unknown }).reason, "provider_evidence_capability_gap");
+  other.rpc.getX402TransferLogs = original;
+  const settled = await other.core.execute({ command: "operation.resume", operationId: otherId });
+  assert.equal((settled.operation as { state?: unknown }).state, "completed", JSON.stringify(settled));
 });
 
 test("started persistence, same-operation races and exact spend without seller result terminalize once without replay", async (t) => {
@@ -2210,7 +2246,7 @@ test("exact-transaction recovery fails closed for every receipt, canonicality an
       const durable = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
       assert.equal(durable?.state, "ambiguous_effect");
       assert.equal(durable?.terminal, false);
-      assert.equal(durable?.transactionRecovery?.stage, "bound");
+      assert.equal(durable?.transactionRecovery, undefined, "a hash that does not qualify never binds the operation");
       assert.equal(durable?.settlementEvidence, undefined);
       assert.equal(await new ProviderX402Repository(fixture.temporary.root).loadReceipt(fixture.profile.profile_hash, operationId), null);
       assert.equal(fixture.rpc.transferCalls, beforeRangeCalls);
@@ -2275,6 +2311,12 @@ test("exact-transaction recovery converges across concurrency, crash boundaries 
     });
     assert.equal(first.error?.code, "APN_X402_RECOVERY_AMBIGUOUS");
     const repository = new ProviderX402Repository(fixture.temporary.root);
+    assert.equal((await repository.findOperation(operationId))?.transactionRecovery, undefined);
+    armTransactionReceipt(fixture);
+    const committed = await fixture.core.execute({
+      command: "operation.recover-transaction-settlement", operationId, transactionHash: TRANSACTION, idempotencyKey: key,
+    });
+    assert.equal(committed.ok, true, JSON.stringify(committed));
     const before = await repository.findOperation(operationId);
     for (const request of [
       { transactionHash: `0x${"d".repeat(64)}`, idempotencyKey: key },
@@ -2300,6 +2342,64 @@ test("exact-transaction recovery converges across concurrency, crash boundaries 
       createdAt: fixture.clock.now().toISOString(),
     }), (error: unknown) => hasCode(error, "APN_IDEMPOTENCY_CONFLICT"));
   });
+});
+
+test("exact-transaction recovery binds the transfer to this operation's own payment window", async (t) => {
+  await t.test("an older identical transfer is refused and never binds", async (sub) => {
+    const fixture = await setup(sub, { effect: ambiguousEffect() });
+    const operationId = await legacyCapabilityGap(fixture, "provider-exact-older-transfer");
+    const older = exactTransfer(1000n);
+    fixture.rpc.x402Receipt = { transactionHash: TRANSACTION, status: "success", blockNumber: older.blockNumber,
+      blockHash: older.blockHash, logs: [older], observedAt: fixture.clock.now().toISOString(), rpcOrigin: fixture.rpc.rpcOrigin };
+    const refused = await fixture.core.execute({ command: "operation.recover-transaction-settlement", operationId,
+      transactionHash: TRANSACTION, idempotencyKey: "provider-exact-older-transfer-recovery" });
+    assert.equal(refused.error?.code, "APN_X402_SETTLEMENT_INVALID");
+    const durable = await new ProviderX402Repository(fixture.temporary.root).findOperation(operationId);
+    assert.equal(durable?.terminal, false);
+    assert.equal(durable?.transactionRecovery, undefined);
+  });
+
+  await t.test("a transfer already proving another operation is refused", async (sub) => {
+    const fixture = await setup(sub, { effect: ambiguousEffect() });
+    const first = await legacyCapabilityGap(fixture, "provider-exact-claimed-first");
+    armTransactionReceipt(fixture);
+    const claimed = await fixture.core.execute({ command: "operation.recover-transaction-settlement", operationId: first,
+      transactionHash: TRANSACTION, idempotencyKey: "provider-exact-claimed-first-recovery" });
+    assert.equal(claimed.ok, true, JSON.stringify(claimed));
+    fixture.reads.observedAt = fixture.clock.now().toISOString();
+    const second = await legacyCapabilityGap(fixture, "provider-exact-claimed-second");
+    const reused = await fixture.core.execute({ command: "operation.recover-transaction-settlement", operationId: second,
+      transactionHash: TRANSACTION, idempotencyKey: "provider-exact-claimed-second-recovery" });
+    assert.equal(reused.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+    assert.equal((await new ProviderX402Repository(fixture.temporary.root).findOperation(second))?.terminal, false);
+  });
+});
+
+test("a provider payment whose settlement cannot be proven unique is owner-abandoned only after its evidence window (R4)", async (t) => {
+  const fixture = await setup(t);
+  const operationId = await prepare(fixture.core, "provider-abandon-not-unique");
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const calls: unknown[] = [];
+  const owner = new ApnCore({ state: new StateStore(fixture.temporary.root, { lockWaitMs: 1_000 }),
+    profileRepository: new StateProfileRepository(fixture.state), providerRegistry: fixture.registry, policy: fixture.policy,
+    rpc: fixture.rpc, http: fixture.http, rpcUrl: "https://rpc.example/base?tenant=one", clock: fixture.clock,
+    operationAbandonApproval: { approve: async (intent) => { calls.push(intent); } } });
+  const early = await owner.execute({ command: "operation.abandon", operationId });
+  assert.equal(early.error?.code, "APN_OPERATION_BLOCKED");
+  armExactSettlement(fixture);
+  fixture.rpc.transferLogs = [exactTransfer(1010n), { ...exactTransfer(1012n), transactionHash: `0x${"d".repeat(64)}` as Hex }];
+  const ambiguous = await owner.execute({ command: "operation.resume", operationId });
+  assert.equal((ambiguous.operation as { reason?: unknown }).reason, "settlement_not_unique", JSON.stringify(ambiguous));
+  const abandoned = await owner.execute({ command: "operation.abandon", operationId });
+  assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+  assert.equal((abandoned.operation as { state?: unknown }).state, "abandoned_unknown");
+  assert.equal(calls.length, 1);
+  const receipt = await owner.execute({ command: "receipt.get", operationId });
+  assert.equal((receipt.receipt as { terminalState?: unknown }).terminalState, "abandoned_unknown", JSON.stringify(receipt));
+  assert.equal(fixture.effect.calls.length, 1, "abandonment never pays again");
+  const repeated = await owner.execute({ command: "operation.abandon", operationId });
+  assert.equal((repeated.operation as { state?: unknown }).state, "abandoned_unknown");
+  assert.equal(calls.length, 1);
 });
 
 function ambiguousEffect(): FixtureX402 {

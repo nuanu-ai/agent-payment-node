@@ -109,10 +109,10 @@ async function scanRange(call, intent, childHash, cursor, expiry, safeHead, star
         rpcBlock(call, quantity(start)).then(result => result.block),
         rpcBlock(call, quantity(end)).then(result => result.block),
     ]);
-    const registry = saRegistry(8453), facilitator = intent.provider.facilitatorAddresses[0];
+    // The child delegation hash is unique to this operation; any approved facilitator may be the redeemer.
+    const registry = saRegistry(8453);
     const childFilter = { address: registry.protocol.amount.address, fromBlock: quantity(start), toBlock: quantity(end),
-        topics: [SA_INCREASED_SPENT_TOPIC, addressWord(registry.protocol.manager.address), addressWord(facilitator),
-            childHash] };
+        topics: [SA_INCREASED_SPENT_TOPIC, addressWord(registry.protocol.manager.address), null, childHash] };
     const transferFilter = { address: registry.token.address, fromBlock: quantity(start), toBlock: quantity(end),
         topics: [SA_TRANSFER_TOPIC, addressWord(intent.binding.ownerAddress), addressWord(intent.request.recipient)] };
     const childRaw = await call("eth_getLogs", [childFilter]);

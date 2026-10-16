@@ -5,10 +5,10 @@ import { accountBindingHash, capabilityHash, markProviderProfileDrift, } from ".
 import { findPendingProviderPermission } from "./provider-permission-discovery.js";
 import { publicPendingPermissionProfile, publicPermissionProfile } from "./provider-permission-output.js";
 import { permissionBalance, publicProfile } from "./provider-wallet-output.js";
-import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
+import { previewProviderProfile, upgradeProviderProfile } from "./provider-profile-upgrade.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
-import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
+import { assertWalletLifecycleAvailable, walletLifecycleMutable } from "./wallet-lifecycle-guard.js";
 import { OperationService } from "./operation-service.js";
 export class ProviderWalletService {
     context;
@@ -120,7 +120,6 @@ export class ProviderWalletService {
         if (initial === null) {
             if (this.context.providerRegistry === undefined || await this.context.state.loadWallet(profileHash) !== null)
                 return null;
-            await assertWalletLifecycleAvailable(this.context, profileHash);
             const pending = await findPendingProviderPermission(this.context.requireProviderRegistry(), profileHash);
             if (pending === null)
                 return null;
@@ -134,7 +133,7 @@ export class ProviderWalletService {
                 return null;
             if (current === null && this.context.providerRegistry === undefined)
                 return null;
-            await assertWalletLifecycleAvailable(this.context, profileHash);
+            const mutable = await walletLifecycleMutable(this.context, profileHash);
             if (current === null) {
                 if (this.context.providerRegistry === undefined)
                     return null;
@@ -142,20 +141,22 @@ export class ProviderWalletService {
                 return pending === null ? null : publicPendingPermissionProfile(profile, pending.adapter, pending.permission);
             }
             const adapter = this.context.requireProviderRegistry().resolve(current.provider_id);
-            current = await upgradeProviderProfile(adapter, current, repository);
+            current = mutable ? await upgradeProviderProfile(adapter, current, repository) : await previewProviderProfile(adapter, current);
             if (adapter.permissions !== undefined) {
                 let permission = await adapter.permissions.read(profileHash);
                 if (permission === null) {
                     throw new ApnError("APN_STATE_CORRUPT", "The Smart Account profile has no committed permission record.");
                 }
-                if (permission.state === "grant_committed_pending_profile") {
+                if (mutable && permission.state === "grant_committed_pending_profile") {
                     permission = await adapter.permissions.activate(profileHash);
                 }
                 const observed = permissionObservation(adapter, permission);
-                const checked = sameBinding(current, observed)
-                    ? alignPermissionProfile(current, adapter, permission)
-                    : alignPermissionRevision(markProviderProfileDrift(current, observed), permission);
-                if (checked !== current)
+                const checked = !mutable
+                    ? sameBinding(current, observed) ? current : markProviderProfileDrift(current, observed)
+                    : sameBinding(current, observed)
+                        ? alignPermissionProfile(current, adapter, permission)
+                        : alignPermissionRevision(markProviderProfileDrift(current, observed), permission);
+                if (mutable && checked !== current)
                     await repository.save(checked);
                 return publicPermissionProfile(checked, permission, true);
             }
@@ -172,7 +173,7 @@ export class ProviderWalletService {
             const drifted = current.drift.state === "bound" && !sameBinding(current, observed)
                 ? markProviderProfileDrift(current, observed)
                 : current;
-            if (drifted !== current)
+            if (mutable && drifted !== current)
                 await repository.save(drifted);
             return publicProfile(drifted, true);
         });
@@ -187,25 +188,26 @@ export class ProviderWalletService {
             return null;
         await this.context.ready();
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-            await assertWalletLifecycleAvailable(this.context, profileHash);
+            const mutable = await walletLifecycleMutable(this.context, profileHash);
             let bound = await this.context.requireProfileRepository().load(profileHash);
             if (bound === null || bound.provider_id === "local") {
                 throw new ApnError("APN_STATE_CORRUPT", "Provider profile changed during balance read.");
             }
             const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
-            bound = await upgradeProviderProfile(adapter, bound, this.context.requireProfileRepository());
+            bound = mutable ? await upgradeProviderProfile(adapter, bound, this.context.requireProfileRepository())
+                : await previewProviderProfile(adapter, bound);
             if (adapter.permissions !== undefined) {
                 let permission = await adapter.permissions.read(profileHash);
                 if (permission === null) {
                     throw new ApnError("APN_STATE_CORRUPT", "The Smart Account profile has no committed permission record.");
                 }
-                if (permission.state === "grant_committed_pending_profile") {
+                if (mutable && permission.state === "grant_committed_pending_profile") {
                     permission = await adapter.permissions.activate(profileHash);
                 }
                 const observed = permissionObservation(adapter, permission);
                 if (!sameBinding(bound, observed) || bound.drift.state !== "bound") {
                     const drifted = bound.drift.state === "bound" ? markProviderProfileDrift(bound, observed) : bound;
-                    if (drifted !== bound)
+                    if (mutable && drifted !== bound)
                         await this.context.requireProfileRepository().save(drifted);
                     throw new ApnError("APN_PROFILE_DRIFT", "Provider identity or capabilities changed; balance remains unavailable until a new foreground identity is created.");
                 }

@@ -4,10 +4,10 @@ import { findPendingProviderPermission } from "./provider-permission-discovery.j
 import { publicPendingPermissionProfile, publicPermissionProfile } from "./provider-permission-output.js";
 import type { ProviderPermissionBinding, ProviderPermissionLifecyclePort } from "./provider-ports.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
-import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
+import { previewProviderProfile, upgradeProviderProfile } from "./provider-profile-upgrade.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalProfile } from "./wallet-policy.js";
-import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
+import { assertWalletLifecycleAvailable, walletLifecycleMutable } from "./wallet-lifecycle-guard.js";
 
 type PermissionCommand = Extract<CommandRequest, {
   readonly command: "wallet.permission.list" | "wallet.permission.sync" |
@@ -22,7 +22,10 @@ export class ProviderPermissionService {
     await this.context.ready();
     const profileHash = this.context.state.profileHash(profile);
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-      await assertWalletLifecycleAvailable(this.context, profileHash);
+      // Listing never waits for a money operation; it only skips profile upkeep while one is in flight.
+      const mutable = request.command === "wallet.permission.list"
+        ? await walletLifecycleMutable(this.context, profileHash)
+        : (await assertWalletLifecycleAvailable(this.context, profileHash), true);
       const repository = this.context.requireProfileRepository();
       let bound = await repository.load(profileHash);
       if (bound === null || bound.provider_id === "local") {
@@ -44,7 +47,7 @@ export class ProviderPermissionService {
         );
       }
       const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
-      bound = await upgradeProviderProfile(adapter, bound, repository);
+      bound = mutable ? await upgradeProviderProfile(adapter, bound, repository) : await previewProviderProfile(adapter, bound);
       const permissions = requirePermissions(adapter.permissions);
       if (request.command === "wallet.permission.forget") {
         assertExpectedRevision(bound, request.expectedRevision);
@@ -63,7 +66,7 @@ export class ProviderPermissionService {
           : await permissions.disable(profileHash, current.revision);
       }
       if (permission === null) throw new ApnError("APN_STATE_CORRUPT", "The provider profile has no committed permission.");
-      const aligned = alignRevision(bound, permission);
+      const aligned = mutable ? alignRevision(bound, permission) : bound;
       if (aligned !== bound) await repository.save(aligned);
       return publicPermissionProfile(aligned, permission, true);
     });

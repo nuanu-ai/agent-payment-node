@@ -37,6 +37,18 @@ export class ProviderX402TransactionRecoveryService {
             this.assertCompatible(operation, transactionHash, idempotencyDigest, materialDigest);
             if (operation.terminal)
                 return await this.projectCommitted(operation);
+            await this.assertTransactionUnclaimed(operationId, transactionHash);
+            // Read-only evidence comes first, so a hash that does not qualify never binds the operation.
+            const evidence = operation.transactionRecovery?.stage === "evidence_validated" ? undefined : await this.evidence().observe({
+                chainId: "8453",
+                transactionHash,
+                token: operation.requirement.token,
+                payer: operation.provider.payer,
+                payee: operation.requirement.payee,
+                amountAtomic: operation.requirement.amountAtomic,
+            });
+            if (evidence !== undefined)
+                assertWithinPaymentWindow(operation, evidence);
             const reservation = await this.repository.reserveTransactionRecovery({
                 operationId,
                 profileHash: operation.profileHash,
@@ -62,16 +74,7 @@ export class ProviderX402TransactionRecoveryService {
                     transactionRecovery: binding,
                 }, reservation.createdAt);
             }
-            if (operation.transactionRecovery?.stage === "bound") {
-                const evidence = await this.evidence().observe({
-                    chainId: "8453",
-                    transactionHash,
-                    token: operation.requirement.token,
-                    payer: operation.provider.payer,
-                    payee: operation.requirement.payee,
-                    amountAtomic: operation.requirement.amountAtomic,
-                    rpcOriginHash: operation.rpcOriginHash,
-                });
+            if (operation.transactionRecovery?.stage === "bound" && evidence !== undefined) {
                 const at = this.context.clock.now().toISOString();
                 const binding = sealRecoveryBinding({
                     ...withoutIntegrity(operation.transactionRecovery),
@@ -98,6 +101,14 @@ export class ProviderX402TransactionRecoveryService {
     evidence() {
         return this.context.providerTransactionEvidence ?? new BaseExactTransactionEvidence(this.context.requireRpc());
     }
+    /** A transaction already proving another provider payment can never prove this one. */
+    async assertTransactionUnclaimed(operationId, transactionHash) {
+        for (const other of await this.repository.listAllOperations()) {
+            if (other.operationId !== operationId && other.settlementEvidence?.transactionHash === transactionHash) {
+                throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "The transaction already proves another provider x402 payment.");
+            }
+        }
+    }
     async requiredOperation(profileHash, operationId) {
         const operation = await this.repository.loadOperation(profileHash, operationId);
         if (operation === null)
@@ -117,7 +128,7 @@ export class ProviderX402TransactionRecoveryService {
             return;
         }
         if (operation.state !== "ambiguous_effect" || operation.sellerResult !== undefined ||
-            operation.immutableUpperBlock !== undefined ||
+            operation.evidenceLowerBlock === undefined ||
             (operation.settlementEvidence !== undefined && operation.settlementEvidence.schemaVersion !== "apn.provider-x402.transaction-settlement.v1") ||
             (binding === undefined && ![
                 "provider_evidence_capability_gap", "provider_result_invalid",
@@ -135,6 +146,13 @@ export class ProviderX402TransactionRecoveryService {
         await this.repository.writeOperation(updated);
         return updated;
     }
+}
+/** The transfer must land after this operation's own approval started and, once frozen, inside its evidence window. */
+function assertWithinPaymentWindow(operation, evidence) {
+    const block = BigInt(evidence.receiptBlock.number);
+    if (block <= BigInt(operation.evidenceLowerBlock.number) ||
+        (operation.immutableUpperBlock !== undefined && block > BigInt(operation.immutableUpperBlock.number)))
+        throw new ApnError("APN_X402_SETTLEMENT_INVALID", "The named transaction lies outside this operation's payment window.");
 }
 function canonicalTransactionHash(value) {
     if (!/^0x[0-9a-fA-F]{64}$/u.test(value) || /^0x0{64}$/iu.test(value)) {

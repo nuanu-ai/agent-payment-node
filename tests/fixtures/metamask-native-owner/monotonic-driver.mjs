@@ -65,6 +65,19 @@ try {
  const originalRun=NodeMetaMaskProcessRunner.prototype.runJson;
  NodeMetaMaskProcessRunner.prototype.runJson=async function(argv,...rest){if(scenario==='paused-wall-financial'&&argv[0]==='wallet'&&argv[1]==='send-transaction'||scenario==='paused-wall-policy'&&markerAt&&argv[0]==='auth'&&!slowRead){slowRead=true;const originalResolver=this.binResolver,originalLaunch=this.capturedLaunch;this.binResolver=async()=>{await new Promise(r=>setTimeout(r,2600));return originalResolver();};this.capturedLaunch=(...args)=>{if(argv[1]==='send-transaction')sendAt=performance.now();return originalLaunch(...args);};}return originalRun.call(this,argv,...rest);};
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
+ if(scenario!=='paused-wall-financial'){
+   // The scope deadline passes before the vendor child starts: proven no hand-off closes as failed_before_effect (R4).
+   await assert.rejects(()=>owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001'));
+   const children=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse),sent=children.filter(a=>a[1]==='send-transaction');
+   assert.equal(sent.length,0);assert.equal(sendAt,0);
+   const files=await readdir(join(root,'metamask-native-operations')),journal=JSON.parse(await readFile(join(root,'metamask-native-operations',files[0]),'utf8'));
+   assert.equal(journal.state,'failed_before_effect');assert.equal(journal.effectAttempts,1);
+   const {AssetUsageLedger}=await import(moduleUrl('asset-usage-ledger.js'));const ledger=new AssetUsageLedger(root);
+   assert.equal((await ledger.usage({account:address,chain:'eip155:1',asset:{kind:'native',identifier:null}},new Date())).amountAtomic,'0');
+   process.stdout.write(JSON.stringify({TEST_ORIGINAL_MONOTONIC_BOUND:true,scenario,scopeWindowMs:3000,markerToReturnMs:performance.now()-markerAt,childCount:sent.length,finalState:journal.state,effectAttempts:journal.effectAttempts})+'\n');
+   process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
+   await rm(root,{recursive:true,force:true});await rm(temp,{recursive:true,force:true});process.exit(0);
+ }
  const result=await owner.runFixedMetaMaskNativeTransfer(root,1,'native-test-static-0001');
  const children=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse),sent=children.filter(a=>a[1]==='send-transaction');
  assert.equal(result.effect_attempts,1);assert.equal(result.state,'unknown');assert.equal(sent.length,0);assert.equal(sendAt,0);

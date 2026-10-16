@@ -18,7 +18,7 @@ const EDGES: Readonly<Record<MetaMaskGaslessState, readonly MetaMaskGaslessState
   dispatch_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed"],
   submitted_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
   unknown_finality: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
-  failed_effects_pending: ["failed_effects_pending", "completed"],
+  failed_effects_pending: ["failed_effects_pending", "completed", "abandoned_unknown"],
   completed: [], failed_before_effect: [], abandoned_unknown: [],
 };
 
@@ -75,7 +75,7 @@ function step(previous: MetaMaskGaslessTransition, next: MetaMaskGaslessTransiti
     const p = BigInt(previous.cursor.previousEndBlock.numberAtomic), n = BigInt(next.cursor.previousEndBlock.numberAtomic);
     if (n < p || (n === p && !mmSame(previous.cursor.previousEndBlock, next.cursor.previousEndBlock))) corrupt();
   }
-  if (previous.state === "failed_effects_pending" && next.state !== "failed_effects_pending" && next.state !== "completed") corrupt();
+  if (previous.state === "failed_effects_pending" && !["failed_effects_pending", "completed", "abandoned_unknown"].includes(next.state)) corrupt();
   if (previous.state !== "failed_effects_pending" && next.state === "failed_effects_pending" &&
     next.observation?.phase !== "reverted") corrupt();
   if (previous.state === "failed_effects_pending" && next.state === "failed_effects_pending" &&

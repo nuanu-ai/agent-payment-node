@@ -7,7 +7,7 @@ import type {
   X402ExecutionPort,
 } from "./provider-ports.js";
 import { providerX402InvocationIntentHash } from "./provider-x402-model.js";
-import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeNormalizedProviderJson, canonicalizeSellerResultJson } from "./normalized-provider-json.js";
 import {
   isConflictingProviderX402OuterKey,
   providerX402RejectionShape,
@@ -235,7 +235,7 @@ function parseSellerResult(bytes: Buffer, expectedAmount: string): ProviderX402S
     ))
   ) throw protocol();
   let canonical: string;
-  try { canonical = canonicalizeNormalizedProviderJson(value.data); }
+  try { canonical = canonicalizeSellerResultJson(value.data); }
   catch { throw protocol(); }
   const length = Buffer.byteLength(canonical, "utf8");
   if (length > MAX_OUTPUT_BYTES) throw protocol();

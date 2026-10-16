@@ -28,9 +28,17 @@ export class SmartAccountGaslessOperationRepository extends SecureStateStore {
             corrupt();
         return op;
     }
+    /** Reads only files named by this ID, so another saved operation can never break this lookup. */
     async findOperation(operationId) {
         stateIdentifier(operationId, "Smart Account gasless operation ID");
-        const matches = (await this.listAllOperations()).filter(op => op.operationId === operationId);
+        const matches = [];
+        for (const entry of await this.readDirectory(OPERATIONS)) {
+            if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name))
+                corrupt();
+            const op = await this.loadOperation(entry.name, operationId);
+            if (op !== null)
+                matches.push(op);
+        }
         if (matches.length > 1)
             corrupt();
         return matches[0] ?? null;
