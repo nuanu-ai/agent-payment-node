@@ -1,6 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { validateEconomics } from "../transfer-policy.js";
 import { bridgeNativePrincipal } from "./asset-registry.js";
+import { bridgeDeploymentCheck } from "./deployment-check.js";
 import { bridgeDeployment } from "./deployments.js";
 import { ApnError } from "../errors.js";
 import { approvalData } from "./transaction.js";
@@ -197,30 +198,33 @@ async function preSignRpc(input, work) {
 function rpcBoundary(role, stage, chainRole, chainId, category) {
     return { effectRole: role, stage, chainRole, chainId, category };
 }
-export async function guardBridgeEffect(op, role, source, destination, now) {
+/**
+ * The full pre-sign guard of one unsent effect. The source deployment check (deployment-check.ts) is read in the same POST
+ * as the account at the head the transaction executes against; it verifies the reviewed pins directly, so the identity
+ * frozen at prepare is a record, not a comparand (an upgraded APN that re-pins a lane checks its own pins). The destination
+ * reads only where delivery depends on third-party routing. `deploymentCheck` is false only for a re-check in the same
+ * invocation after a full guard passed with no consent wait between (P2); nonce, allowance, balance, simulation and fees
+ * are read fresh every time.
+ */
+export async function guardBridgeEffect(op, role, source, destination, now, deploymentCheck = true) {
     assertBridgeRemaining(op, now());
     const i = op.intent, m = i.materialization, effect = op.effects.find((e) => e.role === role);
-    const proofBinding = bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt);
-    if (proofBinding === null)
+    if (bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt) === null)
         bridgeFailure("APN_STATE_CORRUPT", "bridge_deployment_proof_verifier_changed");
     if (op.terminal || effect === undefined || effect.submissionAttempts !== 0)
         bridgeFailure("APN_OPERATION_BLOCKED", "bridge_first_send_only");
     // The guard binds chain identity, not the endpoint URL: every read checks eth_chainId, so a user may swap a failing RPC.
     if (source.chainId !== m.request.fromChainId || destination.chainId !== m.request.toChainId)
         bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_chain_identity");
-    const [sourceDeployment, destinationDeployment] = await Promise.all([
-        preSignRpc(rpcBoundary(role, "source_deployment_refresh", "source", source.chainId, "deployment_refresh"), async () => await (proofBinding === "deployment-proof-v1" ? source.refreshDeployment?.(m.tool, m.request.toChainId, m.request.fromToken, i.sourceDeployment) ?? source.deployment(m.tool, m.request.toChainId, m.request.fromToken)
-            : source.deployment(m.tool, m.request.toChainId, m.request.fromToken))),
-        preSignRpc(rpcBoundary(role, "destination_deployment_refresh", "destination", destination.chainId, "deployment_refresh"), async () => await (proofBinding === "deployment-proof-v1" ? destination.refreshDeployment?.(m.tool, m.request.fromChainId, m.request.toToken, i.destinationDeployment) ?? destination.deployment(m.tool, m.request.fromChainId, m.request.toToken)
-            : destination.deployment(m.tool, m.request.fromChainId, m.request.toToken))),
-    ]);
-    for (const [frozen, current] of [[i.sourceDeployment, sourceDeployment], [i.destinationDeployment, destinationDeployment]]) {
-        if (current.contractHash !== frozen.contractHash || current.codeHash !== frozen.codeHash || current.configurationHash !== frozen.configurationHash)
-            bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_drift");
+    const destinationCheck = bridgeDeploymentCheck(m.request.toChainId, m.request.fromChainId, m.tool, m.request.toToken, "destination");
+    if (deploymentCheck && (destinationCheck.reads.length > 0 || destinationCheck.bnbPool)) {
+        await preSignRpc(rpcBoundary(role, "destination_deployment_refresh", "destination", destination.chainId, "deployment_refresh"), async () => await destination.deploymentCheck(m.tool, m.request.fromChainId, m.request.toToken, "destination"));
     }
     const envelope = effect.envelope, c = envelope.economics;
-    const account = await preSignRpc(rpcBoundary(role, "source_account_refresh", "source", source.chainId, "account_nonce"), async () => await source.account(m.sender, m.approvalAddress, m.request.fromToken, [{ chainId: envelope.chainId, from: envelope.from,
-            to: envelope.to, data: envelope.data, valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic }]));
+    const planned = { chainId: envelope.chainId, from: envelope.from, to: envelope.to, data: envelope.data, valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic };
+    const account = await preSignRpc(rpcBoundary(role, "source_account_refresh", "source", source.chainId, "account_nonce"), async () => deploymentCheck
+        ? (await source.checkedAccount({ tool: m.tool, peerChainId: m.request.toChainId }, m.sender, m.approvalAddress, m.request.fromToken, [planned])).account
+        : await source.account(m.sender, m.approvalAddress, m.request.fromToken, [planned]));
     assertProtocolTime(m, i.decoded, account);
     if (account.latestNonceAtomic !== c.nonceAtomic || account.pendingNonceAtomic !== c.nonceAtomic)
         bridgeFailure("APN_OPERATION_BLOCKED", "bridge_nonce_changed");
@@ -229,8 +233,7 @@ export async function guardBridgeEffect(op, role, source, destination, now) {
         bridgeFailure("APN_PERMISSION_ALLOWANCE_INSUFFICIENT", "bridge_exact_allowance_changed");
     if (BigInt(account.balanceAtomic) < BigInt(m.request.amountAtomic))
         bridgeFailure("APN_INSUFFICIENT_ASSET", "source_asset_balance");
-    const estimate = await preSignRpc(rpcBoundary(role, "source_execution_simulation", "source", source.chainId, "simulation"), async () => await source.estimate({ chainId: envelope.chainId, from: envelope.from, to: envelope.to, data: envelope.data,
-        valueAtomic: envelope.valueAtomic, gasLimitAtomic: c.gasLimitAtomic }));
+    const estimate = await preSignRpc(rpcBoundary(role, "source_execution_simulation", "source", source.chainId, "simulation"), async () => await source.estimate(planned));
     // `c` is the owner-approved maximum: the preparation quote raised by the stated headroom. A fresh estimate inside
     // that maximum proceeds on the signed envelope; only an estimate above the approved maximum ends the operation.
     if (bridgeUint(estimate.gasLimitAtomic, true) > BigInt(c.gasLimitAtomic))

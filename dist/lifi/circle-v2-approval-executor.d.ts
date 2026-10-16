@@ -56,8 +56,12 @@ export declare function publicCircleApproval(record: CircleApprovalRecord): {
     failureReason?: string;
     integrityHash: string;
 };
-/** Use APN's canonical Base RPC reader, which verifies receipt membership and safe block ancestry. */
-export declare function circleApprovalRpcFromBridge(rpc: BridgeRpcPort): CircleApprovalRpc;
+/**
+ * Use APN's canonical Base RPC reader, which verifies receipt membership and safe block ancestry. Each call reads through
+ * its own command session on the primary endpoint: a state read is one batch (chain identity, head, account, Base fee
+ * inputs and the approval's own simulation), and the estimate and fee quote reuse it.
+ */
+export declare function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort)): CircleApprovalRpc;
 /** APN encrypted local wallet is opened solely in the signing call; no secret enters the journal. */
 export declare class LocalCircleApprovalSigner implements CircleApprovalSigner {
     private readonly state;

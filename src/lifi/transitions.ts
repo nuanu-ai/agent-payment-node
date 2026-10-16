@@ -17,7 +17,7 @@ export function newBridgeOperation(input: { readonly profileHash: string; readon
   return validateBridgeOperation(result);
 }
 export function transitionBridge(op: BridgeOperationRecord, patch: Partial<BridgeMutable>, at: string): BridgeOperationRecord {
-  validateBridgeOperation(op);
+  // `op` is validated by the continuity check below (and when it was loaded); the pure steps before it read nothing unsafe.
   const merged = { ...op, ...patch };
   // Telemetry is bounded and overwritten: the next transition keeps only the latest rows, so the journal cannot grow with polls.
   const next = merged.observationTelemetry === undefined ? merged

@@ -14,6 +14,7 @@ import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from ".
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
 import { newBridgeOperation } from "./transitions.js";
+import { bridgePreparePostBudget } from "./send-budget.js";
 import { bridgeExecutionDestination, bridgeExecutionSource, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
@@ -75,32 +76,32 @@ export class BridgePreparation {
                 .admit(profile, quote.owner.address, quote.request, selected.choice.tool);
             // One command-scoped read cache covers both sides of materialization. It is intentionally discarded before
             // approval or signing so mutable account, nonce and fee reads cannot cross an authority boundary. Only the
-            // provider-family scheduler/cooldown spans phases. Cold proofs retain bounded request and retry headroom.
-            const session = new RpcReadSession({ now: this.o.now, maxHttpRequests: 26, maxHttpAttempts: 28,
-                physicalBudget: new BridgeRpcPhysicalBudget(),
-                archiveDeploymentBatchMaxItems: 3, lineaArchiveDeploymentScalarCode: this.o.lineaArchiveDeploymentScalarCode === true,
+            // provider-family scheduler/cooldown spans phases. The cap is the prepare read plan with its retry headroom.
+            const posts = bridgePreparePostBudget();
+            const session = new RpcReadSession({ now: this.o.now, maxHttpRequests: posts, maxHttpAttempts: posts,
+                physicalBudget: new BridgeRpcPhysicalBudget(posts),
                 ...(this.o.providerScheduler === undefined ? {} : { providerScheduler: this.o.providerScheduler }) });
             const source = this.o.rpcFor(quote.request.fromChainId, session), destination = this.o.rpcFor(quote.request.toChainId, session);
-            const [sourceSafeBlock, destinationSafeBlock, response] = await Promise.all([
-                source.block("safe"), destination.block("safe"), this.o.provider.materialize(selected.step),
-            ]), preparedAt = new Date(this.o.now()).toISOString();
+            const response = await this.o.provider.materialize(selected.step), preparedAt = new Date(this.o.now()).toISOString();
             const parsed = materializeBridgeRoute(selected, response, quote.request, quote.owner.address), m = parsed.materialization, decoded = decodeBridgeCall(m);
             if (decoded.composite !== undefined)
                 await verifyFlyHeaderSignature(decoded.composite, BNB_COMPOSITE.signer);
-            const [sourceDeployment, destinationDeployment] = await Promise.all([
-                source.deployment(m.tool, m.request.toChainId, m.request.fromToken, sourceSafeBlock, m.tool === "stargateV2" && bridgeNativePrincipal(m.request)),
-                destination.deployment(m.tool, m.request.fromChainId, m.request.toToken, destinationSafeBlock, m.tool === "stargateV2" && bridgeNativePrincipal(m.request)),
-            ]);
             const planned = bridgeNativePrincipal(m.request) ? [m.transaction] : [{ chainId: m.request.fromChainId,
                     from: m.sender, to: m.request.fromToken, data: approvalData(m.approvalAddress, m.request.amountAtomic), valueAtomic: "0", gasLimitAtomic: "0" }];
-            const sourceAccount = await source.account(m.sender, m.approvalAddress, m.request.fromToken, planned);
+            // Two POSTs on the primary endpoints: the source check with the account at its head, and the destination head with
+            // its role's check. No archive endpoint and no safe-head history is needed to prepare.
+            const [checked, destinationDeployment] = await Promise.all([
+                source.checkedAccount({ tool: m.tool, peerChainId: m.request.toChainId }, m.sender, m.approvalAddress, m.request.fromToken, planned),
+                destination.deploymentCheck(m.tool, m.request.fromChainId, m.request.toToken, "destination"),
+            ]);
+            const sourceDeployment = checked.deployment, sourceAccount = checked.account;
             if (parsed.providerNonceAtomic !== null && parsed.providerNonceAtomic !== (BigInt(sourceAccount.latestNonceAtomic) + (bridgeApprovalRequired(m.request, sourceAccount.allowanceAtomic) ? 1n : 0n)).toString())
                 bridgeFailure("APN_PROVIDER_PROTOCOL", "provider_nonce_conflict");
             const envelopes = await freezeBridgeEnvelopes(m, sourceAccount, source);
             const expiresAt = bridgeExpiry(m, decoded, sourceAccount, preparedAt, this.o.now());
             const operation = newBridgeOperation({ profileHash, operationId, idempotencyHash, requestHash,
                 intent: { profile, quoteHash, owner: quote.owner, providerBinding: quote.providerBinding, materialization: m, decoded,
-                    sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock: destinationSafeBlock,
+                    sourceDeployment, destinationDeployment, sourceAccount, destinationStartBlock: destinationDeployment.block,
                     sourceRpcOrigin: source.origin, destinationRpcOrigin: destination.origin, preparedAt, expiresAt,
                     policyHash: bridgeApprovalPolicyHash(m),
                     implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic, allowlist },

@@ -2,7 +2,7 @@ import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { type BridgeOperationRecord } from "./operation-model.js";
-import { bridgeCorrupt, validateBridgeContinuity, validateBridgeOperation, validateLegacyBridgeOperation } from "./operation-validation.js";
+import { assertBridgeAppend, bridgeCorrupt, validateBridgeOperation, validateLegacyBridgeOperation } from "./operation-validation.js";
 import { bridgeReceipt, currentBridgeReceiptCandidates, type BridgeReceipt } from "./receipt.js";
 import { legacyBridgeReceiptCandidates } from "./receipt.js";
 import { bridgeAtTransition } from "./transitions.js";
@@ -82,8 +82,9 @@ export class BridgeOperationRepository extends SecureStateStore {
   async writeOperation(op: BridgeOperationRecord): Promise<void> {
     validateBridgeOperation(op); await this.ready();
     if (Buffer.byteLength(canonicalJson(op), "utf8") + 1 > 1024 * 1024) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_record_capacity");
+    // `op` is validated above and `previous` when it is loaded; only the append structure remains to check.
     const previous = await this.loadOperation(op.profileHash, op.operationId);
-    if (previous !== null) validateBridgeContinuity(previous, op);
+    if (previous !== null) assertBridgeAppend(previous, op);
     else if (op.state !== "awaiting_approval" || op.transitions.length !== 1) bridgeCorrupt();
     if (previous !== null && bridgeSame(previous, op)) return;
     await this.ensureDirectory(`bridge-operations/${op.profileHash}`);
@@ -227,7 +228,8 @@ function validateReceipt(value: unknown, op: BridgeOperationRecord): void {
   if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint) bridgeCorrupt();
   const { receipt_hash, ...body } = value;
   if (hashObject(body) !== receipt_hash) bridgeCorrupt();
-  const index = op.transitions.findIndex((_, i) => bridgeAtTransition(op, i).integrityHash === value.operation_binding_hash);
+  // A stored receipt binds the newest transitions; search from the end (an integrity hash names exactly one transition).
+  const index = op.transitions.findLastIndex((_, i) => bridgeAtTransition(op, i).integrityHash === value.operation_binding_hash);
   if (index < 0 || !currentBridgeReceiptCandidates(bridgeAtTransition(op, index))
     .some((candidate) => bridgeSame(value, candidate))) bridgeCorrupt();
 }

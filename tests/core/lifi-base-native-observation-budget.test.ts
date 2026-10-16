@@ -7,6 +7,7 @@ import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
 import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
 import { bridgeRpcFactory, BridgeRpcPhysicalBudget, RpcReadSession } from "../../src/lifi/rpc.js";
 import { bridgeSourceObservationRequests } from "../../src/lifi/observation-budget.js";
+import { BRIDGE_CANONICAL_OBSERVATION_POSTS } from "../../src/lifi/rpc-observation.js";
 import type { BridgeEnvelope } from "../../src/lifi/model.js";
 
 const captured = JSON.parse(await readFile("tests/core/lifi-fixtures/base-native-across-observation-rpc-20261008.json", "utf8"));
@@ -16,8 +17,7 @@ const normalize = (value: unknown): unknown => Array.isArray(value) ? value.map(
 const key = (role: string, method: string, params: unknown[]) => canonicalJson({ role, method, params: normalize(params) });
 const role = (url: string) => url.includes("publicnode.com") ? "primary" : url.includes("tenderly.co") ? "archive" : "receipt";
 
-const SOURCE_REQUESTS = bridgeSourceObservationRequests(8453, 1, "across", "0x0000000000000000000000000000000000000000", 3);
-function reader(mutation?: "configuration" | "multicall_code") {
+function reader(mutation?: "configuration" | "multicall_code", requests = BRIDGE_CANONICAL_OBSERVATION_POSTS) {
   const responses = new Map<string, unknown>();
   for (const row of captured.rows) {
     const identity = key(row.role, row.method, row.params);
@@ -33,8 +33,8 @@ function reader(mutation?: "configuration" | "multicall_code") {
   }
   let now = Date.parse(captured.capturedAt[0]);
   const wait = async (ms: number) => { now += ms; };
-  const physical = new BridgeRpcPhysicalBudget(() => now, wait);
-  const session = new RpcReadSession({ now: () => now, wait, maxHttpRequests: SOURCE_REQUESTS, maxHttpAttempts: SOURCE_REQUESTS + 2,
+  const physical = new BridgeRpcPhysicalBudget(requests + 2);
+  const session = new RpcReadSession({ now: () => now, wait, maxHttpRequests: requests, maxHttpAttempts: requests + 2,
     archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const posts: Array<{ role: string; count: number; methods: string[] }> = [];
   const read = (endpointRole: string, method: string, params: unknown[]): unknown => {
@@ -74,30 +74,35 @@ function reader(mutation?: "configuration" | "multicall_code") {
   return { rpc, session, physical, posts };
 }
 
-test("Base native Across observation and exact historical deployment fit the derived 14 POST source budget including fresh primary headers", async () => {
+test("a captured mainnet Base native Across observation replays on primary and receipt reader only, with the oracle-proven fee", async () => {
   const r = reader();
   const observed = await r.rpc.observe(captured.transactionHash, captured.envelope as BridgeEnvelope);
   assert(observed); assert(observed.transaction.safeBlock);
+  // The receipt's own fee fields give the same total the legacy pinned-oracle proof recorded at capture time.
   assert.equal(observed.transaction.actualTotalFeeWei, "899986077215");
-  assert.deepEqual(observed.transaction.block, captured.observed.transaction.block);
-  const deployment = await r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", observed.transaction.block, true);
-  assert.deepEqual(deployment, captured.historical);
-  assert.equal(SOURCE_REQUESTS, 14); assert.equal(r.session.telemetry().httpRequests, SOURCE_REQUESTS);
-  assert.equal(r.session.telemetry().httpAttempts, SOURCE_REQUESTS);
-  assert(r.physical.remaining() >= 10);
-  assert(r.posts.filter(post => post.role === "archive").every(post => post.count <= 3));
+  const { feeEvidence: current, ...transaction } = observed.transaction, { feeEvidence: legacy, ...capturedTransaction } = captured.observed.transaction;
+  assert.deepEqual(transaction, capturedTransaction); assert.equal(current.baseOracle, null); assert.notEqual(legacy.baseOracle, null);
+  // One primary batch, the scalar receipt reader's chain identity and receipt, and the inclusion header: no archive, no deployment.
+  assert.deepEqual(r.posts.map(post => post.role), ["primary", "receipt", "receipt", "primary"]);
+  assert.equal(r.session.telemetry().httpRequests, BRIDGE_CANONICAL_OBSERVATION_POSTS); assert.equal(bridgeSourceObservationRequests(1), 8);
   assert(r.posts.every(post => !post.methods.includes("eth_sendRawTransaction")));
 });
 
+test("the frozen migration proof still reproduces the captured historical deployment identity on the archive role", async () => {
+  const r = reader(undefined, 12);
+  const deployment = await r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", captured.observed.transaction.block, true);
+  assert.deepEqual(deployment, captured.historical);
+  assert(r.posts.filter(post => post.role === "archive").every(post => post.count <= 3));
+});
+
 test("Base Across aggregation still refuses a changed independently captured configuration component", async () => {
-  const r = reader("configuration");
-  const observed = await r.rpc.observe(captured.transactionHash, captured.envelope as BridgeEnvelope); assert(observed);
-  await assert.rejects(r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", observed.transaction.block, true),
+  const r = reader("configuration", 12);
+  await assert.rejects(r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", captured.observed.transaction.block, true),
     { code: "APN_PROVIDER_PROTOCOL" });
 });
 
 test("Base Across historical aggregation requires the exact reviewed Multicall bytecode", async () => {
-  const r = reader("multicall_code");
+  const r = reader("multicall_code", 12);
   await assert.rejects(r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", captured.observed.transaction.block, true),
     { code: "APN_PROVIDER_PROTOCOL" });
 });

@@ -30,4 +30,12 @@ export declare function bridgeExpiry(m: BridgeMaterialization, decoded: DecodedB
 export declare function assertBridgeRemaining(op: BridgeOperationRecord, now: number): void;
 /** A transport failure or an HTTP 408/5xx answer after its bounded retry: the endpoint was unavailable, not refusing. */
 export declare function bridgeTransientRpcFailure(error: unknown): error is ApnError;
-export declare function guardBridgeEffect(op: BridgeOperationRecord, role: "approval" | "bridge", source: BridgeRpcPort, destination: BridgeRpcPort, now: () => number): Promise<void>;
+/**
+ * The full pre-sign guard of one unsent effect. The source deployment check (deployment-check.ts) is read in the same POST
+ * as the account at the head the transaction executes against; it verifies the reviewed pins directly, so the identity
+ * frozen at prepare is a record, not a comparand (an upgraded APN that re-pins a lane checks its own pins). The destination
+ * reads only where delivery depends on third-party routing. `deploymentCheck` is false only for a re-check in the same
+ * invocation after a full guard passed with no consent wait between (P2); nonce, allowance, balance, simulation and fees
+ * are read fresh every time.
+ */
+export declare function guardBridgeEffect(op: BridgeOperationRecord, role: "approval" | "bridge", source: BridgeRpcPort, destination: BridgeRpcPort, now: () => number, deploymentCheck?: boolean): Promise<void>;

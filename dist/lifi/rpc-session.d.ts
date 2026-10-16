@@ -1,6 +1,6 @@
 import type { RpcDecoder } from "./rpc-session-helpers.js";
 import { BridgeRpcPhysicalBudget } from "./rpc-session-helpers.js";
-export { BridgeRpcPhysicalBudget, BRIDGE_INVOCATION_RPC_POST_LIMIT, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
+export { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
 export type { RpcReadMethod } from "./rpc-session-helpers.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
@@ -26,8 +26,6 @@ export interface RpcReadSessionOptions {
     readonly deadlineMs?: number;
     /** HTTP chunk bound for one atomic historical deployment read. General batches retain RPC_BATCH_MAX_ITEMS. */
     readonly archiveDeploymentBatchMaxItems?: number;
-    /** One-prepare opt-in: Linea deployment code reads use scalar archive POSTs. */
-    readonly lineaArchiveDeploymentScalarCode?: boolean;
     /** Backward-compatible alias. */
     readonly maxUniqueCalls?: number;
     readonly now?: () => number;
@@ -69,7 +67,6 @@ export declare class RpcReadSession {
     private readonly maxHttpAttempts;
     private readonly maxReadAttempts;
     private readonly archiveDeploymentBatchMaxItems;
-    private readonly lineaArchiveDeploymentScalarCode;
     private readonly now;
     private readonly wait;
     private readonly deadline;
@@ -105,8 +102,11 @@ export declare class RpcReadSession {
     /** One raw send through the same persisted provider-family pacing and cooldown as reads. */
     submit(origin: string, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall): Promise<unknown>;
     read(origin: string, chainId: BridgeChainId, method: string, params: readonly unknown[], oneAttempt: EvmRpcCall, decoder?: RpcDecoder): Promise<unknown>;
-    /** Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the one HTTP request. */
-    readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
+    /**
+     * Strict whole-batch read. Cached exact immutable/snapshot keys are removed before the HTTP request; an endpoint with a
+     * known smaller batch capability receives the same logical batch in sequential chunks, committed to the cache atomically.
+     */
+    readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T, maxItemsPerRequest?: number): Promise<{
         readonly [K in keyof T]: unknown;
     }>;
     /** One logical archive deployment read, transported sequentially in provider-sized chunks with one atomic cache commit. */

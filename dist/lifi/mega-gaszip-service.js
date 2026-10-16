@@ -77,7 +77,8 @@ export class MegaFundingService {
         if (profile !== MEGA_FUNDING.profile || bound.owner.address !== MEGA_FUNDING.owner || bound.owner.address !== input.expectedPayer)
             megaFail("expected_payer");
         const amount = megaUint(input.amountAtomic), floor = megaUint(input.minimumOutputAtomic), fee = megaUint(input.maximumFeeAtomic);
-        if (amount !== MEGA_FUNDING.maximumAmount || floor < MEGA_FUNDING.minimumOutput || fee <= 0n || fee > MEGA_FUNDING.maximumFee)
+        // The owner's own fee ceiling and delivery floor bound the effect; the asset policy and usage ledger cap the amount.
+        if (amount !== MEGA_FUNDING.maximumAmount || floor <= 0n || fee <= 0n)
             megaFail("input_caps");
         const operationId = this.state.operationId(profile, idempotency), idempotencyHash = this.state.idempotencyHash(idempotency), requestHash = hashObject(input);
         const ops = new OperationService(this.state);

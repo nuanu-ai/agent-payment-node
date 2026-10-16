@@ -37,6 +37,8 @@ async function fixture(lane:"sei"|"mega"){
   const before=anchors.find(b=>b.id==="previous")!.result.hash,after=anchors.find(b=>b.id==="block")!.result.hash;
   for(const b of balances){if(b.id==="recheck")add(mega,"eth_getBlockByNumber",[b.result.number,false],b);else add(mega,b.id==="codeBefore"?"eth_getCode":"eth_getBalance",[prepare.owner.address,{blockHash:b.id==="after"?after:before,requireCanonical:true}],b);}
  }
+ // The owner's code is now read at the latest head; replay the captured (empty) owner code for that read.
+ const code=calls.find(c=>c.method==="eth_getCode"&&c.url!==base)!;calls.push({...code,params:[prepare.owner.address,"latest"]});
  const tx=calls.find(c=>c.url===base&&c.method==="eth_getTransactionByHash")!.body.result;
  const sourceHash=tx.hash as Hex;
  const sourceRaw=serializeTransaction({type:"eip1559",chainId:8453,nonce:Number(BigInt(tx.nonce)),gas:BigInt(tx.gas),maxFeePerGas:BigInt(tx.maxFeePerGas),maxPriorityFeePerGas:BigInt(tx.maxPriorityFeePerGas),to:prepare.owner.address===MEGA_FUNDING.owner?MEGA_FUNDING.target:SEI_FUNDING.target,value:BigInt(tx.value),data:tx.input,accessList:tx.accessList},{r:tx.r,s:tx.s,yParity:Number(BigInt(tx.yParity))});
@@ -56,7 +58,11 @@ async function fixture(lane:"sei"|"mega"){
 for(const lane of ["sei","mega"] as const){
  test(`${lane} complete actual native response through production parser and independent safe net payout proof`,async()=>{
   const f=await fixture(lane),d=f.delivery();assert.equal(d.grossNative,true);assert.equal(d.amount,f.parsed.txs[0].value);
-  const proof=await (lane==="sei"?proveSeiDelivery:proveMegaDelivery)(f.rpc(),f.prepare.owner.address,d);assert.equal(proof?.amount,f.net);assert.equal(proof?.status,"success");
+  let posts=0;const counting={request:async(...args:Parameters<typeof f.transport.request>)=>{posts+=1;return await f.transport.request(...args);}};
+  const proof=await (lane==="sei"?proveSeiDelivery:proveMegaDelivery)(lane==="sei"?new SeiFundingRpc(sei,counting):new MegaFundingRpc(mega,counting),f.prepare.owner.address,d);
+  assert.equal(proof?.amount,f.net);assert.equal(proof?.status,"success");
+  // Payout, chain identity, receipt, safe head, inclusion block and the owner's current code: no historical balances (was 11).
+  assert.equal(posts,6);
  });
  for(const raisedFloor of [false,true])test(`${lane} full actual fixture normal observer ${raisedFloor?"ends a proved net below the frozen owner floor as destination_failed":"appends proof, finalizes usage, and cannot double claim"}`,async t=>{
   const f=await fixture(lane),temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root);await state.initialize();
@@ -83,9 +89,14 @@ for(const lane of ["sei","mega"] as const){
   const outcome=(lane==="sei"?inspectSeiDelivery:inspectMegaDelivery)(v,f.sourceHash,f.prepare.owner.address,f.prepare.amountAtomic) as Row;
   assert.equal(outcome.providerFailure,kind==="refund"?"provider_refund":"provider_cancelled");assert.equal(typeof outcome.providerDigest,"string");});
  });
- for(const kind of ["truncated","wrong-native","token","type","chain","receiver","status","data","minValue","extra","null-flag"] as const)test(`${lane} full provider fixture rejects ${kind}`,async()=>{
+ test(`${lane} full provider fixture tolerates fields GasZip adds later`,async()=>{
+  const f=await fixture(lane),v=structuredClone(f.parsed);v.txs[0].unknown=true;v.deposit.addedLater="x";v.addedLater=1;
+  const tolerant=(lane==="sei"?inspectSeiDelivery:inspectMegaDelivery)(v,f.sourceHash,f.prepare.owner.address,f.prepare.amountAtomic) as SeiCorrelatedDelivery;
+  const {providerDigest:_a,...withExtra}=tolerant,{providerDigest:_b,...plain}=f.delivery();assert.deepEqual(withExtra,plain);
+ });
+ for(const kind of ["truncated","wrong-native","token","type","chain","receiver","status","data","minValue","null-flag"] as const)test(`${lane} full provider fixture rejects ${kind}`,async()=>{
   const f=await fixture(lane),v=structuredClone(f.parsed);
-  if(kind==="truncated")delete v.deposit.seen;if(kind==="wrong-native")v.txs[0].valueNative="1";if(kind==="token")v.deposit.token=f.prepare.owner.address;if(kind==="type")v.deposit.type="TOKEN";if(kind==="chain")v.txs[0].chain="1";if(kind==="receiver")v.txs[0].to=SEI_FUNDING.target;if(kind==="status")v.txs[0].status="SUCCESS";if(kind==="data")v.txs[0].data="0x01";if(kind==="minValue")v.txs[0].minValue="1";if(kind==="extra")v.txs[0].unknown=true;if(kind==="null-flag")v.txs[0].refund=null;
+  if(kind==="truncated")delete v.deposit.seen;if(kind==="wrong-native")v.txs[0].valueNative="1";if(kind==="token")v.deposit.token=f.prepare.owner.address;if(kind==="type")v.deposit.type="TOKEN";if(kind==="chain")v.txs[0].chain="1";if(kind==="receiver")v.txs[0].to=SEI_FUNDING.target;if(kind==="status")v.txs[0].status="SUCCESS";if(kind==="data")v.txs[0].data="0x01";if(kind==="minValue")v.txs[0].minValue="1";if(kind==="null-flag")v.txs[0].refund=null;
   assert.throws(()=>(lane==="sei"?inspectSeiDelivery:inspectMegaDelivery)(v,f.sourceHash,f.prepare.owner.address,f.prepare.amountAtomic));
  });
  test(`${lane} pending complete fixture stays unresolved`,async()=>{const f=await fixture(lane);f.parsed.txs[0].status="PENDING";assert.equal(f.delivery(),null);});
@@ -102,13 +113,14 @@ for(const lane of ["sei","mega"] as const){
    nextActions:[`apn ${lane} funding status --operation ${record.operationId}`],reason:`${lane}_gaszip_native_signature_s`}});
   assert.deepEqual(await journal.findOperation(record.operationId),before);
  });
- for(const kind of ["gross","gas","price","net","type2","signature","receipt-fee","receipt-gas","receipt-revert","receipt-zero-gas","parent","membership","safe-pending"] as const)test(`${lane} independent public RPC fixture ${kind} cannot settle`,async()=>{
+ // No historical balance delta is read any more, so a parent-hash link is no longer part of the payout proof.
+for(const kind of ["gross","gas","price","net","type2","signature","receipt-fee","receipt-gas","receipt-revert","receipt-zero-gas","membership","safe-pending"] as const)test(`${lane} independent public RPC fixture ${kind} cannot settle`,async()=>{
   const f=await fixture(lane),d=f.delivery(),url=lane==="sei"?sei:mega;
   const tx=f.calls.find(c=>c.url===url&&c.method==="eth_getTransactionByHash")!.body.result;
   const receipt=f.calls.find(c=>c.url===url&&c.method==="eth_getTransactionReceipt")!.body.result;
   if(kind==="gross")Object.assign(d,{amount:(BigInt(d.amount)+1n).toString()});if(kind==="gas")tx.gas="0x5208";if(kind==="price")tx.gasPrice="0x1";if(kind==="net")tx.value="0x1";if(kind==="type2")tx.type="0x2";if(kind==="signature")tx.r=`0x${"1".repeat(64)}`;if(kind==="receipt-fee")receipt.effectiveGasPrice="0x1";if(kind==="receipt-gas")receipt.gasUsed="0xfffff";if(kind==="receipt-revert")receipt.status="0x0";
   if(kind==="receipt-zero-gas")receipt.gasUsed="0x0";
-  if(kind==="parent" || kind==="membership")for(const c of f.calls.filter(c=>c.url===url&&c.method==="eth_getBlockByNumber"&&c.params[0]===receipt.blockNumber)){if(kind==="parent")c.body.result.parentHash=`0x${"1".repeat(64)}`;else c.body.result.transactions=[];}
+  if(kind==="membership")for(const c of f.calls.filter(c=>c.url===url&&c.method==="eth_getBlockByNumber"&&c.params[0]===receipt.blockNumber))c.body.result.transactions=[];
   if(kind==="safe-pending"){for(const c of f.calls.filter(c=>c.url===url&&c.method==="eth_getBlockByNumber"&&c.params[0]==="safe"))c.body.result.number="0x1";assert.equal(await (lane==="sei"?proveSeiDelivery:proveMegaDelivery)(f.rpc(),f.prepare.owner.address,d),null);}
   else await assert.rejects((lane==="sei"?proveSeiDelivery:proveMegaDelivery)(f.rpc(),f.prepare.owner.address,d));
  });
@@ -120,6 +132,7 @@ async function shortScalarPayout(){
  const port=(tx:Row):SeiRpcPort=>({call:async(method:string,params:readonly unknown[])=>{
   const header=q.recordedHeaders;if(method==="eth_chainId")return header.chainId;if(method==="eth_getTransactionByHash")return structuredClone(tx);
   if(method==="eth_getBlockByNumber"&&params[0]==="safe")return header.safe;if(method==="eth_getBlockByNumber"&&params[0]===header.previous.number)return header.previous;
+  if(method==="eth_getCode"&&params[1]==="latest")return "0x";
   const c=q.calls.find((c:Row)=>c.method===method&&JSON.stringify(c.params)===JSON.stringify(params));assert.ok(c,`${method} ${JSON.stringify(params)}`);return structuredClone(c.body.result);
  }});
  return {q,captured,delivery,prove:(tx:Row)=>proveSeiDelivery(port(tx),q.owner,delivery)};

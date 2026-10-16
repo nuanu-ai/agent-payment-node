@@ -10,8 +10,6 @@ export declare const MEGA_FUNDING: Readonly<{
     target: `0x${string}`;
     data: Hex;
     maximumAmount: 10000000000000n;
-    maximumFee: 1000000000000n;
-    minimumOutput: 8000000000000n;
     mechanism: {
         provider: string;
         reference: string;

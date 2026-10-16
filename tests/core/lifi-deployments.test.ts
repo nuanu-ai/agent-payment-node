@@ -176,7 +176,7 @@ for (const chain of fixture.chains) {
       let chainCalls = 0;
       const call: EvmRpcCall = async (method, params) => {
         const value = await baseline.call(method, params);
-        if (failure === "chain" && method === "eth_chainId" && ++chainCalls >= 4) return "0xa";
+        if (failure === "chain" && method === "eth_chainId" && ++chainCalls >= 2) return "0xa";
         if (failure === "block" && method === "eth_getBlockByNumber" && params[0] === chain.safeBlock.number) return { ...(value as object), hash: `0x${"ff".repeat(32)}` };
         return value;
       };
