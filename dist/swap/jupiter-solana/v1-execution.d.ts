@@ -6,6 +6,7 @@ import type { GuardedSwapService } from "../service.js";
 import type { JupiterV1OwnerAdmission } from "./v1-admission.js";
 import { type JupiterV1ExecutionBindingStore, JupiterV1LocalSigner } from "./v1-effects.js";
 import { type SavedJupiterV1MaterialStore } from "./v1-material.js";
+import { type SwapUnlandedProof } from "../unlanded.js";
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export declare class JupiterV1SingleSender {
     private readonly core;
@@ -32,7 +33,11 @@ export declare class JupiterV1ExecutionDriver implements GuardedSwapExecutionDri
     constructor(d: JupiterV1ExecutionDependencies);
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
+    proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
 }
+/** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
+ * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */
+export declare function proveJupiterV1Unlanded(d: Pick<JupiterV1ExecutionDependencies, "core" | "bindings" | "rpc">, input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
 /** Owns the actual bounded Solana rail transport; no new URL, fallback or financial callback is accepted. */
 export declare class JupiterV1BudgetedRpc extends SolanaRpc {
     private readonly base;

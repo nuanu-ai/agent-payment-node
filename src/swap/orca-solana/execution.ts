@@ -7,6 +7,7 @@ import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
+import type { SwapUnlandedProof } from "../unlanded.js";
 import { assertInjectedProtocol } from "../uniswap-ethereum/execution/binding.js";
 import type { OrcaLocalOwnerAdmission } from "./admission.js";
 import { latestLifetime, orcaMessageFee, requireOrcaFunds } from "./builder.js";
@@ -63,7 +64,7 @@ export interface OrcaExecutionDriverDependencies {
   readonly bindings: Pick<OrcaExecutionBindingStore, "save" | "load">;
   readonly signer: Pick<OrcaLocalSigner, "sign">;
   readonly sender: Pick<OrcaSingleSender, "sendOnce">;
-  readonly observer: Pick<OrcaReceiptObserver, "observeOutcome">;
+  readonly observer: Pick<OrcaReceiptObserver, "observeOutcome" | "proveUnlanded">;
   readonly effects: Pick<ChainWalletStoragePort, "effect">;
   readonly clock: ClockPort;
 }
@@ -109,7 +110,7 @@ export class OrcaSolanaExecutionDriver implements GuardedSwapExecutionDriver {
     let operation = validateSwapOperation(input.operation);
     if (operation.submissionMarker === null) blocked("Orca observation is available only after the submission marker.", "orca_resume_before_marker");
     const material = validateOrcaKeylessMaterial(input.material);
-    if (["finalized", "failed_confirmed_revert"].includes(operation.state)) return operation;
+    if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state)) return operation;
     const binding = await this.d.bindings.load(operation, material);
     const account = binding === null ? null : await this.d.admission.localAccount(operation);
     const effect = binding === null || account === null ? null : await this.d.effects.effect(account, operation.operationId, binding.bindingHash);
@@ -117,6 +118,21 @@ export class OrcaSolanaExecutionDriver implements GuardedSwapExecutionDriver {
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());
     if (binding === null || effect === null) return operation;
     return await this.observeExact(operation, binding, material, effect.transactionId);
+  }
+
+  /**
+   * The execution binding carries the frozen lifetime of the only bytes that can be signed. Without a binding nothing was
+   * signed, but no lifetime is known either, so no chain proof exists; the operation stays observable.
+   */
+  async proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null> {
+    const operation = validateSwapOperation(input.operation), material = validateOrcaKeylessMaterial(input.material);
+    const binding = await this.d.bindings.load(operation, material);
+    if (binding === null) return null;
+    return await this.d.observer.proveUnlanded(binding.lifetime.lastValidBlockHeight, async () => {
+      const account = await this.d.admission.localAccount(operation);
+      const effect = account === null ? null : await this.d.effects.effect(account, operation.operationId, binding.bindingHash);
+      return effect === null ? null : effect.transactionId;
+    });
   }
 
   private async observeExact(operation: SwapOperationRecord, binding: OrcaExecutionBinding, material: OrcaKeylessMaterial,

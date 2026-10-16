@@ -17,6 +17,7 @@ import { JupiterV1MaterialResolver } from "./v1-resolver.js";
 import { routeConfigForMaterial } from "./v1-route-config.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
+import { proveSolanaUnlanded, type SwapUnlandedProof } from "../unlanded.js";
 
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
@@ -92,7 +93,7 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
  }
  async observe(input:GuardedSwapObservationInput):Promise<SwapOperationRecord>{return await this.d.core.operations.withLocks([`jupiter-v1-operation:${input.operation.operationId}`],async()=>{
   let op=await this.d.core.operations.loadAny(input.operation.operationId);if(op===null)corrupt();if(op.submissionMarker===null)blocked("Jupiter observation requires its durable effect marker.");
-  if(["finalized","failed_confirmed_revert"].includes(op.state))return op;
+  if(["finalized","failed_confirmed_revert","expired_unlanded"].includes(op.state))return op;
   if(op.state==="submitting")op=await this.d.core.recordPossibleSend(op,"unknown_finality",this.d.clock.now());
   const material=validateJupiterV1PreparedMaterial(input.material),binding=await this.d.bindings.load(op,material);if(binding===null)return op;
   // Read the public signature marker first. Status never decrypts custody and never signs or sends.
@@ -103,6 +104,18 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
    return await this.d.core.finalize(op,this.d.clock.now(),{receiptHash:receipt.receiptHash,transactionHash:receipt.signature,observedAt:this.d.clock.now().toISOString(),finalized:true});
   }catch{return op;}
  });}
+ async proveUnlanded(input:GuardedSwapObservationInput):Promise<SwapUnlandedProof|null>{return await proveJupiterV1Unlanded(this.d,input);}
+}
+/** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
+ * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */
+export async function proveJupiterV1Unlanded(d:Pick<JupiterV1ExecutionDependencies,"core"|"bindings"|"rpc">,input:GuardedSwapObservationInput):Promise<SwapUnlandedProof|null>{
+ return await d.core.operations.withLocks([`jupiter-v1-operation:${input.operation.operationId}`],async()=>{
+  const op=await d.core.operations.loadAny(input.operation.operationId);if(op===null)corrupt();
+  if(op.submissionMarker===null||op.receiptProof!==null||!["submitting","submitted","unknown_finality"].includes(op.state))return null;
+  const material=validateJupiterV1PreparedMaterial(input.material);
+  return await proveSolanaUnlanded(d.rpc,{lastValidBlockHeight:material.execution.lifetime.lastValidBlockHeight,loadSignature:async()=>{
+   const binding=await d.bindings.load(op,material);return binding===null?null:await d.bindings.loadSignature(op,binding);}});
+ });
 }
 async function guardReceipt(fresh:Parameters<typeof guardJupiterV1WhirlpoolMaterial>[0]){
  return await guardJupiterV1WhirlpoolMaterial(fresh);

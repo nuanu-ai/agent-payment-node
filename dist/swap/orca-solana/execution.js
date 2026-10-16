@@ -108,7 +108,7 @@ export class OrcaSolanaExecutionDriver {
         if (operation.submissionMarker === null)
             blocked("Orca observation is available only after the submission marker.", "orca_resume_before_marker");
         const material = validateOrcaKeylessMaterial(input.material);
-        if (["finalized", "failed_confirmed_revert"].includes(operation.state))
+        if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state))
             return operation;
         const binding = await this.d.bindings.load(operation, material);
         const account = binding === null ? null : await this.d.admission.localAccount(operation);
@@ -119,6 +119,21 @@ export class OrcaSolanaExecutionDriver {
         if (binding === null || effect === null)
             return operation;
         return await this.observeExact(operation, binding, material, effect.transactionId);
+    }
+    /**
+     * The execution binding carries the frozen lifetime of the only bytes that can be signed. Without a binding nothing was
+     * signed, but no lifetime is known either, so no chain proof exists; the operation stays observable.
+     */
+    async proveUnlanded(input) {
+        const operation = validateSwapOperation(input.operation), material = validateOrcaKeylessMaterial(input.material);
+        const binding = await this.d.bindings.load(operation, material);
+        if (binding === null)
+            return null;
+        return await this.d.observer.proveUnlanded(binding.lifetime.lastValidBlockHeight, async () => {
+            const account = await this.d.admission.localAccount(operation);
+            const effect = account === null ? null : await this.d.effects.effect(account, operation.operationId, binding.bindingHash);
+            return effect === null ? null : effect.transactionId;
+        });
     }
     async observeExact(operation, binding, material, signature) {
         let outcome;

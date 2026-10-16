@@ -1,5 +1,6 @@
 import { ApnError } from "../../errors.js";
 import { SwapOperationRepository } from "../repository.js";
+import { SWAP_TERMINAL_STATES } from "../model.js";
 import { EMPTY_PROGRAM_SNAPSHOT, JUPITER_SOLANA_SCHEMA, JUPITER_SWAP_API_V2, JUPITER_V2_SOURCE, JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, WRAPPED_SOL_MINT, } from "./catalog.js";
 import { JUPITER_V1_PROTOCOL_REGISTRY, JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
 import { JUPITER_V1_FINITE_ROUTES, JUPITER_V1_OLD_ROUTE } from "./v1-route-config.js";
@@ -53,7 +54,7 @@ function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };
 }
 function operationOutcome(operation) {
-    const terminal = ["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(operation.state);
+    const terminal = SWAP_TERMINAL_STATES.includes(operation.state);
     const approvable = ["awaiting_approval", "reserved"].includes(operation.state) && operation.submissionMarker === null;
     return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: terminal ? [] :
             [`apn swap solana jupiter ${approvable ? "approve" : "status"} --operation ${operation.operationId}`] };
