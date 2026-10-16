@@ -10,7 +10,7 @@ import { OperationService } from "../operation-service.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, publicRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
-import { RelayNativeSourceJournalRepository } from "./native-source.js";
+import { RelayNativeSourceJournalRepository } from "./native-source-journal.js";
 import { RelayEncryptedApprovalCustody } from "./approval-effect.js";
 import { RelayEncryptedDepositCustody } from "./deposit-effect.js";
 import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, RELAY_BASE_SOURCE, relayNativeRoute } from "./native-quote.js";

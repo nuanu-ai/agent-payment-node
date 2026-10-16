@@ -21,6 +21,7 @@ import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256 } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import { OperationService } from "../operation-service.js";
@@ -343,6 +344,13 @@ export class CircleEvmService {
                 }
                 return this.custody.seal(op, effect, guard);
             }, loadMaterial: (op, effect) => this.custody.load(op, effect),
+            unsent: { outcome: async (_op, effect) => {
+                    const remote = rpc(effect);
+                    await remote.identity();
+                    return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+                        nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
+                },
+                discard: (op, effect) => this.custody.discard(op, effect) },
             broadcast: async (effect, raw, guard) => {
                 guard();
                 if (effect.role === "approval" || effect.role === "burn")

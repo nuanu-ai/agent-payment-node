@@ -13,6 +13,7 @@ import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { relayExecutionRoute } from "./execution-route.js";
 import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
+import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 
 const TX = /^0x[0-9a-fA-F]+$/u;
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -36,6 +37,14 @@ export interface RelaySignedApproval { readonly rawTransaction: Hex; readonly tr
 export interface RelayApprovalCustodyPort {
   load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null>;
   seal(op: RelayUnsignedOperation, signed: RelaySignedApproval): Promise<void>;
+  /** Only after the journal records the sealed bytes as never landing. */
+  discard?(op: RelayUnsignedOperation): Promise<void>;
+}
+/** Production source runtimes always provide it; injected test ports may omit it. */
+export type RelayUnsentOutcomePort = (input: Readonly<{ account: string; nonce: bigint; transactionHash: string }>) => Promise<EvmUnsentOutcome>;
+/** Signed nonce of saved bytes; the bytes were verified against the frozen envelope when sealed. */
+export function relaySignedNonce(raw: string): bigint {
+  const nonce = parseTransaction(raw as Hex).nonce; if (nonce === undefined) corrupt("signed nonce"); return BigInt(nonce);
 }
 /** Reuses the existing AES-GCM encrypted wallet secret and hash-bound direct-effect slot. */
 export class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
@@ -74,6 +83,16 @@ export class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
   }
   async seal(op: RelayUnsignedOperation, signed: RelaySignedApproval): Promise<void> {
     await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => this.sealLocked(op, signed));
+  }
+  async discard(op: RelayUnsignedOperation): Promise<void> {
+    await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+      const wallet = await this.wallets.describe("default"); if (wallet === null) return;
+      try {
+        if (!same(wallet.identity.address, op.sourceAccount)) corrupt("custody owner");
+        if (wallet.secret.directEffects[key(op)] === undefined) return;
+        delete wallet.secret.directEffects[key(op)]; await this.wallets.save(wallet.identity, wallet.secret);
+      } finally { this.wallets.clear(wallet.secret); }
+    });
   }
   private async sealLocked(op: RelayUnsignedOperation, signed: RelaySignedApproval): Promise<void> {
     const wallet = await this.wallets.describe("default");
@@ -115,6 +134,7 @@ export interface RelayApprovalPorts {
   send(rawTransaction: Hex): Promise<string>;
   observe(transactionHash: Hex): Promise<RelayApprovalObservation | null>;
   readonly custody: RelayApprovalCustodyPort;
+  readonly unsentOutcome?: RelayUnsentOutcomePort;
 }
 
 /** A resumed call never signs again and never sends after `submitting` is durable. */
@@ -139,7 +159,8 @@ export class RelayApprovalEffectService {
       const firstNonce = journal === null ? await this.revalidate(op) : null;
       if (journal === null) journal = await this.effects.create(profileHash, operationId, this.ports.now().toISOString());
       let effect = journal.effects[0];
-      if (effect.phase === "confirmed" || effect.phase === "failed") return journal;
+      if (effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent") return journal;
+      const resumedSeal = effect.phase === "sealed";
       if (effect.phase === "pending") {
         const nonce = firstNonce ?? await this.revalidate(op);
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
@@ -155,6 +176,21 @@ export class RelayApprovalEffectService {
         await verifySigned(op, signed.rawTransaction, signed.transactionHash);
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
           { kind: "seal_signed", role: "approval", transactionHash: signed.transactionHash });
+        effect = journal.effects[0];
+      }
+      if (effect.phase === "sealed") {
+        // Resumed saved bytes that never crossed `submitting` end only when another transaction consumed their nonce at safe depth.
+        const saved = await this.ports.custody.load(op);
+        const outcome = saved === null || !resumedSeal || this.ports.unsentOutcome === undefined ? null : await this.ports.unsentOutcome({
+          account: op.sourceAccount, nonce: relaySignedNonce(saved.rawTransaction), transactionHash: saved.transactionHash });
+        if (outcome === "never_lands") {
+          journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
+            { kind: "record_never_landed", role: "approval", at: this.ports.now().toISOString() });
+          await this.ports.custody.discard?.(op); return journal;
+        }
+        // The node already knows these exact bytes: never send them again; fence them as possibly sent and only observe.
+        if (outcome === "own_transaction_known") journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
+          { kind: "mark_submitting", role: "approval", at: this.ports.now().toISOString() });
         effect = journal.effects[0];
       }
       if (effect.phase === "sealed") {

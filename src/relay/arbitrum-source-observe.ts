@@ -5,9 +5,9 @@ import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
-import { ArbitrumSourceEffectJournalRepository, type ArbitrumEffectRole,
+import { ArbitrumSourceEffectJournalRepository, type ArbitrumEffectEvent, type ArbitrumEffectRole,
   type ArbitrumSourceEffectJournal } from "./arbitrum-source-effect-journal.js";
-import { RelayArbitrumSourceFinalityObserver, type RelayArbitrumExpectedEffect,
+import { RelayArbitrumSourceFinalityObserver, type RelayArbitrumExpectedEffect, type RelayArbitrumNeverLandedProof,
   type RelayArbitrumRevertProof, type RelayArbitrumSourceProof } from "./arbitrum-source-finality.js";
 import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 
@@ -48,10 +48,12 @@ export interface RelayArbitrumSourceObservePorts {
   readonly transition?: (profileHash: string, operationId: string, expectedHash: string,
     role: ArbitrumEffectRole, proofDigest: string, verify: (input: {
       operation: RelayUnsignedOperation; journal: ArbitrumSourceEffectJournal; role: ArbitrumEffectRole;
-      outcome: "confirmed" | "failed"; proofDigest: string }) => Promise<boolean>,
-    outcome: "confirmed" | "failed") => Promise<ArbitrumSourceEffectJournal>;
+      outcome: "confirmed" | "failed" | "never_landed"; proofDigest: string }) => Promise<boolean>,
+    outcome: "confirmed" | "failed" | "never_landed") => Promise<ArbitrumSourceEffectJournal>;
   /** Synthetic seam; production finalizes the shared usage reservation from the saved safe source proof. */
   readonly finalizeUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
+  /** Synthetic seam for unverified fences (mark_submitting, record_send); production uses the CAS journal repository. */
+  readonly advance?: (profileHash: string, operationId: string, expectedHash: string, event: ArbitrumEffectEvent) => Promise<ArbitrumSourceEffectJournal>;
   /** Synthetic seam; production releases the shared usage reservation after a safe source revert proof. */
   readonly releaseRevertedUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
 }
@@ -60,7 +62,8 @@ function boundRevert(proof: RelayArbitrumRevertProof, chosen: RelayArbitrumExpec
     same(proof.reverted.transactionHash, chosen.transactionHash);
 }
 export class RelayArbitrumSourceObserveService {
-  constructor(private readonly state: StateStore, private readonly observer: Pick<RelayArbitrumSourceFinalityObserver, "observe" | "observeRevert">,
+  constructor(private readonly state: StateStore,
+    private readonly observer: Pick<RelayArbitrumSourceFinalityObserver, "observe" | "observeRevert" | "observeUnsent">,
     private readonly ports: RelayArbitrumSourceObservePorts = {}) {}
 
   private async finalizeUsage(op: RelayUnsignedOperation, journal: ArbitrumSourceEffectJournal): Promise<void> {
@@ -76,7 +79,16 @@ export class RelayArbitrumSourceObserveService {
       expectedCurrentStates: ["reserved", "submitted", "unknown_finality", "finalized"], now: new Date() });
   }
 
-  /** A reverted approval or deposit moved no principal: the hold is released, never counted as spent. */
+  /** Bytes already known on chain count as an uncertain send: the principal hold stays counted. */
+  private async holdUncertainSend(op: RelayUnsignedOperation): Promise<void> {
+    const identity = { account: getAddress(op.sourceAccount), chain: "eip155:42161",
+      asset: { kind: "token" as const, identifier: RELAY_ARBITRUM_USDC } };
+    const ledger = new AssetUsageLedger(this.state.root), reservationId = assetUsageReservationId(identity, `relay-arbitrum-approval:${op.operationId}`);
+    if ((await ledger.load(identity, reservationId))?.state !== "reserved") return;
+    await ledger.transition({ ...identity, reservationId, policyDigest: op.policyDigest!, state: "unknown_finality",
+      expectedCurrentStates: ["reserved"], now: new Date() });
+  }
+  /** A reverted or never-landed approval or deposit moved no principal: the hold is released, never counted as spent. */
   private async releaseRevertedUsage(op: RelayUnsignedOperation, proofDigest: string): Promise<void> {
     if (this.ports.releaseRevertedUsage !== undefined) return this.ports.releaseRevertedUsage(op, proofDigest);
     const identity = { account: getAddress(op.sourceAccount), chain: "eip155:42161",
@@ -100,7 +112,8 @@ export class RelayArbitrumSourceObserveService {
     const repository = new ArbitrumSourceEffectJournalRepository(this.state.root);
     const journal = await (this.ports.journal?.(op.profileHash, operationId) ?? repository.load(op.profileHash, operationId));
     const output = (state: "source_effect_not_recorded" | "observation_only" | "source_proof_pending" |
-      "approval_source_confirmed" | "approval_skipped" | "deposit_source_confirmed" | "source_effect_reverted", reason: string,
+      "approval_source_confirmed" | "approval_skipped" | "deposit_source_confirmed" | "source_effect_reverted" |
+      "source_effect_never_landed", reason: string,
       proof: RelayArbitrumSourceProof | null = null) => ({ operationId, state, reason,
       approvalPhase: journal?.effects[0].phase ?? null, depositPhase: journal?.effects[1].phase ?? null,
       sourceProof: proof === null ? null : { ...proof,
@@ -118,6 +131,11 @@ export class RelayArbitrumSourceObserveService {
       await this.releaseRevertedUsage(op, failed.attempt!.observationDigest!);
       return output("source_effect_reverted", `${failed.role}_reverted_at_safe_finality`);
     }
+    const abandoned = journal.effects.find(e => e.phase === "abandoned_unsent");
+    if (abandoned !== undefined) {
+      await this.releaseRevertedUsage(op, abandoned.attempt!.observationDigest!);
+      return output("source_effect_never_landed", `${abandoned.role}_signed_bytes_never_land`);
+    }
     if (depositEffect.phase === "confirmed") {
       await this.finalizeUsage(op, journal);
       return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
@@ -126,6 +144,22 @@ export class RelayArbitrumSourceObserveService {
       "canonical_allowance_observed_deposit_recheck_required");
     const role: ArbitrumEffectRole = ["confirmed", "approval_skipped"].includes(approvalEffect.phase) ? "deposit" : "approval";
     const current = role === "approval" ? approvalEffect : depositEffect;
+    if (current.phase === "sealed") {
+      // Signed bytes that never crossed `submitting`: resumable unless another transaction consumed their nonce at safe depth.
+      const sealed = { transactionHash: current.attempt!.transactionHash as Hex, from: op.sourceAccount, nonce: BigInt(current.attempt!.nonce!) };
+      const { outcome, proof: dead } = await this.observer.observeUnsent(sealed);
+      if (outcome === "never_lands" && dead !== null && same(dead.transactionHash, sealed.transactionHash) && dead.signedNonce === current.attempt!.nonce &&
+        dead.sourceChainId === 42161 && dead.proofClass === "canonical_safe_nonce_consumed") return this.recordNeverLanded(op, journal, role, dead, output);
+      if (outcome !== "own_transaction_known") return output("observation_only", `${role}_signed_unsent_resumable`);
+      // The node already knows these exact bytes: never send them again; fence them as an uncertain send and observe.
+      const advance = this.ports.advance ?? ((profileHash: string, id: string, expected: string, event: ArbitrumEffectEvent) =>
+        new ArbitrumSourceEffectJournalRepository(this.state.root).transition(profileHash, id, expected, event));
+      let fenced = await advance(op.profileHash, operationId, journal.integrityHash, { kind: "mark_submitting", role, at: new Date().toISOString() });
+      fenced = await advance(op.profileHash, operationId, fenced.integrityHash, { kind: "record_send", role, outcome: "uncertain" });
+      await this.holdUncertainSend(op);
+      return { ...output("observation_only", `${role}_signed_bytes_known_on_chain_observe_only`),
+        approvalPhase: fenced.effects[0].phase, depositPhase: fenced.effects[1].phase };
+    }
     if (!observable.has(current.phase)) return output(role === "deposit" && approvalEffect.phase === "confirmed" ? "approval_source_confirmed" : "observation_only",
       role === "deposit" ? "deposit_effect_not_submitting" : "approval_effect_not_submitting");
     const chosen = expected(op, journal, role);
@@ -140,7 +174,7 @@ export class RelayArbitrumSourceObserveService {
       return output("source_proof_pending", "canonical_safe_source_proof_unavailable");
     const proofDigest = hashObject(proof);
     const verify = async (input: { operation: RelayUnsignedOperation; journal: ArbitrumSourceEffectJournal;
-      role: ArbitrumEffectRole; outcome: "confirmed" | "failed"; proofDigest: string }) =>
+      role: ArbitrumEffectRole; outcome: "confirmed" | "failed" | "never_landed"; proofDigest: string }) =>
       input.operation.integrityHash === op.integrityHash && input.journal.integrityHash === journal.integrityHash &&
       input.role === role && input.outcome === "confirmed" && input.proofDigest === proofDigest &&
       input.journal.effects[role === "approval" ? 0 : 1].attempt?.transactionHash === chosen.transactionHash &&
@@ -159,7 +193,7 @@ export class RelayArbitrumSourceObserveService {
     output: (state: "source_effect_reverted", reason: string) => T): Promise<T> {
     const proofDigest = hashObject(reverted);
     const verify = async (input: { operation: RelayUnsignedOperation; journal: ArbitrumSourceEffectJournal;
-      role: ArbitrumEffectRole; outcome: "confirmed" | "failed"; proofDigest: string }) =>
+      role: ArbitrumEffectRole; outcome: "confirmed" | "failed" | "never_landed"; proofDigest: string }) =>
       input.operation.integrityHash === op.integrityHash && input.journal.integrityHash === journal.integrityHash &&
       input.role === role && input.outcome === "failed" && input.proofDigest === proofDigest &&
       input.journal.effects[role === "approval" ? 0 : 1].attempt?.transactionHash === chosen.transactionHash &&
@@ -171,5 +205,20 @@ export class RelayArbitrumSourceObserveService {
     if (effect.phase !== "failed" || effect.attempt?.observationDigest !== proofDigest) corrupt("revert_transition_result");
     await this.releaseRevertedUsage(op, proofDigest);
     return output("source_effect_reverted", `${role}_reverted_at_safe_finality`);
+  }
+  private async recordNeverLanded<T>(op: RelayUnsignedOperation, journal: ArbitrumSourceEffectJournal, role: ArbitrumEffectRole,
+    proof: RelayArbitrumNeverLandedProof, output: (state: "source_effect_never_landed", reason: string) => T): Promise<T> {
+    const proofDigest = hashObject(proof), index = role === "approval" ? 0 : 1;
+    const verify = async (input: { operation: RelayUnsignedOperation; journal: ArbitrumSourceEffectJournal;
+      role: ArbitrumEffectRole; outcome: "confirmed" | "failed" | "never_landed"; proofDigest: string }) =>
+      input.operation.integrityHash === op.integrityHash && input.journal.integrityHash === journal.integrityHash &&
+      input.role === role && input.outcome === "never_landed" && input.proofDigest === proofDigest &&
+      input.journal.effects[index].phase === "sealed" && input.journal.effects[index].attempt?.transactionHash === proof.transactionHash;
+    const next = await (this.ports.transition?.(op.profileHash, op.operationId, journal.integrityHash, role, proofDigest, verify, "never_landed") ??
+      new ArbitrumSourceEffectJournalRepository(this.state.root, verify).transition(op.profileHash, op.operationId,
+        journal.integrityHash, { kind: "record_never_landed", role, proofDigest }));
+    if (next.effects[index].phase !== "abandoned_unsent" || next.effects[index].attempt?.observationDigest !== proofDigest) corrupt("never_landed_transition_result");
+    await this.releaseRevertedUsage(op, proofDigest);
+    return output("source_effect_never_landed", `${role}_signed_bytes_never_land`);
   }
 }

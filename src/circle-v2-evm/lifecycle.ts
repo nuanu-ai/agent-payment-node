@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 import type { Hex } from "viem";
 import type { CircleMaterial } from "./custody.js";
 import { advanceCircle, circleBlocked, circleCorrupt, circleSame, validateCircle, type CircleEffect, type CircleEnvelope, type CircleOperationV1, type CircleRole } from "./operation-model.js";
@@ -24,6 +25,8 @@ export interface CircleLifecyclePorts {
   mintEnvelope(op: CircleOperationV1): Promise<CircleEnvelope>;
   cleanupEnvelope(op: CircleOperationV1): Promise<CircleEnvelope>;
   usage(op: CircleOperationV1, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<CircleOperationV1["usage"]>;
+  /** Never-lands proof and discard for signed-but-unsent bytes. Production runtimes always provide it; injected test ports may omit it. */
+  unsent?: Readonly<{ outcome(op: CircleOperationV1, effect: CircleEffect): Promise<EvmUnsentOutcome>; discard(op: CircleOperationV1, effect: CircleEffect): Promise<void> }>;
 }
 type Consent = () => void;
 /** Phases whose signed bytes, if any, never crossed the submission fence: resumable with fresh consent (R3). */
@@ -72,7 +75,10 @@ export async function approveCircleSource(input: CircleOperationV1, ports: Circl
   if (op.state === "cleanup_required") circleBlocked("explicit_cleanup_required");
   if (op.source !== null) return observeCircle(op, ports);
   // A signed source effect that never reached its submission fence stays resumable with fresh consent (R3).
-  if (op.effects.some(e => e.phase === "signing_started")) op = await observeCircle(op, ports);
+  if (op.effects.some(e => e.phase === "signing_started" || e.phase === "sealed")) {
+    op = await observeCircle(op, ports);
+    if (op.terminal || op.state === "cleanup_required" || op.effects.some(e => (e.role === "approval" || e.role === "burn") && ["submission_started", "submitted", "unknown"].includes(e.phase))) return op;
+  }
   const resumeSigned = op.effects.some(e => (e.role === "approval" || e.role === "burn") && UNSENT_SIGNING.includes(e.phase));
   if (!resumeSigned && ports.now() >= Date.parse(op.expiresAt)) circleBlocked("source_preparation_expired");
   await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "source", ports, resumeSigned); await ports.assertOwnerPolicyAndConflicts(op); checkConsent(token, op, ports);
@@ -145,6 +151,7 @@ export async function approveCircleMint(input: CircleOperationV1, ports: CircleL
 }
 export async function observeCircle(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
   let op = validateCircle(input); if (op.terminal) return op;
+  op = await abandonNeverLanding(op, ports); if (op.terminal) return op;
   for (const initial of op.effects) {
     let effect = op.effects.find(e => e.role === initial.role)!;
     if (effect.phase === "signing_started" || effect.phase === "unknown" && effect.transactionHash === null) {
@@ -154,7 +161,7 @@ export async function observeCircle(input: CircleOperationV1, ports: CircleLifec
         effect.phase === "signing_started" ? `${effect.role}_material_recovered_unsent` : `${effect.role}_material_recovered_observe_only`, ports);
       effect = op.effects.find(e => e.role === initial.role)!;
     }
-    if (effect.transactionHash === null || effect.phase === "prepared" || effect.phase === "sealed" || ["confirmed", "reverted"].includes(effect.phase)) continue;
+    if (effect.transactionHash === null || ["prepared", "sealed", "abandoned_unsent", "confirmed", "reverted"].includes(effect.phase)) continue;
     const proof = await ports.observeEffect(op, effect); if (proof === null) continue;
     if (proof.outcome === "reverted") {
       op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "reverted", proof }), state: "cleanup_required" }, `${effect.role}_finalized_revert_requires_explicit_cleanup`, ports);
@@ -209,11 +216,13 @@ export async function cleanupCircle(input: CircleOperationV1, ports: CircleLifec
     for (const effect of op.effects) if (await ports.loadMaterial(op, effect) !== null) circleBlocked("unsubmitted_cancel_private_material_present");
     if (await ports.allowance(op) !== "0") circleBlocked("unsubmitted_cancel_nonzero_allowance");
     const guard = await cancellationConsent(op, ports); guard();
-    const usage = await ports.usage(op, "failed_before_effect"); guard();
+    for (const effect of op.effects) if (effect.phase === "signing_started")
+      op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "abandoned_unsent" }) }, `${effect.role}_signing_fence_without_bytes_abandoned`, ports);
+    guard(); const usage = await ports.usage(op, "failed_before_effect"); guard();
     return persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "explicit_no_private_entry_cancellation", ports);
   }
   // A signed-but-unsent burn never crossed its submission fence; the approve-zero cleanup takes the same pending nonce, so it can never land after it.
-  if (!["prepared", "reverted", ...UNSENT_SIGNING].includes(burn.phase) || !["confirmed", "reverted"].includes(approval.phase) || op.source !== null) circleBlocked("cleanup_requires_confirmed_approval_and_no_burn_attempt");
+  if (!["prepared", "reverted", "abandoned_unsent", ...UNSENT_SIGNING].includes(burn.phase) || !["confirmed", "reverted"].includes(approval.phase) || op.source !== null) circleBlocked("cleanup_requires_confirmed_approval_and_no_burn_attempt");
   if (approval.phase === "reverted" && await ports.allowance(op) === "0") {
     const token = await consent(op, "cleanup", ports); checkConsent(token, op, ports);
     return persist(op, { usage: await ports.usage(op, "failed_confirmed_revert"), usageFinalized: true, residualAllowanceAtomic: "0", state: "cleaned", terminal: true }, "confirmed_revert_zero_allowance_recovery", ports);
@@ -243,4 +252,33 @@ export async function executeCircleCleanupWithConsent(op: CircleOperationV1, por
 export function assertCircleEffectGuard(op: CircleOperationV1, effect: CircleEffect, guard: () => void): void {
   const record = effectGuards.get(guard); if (record === undefined || record.role !== effect.role) circleBlocked("private_exact_effect_guard_required");
   checkConsent(record.token, op, record.ports, effect); guard();
+}
+
+/** R4: a signed source effect that never crossed its submission fence, whose nonce another transaction consumed at
+ * safe depth while its own hash stays unknown, can never land. Its bytes are discarded. A never-landing approval
+ * ends the route as never sent and releases every hold; a never-landing burn leaves the confirmed approval to the
+ * explicit approve-zero cleanup. Bytes the node already knows are fenced as possibly sent and only observed. A nonce
+ * not yet consumed keeps the effect resumable. */
+async function abandonNeverLanding(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
+  let op = input;
+  if (op.terminal || op.source !== null || ports.unsent === undefined) return op;
+  for (const role of ["approval", "burn"] as const) {
+    let effect = op.effects.find(e => e.role === role)!;
+    const outcome = effect.phase === "sealed" ? await ports.unsent.outcome(op, effect) : null;
+    if (outcome === "never_lands")
+      op = await persist(op, { effects: updateEffect(op, role, { phase: "abandoned_unsent" }) }, `${role}_signed_bytes_never_land`, ports);
+    // The node already knows these exact bytes: never send them again; fence them as possibly sent and only observe.
+    if (outcome === "own_transaction_known")
+      op = await persist(op, { usage: await ports.usage(op, "unknown_finality"), effects: updateEffect(op, role, { phase: "submission_started" }) },
+        `${role}_signed_bytes_known_on_chain_observe_only`, ports);
+    effect = op.effects.find(e => e.role === role)!;
+    if (effect.phase !== "abandoned_unsent") continue;
+    if (effect.materialHash !== null) await ports.unsent.discard(op, effect);
+    if (role === "approval") {
+      const usage = await ports.usage(op, "failed_before_effect");
+      return persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "approval_never_landed_holds_released", ports);
+    }
+    if (op.state !== "cleanup_required") op = await persist(op, { state: "cleanup_required" }, "burn_never_landed_explicit_cleanup_required", ports);
+  }
+  return op;
 }

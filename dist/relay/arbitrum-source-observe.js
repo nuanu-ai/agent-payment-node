@@ -63,7 +63,17 @@ export class RelayArbitrumSourceObserveService {
             policyDigest: op.policyDigest, state: "finalized", outcomeDigest: proofDigest,
             expectedCurrentStates: ["reserved", "submitted", "unknown_finality", "finalized"], now: new Date() });
     }
-    /** A reverted approval or deposit moved no principal: the hold is released, never counted as spent. */
+    /** Bytes already known on chain count as an uncertain send: the principal hold stays counted. */
+    async holdUncertainSend(op) {
+        const identity = { account: getAddress(op.sourceAccount), chain: "eip155:42161",
+            asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC } };
+        const ledger = new AssetUsageLedger(this.state.root), reservationId = assetUsageReservationId(identity, `relay-arbitrum-approval:${op.operationId}`);
+        if ((await ledger.load(identity, reservationId))?.state !== "reserved")
+            return;
+        await ledger.transition({ ...identity, reservationId, policyDigest: op.policyDigest, state: "unknown_finality",
+            expectedCurrentStates: ["reserved"], now: new Date() });
+    }
+    /** A reverted or never-landed approval or deposit moved no principal: the hold is released, never counted as spent. */
     async releaseRevertedUsage(op, proofDigest) {
         if (this.ports.releaseRevertedUsage !== undefined)
             return this.ports.releaseRevertedUsage(op, proofDigest);
@@ -110,6 +120,11 @@ export class RelayArbitrumSourceObserveService {
             await this.releaseRevertedUsage(op, failed.attempt.observationDigest);
             return output("source_effect_reverted", `${failed.role}_reverted_at_safe_finality`);
         }
+        const abandoned = journal.effects.find(e => e.phase === "abandoned_unsent");
+        if (abandoned !== undefined) {
+            await this.releaseRevertedUsage(op, abandoned.attempt.observationDigest);
+            return output("source_effect_never_landed", `${abandoned.role}_signed_bytes_never_land`);
+        }
         if (depositEffect.phase === "confirmed") {
             await this.finalizeUsage(op, journal);
             return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
@@ -118,6 +133,23 @@ export class RelayArbitrumSourceObserveService {
             return output("approval_skipped", "canonical_allowance_observed_deposit_recheck_required");
         const role = ["confirmed", "approval_skipped"].includes(approvalEffect.phase) ? "deposit" : "approval";
         const current = role === "approval" ? approvalEffect : depositEffect;
+        if (current.phase === "sealed") {
+            // Signed bytes that never crossed `submitting`: resumable unless another transaction consumed their nonce at safe depth.
+            const sealed = { transactionHash: current.attempt.transactionHash, from: op.sourceAccount, nonce: BigInt(current.attempt.nonce) };
+            const { outcome, proof: dead } = await this.observer.observeUnsent(sealed);
+            if (outcome === "never_lands" && dead !== null && same(dead.transactionHash, sealed.transactionHash) && dead.signedNonce === current.attempt.nonce &&
+                dead.sourceChainId === 42161 && dead.proofClass === "canonical_safe_nonce_consumed")
+                return this.recordNeverLanded(op, journal, role, dead, output);
+            if (outcome !== "own_transaction_known")
+                return output("observation_only", `${role}_signed_unsent_resumable`);
+            // The node already knows these exact bytes: never send them again; fence them as an uncertain send and observe.
+            const advance = this.ports.advance ?? ((profileHash, id, expected, event) => new ArbitrumSourceEffectJournalRepository(this.state.root).transition(profileHash, id, expected, event));
+            let fenced = await advance(op.profileHash, operationId, journal.integrityHash, { kind: "mark_submitting", role, at: new Date().toISOString() });
+            fenced = await advance(op.profileHash, operationId, fenced.integrityHash, { kind: "record_send", role, outcome: "uncertain" });
+            await this.holdUncertainSend(op);
+            return { ...output("observation_only", `${role}_signed_bytes_known_on_chain_observe_only`),
+                approvalPhase: fenced.effects[0].phase, depositPhase: fenced.effects[1].phase };
+        }
         if (!observable.has(current.phase))
             return output(role === "deposit" && approvalEffect.phase === "confirmed" ? "approval_source_confirmed" : "observation_only", role === "deposit" ? "deposit_effect_not_submitting" : "approval_effect_not_submitting");
         const chosen = expected(op, journal, role);
@@ -158,6 +190,18 @@ export class RelayArbitrumSourceObserveService {
             corrupt("revert_transition_result");
         await this.releaseRevertedUsage(op, proofDigest);
         return output("source_effect_reverted", `${role}_reverted_at_safe_finality`);
+    }
+    async recordNeverLanded(op, journal, role, proof, output) {
+        const proofDigest = hashObject(proof), index = role === "approval" ? 0 : 1;
+        const verify = async (input) => input.operation.integrityHash === op.integrityHash && input.journal.integrityHash === journal.integrityHash &&
+            input.role === role && input.outcome === "never_landed" && input.proofDigest === proofDigest &&
+            input.journal.effects[index].phase === "sealed" && input.journal.effects[index].attempt?.transactionHash === proof.transactionHash;
+        const next = await (this.ports.transition?.(op.profileHash, op.operationId, journal.integrityHash, role, proofDigest, verify, "never_landed") ??
+            new ArbitrumSourceEffectJournalRepository(this.state.root, verify).transition(op.profileHash, op.operationId, journal.integrityHash, { kind: "record_never_landed", role, proofDigest }));
+        if (next.effects[index].phase !== "abandoned_unsent" || next.effects[index].attempt?.observationDigest !== proofDigest)
+            corrupt("never_landed_transition_result");
+        await this.releaseRevertedUsage(op, proofDigest);
+        return output("source_effect_never_landed", `${role}_signed_bytes_never_land`);
     }
 }
 //# sourceMappingURL=arbitrum-source-observe.js.map

@@ -87,13 +87,13 @@ export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation, "integri
         readonly providerFeeCeilingAtomic: string;
         readonly routeReference: "arbitrum-usdc-ethereum-usdc-source-draft-v1";
     }>;
-    readonly state: "prepared" | "retired" | "source_confirmed" | "failed_confirmed_revert";
+    readonly state: "prepared" | "retired" | "source_confirmed" | "failed_confirmed_revert" | "failed_before_effect";
     readonly terminal: boolean;
     readonly sourceEffectTerminal?: true;
     readonly sourceJournalIntegrityHash?: string;
     readonly retiredAt?: string;
     readonly retirementIntegrityHash?: string;
-    readonly proofClass: "saved_unsigned_quote" | "source_effect_confirmed" | "source_effect_reverted";
+    readonly proofClass: "saved_unsigned_quote" | "source_effect_confirmed" | "source_effect_reverted" | "source_effect_never_landed";
     readonly balanceEvidence: "not_checked";
     readonly allowanceEvidence: "not_checked";
     readonly statusObservable: boolean;
@@ -101,7 +101,7 @@ export type PublicRelayUnsignedOperation = Omit<RelayUnsignedOperation, "integri
     readonly nextActions: readonly [];
 };
 export declare function publicRelayUnsignedOperation(operation: RelayUnsignedOperation, retirement?: RelayRetirement | null, sourceCompletion?: {
-    readonly state: "source_confirmed" | "failed_confirmed_revert";
+    readonly state: "source_confirmed" | "failed_confirmed_revert" | "failed_before_effect";
     readonly journalIntegrityHash: string;
 } | null): PublicRelayUnsignedOperation;
 /** Separate create-only marker preserves the original prepared quote byte for byte. */

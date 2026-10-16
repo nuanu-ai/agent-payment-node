@@ -80,8 +80,9 @@ const immutable = (op) => ({ schemaVersion: op.schemaVersion, operationId: op.op
     idempotencyHash: op.idempotencyHash, requestHash: op.requestHash, fingerprint: op.fingerprint, destinationChain: op.destinationChain,
     sourceCustody: op.sourceCustody, destinationCustody: op.destinationCustody, policies: op.policies, preparedAt: op.preparedAt,
     expiresAt: op.expiresAt, deploymentDigest: op.deploymentDigest, feeQuoteAtomic: op.feeQuoteAtomic });
-const phases = { prepared: ["signing_started"], signing_started: ["sealed", "unknown"], sealed: ["submission_started", "unknown"],
-    submission_started: ["submitted", "unknown", "confirmed", "reverted"], submitted: ["unknown", "confirmed", "reverted"], unknown: ["unknown", "confirmed", "reverted"], confirmed: [], reverted: [] };
+const phases = { prepared: ["signing_started"], signing_started: ["sealed", "unknown", "abandoned_unsent"], sealed: ["submission_started", "unknown", "abandoned_unsent"],
+    submission_started: ["submitted", "unknown", "confirmed", "reverted"], submitted: ["unknown", "confirmed", "reverted"], unknown: ["unknown", "confirmed", "reverted"], confirmed: [], reverted: [],
+    abandoned_unsent: [] };
 export function validateCircleAdvance(previous, next) {
     if (previous.terminal || !circleSame(immutable(previous), immutable(next)) || next.transitions.length !== previous.transitions.length + 1 ||
         !circleSame(previous.transitions, next.transitions.slice(0, -1)))

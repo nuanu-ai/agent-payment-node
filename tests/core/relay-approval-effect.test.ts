@@ -260,3 +260,32 @@ test("a risen base fee that still fits the frozen envelopes admits the approval;
   assert.equal((await risen.run(f.op.operationId)).effects[0].phase, "submitting");
   assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 1);
 });
+
+for (const outcome of ["never_lands", "nonce_not_consumed", "own_transaction_known"] as const)
+  test(`a resumed sealed approval whose nonce check says ${outcome} ends, resumes once, or is fenced for observation`, async t => {
+    const f = await setup(t); let fundingCalls = 0, checks = 0, discards = 0;
+    const interrupted = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async op => {
+      if (++fundingCalls === 2) throw new Error("rpc 429"); return f.ports.funding(op); } });
+    await assert.rejects(interrupted.run(f.op.operationId), /rpc 429/);
+    const journals = new RelayEffectJournalRepository(f.state.root);
+    const sealed = (await journals.load(f.op.profileHash, f.op.operationId))!;
+    assert.equal(sealed.effects[0].phase, "sealed"); assert.equal(f.counts.sends, 0);
+    const resumed = new RelayApprovalEffectService(f.state, { ...f.ports,
+      custody: { ...f.ports.custody, discard: async () => { discards++; } },
+      unsentOutcome: async input => { checks++; assert.equal(input.nonce, 7n); assert.equal(input.transactionHash, sealed.effects[0].attempt!.transactionHash);
+        return outcome; } });
+    const journal = await resumed.run(f.op.operationId);
+    assert.equal(checks, 1);
+    if (outcome === "never_lands") {
+      assert.equal(journal.effects[0].phase, "abandoned_unsent"); assert.equal(discards, 1); assert.equal(f.counts.sends, 0);
+      const status = await new OperationService(f.state).relayStatus(f.op);
+      assert.equal(status.state, "failed_before_effect"); assert.equal(status.terminal, true);
+      assert.equal(status.proofClass, "source_effect_never_landed");
+      assert.equal((await resumed.run(f.op.operationId)).effects[0].phase, "abandoned_unsent"); assert.equal(checks, 1);
+    } else if (outcome === "nonce_not_consumed") {
+      assert.equal(journal.effects[0].phase, "submitting"); assert.equal(f.counts.sends, 1); assert.equal(discards, 0);
+    } else {
+      assert.equal(journal.effects[0].phase, "submitting"); assert.equal(f.counts.sends, 0); assert.equal(discards, 0);
+    }
+    assert.equal(f.counts.signs, 1);
+  });

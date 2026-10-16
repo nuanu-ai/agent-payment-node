@@ -28,6 +28,13 @@ function depositKey(op) {
 function nativeDepositKey(op) {
     return domainHash("apn.relay-native-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
 }
+/** Signed nonce of saved bytes; the bytes were verified against the frozen envelope when sealed. */
+export function relaySignedNonce(raw) {
+    const nonce = parseTransaction(raw).nonce;
+    if (nonce === undefined)
+        corrupt("signed nonce");
+    return BigInt(nonce);
+}
 /** Reuses the existing AES-GCM encrypted wallet secret and hash-bound direct-effect slot. */
 export class RelayEncryptedApprovalCustody {
     state;
@@ -82,6 +89,24 @@ export class RelayEncryptedApprovalCustody {
     async seal(op, signed) {
         await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => this.sealLocked(op, signed));
     }
+    async discard(op) {
+        await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
+            const wallet = await this.wallets.describe("default");
+            if (wallet === null)
+                return;
+            try {
+                if (!same(wallet.identity.address, op.sourceAccount))
+                    corrupt("custody owner");
+                if (wallet.secret.directEffects[key(op)] === undefined)
+                    return;
+                delete wallet.secret.directEffects[key(op)];
+                await this.wallets.save(wallet.identity, wallet.secret);
+            }
+            finally {
+                this.wallets.clear(wallet.secret);
+            }
+        });
+    }
     async sealLocked(op, signed) {
         const wallet = await this.wallets.describe("default");
         if (wallet === null)
@@ -132,8 +157,9 @@ export class RelayApprovalEffectService {
             if (journal === null)
                 journal = await this.effects.create(profileHash, operationId, this.ports.now().toISOString());
             let effect = journal.effects[0];
-            if (effect.phase === "confirmed" || effect.phase === "failed")
+            if (effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent")
                 return journal;
+            const resumedSeal = effect.phase === "sealed";
             if (effect.phase === "pending") {
                 const nonce = firstNonce ?? await this.revalidate(op);
                 journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "mark_signing", role: "approval", marker: randomBytes(32).toString("hex"), at: this.ports.now().toISOString() });
@@ -148,6 +174,22 @@ export class RelayApprovalEffectService {
                     return journal; // Signer may have run before a crash. Never call it again.
                 await verifySigned(op, signed.rawTransaction, signed.transactionHash);
                 journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "seal_signed", role: "approval", transactionHash: signed.transactionHash });
+                effect = journal.effects[0];
+            }
+            if (effect.phase === "sealed") {
+                // Resumed saved bytes that never crossed `submitting` end only when another transaction consumed their nonce at safe depth.
+                const saved = await this.ports.custody.load(op);
+                const outcome = saved === null || !resumedSeal || this.ports.unsentOutcome === undefined ? null : await this.ports.unsentOutcome({
+                    account: op.sourceAccount, nonce: relaySignedNonce(saved.rawTransaction), transactionHash: saved.transactionHash
+                });
+                if (outcome === "never_lands") {
+                    journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "record_never_landed", role: "approval", at: this.ports.now().toISOString() });
+                    await this.ports.custody.discard?.(op);
+                    return journal;
+                }
+                // The node already knows these exact bytes: never send them again; fence them as possibly sent and only observe.
+                if (outcome === "own_transaction_known")
+                    journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "mark_submitting", role: "approval", at: this.ports.now().toISOString() });
                 effect = journal.effects[0];
             }
             if (effect.phase === "sealed") {

@@ -191,7 +191,7 @@ test("confirmed approval admits deposit but ambiguous send cannot replay", async
   assert.equal(h.counts().sends, 1);
   let depositJournal = h.journal();
   const blockHash = `0x${"3".repeat(64)}` as Hex;
-  const source = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observe: async (deposit, approval) => ({
+  const source = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async (deposit, approval) => ({
     sourceChainId: 42161 as const, rpcOrigin: "https://arb-rpc.example",
     deposit: { transactionHash: deposit.transactionHash, blockNumber: "120", blockHash },
     approval: approval === undefined ? null : { transactionHash: approval.transactionHash,
@@ -267,7 +267,7 @@ test("uncertain approval lease remains counted after safe approval proof and per
   const unconfirmed = harness(state, op, journal);
   await assert.rejects(() => unconfirmed.service.execute("default", op.operationId));
   assert.equal(unconfirmed.counts().sends, 0);
-  const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observe: async expected => ({
+  const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async expected => ({
     sourceChainId: 42161 as const, rpcOrigin: "https://arb-rpc.example",
     deposit: { transactionHash: expected.transactionHash, blockNumber: "100",
       blockHash: `0x${"1".repeat(64)}` as Hex }, approval: null,
