@@ -7,7 +7,9 @@ import { BridgeEffectClaims } from "../../src/lifi/effect-authority.js";
 import { BRIDGE_TELEMETRY_ROWS, type BridgeObservationTelemetry, type BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { transitionBridge } from "../../src/lifi/transitions.js";
-import { lifiFixture } from "./lifi-helpers.js";
+import { keccak256 } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 /** Every file under a state directory, so a test can restore that directory exactly as a backup restore would. */
@@ -88,4 +90,55 @@ test("LIFI-11: every route claims SIGN and SEND; a journal restored to a sealed 
   const caughtUp = (await s.core.bridges.records.findOperation(id))!;
   assert.equal(caughtUp.state, "completed"); assert.equal(s.source.submissions.length, 2);
   assert.deepEqual(caughtUp.effects.map((effect) => effect.transactionHash), completed.effects.map((effect) => effect.transactionHash));
+});
+
+/** A process that died after the durable signing_started save and before custody sealed: no material, no SEND claim. */
+async function interruptedSeal(root: string) {
+  const s = await lifiFixture(root, "base-arb"), { id } = await s.prepare(), seal = s.custody.seal.bind(s.custody);
+  let interrupt = true;
+  s.custody.seal = async (...args) => { if (interrupt) { interrupt = false; throw new Error("synthetic crash before sealing"); } return await seal(...args); };
+  assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
+  const op = (await s.core.bridges.records.findOperation(id))!;
+  assert.deepEqual(op.effects.map((effect) => [effect.role, effect.phase, effect.submissionAttempts]), [["approval", "signing_started", 0], ["bridge", "unsealed", 0]]);
+  assert.equal(await s.custody.load(op, "approval"), null); assert.equal(s.source.submissions.length, 0);
+  return { s, id, op };
+}
+
+test("sign-step wedge: signing_started without material or SEND claim re-seals the identical envelope and continues", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { s, id, op } = await interruptedSeal(temporary.root);
+  // Before the fix every resume threw bridge_committed_signing_material_missing and the wallet stayed blocked.
+  const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
+  const completed = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(completed.state, "completed"); assert.equal(s.source.submissions.length, 2);
+  // RFC 6979 signing of the unchanged envelope gives the same bytes the interrupted seal would have produced.
+  const e = op.effects[0]!.envelope, c = e.economics;
+  const expected = await privateKeyToAccount(LIFI_SYNTHETIC_KEY).signTransaction({ type: "eip1559", chainId: e.chainId, to: e.to, data: e.data,
+    value: BigInt(e.valueAtomic), nonce: Number(c.nonceAtomic), gas: BigInt(c.gasLimitAtomic), maxFeePerGas: BigInt(c.maxFeePerGasAtomic),
+    maxPriorityFeePerGas: BigInt(c.maxPriorityFeePerGasAtomic), accessList: [] });
+  assert.equal(completed.effects[0]!.transactionHash, keccak256(expected)); assert.equal(s.source.submissions[0], expected);
+});
+
+test("sign-step wedge: an interrupted seal past the deadline ends failed_before_effect without signing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { s, id, op } = await interruptedSeal(temporary.root);
+  s.now.setTime(Date.parse(op.intent.expiresAt) + 1); const loads = s.wrapping.loads;
+  const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
+  const ended = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(ended.state, "failed_before_effect"); assert.equal(ended.terminal, true);
+  assert.equal(ended.effects[0]!.phase, "unsealed"); assert.equal(s.source.submissions.length, 0); assert.equal(s.wrapping.loads, loads);
+});
+
+test("sign-step wedge: a SEND claim keeps its observe-only path and is never re-signed", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { s, id, op } = await interruptedSeal(temporary.root);
+  const e = op.effects[0]!.envelope, c = e.economics;
+  const rawTransaction = await privateKeyToAccount(LIFI_SYNTHETIC_KEY).signTransaction({ type: "eip1559", chainId: e.chainId, to: e.to, data: e.data,
+    value: BigInt(e.valueAtomic), nonce: Number(c.nonceAtomic), gas: BigInt(c.gasLimitAtomic), maxFeePerGas: BigInt(c.maxFeePerGasAtomic),
+    maxPriorityFeePerGas: BigInt(c.maxPriorityFeePerGasAtomic), accessList: [] });
+  const body = { schemaVersion: "apn.bridge-effect.v1" as const, profileHash: op.profileHash, operationId: op.operationId, role: "approval" as const,
+    fingerprint: op.fingerprint, envelopeHash: e.envelopeHash, rawTransaction, transactionHash: keccak256(rawTransaction) };
+  await new BridgeEffectClaims(temporary.root).claim(op, "approval", "send", { ...body, materialHash: hashObject(body) });
+  const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(resumed.ok, false); assert.equal(resumed.error?.details?.reason, "bridge_effect_send_claim_unresolved");
+  const held = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(held.effects[0]!.phase, "signing_started"); assert.equal(held.terminal, false); assert.equal(s.source.submissions.length, 0);
+  assert.equal(await s.custody.load(held, "approval"), null);
 });

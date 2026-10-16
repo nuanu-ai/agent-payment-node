@@ -19,7 +19,8 @@ const EDGES = {
     completed: [], destination_failed: [], failed_before_effect: [], failed_after_approval: [], failed_confirmed_revert: [],
 };
 const PHASE_EDGES = {
-    unsealed: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
+    // signing_started returns to unsealed only when custody holds no sealed material and no SEND claim exists (execution.ts).
+    unsealed: ["signing_started"], signing_started: ["sealed", "unsealed"], sealed: ["submitting"],
     submitting: ["submitted_pending", "unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"],
     submitted_pending: ["unknown_finality", "included_success", "included_revert", "safe_success", "safe_revert"],
     unknown_finality: ["included_success", "included_revert", "safe_success", "safe_revert"],

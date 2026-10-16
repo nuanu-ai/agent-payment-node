@@ -278,7 +278,8 @@ test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or
   const current = (await core.bridges.records.findOperation(op.operationId))!;
   assert.equal(current.intent.expiresAt, op.intent.expiresAt);
   assert.equal(current.effects[1]!.submissionAttempts, 0);
-  if (phase === "safe") {
+  // An interrupted seal (signing_started, no material, no SEND claim) signed nothing: it ends like the unsealed remainder.
+  if (phase === "safe" || phase === "signing_started") {
     assert.equal(current.state, "failed_after_approval"); assert.equal(current.terminal, true);
     assert.equal(current.effects[0]!.phase, "safe_success"); assert.equal(current.effects[1]!.phase, "unsealed");
     assert.match(current.failure!.reason, /^unsent_apn_reprepare_required$/u);
@@ -290,7 +291,7 @@ test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or
     assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "0");
   } else {
     assert.equal(current.terminal, false);
-    assert.equal(current.effects[1]!.phase, phase === "signing_started" ? "signing_started" : "unsealed");
+    assert.equal(current.effects[1]!.phase, "unsealed");
     const lease = current.usageLease!;
     assert.notEqual((await new AssetUsageLedger(temp.root).load(lease, lease.reservationId))!.state, "failed_confirmed_revert");
   }

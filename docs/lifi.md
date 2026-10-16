@@ -1263,12 +1263,19 @@ Historical native-fill before/after balances use the explicitly configured archi
   (an interrupted send step or a restored journal) is recorded as an attempt from
   the sealed material and observed, never sent again. Only a SEND claim blocks
   ending an expired unsent remainder.
+- **Interrupted seal.** An effect left at `signing_started` with no sealed
+  material and no SEND claim signed and sent nothing. Resume returns it to
+  `unsealed`, runs the full guard again and re-signs the identical envelope
+  (RFC 6979 gives the same bytes), or ends it on the expiry path.
 - **GasZip.** Every outcome ends: signed bytes that were never sent, a definite
   JSON-RPC refusal, a guard that refused before transport, or an unlanded hash
   whose nonce the safe head already moved past end as `failed_before_effect`
   (bytes scrubbed, hold released); a cancelled or refunded deposit or a proved
   payout below the owner floor ends as `destination_failed` (spend kept); an
-  actual Base fee over the quote ceiling is reported as `feeCapExceeded`.
+  actual Base fee over the quote ceiling is reported as `feeCapExceeded`. The
+  nonce-moved exit trusts the node's transaction lookup: a node that pruned its
+  transaction index (about 54 days of Base blocks) could report a very old
+  landed deposit as absent.
 - **NEAR 1Click.** A nonce sealed by an earlier operation refuses a new submit
   before consent, and is released once that operation's deadline passed and the
   node does not know its hash. After consent the Base lane only requires the
