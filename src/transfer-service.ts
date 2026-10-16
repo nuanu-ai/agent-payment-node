@@ -110,7 +110,7 @@ export class TransferService {
       await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, wallet.address);
       // Owner caps come from the active allowlist policy and the shared usage ledger, as for every direct transfer, before any RPC.
       const allowlist = await this.allowlist.admit(evmAllowlistSubject({ profile, operationId, walletAddress: wallet.address,
-        chainId: CHAIN_ID, token: BASE_USDC, amountAtomic: amount.atomic }));
+        chainId: CHAIN_ID, token: BASE_USDC, amountAtomic: amount.atomic, recipient }));
       const rpc = this.context.requireRpc();
       rpc.armEvmDirectRpcGuard?.();
       await rpc.assertBaseChain();

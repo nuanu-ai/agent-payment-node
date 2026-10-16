@@ -1,3 +1,4 @@
+import { type AssetRecipientPins } from "./allowlist-recipient-pins.js";
 import { type SwapAdmissionMechanism } from "./swap/route-admission.js";
 export declare const ASSET_POLICY_REGISTRY_SCHEMA: "apn.asset-policy-registry.v1";
 /** Version 2 replaces the single asset cap pair with exactly one owner cap pair per admitted rail. */
@@ -20,6 +21,8 @@ export interface AssetMechanismOption {
     readonly provider: string;
     readonly reference: string;
     readonly maximumPerTransferAtomic: string;
+    /** Optional owner pin (OD-1) for this bridge alternative: 1-16 recipients of any family. Absent: not restricted. */
+    readonly recipients?: readonly string[];
 }
 export interface AssetPolicyRow {
     readonly kind: "native" | "token";
@@ -55,6 +58,8 @@ export interface AssetPolicyRow {
     }>;
     /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
     readonly gaslessRecipient?: string;
+    /** Optional owner pins (OD-1) per direct, x402 or single-pin bridge rail; see `allowlist-recipient-pins.ts`. */
+    readonly recipients?: AssetRecipientPins;
 }
 export interface AssetPolicyChain {
     /** Exact network identity: eip155 chain ID, Solana genesis hash, or TRON genesis block ID. */

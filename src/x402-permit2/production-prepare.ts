@@ -78,7 +78,7 @@ export class Permit2ProductionPreparation {
         usage: { usage: (identity, at) => this.usage.usageReadOnly(identity, at) }, rpc: this.ports.rpc, now: () => this.now() });
       const observed = await read.readChecked({ payer: wallet.account, chainId: 43114, token: asset.token,
         challengeHash: checked.challengeHash, offerHash: selection.offerHash, amountAtomic: selection.amountAtomic,
-        nowSeconds: signingSecond, nonceBitmapWordIndex: (nonce >> 8n).toString() });
+        nowSeconds: signingSecond, nonceBitmapWordIndex: (nonce >> 8n).toString(), payTo: selection.payTo });
       if (canonicalJson(wallet) !== canonicalJson(await permit2WalletBinding(this.state, profile))) blocked("Wallet binding changed during preparation.");
       const material = createPermit2ProductionMaterial({ checked, wallet, checkpoint: observed.checkpoint,
         owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString() });

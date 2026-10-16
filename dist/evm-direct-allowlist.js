@@ -30,12 +30,12 @@ export function evmAllowlistSubject(operation) {
     // The local `pay transfer prepare` Base USDC record is the same direct asset row and shares its owner caps.
     if (asset === undefined && operation.providerDirect === undefined && operation.chainId === CHAIN_ID && operation.token === BASE_USDC) {
         return { profile: operation.profile, operationId: operation.operationId, family: "evm", account: operation.walletAddress,
-            chain: `eip155:${CHAIN_ID}`, amountAtomic: operation.amountAtomic, asset: { kind: "token", identifier: BASE_USDC } };
+            chain: `eip155:${CHAIN_ID}`, amountAtomic: operation.amountAtomic, asset: { kind: "token", identifier: BASE_USDC }, recipient: operation.recipient };
     }
     if (asset === undefined)
         throw new ApnError("APN_STATE_CORRUPT", "Only a local direct EVM transfer carries a direct allowlist binding.");
     return { profile: operation.profile, operationId: operation.operationId, family: "evm", account: operation.walletAddress,
-        chain: `eip155:${operation.chainId}`, amountAtomic: operation.amountAtomic,
+        chain: `eip155:${operation.chainId}`, amountAtomic: operation.amountAtomic, recipient: operation.recipient,
         asset: asset.kind === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: asset.address } };
 }
 /** A binding is optional so records written before the gate still validate; once present its lease is mandatory past `started`. */

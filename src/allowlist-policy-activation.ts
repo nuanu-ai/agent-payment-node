@@ -9,6 +9,7 @@ import {
   type AssetPolicyRegistry,
   type AssetMechanismOption,
 } from "./asset-policy-registry.js";
+import { isRecipientPinRail } from "./allowlist-recipient-pins.js";
 import { swapMechanismDigest } from "./swap/pin.js";
 import { swapRouteDigest, type SwapAdmissionMechanism } from "./swap/route-admission.js";
 import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS, type TtyTransferApprovalOptions } from "./tty-approval.js";
@@ -47,7 +48,10 @@ export interface AllowlistAdmissionView {
   readonly mechanism: Readonly<{ provider: string; reference: string }> | SwapAdmissionMechanism | null;
   readonly mechanismOptions?: readonly AssetMechanismOption[];
   readonly swapMechanisms?: readonly SwapAdmissionMechanism[];
+  /** Gasless: the single exact recipient pin. */
   readonly recipient?: string;
+  /** Direct, x402 and single-pin bridge: the owner's recipient pin (OD-1). Absent: this policy does not restrict recipients. */
+  readonly recipients?: readonly string[];
 }
 
 export function allowlistAdmissions(registry: AssetPolicyRegistry): readonly AllowlistAdmissionView[] {
@@ -58,6 +62,7 @@ export function allowlistAdmissions(registry: AssetPolicyRegistry): readonly All
       decimals: asset.decimals, rail, maximumPerTransferAtomic: caps.maximumPerTransferAtomic, dailyLimitAtomic: caps.dailyLimitAtomic,
       mechanism: mechanism ?? null,
       ...(rail === "gasless" && asset.gaslessRecipient !== undefined ? { recipient: asset.gaslessRecipient } : {}),
+      ...(isRecipientPinRail(rail) && asset.recipients?.[rail] !== undefined ? { recipients: asset.recipients[rail] } : {}),
       ...(rail === "bridge" && asset.mechanismOptions?.bridge !== undefined ? { mechanismOptions: asset.mechanismOptions.bridge } : {}),
       ...(rail === "swap" && asset.mechanismOptions?.swap !== undefined ? { swapMechanisms: asset.mechanismOptions.swap } : {}) };
   })));
@@ -100,8 +105,10 @@ export function allowlistDecisionLines(intent: AllowlistPolicyDecisionIntent, ap
       `   Daily (UTC): ${display(row.dailyLimitAtomic, row.decimals)} ${row.symbol} (${row.dailyLimitAtomic} atomic)`,
       ...(row.mechanism === null ? [] : [`   Mechanism pin: ${mechanismText(row.mechanism)}`]),
       ...(row.recipient === undefined ? [] : [`   Exact recipient: ${row.recipient}`]),
+      ...(row.recipients === undefined ? [] : [`   Recipients pinned (${row.recipients.length}): ${row.recipients.join(", ")}`]),
       ...(row.mechanismOptions === undefined ? [] : row.mechanismOptions.map((option) =>
-        `   Mechanism pin: provider ${option.provider}; reference ${option.reference}; per operation ${display(option.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${option.maximumPerTransferAtomic} atomic)`)),
+        `   Mechanism pin: provider ${option.provider}; reference ${option.reference}; per operation ${display(option.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${option.maximumPerTransferAtomic} atomic)${
+          option.recipients === undefined ? "" : `; recipients pinned (${option.recipients.length}): ${option.recipients.join(", ")}`}`)),
       ...(row.swapMechanisms === undefined ? [] : row.swapMechanisms.map((mechanism) => `   Mechanism pin: ${mechanismText(mechanism)}`)),
     ]),
     "Daily caps count this asset's combined usage on every rail during the UTC day.",

@@ -62,7 +62,7 @@ export async function prepareEvmTransfer(context, operations, request, persist, 
             const amount = evmAmount(request.amount, listed.decimals);
             // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
             const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
-                chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
+                chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic, recipient,
                 asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
             const rpcPort = context.requireRpc();
             armDirectEvmStep(rpcPort, selection.chainId, "prepare");

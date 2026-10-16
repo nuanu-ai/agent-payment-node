@@ -14,7 +14,8 @@ export function requireListedRailAsset(asset) {
 }
 export function railAllowlistSubject(input) {
     return { profile: input.profile, operationId: input.operationId, family: input.account.rail, account: input.account.address,
-        chain: railAllowlistChain(input.account.rail), asset: railUsageAsset(input.prepared.asset), amountAtomic: input.prepared.amountAtomic };
+        chain: railAllowlistChain(input.account.rail), asset: railUsageAsset(input.prepared.asset), amountAtomic: input.prepared.amountAtomic,
+        recipient: input.prepared.recipient };
 }
 /** Optional on records written before the gate; once bound, the lease is mandatory from the first signing or send transition. */
 export function validateRailAllowlist(value, subject) {
