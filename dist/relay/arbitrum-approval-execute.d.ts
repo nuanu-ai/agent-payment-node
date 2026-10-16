@@ -13,6 +13,8 @@ export interface RelayArbitrumApprovalSummary {
     readonly token: string;
     readonly spender: string;
     readonly approvalValueAtomic: string;
+    readonly recipient: string;
+    readonly minimumOutputAtomic: string;
     readonly quoteDigest: string;
     readonly deadline: string;
     readonly approvalNetworkFeeCeilingWei: string;
