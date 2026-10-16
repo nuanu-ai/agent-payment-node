@@ -8,11 +8,11 @@ import { projectLegacyLocalProfile } from "../../src/provider-profile.js";import
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { CircleUsage,circleMechanism } from "../../src/circle-v2-evm/usage.js";import { CircleRepository } from "../../src/circle-v2-evm/repository.js";
 import { CircleFundingEvmService } from "../../src/circle-v2-evm/funding-runtime.js";import { CIRCLE_RPC_ABI } from "../../src/circle-v2-evm/rpc.js";
-import { CIRCLE_DEPLOYMENT_PINS,CIRCLE_SOURCE_OWNER,CIRCLE_SOURCE_TOKEN,CIRCLE_MESSENGER,CIRCLE_MINTER,CIRCLE_TRANSMITTER,circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_DEPLOYMENT_PINS,CIRCLE_SOURCE_OWNER,CIRCLE_SOURCE_TOKEN,CIRCLE_MESSENGER,CIRCLE_MINTER,CIRCLE_TRANSMITTER,circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { advanceCircleFundingOperation as advanceCircle, sealCircleFundingOperation as sealCircle, circleFundingFingerprint, type CircleFundingOperationV2 } from "../../src/circle-v2-evm/funding-operation.js";
 import { circleFundingBinding, quoteCircleFundingFee } from "../../src/circle-v2-evm/funding-binding.js";
 import { bindCircleAttestation,decodeCircleSource,verifyCircleApproval,encodeCircleApproval,encodeCircleBurn,encodeCircleMint,circleWord,type CircleObservation } from "../../src/circle-v2-evm/protocol.js";
-import { source,event,observation,iris,message,snapshot } from "./circle-v2-evm-runtime-fixtures.js";import { initial,at } from "./circle-v2-evm-nonce-runtime-fixtures.js";
+import { source,event,observation,iris,message,snapshot } from "./circle-v2-evm-runtime-fixtures.js";import { initial,at,fundingIdentity } from "./circle-v2-evm-nonce-runtime-fixtures.js";
 export const actor=privateKeyToAccount(`0x${"09".padStart(64,"0")}`),q=(n:bigint|number)=>`0x${BigInt(n).toString(16)}`;
 export const testFeeRecipient=getAddress("0xfc1bdd1ff58200761d56ccbce73f6f42ebe56379");
 const hash=(v:string)=>`0x${v.repeat(64).slice(0,64)}` as Hex,approvalHash=hash("a"),burnHash=hash("b");
@@ -27,7 +27,7 @@ function normalize(o:{-readonly [K in keyof CircleObservation]:CircleObservation
  const r=o.receipt as Record<string,unknown>;o.receipt={...r,transactionHash:tx,transactionIndex:"0x0",blockNumber:n,blockHash:h,gasUsed:q(gas),effectiveGasPrice:"0x1312d00",logs:(r.logs as Record<string,unknown>[]).map(l=>({...l,transactionHash:tx,transactionIndex:"0x0",blockNumber:n,blockHash:h}))};return o;
 }
 function fundingInitial(root:string):CircleFundingOperationV2 {
- const old=initial(root),funding=circleFundingBinding(143,"default",{recipient:getAddress(`0x${"77".repeat(20)}`),amountAtomic:"510000",maxFeeAtomic:"1000",minMintAtomic:"509000"}),feeQuote=quoteCircleFundingFee(funding,[{finalityThreshold:1000,minimumFee:1}],at,at);
+ const old=initial(root),funding=circleFundingBinding(143,fundingIdentity(old),{recipient:getAddress(`0x${"77".repeat(20)}`),amountAtomic:"510000",maxFeeAtomic:"1000",minMintAtomic:"509000"}),feeQuote=quoteCircleFundingFee(funding,[{finalityThreshold:1000,minimumFee:1}],at,at);
  const {externalFulfillment:_e,nonceRetirement:_n,schemaVersion:_s,integrityHash:_h,...body}=old;
  const op=sealCircle({...body,schemaVersion:"apn.circle-v2-evm-operation.v2",funding,feeQuote,feeQuoteAtomic:feeQuote.quotedFeeAtomic,state:"awaiting_source",expiresAt:new Date(at+900000).toISOString(),effects:body.effects.map(e=>({...e,envelope:{...e.envelope,data:e.role==="burn"?encodeCircleBurn(143,funding):encodeCircleApproval(false,funding)}}))} as Omit<CircleFundingOperationV2,"integrityHash">);
  return sealCircle({...op,effects:op.effects.map(e=>{const {envelopeHash:_h,...body}=e.envelope;return {...e,envelope:circleEnvelope(body)};})});

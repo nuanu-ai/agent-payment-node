@@ -6,11 +6,13 @@ import { hashObject } from "../../src/canonical.js";
 const base = ["circle", "evm", "prepare", "--profile", "evm-live-buyer", "--destination-profile", "default", "--destination-chain", "143", "--idempotency-key", "funding-example-1"];
 const options = ["--beneficiary", "--gross-atomic", "--max-issuer-fee-atomic", "--min-mint-atomic"];
 const values = [getAddress(`0x${"55".repeat(20)}`), "510000", "10000", "500000"];
-test("old prepare request shape and hash stay unchanged; explicit funding is separate", () => {
+test("prepare requires every input; the fixed v1 request without funding is read-only and refused", () => {
  const old = { command: "circle.evm.prepare", profile: "evm-live-buyer", destinationProfile: "default", destinationChain: 143, idempotencyKey: "funding-example-1" };
- assert.deepEqual(parseArgv(base).request, old); assert.equal(hashObject(parseArgv(base).request), hashObject(old));
+ assert.throws(() => parseArgv(base), { code: "APN_INVALID_INPUT" });
  const request = parseArgv([...base, ...options.flatMap((o,i) => [o, values[i]!])]).request;
  assert.deepEqual(request, { ...old, funding: { recipient: values[0], amountAtomic: values[1], maxFeeAtomic: values[2], minMintAtomic: values[3] } });
+ assert.equal(hashObject(request), hashObject({ ...old, funding: { recipient: values[0], amountAtomic: values[1], maxFeeAtomic: values[2], minMintAtomic: values[3] } }));
+ for (const chain of ["1", "0143", "1329.0", "42161"]) assert.throws(() => parseArgv([...base.slice(0, 8), chain, ...base.slice(9), ...options.flatMap((o,i) => [o, values[i]!])]), { code: "APN_INVALID_INPUT" });
  for (const recipient of [getAddress(`0x${"66".repeat(20)}`), values[0]!]) assert.equal((parseArgv([...base, "--beneficiary", recipient, ...options.slice(1).flatMap((o,i) => [o, values[i+1]!])]).request as {funding:{recipient:string}}).funding.recipient, recipient);
 });
 for (let mask=1;mask<15;mask++) test(`partial funding tuple ${mask} refuses`, () => { assert.throws(() => parseArgv([...base, ...options.flatMap((o,i) => mask & (1<<i) ? [o, values[i]!] : [])]), {code:"APN_INVALID_INPUT"}); });

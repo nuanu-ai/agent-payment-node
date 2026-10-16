@@ -5,7 +5,7 @@ import { canonicalJson, hashObject } from "../canonical.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import { listLocalWallets } from "../wallet-import-collision.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, decodeCircleSource, verifyCircleApproval, verifyCircleAttestationSigners, circleAttesterConfigurationHash } from "./protocol.js";
 import { verifyCircleDeployments } from "./preflight.js";
 import { readCircleAttesters, readCircleDeployment } from "./rpc.js";
@@ -66,8 +66,6 @@ export async function adoptCircleFundingExternalMint(state, repo, usage, env, no
     const initial = found;
     if (initial === null)
         circleBlocked("external_operation_not_found");
-    if (initial.destinationChain !== 143)
-        circleBlocked("external_monad_only");
     if (initial.source === null || initial.attestation === null)
         circleBlocked("external_verified_source_required");
     const key = fundingExternalClaimKey(initial), sourceKey = hashObject({ sourceTransactionHash: initial.source.transactionHash, sourceMessageHash: initial.source.sourceMessageHash });
@@ -83,7 +81,7 @@ export async function adoptCircleFundingExternalMint(state, repo, usage, env, no
                 circleBlocked("external_terminal_conflict");
             return op;
         }
-        const route = circleRoute(op.destinationChain, op.destinationProfile), budget = new CircleExternalRpcBudget(now, now() + 120000, https), source = new CircleExternalRpc(env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", 42161, budget), destination = new CircleExternalRpc(env[route.rpcEnvironment] ?? route.rpcDefault, op.destinationChain, budget);
+        const route = circleRoute(op.destinationChain), budget = new CircleExternalRpcBudget(now, now() + 120000, https), source = new CircleExternalRpc(env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", 42161, budget), destination = new CircleExternalRpc(env[route.rpcEnvironment] ?? route.rpcDefault, op.destinationChain, budget);
         const approval = op.effects[0], burn = op.effects[1];
         if (approval.phase !== "confirmed" || burn.phase !== "confirmed" || approval.transactionHash === null || burn.transactionHash === null)
             circleBlocked("external_source_not_confirmed");
@@ -95,13 +93,12 @@ export async function adoptCircleFundingExternalMint(state, repo, usage, env, no
         sourceEnvelope(approval, approvalObservation.transaction);
         sourceEnvelope(burn, burnObservation.transaction);
         const sourceHead = circleRecord(burnObservation.finalityHead);
-        // P1: the exact Approval event proves the approved allowance; the zero allowance is read at the latest head.
+        // P1: the exact Approval event proves the approved allowance, and the burn at the next nonce consumed exactly it, so
+        // the allowance at the burn block is zero without a state read that a later, unrelated approval could change.
         const approvalProof = verifyCircleApproval(approvalObservation, false, null, op.funding);
         const sourceProof = decodeCircleSource(burnObservation, op.destinationChain, op.funding);
         if (op.source === null || sourceProof.sourceMessageHash !== op.source.sourceMessageHash || sourceProof.blockHash !== op.source.blockHash || sourceProof.receiptHash !== op.source.receiptHash || approval.proof?.receiptHash !== approvalProof.receiptHash)
             circleBlocked("external_source_reorg");
-        if (String(await source.read(CIRCLE_SOURCE_TOKEN, "allowance", [CIRCLE_SOURCE_OWNER, CIRCLE_MESSENGER], "latest")) !== "0")
-            circleBlocked("external_source_allowance");
         const proofOp = { ...op, source: sourceProof }, destBlock = circleRecord(destinationObservation.canonicalBlock);
         const destinationHead = circleRecord(destinationObservation.finalityHead);
         circleExternalHeader(destinationHead);

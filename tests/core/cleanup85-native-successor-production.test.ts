@@ -7,7 +7,7 @@ import { mkdir,readFile,writeFile,unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson,domainHash,hashObject } from "../../src/canonical.js";
 import { CircleEvmService } from "../../src/circle-v2-evm/runtime.js";
-import { circleRoute,CIRCLE_SOURCE_TOKEN } from "../../src/circle-v2-evm/catalog.js";
+import { circleLegacyRoute as circleRoute,CIRCLE_SOURCE_TOKEN } from "../../src/circle-v2-evm/catalog.js";
 import { circleMechanism } from "../../src/circle-v2-evm/usage.js";
 import { Cleanup85NativeCancellation,verifyCleanup85CancellationAccounting } from "../../src/circle-cleanup85-native-cancellation.js";
 import { Cleanup85NativePublicRecords } from "../../src/circle-cleanup85-native-records.js";
