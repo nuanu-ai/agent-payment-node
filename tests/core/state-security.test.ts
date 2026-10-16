@@ -9,7 +9,7 @@ import { EncryptedWalletStore, walletEnvelopeIdentity } from "../../src/encrypte
 import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import { EvmWrappingSecret } from "./evm-helpers.js";
 import { StateStore } from "../../src/state.js";
-import { WALLET, RECIPIENT, TestNative, TestRpc, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
+import { WALLET, RECIPIENT, TestNative, TestRpc, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
 
 test("state root rejects wrong mode and symlinked ancestors", async (t) => {
   const temporary = await temporaryState();
@@ -123,6 +123,7 @@ test("operation filenames hash idempotency keys instead of exposing them", async
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
+  await activateBaseUsdcDirectPolicy(temporary.root);
   await makeCore({ root: temporary.root, rpc: new TestRpc() }).execute({
     command: "transfer.prepare",
     profile: "default",

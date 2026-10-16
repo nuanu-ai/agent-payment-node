@@ -17,7 +17,7 @@ import { StateStore } from "../../src/state.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "../../src/tty-approval.js";
 import { isExactTransferApproval, transferApprovalPhrase } from "../../src/tty-approval.js";
 import { x402AuthorizationIntentHash } from "../../src/x402-state-integrity.js";
-import { RECIPIENT, TestClock, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { RECIPIENT, TestClock, TestProfilePolicy, TestRpc, activateBaseUsdcDirectPolicy, temporaryState } from "./helpers.js";
 import { QueuedHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
@@ -223,6 +223,7 @@ test("direct-transfer approval completes before the encrypted private key is loa
   const core = new ApnCore({ state, native: new LocalWalletNative(state, wrapping, approval), rpc, clock });
   const wallet = await core.execute({ command: "wallet.ensure", profile: "default" });
   rpc.balances = { ...rpc.balances, address: (wallet.data as { address: Address }).address };
+  await activateBaseUsdcDirectPolicy(temporary.root, (wallet.data as { address: Address }).address);
   trace.length = 0;
   const prepared = await core.execute({
     command: "transfer.prepare",
@@ -251,6 +252,7 @@ test("local custody persists one approved direct-transfer effect and restart obs
   const wallet = await first.execute({ command: "wallet.ensure", profile: "default" });
   const address = (wallet.data as { address: Address }).address;
   rpc.balances = { ...rpc.balances, address };
+  await activateBaseUsdcDirectPolicy(temporary.root, address);
 
   const prepared = await first.execute({
     command: "transfer.prepare",

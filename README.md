@@ -275,7 +275,12 @@ apn pay transfer approve --operation <operation-id> \
 ```
 
 For the default local wallet, prepare freezes recipient, amount, nonce, fees,
-calldata and expiry. For a bound Coinbase or MetaMask Agent Wallet profile it
+calldata and expiry. It needs an active owner allowlist policy that admits
+Base USDC on the direct rail (`docs/allowlist-direct-integration.md`): the
+amount counts against that policy's per-transfer and daily caps, and approval
+reserves it in the shared usage ledger before signing. Approval accepts any fee
+movement that keeps the frozen nonce, gas limit and max fee per gas
+executable; the consent screen shows that signed execution-fee cap. For a bound Coinbase or MetaMask Agent Wallet profile it
 instead freezes the public profile revision/capability/sender, provider
 execution ownership, recipient, integer atomic amount and canonical decimal,
 Base/canonical-USDC identity, foreground-approval policy and validated RPC

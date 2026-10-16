@@ -20,7 +20,7 @@ import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
 import { UsdtExecutionJournal, usdtExecutionIntent } from "../../src/gasless-usdt/execution-journal.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
+import { TestRpc, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, temporaryState } from "./helpers.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { runCli } from "../../src/cli.js";
 import { createMcpServer } from "../../src/mcp-server.js";
@@ -249,6 +249,7 @@ test("the same key can independently prepare an older direct rail and the bound 
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const key = "cross-family-local-001";
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
+  await activateBaseUsdcDirectPolicy(temporary.root);
   const directRpc = new TestRpc();
   const direct = await makeCore({ root: temporary.root, rpc: directRpc }).execute({ command: "transfer.prepare",
     profile: "default", recipient: RECIPIENT, amount: "1", idempotencyKey: key });

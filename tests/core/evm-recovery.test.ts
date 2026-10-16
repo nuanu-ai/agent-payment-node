@@ -91,7 +91,11 @@ for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP 
   assert.equal((approved.operation as { state: string }).state, approvalState);
   assert.equal(setup.approval.intents.length, 1); assert.equal(setup.rpc.submissions.length, 1); assert.equal(signingRequests, 1);
   const afterApproval = { receiptCalls, loads: setup.wrapping.loads };
-  assert.deepEqual((await invoke("apn_operation_status", { operation: operation.operation_id })).operation, approved.operation);
+  // The offline status keeps the RPC placeholder that the CLI result fills with the endpoint it was given.
+  const statusView = (await invoke("apn_operation_status", { operation: operation.operation_id })).operation as Record<string, unknown>;
+  assert.deepEqual({ ...statusView, next_actions: null }, { ...(approved.operation as Record<string, unknown>), next_actions: null });
+  assert.deepEqual((approved.operation as { next_actions: string[] }).next_actions,
+    (statusView.next_actions as string[]).map(action => action.replace("--rpc-url <https-url>", `--rpc-url ${selection.rpc_url}`)));
   assert.equal(receiptCalls, afterApproval.receiptCalls); assert.equal(setup.wrapping.loads, afterApproval.loads);
   assert.equal(signingRequests, 1); assert.equal(setup.rpc.submissions.length, 1);
   const observe = approvalState === "submitted_pending";

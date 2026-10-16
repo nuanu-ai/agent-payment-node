@@ -10,7 +10,8 @@ import { parseDecimal } from "./money.js";
 import { conflictDomainKey, evmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
 import { OperationService } from "./operation-service.js";
 import { appendTransition, sealOperation, sealReceipt } from "./state.js";
-import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, parseEffect, publicOperation, requireFunding, transferData, validateBalance, validateEconomics, verifyEffect, } from "./transfer-policy.js";
+import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, parseEffect, publicOperation, requireFunding, transferData, validateBalance, validateEconomics, verifyEffect, withInvocationRpc, } from "./transfer-policy.js";
+import { reportingRateLimits } from "./rpc-rate-limit.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
@@ -35,6 +36,13 @@ export class TransferService {
         });
     }
     async prepare(request) {
+        return await this.invocation(() => this.prepareOperation(request));
+    }
+    /** What a caller sees: a 429 as a rate limit, and next actions bound to this invocation's own RPC endpoint. */
+    async invocation(work) {
+        return withInvocationRpc(await reportingRateLimits(work), this.context.rpcUrl);
+    }
+    async prepareOperation(request) {
         if (request.asset !== undefined) {
             if (await this.providerDirect.canHandle(request.profile))
                 throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Generic EVM direct transfer is available only for the local wallet; external profiles retain their explicit Base-USDC capabilities.");
@@ -80,6 +88,9 @@ export class TransferService {
             if (wallet === null)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
             await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, wallet.address);
+            // Owner caps come from the active allowlist policy and the shared usage ledger, as for every direct transfer, before any RPC.
+            const allowlist = await this.allowlist.admit(evmAllowlistSubject({ profile, operationId, walletAddress: wallet.address,
+                chainId: CHAIN_ID, token: BASE_USDC, amountAtomic: amount.atomic }));
             const rpc = this.context.requireRpc();
             rpc.armEvmDirectRpcGuard?.();
             await rpc.assertBaseChain();
@@ -139,6 +150,7 @@ export class TransferService {
                 reason: initial.reason,
                 proofClass: initial.proofClass,
                 transitions: appendTransition([], initial),
+                allowlist,
             });
             await this.persist(operation);
             await new DirectPublicEffectJournal(state).prepare(operation);
@@ -148,7 +160,8 @@ export class TransferService {
     async prepareCoinbaseGasless(request) {
         return await this.providerDirect.prepareCoinbaseGasless(request);
     }
-    async approve(operationIdInput) {
+    async approve(operationId) { return await this.invocation(() => this.approveOperation(operationId)); }
+    async approveOperation(operationIdInput) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
@@ -158,7 +171,7 @@ export class TransferService {
         if (localFound.evm?.cleanup85Cancellation !== undefined)
             throw new ApnError("APN_OPERATION_BLOCKED", "Finite cleanup85 cancellation requires its dedicated foreground controller; observation cannot grant signing.");
         const { profile, profileHash } = localFound;
-        return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, ...(localFound.evm?.circleNativeAdmission === undefined ? [] : [`profile:${localFound.evm.circleNativeAdmission.recipientCustody.profileHash}`])], async () => {
+        return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
             let operation = requiredLocal(await this.requiredOperation(operationId));
             if (operation.terminal)
                 return publicOperation(await this.followUsage(operation));
@@ -172,6 +185,9 @@ export class TransferService {
             if (this.context.clock.now().getTime() >= Date.parse(operation.expiresAt)) {
                 await this.failBeforeEffect(operation, "approval_window_expired");
             }
+            // 0.5.41 let an Arbitrum native transfer to profile "default" bypass an unsettled Circle source; that rider is retired.
+            if (operation.evm?.circleNativeAdmission !== undefined)
+                await this.failBeforeEffect(operation, "circle_native_admission_retired");
             const rpc = this.context.requireRpc();
             if (operation.chainId === 8453 || operation.chainId === 42161 || operation.chainId === 1329)
                 rpc.armEvmDirectRpcGuard?.();
@@ -186,13 +202,9 @@ export class TransferService {
             }
             else
                 await this.context.state.withLocks([walletCustodyLock(this.context.state, profile)], check);
-            if (operation.evm !== undefined) {
-                // The native signer approves and signs in one call, so the reservation is durable in both stores before it.
-                const allowlistLease = await this.reserveUsage(operation);
-                operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
-            }
-            if (operation.evm === undefined)
-                operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect");
+            // The native signer approves and signs in one call, so the reservation is durable in both stores before it.
+            const allowlistLease = await this.reserveUsage(operation);
+            operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
             const custodyPayload = directCustodyPayload(operation);
             // A failed native call may have lost its response after signing. Classification cannot decrypt custody here.
             const effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
@@ -207,7 +219,7 @@ export class TransferService {
         const saved = await this.context.state.findOperation(canonicalOperationId(operationId));
         if (saved?.evm?.cleanup85Cancellation !== undefined)
             throw new ApnError("APN_OPERATION_BLOCKED", "Finite cleanup85 cancellation requires its finalized public observer; generic safe settlement cannot close it.");
-        return await this.observation.resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc);
+        return await this.invocation(() => this.observation.resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc));
     }
     async recoverProviderRequest(operationId, providerRequestId) {
         return await this.observation.recoverProviderRequest(operationId, providerRequestId);
@@ -273,8 +285,9 @@ export class TransferService {
     }
     async failBeforeEffect(operation, reason) {
         await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
-        await this.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
-        throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.");
+        const failed = await this.transition(operation, "failed_before_effect", true, reason, "durable_pre_effect_failure");
+        const view = withInvocationRpc(publicOperation(failed), this.context.rpcUrl);
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen transfer inputs changed before approval; prepare a new operation.", { nextActions: view.next_actions });
     }
     async transition(operation, state, terminal, reason, proofClass, extra = {}, rpcReceipt, followUsage = true) {
         const at = this.context.clock.now().toISOString();

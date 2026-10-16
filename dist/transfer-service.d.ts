@@ -10,10 +10,14 @@ export declare class TransferService {
     prepare(request: Extract<CommandRequest, {
         command: "transfer.prepare";
     }>): Promise<unknown>;
+    /** What a caller sees: a 429 as a rate limit, and next actions bound to this invocation's own RPC endpoint. */
+    private invocation;
+    private prepareOperation;
     prepareCoinbaseGasless(request: Extract<CommandRequest, {
         command: "gasless.transfer.prepare";
     }>): Promise<unknown>;
-    approve(operationIdInput: string): Promise<unknown>;
+    approve(operationId: string): Promise<unknown>;
+    private approveOperation;
     resume(operationId: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
     recoverProviderRequest(operationId: string, providerRequestId: string): Promise<unknown>;
     status(operationId: string): Promise<unknown>;

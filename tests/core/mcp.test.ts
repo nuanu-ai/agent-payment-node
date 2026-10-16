@@ -16,7 +16,7 @@ import { projectMcpTools } from "../../src/mcp-projection.js";
 import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js";
 import type { NativePort, NativeRequest } from "../../src/ports.js";
 import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "../../src/policy-approval.js";
-import { RECIPIENT, TestNative, TestRpc, exactReceipt, temporaryState } from "./helpers.js";
+import { RECIPIENT, TestNative, TestRpc, activateBaseUsdcDirectPolicy, exactReceipt, temporaryState } from "./helpers.js";
 import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 
 const TOOL_NAMES = [
@@ -462,6 +462,7 @@ test("direct MCP approval returns the exact foreground handoff before custody an
   assert.equal((await runCli(["wallet", "ensure"], {}, {
     stateRoot: temporary.root, native: setupNative,
   })).ok, true);
+  await activateBaseUsdcDirectPolicy(temporary.root);
   let hostileNativeCalls = 0;
   let hostileApprovalCalls = 0;
   let wrappingLoads = 0;
