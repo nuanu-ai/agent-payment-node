@@ -58,7 +58,8 @@ export async function observeCoinbaseGasless(rpc, operation, logsRpc) {
         fail("coinbase_gasless_binding_missing", "APN_STATE_CORRUPT");
     const call = requiredCall(rpc), logs = requiredLogs(logsRpc ?? rpc);
     const identity = await rpc.assertBaseChain();
-    if (identity.rpcOrigin !== binding.rpcOrigin)
+    // Any Base endpoint may observe; only the logs preset records the frozen call origin as its provenance.
+    if (logsRpc !== undefined && identity.rpcOrigin !== binding.rpcOrigin)
         return unresolved(operation, "coinbase_gasless_rpc_origin_changed");
     try {
         const logsCall = logsRpc === undefined ? undefined : requiredCall(logsRpc);

@@ -27,6 +27,7 @@ import {
 } from "./provider-x402-state.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { stagedProviderX402Operation } from "./provider-x402-stage.js";
+import { resolveProviderPrepare } from "./provider-prepare-identity.js";
 import { isCode } from "./secure-state-store.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
@@ -104,7 +105,8 @@ export class ProviderX402Service {
     // The RPC is not part of the request identity: any Base endpoint may prepare, approve and observe it.
     const requestHash = providerX402RequestHash(requestInput);
     const legacyRequestHash = providerX402RequestHash({ ...requestInput, legacyRpcUrl: rpcUrl });
-    const replay = await this.resolvePrepare({ kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash }, legacyRequestHash);
+    const replay = await resolveProviderPrepare(this.operations,
+      { kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash }, legacyRequestHash);
     if (replay !== null) {
       if (replay.kind !== "x402_fetch" || replay.strategy !== "provider_atomic")
         throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to a different operation strategy.");
@@ -115,7 +117,7 @@ export class ProviderX402Service {
       `profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
       `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`,
     ], async () => {
-      const existing = await this.resolvePrepare({
+      const existing = await resolveProviderPrepare(this.operations, {
         kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash,
       }, legacyRequestHash);
       if (existing !== null) {
@@ -153,16 +155,6 @@ export class ProviderX402Service {
         throw new ApnError("APN_STATE_CORRUPT", "Staged provider x402 operation disappeared during preparation.");
       }
     });
-  }
-  private async resolvePrepare(
-    input: Parameters<OperationService["resolvePrepare"]>[0],
-    legacyRequestHash: string,
-  ): ReturnType<OperationService["resolvePrepare"]> {
-    try { return await this.operations.resolvePrepare(input); }
-    catch (error) {
-      if (!isCode(error, "APN_IDEMPOTENCY_CONFLICT")) throw error;
-      return await this.operations.resolvePrepare({ ...input, requestHash: legacyRequestHash });
-    }
   }
   private async completePreparation(operation: ProviderX402OperationRecord): Promise<ProviderX402OperationRecord> {
     if (operation.state !== "preparing") return operation;
