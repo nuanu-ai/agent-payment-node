@@ -40,7 +40,7 @@ async function prepared(profile = "default") {
   const state = new StateStore(temporary.root);
   const service = new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
     { activePolicy: async () => active(1, profile), dailyUsage: async () => "0" });
-  const saved = await service.prepareArbitrum({ profile, owner, amountAtomic: "500000",
+  const saved = await service.prepareArbitrum({ recipient: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04", profile, owner, amountAtomic: "500000",
     minOutputAtomic: "94065", maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
     maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-approval-decision" });
   const operation = await new RelayUnsignedOperationRepository(temporary.root).loadOperation(

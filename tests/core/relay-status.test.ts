@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { hashObject } from "../../src/canonical.js";
+import { hashObject, sha256 } from "../../src/canonical.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { freezeRelayUnsignedOperation, RelayRetirementRepository, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { relayStatusLocator, validateRelayQuote } from "../../src/relay/quote.js";
@@ -26,7 +26,7 @@ async function savedOperation(withLocator = true) {
   const quote = withLocator ? { ...withStatus, quoteDigest: hashObject(withStatus) } :
     { ...noLocator, quoteDigest: hashObject(noLocator) };
   return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
-    state: "prepared", terminal: false, profileHash: "1".repeat(64), operationId,
+    state: "prepared", terminal: false, profileHash: sha256("profile\0default"), operationId,
     idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64), sourceChainId: 1,
     destinationChainId: 56, sourceAccount: payer, recipient, quoteDigest: quote.quoteDigest, quote,
     ...(withLocator ? { statusLocator: locator } : {}),
@@ -57,9 +57,13 @@ test("Relay status binds CLI and spends exactly one keyless GET without modifyin
     assert.ok(init?.signal instanceof AbortSignal);
     return response(payload("success"));
   };
-  assert.deepEqual(bindArgv(["relay", "status", "--operation", operationId]).request,
-    { command: "relay.status", operationId });
-  const result = await new RelayKeylessStatusService(new StateStore(temp.root), fetcher).status(operationId);
+  assert.deepEqual(bindArgv(["relay", "status", "--profile", "default", "--operation", operationId]).request,
+    { command: "relay.status", profile: "default", operationId });
+  const result = await new RelayKeylessStatusService(new StateStore(temp.root), fetcher).status("default", operationId);
+  assert.equal(calls, 1);
+  // Another profile cannot read this operation's provider status (it is not found under its hash): no GET is made.
+  await assert.rejects(new RelayKeylessStatusService(new StateStore(temp.root), fetcher).status("alice", operationId),
+    { code: "APN_OPERATION_NOT_FOUND" });
   assert.equal(calls, 1);
   assert.equal(result.status, "success"); assert.equal(result.proofClass, "provider_assertion");
   assert.equal(result.chainIdentityObserved, true);
@@ -78,7 +82,7 @@ test("Relay accepts schema-valid waiting status without chain IDs or transaction
   const service = new RelayKeylessStatusService(new StateStore(temp.root), async () => {
     calls++; return response({ status: "waiting" });
   });
-  const result = await service.status(operationId);
+  const result = await service.status("default", operationId);
   assert.equal(calls, 1);
   assert.equal(result.status, "waiting");
   assert.equal(result.chainIdentityObserved, false);
@@ -98,13 +102,13 @@ test("old quote without locator and hostile saved locator fail before network", 
   let calls = 0;
   const fetcher: typeof fetch = async () => { calls++; return response(payload("success")); };
   const service = new RelayKeylessStatusService(new StateStore(temp.root), fetcher);
-  await assert.rejects(service.status(operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(service.status("default", operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(calls, 0);
   const path = join(temp.root, "relay-unsigned-operations", op.profileHash, `${operationId}.json`);
   const forged = { ...op, statusLocator: { requestId: hash, endpoint: "https://evil.example/intents/status/v3?requestId=" + hash } };
   const { integrityHash: _, ...body } = forged;
   await writeFile(path, JSON.stringify({ ...body, integrityHash: hashObject(body) }));
-  await assert.rejects(service.status(operationId), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(service.status("default", operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(calls, 0);
 });
 
@@ -120,14 +124,14 @@ test("retired quote and malformed retirement marker fail before any Relay reques
   const service = new RelayKeylessStatusService(new StateStore(temp.root), async () => {
     calls++; return response(payload("success"));
   });
-  await assert.rejects(service.status(operationId), { code: "APN_OPERATION_BLOCKED",
+  await assert.rejects(service.status("default", operationId), { code: "APN_OPERATION_BLOCKED",
     details: { reason: "relay_operation_retired" } });
   assert.equal(calls, 0);
   assert.deepEqual(await readFile(markerPath), before);
   const malformed = JSON.parse(before.toString()) as Record<string, unknown>;
   malformed.preparedIntegrityHash = "f".repeat(64);
   await writeFile(markerPath, JSON.stringify(malformed));
-  await assert.rejects(service.status(operationId), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(service.status("default", operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(calls, 0);
 });
 
@@ -156,7 +160,7 @@ test("Relay status protocol gates have fixed diagnostic reasons and one request 
   ] as const) {
     let calls = 0;
     const service = new RelayKeylessStatusService(new StateStore(temp.root), async () => { calls++; return providerResponse; });
-    await assert.rejects(service.status(operationId), { code: "APN_PROVIDER_PROTOCOL", details: { reason: expectedReason } });
+    await assert.rejects(service.status("default", operationId), { code: "APN_PROVIDER_PROTOCOL", details: { reason: expectedReason } });
     assert.equal(calls, 1);
     assert.deepEqual(await readFile(path), before);
   }
@@ -168,7 +172,7 @@ test("Relay status accepts a matching single chain ID without asserting complete
   await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
   const service = new RelayKeylessStatusService(new StateStore(temp.root), async () =>
     response({ status: "pending", originChainId: 1, txHashes: [hash.toUpperCase().replace("0X", "0x")] }));
-  const result = await service.status(operationId);
+  const result = await service.status("default", operationId);
   assert.equal(result.chainIdentityObserved, false);
   assert.deepEqual(result.txHashes, [hash]);
 });
@@ -183,7 +187,7 @@ test("Relay delayed, refund and failure are provider assertions with sanitized r
     ["failure", { failReason: "SLIPPAGE", details: "untrusted secret" }, "SLIPPAGE"],
   ] as const) {
     const service = new RelayKeylessStatusService(new StateStore(temp.root), async () => response(payload(status, changes)));
-    const result = await service.status(operationId);
+    const result = await service.status("default", operationId);
     assert.equal(result.reason, expectedReason);
     assert.equal(JSON.stringify(result).includes("untrusted secret"), false);
   }

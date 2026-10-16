@@ -7,8 +7,8 @@ import { ApnError } from "../../src/errors.js";
 import type { ReadOnlyRpcBatchCall } from "../../src/rpc.js";
 import { StateStore } from "../../src/state.js";
 import { ETHEREUM_USDC } from "../../src/relay/quote.js";
-import { RELAY_ETHEREUM_USDC_RECIPIENT, validateRelayArbitrumUsdcEthereumUsdcQuote } from
-  "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { validateRelayArbitrumUsdcEthereumUsdcQuote } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ETHEREUM_USDC_RECIPIENT } from "./relay-legacy-accounts.js";
 import { proveRelayEthereumUsdcCredit, RelayEthereumUsdcReadOnlyRpc, type RelayEthereumUsdcProofPorts } from
   "../../src/relay/ethereum-usdc-credit-proof.js";
 import { temporaryState } from "./helpers.js";
@@ -24,7 +24,7 @@ const stranger = "0x1111111111111111111111111111111111111111";
 async function fixture() {
   const raw = JSON.parse(await readFile("tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json", "utf8"));
   const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(raw,
-    { payer, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 });
+    { payer, recipient, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 });
   const log = { address: ETHEREUM_USDC, topics: [transferTopic, topic(stranger), topic(recipient)],
     data: `0x${BigInt(quote.minimumOutputAtomic).toString(16).padStart(64, "0")}`,
     transactionHash: destinationHash, blockNumber: 200n, blockHash: inclusionHash, removed: false, logIndex: 3n };

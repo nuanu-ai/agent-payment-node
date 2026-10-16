@@ -94,9 +94,9 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path.join(" ") === "relay base prepare")
         return { request: { command: "relay.base.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay arbitrum prepare")
-        return { request: { command: "relay.arbitrum.prepare", profile: value(options, "--profile"), owner: value(options, "--owner"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxProviderFeeAtomic: value(options, "--max-provider-fee-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), quoteFile: value(options, "--quote-file"), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "relay.arbitrum.prepare", profile: value(options, "--profile"), owner: value(options, "--owner"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxProviderFeeAtomic: value(options, "--max-provider-fee-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), quoteFile: value(options, "--quote-file"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay arbitrum observe")
-        return { request: { command: "relay.arbitrum.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.arbitrum.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
     if (parsed.command.path.join(" ") === "relay arbitrum approval-check")
         return { request: { command: "relay.arbitrum.approval-check", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay arbitrum approval-execute")
@@ -104,21 +104,21 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path.join(" ") === "relay arbitrum deposit-dispatch")
         return { request: { command: "relay.arbitrum.deposit-dispatch", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay native prepare")
-        return { request: { command: "relay.native.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "relay.native.prepare", profile: value(options, "--profile"), sourceChain: value(options, "--source-chain"), destinationChain: value(options, "--destination-chain"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay preflight")
         return { request: { command: "relay.preflight", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay execute")
-        return { request: { command: "relay.execute", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.execute", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay native execute")
-        return { request: { command: "relay.native.execute", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.native.execute", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay retire")
         return { request: { command: "relay.retire", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay status")
-        return { request: { command: "relay.status", operationId: value(options, "--operation") } };
+        return { request: { command: "relay.status", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay observe")
-        return { request: { command: "relay.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), bnbRpcUrl: value(options, "--bnb-rpc-url") };
+        return { request: { command: "relay.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), bnbRpcUrl: value(options, "--bnb-rpc-url") };
     if (parsed.command.path.join(" ") === "relay base observe")
-        return { request: { command: "relay.base.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
+        return { request: { command: "relay.base.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
     if (parsed.command.path[0] === "stargate") {
         switch (parsed.command.path.join(" ")) {
             case "stargate native prepare": return { request: { command: "stargate.native.prepare", profile: value(options, "--profile"),

@@ -33,5 +33,6 @@ export declare class RelayObserveService {
     /** The factory must return a fresh budgeted BNB adapter for each observation. */
     private readonly bnbInvocation;
     constructor(state: StateStore, source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService, native?: RelayNativeObserveService | undefined);
-    observe(operationId: string): Promise<RelayObserveResult>;
+    /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+    observe(profile: string, operationId: string): Promise<RelayObserveResult>;
 }

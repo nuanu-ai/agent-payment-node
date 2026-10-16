@@ -3,7 +3,7 @@ import type { Hex } from "viem";
 import { validateRelayUnsignedOperation, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { verifyDepositObservation, type RelayDepositObservation } from "./deposit-effect.js";
 import { BNB_NATIVE } from "./quote.js";
-import { relayNativeRoute, RELAY_MEGA_USDM } from "./native-quote.js";
+import { relayNativeRouteByReference, RELAY_MEGA_USDM } from "./native-routes.js";
 
 const HASH = /^0x[0-9a-fA-F]{64}$/u;
 const same = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
@@ -34,7 +34,7 @@ export interface RelayBnbProofPorts {
   block(number: bigint): Promise<RelayBnbBlock | null>;
   /** A consensus safe or finalized checkpoint; null when the RPC cannot supply one. */
   finalityCheckpoint(): Promise<RelayBnbBlock | null>;
-  /** Polygon milestone consensus finality, required by the new Base source lane. */
+  /** Polygon milestone consensus finality: every Polygon destination proof uses it, whatever the source chain. */
   polygonFinalizedCheckpoint?(): Promise<RelayBnbBlock | null>;
 }
 export interface RelaySourceDepositProof {
@@ -157,8 +157,8 @@ export async function proveRelayBaseDestination(operation: RelayUnsignedOperatio
 export async function proveRelayNativeDestination(operation: RelayUnsignedOperation,
   sourceHash: string, candidateHashes: readonly string[], ports: RelayBnbProofPorts): Promise<RelayBnbProofResult> {
   const op = validateRelayUnsignedOperation(operation), quote = op.nativeQuote;
-  if (!quote || op.sourceChainId !== relayNativeRoute(op.sourceAccount, op.recipient).sourceChainId || ![137, 143, 4326].includes(op.destinationChainId) ||
-    quote.routeReference !== relayNativeRoute(op.sourceAccount, op.recipient).reference ||
+  const route = quote === undefined ? null : relayNativeRouteByReference(quote.routeReference);
+  if (!quote || route === null || op.sourceChainId !== route.sourceChainId || op.destinationChainId !== route.chainId ||
     quote.recipient.toLowerCase() !== op.recipient.toLowerCase() ||
     BigInt(quote.minimumOutputWei) < BigInt(op.minOutputAtomic)) return mismatch("saved_native_quote_binding");
   if (!HASH.test(sourceHash) || candidateHashes.length !== 1 || !HASH.test(candidateHashes[0]!))
@@ -169,7 +169,9 @@ export async function proveRelayNativeDestination(operation: RelayUnsignedOperat
 
 async function inspectCandidate(op: RelayUnsignedOperation, sourceHash: string, hash: string,
   ports: RelayBnbProofPorts, expectedChainId: 56 | 137 | 143 | 8453 | 4326): Promise<RelayBnbProofResult> {
-  const polygonMilestone = op.sourceChainId === 8453 && expectedChainId === 137;
+  // One proof per destination chain (OWNR R2): Polygon is always proven at its milestone-finalized checkpoint and the
+  // credit is always filtered by this operation's own recipient, whatever the source chain.
+  const polygonMilestone = expectedChainId === 137;
   if (polygonMilestone && !ports.polygonFinalizedCheckpoint) return unproven("polygon_consensus_finality_unavailable");
   // P3: chain, transaction, receipt and checkpoint are requested together; the inclusion block is requested as soon
   // as the receipt names it, so an adapter can send the whole proof in two POSTs. The checkpoint is read with or

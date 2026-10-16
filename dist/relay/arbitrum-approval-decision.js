@@ -1,4 +1,5 @@
 /** Saved-operation Arbitrum approval decision. Only a verified allowance skip can mutate state. */
+import { getAddress } from "viem";
 import { ApnError } from "../errors.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
@@ -45,7 +46,7 @@ export class RelayArbitrumApprovalDecisionService {
             if (policy === null || policy.profile !== profile || policy.accounts.evm?.toLowerCase() !== operation.sourceAccount)
                 return blocked("active_owner_policy_required");
             const usage = await (this.ports.dailyUsage?.(operation.sourceAccount, at) ??
-                new AssetUsageLedger(this.state.root).usage({ account: operation.sourceAccount,
+                new AssetUsageLedger(this.state.root).usage({ account: getAddress(operation.sourceAccount),
                     chain: "eip155:42161", asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC } }, at)
                     .then(value => value.amountAtomic));
             return this.reader.read(operation, policy, operation.sourceAccount, usage, at, this.ports.now);

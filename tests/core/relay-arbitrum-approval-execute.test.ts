@@ -46,7 +46,7 @@ async function setup(policyFactory?: (root: string) => Promise<ActiveAssetPolicy
   const policy = policyFactory === undefined ? active(fixtureOwner, profile) :
     { ...await policyFactory(temporary.root), accounts: { evm: fixtureOwner } };
   const prepared = await new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
-    { activePolicy: async () => policy, dailyUsage: async () => "0" }).prepareArbitrum({
+    { activePolicy: async () => policy, dailyUsage: async () => "0" }).prepareArbitrum({ recipient: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04",
     profile, owner: fixtureOwner, amountAtomic: "500000", minOutputAtomic: "94065",
     maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
     maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-execute-test",

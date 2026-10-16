@@ -12,7 +12,7 @@ import { StateStore } from "../state.js";
 import { RelayNativeSourceJournalRepository } from "./native-source-journal.js";
 import { RelayEncryptedApprovalCustody } from "./approval-effect.js";
 import { RelayEncryptedDepositCustody } from "./deposit-effect.js";
-import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, RELAY_BASE_SOURCE, relayNativeRoute } from "./native-quote.js";
+import { relayNativeRouteByReference } from "./native-routes.js";
 import { relayAbandonSummary, relayRetireSource, releaseRelayHold } from "./retire-source.js";
 export { TtyRelayAbandonConfirmation } from "./retire-source.js";
 export class RelayRetireService {
@@ -28,38 +28,35 @@ export class RelayRetireService {
         this.wrapping = wrapping;
         this.abandon = abandon;
     }
+    /** Any profile retires its own operations: the operation is found only under `profileHash(profile)` (other profiles'
+     * operations are invisible), and the owner lock is taken on the operation's own recorded source account (OWNR-08). */
     async retire(input) {
-        if ((input.profile !== "default" && input.profile !== "evm-live-buyer" && input.profile !== "evm-live-seller") || !/^[a-f0-9]{64}$/u.test(input.operationId))
-            throw new ApnError("APN_INVALID_INPUT", "Relay retirement requires an admitted profile and an operation ID.");
+        if (!/^[a-f0-9]{64}$/u.test(input.operationId))
+            throw new ApnError("APN_INVALID_INPUT", "Relay retirement requires a profile and an operation ID.");
         allowlistProfileHash(input.profile);
         const profileHash = this.state.profileHash(input.profile);
         await this.state.initialize();
+        const operations = new RelayUnsignedOperationRepository(this.state.root);
+        const found = await operations.loadOperation(profileHash, input.operationId);
+        if (found === null) {
+            // Distinguish an operation belonging to another profile from one that does not exist.
+            await new OperationService(this.state).required(input.operationId);
+            throw new ApnError("APN_OPERATION_BLOCKED", "The operation is not a prepared Relay quote for this profile.");
+        }
         // Owner consent to abandon is taken before any lock; the locked pass re-proves the same source journal.
         const consented = await this.abandonConsent(profileHash, input.operationId);
         return this.state.withLocks([`profile:${profileHash}`, `operation:${input.operationId}`,
-            `relay-native-source:${input.operationId}`,
-            evmAddressLock(input.profile === "evm-live-seller" ? RELAY_BASE_SOURCE : input.profile === "evm-live-buyer" ? RELAY_BNB_SOURCE : RELAY_BNB_DEFAULT_SOURCE)], async () => {
-            const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, input.operationId);
-            if (op === null) {
-                // Distinguish an operation belonging to another profile from one that does not exist.
-                await new OperationService(this.state).required(input.operationId);
-                throw new ApnError("APN_OPERATION_BLOCKED", "The operation is not a prepared Relay quote for this profile.");
-            }
+            `relay-native-source:${input.operationId}`, evmAddressLock(found.sourceAccount)], async () => {
+            const op = await operations.loadOperation(profileHash, input.operationId);
+            // Prepared operations are create-only; the reload under the lock must be the same record.
+            if (op === null || op.integrityHash !== found.integrityHash)
+                throw new ApnError("APN_STATE_CORRUPT", "Relay operation changed during retirement.");
             if (op.nativeQuote === undefined)
                 return this.retireTokenLane(op, input.profile, consented);
-            if (input.profile === "evm-live-buyer" || op.nativeQuote !== undefined) {
-                let route = null;
-                try {
-                    route = relayNativeRoute(op.sourceAccount, op.recipient);
-                }
-                catch { /* outside the native lanes */ }
-                if (route === null || route.profile !== input.profile || op.nativeQuote === undefined || op.quote !== undefined ||
-                    op.sourceChainId !== route.sourceChainId || op.destinationChainId !== route.chainId ||
-                    op.sourceAccount.toLowerCase() !== route.payer.toLowerCase() ||
-                    op.nativeQuote.routeReference !== route.reference ||
-                    op.policyDigest === undefined || op.policyRevision === undefined) {
-                    throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement requires an exact profile native quote.");
-                }
+            const route = relayNativeRouteByReference(op.nativeQuote.routeReference);
+            if (route === null || op.quote !== undefined || op.sourceChainId !== route.sourceChainId ||
+                op.destinationChainId !== route.chainId || op.policyDigest === undefined || op.policyRevision === undefined) {
+                throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement requires an exact saved native quote.");
             }
             const retirements = new RelayRetirementRepository(this.state.root);
             const existing = await retirements.load(op);
@@ -78,14 +75,14 @@ export class RelayRetireService {
                     chain: `eip155:${op.sourceChainId}`, asset: { kind: "native", identifier: null } }, nativeReservationId))?.state !== "failed_before_effect") {
                 throw new ApnError("APN_OPERATION_BLOCKED", "Relay retirement requires a reconciled no-effect native usage reservation.");
             }
-            return new RelayEncryptedApprovalCustody(this.state, this.wrapping).withNoMaterial(op, async () => new AssetUsageLedger(this.state.root).withNoMatchingRelayReservation(op.sourceAccount, op.policyDigest, op.amountAtomic, async () => {
+            return new RelayEncryptedApprovalCustody(this.state, this.wrapping, input.profile).withNoMaterial(op, async () => new AssetUsageLedger(this.state.root).withNoMatchingRelayReservation(op.sourceAccount, op.policyDigest, op.amountAtomic, async () => {
                 if (existing !== null)
                     return publicRelayUnsignedOperation(op, existing);
                 const now = this.clock.now();
                 if (!Number.isFinite(now.getTime()))
                     throw new ApnError("APN_INVALID_INPUT", "Relay retirement clock is invalid.");
                 return publicRelayUnsignedOperation(op, await retirements.persistLocked(op, now.toISOString()));
-            }, op.sourceChainId, nativeReservationId), input.profile);
+            }, op.sourceChainId, nativeReservationId));
         });
     }
     async abandonConsent(profileHash, operationId) {
@@ -113,11 +110,11 @@ export class RelayRetireService {
         if (!Number.isFinite(now.getTime()))
             throw new ApnError("APN_INVALID_INPUT", "Relay retirement clock is invalid.");
         const persist = async () => publicRelayUnsignedOperation(op, await retirements.persistLocked(op, now.toISOString()));
-        const custody = new RelayEncryptedApprovalCustody(this.state, this.wrapping);
+        const custody = new RelayEncryptedApprovalCustody(this.state, this.wrapping, profile);
         if (source.kind === "approval_only") {
             // The confirmed approval's own signed slot may remain; deposit bytes may not. The held profile and operation
             // locks exclude any deposit signing marker, and a retired operation refuses every later journal transition.
-            if (op.arbitrumDraft === undefined && await new RelayEncryptedDepositCustody(this.state, this.wrapping).load(op) !== null)
+            if (op.arbitrumDraft === undefined && await new RelayEncryptedDepositCustody(this.state, this.wrapping, profile).load(op) !== null)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Relay abandonment is refused because signed deposit bytes exist.");
             await releaseRelayHold(this.state.root, op, source, now);
             return persist();
@@ -129,7 +126,7 @@ export class RelayRetireService {
         return custody.withNoMaterial(op, async () => {
             await releaseRelayHold(this.state.root, op, source, now);
             return new AssetUsageLedger(this.state.root).withNoMatchingRelayReservation(op.sourceAccount, op.policyDigest, op.amountAtomic, persist, 1, source.hold.reservationId);
-        }, profile);
+        });
     }
 }
 //# sourceMappingURL=retire.js.map

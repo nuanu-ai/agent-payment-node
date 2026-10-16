@@ -1,7 +1,8 @@
 export declare const RELAY_ARBITRUM_USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
-export declare const RELAY_ETHEREUM_USDC_RECIPIENT: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
 export interface RelayArbitrumQuoteIntent {
     readonly payer: string;
+    /** The Ethereum recipient the caller names (OWNR-07); the signed order must pay exactly this address. */
+    readonly recipient: string;
     readonly amountAtomic: string;
     readonly minimumOutputAtomic: string;
     readonly nowSeconds: number;

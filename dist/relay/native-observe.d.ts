@@ -16,5 +16,6 @@ export declare class RelayNativeObserveService {
     private readonly usedInvocations;
     constructor(state: StateStore, source: RelaySourceFinalityPorts | ((chainId: 56 | 8453) => RelaySourceFinalityPorts), destinationInvocation: (chainId: 137 | 143 | 4326, sourceChainId?: 56 | 8453) => RelayBnbProofPorts, status?: RelayKeylessStatusService, clock?: ClockPort);
     private result;
+    /** The caller loaded `op` under its explicit profile; the route is the protocol row its saved quote names. */
     observe(op: RelayUnsignedOperation): Promise<RelayObserveResult>;
 }

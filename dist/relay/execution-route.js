@@ -1,8 +1,8 @@
-/** Finite saved Ethereum USDC Relay source routes. Base has an exact owner/recipient binding. */
+/** Saved Ethereum USDC Relay source routes (BNB native, Base ETH) for any payer and recipient. Refunds are derived:
+ * source refund = the payer, destination refund = the recipient (OWNR 4.1). */
 import { ApnError } from "../errors.js";
 import { BASE_NATIVE, ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { RELAY_BASE_ROUTE_REFERENCE, RELAY_ROUTE_REFERENCE } from "./prepare.js";
-export const RELAY_BASE_ACCOUNT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const same = (left, right) => left.toLowerCase() === right.toLowerCase();
 function blocked() {
     throw new ApnError("APN_OPERATION_BLOCKED", "Saved Relay source route is not executable.", { reason: "saved_source_route_binding" });
@@ -25,8 +25,7 @@ export function relayExecutionRoute(op) {
     const destinationRefund = input?.refunds[1];
     if (!/^(0|[1-9][0-9]*)$/u.test(payment?.minimumAmount ?? "") ||
         !/^(0|[1-9][0-9]*)$/u.test(payment?.expectedAmount ?? "") ||
-        quote.routeReference !== RELAY_BASE_ROUTE_REFERENCE || !same(op.sourceAccount, RELAY_BASE_ACCOUNT) ||
-        !same(op.recipient, RELAY_BASE_ACCOUNT) || !same(quote.payer, op.sourceAccount) ||
+        quote.routeReference !== RELAY_BASE_ROUTE_REFERENCE || !same(quote.payer, op.sourceAccount) ||
         !same(quote.recipient, op.recipient) || !same(quote.sourceRefundRecipient, op.sourceAccount) ||
         order.solverChainId !== "base" || order.inputs.length !== 1 || order.fees.length !== 0 ||
         input?.payment.chainId !== "ethereum" || !same(input.payment.currency, ETHEREUM_USDC) ||

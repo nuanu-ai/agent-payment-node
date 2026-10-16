@@ -1,4 +1,4 @@
-/** A finite, unsigned Relay quote lane. Nothing in this module signs or sends a transaction. */
+/** Unsigned Relay Ethereum USDC quotes for any payer and recipient. Nothing in this module signs or sends a transaction. */
 import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import { hashObject } from "../canonical.js";

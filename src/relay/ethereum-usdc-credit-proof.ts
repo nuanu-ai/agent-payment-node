@@ -1,11 +1,10 @@
-/** Read-only Ethereum USDC recipient credit proof for the captured Arbitrum Relay quote. */
+/** Read-only Ethereum USDC recipient credit proof for a validated Arbitrum Relay quote; credits only `quote.recipient`. */
 import { hashObject } from "../canonical.js";
 import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc, type ReadOnlyRpcBatchCall } from "../rpc.js";
 import type { StateStore } from "../state.js";
-import { RELAY_ETHEREUM_USDC_RECIPIENT,
-  validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
+import type { validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
 import { ETHEREUM_USDC } from "./quote.js";
 
 type Quote = Awaited<ReturnType<typeof validateRelayArbitrumUsdcEthereumUsdcQuote>>;
@@ -41,6 +40,7 @@ export type RelayEthereumUsdcCreditResult = Readonly<{
   minimumOutputAtomic: string; creditedAtomic: string; transferLogIndex: string;
   proofClass: "canonical_safe_erc20_transfer_log";
 }> }> | Readonly<{ status: "pending" | "unproven" | "mismatch"; reason: string }>);
+export type RelayEthereumUsdcCreditProof = Extract<RelayEthereumUsdcCreditResult, { status: "recipient_credit_proven" }>["proof"];
 
 function result(status: "pending" | "unproven" | "mismatch", reason: string): RelayEthereumUsdcCreditResult {
   return { status, reason, relayOrderFulfillmentProven: false, paidAcceptance: false };
@@ -53,7 +53,7 @@ export async function proveRelayEthereumUsdcCredit(quote: Quote, candidateHash: 
     const { quoteDigest, ...projection } = quote;
     if (hashObject(projection) !== quoteDigest || quote.schemaVersion !== "apn.relay-arbitrum-usdc-ethereum-usdc-quote.v1" ||
       quote.routeReference !== "arbitrum-usdc-ethereum-usdc-observation-v1" ||
-      quote.recipient !== RELAY_ETHEREUM_USDC_RECIPIENT.toLowerCase() ||
+      !/^0x[0-9a-f]{40}$/u.test(quote.recipient) ||
       quote.orderData.output.chainId !== "ethereum" || quote.orderData.output.calls.length !== 0 ||
       quote.orderData.output.payments.length !== 1 ||
       !same(quote.orderData.output.payments[0]!.currency, ETHEREUM_USDC) ||

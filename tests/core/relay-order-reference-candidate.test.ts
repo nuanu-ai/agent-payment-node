@@ -19,7 +19,7 @@ const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 async function fixture(): Promise<RelayOrderReferenceEvidence> {
   const raw = JSON.parse(await readFile("tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json", "utf8"));
   const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(raw,
-    { payer, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 });
+    { payer, recipient: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04", amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 });
   const sourceHash = hash("a"), sourceBlockHash = hash("b"), destinationHash = hash("c"), destinationBlockHash = hash("d");
   const sourceReceipt = { transactionHash: sourceHash, status: "success" as const, blockNumber: 100n,
     blockHash: sourceBlockHash, logs: [{ address: ETHEREUM_DEPOSITORY, topics: [depositTopic],
@@ -30,7 +30,7 @@ async function fixture(): Promise<RelayOrderReferenceEvidence> {
       topics: [transferTopic, `0x${word(payer)}`, `0x${word(quote.recipient)}`],
       data: `0x${quantity(94065n)}`, transactionHash: destinationHash, blockNumber: 200n,
       blockHash: destinationBlockHash, removed: false, logIndex: 7n }] };
-  return { rawQuote: raw, quoteIntent: { payer, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 },
+  return { rawQuote: raw, quoteIntent: { payer, recipient: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04", amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 },
     quote, sourceProof: { sourceChainId: 42161, rpcOrigin: "https://arb-rpc.example",
     deposit: { transactionHash: sourceHash, blockNumber: "100", blockHash: sourceBlockHash },
     approval: null, safeHead: { number: "105", hash: hash("e") },

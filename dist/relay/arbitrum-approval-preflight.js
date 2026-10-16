@@ -19,7 +19,7 @@ export async function preflightRelayArbitrumApproval(operation, active, publicAc
     }
     const funding = await preflightRelayArbitrumSourceDraft(draft, active, publicAccount, dailyUsageAtomic, now, ports);
     const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(draft.rawQuote, {
-        payer: draft.owner, amountAtomic: draft.amountAtomic,
+        payer: draft.owner, recipient: draft.recipient, amountAtomic: draft.amountAtomic,
         minimumOutputAtomic: draft.minimumOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000),
     });
     if (quote.quoteDigest !== draft.quoteDigest || quote.orderId !== draft.orderId)
