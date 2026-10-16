@@ -11,7 +11,8 @@ import { proveRelayNativeDestination, type RelayBnbProofPorts } from "./destinat
 import { RelayDestinationClaimRepository } from "./destination-claim.js";
 import { verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayNativeSourceJournalRepository } from "./native-source.js";
-import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
+import { verifySavedRelayNativeQuote } from "./native-quote.js";
+import { relayNativeRouteByReference } from "./native-routes.js";
 import type { RelaySourceFinalityPorts, RelayObserveResult, RelayObserveState } from "./observe.js";
 import { RelayKeylessStatusService } from "./status.js";
 
@@ -46,11 +47,11 @@ export class RelayNativeObserveService {
       operationalAcceptance: state === "operational_acceptance" };
   }
 
+  /** The caller loaded `op` under its explicit profile; the route is the protocol row its saved quote names. */
   async observe(op: RelayUnsignedOperation): Promise<RelayObserveResult> {
-    const route = relayNativeRoute(op.sourceAccount, op.recipient);
-    if (op.profileHash !== this.state.profileHash(route.profile) || op.destinationChainId !== route.chainId ||
-      op.nativeQuote?.routeReference !== route.reference || op.statusLocator === undefined)
-      blocked("saved_native_route_or_owner");
+    const route = op.nativeQuote === undefined ? null : relayNativeRouteByReference(op.nativeQuote.routeReference);
+    if (route === null || op.nativeQuote === undefined || op.sourceChainId !== route.sourceChainId ||
+      op.destinationChainId !== route.chainId || op.statusLocator === undefined) blocked("saved_native_route_or_owner");
     try { await verifySavedRelayNativeQuote(op.nativeQuote); } catch { blocked("saved_native_quote_authority"); }
     await this.state.withLocks([evmAddressLock(op.sourceAccount)], async () => {
       await assertExclusiveEvmOwner(this.state, op.sourceAccount, op.profileHash);
@@ -105,7 +106,7 @@ export class RelayNativeObserveService {
     });
     if (outcome === "failed") return this.result(op.operationId, "source_unproven", "source_receipt_failed");
     let provider: Awaited<ReturnType<RelayKeylessStatusService["status"]>>;
-    try { provider = await this.status.status(op.operationId); }
+    try { provider = await this.status.statusOf(op); }
     catch { return this.result(op.operationId, "source_finalized", "provider_status_unavailable_or_ambiguous", true); }
     const sourceBound = provider.chainIdentityObserved && provider.inTxHashes.length === 1 &&
       same(provider.inTxHashes[0]!, hash);
@@ -121,13 +122,12 @@ export class RelayNativeObserveService {
       proof.reason, true, provider.status, sourceBound, proof);
     if (provider.status !== "success" || !sourceBound) return this.result(op.operationId, "recipient_credit_observed",
       "provider_success_or_source_binding_unproven", true, provider.status, sourceBound, proof);
-    if (op.sourceChainId === 8453) {
-      try { await new RelayDestinationClaimRepository(this.state.root).claim(op, hash, proof.proof); }
-      catch { return this.result(op.operationId, "provider_candidate_unproven", "destination_payout_claim_conflict", true, provider.status, true, proof); }
-      return { ...this.result(op.operationId, "operational_acceptance",
-        "source_safe_provider_success_and_canonical_recipient_credit", true, provider.status, true, proof),
-        sourceActualFee: source.receipt.actualFee! };
-    }
+    // One payout can accept one operation only, whatever its source chain or recipient (create-only claim).
+    try { await new RelayDestinationClaimRepository(this.state.root).claim(op, hash, proof.proof); }
+    catch { return this.result(op.operationId, "provider_candidate_unproven", "destination_payout_claim_conflict", true, provider.status, true, proof); }
+    if (op.sourceChainId === 8453) return { ...this.result(op.operationId, "operational_acceptance",
+      "source_safe_provider_success_and_canonical_recipient_credit", true, provider.status, true, proof),
+      sourceActualFee: source.receipt.actualFee! };
     return this.result(op.operationId, "operational_acceptance",
       "source_finalized_provider_success_and_safe_recipient_credit", true, provider.status, true, proof);
   }

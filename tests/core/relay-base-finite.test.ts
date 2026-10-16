@@ -6,8 +6,10 @@ import { hashObject, canonicalJson } from "../../src/canonical.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
-import { relayNativeRoute, relayNativeQuoteRequest, validateRelayNativeQuote, verifySavedRelayNativeQuote,
-  RELAY_BASE_SOURCE, RELAY_POLYGON_RECIPIENT, RELAY_BNB_SOURCE, RELAY_BASE_FULL_FEE } from "../../src/relay/native-quote.js";
+import { relayNativeQuoteRequest, validateRelayNativeQuote, verifySavedRelayNativeQuote, RELAY_BASE_MEGA_ROUTE_REFERENCE,
+  RELAY_BASE_POLYGON_ROUTE_REFERENCE, RELAY_LEGACY_BASE_MEGA_REFERENCE, RELAY_LEGACY_BASE_POLYGON_REFERENCE } from "../../src/relay/native-quote.js";
+import { RELAY_BASE_SOURCE, RELAY_POLYGON_RECIPIENT, RELAY_BNB_SOURCE, RELAY_BASE_FULL_FEE } from "./relay-legacy-accounts.js";
+import { RelayNativeDepositCustody } from "../../src/relay/native-source-custody.js";
 import { verifyRelayBaseFunding } from "../../src/relay/base-source-guard.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce } from "../../src/relay/native-source.js";
@@ -17,8 +19,10 @@ import { relaySourceTerminal } from "../../src/relay/lifecycle.js";
 import { temporaryState } from "./helpers.js";
 const clock = 1791517419;
 const raw = async (mega = true): Promise<any> => JSON.parse(await readFile(`tests/core/relay-fixtures/relay-base-${mega ? "mega-usdm" : "polygon-pol"}-quote-20261009.json`, "utf8"));
+// The 2026-10-09 fixtures were captured for owner-named references; they decode as those legacy routes (OWNR 5.3).
 const intent = (mega = true) => ({ payer: RELAY_BASE_SOURCE, recipient: mega ? RELAY_POLYGON_RECIPIENT : RELAY_BNB_SOURCE,
-  amountAtomic: "50000000000000", minimumOutputWei: mega ? "90000000000000000" : "700000000000000000", nowSeconds: clock });
+  amountAtomic: "50000000000000", minimumOutputWei: mega ? "90000000000000000" : "700000000000000000", nowSeconds: clock,
+  routeReference: mega ? RELAY_LEGACY_BASE_MEGA_REFERENCE : RELAY_LEGACY_BASE_POLYGON_REFERENCE, maximumNetworkFeeWei: RELAY_BASE_FULL_FEE.toString() });
 async function op(state: StateStore, mega = true) {
   const quote = await validateRelayNativeQuote(await raw(mega), intent(mega));
   return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned", state: "prepared", terminal: false,
@@ -33,8 +37,11 @@ for (const mega of [true, false]) test(`finite Base ${mega ? "USDm" : "POL"} quo
   assert.equal(q.deposit.chainId, 8453); assert.equal(q.deposit.maximumNetworkFeeWei, RELAY_BASE_FULL_FEE.toString());
   assert.equal(q.orderId, (await raw(mega)).protocol.v2.orderId); await verifySavedRelayNativeQuote(q);
   const request = relayNativeQuoteRequest(intent(mega)); assert.equal(request.originChainId, 8453); assert.equal(request.destinationChainId, mega ? 4326 : 137);
-  assert.throws(() => relayNativeQuoteRequest({ ...intent(mega), amountAtomic: "50000000000001" }));
-  assert.throws(() => relayNativeQuoteRequest({ ...intent(mega), minimumOutputWei: "1" }));
+  // Principal, minimum output and fee ceiling are the caller's (OWNR-05); only non-positive values are refused.
+  assert.equal(relayNativeQuoteRequest({ ...intent(mega), amountAtomic: "50000000000001" }).amount, "50000000000001");
+  for (const field of ["amountAtomic", "minimumOutputWei", "maximumNetworkFeeWei"] as const)
+    assert.throws(() => relayNativeQuoteRequest({ ...intent(mega), [field]: "0" }));
+  assert.throws(() => relayNativeQuoteRequest({ ...intent(mega), routeReference: "base-native-unknown-v1" }));
   const edits: Array<(q: any) => void> = [q => { q.steps[0].items[0].data.chainId = 56; }, q => { q.steps[0].items[0].data.value = "1"; },
     q => { q.protocol.v2.orderData.output.calls = [{}]; }, q => { q.protocol.v2.orderData.inputs[0].refunds[1].currency = RELAY_BASE_SOURCE; },
     q => { q.protocol.v2.orderData.output.payments[0].minimumAmount = "1"; }, q => { q.protocol.v2.orderData.inputs[0].refunds[1].recipient = RELAY_BASE_SOURCE; },
@@ -50,24 +57,34 @@ function active(mega = true) {
     publishedAt: "2026-10-09T00:00:00.000Z", effectiveDate: "2026-10-09", effectiveAt: "2026-10-09T00:00:00.000Z", expiresAt: "2026-10-17T00:00:00.000Z",
     chains: [{ chain: "eip155:8453", family: "evm", name: "Base", assets: [{ kind: "native", identifier: null, symbol: "ETH", decimals: 18,
       rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false }, railCaps: { bridge: { maximumPerTransferAtomic: "50000000000000", dailyLimitAtomic: "100000000000000" } },
-      mechanismOptions: { bridge: [true, false].map(m => ({ provider: "relay", maximumPerTransferAtomic: "50000000000000", reference: relayNativeRoute(RELAY_BASE_SOURCE, intent(m).recipient).reference })) } }] }] });
+      mechanismOptions: { bridge: [RELAY_LEGACY_BASE_MEGA_REFERENCE, RELAY_LEGACY_BASE_POLYGON_REFERENCE, RELAY_BASE_MEGA_ROUTE_REFERENCE, RELAY_BASE_POLYGON_ROUTE_REFERENCE]
+        .map(reference => ({ provider: "relay", maximumPerTransferAtomic: "50000000000000", reference })) } }] }] });
   return { profile: "evm-live-seller", registry: r, digest: r.policyDigest, revision: 1, accounts: { evm: RELAY_BASE_SOURCE }, activationDigest: "a".repeat(64), activatedAt: new Date(clock * 1000).toISOString() };
 }
-test("normal CLI prepare uses seller Base policy alternatives, saves durable quote, replays and rejects cross-lane key", async t => {
+test("CLI native prepare of any profile names chains, picks the owner-free Base route, replays and rejects a cross-lane key", async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root); let calls = 0;
-  const input = { profile: "evm-live-seller", recipient: intent().recipient, amountAtomic: intent().amountAtomic, minOutputAtomic: intent().minimumOutputWei,
-    maxDepositNetworkFeeWei: "1000000000000", idempotencyKey: "relay-base-mega-0001" };
-  const bound = bindArgv(["relay", "native", "prepare", "--profile", input.profile, "--recipient", input.recipient, "--amount-atomic", input.amountAtomic,
-    "--min-output-atomic", input.minOutputAtomic, "--max-deposit-network-fee-wei", input.maxDepositNetworkFeeWei, "--idempotency-key", input.idempotencyKey]);
+  const input = { profile: "carol", sourceChain: "eip155:8453", destinationChain: "eip155:4326", recipient: intent().recipient,
+    amountAtomic: intent().amountAtomic, minOutputAtomic: intent().minimumOutputWei, maxDepositNetworkFeeWei: "1000000000000", idempotencyKey: "relay-base-mega-0001" };
+  const bound = bindArgv(["relay", "native", "prepare", "--profile", input.profile, "--source-chain", input.sourceChain, "--destination-chain", input.destinationChain,
+    "--recipient", input.recipient, "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
+    "--max-deposit-network-fee-wei", input.maxDepositNetworkFeeWei, "--idempotency-key", input.idempotencyKey]);
   assert.deepEqual(bound.request, { command: "relay.native.prepare", ...input });
+  const references: string[] = [];
   const service = new RelayUnsignedPrepareService(state, { now: () => new Date(clock * 1000) }, undefined, {
-    activePolicy: async () => active(), publicAccount: async () => RELAY_BASE_SOURCE, dailyUsage: async () => "0",
-    nativeQuote: async i => { calls++; return validateRelayNativeQuote(await raw(), i); } });
-  const first = await service.prepareNative(input); assert.equal(first.sourceChainId, 8453); assert.equal(first.destinationChainId, 4326);
-  assert.equal(first.state, "prepared"); assert.deepEqual(await service.prepareNative(input), first); assert.equal(calls, 1);
-  await assert.rejects(service.prepareNative({ ...input, recipient: intent(false).recipient, minOutputAtomic: intent(false).minimumOutputWei }), { code: "APN_IDEMPOTENCY_CONFLICT" });
-  await assert.rejects(service.prepareNative({ ...input, idempotencyKey: "relay-base-mega-0002", maxDepositNetworkFeeWei: "1000000000001" }), { code: "APN_INVALID_INPUT" });
+    activePolicy: async () => ({ ...active(), profile: "carol" }), publicAccount: async () => RELAY_BASE_SOURCE, dailyUsage: async () => "0",
+    // The captured order is the provider's signed data; the route is protocol data the caller's chains selected.
+    nativeQuote: async i => { calls++; references.push(i.routeReference); return validateRelayNativeQuote(await raw(), i); } });
+  // A fee ceiling below the signed envelope is refused by the quote validator before anything is saved.
+  await assert.rejects(service.prepareNative({ ...input, idempotencyKey: "relay-base-mega-0003", maxDepositNetworkFeeWei: "1" }), /gas limits/u);
   assert.equal(calls, 1);
+  const first = await service.prepareNative(input); assert.equal(first.sourceChainId, 8453); assert.equal(first.destinationChainId, 4326);
+  assert.equal(first.nativeQuote?.routeReference, RELAY_BASE_MEGA_ROUTE_REFERENCE);
+  assert.deepEqual(references, [RELAY_BASE_MEGA_ROUTE_REFERENCE, RELAY_BASE_MEGA_ROUTE_REFERENCE]);
+  assert.equal(first.state, "prepared"); assert.deepEqual(await service.prepareNative(input), first); assert.equal(calls, 2);
+  await assert.rejects(service.prepareNative({ ...input, destinationChain: "eip155:137", recipient: intent(false).recipient, minOutputAtomic: intent(false).minimumOutputWei }), { code: "APN_IDEMPOTENCY_CONFLICT" });
+  await assert.rejects(service.prepareNative({ ...input, idempotencyKey: "relay-base-mega-0002", destinationChain: "eip155:143" }),
+    { code: "APN_INVALID_INPUT", details: { reason: "relay_native_route_unknown" } });
+  assert.equal(calls, 2);
 });
 test("Base exact deposit simulation and OP Stack L1/operator fee enforce full budget without a runtime code read", async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const saved = await op(new StateStore(tmp.root));
@@ -141,9 +158,9 @@ for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} lost signe
   const runtime = new RelayNativeSourceRuntime(state, wrapping, { confirm: async () => true, rpc: {
     batchCall: async () => { throw new Error("no RPC after unsigned crash"); }, submitRawTransaction: async () => { throw new Error("no send after unsigned crash"); } } }, { now: () => now });
   Object.assign(runtime, { wallets: { describe: async () => ({ identity: { address: RELAY_BASE_SOURCE }, secret: { directEffects: {} } }), clear: () => {} } });
-  assert.equal((await runtime.execute(saved.operationId)).phase, "signing_started");
+  assert.equal((await runtime.execute(profile, saved.operationId)).phase, "signing_started");
   assert.equal((await ledger.load(identity, reservationId))?.state, "unknown_finality");
-  assert.equal((await runtime.execute(saved.operationId)).phase, "signing_started");
+  assert.equal((await runtime.execute(profile, saved.operationId)).phase, "signing_started");
   await assert.rejects(new RelayRetireService(state, { now: () => now }, wrapping).retire({ profile, operationId: saved.operationId }));
 });
 
@@ -189,7 +206,7 @@ test("Base delayed wallet load is refused before private key access or send", as
     { confirm: async () => true, rpc: { batchCall: async () => [], submitRawTransaction: async () => { sends++; return "0x00" as Hex; } } }, { now: () => at });
   Object.assign(runtime, { owner: async () => {}, admission: async () => policy, funding: async () => 0n,
     wallets: { describe: async () => { at = new Date(Date.parse(saved.deadline)); return { identity: { address: saved.sourceAccount }, secret: { get privateKey() { keyReads++; throw new Error("must not access private key"); } } }; }, clear: () => {} } });
-  await assert.rejects((runtime as any).run(saved, (runtime as any).ports.rpc, new AbortController().signal), /authority expired or changed/u);
+  await assert.rejects((runtime as any).run(saved, "evm-live-seller", (runtime as any).ports.rpc, new AbortController().signal), /authority expired or changed/u);
   assert.equal(keyReads, 0); assert.equal(sends, 0); assert.equal((await new RelayNativeSourceJournalRepository(tmp.root).load(saved))?.phase, "signing_started");
 });
 
@@ -205,7 +222,7 @@ test("Base execution retains exact allowlist lock through the asynchronous criti
   const runtime = new RelayNativeSourceRuntime(state, { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) },
     { confirm: async () => true, rpc: { batchCall: async () => [], submitRawTransaction: async () => "0x00" as Hex } }, { now: () => new Date(clock * 1000) });
   Object.assign(runtime, { owner: async () => { entered(); await paused; throw new Error("stop after lock witness"); } });
-  const running = runtime.execute(saved.operationId); await started;
+  const running = runtime.execute("evm-live-seller", saved.operationId); await started;
   const policies = new AllowlistPolicyStore(tmp.root); Object.assign(policies, { lockWaitMs: 0 });
   try {
     const { LocalWalletNative } = await import("../../src/local-wallet-native.js");
@@ -228,7 +245,7 @@ test("permanent signing claim rejects restored pending attempts and no-effect re
   const runtime = new RelayNativeSourceRuntime(state, wrapping, { confirm: async () => { throw new Error("no foreground or sign allowed"); }, rpc: {
     batchCall: async () => { throw new Error("no reads allowed"); }, submitRawTransaction: async () => { throw new Error("no sends allowed"); } } });
   Object.assign(runtime, { owner: async () => {} });
-  await assert.rejects((runtime as any).run(saved, (runtime as any).ports.rpc, new AbortController().signal), (error: any) => error.details?.reason === "permanent_effect_claim_requires_observation");
+  await assert.rejects((runtime as any).run(saved, "evm-live-seller", (runtime as any).ports.rpc, new AbortController().signal), (error: any) => error.details?.reason === "permanent_effect_claim_requires_observation");
   await assert.rejects(new RelayRetireService(state, { now: () => new Date(clock * 1000) }, wrapping).retire({ profile: "evm-live-seller", operationId: saved.operationId }), /permanent native effect claim/u);
 });
 
@@ -242,13 +259,14 @@ for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} custody is
   const runtime = new RelayNativeSourceRuntime(other, wrapping, { confirm: async () => { throw new Error("no foreground"); }, rpc: {
     batchCall: async () => { throw new Error("no RPC"); }, submitRawTransaction: async () => { throw new Error("no send"); } } }, { now: () => new Date(clock * 1000) });
   let entered = 0;
-  Object.assign(runtime, { run: async (current: typeof saved) => { entered++; return (runtime as any).custody(current); },
+  Object.assign(runtime, { run: async (current: typeof saved, profile: string) => { entered++;
+    return new RelayNativeDepositCustody(other, (runtime as any).wallets, profile, () => true).slot(current); },
     wallets: { describe: async () => ({ identity: { address: saved.sourceAccount }, secret: { directEffects: {} } }), clear: () => {} } });
   await state.withLocks([walletCustodyLock(state, "evm-live-seller")], async () => {
-    await assert.rejects(runtime.execute(saved.operationId), { code: "APN_STATE_BUSY" });
+    await assert.rejects(runtime.execute("evm-live-seller", saved.operationId), { code: "APN_STATE_BUSY" });
     assert.equal(entered, 0);
   });
-  assert.equal(await runtime.execute(saved.operationId), null); assert.equal(entered, 1);
+  assert.equal(await runtime.execute("evm-live-seller", saved.operationId), null); assert.equal(entered, 1);
 });
 
 test("Base sealed bytes recorded as never landing end the operation without any send", async t => {

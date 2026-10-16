@@ -16,11 +16,13 @@ export interface RelayDepositCustodyPort {
     /** Only after the journal records the sealed bytes as never landing. */
     discard?(op: RelayUnsignedOperation): Promise<void>;
 }
-/** Encrypted, hash-bound signed material for the one permitted deposit attempt. */
+/** Encrypted, hash-bound signed material for the one permitted deposit attempt, in the operation's own profile envelope. */
 export declare class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
     private readonly state;
+    private readonly profile;
     private readonly wallets;
-    constructor(state: StateStore, wrapping: WrappingSecretPort);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, profile: string);
+    private owned;
     load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null>;
     discard(op: RelayUnsignedOperation): Promise<void>;
     seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void>;
@@ -45,8 +47,8 @@ export interface RelayDepositObservation {
 }
 export interface RelayDepositPorts {
     now(): Date;
-    activePolicy(profile: "default"): Promise<ActiveAssetPolicy | null>;
-    publicAccount(profile: "default"): Promise<string | null>;
+    activePolicy(profile: string): Promise<ActiveAssetPolicy | null>;
+    publicAccount(profile: string): Promise<string | null>;
     dailyUsage(account: string, now: Date): Promise<string>;
     executionAdmission(op: RelayUnsignedOperation): Promise<null | Readonly<{
         requestId: string;
@@ -76,7 +78,8 @@ export declare class RelayDepositEffectService {
     private readonly operations;
     private readonly effects;
     constructor(state: StateStore, ports: RelayDepositPorts);
-    run(operationId: string): Promise<RelayEffectJournal>;
+    /** The operation is found only under the caller's explicit profile; no profile is assumed. */
+    run(profile: string, operationId: string): Promise<RelayEffectJournal>;
     private assertEnvelope;
     private revalidate;
 }

@@ -2,10 +2,12 @@
 import { hashObject } from "../canonical.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
-import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT, validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
+import { getAddress } from "viem";
+import { RELAY_ARBITRUM_USDC, validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
 export const RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE = "arbitrum-usdc-ethereum-usdc-source-draft-v1";
 const UINT = /^(0|[1-9][0-9]*)$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
@@ -27,7 +29,9 @@ function frozen(value) {
     }
     return value;
 }
-function policy(active, profile, owner, principal, usage, now) {
+/** Policy admission of the draft at prepare and at every later check (approval, reservation, first send): owner,
+ * expiry, asset, rail, mechanism and caps, then the owner's optional recipient pin (OD-1). */
+function policy(active, profile, owner, recipient, principal, usage, now) {
     if (active.profile !== profile || active.digest !== active.registry.policyDigest ||
         !Number.isSafeInteger(active.revision) || active.revision <= 0 ||
         active.accounts.evm === undefined || !same(active.accounts.evm, owner) ||
@@ -40,6 +44,7 @@ function policy(active, profile, owner, principal, usage, now) {
         asOf: now.toISOString(), mechanism });
     if (!bridgeMechanismAdmitted(admission, mechanism))
         blocked("source_draft_pin_required");
+    assertRecipientAdmitted({ admission, mechanism, recipient });
 }
 export async function createRelayArbitrumSourceDraft(input) {
     const { now, activePolicy, publicAccount, dailyUsageAtomic, rawQuote, ...request } = input;
@@ -47,6 +52,9 @@ export async function createRelayArbitrumSourceDraft(input) {
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
         !ADDRESS.test(input.owner) || !ADDRESS.test(publicAccount) || !same(input.owner, publicAccount))
         blocked("source_owner");
+    if (!ADDRESS.test(input.recipient) || /^0x0{40}$/u.test(input.recipient))
+        blocked("recipient");
+    const recipient = getAddress(input.recipient);
     for (const [name, value] of [["amount", input.amountAtomic], ["minimum", input.minimumOutputAtomic],
         ["provider fee cap", input.maxProviderFeeAtomic], ["approval fee cap", input.maxApprovalNetworkFeeWei],
         ["deposit fee cap", input.maxDepositNetworkFeeWei], ["daily usage", dailyUsageAtomic]])
@@ -54,8 +62,8 @@ export async function createRelayArbitrumSourceDraft(input) {
     if (amount(input.amountAtomic, "amount") === 0n || amount(input.minimumOutputAtomic, "minimum") === 0n)
         blocked("zero_amount");
     const owner = input.owner.toLowerCase();
-    policy(activePolicy, input.profile, owner, input.amountAtomic, dailyUsageAtomic, now);
-    const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(rawQuote, { payer: owner,
+    policy(activePolicy, input.profile, owner, recipient, input.amountAtomic, dailyUsageAtomic, now);
+    const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(rawQuote, { payer: owner, recipient,
         amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minimumOutputAtomic,
         nowSeconds: Math.floor(now.getTime() / 1000) });
     if (BigInt(quote.providerFeeAtomic) > BigInt(input.maxProviderFeeAtomic) ||
@@ -67,7 +75,7 @@ export async function createRelayArbitrumSourceDraft(input) {
     const body = { schemaVersion: "apn.relay-arbitrum-source-draft.v1",
         sourceChainId: 42161, destinationChainId: 1,
         sourceToken: RELAY_ARBITRUM_USDC, destinationToken: quote.orderData.output.payments[0].currency,
-        recipient: RELAY_ETHEREUM_USDC_RECIPIENT, profile: request.profile, owner,
+        recipient, profile: request.profile, owner,
         amountAtomic: input.amountAtomic, minimumOutputAtomic: quote.minimumOutputAtomic,
         maxProviderFeeAtomic: input.maxProviderFeeAtomic,
         maxApprovalNetworkFeeWei: input.maxApprovalNetworkFeeWei,
@@ -85,7 +93,7 @@ export async function preflightRelayArbitrumSourceDraft(draft, active, publicAcc
         draft.schemaVersion !== "apn.relay-arbitrum-source-draft.v1" || draft.sourceChainId !== 42161 ||
         draft.destinationChainId !== 1 ||
         !same(draft.sourceToken, RELAY_ARBITRUM_USDC) || !same(draft.destinationToken, ETHEREUM_USDC) ||
-        !same(draft.recipient, RELAY_ETHEREUM_USDC_RECIPIENT) || draft.executionAdmitted !== false ||
+        !ADDRESS.test(draft.recipient) || draft.executionAdmitted !== false ||
         draft.nextActions.length !== 0)
         blocked("draft_identity");
     for (const [name, value] of [["provider fee cap", draft.maxProviderFeeAtomic],
@@ -97,8 +105,8 @@ export async function preflightRelayArbitrumSourceDraft(draft, active, publicAcc
         active.revision !== draft.policyRevision || now.getTime() + 60_000 >= Date.parse(draft.deadline))
         blocked("draft_integrity_or_expiry");
     allowlistProfileHash(draft.profile);
-    policy(active, draft.profile, draft.owner, draft.amountAtomic, dailyUsageAtomic, now);
-    const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(draft.rawQuote, { payer: draft.owner,
+    policy(active, draft.profile, draft.owner, draft.recipient, draft.amountAtomic, dailyUsageAtomic, now);
+    const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(draft.rawQuote, { payer: draft.owner, recipient: draft.recipient,
         amountAtomic: draft.amountAtomic, minimumOutputAtomic: draft.minimumOutputAtomic,
         nowSeconds: Math.floor(now.getTime() / 1000) });
     if (quote.quoteDigest !== draft.quoteDigest || quote.orderId !== draft.orderId ||

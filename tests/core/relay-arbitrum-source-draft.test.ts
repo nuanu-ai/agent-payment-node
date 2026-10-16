@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
-import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ARBITRUM_USDC } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ETHEREUM_USDC_RECIPIENT } from "./relay-legacy-accounts.js";
 import { RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE, createRelayArbitrumSourceDraft,
   preflightRelayArbitrumSourceDraft, type RelayArbitrumReadCall } from "../../src/relay/arbitrum-usdc-source-draft.js";
 
@@ -28,7 +29,7 @@ function active(reference = RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE, profile = "de
 }
 
 async function input() {
-  return { profile: "default" as const, owner, publicAccount: owner, amountAtomic: "500000",
+  return { profile: "default" as const, owner, recipient: RELAY_ETHEREUM_USDC_RECIPIENT, publicAccount: owner, amountAtomic: "500000",
     minimumOutputAtomic: "94065", maxProviderFeeAtomic: "401482",
     maxApprovalNetworkFeeWei: "2000000000000", maxDepositNetworkFeeWei: "2000000000000",
     dailyUsageAtomic: "0", activePolicy: active(), rawQuote: await quote(), now };
@@ -64,6 +65,8 @@ test("source draft rejects policy, quote, owner, recipient and fee drift", async
     ["deposit gas", v => { v.maxDepositNetworkFeeWei = "1"; }],
     ["daily cap", v => { v.dailyUsageAtomic = "1900000"; }],
     ["recipient", v => { v.rawQuote.protocol.v2.orderData.output.payments[0].recipient = owner; }],
+    ["named recipient", v => { v.recipient = owner; }],
+    ["zero recipient", v => { v.recipient = `0x${"0".repeat(40)}`; }],
     ["source token", v => { v.rawQuote.protocol.v2.orderData.inputs[0].payment.currency = owner; }],
     ["source chain", v => { v.rawQuote.steps[0].items[0].data.chainId = 1; }],
     ["approval amount", v => { v.rawQuote.steps[0].items[0].data.data = v.rawQuote.steps[0].items[0].data.data.slice(0, -1) + "1"; }],

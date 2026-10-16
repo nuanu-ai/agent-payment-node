@@ -1,12 +1,13 @@
-/** One durable native deposit for an exact fixed Relay BNB or Base funding quote. */
-import { getAddress, keccak256, parseTransaction, recoverTransactionAddress } from "viem";
+/** One durable native deposit for an exact saved Relay BNB or Base native-source quote of any profile. */
+import { getAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { hashObject, canonicalJson, domainHash } from "../canonical.js";
+import { hashObject } from "../canonical.js";
 import { activeAssetPolicyFromState } from "../allowlist-active-policy.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { RelayNativeAuthority } from "./native-authority.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
 import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
@@ -19,9 +20,11 @@ import { relaySignedNonce } from "./approval-effect.js";
 import { isGrantedPermissionRecord } from "../metamask-smart-account-record.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { HttpsBaseRpc } from "../rpc.js";
-import { relayNativeRoute, verifySavedRelayNativeQuote } from "./native-quote.js";
+import { verifySavedRelayNativeQuote } from "./native-quote.js";
+import { relayNativeRouteByReference } from "./native-routes.js";
 import { ETHEREUM_DEPOSITORY } from "./quote.js";
-import { BASE_RELAY_SIGNED_BYTES, verifyRelayBaseFunding } from "./base-source-guard.js";
+import { verifyRelayBaseFunding } from "./base-source-guard.js";
+import { RelayNativeDepositCustody, verifySignedNativeDeposit as verifySigned } from "./native-source-custody.js";
 import { decodeRelayBaseReceiptFee, verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -30,34 +33,6 @@ function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay na
 function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay native source state is invalid: ${reason}.`); }
 export { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce, publicRelayNativeSourceJournal } from "./native-source-journal.js";
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce } from "./native-source-journal.js";
-function custodyKey(op) {
-    return domainHash("apn.relay-native-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
-}
-function custodyBinding(op) {
-    return domainHash("apn.relay-native-deposit-envelope.v1", canonicalJson({ operationId: op.operationId,
-        integrityHash: op.integrityHash, quoteDigest: op.quoteDigest, deposit: op.nativeQuote.deposit }));
-}
-async function verifySigned(op, raw, expectedNonce) {
-    if ((op.sourceChainId === 8453 && (raw.length - 2) / 2 > BASE_RELAY_SIGNED_BYTES) || !/^0x(?:[a-fA-F0-9]{2})+$/u.test(raw))
-        corrupt("signed encoding");
-    let tx, signer;
-    try {
-        tx = parseTransaction(raw);
-        signer = await recoverTransactionAddress({ serializedTransaction: raw });
-    }
-    catch {
-        corrupt("signed decode");
-    }
-    const d = op.nativeQuote.deposit;
-    if (tx.type !== "eip1559" || tx.chainId !== op.sourceChainId || !same(signer, op.sourceAccount) ||
-        !same(tx.to ?? "", d.to) || !same(tx.data ?? "0x", d.data) || (tx.value ?? 0n) !== BigInt(d.value) ||
-        tx.gas !== BigInt(d.gas) || tx.maxFeePerGas !== BigInt(d.maxFeePerGas) ||
-        tx.maxPriorityFeePerGas !== BigInt(d.maxPriorityFeePerGas) || tx.nonce === undefined ||
-        (expectedNonce !== undefined && BigInt(tx.nonce) !== expectedNonce) || (tx.accessList?.length ?? 0) !== 0 ||
-        tx.gas * tx.maxFeePerGas > BigInt(op.depositNetworkFeeCeilingWei))
-        corrupt("signed envelope drift");
-    return keccak256(raw);
-}
 export class RelayNativeSourceRuntime {
     state;
     ports;
@@ -78,10 +53,12 @@ export class RelayNativeSourceRuntime {
         this.journals = new RelayNativeSourceJournalRepository(state.root);
         this.usage = new AssetUsageLedger(state.root);
     }
-    async execute(operationId) {
+    /** `profile` is the caller's explicit profile; the operation is found only under its hash (OWNR 4.1). */
+    async execute(profile, operationId) {
         if (!HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay native execute requires an operation ID.");
-        const op = await new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId);
+        allowlistProfileHash(profile);
+        const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(this.state.profileHash(profile), operationId);
         if (op === null)
             blocked("prepared_operation_missing");
         this.assertLane(op);
@@ -96,9 +73,9 @@ export class RelayNativeSourceRuntime {
             const transport = this.ports.rpc instanceof HttpsBaseRpc ? this.ports.rpc.withAbortSignal(abort.signal) : this.ports.rpc;
             const invocation = this.origin === undefined ? null : new RelayRpcInvocation(this.state, this.origin, transport, abort.signal, transport instanceof HttpsBaseRpc ? () => transport.primePublicAddresses() : undefined);
             const rpc = invocation?.rpc ?? transport;
-            const work = () => this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(relayNativeRoute(op.sourceAccount, op.recipient).profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)], async () => this.run(op, rpc, abort.signal));
+            const work = () => this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)], async () => this.run(op, profile, rpc, abort.signal));
             const result = op.sourceChainId !== 8453 ? await work() : await this.state.withLocks([
-                walletCustodyLock(this.state, relayNativeRoute(op.sourceAccount, op.recipient).profile)
+                walletCustodyLock(this.state, profile)
             ], async () => {
                 this.#heldCustody.add(op);
                 try {
@@ -119,17 +96,12 @@ export class RelayNativeSourceRuntime {
     assertLane(op) {
         validateRelayUnsignedOperation(op);
         const q = op.nativeQuote, d = q?.deposit;
-        let route;
-        try {
-            route = relayNativeRoute(op.sourceAccount, op.recipient);
-        }
-        catch {
+        // The route is the protocol row the saved quote names; payer and recipient are the operation's own (OWNR R2).
+        const route = q === undefined ? null : relayNativeRouteByReference(q.routeReference);
+        if (route === null || q === undefined)
             blocked("saved_native_quote_or_route");
-        }
         if (op.quote !== undefined || op.sourceChainId !== route.sourceChainId || op.destinationChainId !== route.chainId ||
-            op.profileHash !== this.state.profileHash(route.profile) ||
-            !same(op.sourceAccount, route.payer) || !same(op.recipient, route.recipient) ||
-            q?.routeReference !== route.reference || d === undefined ||
+            !same(q.payer, op.sourceAccount) || !same(q.recipient, op.recipient) || d === undefined ||
             op.statusLocator === undefined || op.policyDigest === undefined || op.policyRevision === undefined ||
             op.depositNetworkFeeCeilingWei === undefined || q.statusLocator?.requestId !== op.statusLocator.requestId ||
             !same(d.to, ETHEREUM_DEPOSITORY) || !same(d.from, op.sourceAccount) || d.chainId !== route.sourceChainId ||
@@ -154,21 +126,22 @@ export class RelayNativeSourceRuntime {
     usageIdentity(op) {
         return { account: getAddress(op.sourceAccount), chain: `eip155:${op.sourceChainId}`, asset: { kind: "native", identifier: null } };
     }
-    async active(op) {
-        const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
+    async active(op, profile) {
         const active = activeAssetPolicyFromState(await new AllowlistPolicyStore(this.state.root).readUnderProfileLock(profile), this.clock.now());
         if (active === null || active.profile !== profile || active.digest !== op.policyDigest ||
             active.revision !== op.policyRevision || !same(active.accounts.evm ?? "", op.sourceAccount) || op.policyActivationDigest !== undefined && active.activationDigest !== op.policyActivationDigest)
             blocked("active_policy_or_owner");
         return active;
     }
-    async admission(op, now) {
+    /** Owner admission at every gate (prepare-of-execute, reservation, signing, first send): owner, policy, caps, mechanism
+     * and the owner's optional recipient pin (OD-1). */
+    async admission(op, profile, now) {
         await this.owner(op);
         if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
             blocked("operation_retired");
         if (!Number.isFinite(now.getTime()) || now.getTime() + 60_000 >= Date.parse(op.deadline))
             blocked("quote_deadline");
-        const active = await this.active(op);
+        const active = await this.active(op, profile);
         if (active.registry.expiresAt !== undefined && now.toISOString() >= active.registry.expiresAt)
             blocked("policy_expired");
         const id = assetUsageReservationId(this.usageIdentity(op), `relay-native-execute:${op.operationId}`);
@@ -177,11 +150,13 @@ export class RelayNativeSourceRuntime {
             current.reservation.reservedAt.slice(0, 10) === now.toISOString().slice(0, 10) ? BigInt(op.amountAtomic) : 0n;
         if (BigInt(current.snapshot.amountAtomic) < own)
             corrupt("usage total");
+        const mechanism = { provider: "relay", reference: op.nativeQuote.routeReference };
         const decision = evaluateAssetPolicy(active.registry, { chain: `eip155:${op.sourceChainId}`, asset: { kind: "native", identifier: null },
-            rail: "bridge", mechanism: { provider: "relay", reference: op.nativeQuote.routeReference }, amountAtomic: op.amountAtomic, dailyUsageAtomic: (BigInt(current.snapshot.amountAtomic) - own).toString(),
+            rail: "bridge", mechanism, amountAtomic: op.amountAtomic, dailyUsageAtomic: (BigInt(current.snapshot.amountAtomic) - own).toString(),
             asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        if (!bridgeMechanismAdmitted(decision, { provider: "relay", reference: op.nativeQuote.routeReference }))
+        if (!bridgeMechanismAdmitted(decision, mechanism))
             blocked("route_pin");
+        assertRecipientAdmitted({ admission: decision, mechanism, recipient: op.recipient });
         return active;
     }
     /** Chain and head, then the balance pinned to the head hash (EIP-1898 requireCanonical) and the pending nonce; Base
@@ -209,41 +184,6 @@ export class RelayNativeSourceRuntime {
         if (nonce > BigInt(Number.MAX_SAFE_INTEGER))
             blocked("nonce_unbounded");
         return nonce;
-    }
-    async custody(op, signed) {
-        const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
-        const work = async () => {
-            const wallet = await this.wallets.describe(profile);
-            if (wallet === null)
-                blocked("encrypted_wallet_missing");
-            try {
-                if (!same(wallet.identity.address, op.sourceAccount))
-                    blocked("encrypted_wallet_owner");
-                const old = wallet.secret.directEffects[custodyKey(op)];
-                if (signed !== undefined) {
-                    if (old !== undefined)
-                        blocked("signed_native_deposit_already_sealed");
-                    if (await verifySigned(op, signed.raw) !== signed.hash)
-                        corrupt("signed hash");
-                    const entry = { payloadHash: custodyBinding(op), transactionHash: signed.hash,
-                        rawTransaction: signed.raw, rawTransactionHash: signed.hash };
-                    wallet.secret.directEffects[custodyKey(op)] = entry;
-                    await this.wallets.save(wallet.identity, wallet.secret);
-                    return signed;
-                }
-                if (old === undefined)
-                    return null;
-                if (old.payloadHash !== custodyBinding(op) || old.transactionHash !== old.rawTransactionHash ||
-                    keccak256(old.rawTransaction) !== old.transactionHash)
-                    corrupt("custody binding");
-                await verifySigned(op, old.rawTransaction);
-                return { raw: old.rawTransaction, hash: old.transactionHash };
-            }
-            finally {
-                this.wallets.clear(wallet.secret);
-            }
-        };
-        return this.#heldCustody.has(op) ? await work() : await this.state.withLocks([walletCustodyLock(this.state, profile)], work);
     }
     async observe(op, rpc, hash) {
         const rows = await rpc.batchCall([{ method: "eth_getTransactionByHash", params: [hash] },
@@ -291,8 +231,9 @@ export class RelayNativeSourceRuntime {
         }
         return status === 1n ? "confirmed" : "failed";
     }
-    async run(op, rpc, signal) {
+    async run(op, profile, rpc, signal) {
         let authority;
+        const vault = new RelayNativeDepositCustody(this.state, this.wallets, profile, candidate => this.#heldCustody.has(candidate));
         try {
             await this.owner(op);
             let j = await this.journals.load(op);
@@ -308,7 +249,7 @@ export class RelayNativeSourceRuntime {
             if (j === null || j.phase === "pending") {
                 const prior = await this.usage.load(identity, reservationId);
                 if (prior?.state === "reserved") {
-                    if (await this.custody(op) !== null)
+                    if (await vault.slot(op) !== null)
                         corrupt("signed custody before source marker");
                     await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest,
                         state: "failed_before_effect", expectedCurrentStates: ["reserved"], now: this.clock.now(),
@@ -319,11 +260,11 @@ export class RelayNativeSourceRuntime {
             }
             if (j?.phase === "sealed") {
                 // Saved bytes never sent end only when another transaction consumed their nonce at safe depth; otherwise they resume.
-                const saved = await this.custody(op);
+                const saved = await vault.slot(op);
                 const outcome = saved !== null && saved.hash === j.transactionHash ? await this.unsentOutcome(rpc, op, saved) : null;
                 if (outcome === "never_lands") {
                     j = await this.journals.advance(op, j.integrityHash, "abandoned_unsent", null, this.clock.now());
-                    await this.discardCustody(op);
+                    await vault.discard(op);
                 }
                 // The node already knows these exact bytes: never send them again; fence them as possibly sent and only observe.
                 if (outcome === "own_transaction_known")
@@ -333,14 +274,14 @@ export class RelayNativeSourceRuntime {
                 await this.settleUsage(op, j);
                 return j;
             }
-            if (j?.phase === "signing_started" && op.sourceChainId === 8453 && await this.custody(op) === null) {
+            if (j?.phase === "signing_started" && op.sourceChainId === 8453 && await vault.slot(op) === null) {
                 if ((await this.usage.load(identity, reservationId))?.state === "reserved")
                     await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest, state: "unknown_finality", now: this.clock.now() });
                 return j;
             }
             const observationOnly = j?.phase === "submitting";
             if (j === null || j.phase === "pending" || j.phase === "sealed" || op.sourceChainId === 8453 && j.phase === "signing_started")
-                authority = new RelayNativeAuthority(op, await this.admission(op, this.clock.now()), this.clock, signal);
+                authority = new RelayNativeAuthority(op, await this.admission(op, profile, this.clock.now()), this.clock, signal);
             if (!observationOnly && await this.ports.confirm({ operationId: op.operationId, sourceChainId: op.sourceChainId, destinationChainId: op.destinationChainId,
                 sourceAccount: op.sourceAccount, recipient: op.recipient, amountAtomic: op.amountAtomic,
                 minOutputAtomic: op.minOutputAtomic, deadline: authority?.deadline ?? op.deadline, quoteDigest: op.quoteDigest,
@@ -356,24 +297,24 @@ export class RelayNativeSourceRuntime {
             // P2: bytes signed in this invocation go out on the funding and nonce just read under the held locks.
             let signedNonce = null;
             if (j.phase === "pending") {
-                const active = await this.admission(op, this.clock.now());
+                const active = await this.admission(op, profile, this.clock.now());
                 const prior = await this.usage.load(identity, reservationId);
                 await this.usage.reserve({ ...identity, registry: active.registry, rail: "bridge", mechanism: { provider: "relay", reference: op.nativeQuote.routeReference }, amountAtomic: op.amountAtomic,
                     idempotencyKey: `relay-native-execute:${op.operationId}`, now: this.clock.now(),
                     ...(prior === null ? {} : { retryFailedBeforeEffect: true }) });
-                await this.admission(op, this.clock.now());
+                await this.admission(op, profile, this.clock.now());
                 const nonce = await this.funding(op, rpc);
-                authority.assert(await this.admission(op, this.clock.now()));
+                authority.assert(await this.admission(op, profile, this.clock.now()));
                 await this.journals.claimSigning(op, nonce);
                 j = await this.journals.advance(op, j.integrityHash, "signing_started", null, this.clock.now());
                 if (op.sourceChainId === 8453)
                     await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest, state: "unknown_finality", now: this.clock.now() });
-                const wallet = await this.wallets.describe(relayNativeRoute(op.sourceAccount, op.recipient).profile);
+                const wallet = await this.wallets.describe(profile);
                 if (wallet === null)
                     blocked("encrypted_wallet_missing");
                 let raw;
                 try {
-                    authority.assert(await this.admission(op, this.clock.now()));
+                    authority.assert(await this.admission(op, profile, this.clock.now()));
                     if (!same(wallet.identity.address, op.sourceAccount))
                         blocked("encrypted_wallet_owner");
                     const signer = privateKeyToAccount(wallet.secret.privateKey);
@@ -389,30 +330,30 @@ export class RelayNativeSourceRuntime {
                     this.wallets.clear(wallet.secret);
                 }
                 const hash = await verifySigned(op, raw, nonce);
-                await this.custody(op, { raw, hash });
+                await vault.slot(op, { raw, hash });
                 signedNonce = nonce;
             }
             if (j.phase === "signing_started") {
                 if (op.sourceChainId === 8453 && (await this.usage.load(identity, reservationId))?.state === "reserved")
                     await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest, state: "unknown_finality", now: this.clock.now() });
-                const signed = await this.custody(op);
+                const signed = await vault.slot(op);
                 if (signed === null) {
                     if (op.sourceChainId === 8453)
-                        return j; // Missing signed material is observe-only for the new finite lanes.
-                    j = await this.closeUnsignedAttempt(op, j);
+                        return j; // Missing signed material is observe-only on Base sources (permanent signing claim).
+                    j = await vault.closeUnsignedAttempt(op, j, this.journals, this.clock.now());
                     await this.settleUsage(op, j);
                     return j;
                 }
                 j = await this.journals.advance(op, j.integrityHash, "sealed", signed.hash, this.clock.now());
             }
             if (j.phase === "sealed") {
-                authority ??= new RelayNativeAuthority(op, await this.admission(op, this.clock.now()), this.clock, signal);
+                authority ??= new RelayNativeAuthority(op, await this.admission(op, profile, this.clock.now()), this.clock, signal);
                 const nonce = signedNonce ?? await this.funding(op, rpc);
-                const signed = await this.custody(op);
+                const signed = await vault.slot(op);
                 if (signed === null || signed.hash !== j.transactionHash)
                     corrupt("sealed custody missing");
                 await verifySigned(op, signed.raw, nonce);
-                authority.assert(await this.admission(op, this.clock.now()));
+                authority.assert(await this.admission(op, profile, this.clock.now()));
                 j = await dispatchRelayNativeDepositOnce(op, j, this.journals, raw => { authority.assert(); return rpc.submitRawTransaction(raw, () => authority.assert()); }, signed.raw, this.clock.now());
             }
             if (j.phase === "submitting") {
@@ -451,52 +392,6 @@ export class RelayNativeSourceRuntime {
         const [count, own] = await rpc.batchCall([{ method: "eth_getTransactionCount", params: [op.sourceAccount, "safe"] },
             { method: "eth_getTransactionByHash", params: [saved.hash] }]);
         return evmUnsentOutcome(async (method) => method === "eth_getTransactionCount" ? count : own, { account: op.sourceAccount, nonce: relaySignedNonce(saved.raw), transactionHash: saved.hash });
-    }
-    /** Only after the journal records the sealed bytes as never landing. */
-    async discardCustody(op) {
-        const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
-        const work = async () => {
-            const wallet = await this.wallets.describe(profile);
-            if (wallet === null)
-                return;
-            try {
-                if (!same(wallet.identity.address, op.sourceAccount))
-                    corrupt("encrypted_wallet_owner");
-                if (wallet.secret.directEffects[custodyKey(op)] === undefined)
-                    return;
-                delete wallet.secret.directEffects[custodyKey(op)];
-                await this.wallets.save(wallet.identity, wallet.secret);
-            }
-            finally {
-                this.wallets.clear(wallet.secret);
-            }
-        };
-        if (this.#heldCustody.has(op))
-            await work();
-        else
-            await this.state.withLocks([walletCustodyLock(this.state, profile)], work);
-    }
-    /** The only closure without a chain result: journal has no hash or send marker,
-     * and encrypted custody is proven empty under its mutation lock. */
-    async closeUnsignedAttempt(op, j) {
-        const profile = relayNativeRoute(op.sourceAccount, op.recipient).profile;
-        return this.state.withLocks([walletCustodyLock(this.state, profile)], async () => {
-            const wallet = await this.wallets.describe(profile);
-            if (wallet === null)
-                blocked("encrypted_wallet_missing");
-            try {
-                if (!same(wallet.identity.address, op.sourceAccount))
-                    corrupt("encrypted_wallet_owner");
-                if (wallet.secret.directEffects[custodyKey(op)] !== undefined)
-                    blocked("signed_native_custody_exists");
-                if (j.phase !== "signing_started" || j.transactionHash !== null || j.observedAt !== null)
-                    blocked("no_effect_closure_requires_unsigned_marker");
-                return this.journals.advance(op, j.integrityHash, "failed_before_effect", null, this.clock.now());
-            }
-            finally {
-                this.wallets.clear(wallet.secret);
-            }
-        });
     }
 }
 export function createRelayNativeSourceRuntime(state, wrapping, rpcUrl, confirm, clock, transport) {

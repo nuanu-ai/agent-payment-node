@@ -23,14 +23,17 @@ export type RelayUnsentOutcomePort = (input: Readonly<{
 }>) => Promise<EvmUnsentOutcome>;
 /** Signed nonce of saved bytes; the bytes were verified against the frozen envelope when sealed. */
 export declare function relaySignedNonce(raw: string): bigint;
-/** Reuses the existing AES-GCM encrypted wallet secret and hash-bound direct-effect slot. */
+/** Reuses the existing AES-GCM encrypted wallet secret and hash-bound direct-effect slot of the operation's own
+ * profile (an operation prepared under `default` keeps its slots in the `default` envelope; nothing moves). */
 export declare class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
     private readonly state;
+    private readonly profile;
     private readonly wallets;
-    constructor(state: StateStore, wrapping: WrappingSecretPort);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, profile: string);
+    private owned;
     /** Hold the wallet mutation lock through a local retirement transition. A
      * damaged or unreadable envelope must not be treated as empty custody. */
-    withNoMaterial<T>(op: RelayUnsignedOperation, action: () => Promise<T>, profile?: string): Promise<T>;
+    withNoMaterial<T>(op: RelayUnsignedOperation, action: () => Promise<T>): Promise<T>;
     load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null>;
     private loadLocked;
     seal(op: RelayUnsignedOperation, signed: RelaySignedApproval): Promise<void>;
@@ -65,8 +68,8 @@ export interface RelayApprovalObservation {
 }
 export interface RelayApprovalPorts {
     now(): Date;
-    activePolicy(profile: "default"): Promise<ActiveAssetPolicy | null>;
-    publicAccount(profile: "default"): Promise<string | null>;
+    activePolicy(profile: string): Promise<ActiveAssetPolicy | null>;
+    publicAccount(profile: string): Promise<string | null>;
     dailyUsage(account: string, now: Date): Promise<string>;
     /** External owner gate. It must validate a durable Relay requestId binding; no default exists here. */
     executionAdmission(op: RelayUnsignedOperation): Promise<null | Readonly<{
@@ -96,7 +99,8 @@ export declare class RelayApprovalEffectService {
     private readonly operations;
     private readonly effects;
     constructor(state: StateStore, ports: RelayApprovalPorts);
-    run(operationId: string): Promise<RelayEffectJournal>;
+    /** The operation is found only under the caller's explicit profile; no profile is assumed. */
+    run(profile: string, operationId: string): Promise<RelayEffectJournal>;
     private assertEnvelope;
     private revalidate;
 }

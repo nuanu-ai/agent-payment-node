@@ -141,7 +141,8 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
   async finalityCheckpoint(): Promise<RelayBnbBlock | null> {
     if (this.expectedChainId === 56 || this.expectedChainId === 8453 || this.expectedChainId === 4326)
       return block(await this.read("eth_getBlockByNumber", ["safe", false]), "safe");
-    // A 15-block canonical checkpoint is used on native Relay destination lanes.
+    if (this.expectedChainId === 137) return this.polygonFinalizedCheckpoint();
+    // Monad: a 15-block canonical depth checkpoint.
     const latest = block(await this.read("eth_getBlockByNumber", ["latest", false]), "latest");
     if (latest === null || latest.number < 15n) return null;
     return this.block(latest.number - 15n);
