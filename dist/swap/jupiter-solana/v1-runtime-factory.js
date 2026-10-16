@@ -1,5 +1,5 @@
 import { swapMechanismDigest } from "../pin.js";
-import { JUPITER_V1_OLD_ROUTE, routeConfigForMaterial } from "./v1-route-config.js";
+import { JUPITER_V1_ROUTES, routeConfigForMaterial } from "./v1-route-config.js";
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
@@ -154,7 +154,7 @@ export function createJupiterV1Runtime(options) {
     }
     // This canonical instance owns the shared Native signer, RPC journal and cached fixed-registry runtimes.
     // Asynchronous selection stays inside existing command methods; no public route/pin selector exists.
-    const old = make(JUPITER_V1_OLD_ROUTE);
+    const old = make(JUPITER_V1_ROUTES[0]);
     class JupiterFiniteRuntime extends GuardedSwapRuntime {
         async quote(request, now) { const value = detached(request), selected = await admission.resolveRoute(value.profile, value.amountAtomic, "1", value.account); return await make(selected.route).quote(value, now); }
         async prepare(request, now) { const value = detached(request); return await make(await materialRoute(value.quoteHash)).prepare(value, now); }

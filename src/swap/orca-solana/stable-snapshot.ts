@@ -118,7 +118,7 @@ function pinnedPool(account: RawSolanaAccount | null) {
   const pool = decodeWhirlpool(ORCA_STABLE_POOL, account, WHIRLPOOL_PROGRAM, WHIRLPOOL_ACCOUNT_DISCRIMINATOR);
   if (pool.config !== WHIRLPOOLS_CONFIG || pool.mintA !== USDC_MINT || pool.mintB !== SOLANA_USDT ||
       pool.vaultA !== ORCA_STABLE_VAULT_A || pool.vaultB !== ORCA_STABLE_VAULT_B || pool.tickSpacing !== 1 ||
-      pool.feeTierIndexSeed !== 1 || pool.feeRate !== 100) blocked("Stable Orca pool pin changed.", "orca_stable_pool_state");
+      pool.feeTierIndexSeed !== 1) blocked("Stable Orca pool pin changed.", "orca_stable_pool_state");
   return pool;
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

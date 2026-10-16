@@ -14,7 +14,8 @@ import type { JupiterV1SemanticAccount } from "../../src/swap/jupiter-solana/v1-
 
 test("Fp public capture binds an independently pinned static-fee pool, PDA, vaults and legacy ABI", async () => {
  const c = capturedFp(), a = c.accounts.find(a => a.address === REVIEWED_WHIRLPOOL_FP.pool)!;
- assert.equal(routeConfigForQuoteBuild(c.quote,c.build),JUPITER_V1_WHIRLPOOL_FP_ROUTE);
+ assert.equal(routeConfigForQuoteBuild(c.quote,c.build,JUPITER_V1_WHIRLPOOL_FP_ROUTE.routeId),JUPITER_V1_WHIRLPOOL_FP_ROUTE);
+ assert.equal(routeConfigForQuoteBuild(c.quote,c.build).routeId,"whirlpool-v1-fp-sol-usdc-authority");
  await validateReviewedWhirlpoolFpPool(a);
  const state = decodeReviewedWhirlpoolFpPool(a);
  assert.equal(state.tickSpacing,2); assert.equal(state.feeTierIndexSeed,2); assert.equal(state.feeRate,200);
@@ -24,7 +25,11 @@ test("Fp public capture binds an independently pinned static-fee pool, PDA, vaul
  assert.throws(() => routeConfigForQuote(fixture().quoteResponse,JUPITER_V1_WHIRLPOOL_FP_ROUTE.routeId));
 });
 function changed(a:JupiterV1SemanticAccount, offset:number) { const d = Buffer.from(a.dataBase64,"base64"); d[offset] = d[offset]! ^ 1; return { ...a,dataBase64:d.toString("base64"),dataHash:sha256(d) }; }
-for (const offset of [0,8,40,41,43,45,47,101,133,181,213]) test(`Fp immutable pool field ${offset} refuses after rehash`, () => {
+test("Fp reads a retuned fee rate instead of pinning it (SWAP-18)", () => {
+ const a = capturedFp().accounts.find(a => a.address === REVIEWED_WHIRLPOOL_FP.pool)!;
+ assert.equal(decodeReviewedWhirlpoolFpPool(changed(a,45)).feeRate,201);
+});
+for (const offset of [0,8,40,41,43,101,133,181,213]) test(`Fp immutable pool field ${offset} refuses after rehash`, () => {
  const a = capturedFp().accounts.find(a => a.address === REVIEWED_WHIRLPOOL_FP.pool)!;
  assert.throws(() => decodeReviewedWhirlpoolFpPool(changed(a,offset)));
 });
@@ -45,7 +50,7 @@ for (let index = 0; index < 21; index++) for (const flag of ["isSigner","isWrita
 for (const index of [12,14,16,17,18,19,20]) test(`SYNTHETIC Fp refuses account ${index} substitution`,async () => {
  await assert.rejects(async () => { const m = mutate(syntheticFpMaterial(),v => { v.rawBuildResponse.swapInstruction.accounts[index].pubkey = "11111111111111111111111111111111"; }); await guardJupiterV1WhirlpoolMaterial(m); });
 });
-for (const kind of ["owner","executable","absent","native cap","pool fee drift","adaptive oracle","tick seed","foreign tick pool"]) test(`SYNTHETIC Fp refuses ${kind} before proof RPC`,async () => {
+for (const kind of ["owner","executable","absent","native cap","adaptive oracle","tick seed","foreign tick pool"]) test(`SYNTHETIC Fp refuses ${kind} before proof RPC`,async () => {
  let effects = 0;
  await assert.rejects(async () => { const m = mutate(syntheticFpMaterial(),v => {
   const pool = v.semanticAccounts.find((a:any) => a.address === REVIEWED_WHIRLPOOL_FP.pool);
@@ -53,7 +58,6 @@ for (const kind of ["owner","executable","absent","native cap","pool fee drift",
   else if (kind === "executable") pool.executable = true;
   else if (kind === "absent") pool.existence = "absent";
   else if (kind === "native cap") v.maximumNativeExpenseLamports = "6000001";
-  else if (kind === "pool fee drift") { const d = Buffer.from(pool.dataBase64,"base64"); d.writeUInt16LE(201,45); pool.dataBase64 = d.toString("base64"); }
   else if (kind === "adaptive oracle") v.semanticAccounts.find((a:any) => a.address === REVIEWED_WHIRLPOOL_FP.oracle).owner = pool.owner;
   else { const a = v.semanticAccounts.find((a:any) => a.address === v.rawBuildResponse.swapInstruction.accounts[17].pubkey),d = Buffer.from(a.dataBase64,"base64"); if (kind === "tick seed") d.writeInt32LE(-22000,8); else d.fill(0,9956); a.dataBase64 = d.toString("base64"); }
  }); await guardJupiterV1WhirlpoolMaterial(m); effects++; });

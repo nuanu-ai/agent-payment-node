@@ -28,7 +28,7 @@ for(const maximumInnerAccounts of [0,11,13,"12",null])test(`invalid finite inner
 const unknownPool="11111111111111111111111111111111";
 function withPool(pool:string){const quote=structuredClone(m.quoteResponse);return {...quote,routePlan:quote.routePlan.map(leg=>({...leg,swapInfo:{...leg.swapInfo,ammKey:pool}}))};}
 const selected=new Error("TEST-only resolver reached after strict quote/build route admission");
-async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1RouteId="whirlpool-v1-83-sol-usdc",build=m.rawBuildResponse){
+async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1RouteId="whirlpool-v1-83-sol-usdc-authority",build=m.rawBuildResponse){
  const urls:URL[]=[],posted:unknown[]=[];let resolved=0,proof=0,saved=0,get=0;
  const provider=new JupiterV1ReadOnlyProvider(async(input,init)=>{
   const url=new URL(String(input));urls.push(url);
@@ -65,16 +65,16 @@ test("a failed second discovery read is terminal without a third request",async(
  const r=await discover([withPool(unknownPool),new Error("HTTP failure")]);assert.equal((r.error as any)?.code,"APN_PROVIDER_PROTOCOL");assert.equal(r.urls.length,2);assert.equal(r.resolved,0);
 });
 test("V2 policy selection has no legacy hint or legacy discovery fallback",async()=>{
- const r=await discover([m.quoteResponse],"whirlpool-swap-v2-esv-sol-usdc");assert.equal((r.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(r.urls.length,1);assert.equal(r.urls[0]?.searchParams.has("maxAccounts"),false);assert.equal(r.resolved,0);
+ const r=await discover([m.quoteResponse],"whirlpool-swap-v2-esv-sol-usdc-authority");assert.equal((r.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(r.urls.length,1);assert.equal(r.urls[0]?.searchParams.has("maxAccounts"),false);assert.equal(r.resolved,0);
 });
 test("Fp's separately admitted legacy ABI receives the same bounded account hint",async()=>{
- const c=capturedFp(),r=await discover([c.quote],"whirlpool-v1-fp-sol-usdc",c.build);
+ const c=capturedFp(),r=await discover([c.quote],"whirlpool-v1-fp-sol-usdc-authority",c.build);
  assert.equal(r.error,selected);assert.equal(r.urls.length,2);assert.equal(r.urls[0]?.searchParams.get("maxAccounts"),"12");assert.equal(r.resolved,1);
 });
 test("Fp discovery can retry once but never build a foreign policy-selected pool",async()=>{
- const c=capturedFp(),r=await discover([m.quoteResponse,c.quote],"whirlpool-v1-fp-sol-usdc",c.build);
+ const c=capturedFp(),r=await discover([m.quoteResponse,c.quote],"whirlpool-v1-fp-sol-usdc-authority",c.build);
  assert.equal(r.error,selected);assert.equal(r.urls.length,3);assert.equal(r.urls[0]?.searchParams.get("maxAccounts"),"12");assert.equal(r.urls[1]?.searchParams.has("maxAccounts"),false);
  assert.deepEqual((r.posted[0] as any).quoteResponse,c.quote);
- const refused=await discover([m.quoteResponse,m.quoteResponse],"whirlpool-v1-fp-sol-usdc",c.build);
+ const refused=await discover([m.quoteResponse,m.quoteResponse],"whirlpool-v1-fp-sol-usdc-authority",c.build);
  assert.equal((refused.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(refused.resolved,0);assert.equal(refused.posted.length,0);assert.equal(refused.urls.length,2);
 });

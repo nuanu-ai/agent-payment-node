@@ -16,7 +16,7 @@ import { GuardedSwapService } from "../../src/swap/service.js";
 import { ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_MECHANISM_PIN_SLOT_440170207, ORCA_KEYLESS_PROTOCOL_REGISTRY } from "../../src/swap/orca-solana/pins.js";
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
 import { UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_WBTC_MECHANISM_PIN } from "../../src/swap/uniswap-v3/pins.js";
-import { JUPITER_V1_CURRENT_ROUTES, JUPITER_V1_FINITE_ROUTES } from "../../src/swap/jupiter-solana/v1-route-config.js";
+import { JUPITER_V1_ROUTES as JUPITER_V1_CURRENT_ROUTES, JUPITER_V1_KNOWN_ROUTES as JUPITER_V1_FINITE_ROUTES } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { temporaryState } from "./helpers.js";
 
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1", USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";

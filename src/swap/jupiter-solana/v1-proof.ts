@@ -47,7 +47,8 @@ export async function proveJupiterV1Simulation(reader:Pick<SolanaRpcPort,"call">
  if(a.data.length!==82||beforeData.length!==82||before.owner!==TOKEN||
   !a.data.subarray(0,36).equals(beforeData.subarray(0,36))||!a.data.subarray(44).equals(beforeData.subarray(44)))
   reject("Jupiter V1 read-only USDC mint identity changed.");
- }else if(!a.data.equals(beforeData))reject("Jupiter V1 simulation mutated read-only account data.");}
+ // A program account cannot be written by a transaction; its stored snapshot is the 45-byte prefix APN read (SWAP-04).
+ }else if(before.executable?!a.data.subarray(0,beforeData.length).equals(beforeData):!a.data.equals(beforeData))reject("Jupiter V1 simulation mutated read-only account data.");}
  if(v2&&v.fee===null)reject("Jupiter V1 simulation fee extension is null.");
  if(v.fee!==undefined&&v.fee!==null&&integer(v.fee)!==BigInt(m.networkFeeLamports!))reject("Jupiter V1 simulation fee extension disagrees.");if(v.loadedAddresses!==undefined){const loaded=record(v.loadedAddresses);if(canonicalJson(loaded.writable)!==canonicalJson(m.compiledAccounts.filter(a=>a.source==="lookup"&&a.writable).map(a=>a.address))||canonicalJson(loaded.readonly)!==canonicalJson(m.compiledAccounts.filter(a=>a.source==="lookup"&&!a.writable).map(a=>a.address)))reject("Jupiter V1 simulation loaded addresses changed.");}
  if(v.preBalances!==undefined&&v.postBalances!==undefined){const pre=amountArray(v.preBalances,keys.length),post=amountArray(v.postBalances,keys.length);if(pre[index(guarded.payer)]!-post[index(guarded.payer)]! !==nativeSpend)reject("Jupiter V1 native balance evidence disagrees.");}

@@ -21,7 +21,8 @@ export async function jupiterV1ApprovalScreen(material, intent) {
         ...(material.execution.quoteRpcLifetime === undefined ? [] : [`Blockhash source: configured mainnet RPC before quote freeze; confirmed context ${material.execution.quoteRpcLifetime.contextSlot}; original official build hash ${material.execution.rawBuildResponseHash}`]),
         `Quote: ${intent.quoteHash}; policy: ${intent.policyDigest}; mechanism: ${intent.mechanismDigest}`,
         `Deadline: ${intent.deadline}`,
-        "Runtime byte pins and exact simulation prove this execution; source reproducibility remains unproved.",
+        `Programs as deployed now: ${material.execution.programPins.filter(p => p.deploymentSlot !== null).map(p => `${p.programId} slot ${p.deploymentSlot}, ${p.upgradeAuthority === null ? "immutable" : `upgrade authority ${p.upgradeAuthority}`}`).join("; ")}`,
+        "Pinned upgrade authorities and the exact-message simulation against these deployments prove this execution; source reproducibility remains unproved.",
         "Approval authorizes one local signature and one send. Every later status only observes the same signature."];
 }
 //# sourceMappingURL=v1-tty.js.map
