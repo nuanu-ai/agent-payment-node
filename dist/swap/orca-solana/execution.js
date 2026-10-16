@@ -111,7 +111,7 @@ export class OrcaSolanaExecutionDriver {
         if (operation.submissionMarker === null)
             blocked("Orca observation is available only after the submission marker.", "orca_resume_before_marker");
         const material = validateOrcaKeylessMaterial(input.material);
-        if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state))
+        if (["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(operation.state))
             return operation;
         const binding = await this.d.bindings.load(operation, material);
         const account = binding === null ? null : await this.d.admission.localAccount(operation);

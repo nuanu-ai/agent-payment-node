@@ -179,7 +179,7 @@ export class JupiterV1ExecutionDriver {
                 corrupt();
             if (op.submissionMarker === null)
                 blocked("Jupiter observation requires its durable effect marker.");
-            if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(op.state))
+            if (["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(op.state))
                 return op;
             if (op.state === "submitting")
                 op = await this.d.core.recordPossibleSend(op, "unknown_finality", this.d.clock.now());

@@ -77,7 +77,7 @@ export class SunSwapTronExecutionDriver implements GuardedSwapExecutionDriver {
     let operation = validateSwapOperation(input.operation);
     if (operation.submissionMarker === null) blocked("SunSwap observation is available only after the submission marker.", "sunswap_resume_before_marker");
     const material = validateSunSwapPreparedMaterial(input.material, "stored");
-    if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state)) return operation;
+    if (["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(operation.state)) return operation;
     const binding = await this.d.bindings.load(operation, material);
     // A marker without a completed send attempt is never resumed into signing: the outcome is unknown and only observed.
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());

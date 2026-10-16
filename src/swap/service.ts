@@ -145,6 +145,22 @@ export class GuardedSwapService {
       "expired_unlanded", { usageLease: lease, failureProofHash: proofHash }, now);
   }
 
+  /**
+   * Owner exit when no chain proof is possible: the marked swap's outcome stays unknown, so its input stays charged as
+   * spent (the lease finalizes) and the operation is terminal. Nothing is signed or sent.
+   */
+  async abandonUnknown(operation: SwapOperationRecord, now: Date, acknowledgementDigest: string): Promise<SwapOperationRecord> {
+    operation = validateSwapOperation(operation);
+    if (!["submitting", "submitted", "unknown_finality"].includes(operation.state) || operation.submissionMarker === null ||
+        operation.receiptProof !== null || operation.usageLease === null) blocked("Swap has no unknown effect to abandon.");
+    instant(now);
+    if (operation.state !== "unknown_finality") operation = await this.recordPossibleSend(operation, "unknown_finality", now);
+    const lease = await this.usage.transition({ ...usageIdentity(operation), reservationId: operation.usageLease!.reservationId,
+      policyDigest: operation.policyDigest, state: "finalized", now, outcomeDigest: acknowledgementDigest });
+    return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash,
+      "abandoned_unknown", { usageLease: lease, failureProofHash: acknowledgementDigest }, now);
+  }
+
   resumeDirective(operation: SwapOperationRecord): "prepare_or_approve" | "observe_only" | "terminal" {
     operation = validateSwapOperation(operation);
     if (SWAP_TERMINAL_STATES.includes(operation.state)) return "terminal";

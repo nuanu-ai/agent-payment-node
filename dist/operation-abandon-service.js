@@ -11,6 +11,8 @@ import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
 import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
 import { X402AbandonService } from "./x402-abandon.js";
+import { SwapOperationRepository } from "./swap/repository.js";
+import { abandonSwapOperation } from "./swap/abandon.js";
 export class OperationAbandonService {
     context;
     rails;
@@ -31,6 +33,9 @@ export class OperationAbandonService {
     async abandon(operationIdInput) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
+        // Swaps live in their own repository; a marked swap with no provable bound has an owner exit here (R4).
+        if (await new SwapOperationRepository(this.context.state.root).loadAny(operationId) !== null)
+            return await abandonSwapOperation(this.context, operationId);
         const found = await this.operations.required(operationId);
         if (found.kind === "rail_transfer")
             return found.record.account.rail === "solana"
