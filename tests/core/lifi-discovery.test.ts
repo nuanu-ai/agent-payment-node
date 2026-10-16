@@ -129,7 +129,7 @@ test("LI.FI quote route and owner tampering is rejected even when outer checksum
   const result = await s.core.execute({ command: "bridge.routes", profile: s.profile, request: s.request }); assert.equal(result.ok, true);
   const hash = (result.data as any).quote_hash as string, path = join(temporary.root, "bridge-quotes", s.state.profileHash(s.profile), `${hash}.json`);
   const original = JSON.parse(await readFile(path, "utf8"));
-  for (const mutate of [(r: any) => { r.routes[0].routeId = "different"; }, (r: any) => { r.owner.profile = "other"; }, (r: any) => { r.rawResponse = "{}"; }]) {
+  for (const mutate of [(r: any) => { r.routes = "different"; }, (r: any) => { r.owner.profile = "other"; }, (r: any) => { r.rawResponse = "{}"; }]) {
     const value = structuredClone(original); mutate(value); const { snapshotHash: _h, ...body } = value; value.snapshotHash = hashObject(body);
     assert.throws(() => validateBridgeQuote(value), { code: "APN_STATE_CORRUPT" });
   }

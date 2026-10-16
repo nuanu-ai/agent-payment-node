@@ -238,7 +238,7 @@ class RawBridgeQuotes extends BridgeQuoteRepository {
   async put(path: string, value: unknown): Promise<void> { await this.writeJson(path, value); }
 }
 
-test("a reverse Linea quote saved before the source gate is refused, and only real route drift is corrupt", async (t) => {
+test("a reverse Linea quote saved before the source gate is refused at prepare whatever its stored projection says", async (t) => {
   const now = new Date("2026-09-20T10:54:00.000Z"), step = reverseLineaStep((await lifiSteps("eth-linea", now))[0]);
   step.id = "synthetic-linea-ethereum-native-across";
   const provider = new LifiTestProvider([step], now), temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -256,9 +256,10 @@ test("a reverse Linea quote saved before the source gate is refused, and only re
   const legacy = await resaved((routes) => { for (const row of routes) Object.assign(row, { preparable: true, unavailableReason: null }); }, "linea-legacy-quote-001");
   assert.equal(legacy.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
   assert.equal(legacy.error?.message, "Bridge validation failed: source_execution_unreviewed.");
+  // The stored route projection is display only: prepare selects from a fresh parse of the hash-bound raw response.
   const tampered = await resaved((routes) => Object.assign(routes[0], { preparable: true, unavailableReason: null, quotedOutputAtomic: "1" }), "linea-tampered-quote-001");
-  assert.equal(tampered.error?.code, "APN_STATE_CORRUPT");
-  assert.equal(tampered.error?.message, "Bridge validation failed: bridge_quote_route_binding.");
+  assert.equal(tampered.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  assert.equal(tampered.error?.message, "Bridge validation failed: source_execution_unreviewed.");
   assert.equal(provider.materializeCalls, 0); assert.equal(r.source.calls.length, 0); assert.equal(r.destination.calls.length, 0);
   assert.equal(r.approval.calls.length, 0); assert.equal(r.wrapping.loads, 0);
 });
