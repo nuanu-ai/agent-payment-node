@@ -5,7 +5,7 @@ import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js"
 import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
 import { isX402ResultStatus, validateX402Resource } from "./x402-http-request.js";
-import { X402_STATE_VERSION, TRANSITION_VERSION, ZERO_HASH, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-model.js";
+import { X402_STATE_VERSION, TRANSITION_VERSION, ZERO_HASH, deliversX402Result, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-model.js";
 import { STATE_SHAPE, legalNextState, validateStateTuple } from "./x402-state-shape.js";
 import { validateAttempts, validateAuthorizationUsedScan, validateSettlementEvidence, validateSettlementResponseObservation, validateTransferMethodEvidence, validateTransactionHint, validateUnusedExpiryEvidence, } from "./x402-evidence-validation.js";
 import { address, allowedKeys, bytes32, canonicalText, exactRecord, hash, positive, record, stateCorrupt, timestamp, } from "./x402-state-validation-primitives.js";
@@ -293,7 +293,7 @@ export function validateStateSummary(operation, evidence) {
         const attempt = Number.isSafeInteger(attemptIndex) && attemptIndex >= 0
             ? evidence.attempts[attemptIndex]
             : undefined;
-        if (response?.classification !== "success" || attempt?.phase !== "observed" ||
+        if (!deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
             !isX402ResultStatus(operation.resource, attempt.observation?.status) || attempt.observation?.bodyHash !== resultLink.resultHash)
             stateCorrupt("x402 result link does not bind its designated successful response.");
     }
@@ -349,7 +349,7 @@ export function validateStateSummary(operation, evidence) {
     if (state === "completed") {
         const response = evidence.settlementResponseObservation;
         const attempt = response === undefined ? undefined : evidence.attempts[Number(response.httpAttemptNumber) - 1];
-        if (response?.classification !== "success" || evidence.transactionHint?.source !== "payment_response" ||
+        if (!deliversX402Result(response?.classification) || evidence.transactionHint?.source !== "payment_response" ||
             (attempt?.purpose !== "payment" && attempt?.purpose !== "result_recovery") || attempt.phase !== "observed" ||
             !isX402ResultStatus(operation.resource, attempt.observation?.status))
             stateCorrupt("x402 completed state lacks an observed successful paid response.");

@@ -182,7 +182,7 @@ async function completeJourney(t: TestContext, withCanaries = false): Promise<Jo
   const sent = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(sent.ok, true, JSON.stringify(sent));
   assert.equal((sent.operation as { readonly state?: unknown } | null)?.state, "settlement_pending");
-  assert.equal(sent.data, null, "a non-terminal result link must not expose seller content");
+  assert.equal((sent.data as { readonly kind?: unknown } | null)?.kind, "x402_result", "the paid body is returned as soon as it is stored");
   armSettlement(fixture.rpc, await durableOperation(fixture));
   const completed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(completed.ok, true, JSON.stringify(completed));

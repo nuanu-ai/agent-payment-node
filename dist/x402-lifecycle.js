@@ -1,7 +1,7 @@
 import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
-import { appendX402Transition, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
+import { appendX402Transition, deliversX402Result, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
 import { settlementResponseTransaction, terminalClassification } from "./x402-service-rpc.js";
 export class X402Lifecycle {
     context;
@@ -70,7 +70,7 @@ export class X402Lifecycle {
         const attempt = Number.isSafeInteger(attemptIndex) && attemptIndex >= 0
             ? operation.attempts[attemptIndex]
             : undefined;
-        if (response?.classification !== "success" || attempt?.phase !== "observed" ||
+        if (!deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
             attempt.observation?.status !== result.responseStatus || attempt.observation.bodyHash !== result.resultHash ||
             attempt.observation.bodyByteLength !== result.byteLength || attempt.observation.mediaType !== result.mediaType)
             throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 result lacks its designated successful response.");

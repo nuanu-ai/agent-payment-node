@@ -284,6 +284,11 @@ export interface X402ResultRecord {
   readonly integrityHash: string;
 }
 
+/** A seller body that arrives with a success or a pending settlement answer is the purchased result. */
+export function deliversX402Result(classification: SettlementResponseObservation["classification"] | undefined): boolean {
+  return classification === "success" || classification === "settlement_pending";
+}
+
 export type X402TerminalState = "completed" | "failed_before_effect" | "failed_expired_unused" | "failed_settled_without_result" | "abandoned_unknown";
 
 export interface X402ReceiptRecord {
