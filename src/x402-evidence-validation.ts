@@ -319,7 +319,6 @@ function validateErc7710SettlementEvidence(
       binding.paymentResponseHash !== response.settlementResponseHash || binding.offerHash !== offer.offerHash ||
       binding.delegationManager !== delegated.delegationManager || binding.delegator !== operation.wallet ||
       binding.childHash !== operation.signatureHash || binding.permissionContextHash !== operation.paymentContextHash ||
-      evidence.rpcOriginHash !== delegated.rpcOriginHash ||
       binding.operationBindingHash !== x402OperationBindingHash(operation as unknown as Parameters<typeof x402OperationBindingHash>[0])) {
       stateCorrupt("x402 ERC-7710 evidence conflicts with the frozen operation.");
     }
@@ -407,7 +406,7 @@ function validateErc7710UnusedExpiryEvidence(
       binding.operationBindingHash !== x402OperationBindingHash(operation as unknown as Parameters<typeof x402OperationBindingHash>[0]) ||
       binding.offerHash !== offer.offerHash || binding.delegationManager !== delegated.delegationManager ||
       binding.delegator !== operation.wallet || binding.childHash !== operation.signatureHash ||
-      binding.permissionContextHash !== operation.paymentContextHash || evidence.rpcOriginHash !== delegated.rpcOriginHash
+      binding.permissionContextHash !== operation.paymentContextHash
     ) stateCorrupt("x402 ERC-7710 unused-expiry evidence conflicts with the frozen operation.");
   }
   hash(evidence.rpcOriginHash); hash(evidence.evidenceHash);

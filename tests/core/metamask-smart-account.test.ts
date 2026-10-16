@@ -1527,8 +1527,10 @@ test(`Smart Account ERC-7710 completes ${method} across restart without session 
     assert.ok(resultPending?.resultLink !== undefined);
     assert.equal(resultPending?.settlementEvidence, undefined);
 
-    // Post-exposure recovery must not require the already-spent owner balance.
+    // Post-exposure recovery must not require the already-spent owner balance, nor the endpoint used at prepare:
+    // a rotated Base RPC reconciles the operation and its origin is recorded in the evidence as provenance.
     rpc.ownerUsdcAtomic = "0";
+    rpc.rpcOrigin = "https://rotated.example";
     armSmartAccountX402Settlement(rpc, resultPending!);
     const completedRuntime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
     const completed = await completedRuntime.core.execute({ command: "operation.resume", operationId });
