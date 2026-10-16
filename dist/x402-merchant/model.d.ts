@@ -172,6 +172,7 @@ export declare function publicMerchant(o: MerchantOperation): {
     merchantDelivered: boolean;
     transactionHash: `0x${string}` | null;
     challengeHash: string;
+    paymentWindowSeconds: unknown;
     expiresAt: string;
     amountAtomic: unknown;
     feeCeilingWei: string;

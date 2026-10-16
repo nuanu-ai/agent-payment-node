@@ -16,7 +16,7 @@ import { MerchantRepository } from "./repository.js";
 import { MerchantOwner } from "./owner.js";
 import { checkMerchantEnvelope, merchantCurrent, merchantReceipt, hexHash, type MerchantRpcPort } from "./rpc.js";
 import { type MerchantCustodyPort } from "./custody.js";
-import { canonicalMerchantUrl, merchantChallenge, merchantDelivery, merchantGenericChallenge, merchantProof, refuse } from "./protocol.js";
+import { assertMerchantPaymentWindow, canonicalMerchantUrl, merchantChallenge, merchantDelivery, merchantGenericChallenge, merchantProof, refuse } from "./protocol.js";
 import { MERCHANT_ASSET_PINS, type MerchantAssetPin } from "./asset-pins.js";
 import { merchantPrepareTerms, merchantTerms } from "./terms.js";
 export interface MerchantPorts {
@@ -67,6 +67,7 @@ export class MerchantService {
             const createdAt = this.ports.now().toISOString();
             if (Date.parse(createdAt) - Date.parse(observation.observedAt) > 30000 || Date.parse(createdAt) < Date.parse(observation.observedAt))
                 refuse("merchant_challenge_read_age");
+            assertMerchantPaymentWindow(frozen, observation.observedAt, createdAt);
             const envelope = { nonce: current.nonce, gas: current.gas, maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas, maximumNativeFee,...(input.nativeFeeReserveWei===undefined?{}:{nativeFeeReserveWei:input.nativeFeeReserveWei}) };
             checkMerchantEnvelope(current, envelope,terms,current.feeContext);
             if (BigInt(current.token) < BigInt(terms.amount))
@@ -123,7 +124,9 @@ export class MerchantService {
                 await this.refreshFee(o,grant);
                 phase="challenge";
                 const t = merchantTerms(o);
-                if (canonicalJson(merchantChallenge(await this.ports.http.get({url:t.url}), t)) !== canonicalJson(o.frozen)) refuse("merchant_challenge_changed_after_sealing");
+                const sealedRead = await this.ports.http.get({url:t.url});
+                if (canonicalJson(merchantChallenge(sealedRead, t)) !== canonicalJson(o.frozen)) refuse("merchant_challenge_changed_after_sealing");
+                assertMerchantPaymentWindow(o.frozen, sealedRead.observedAt, this.at());
                 this.fresh(o);
                 assertMerchantAuthority(grant,this,o,this.ports.now());
                 phase="send_claim";
@@ -232,9 +235,10 @@ export class MerchantService {
         await this.operations.assertMerchantAccountAvailable(o);
         const t = merchantTerms(o), current = await merchantCurrent(this.ports.rpc,t,o.envelope);
         checkMerchantEnvelope(current, o.envelope,t,o.feeContext);
-        const fresh = merchantChallenge(await this.ports.http.get({ url: t.url }), t);
+        const read = await this.ports.http.get({ url: t.url }), fresh = merchantChallenge(read, t);
         if (canonicalJson(fresh) !== canonicalJson(o.frozen))
             refuse("merchant_challenge_changed");
+        assertMerchantPaymentWindow(fresh, read.observedAt, this.at());
         this.fresh(o);
     }
     private async refreshFee(o:MerchantOperation,grant:MerchantAuthority):Promise<void>{
