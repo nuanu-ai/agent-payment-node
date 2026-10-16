@@ -18,11 +18,15 @@ export interface AllowlistPolicyAdmissionInput {
     readonly mechanism?: AllowlistAdmissionMechanismPin;
     /** Optional exact recipient for Ethereum/Base local or Base Coinbase gasless transfers. */
     readonly recipient?: string;
-    /** Bridge: exact alternative pins, each with its own per-transfer ceiling. Swap: two to sixteen admitted routes under one cap. */
-    readonly mechanisms?: readonly (AllowlistMechanismPin & {
-        readonly maximumPerTransferAtomic: string;
-    })[] | readonly SwapAdmissionMechanism[];
+    /** Optional owner pin (OD-1) on a direct, x402 or single-pin bridge admission: 1-16 canonical recipients. Absent: not restricted. */
+    readonly recipients?: readonly string[];
+    /** Bridge: exact alternative pins, each with its own per-transfer ceiling and optional recipient pin. Swap: two to sixteen admitted routes under one cap. */
+    readonly mechanisms?: readonly BridgeAlternative[] | readonly SwapAdmissionMechanism[];
 }
+export type BridgeAlternative = AllowlistMechanismPin & {
+    readonly maximumPerTransferAtomic: string;
+    readonly recipients?: readonly string[];
+};
 export interface AllowlistPolicyOverlayInput {
     readonly overlayVersion: string;
     readonly profile: string;

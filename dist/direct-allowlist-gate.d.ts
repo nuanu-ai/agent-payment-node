@@ -15,6 +15,8 @@ export interface DirectAllowlistSubject extends AssetUsageIdentity {
     readonly operationId: string;
     readonly family: CandidateFamily;
     readonly amountAtomic: string;
+    /** The operation's own recipient; an owner recipient pin on the direct row must list it (OD-1). */
+    readonly recipient: string;
 }
 export type DirectAllowlistRefusal = "allowlist_network_unlisted" | "allowlist_asset_unlisted" | "allowlist_decimals_mismatch" | "allowlist_network_not_enabled" | "allowlist_policy_required" | "allowlist_policy_expired" | "allowlist_policy_not_effective" | "allowlist_policy_changed" | "allowlist_account_mismatch" | "allowlist_direct_not_admitted" | "allowlist_per_transfer_cap_exceeded" | "allowlist_daily_cap_exceeded" | "allowlist_binding_missing";
 /** Where the owning journal says the effect is. The ledger follows it forward and never moves backward. */

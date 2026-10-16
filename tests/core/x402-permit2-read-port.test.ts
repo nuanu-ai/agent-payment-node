@@ -14,7 +14,8 @@ const payer = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" as const;
 const instant = new Date("2026-09-23T04:00:00.000Z");
 const request = { payer, chainId: 43114 as const, token: asset.token,
   challengeHash: "a".repeat(64), offerHash: "b".repeat(64), amountAtomic: "10000",
-  nonceBitmapWordIndex: "0", nowSeconds: Math.floor(instant.getTime() / 1000) };
+  nonceBitmapWordIndex: "0", nowSeconds: Math.floor(instant.getTime() / 1000),
+  payTo: "0x2222222222222222222222222222222222222222" as const };
 const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 const tokenAbi = parseAbi(["function balanceOf(address) view returns (uint256)",
   "function allowance(address,address) view returns (uint256)", "function DOMAIN_SEPARATOR() view returns (bytes32)",

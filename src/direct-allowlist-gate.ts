@@ -2,6 +2,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical
 import { loadActiveAssetPolicyRegistry, type ActiveAssetPolicy } from "./allowlist-active-policy.js";
 import { loadAllowlistInventory, type CandidateAsset, type CandidateFamily } from "./allowlist-inventory.js";
 import { ASSET_POLICY_REGISTRY_SCHEMA_V2, evaluateAssetPolicy, type AssetPolicyAdmission } from "./asset-policy-registry.js";
+import { assertRecipientAdmitted } from "./allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity, type AssetUsageReservation } from "./asset-usage-ledger.js";
 import { DirectAssetUsageAdapter, validateDirectAssetUsageLease, type DirectAssetUsageLease } from "./direct-asset-usage.js";
 import { ApnError } from "./errors.js";
@@ -24,6 +25,8 @@ export interface DirectAllowlistSubject extends AssetUsageIdentity {
   readonly operationId: string;
   readonly family: CandidateFamily;
   readonly amountAtomic: string;
+  /** The operation's own recipient; an owner recipient pin on the direct row must list it (OD-1). */
+  readonly recipient: string;
 }
 
 export type DirectAllowlistRefusal =
@@ -208,8 +211,11 @@ function evaluate(active: ActiveAssetPolicy, subject: DirectAllowlistSubject, da
     refuse("allowlist_daily_cap_exceeded", "The transfer exceeds the owner's daily cap for this asset given today's usage.",
       { daily_limit_atomic: caps.dailyLimitAtomic, daily_usage_atomic: dailyUsageAtomic, amount_atomic: subject.amountAtomic });
   }
-  return evaluateAssetPolicy(registry, { chain: subject.chain, asset: subject.asset, rail: "direct", amountAtomic: subject.amountAtomic,
+  const admission = evaluateAssetPolicy(registry, { chain: subject.chain, asset: subject.asset, rail: "direct", amountAtomic: subject.amountAtomic,
     dailyUsageAtomic, asOfDate: at.slice(0, 10), asOf: at });
+  // Prepare and reservation evaluate here; every later step confirms the same policy digest, so the same pin still holds.
+  assertRecipientAdmitted({ admission, recipient: subject.recipient });
+  return admission;
 }
 
 function identity(value: AssetUsageIdentity): AssetUsageIdentity {
