@@ -687,7 +687,8 @@ JSON-RPC errors and malformed evidence are not retried. Each network reports
 reported as `external_provider_profile`, not guessed. There is no balance
 cache: every run reads the chains.
 
-Relay exposes unsigned prepare, read-only preflight, and local retirement. Retire
+Relay prepare commands save only unsigned quotes; `relay preflight` is
+read-only and `relay retire` is local. Retire
 an untouched prepared quote with `apn relay retire --profile default --operation <id>`
 to release the profile for a fresh quote under a new idempotency key. The saved
 quote remains intact; status reports `retired`. Retirement refuses any effect
@@ -911,20 +912,50 @@ apn swap solana orca execute --operation <operation_id>
 ```
 <!-- END APN COMMAND CATALOG -->
 
-`relay native prepare` admits BNB native on chain 56 from the checksummed buyer
-account `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` to its pinned Polygon
-POL or Monad MON recipient. It requires an active owner policy for the exact
-native bridge route and saves a verified unsigned deposit. `relay execute` stays
-bound to Ethereum USDC to BNB. `relay native execute` currently accepts only
-the saved BNB to Polygon operation. It requires active native bridge policy,
-encrypted local buyer wallet, fresh BNB funding and nonce, and foreground
-confirmation. It signs and marks one exact native deposit before the only send;
+Relay commands are CLI-only: none of them is exposed as an MCP tool.
+
+`relay native prepare` admits exactly five finite native routes. The route is
+resolved from the fixed source profile and the pinned recipient; any other
+profile, payer or recipient is refused.
+
+| Mechanism reference | Profile and source account | Route | Recipient |
+| --- | --- | --- | --- |
+| `bnb-native-polygon-native-v1` | `evm-live-buyer` `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` | BNB → Polygon POL | default `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` |
+| `bnb-native-monad-native-v1` | `evm-live-buyer` `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` | BNB → Monad MON | the same buyer account |
+| `bnb-native-monad-native-default-v1` | `default` `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` | BNB → Monad MON | the same default account |
+| `base-native-mega-usdm-default-v1` | `evm-live-seller` `0x991e254B5C8e0AAf6c244eaa2706BAd059809b04` | Base ETH → MegaETH USDm | default `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` |
+| `base-native-polygon-native-buyer-v1` | `evm-live-seller` `0x991e254B5C8e0AAf6c244eaa2706BAd059809b04` | Base ETH → Polygon POL | buyer `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` |
+
+Each route requires an active owner policy of that profile whose EVM account is
+the source account and which admits the source native asset on rail `bridge`
+with mechanism `{ provider: "relay", reference: <mechanism reference> }`; it
+saves a verified unsigned deposit. BNB routes refuse a quote whose deposit
+network fee exceeds the operator's `--max-deposit-network-fee-wei`. The two Base seller
+routes require exactly `50000000000000` wei principal and
+`--max-deposit-network-fee-wei 1000000000000` as the full fee budget; see
+[the fixed Base routes and fee checks](docs/relay-base-native.md).
+
+`relay native execute` accepts a saved operation of any of these five routes.
+It requires the same fixed profile, source account, recipient and route
+reference, the unchanged active policy revision and digest captured at
+preparation and its route pin, the encrypted local wallet of that profile,
+fresh source funding and nonce, and foreground terminal confirmation. It signs
+and marks one exact native deposit before the only send;
 an ambiguous send is observed by its saved hash and never repeated. Its source
-journal proves neither Polygon delivery nor paid acceptance. A crash before
+journal proves neither destination delivery nor paid acceptance. A crash before
 signed custody closes the attempt without a source effect, releases its exact
 usage reservation, and permits local retirement; it cannot sign again.
 
-`relay observe` reads one saved Ethereum USDC to BNB operation. Supply explicit
+`relay execute` runs only saved Ethereum USDC source routes: Ethereum USDC to
+BNB native from `relay prepare`, and Ethereum USDC to Base ETH from
+`relay base prepare` with the fixed default account
+`0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` as both payer and recipient. It
+requires the active route-specific policy pin and foreground terminal
+confirmation.
+
+`relay observe` reads one saved Ethereum USDC to BNB operation or one saved
+native operation of the five routes above; the Base ETH route is observed with
+`relay base observe`. For the Ethereum USDC to BNB operation, supply explicit
 credential-free public HTTPS Ethereum and BNB RPC URLs. It checks the finalized
 source deposit, the saved Relay status locator, and a safe BNB recipient credit
 with at most three Ethereum and eight BNB RPC POSTs. Their physical starts use
