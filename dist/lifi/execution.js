@@ -21,6 +21,8 @@ export class BridgeExecution {
     save;
     physicalBudget;
     observation;
+    /** The source deployment check passed in this invocation with no consent wait since (P2: proved once per invocation). */
+    deploymentChecked = false;
     constructor(state, source, destination, provider, custody, now, save, observationRpc = { source: () => source, destination: () => destination, residual: () => source }, physicalBudget) {
         this.state = state;
         this.source = source;
@@ -44,6 +46,7 @@ export class BridgeExecution {
         }
         if (guardedWbtc(op))
             return await withBridgeEffectAuthority(op, this.now, async () => await this.confirmForeground(op, approval), async () => await this.save(op, { state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } }), async (current) => await this.authorityPolicy(current), async (authority, approvedAt) => {
+                this.deploymentChecked = false;
                 try {
                     op = await this.approved(op, approvedAt);
                 }
@@ -56,6 +59,8 @@ export class BridgeExecution {
             return await this.save(op, {
                 state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null }
             });
+        // Consent can take minutes: the signing guard reads the deployment again.
+        this.deploymentChecked = false;
         try {
             op = await this.approved(op, this.now());
         }
@@ -252,7 +257,8 @@ export class BridgeExecution {
                 reason: "allowlist_binding_missing", rail: "bridge",
             });
         await this.allowlist().confirm(op.intent.profile, op.intent.materialization.request, op.intent.materialization.tool, op.intent.allowlist);
-        await guardBridgeEffect(op, role, this.source, this.destination, this.now);
+        await guardBridgeEffect(op, role, this.source, this.destination, this.now, !this.deploymentChecked);
+        this.deploymentChecked = true;
     }
     async authorityPolicy(op) {
         await assertExclusiveEvmRawSigner(this.state, op.intent.owner.address, op.profileHash);

@@ -143,7 +143,9 @@ test("LI.FI RPC environment requires each exact admitted chain endpoint and reje
     assert.throws(() => bridgeRpcFactory({ APN_BASE_RPC_URL: url })(8453), { code: "APN_RPC_CONFIG" });
   }
   const rpc = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example/rpc", APN_ETHEREUM_RPC_URL: "https://ethereum.example/rpc" });
-  assert.equal(rpc(8453).origin, "https://base.example"); assert.equal(rpc(1).origin, "https://ethereum.example"); assert.equal(rpc(8453), rpc(8453));
+  assert.equal(rpc(8453).origin, "https://base.example"); assert.equal(rpc(1).origin, "https://ethereum.example");
+  // Every adapter reads through a command session; a sessionless call gets its own bounded one.
+  assert.notEqual(rpc(8453), rpc(8453)); assert.equal(rpc(8453).chainId, 8453);
 });
 
 test("LI.FI public provider API contract uses fixed endpoints, finite tools, one inventory per admitted asset pair and bounded status normalization", async () => {

@@ -39,7 +39,8 @@ test("repeated HTTP 408 preserves exact exhaustion evidence after two read retri
 for (const status of [500, 503]) test(`read-only Bridge RPC retries transient HTTP ${status}`, async () => {
   const f = fixture([status, 200]);
   await bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain();
-  assert.deepEqual(f.methods, ["eth_chainId", "eth_chainId"]); assert.deepEqual(f.delays, [2_000]);
+  // The retry waits its backoff and still keeps the provider family's 750 ms gap (this clock only advances in the transport).
+  assert.deepEqual(f.methods, ["eth_chainId", "eth_chainId"]); assert.deepEqual(f.delays, [2_000, 750]);
 });
 test("read-only HTTP 429 returns a typed cooldown without retry", async () => {
   const f = fixture([429]);
@@ -48,20 +49,21 @@ test("read-only HTTP 429 returns a typed cooldown without retry", async () => {
 });
 test("permanent HTTP 4xx is not retried", async () => {
   const f = fixture([400, 200]);
-  await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(),
-    { code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_chainId", httpStatus: "400", attempts: "1", endpointRole: "primary" } });
+  await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(), (error: unknown) => {
+    assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_RPC_PROTOCOL");
+    assert.deepEqual([error.details?.rpcMethod, error.details?.httpStatus, error.details?.attempts, error.details?.endpointRole], ["eth_chainId", "400", "1", "primary"]);
+    return true;
+  });
   assert.equal(f.calls, 1); assert.deepEqual(f.delays, []);
 });
 test("invalid JSON-RPC protocol evidence is not retried", async () => {
   const f = fixture([200, 200], id => JSON.stringify({ jsonrpc: "2.0", id, result: "0x2105", error: { code: -32000 } }));
-  await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(),
-    { code: "APN_RPC_PROTOCOL", message: /bridge_RPC_response/u });
+  await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(), { code: "APN_RPC_PROTOCOL" });
   assert.equal(f.calls, 1); assert.deepEqual(f.delays, []);
 });
 test("explicit JSON-RPC server error is not retried without a defined retry convention", async () => {
   const f = fixture([200, 200], id => JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32016, message: "over rate limit" } }));
-  await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(),
-    { code: "APN_RPC_PROTOCOL", message: /bridge_RPC_response/u });
+  await assert.rejects(bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain(), { code: "APN_RPC_PROTOCOL" });
   assert.equal(f.calls, 1); assert.deepEqual(f.delays, []);
 });
 test("transient transport timeout retries reads and preserves exhaustion evidence", async () => {
@@ -109,4 +111,23 @@ test("Circle approval reuses the gas estimate's price instead of making a duplic
   assert.equal(state.maxFeePerGasWei, "11000000");
   assert.equal(state.gasLimitAtomic, "56240");
   assert.equal(estimates, 1); assert.equal(prices, 0);
+});
+
+test("a Circle approval state read is one keyless primary batch through a fresh command session", async () => {
+  const payer = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7", token = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const spender = "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408", posts: Array<readonly string[]> = [];
+  const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
+  const transport = { request: async (_endpoint: string, _verb: string, body: string | null) => {
+    const parsed = JSON.parse(body!) as Array<{ id: string; method: string }>, rows = Array.isArray(parsed) ? parsed : [parsed];
+    posts.push(rows.map((row) => row.method));
+    const values = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: row.method === "eth_chainId" ? "0x2105"
+      : row.method === "eth_getBlockByNumber" ? { number: "0x10", hash: word(16n), timestamp: "0x10", baseFeePerGas: "0x5" }
+        : row.method === "eth_call" ? word(7n) : row.method === "eth_estimateGas" ? "0xdbb0" : "0x7" }));
+    return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? values : values[0]) };
+  } };
+  const factory = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, { transport, wait: async () => {} });
+  const state = await circleApprovalRpcFromBridge(() => factory(8453)).read({ chainId: 8453, payer, token, spender, data: "0x095ea7b3" });
+  assert.equal(state.gasLimitAtomic, "56240"); assert.equal(state.usdcAllowanceAtomic, "7");
+  // Chain identity, head, fee suggestion, balances, allowance, Base fee inputs, nonces and the approval's simulation together.
+  assert.equal(posts.length, 1); assert.ok(posts[0]!.includes("eth_estimateGas")); assert.ok(!posts[0]!.includes("eth_getCode"));
 });

@@ -2,11 +2,16 @@ import { encodeAbiParameters, getAddress, keccak256, parseAbiParameters } from "
 import { hashObject } from "../canonical.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcWord } from "../evm-rpc-codec.js";
 import { BRIDGE_ZERO_ADDRESS, bridgeFailure, bridgeUint } from "./validation.js";
+import { decodeRelayBaseReceiptFee } from "../relay/source-fee-proof.js";
 const GPO = getAddress("0x420000000000000000000000000000000000000F"), L1_BLOCK = getAddress("0x4200000000000000000000000000000000000015");
 const SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const FEE_RULE = { opGeth: "7da4560d1fb3045286b70a8dc23360d2626543f2", gasPriceOracle: "773798a67678ab28c3ef7ee3405f25c04616af19",
     l1Block: "3c82c3f7618b98e161ce0aff4a1901bed3a4abb9", nitro: "4130f4c50d81209ff94aa63b51ed55d3739cdaba", ethereum: "EIP-1559,EIP-4844" };
+/** Proofs recorded with the Base operator fee proven by the pinned GasPriceOracle at the inclusion block (legacy records). */
 export const BRIDGE_FEE_RULE_HASH = hashObject(FEE_RULE);
+/** Proofs whose Base L1 and operator fees come from the receipt's own fee fields, as for the L1 fee before. */
+export const BRIDGE_RECEIPT_FEE_RULE_HASH = hashObject({ ...FEE_RULE, base: "receipt l1Fee + gasUsed * operatorFeeScalar * 100 + operatorFeeConstant" });
+/** The legacy Base fee predeploy pins. Only the frozen historical migration proofs still read them. */
 export const BASE_FEE_CONTRACT = {
     code: [
         { address: getAddress("0x4f1db3c6abd250ba86e0928471a8f7db3afd88f1"), codeHash: "0xe9fc7c96c4db0d6078e3d359d7e8c982c350a513cb2c31121adf5e1e8a446614" },
@@ -21,7 +26,42 @@ export const BASE_FEE_CONTRACT = {
         { kind: "call", address: GPO, data: "0x105d0b81", expected: `0x${"0".repeat(63)}1` },
     ],
 };
-export async function bridgeActualFees(chainId, receipt, block, call, basePinnedReader) {
+/**
+ * The paid fee of one source effect, from its receipt alone. Base: the receipt's `l1Fee` and the Jovian operator fee from
+ * its `operatorFeeScalar`/`operatorFeeConstant` (absent fields are zero parameters), exactly as the Relay rail decodes it.
+ * Arbitrum: the poster gas is inside gasUsed * effectiveGasPrice. Other chains: execution plus any EIP-4844 blob fee.
+ */
+export function bridgeActualFees(chainId, receipt) {
+    const gas = evmRpcQuantity(receipt.gasUsed), price = evmRpcQuantity(receipt.effectiveGasPrice), type = evmRpcQuantity(receipt.type);
+    if (gas > (1n << 64n) - 1n || ![0n, 1n, 2n, 3n, 4n].includes(type))
+        bridgeFailure("APN_RPC_PROTOCOL", "receipt_fee_shape");
+    const execution = gas * price;
+    let l1 = 0n, operator = 0n, blob = 0n, arbitrumPosterGasAtomic = null;
+    if (chainId === 8453) {
+        if (type === 3n)
+            bridgeFailure("APN_RPC_PROTOCOL", "unsupported_Base_blob_transaction");
+        const fee = decodeRelayBaseReceiptFee(receipt);
+        l1 = BigInt(fee.l1FeeWei);
+        operator = BigInt(fee.operatorFeeWei);
+    }
+    else if (chainId === 42161) {
+        const posterGas = evmRpcQuantity(receipt.gasUsedForL1);
+        if (posterGas > gas)
+            bridgeFailure("APN_RPC_PROTOCOL", "arbitrum_poster_gas");
+        arbitrumPosterGasAtomic = posterGas.toString();
+    }
+    else if (type === 3n) {
+        blob = evmRpcQuantity(receipt.blobGasUsed) * evmRpcQuantity(receipt.blobGasPrice);
+    }
+    const total = execution + l1 + operator + blob;
+    for (const amount of [execution, l1, operator, blob, total])
+        bridgeUint(amount.toString(), false, "APN_RPC_PROTOCOL");
+    return { gasUsedAtomic: gas.toString(), effectiveGasPriceAtomic: price.toString(), executionFeeWei: execution.toString(),
+        l1DataFeeWei: l1.toString(), operatorFeeWei: operator.toString(), blobFeeWei: blob.toString(), actualTotalFeeWei: total.toString(),
+        feeEvidence: { receiptHash: hashObject(receipt), ruleHash: BRIDGE_RECEIPT_FEE_RULE_HASH, baseOracle: null, arbitrumPosterGasAtomic } };
+}
+/** The legacy oracle-proven fee, kept only for the frozen historical migration proofs that hash it. */
+export async function legacyBridgeActualFees(chainId, receipt, block, call, basePinnedReader) {
     const gas = evmRpcQuantity(receipt.gasUsed), price = evmRpcQuantity(receipt.effectiveGasPrice), type = evmRpcQuantity(receipt.type);
     if (gas > (1n << 64n) - 1n || ![0n, 1n, 2n, 3n, 4n].includes(type))
         bridgeFailure("APN_RPC_PROTOCOL", "receipt_fee_shape");

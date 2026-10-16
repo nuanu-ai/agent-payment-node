@@ -5,40 +5,21 @@ import type { RpcReadTelemetry } from "./rpc-session.js";
 export type RpcDecoder<T = unknown> = (value: unknown) => T;
 
 export const MAX_READ_ATTEMPTS = 2;
-export const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
-/** One invocation's physical transport gate, shared by every chain and read/observation session. */
+/**
+ * One invocation's physical POST counter, shared by every chain and read/observation session. The cap is the operation's
+ * read-plan budget (send-budget.ts) with its stated retry headroom; pacing belongs to the per-provider-family scheduler alone.
+ */
 export class BridgeRpcPhysicalBudget {
   private posts = 0;
-  private lastStart = Number.NEGATIVE_INFINITY;
-  private tail: Promise<void> = Promise.resolve();
-  constructor(private readonly now: () => number = Date.now,
-    private readonly wait: (milliseconds: number) => Promise<void> = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
-    /** The operation's invocation cap derived from its read plans (send-budget.ts); it raises the base cap, never lowers it. */
-    private readonly derivedPosts = 0) {}
-  remaining(): number {
-    return Math.max(BRIDGE_INVOCATION_RPC_POST_LIMIT, this.derivedPosts) - this.posts;
+  constructor(private readonly limit: number) {
+    if (!Number.isSafeInteger(limit) || limit < 0) throw new ApnError("APN_RPC_CONFIG", "Bridge RPC invocation POST budget is invalid.");
   }
+  remaining(): number { return Math.max(0, this.limit - this.posts); }
   require(posts: number, method: string): void {
     if (this.remaining() < posts) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC invocation POST budget exhausted.",
       { reason: "physical_post_limit", rpcMethod: method, physicalPosts: this.posts.toString(), remainingPhysicalPosts: this.remaining().toString() });
   }
-  async beforePost(method: string): Promise<void> {
-    const previous = this.tail;
-    let release!: () => void;
-    this.tail = new Promise<void>((resolve) => { release = resolve; });
-    await previous;
-    try {
-      this.require(1, method);
-      const nextStart = this.lastStart + 750;
-      while (this.now() < nextStart) {
-        const before = this.now();
-        await this.wait(nextStart - before);
-        if (this.now() <= before) throw new ApnError("APN_RPC_CONFIG", "Bridge RPC invocation pacing clock did not advance.");
-      }
-      this.require(1, method);
-      this.posts += 1; this.lastStart = this.now();
-    } finally { release(); }
-  }
+  async beforePost(method: string): Promise<void> { this.require(1, method); this.posts += 1; }
 }
 /**
  * An exhausted invocation or session read budget means "not read in this invocation": the caller defers to the next

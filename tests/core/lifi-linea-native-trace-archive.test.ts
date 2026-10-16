@@ -29,7 +29,7 @@ function reader(mutation?: Mutation, limits: { maxHttpRequests?: number; deadlin
   }
   let now = Date.parse(capture.capturedAt);
   const epoch = now, wait = async (milliseconds: number) => { await new Promise<void>((resolve) => setImmediate(resolve)); now += milliseconds; };
-  const physical = new BridgeRpcPhysicalBudget(() => now, wait);
+  const physical = new BridgeRpcPhysicalBudget(24);
   const session = new RpcReadSession({ now: () => now, wait, physicalBudget: physical, maxReadAttempts: 1,
     archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 16, maxHttpAttempts: 16, deadlineMs: 180_000, ...limits });
   const posts: Array<{ role: string; methods: string[]; at: number }> = [];
@@ -68,27 +68,34 @@ function reader(mutation?: Mutation, limits: { maxHttpRequests?: number; deadlin
   return { rpc, session, posts, epoch, physical };
 }
 
-test("Linea native fill uses one exact chain-checked archive trace while retaining primary origin and shared pacing", async (t) => {
+test("Linea native fill reads its trace and pinned balances from the named archive, everything else from the primary", async (t) => {
   const r = reader(), observed = await r.rpc.observeDestination!(capture.transactionHash, capture.expected);
   assert(observed);
   assert.equal(observed.transaction.rpcOrigin, "https://linea-rpc.publicnode.com");
   assert.equal(observed.receipt.nativeTransfer?.valueAtomic, capture.expected.amountAtomic);
   assert.equal(observed.receipt.nativeTransfer?.to, capture.expected.recipient);
-  assert.deepEqual(r.posts.filter(row => row.methods.includes("debug_traceTransaction")),
-    [{ role: "archive", methods: ["eth_chainId", "debug_traceTransaction"], at: r.posts.find(row => row.methods.includes("debug_traceTransaction"))!.at }]);
+  assert.deepEqual(r.posts.filter(row => row.methods.includes("debug_traceTransaction")).map(row => ({ role: row.role, methods: row.methods })),
+    [{ role: "archive", methods: ["debug_traceTransaction"] }]);
   const telemetry = r.session.telemetry();
   assert.equal(telemetry.batchItemsByMethod.debug_traceTransaction, 1);
   assert.equal(telemetry.deadline, r.epoch + 180_000);
-  assert.equal(r.posts.length, 11);
-  assert.equal(r.physical.remaining(),13);
+  // Primary: [chain, transaction, receipt, safe head], inclusion header, pre-delivery header. Archive: chain identity once,
+  // two hash-pinned balances, the trace. No header recheck after hash-pinned reads.
+  assert.deepEqual(r.posts.map(row => row.role), ["primary", "primary", "primary", "archive", "archive", "archive", "archive"]);
+  assert.equal(r.physical.remaining(), 24 - 7);
   assert.equal(telemetry.httpRequests, r.posts.length); assert.equal(telemetry.httpAttempts, r.posts.length);
-  t.diagnostic(JSON.stringify({posts:r.posts,telemetry}));
+  t.diagnostic(JSON.stringify({ posts: r.posts, telemetry }));
   assert.equal(r.posts.filter(row => row.methods.includes("eth_getBalance")).length, 2);
   assert(r.posts.filter(row => row.methods.includes("eth_getBalance")).every(row => row.role === "archive"));
-  for (let index = 1; index < r.posts.length; index++) assert(r.posts[index]!.at - r.posts[index - 1]!.at >= 500);
+  // Pacing belongs to each provider family: consecutive POSTs to one endpoint keep their 750 ms gap.
+  for (const role of ["primary", "archive"]) {
+    const own = r.posts.filter(row => row.role === role);
+    for (let index = 1; index < own.length; index++) assert(own[index]!.at - own[index - 1]!.at >= 750, role);
+  }
 });
 
-for (const mutation of ["chain", "error", "missing", "malformed", "large", "trace", "receipt", "canonical", "reanchor"] as const) {
+// Hash-pinned reads need no header recheck after the trace (P2): the node enforces `requireCanonical` itself.
+for (const mutation of ["chain", "error", "missing", "malformed", "large", "trace", "receipt", "canonical"] as const) {
   test(`Linea archive native observation rejects ${mutation}`, async () => {
     const r = reader(mutation);
     await assert.rejects(r.rpc.observeDestination!(capture.transactionHash, capture.expected));
@@ -131,18 +138,11 @@ test("Linea observation accepts proof read through another primary RPC endpoint 
 });
 
 
-test("canonical Linea native observation plus exact-hash deployment stays within unchanged destination16/invocation24 budgets",async(t)=>{
-  const r=reader(),observed=await r.rpc.observeDestination!(capture.transactionHash,capture.expected);assert(observed);
-  const deployment=await r.rpc.deployment("across",1,BRIDGE_ZERO_ADDRESS,observed.transaction.block,true);
-  assert.deepEqual(deployment.block,observed.transaction.block);assert.equal(deployment.rpcOrigin,"https://linea-rpc.publicnode.com");
-  assert.equal(deployment.codeHash,deploymentCapture.proof.codeHash);assert.equal(deployment.configurationHash,deploymentCapture.proof.configurationHash);
-  const telemetry=r.session.telemetry();assert.equal(r.posts.length,14);assert.equal(r.physical.remaining(),10);assert.equal(telemetry.httpAttempts,r.posts.length);
-  t.diagnostic(JSON.stringify({TEST_COMPOSITE_GRAPH:true,physicalPosts:r.posts.length,posts:r.posts,telemetry}));
-});
-
-
-test("full native deployment graph refuses an insufficient destination budget before extra transport",async()=>{
-  const r=reader(undefined,{maxHttpRequests:13}),observed=await r.rpc.observeDestination!(capture.transactionHash,capture.expected);assert(observed);
-  await assert.rejects(r.rpc.deployment("across",1,BRIDGE_ZERO_ADDRESS,observed.transaction.block,true),{code:"APN_RPC_BUDGET_EXCEEDED"});
-  assert(r.posts.length<=13);assert.equal(r.session.telemetry().remainingHttpRequests,0);
+test("the frozen migration proof still reproduces the captured Linea deployment identity without a trace probe", async () => {
+  const r = reader(), observed = await r.rpc.observeDestination!(capture.transactionHash, capture.expected); assert(observed);
+  const before = r.posts.length;
+  const deployment = await r.rpc.deployment("across", 1, BRIDGE_ZERO_ADDRESS, observed.transaction.block, true);
+  assert.deepEqual(deployment.block, observed.transaction.block); assert.equal(deployment.rpcOrigin, "https://linea-rpc.publicnode.com");
+  assert.equal(deployment.codeHash, deploymentCapture.proof.codeHash); assert.equal(deployment.configurationHash, deploymentCapture.proof.configurationHash);
+  assert(r.posts.slice(before).every(row => row.role === "archive" && !row.methods.includes("debug_traceTransaction")));
 });

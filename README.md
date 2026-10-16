@@ -41,8 +41,9 @@ LI.FI route selection and local-wallet execution now cover canonical USDC
 between Ethereum, Base and Arbitrum through Across V4 and Stargate V2 Taxi.
 The bridge flow freezes both source effects, requires foreground approval and
 correlates safe delivery across both chains. Public RPC reads are method
-allowlisted, bounded, provider-paced and split across explicit primary,
-receipt and archive roles. See [LI.FI bridges](docs/lifi.md) for fee controls,
+allowlisted, bounded, provider-paced and batched on the keyless primary
+`APN_<CHAIN>_RPC_URL`; receipt and archive readers are optional and no bridge
+command requires them. See [LI.FI bridges](docs/lifi.md) for fee controls,
 recovery, the accepted Base-to-Arbitrum row and the remaining open rows.
 
 The local wallet also has a USDC fee-transfer path on Ethereum, Base, Arbitrum,

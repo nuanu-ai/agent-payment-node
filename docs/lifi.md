@@ -345,51 +345,34 @@ JSON bodies, two concurrent requests, a 15-second request deadline, and no
 redirects or automatic retries. Bridge preparation uses one command-scoped RPC
 read session across the source and destination. Strict JSON-RPC batches contain
 at most 33 items; identical ordered batches are singleflighted, and every
-response is decoded before any eligible result enters the cache. Deployment
-state is read at the frozen block from the owner configured archive endpoint,
-with that archive's chain identity inside the same batch. Source account state
-is pinned to one numeric latest header while the pending nonce remains
-explicitly pending. Mutable account, fee and estimate data is never retained
-across an approval or signing boundary. A session permits at most 96 logical
-items, 8 HTTP requests, 10 HTTP attempts and 180 seconds. It allows one request
-per RPC origin at least 750ms apart and two requests globally.
+response is decoded before any eligible result enters the cache. dRPC's keyless
+plan refuses a batch of more than three requests, so a `*.drpc.org` endpoint
+receives the same logical batch in sequential three-item chunks that the read
+plan counts once. Every read goes to the primary `APN_<CHAIN>_RPC_URL`: mutable
+state (head, balances, allowance, nonces, fee inputs, the planned simulation and
+the light deployment check) is read in one batch at the moving `latest` head the
+transaction will execute against, with the pending nonce explicitly pending.
+Mutable account, fee and estimate data is never retained across an approval or
+signing boundary. A session permits at most 96 logical items and 180 seconds;
+its request cap is the step's read plan with explicit retry headroom. Each
+provider family keeps one request at least 750ms apart.
 
 Each admitted EVM chain also accepts optional
-`APN_<CHAIN>_ARCHIVE_RPC_URL` and `APN_<CHAIN>_RECEIPT_RPC_URL` readers. The
-primary `APN_<CHAIN>_RPC_URL` remains the frozen operation identity and receives
-the first exact transaction receipt read. A qualifying missing or unavailable
-historical receipt uses a distinct receipt reader when configured, otherwise an
-explicitly configured archive reader. Receipt readers can receive only `eth_chainId` and the
-exact `eth_getTransactionReceipt`; state, code, configuration, moving tags,
-logs, estimates and effects stay off that endpoint. APN validates the reader's
-chain and the receipt transaction hash, status and block fields before caching
-the atomic result. The official Base `https://mainnet.base.org` reader is a
-known scalar-only endpoint, so APN sends chain ID and receipt as two sequential
-JSON-RPC objects with the same 750ms per-origin pacing. Archive deployment and
-historical state reads retain their three-item chunk limit. Canonical inclusion and safe-header
-rechecks stay on the frozen primary endpoint, including command-session batches;
-these header-only reads do not require an archive reader and bypass cached header
-values for fresh canonical revalidation. Block-pinned code,
-configuration and historical state verification still require an explicitly configured archive
-reader. Its URL may share the primary origin: no independent-provider quorum is
-claimed. Use a public anonymous endpoint that serves the required historical
-state; availability is not guaranteed, and APN never infers an archive URL when
-it is absent. Chain identity, canonical block pins and code/configuration proofs
-still fail closed. Missing configuration reports `explicit_archive_RPC_required`;
-old journals retain `distinct_archive_RPC_required`. The exact Ethereum USDC→Arbitrum
-Across approval continuation permits 34 physical POSTs, including the fresh
-canonical-header batch and one first bridge send. WBTC continuation remains 33
-and the default invocation remains 24; no other route gains capacity. Observation diagnostics retain these
-and `historical_receipt_unavailable` reasons without exposing provider bodies or URLs.
-
-For one `bridge prepare`, setting `APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE=1` sends
-Linea's pinned deployment `eth_getCode` reads as individual JSON-RPC POSTs to
-the same explicitly configured archive endpoint. Other deployment reads remain batched.
-The option is off by default and has no effect on other chains, other bridge
-commands, or other RPC roles. The three Linea code reads add two physical
-requests to the modeled 19-request prepare (21 of the 26-request ceiling).
-Each scalar code request has one physical attempt; all reads retain the session
-deadline, pacing, telemetry, and atomic cache commit.
+`APN_<CHAIN>_ARCHIVE_RPC_URL` and `APN_<CHAIN>_RECEIPT_RPC_URL` readers; no
+bridge command requires either. A distinct receipt reader serves the exact
+`eth_getTransactionReceipt` (and its chain identity) and nothing else; without
+one, an empty or refused primary receipt is re-read through a configured archive.
+The official Base `https://mainnet.base.org` reader is a known scalar-only
+endpoint, so APN sends chain ID and receipt as two sequential JSON-RPC objects.
+Reads pinned to a block hash or number (the native-fill balance witnesses) and
+call traces use the archive reader when the owner names one, otherwise the
+primary, which serves recent blocks; `requireCanonical: true` still makes the
+node refuse a non-canonical hash. APN never infers an archive URL. Missing
+historical data on a pruned primary surfaces as an RPC failure of that read.
+Only the frozen historical migration proofs of `operation repair-deployment`
+still require the archive reader (three-item chunks). Observation diagnostics
+keep `explicit_archive_RPC_required`, `distinct_archive_RPC_required` and
+`historical_receipt_unavailable` for old journals without exposing provider bodies or URLs.
 
 Operators must not run a separate synthetic RPC capability preflight before the
 real `bridge prepare`. The prepare command performs the exact chain, deployment,
@@ -1234,7 +1217,7 @@ Protocol references: [GasZip direct forwarder](https://dev.gas.zip/gas/code-exam
 [deposit API](https://dev.gas.zip/gas/api/deposit). Fresh unsigned RPC and quote
 reads are separate from synthetic tests and actual funding acceptance.
 
-Historical native-fill before/after balances use the explicitly configured archive reader when pinned to a nonzero EIP-1898 block hash with `requireCanonical: true`. The frozen primary RPC origin remains the operation identity, and primary canonical receipt/header witnesses remain required. Numeric or moving balance snapshots keep their existing primary route. Archive chain validation, shared pacing and command/session request limits still apply.
+Historical native-fill before/after balances are pinned to a nonzero EIP-1898 block hash with `requireCanonical: true`; they use the archive reader when one is configured and the primary otherwise. Primary canonical receipt/header witnesses remain required. Archive chain validation, provider pacing and command/session request limits still apply.
 
 ## Phase 1 cleanup, 2026-10-16
 
@@ -1283,3 +1266,56 @@ Historical native-fill before/after balances use the explicitly configured archi
   records the safe source receipt and the finalized destination proof and then
   answers from the journal; the Base USDC to TRON USDT lane proves delivery like
   the other lanes.
+
+## Public-RPC diet, 2026-10-17
+
+Every bridge command now works on keyless primary endpoints alone; the archive
+and receipt readers are optional. The safety properties are unchanged: exact
+calldata decoding, the exact-amount allowance to the fixed Diamond, the nonce,
+fee and debit caps, a fresh simulation before signing and again before the one
+send, the durable sign and send markers, canonical receipt membership, log
+proofs from the registry's emitters and the safe head before success.
+
+- **Deployment check.** One light check per invocation, read in the same batch
+  as the account at the `latest` head the transaction executes against: the
+  Diamond's selector routing and fee-forwarder whitelist, the facet's protocol
+  binding, the spoke's time buffers, Stargate routing and owner-settable token
+  fees. Code hashes, implementation/admin/beacon slots, the fee forwarder's
+  owner and the Base fee predeploys are no longer pinned; they change on
+  legitimate upgrades. A destination reads nothing before the send except the
+  BNB composite's routing configuration. The identity frozen at prepare is a
+  record; the guard checks the reviewed pins directly. Within one invocation the
+  re-check right before the send reads only the account batch; consent resets it.
+- **Observation.** One batch of transaction, receipt and safe head, then the
+  inclusion header (in the same batch on a re-poll). No deployment re-proof after
+  the money moved, no header recheck after hash-pinned reads. Base fees come
+  from the receipt (`l1Fee` and the Jovian operator fee fields); proofs written
+  with the legacy oracle evidence keep validating and compare equal by inclusion.
+- **History.** Only the native-fill balance witnesses and call traces need
+  history; they use an owner-named archive and otherwise the primary.
+- **Budgets.** Each session cap and the invocation cap are derived from these
+  plans with explicit retry headroom; the invocation counter no longer adds a
+  global 750 ms gap (each provider family keeps its own).
+- **dRPC.** Its keyless plan refuses batches over three requests, so a
+  `*.drpc.org` endpoint gets each logical batch in three-item chunks, counted once.
+
+Measured POSTs for one Base USDC → Arbitrum USDC Across bridge through the
+production adapter (`tests/core/lifi-public-rpc-lifecycle.test.ts`):
+
+| Step | 0.5.42 (archive configured) | Now (primary only) |
+|---|---|---|
+| prepare | 21 (17 archive) | 2 |
+| approve (approval guards and send) | 30 (18 archive) | 5 |
+| resume: bridge guards and send | 43 (29 archive) | 6 |
+| resume: both effects included | 18 (12 archive) | 3 |
+| resume: source safe | 19 + 23 (two resumes) | 3 |
+| resume: destination proof | 13 (7 archive) | 2 |
+| **total** | **167 (108 archive), 7 invocations** | **21 (0 archive), 6 invocations** |
+
+Other routes: Ethereum USDC → Arbitrum continuation after a paid approval 35 → 7;
+WBTC Ethereum ↔ Arbitrum continuation 32/33 → 6; Base USDC → Arbitrum send step
+24 → 3; captured mainnet Base native Across observation 13 → 4; Linea native fill
+destination observation 11 → 7; a Circle approval state read about 25 → 1.
+
+`operation repair-deployment` keeps its frozen archive proofs unchanged for the
+two recognized historical migrations.
