@@ -1,7 +1,7 @@
 import { type AssetUsageReservation } from "./asset-usage-ledger.js";
 import type { ClockPort } from "./ports.js";
 import type { X402OperationRecord } from "./x402-state-model.js";
-/** The same key the shared rail gate uses, so one operation can never hold two x402 reservations. */
+/** Persisted reservation key; stored holds are found by it, so it never changes. One operation holds one x402 reservation. */
 export declare function x402UsageKey(operationId: string): string;
 /**
  * Local x402 spend in the shared asset-usage ledger. The reservation is made before anything is signed, under the
