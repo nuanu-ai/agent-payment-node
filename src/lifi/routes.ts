@@ -1,7 +1,7 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
 import type { BridgeChainId } from "./chains.js";
 import type { Address } from "../model.js";
-import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination, type BridgeAsset } from "./asset-registry.js";
+import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeExecutionSource, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination, type BridgeAsset } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import type { BridgeFee, BridgeMaterialization, BridgeRouteRequest, BridgeTool } from "./model.js";
 import type { LifiResponse } from "./ports.js";
@@ -36,6 +36,8 @@ function toolGate(tool: string, request: BridgeRouteRequest): string | null {
     bridgeAssetTool(requestAsset(request, request.fromChainId), tool);
     bridgeAssetTool(requestAsset(request, request.toChainId), tool);
   } catch { return "asset_tool_unreviewed"; }
+  // Destination-only chains (BNB, Monad, Linea) have no reviewed LI.FI source path; prepare would always refuse them.
+  if (!bridgeExecutionSource(request.fromChainId)) return "source_execution_unreviewed";
   return null;
 }
 

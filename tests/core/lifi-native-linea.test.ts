@@ -5,7 +5,7 @@ import { bridgeExecutionDestination } from "../../src/lifi/asset-registry.js";
 import { bridgeCapabilities } from "../../src/lifi/catalog.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "../../src/lifi/deployments.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
-import { lifiFixture } from "./lifi-helpers.js";
+import { LifiTestProvider, lifiFixture, lifiSteps } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { BridgeAllowlistGate, LIFI_ACROSS_BRIDGE_MECHANISM } from "../../src/lifi/allowlist.js";
@@ -194,6 +194,46 @@ test("Linea preparation requires the exact self recipient and exact LI.FI/Across
   await assert.rejects(gate.admit(s.profile, LIFI_SYNTHETIC_SENDER, { ...s.request,
     recipient: "0x1111111111111111111111111111111111111111" }, "across"),
   (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "bridge_self_recipient_required");
+});
+
+/** Discovery-only reversal of the captured Ethereum->Linea step: chains swapped, both legs owned by the synthetic sender. */
+function reverseLineaStep(value: unknown, key = ""): any {
+  if (Array.isArray(value)) return value.map((item) => reverseLineaStep(item));
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, reverseLineaStep(v, k)]));
+  if (["chainId", "fromChainId", "toChainId"].includes(key)) return value === 1 ? 59144 : value === 59144 ? 1 : value;
+  if (["fromAddress", "toAddress"].includes(key)) return LIFI_SYNTHETIC_SENDER;
+  return value;
+}
+
+test("Linea is preparable only as an Ethereum destination; reverse discovery names the source gate before any effect", async (t) => {
+  const forward = await temporaryState(); t.after(forward.cleanup);
+  const f = await lifiFixture(forward.root, "eth-linea");
+  const listed = await f.core.execute({ command: "bridge.routes", profile: f.profile, request: f.request });
+  assert.equal(listed.ok, true, listed.error?.message);
+  const across = (listed.data as any).routes.find((row: any) => row.tool === "across");
+  assert.equal(across.preparable, true);
+  assert.equal(across.executability_gate, "selected_materialization_rpc_deployment_fee_and_consent_required");
+
+  const now = new Date("2026-09-20T10:54:00.000Z"), step = reverseLineaStep((await lifiSteps("eth-linea", now))[0]);
+  step.id = "synthetic-linea-ethereum-native-across";
+  const provider = new LifiTestProvider([step], now), reverse = await temporaryState(); t.after(reverse.cleanup);
+  const r = await lifiFixture(reverse.root, "eth-linea", { provider, policy: false });
+  assert.deepEqual([r.request.fromChainId, r.request.toChainId], [59144, 1]);
+  const discovered = await r.core.execute({ command: "bridge.routes", profile: r.profile, request: r.request });
+  assert.equal(discovered.ok, true, discovered.error?.message);
+  const row = (discovered.data as any).routes[0];
+  assert.equal(row.tool, "across"); assert.equal(row.preparable, false); assert.equal(row.executable, false);
+  assert.equal(row.executability_gate, "source_execution_unreviewed");
+  const refused = await r.core.execute({ command: "bridge.prepare", profile: r.profile, quote: (discovered.data as any).quote_hash,
+    route: row.route_id, idempotencyKey: "linea-reverse-source-001" });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  assert.equal(refused.error?.message, "Bridge validation failed: source_execution_unreviewed.");
+  assert.equal(provider.materializeCalls, 0); assert.equal(r.source.calls.length, 0); assert.equal(r.destination.calls.length, 0);
+  assert.equal(r.approval.calls.length, 0); assert.equal(r.wrapping.loads, 0);
+  const gate = new BridgeAllowlistGate({ state: r.state, clock: { now: () => new Date(r.now) } });
+  await assert.rejects(gate.admit(r.profile, LIFI_SYNTHETIC_SENDER, r.request, "across"),
+    (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "bridge_source_execution_unreviewed");
 });
 
 test("Linea shared usage reservation is atomic, survives unknown outcome, and blocks daily-cap bypass", async (t) => {
