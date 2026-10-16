@@ -462,26 +462,19 @@ test("LI.FI production observation persists first-429 and zero-transport budget 
     budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 1 },
     attemptsByMethodClass: { block: 2, chain: 3, code: 2, receipt: 1, transaction: 1 },
   });
+  // An exhausted request or attempt budget is a deferral: the journal keeps its state, no telemetry-only transition is written,
+  // and the session still accounts for the rejected read.
   const budgetState = await temporaryState(); t.after(budgetState.cleanup);
   const budget = await productionBaseObservation(budgetState.root, "success", { maxHttpRequests: 6, maxHttpAttempts: 8 }), budgetResult = await budget.execute();
-  assert.equal(budgetResult.reliable, false);
-  assert.deepEqual(budgetResult.operation.observationTelemetry?.at(-1), {
-    schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "approval", outcome: "failure",
-    physicalRequests: 6, httpAttempts: 6, logicalRpcItems: 18, batchCount: 0, maxBatchSize: 1,
-    budgetRejectedBeforeTransport: 1, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 0 },
-    attemptsByMethodClass: { block: 2, chain: 2, receipt: 1, transaction: 1 },
-  });
+  assert.equal(budgetResult.reliable, false); assert.equal(budgetResult.operation.failure, null);
+  assert.deepEqual(budgetResult.operation.observationTelemetry, []);
+  assert.equal(budget.run.session.telemetry().budgetRejectedBeforeTransport, 1); assert.equal(budget.run.session.telemetry().httpRequests, 6);
   const attemptState = await temporaryState(); t.after(attemptState.cleanup);
   const attemptBudget = await productionBaseObservation(attemptState.root, "success", { maxHttpRequests: 14, maxHttpAttempts: 6 });
-  const attemptResult = await attemptBudget.execute(), attemptTelemetry = attemptResult.operation.observationTelemetry?.at(-1)!;
+  const attemptResult = await attemptBudget.execute();
   assert.equal(attemptResult.reliable, false); assert.equal(attemptBudget.run.session.telemetry().httpRequests, 7);
-  assert.deepEqual(attemptTelemetry, {
-    schemaVersion: "apn.bridge-observation-telemetry.v1", stage: "source_observation", effectRole: "approval", outcome: "failure",
-    physicalRequests: 6, httpAttempts: 6, logicalRpcItems: 18, batchCount: 0, maxBatchSize: 1,
-    budgetRejectedBeforeTransport: 1, attemptsByEndpointRole: { primary: 4, receipt: 2, archive: 0 },
-    attemptsByMethodClass: { block: 2, chain: 2, receipt: 1, transaction: 1 },
-  });
-  assert.equal(attemptTelemetry.physicalRequests, Object.values(attemptTelemetry.attemptsByEndpointRole).reduce((sum, value) => sum + value, 0));
+  assert.equal(attemptResult.operation.failure, null); assert.deepEqual(attemptResult.operation.observationTelemetry, []);
+  assert.equal(attemptBudget.run.session.telemetry().budgetRejectedBeforeTransport, 1);
   for (const execution of [limited, budget, attemptBudget]) {
     assert.equal(execution.run.calls.flatMap((call) => call.rows).some((row) => row.method === "eth_sendRawTransaction"), false);
     assert.equal(execution.fixture.source.submissions.length, 0);
@@ -501,7 +494,8 @@ test("LI.FI source protocol evidence failures persist the consumed production tr
     budgetRejectedBeforeTransport: 0, attemptsByEndpointRole: { primary: 5, receipt: 2, archive: 8 },
     attemptsByMethodClass: { block: 6, call: 6, chain: 3, code: 11, receipt: 1, storage: 4, transaction: 1 },
   });
-  const projectedOperation = transitionBridge(prepared.template, { observationTelemetry: result.operation.observationTelemetry },
+  const projectedOperation = transitionBridge(prepared.template, { observationTelemetry: result.operation.observationTelemetry,
+    failure: { reason: "source_protocol_evidence_unavailable", residualAllowance: null } },
     new Date(Date.parse(prepared.template.updatedAt) + 1).toISOString());
   const projected = (bridgeReceipt(projectedOperation) as any).observation_rpc_telemetry;
   assert.equal(projected.length, 1); assert.equal(projected[0].physical_requests, 15); assert.equal(projected[0].effect_role, "bridge");
@@ -677,7 +671,8 @@ for (const capacity of [14, 15]) test(`Base canonical observation enforces ${cap
   assert.equal(result.reliable, capacity === 15);
   assert.equal(prepared.run.calls.length, capacity);
   if (capacity === 14) {
-    assert.equal(result.operation.failure?.observationRpc?.code, "APN_RPC_BUDGET_EXCEEDED");
+    // An exhausted read budget defers to the next resume: no unknown-finality diagnostic, no state change.
+    assert.equal(result.operation.failure, null); assert.equal(result.operation.state, "unknown_finality");
     assert.equal(prepared.run.session.telemetry().budgetRejectedBeforeTransport, 1);
   }
   assert.equal(prepared.run.calls.flatMap(call => call.rows).some(row => row.method === "eth_sendRawTransaction"), false);

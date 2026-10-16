@@ -23,6 +23,9 @@ export declare class BridgeExecution {
     private approved;
     resume(op: BridgeOperationRecord, approval?: BridgeApprovalPort): Promise<BridgeOperationRecord>;
     run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord>;
+    private claims;
+    /** Catches the journal up with a SEND claim from the exact sealed material, without signing or sending, then observes. */
+    private recordClaimedSend;
     private guard;
     private authorityPolicy;
     private allowlist;

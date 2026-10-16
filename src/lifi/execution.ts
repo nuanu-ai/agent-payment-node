@@ -7,7 +7,7 @@ import type { StateStore } from "../state.js";
 import { assertBridgeRemaining, bridgeTransientRpcFailure, guardBridgeEffect } from "./economics.js";
 import { validateMaterial } from "./effect-store.js";
 import { BridgeObservation, replaceEffect, type BridgeSave } from "./observation.js";
-import { BRIDGE_PRE_SIGN_RPC_RATE_LIMITED, BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, retainedUnsentBridgeRpcFailure, type BridgeOperationRecord,
+import { BRIDGE_PRE_SIGN_RPC_RATE_LIMITED, BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeOperationRecord,
   type BridgePreSignRpcFailure } from "./operation-model.js";
 import { assertBridgeOwner } from "./owner.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
@@ -15,6 +15,7 @@ import { publicBridgeOperation } from "./receipt.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import type { BridgeRpcPhysicalBudget } from "./rpc.js";
+import { bridgeRpcBudgetDeferred } from "./rpc-session-helpers.js";
 
 export class BridgeExecution {
   private readonly observation: BridgeObservation;
@@ -89,10 +90,13 @@ export class BridgeExecution {
       }
       if (effect.role === "bridge" && op.effects[0]!.role === "approval" &&
         !["included_success", "safe_success"].includes(op.effects[0]!.phase)) return op;
+      // A SEND claim this journal has not recorded (a crash between claim and save, or a restored journal) means these exact
+      // bytes may have been broadcast: record the attempt from the sealed material and observe. Never sign or send again.
+      const claimedSend = await this.claims().sendClaim(op, effect.role);
+      if (claimedSend !== null) return await this.recordClaimedSend(op, effect, claimedSend);
       if (guardedWbtc(op) && authority === undefined) {
         if (effect.role === "bridge" && effect.phase === "unsealed" && op.effects[0]?.role === "approval" &&
           op.effects[0].phase === "safe_success" && Date.parse(op.intent.expiresAt) <= this.now()) {
-          await new BridgeEffectClaims(this.state.root).assertUnsignedBridge(op);
           try { assertBridgeRemaining(op, this.now()); }
           catch (error) { return await this.haltUnsent(op, error); }
         }
@@ -103,10 +107,9 @@ export class BridgeExecution {
         catch (error) { return budgetExhausted(error) ? op : await this.deferOrHalt(op, error); }
         // Signing commits an effect; leave room for a fresh guard and its single raw send.
         if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2) return op;
-        if (authority !== undefined) {
-          await authority.check(op);
-          await new BridgeEffectClaims(this.state.root).claim(op, effect.role, "sign");
-        }
+        if (authority !== undefined) await authority.check(op);
+        // Every route: the create-only SIGN claim outside the rollbackable journals binds this effect before custody signs.
+        await this.claims().claim(op, effect.role, "sign");
         op = await this.save(op, { ...clearedDeferral(op), effects: replaceEffect(op, { ...effect, phase: "signing_started" }) });
         // The marker is durable before entering custody. A recovered marker only loads its original seal.
         try { await this.custody.seal(op, effect.role, op.intent.owner, authority?.sign(op, effect.role)); }
@@ -128,10 +131,9 @@ export class BridgeExecution {
       catch (error) { return budgetExhausted(error) ? op : await this.deferOrHalt(op, error); }
       // Preserve a sealed effect for a later invocation when its one permitted send cannot fit.
       if (this.physicalBudget?.remaining() === 0) return op;
-      if (authority !== undefined) {
-        await authority.check(op);
-        await new BridgeEffectClaims(this.state.root).claim(op, effect.role, "send", material);
-      }
+      if (authority !== undefined) await authority.check(op);
+      // Every route: the create-only SEND claim binds these exact sealed bytes before the single broadcast.
+      await this.claims().claim(op, effect.role, "send", material);
       op = await this.save(op, { ...clearedDeferral(op), state: "source_pending", effects: replaceEffect(op, { ...effect, phase: "submitting",
         submittedAt: new Date(this.now()).toISOString(), submissionAttempts: 1 }) });
       effect = op.effects.find((e) => e.role === effect.role)!;
@@ -153,6 +155,23 @@ export class BridgeExecution {
     }
     if (op.effects.every((e) => e.phase === "safe_success")) return await this.observation.destinationProof(op);
     return op;
+  }
+  private claims(): BridgeEffectClaims { return new BridgeEffectClaims(this.state.root); }
+  /** Catches the journal up with a SEND claim from the exact sealed material, without signing or sending, then observes. */
+  private async recordClaimedSend(op: BridgeOperationRecord, effect: BridgeEffect,
+    claimed: Readonly<{ materialHash: string; transactionHash: string }>): Promise<BridgeOperationRecord> {
+    const material = await this.custody.load(op, effect.role);
+    if (material === null || material.materialHash !== claimed.materialHash || material.transactionHash !== claimed.transactionHash) {
+      bridgeFailure("APN_OPERATION_BLOCKED", "bridge_effect_send_claim_unresolved", {});
+    }
+    const current = () => op.effects.find((e) => e.role === effect.role)!;
+    if (current().phase === "unsealed") op = await this.save(op, { effects: replaceEffect(op, { ...current(), phase: "signing_started" }) });
+    if (current().phase === "signing_started") op = await this.save(op, { effects: replaceEffect(op, { ...current(), phase: "sealed",
+      transactionHash: material.transactionHash, sealedMaterialHash: material.materialHash }) });
+    op = await this.save(op, { state: "unknown_finality", effects: replaceEffect(op, { ...current(), phase: "submitting",
+      submittedAt: new Date(this.now()).toISOString(), submissionAttempts: 1 }) });
+    op = await this.save(op, { effects: replaceEffect(op, { ...current(), phase: "unknown_finality" }) });
+    return (await this.observation.sources(op)).operation;
   }
   private async guard(op: BridgeOperationRecord, role: "approval" | "bridge"): Promise<void> {
     await assertBridgeOwner(this.state, op.intent);
@@ -204,7 +223,10 @@ export class BridgeExecution {
       ...(retained?.residualAllowanceStatus === "unavailable" ? { residualAllowanceStatus: "unavailable" as const } : {}),
     };
     if (op.effects.some((e) => e.phase === "signing_started")) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_unresolved");
-    if (op.effects.every((e) => e.submissionAttempts === 0)) return await this.save(op, { state: "failed_before_effect", failure });
+    if (op.effects.every((e) => e.submissionAttempts === 0)) {
+      await this.claims().assertNoUnrecordedSend(op);
+      return await this.save(op, { state: "failed_before_effect", failure });
+    }
     if (op.effects[0]?.role === "approval" && op.effects[0].phase === "safe_success" && op.effects.at(-1)!.submissionAttempts === 0) {
       return await this.terminalFailure(op, "failed_after_approval", reason, preSignRpc);
     }
@@ -214,19 +236,16 @@ export class BridgeExecution {
     preSignRpc: BridgePreSignRpcFailure | null = null): Promise<BridgeOperationRecord> {
     const retained = retainedUnsentBridgeRpcFailure(op), diagnostic = preSignRpc ?? retained?.preSignRpc ?? null;
     const failureReason = diagnostic === null ? reason : "unsent_apn_rpc_ambiguous";
+    if (state === "failed_after_approval") await this.claims().assertNoUnrecordedSend(op);
+    // The residual allowance is reported, never required: an unavailable read keeps the proven terminal outcome.
     const residual = await this.observation.residualObservation(op);
-    if (!residual.ok) return await this.save(op, { state: "unknown_finality", observationTelemetry: residual.observationTelemetry,
-      failure: { reason: failureReason, residualAllowance: null,
-      ...(diagnostic === null ? {} : { residualAllowanceStatus: "unavailable" as const, preSignRpc: diagnostic }) } });
-    if (state === "failed_after_approval" && guardedWbtc(op) && op.effects.at(-1)?.phase === "unsealed" &&
-      Date.parse(op.intent.expiresAt) <= this.now()) await new BridgeEffectClaims(this.state.root).assertUnsignedBridge(op);
-    return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason, residualAllowance: residual.value,
-      ...(diagnostic === null ? {} : { residualAllowanceStatus: "observed" as const, preSignRpc: diagnostic }) } });
+    return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason,
+      residualAllowance: residual.ok ? residual.value : null,
+      ...(diagnostic === null && residual.ok ? {} : { residualAllowanceStatus: residual.ok ? "observed" as const : "unavailable" as const }),
+      ...(diagnostic === null ? {} : { preSignRpc: diagnostic }) } });
   }
 }
-function budgetExhausted(error: unknown): boolean {
-  return error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED";
-}
+function budgetExhausted(error: unknown): boolean { return bridgeRpcBudgetDeferred(error); }
 function rateLimited(error: unknown): boolean {
   return error instanceof ApnError && error.code === "APN_RPC_RATE_LIMITED";
 }

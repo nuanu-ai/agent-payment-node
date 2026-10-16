@@ -205,8 +205,8 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
   const proofBinding = bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt);
   if (proofBinding === null) bridgeFailure("APN_STATE_CORRUPT", "bridge_deployment_proof_verifier_changed");
   if (op.terminal || effect === undefined || effect.submissionAttempts !== 0) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_first_send_only");
-  if (source.origin !== i.sourceRpcOrigin || destination.origin !== i.destinationRpcOrigin || source.chainId !== m.request.fromChainId ||
-    destination.chainId !== m.request.toChainId) bridgeFailure("APN_RPC_CONFIG", "bridge_frozen_RPC_origin");
+  // The guard binds chain identity, not the endpoint URL: every read checks eth_chainId, so a user may swap a failing RPC.
+  if (source.chainId !== m.request.fromChainId || destination.chainId !== m.request.toChainId) bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_chain_identity");
   const [sourceDeployment, destinationDeployment] = await Promise.all([
     preSignRpc(rpcBoundary(role, "source_deployment_refresh", "source", source.chainId, "deployment_refresh"),
       async () => await (proofBinding === "deployment-proof-v1" ? source.refreshDeployment?.(m.tool, m.request.toChainId, m.request.fromToken,
@@ -258,7 +258,7 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
     } else {
       const quote = await preSignRpc(rpcBoundary(role, "source_fee_quote", "source", source.chainId, "fee_quote"),
         async () => await source.feeQuote(e.envelope));
-      if (quote.chainId !== e.envelope.chainId || quote.rpcOrigin !== i.sourceRpcOrigin ||
+      if (quote.chainId !== e.envelope.chainId ||
         quote.maximumExecutionFeeWei !== e.envelope.economics.maximumGasCostAtomic) bridgeFailure("APN_RPC_PROTOCOL", "fresh_fee_quote_identity");
       unpaid += BigInt(quote.totalQuoteWei) + BigInt(e.envelope.valueAtomic);
     }

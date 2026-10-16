@@ -163,7 +163,7 @@ export function validateEnvelopeProof(p, e, hash) {
     if (p.chainId !== e.chainId || p.transactionHash !== hash || p.from !== e.from || p.to !== e.to ||
         p.nonceAtomic !== c.nonceAtomic || p.valueAtomic !== e.valueAtomic || p.dataHash !== sha256(Buffer.from(e.data.slice(2), "hex")) ||
         p.gasLimitAtomic !== c.gasLimitAtomic || p.maxFeePerGasAtomic !== c.maxFeePerGasAtomic ||
-        p.maxPriorityFeePerGasAtomic !== c.maxPriorityFeePerGasAtomic || p.rpcOrigin !== e.feeQuote.rpcOrigin)
+        p.maxPriorityFeePerGasAtomic !== c.maxPriorityFeePerGasAtomic)
         bridgeCorrupt();
     if (BigInt(p.gasUsedAtomic) > BigInt(c.gasLimitAtomic) || BigInt(p.effectiveGasPriceAtomic) > BigInt(c.maxFeePerGasAtomic) ||
         BigInt(p.executionFeeWei) !== BigInt(p.gasUsedAtomic) * BigInt(p.effectiveGasPriceAtomic) ||
@@ -238,7 +238,7 @@ function validateSnapshot(op, s, legacy) {
         }
         if (s.sourceProof === null || p.correlationHash !== hashObject(s.sourceProof.correlation) || p.tool !== m.tool ||
             p.chainId !== m.request.toChainId || p.recipient !== m.request.recipient || p.token !== m.request.toToken ||
-            p.rpcOrigin !== op.intent.destinationRpcOrigin || BigInt(p.safeBlock.numberAtomic) < BigInt(p.blockNumberAtomic) ||
+            BigInt(p.safeBlock.numberAtomic) < BigInt(p.blockNumberAtomic) ||
             (op.intent.decoded.composite === undefined && (BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
                 ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic))))
             bridgeCorrupt();
@@ -319,7 +319,7 @@ function validateEffect(e, envelope, at) {
             bridgeCorrupt();
     }
     if (e.safeProof !== null && (e.safeProof.safeBlock === null || e.includedProof === null ||
-        !bridgeSame({ ...e.safeProof, safeBlock: null }, { ...e.includedProof, safeBlock: null })))
+        !bridgeSame({ ...e.safeProof, safeBlock: null, rpcOrigin: null }, { ...e.includedProof, safeBlock: null, rpcOrigin: null })))
         bridgeCorrupt();
 }
 function validateTransition(p, n, legacy = false) {

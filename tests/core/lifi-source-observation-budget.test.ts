@@ -10,7 +10,7 @@ import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import { BridgeExecution } from "../../src/lifi/execution.js";
 import { bridgeSourceObservationRequests } from "../../src/lifi/observation-budget.js";
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
-import { bridgeRpcPhysicalPolicy } from "../../src/lifi/rpc-execution-budget.js";
+import { bridgeInvocationPostBudget } from "../../src/lifi/send-budget.js";
 import { bridgeDeploymentReadPlan } from "../../src/lifi/rpc-deployment.js";
 import { BASE_FEE_CONTRACT } from "../../src/lifi/rpc-fees.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
@@ -126,7 +126,7 @@ for (const receipt of ["primary", "scalar"] as const) test(`resume after a sent 
   const invocation = (spentPosts: number) => {
     const reads = chain(receipt, time); reads.include(raw, approval);
     const rpcFor = bridgeRpcFactory(chainEnvironment([8453, 42161], receipt), { transport: reads.transport, wait });
-    const physical = new BridgeRpcPhysicalBudget(() => time, wait, bridgeRpcPhysicalPolicy(op)), scheduler = new RpcProviderScheduler();
+    const physical = new BridgeRpcPhysicalBudget(() => time, wait, bridgeInvocationPostBudget(op, 3)), scheduler = new RpcProviderScheduler();
     const common = { now: () => time, wait, archiveDeploymentBatchMaxItems: 3, providerScheduler: scheduler, physicalBudget: physical };
     const limit = bridgeSourceObservationRequests(m.request.fromChainId, m.request.toChainId, m.tool, m.request.fromToken, 3);
     const session = new RpcReadSession({ ...common, maxHttpRequests: 28, maxHttpAttempts: 30 });
@@ -138,12 +138,12 @@ for (const receipt of ["primary", "scalar"] as const) test(`resume after a sent 
       { source: () => rpcFor(8453, observer), destination: () => rpcFor(42161, session),
         residual: () => rpcFor(8453, new RpcReadSession({ ...common, maxHttpRequests: 2, maxHttpAttempts: 3 })) }, physical) };
   };
-  // QA's first resume: the approval guard and its send spent the invocation, so observation cannot start a request.
-  const spent = invocation(24), first = await spent.execution.resume(op);
-  assert.equal(spent.reads.posts.length, 0); assert.equal(first.state, "unknown_finality"); assert.equal(first.terminal, false);
-  assert.equal(first.failure?.observationRpc?.code, "APN_RPC_BUDGET_EXCEEDED"); assert.deepEqual(effects(first), effects(op));
-  // The next resume has a fresh invocation: the approval observation completes, and the bridge guard that no longer fits is deferred.
-  const fresh = invocation(0), resumed = await fresh.execution.resume(first);
+  // QA's first resume: the invocation is spent, so observation cannot start a request. That is a deferral, not unknown finality.
+  const spent = invocation(bridgeInvocationPostBudget(op, 3)), first = await spent.execution.resume(op);
+  assert.equal(spent.reads.posts.length, 0); assert.equal(first.integrityHash, op.integrityHash); assert.equal(first.terminal, false);
+  assert.deepEqual(effects(first), effects(op));
+  // The next resume keeps 24 POSTs of its derived cap: the approval observation completes, and the bridge guard that no longer fits is deferred.
+  const fresh = invocation(bridgeInvocationPostBudget(op, 3) - 24), resumed = await fresh.execution.resume(first);
   assert.deepEqual(effects(resumed), [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]); assert.equal(resumed.terminal, false);
   assert.equal(resumed.effects[0]!.safeProof!.block.numberAtomic, INCLUDED_BLOCK.toString()); assert.equal(resumed.failure, null);
   const observed = resumed.observationTelemetry!.filter((entry) => entry.stage === "source_observation").at(-1)!;
