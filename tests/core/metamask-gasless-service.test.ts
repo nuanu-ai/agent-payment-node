@@ -8,7 +8,8 @@ import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
 import { MM_CHAINS } from "../../src/metamask-gasless/model.js";
-import { mmFixture, mmTestWord } from "./metamask-gasless-helpers.js";
+import { mmFixture, mmTestWord, mmWriteOperationFile } from "./metamask-gasless-helpers.js";
+import { fillLegacyHistory } from "./metamask-gasless-journal-fixtures/factory.js";
 
 const sandbox = async () => await mkdtemp(join(await realpath(tmpdir()), "apn-mm-service-test-"));
 
@@ -207,5 +208,37 @@ test("MM post-marker clock warning preserves the saved guard until a usable cloc
     f.now.setTime(f.now.getTime() + 2); f.rpc.phase = "success";
     const resumed = await f.restart().execute({ command: "operation.resume", operationId: id });
     assert.equal(resumed.ok, true, JSON.stringify(resumed.error)); assert.equal((await f.record(id)).state, "completed");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("MM re-observation that changes nothing writes nothing, and full history still observes and completes", async () => {
+  const root = await sandbox();
+  try {
+    const f = await mmFixture(root), { id } = await f.prepare(); f.rpc.phase = "pending"; f.rpc.candidate = null;
+    assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+    const dispatched = await f.record(id);
+    assert.equal(dispatched.state, "unknown_finality");
+    f.advance(60_000);
+    const repeated = await f.restart().execute({ command: "operation.resume", operationId: id });
+    assert.equal(repeated.ok, true, JSON.stringify(repeated.error));
+    assert.deepEqual(await f.record(id), dispatched);
+
+    // A journal an earlier release filled to the old limit: every slot is a nonterminal observation.
+    const full = fillLegacyHistory(dispatched, 96); f.advance(600_000);
+    await mmWriteOperationFile(root, full);
+    const held = await f.restart().execute({ command: "operation.resume", operationId: id });
+    assert.equal(held.ok, true, JSON.stringify(held.error));
+    const output = held.operation as { transient_warning?: { reason: string }; transient_observation?: { phase: string; reason: string } };
+    assert.equal(output.transient_warning?.reason, "mm_gasless_record_capacity");
+    assert.deepEqual([output.transient_observation?.phase, output.transient_observation?.reason], ["pending", "mm_gasless_pending"]);
+    assert.deepEqual(await f.record(id), full);
+
+    f.rpc.phase = "success"; f.rpc.candidate = mmTestWord("transaction-a");
+    const completed = await f.restart().execute({ command: "operation.resume", operationId: id });
+    assert.equal(completed.ok, true, JSON.stringify(completed.error));
+    const final = await f.record(id);
+    assert.equal(final.state, "completed"); assert.equal(final.transitions.length, 97);
+    assert.equal((await f.restart().execute({ command: "receipt.get", operationId: id })).ok, true);
+    assert.equal(f.provider.submissions.length, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

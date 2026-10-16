@@ -618,6 +618,15 @@ canonical receipt and finality, exact two-call batch, consumed permission,
 USDC delivery/fee/debit and outer gas payer. A temporarily unusable clock or
 full history preserves the saved guard and cannot authorize another dispatch.
 
+A resume whose result differs from the saved one only in when it was read
+writes nothing. The operation history holds 96 transitions and keeps the last
+one for the terminal transition, so a long-unresolved operation can always
+still complete or be abandoned. Once only that slot is left, resume keeps
+observing: a proved completion is saved, and any other result is reported as
+`transient_observation` with a `mm_gasless_record_capacity` warning instead of
+being saved. A history that an earlier release filled to 96 nonterminal
+transitions still loads and still takes its one terminal transition.
+
 `operation status` and `receipt get` use saved evidence without network access;
 they may repair local operation or receipt records after an interrupted write. Public output
 contains hashed provider identities and accounting, without the private
