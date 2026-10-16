@@ -26,8 +26,7 @@ export async function readOrcaMarket(rpc, owner, amountIn) {
     if (oracleAccount !== null)
         blocked("The pool has an adaptive-fee oracle; its variable fee is outside this pinned quote.", "orca_adaptive_fee");
     const vaultSol = vaultAmount(solVault ?? null, WSOL_MINT), vaultUsdc = vaultAmount(usdcVault ?? null, USDC_MINT);
-    if (wsolState !== null)
-        blocked("The owner's wSOL account already exists; unwrap or close it before this swap.", "orca_wsol_account_present");
+    const wsol = keptWsol(wsolState ?? null, owner);
     const balances = orcaOwnerBalances(ownerAccount ?? null, usdcState ?? null, owner);
     const rent = rpcAtomic(await rpc.call("getMinimumBalanceForRentExemption", [165, { commitment: "confirmed" }]));
     if (rent === 0n)
@@ -42,7 +41,20 @@ export async function readOrcaMarket(rpc, owner, amountIn) {
     return { slot: read.slot, pool, poolView: { address: pool.address, tickSpacing: pool.tickSpacing, feeRate: pool.feeRate,
             protocolFeeRate: pool.protocolFeeRate, liquidity: pool.liquidity.toString(), sqrtPrice: pool.sqrtPrice.toString(),
             tickCurrentIndex: pool.tickCurrentIndex }, tickArrays, oracle, wsolAccount, usdcAccount, vaultSolLamports: vaultSol.toString(),
-        vaultUsdcAtomic: vaultUsdc.toString(), owner: balances, tokenAccountRentLamports: rent, accountDataSha256: hashes, swap };
+        vaultUsdcAtomic: vaultUsdc.toString(), owner: balances, wsol, tokenAccountRentLamports: rent, accountDataSha256: hashes, swap };
+}
+/** An existing wSOL account is used only when it is the owner's plain native account; its balance must survive the swap. */
+function keptWsol(account, owner) {
+    if (account === null)
+        return null;
+    if (account.owner !== TOKEN_PROGRAM || account.data.length !== 165)
+        blocked("The owner's wSOL address holds a non-token account.", "orca_wsol_account_unusable");
+    const token = getTokenDecoder().decode(account.data);
+    if (token.owner !== owner || token.mint !== WSOL_MINT || token.state !== 1 || token.isNative.__option !== "Some" ||
+        token.delegate.__option !== "None" || token.closeAuthority.__option !== "None") {
+        blocked("The owner's wSOL account is frozen, delegated, closable by another key, or not the owner's.", "orca_wsol_account_unusable");
+    }
+    return { amountAtomic: token.amount.toString(), lamports: account.lamports.toString() };
 }
 async function tickArrayAddresses(pool) {
     const start = tickArrayStart(pool.tickCurrentIndex, pool.tickSpacing), span = 88 * pool.tickSpacing;

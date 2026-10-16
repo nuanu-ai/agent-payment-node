@@ -74,7 +74,7 @@ import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-facto
 import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
 import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
-import { verifyUniswapV3CodePins } from "./swap/uniswap-v3/pins.js";
+import { verifyUniswapV3CodePins, verifyUniswapV3MutablePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
 import { createJupiterV1Runtime } from "./swap/jupiter-solana/v1-runtime-factory.js";
 import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
@@ -83,7 +83,7 @@ import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
 import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-candidate.js";
 import { orcaStablePreparedStatus } from "./swap/orca-solana/stable-status.js";
 import { approveOrcaStableReservation, confirmOrcaStableExecution, confirmOrcaStableNoSendRecovery, TtyOrcaStableConsent } from "./swap/orca-solana/stable-approval.js";
-import { executeOrcaStableFirstAttempt } from "./swap/orca-solana/stable-effect-runtime.js";
+import { executeConsentedOrcaStable, orcaStableAdmissionPorts } from "./swap/orca-solana/stable-commands.js";
 import { recoverOrcaStableNoSend } from "./swap/orca-solana/stable-no-send-recovery.js";
 import { OrcaStableNoSendProofStore } from "./swap/orca-solana/stable-no-send-proof.js";
 import { releaseOrcaStableNoEffect } from "./swap/orca-solana/stable-release.js";
@@ -188,7 +188,7 @@ export function createApnCore(bound, options = {}) {
     // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
     // MCP intercepts approve/execute with a CLI handoff before this factory runs.
     const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
-        ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, clock,
+        ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, verifySendPins: verifyUniswapV3MutablePins, clock,
             // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
@@ -218,6 +218,7 @@ export function createApnCore(bound, options = {}) {
             stage: bound.request.command === "swap.jupiter.quote" ? "quote" : bound.request.command === "swap.jupiter.prepare" ? "prepare" :
                 bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" ? "execute" : "observe",
             ...("operationId" in bound.request ? { operationId: bound.request.operationId } : {}) }) : undefined);
+    const stablePorts = () => ({ state, clock, accounts: chainAccounts, rpc: solanaRpc, verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
     return new ApnCore({
         state,
         ...(jupiterV1Runtime === undefined ? {} : { jupiterV1Runtime }),
@@ -273,27 +274,14 @@ export function createApnCore(bound, options = {}) {
                 }, operationId, clock.now());
             },
             orcaStableApprove: async (operationId) => {
-                const usage = new AssetUsageLedger(state.root);
-                return await approveOrcaStableReservation(new GuardedSwapService(new SwapOperationRepository(state.root), usage), new SavedOrcaStableMaterialStore(state.root), {
-                    activePolicy: profile => loadActiveAssetPolicyRegistry({ state, clock }, profile),
-                    localAccount: profile => chainAccounts.account(profile, "solana"),
-                    dailyUsage: async (owner, mint, now) => (await usage.usage({ account: owner, chain: ORCA_SOLANA_CHAIN,
-                        asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
-                }, operationId, new TtyOrcaStableConsent(), () => clock.now());
+                const usage = new AssetUsageLedger(state.root), service = new GuardedSwapService(new SwapOperationRepository(state.root), usage), stable = stablePorts();
+                await approveOrcaStableReservation(service, new SavedOrcaStableMaterialStore(state.root), orcaStableAdmissionPorts(stable, usage), operationId, options.orcaStableApproveConsent ?? new TtyOrcaStableConsent(), () => clock.now());
+                return await executeConsentedOrcaStable(stable, service, operationId); // SWAP-20: the approval screen authorizes this one execution.
             },
             orcaStableExecute: async (operationId) => {
                 const service = new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root));
-                const materials = new SavedOrcaStableMaterialStore(state.root);
-                await confirmOrcaStableExecution(service, materials, operationId, options.orcaStableExecuteConsent ?? new TtyOrcaStableConsent(), () => clock.now());
-                return await executeOrcaStableFirstAttempt({ service, materials,
-                    bindings: new OrcaStableExecutionBindingStore(state.root),
-                    admission: {
-                        activePolicy: profile => loadActiveAssetPolicyRegistry({ state, clock }, profile),
-                        localAccount: profile => chainAccounts.account(profile, "solana"),
-                        dailyUsage: async (owner, mint, now) => (await service.usage.usage({ account: owner, chain: ORCA_SOLANA_CHAIN,
-                            asset: { kind: "token", identifier: mint } }, now)).amountAtomic,
-                    }, custody: chainAccounts, rpc: solanaRpc, operationId, clock: () => clock.now(),
-                    verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
+                await confirmOrcaStableExecution(service, new SavedOrcaStableMaterialStore(state.root), operationId, options.orcaStableExecuteConsent ?? new TtyOrcaStableConsent(), () => clock.now());
+                return await executeConsentedOrcaStable(stablePorts(), service, operationId);
             },
             orcaStableRecoverNoSend: async (operationId) => {
                 const service = new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root));

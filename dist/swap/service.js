@@ -2,12 +2,13 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../
 import { ApnError } from "../errors.js";
 import { evaluateAssetPolicy, validateAssetPolicyRegistry } from "../asset-policy-registry.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
-import { swapMechanismDigest } from "./pin.js";
-import { requireSwapProtocol, validateSwapProtocolRegistry } from "./protocol-registry.js";
+import { validateSwapProtocolRegistry } from "./protocol-registry.js";
+import { admittedSwapProtocol, swapAdmissionMechanisms } from "./route-admission.js";
 import { createSwapQuote } from "./quote.js";
-import { newSwapOperation, validateSwapOperation, validateSwapReceiptProof } from "./model.js";
+import { newSwapOperation, SWAP_TERMINAL_STATES, validateSwapOperation, validateSwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
 import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
+import { swapUnlandedProofHash, validateSwapUnlandedProof } from "./unlanded.js";
 export class GuardedSwapService {
     operations;
     usage;
@@ -16,7 +17,8 @@ export class GuardedSwapService {
         this.usage = usage;
     }
     async prepare(input) {
-        if (!isPlainRecord(input) || !exactKeys(input, ["quote", "assetPolicy", "protocolRegistry", "idempotencyKey", "approvalCapAtomic", "now"])) {
+        if (!isPlainRecord(input) || !exactKeys(input, ["quote", "assetPolicy", "protocolRegistry", "idempotencyKey", "approvalCapAtomic", "now",
+            ...(input.laneMechanismDigest === undefined ? [] : ["laneMechanismDigest"])])) {
             invalid("Swap preparation input is invalid.");
         }
         const quote = createSwapQuote(input.quote), at = instant(input.now), policy = validateAssetPolicyRegistry(input.assetPolicy);
@@ -26,20 +28,13 @@ export class GuardedSwapService {
             asset: quote.sourceAsset.kind === "native" ? { kind: "native", identifier: null } :
                 { kind: "token", identifier: quote.sourceAsset.identifier }, rail: "swap", amountAtomic: quote.inputAmountAtomic,
             dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
-        const pin = admission.asset.mechanismPins?.swap;
-        if (pin === undefined || pin.chain !== quote.sourceAsset.chain)
-            blocked("Source asset lacks the exact swap mechanism admission.");
-        const mechanismDigest = swapMechanismDigest(pin);
         const destinationAdmission = evaluateAssetPolicy(policy, { chain: quote.destinationAsset.chain,
             asset: quote.destinationAsset.kind === "native" ? { kind: "native", identifier: null } :
                 { kind: "token", identifier: quote.destinationAsset.identifier }, rail: "swap", amountAtomic: quote.minimumOutputAtomic,
             dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
-        const destinationPin = destinationAdmission.asset.mechanismPins?.swap;
-        if (destinationPin === undefined || swapMechanismDigest(destinationPin) !== mechanismDigest) {
-            blocked("Destination asset lacks the same exact swap mechanism admission.");
-        }
+        // Both assets must admit the installed lane's route (protocol, router, pools); its internal version is APN's own.
         const protocolRegistry = validateSwapProtocolRegistry(input.protocolRegistry);
-        requireSwapProtocol(protocolRegistry, mechanismDigest);
+        const mechanismDigest = admittedSwapProtocol(protocolRegistry, quote.sourceAsset.chain, admission.asset, destinationAdmission.asset, input.laneMechanismDigest).mechanismDigest;
         const idempotencyHash = swapIdempotencyHash(input.idempotencyKey);
         const operationId = preparedSwapOperationId(quote.profile, input.idempotencyKey);
         let operation = await this.operations.create(newSwapOperation({ operationId, idempotencyHash, quote,
@@ -129,9 +124,26 @@ export class GuardedSwapService {
                 state: "failed_before_effect", now, outcomeDigest: failureProofHash });
         return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "failed_before_effect", { failureProofHash, ...(lease === undefined ? {} : { usageLease: lease }) }, now);
     }
+    /**
+     * The chain proved the marked effect can never land: its lifetime, deadline or expiration passed at finality with no
+     * inclusion. The principal lease is released and the operation is terminal. Nothing is re-signed or resent.
+     */
+    async expireUnlanded(operation, now, proof) {
+        operation = validateSwapOperation(operation);
+        if (!["submitting", "submitted", "unknown_finality"].includes(operation.state) || operation.submissionMarker === null ||
+            operation.receiptProof !== null || operation.usageLease === null)
+            blocked("Swap has no unlanded effect to expire.");
+        instant(now);
+        const proofHash = swapUnlandedProofHash(operation, validateSwapUnlandedProof(proof, operation.quote.sourceAsset.chain));
+        if (operation.state !== "unknown_finality")
+            operation = await this.recordPossibleSend(operation, "unknown_finality", now);
+        const lease = await this.usage.transition({ ...usageIdentity(operation), reservationId: operation.usageLease.reservationId,
+            policyDigest: operation.policyDigest, state: "released_unsubmitted", now, outcomeDigest: proofHash });
+        return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "expired_unlanded", { usageLease: lease, failureProofHash: proofHash }, now);
+    }
     resumeDirective(operation) {
         operation = validateSwapOperation(operation);
-        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(operation.state))
+        if (SWAP_TERMINAL_STATES.includes(operation.state))
             return "terminal";
         return operation.submissionMarker === null ? "prepare_or_approve" : "observe_only";
     }
@@ -161,9 +173,10 @@ function assertPolicyBindings(operation, policy, at) {
         const admission = evaluateAssetPolicy(policy, { chain: asset.chain,
             asset: asset.kind === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: asset.identifier },
             rail: "swap", amountAtomic: amount, dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
-        const pin = admission.asset.mechanismPins?.swap;
+        // The policy digest equals the one that selected operation.mechanismDigest at preparation, so the same route admission
+        // still holds; the runtime re-checks the exact lane route against its installed registry before consent and sending.
         if (admission.policyDigest !== operation.policyDigest || admission.registryVersion !== operation.policyVersion ||
-            pin === undefined || swapMechanismDigest(pin) !== operation.mechanismDigest) {
+            swapAdmissionMechanisms(admission.asset).length === 0) {
             blocked("Swap policy or mechanism binding changed after preparation.");
         }
     }

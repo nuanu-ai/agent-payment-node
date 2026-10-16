@@ -9,7 +9,7 @@ import { JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS } from "../../src/swap/jupiter-s
 import { routeConfigForQuote, routeConfigForMaterial, JUPITER_V1_FINITE_ROUTES,
  JUPITER_V1_WHIRLPOOL_V2_ROUTE as OLD_ESV, JUPITER_V1_WHIRLPOOL_4H_ROUTE as OLD_4H,
  JUPITER_V1_WHIRLPOOL_V2_RUNTIME_099DA3_ROUTE as NEW_ESV,
- JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE as NEW_4H } from "../../src/swap/jupiter-solana/v1-route-config.js";
+ JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_ROUTE as NEW_4H, JUPITER_V1_CURRENT_ROUTES } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { jupiterV1MaterialDigest, validateJupiterV1Material, type JupiterV1ResolvedMaterial } from "../../src/swap/jupiter-solana/v1-material.js";
 import { assembleJupiterV1, decodeJupiterV1AddressTable } from "../../src/swap/jupiter-solana/v1-resolver.js";
 import { jupiterV1Instructions, jupiterV1Lifetime, jupiterV1ResponseHash } from "../../src/swap/jupiter-solana/v1-codec.js";
@@ -121,7 +121,7 @@ for (const {lane, old, fresh} of lanes) {
   else { const d = Buffer.from(getBase58Encoder().encode(ix.data)); d[change === "threshold" ? 16 : 42] = 1; ix.data = getBase58Decoder().decode(d); }
   await assert.rejects(proveJupiterV1Simulation({async call() {return sim;}}, g));
  });
- test(`SYNTHETIC ${lane} requires both assets' exact upgraded admission; historical and mixed admissions cannot select it`, async t => {
+ test(`SYNTHETIC ${lane} admits every generation of its pool by route and refuses a mixed-pool admission`, async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const profile = `synthetic-${lane}-generation`, payer = upgraded(lane).payer;
   const store = new ChainAccountStore(temp.root, {async load() {return Buffer.alloc(32, 77);}, async create() {return Buffer.alloc(32, 77);}});
@@ -129,10 +129,13 @@ for (const {lane, old, fresh} of lanes) {
   const registry = (inputPin: SwapMechanismPin, outputPin = inputPin) => {const now = new Date(); return sealAssetPolicyRegistry({schemaVersion: "apn.asset-policy-registry.v1", registryVersion: "synthetic-generation.1", publishedAt: now.toISOString(), effectiveDate: now.toISOString().slice(0, 10), effectiveAt: new Date(now.getTime()-1000).toISOString(), expiresAt: new Date(now.getTime()+3600000).toISOString(), chains: [{chain: fresh.mechanismPin.chain, family: "solana", name: "Solana", assets: [{kind: "native", identifier: null, symbol: "SOL", decimals: 9, rails: {direct: false, gasless: false, x402: false, bridge: false, swap: true}, caps: {maximumPerTransferAtomic: "6000000", dailyLimitAtomic: "6000000"}, mechanismPins: {swap: inputPin}}, {kind: "token", identifier: SOLANA_USDC_MINT, symbol: "USDC", decimals: 6, rails: {direct: false, gasless: false, x402: false, bridge: false, swap: true}, caps: {maximumPerTransferAtomic: "500000", dailyLimitAtomic: "500000"}, mechanismPins: {swap: outputPin}}]}]});};
   let active = registry(fresh.mechanismPin);
   const admission = new JupiterV1OwnerAdmission(store, async () => ({profile, registry: active, digest: active.policyDigest, revision: 1, accounts: {solana: payer}, activationDigest: "a".repeat(64), activatedAt: active.effectiveAt!}), new AssetUsageLedger(temp.root), () => new Date());
-  assert.equal((await admission.resolveRoute(profile, "1000000", "115960", payer)).route, fresh);
-  active = registry(old.mechanismPin); assert.equal((await admission.resolveRoute(profile, "1000000", "115960", payer)).route, old);
-  for (const pair of [[old.mechanismPin, fresh.mechanismPin], [fresh.mechanismPin, old.mechanismPin], [fresh.mechanismPin, lane === "esv" ? NEW_4H.mechanismPin : NEW_ESV.mechanismPin]]) {
-   active = registry(pair[0]!, pair[1]!); await assert.rejects(admission.resolveRoute(profile, "1000000", "115960", payer));
+  const current = JUPITER_V1_CURRENT_ROUTES.find(route => route.pool === fresh.pool)!;
+  assert.equal((await admission.resolveRoute(profile, "1000000", "115960", payer)).route, current);
+  for (const pair of [[old.mechanismPin, old.mechanismPin], [old.mechanismPin, fresh.mechanismPin], [fresh.mechanismPin, old.mechanismPin]]) {
+   active = registry(pair[0]!, pair[1]!); const resolved = await admission.resolveRoute(profile, "1000000", "115960", payer);
+   assert.equal(resolved.route, current); assert.ok(resolved.routes.includes(old) && resolved.routes.includes(fresh));
   }
+  active = registry(fresh.mechanismPin, lane === "esv" ? NEW_4H.mechanismPin : NEW_ESV.mechanismPin);
+  await assert.rejects(admission.resolveRoute(profile, "1000000", "115960", payer));
  });
 }

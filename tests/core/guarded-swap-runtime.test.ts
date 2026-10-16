@@ -50,6 +50,7 @@ async function fixture(root: string, options: { readonly admitted?: boolean; rea
     async execute(input) { sends++; let op = await runtime.service.markSubmitting(input.operation, input.now);
       return await runtime.service.recordPossibleSend(op, "unknown_finality", input.now); },
     async observe(input) { observes++; return input.operation; },
+    async proveUnlanded() { return null; },
   };
   runtime = new GuardedSwapRuntime({ chain: "eip155:1", builder: { async quote() {
     return { quoteHash: quote.quoteHash, quote, signed: false, broadcast: false };

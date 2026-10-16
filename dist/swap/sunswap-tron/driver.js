@@ -72,13 +72,18 @@ export class SunSwapTronExecutionDriver {
         if (operation.submissionMarker === null)
             blocked("SunSwap observation is available only after the submission marker.", "sunswap_resume_before_marker");
         const material = validateSunSwapPreparedMaterial(input.material, "stored");
-        if (["finalized", "failed_confirmed_revert"].includes(operation.state))
+        if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state))
             return operation;
         const binding = await this.d.bindings.load(operation, material);
         // A marker without a completed send attempt is never resumed into signing: the outcome is unknown and only observed.
         if (operation.state === "submitting")
             operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());
         return binding === null ? operation : await this.observeExact(operation, material);
+    }
+    /** The transaction id and expiration are fixed in the prepared material, signed or not. */
+    async proveUnlanded(input) {
+        validateSwapOperation(input.operation);
+        return await this.d.observer.proveUnlanded(validateSunSwapPreparedMaterial(input.material, "stored"));
     }
     async observeExact(operation, material) {
         let outcome;

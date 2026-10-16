@@ -4,6 +4,7 @@ import { ApnError } from "../../../errors.js";
 import type { EvmRpcCall } from "../../../evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmTokenBalance, recheckEvmBlock } from "../../../evm-rpc-codec.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../../model.js";
+import { proveEvmUnlanded, type SwapUnlandedProof } from "../../unlanded.js";
 import { validateUniswapReceipt, type UniswapReceiptEvidence } from "../../uniswap-receipt.js";
 import { UNISWAP_ROUTER } from "../../uniswap-pin.js";
 import { validateUniswapExecutionBinding } from "./binding.js";
@@ -81,6 +82,11 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
       finalizedHead: { number: finalizedHead.number, hash: finalizedHead.hash }, observedAt }, binding.envelope,
     { transactionHash, account: operation.quote.account, recipient: operation.quote.recipient,
       inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, outputToken: outputTokenOf(operation) }) };
+  }
+
+  /** Router deadline passed at a finalized block with no receipt for the sealed hash: the input can never move. */
+  async proveUnlanded(deadlineSeconds: number, loadTransactionHash: () => Promise<string | null>): Promise<SwapUnlandedProof | null> {
+    return await proveEvmUnlanded(this.call, { chainId: 1n, deadlineSeconds, loadTransactionHash });
   }
 
   /** Status 0 at a canonical finalized block with no logs proves the input never left; only gas was spent. */

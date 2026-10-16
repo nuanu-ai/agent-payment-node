@@ -6,7 +6,8 @@ import { tronAddress } from "../tron/codec.js";
 export const SWAP_MECHANISM_PIN_SCHEMA = "apn.swap-mechanism-pin.v1";
 const TEXT = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u;
 const VERSION = /^(?=[A-Za-z0-9._+-]{1,64}$)(?=.*[0-9])[A-Za-z0-9][A-Za-z0-9._+-]*$/u;
-const EXPECTED = {
+/** Exact network of each protocol family. Shared with route admissions, which carry no network family of their own. */
+export const SWAP_PROTOCOL_NETWORKS = {
     uniswap_ethereum: { family: "evm", chain: "eip155:1" },
     sunswap_tron: { family: "tron", chain: "tron:00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc" },
     jupiter_solana: { family: "solana", chain: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
@@ -18,7 +19,7 @@ export function validateSwapMechanismPin(value) {
         "constructorIdentity", "constructorVersion", "routerProgramIdentity", "auxiliaryContractProgramIdentities",
         "quoteSchemaVersion", "transactionSchemaVersion", "validationPolicyIdentity", "validationPolicyVersion",
     ]) || value.schemaVersion !== SWAP_MECHANISM_PIN_SCHEMA ||
-        !Object.hasOwn(EXPECTED, value.protocolFamily) ||
+        !Object.hasOwn(SWAP_PROTOCOL_NETWORKS, value.protocolFamily) ||
         (value.networkFamily !== "evm" && value.networkFamily !== "tron" && value.networkFamily !== "solana") ||
         (value.constructorKind !== "builder_api" && value.constructorKind !== "sdk") ||
         typeof value.chain !== "string" || typeof value.protocolVersion !== "string" ||
@@ -34,7 +35,7 @@ export function validateSwapMechanismPin(value) {
         new Set([value.routerProgramIdentity, ...value.auxiliaryContractProgramIdentities]).size !==
             value.auxiliaryContractProgramIdentities.length + 1)
         invalid("Swap mechanism pin is malformed, duplicate, or unversioned.");
-    const expected = EXPECTED[value.protocolFamily];
+    const expected = SWAP_PROTOCOL_NETWORKS[value.protocolFamily];
     if (value.networkFamily !== expected.family || value.chain !== expected.chain) {
         invalid("Swap protocol family does not match its exact network family and chain.");
     }
@@ -49,7 +50,7 @@ export function swapMechanismDigest(value) {
     return domainHash(SWAP_MECHANISM_PIN_SCHEMA, canonicalJson(validateSwapMechanismPin(value)));
 }
 function invalid(message) { throw new ApnError("APN_INVALID_INPUT", message); }
-function canonicalProgramIdentity(family, value) {
+export function canonicalProgramIdentity(family, value) {
     try {
         if (family === "evm") {
             const result = getAddress(value);

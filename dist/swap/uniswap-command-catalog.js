@@ -6,7 +6,7 @@ const option = (name, type, constraints) => ({ name, type, constraints, required
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
     success: "Pinned Uniswap inventory, unsigned quote, prepared operation, or durable status.",
     failures: ["Classified refusal; no signing, broadcast, approval, or provider fallback."] };
-const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert"], non_terminal: ["quoted", "prepared", "awaiting_approval",
+const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert", "expired_unlanded"], non_terminal: ["quoted", "prepared", "awaiting_approval",
         "reserved", "submitting", "submitted", "unknown_finality"] };
 const profile = option("--profile", "profile", ["existing_profile_name"]), account = option("--account", "address", ["checksummed_ethereum_address"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);

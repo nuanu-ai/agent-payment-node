@@ -126,6 +126,22 @@ export async function verifyNativeCodePins(call, tag, pins, implementation, depr
     verifyCodeValue((await nativeReads(call, [{ method: "eth_getCode", params: [implementation.pin.address, tag] }]))[0], implementation.pin);
     return [...pins, implementation.pin];
 }
+/**
+ * Send-time verifier (SWAP-17): only upstream state the code pins cannot fix, the USDC proxy implementation and USDT's
+ * deprecation flag. The router, quoter, factory, WETH9, pools and token proxies have no upgrade path and, after EIP-6780,
+ * cannot have their code replaced; their hashes were verified once for this operation at quote.
+ */
+export const verifyUniswapV3MutablePins = async (call, tag) => {
+    const word = evmRpcHex(await call("eth_getStorageAt", [UNISWAP_USDC, USDC_IMPLEMENTATION_SLOT, tag]), 32);
+    if (!/^0x0{24}/u.test(word) || getAddress(`0x${word.slice(26)}`) !== USDC_IMPLEMENTATION_PIN.address) {
+        blocked("The USDC proxy implementation changed from its pinned address.", "uniswap_code_pin_drift");
+    }
+    verifyCodeValue(await call("eth_getCode", [USDC_IMPLEMENTATION_PIN.address, tag]), USDC_IMPLEMENTATION_PIN);
+    await verifyUsdtNotDeprecated(call, tag);
+    return [USDC_IMPLEMENTATION_PIN];
+};
+/** The WBTC lane touches no upgradeable contract; its code and pool identity were verified once at quote. */
+export const verifyUniswapWbtcMutablePins = async () => [];
 export async function verifyUsdtNotDeprecated(call, tag) {
     assertUsdtNotDeprecated(await call("eth_call", [USDT_DEPRECATED_CALL, tag]));
 }

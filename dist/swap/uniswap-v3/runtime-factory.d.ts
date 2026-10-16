@@ -19,8 +19,10 @@ export interface UniswapKeylessRuntimeOptions {
     readonly tty?: TtyTransferApprovalOptions;
     /** Ethereum mainnet reader/sender. Production passes lazyEthereumRpcCall(process.env). */
     readonly call: EvmRpcCall;
-    /** Code-pin verifier. Production passes verifyUniswapV3CodePins. */
+    /** Quote-time code-pin verifier, once per operation. Production passes verifyUniswapV3CodePins. */
     readonly verifyPins: UniswapV3PinVerifier;
+    /** Send-time verifier of mutable upstream state only. Production passes verifyUniswapV3MutablePins. */
+    readonly verifySendPins: UniswapV3PinVerifier;
 }
 /** Resolves APN_ETHEREUM_RPC_URL on first use, so offline commands never need it and online ones fail closed without it. */
 export declare function lazyEthereumRpcCall(environment: Readonly<Record<string, string | undefined>>, transport?: Pick<BridgeHttps, "request">): NativeBatchCall;

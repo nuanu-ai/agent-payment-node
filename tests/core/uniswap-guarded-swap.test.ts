@@ -166,7 +166,7 @@ test("CLI and MCP expose identical dormant surface; inventory grants no admissio
   assert.equal(bindArgv(["swap", "ethereum", "uniswap", "inventory"]).request.command, "swap.uniswap.inventory");
   const temporary = await temporaryState(); t.after(temporary.cleanup); const core = new ApnCore({ state: new StateStore(temporary.root) });
   const inventory = await core.execute({ command: "swap.uniswap.inventory" }); assert.equal(inventory.ok, true);
-  assert.equal((inventory.data as any).admitted, false); assert.equal((inventory.data as any).execution, "dormant");
+  assert.equal((inventory.data as any).ownerAdmission.evaluated, false); assert.equal((inventory.data as any).execution, "dormant");
   const prepare = await core.execute({ command: "swap.uniswap.prepare", profile: "swap-test", quoteHash: H("1"), idempotencyKey: "uniswap-test-0001" });
   assert.equal(prepare.error?.code, "APN_OPERATION_BLOCKED");
   const approve = await core.execute({ command: "swap.uniswap.approve", operationId: H("2") });

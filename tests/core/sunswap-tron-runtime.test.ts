@@ -216,7 +216,7 @@ test("the installed factory wires the keyless runtime and MCP hands approve and 
     return JSON.parse(content.text) as OutputEnvelope;
   };
   const listed = await call("apn_swap_tron_sunswap_inventory", {});
-  assert.equal((listed.data as any).keyless.mechanismPin.constructorKind, "sdk"); assert.equal((listed.data as any).admitted, false);
+  assert.equal((listed.data as any).keyless.mechanismPin.constructorKind, "sdk"); assert.equal((listed.data as any).ownerAdmission.evaluated, false);
   const operation = "c".repeat(64);
   for (const action of ["approve", "execute"]) {
     const refused = await call(`apn_swap_tron_sunswap_${action}`, { operation });

@@ -23,6 +23,8 @@ export interface OrcaSwapPlan {
   readonly computeUnitPriceMicroLamports: string;
   readonly tickArrays: readonly string[];
   readonly oracle: string;
+  /** The owner's wSOL account existed at quote: it is reused and kept (never closed), so its own balance never unwraps. */
+  readonly wsolAccountKept?: true;
 }
 export interface OrcaSwapLifetime { readonly blockhash: string; readonly lastValidBlockHeight: string }
 export interface CompiledOrcaSwap {
@@ -63,7 +65,7 @@ export function orcaSwapInstructions(planValue: OrcaSwapPlan): readonly Instruct
       { address: address(plan.owner), role: AccountRole.READONLY_SIGNER },
       writable(ORCA_SOL_USDC_POOL), writable(plan.wsolAccount), writable(ORCA_SOL_VAULT), writable(plan.usdcAccount), writable(ORCA_USDC_VAULT),
       writable(plan.tickArrays[0]!), writable(plan.tickArrays[1]!), writable(plan.tickArrays[2]!), writable(plan.oracle)] },
-    getCloseAccountInstruction({ account: wsol, destination: address(plan.owner), owner }),
+    ...(plan.wsolAccountKept === true ? [] : [getCloseAccountInstruction({ account: wsol, destination: address(plan.owner), owner })]),
   ];
 }
 
@@ -132,7 +134,8 @@ function mergedRole(plan: OrcaSwapPlan, key: string): { readonly writable: boole
 }
 
 export function validatePlan(plan: OrcaSwapPlan): OrcaSwapPlan {
-  if (typeof plan !== "object" || plan === null || !Array.isArray(plan.tickArrays) || plan.tickArrays.length !== 3) invalid("Orca swap plan is invalid.");
+  if (typeof plan !== "object" || plan === null || !Array.isArray(plan.tickArrays) || plan.tickArrays.length !== 3 ||
+      (plan.wsolAccountKept !== undefined && plan.wsolAccountKept !== true)) invalid("Orca swap plan is invalid.");
   [plan.owner, plan.wsolAccount, plan.usdcAccount, plan.oracle, ...plan.tickArrays].forEach(solanaAddress);
   const keys = [plan.owner, plan.wsolAccount, plan.usdcAccount, plan.oracle, ...plan.tickArrays, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT];
   if (new Set(keys).size !== keys.length || ORCA_ALLOWED_PROGRAMS.includes(plan.owner)) invalid("Orca swap plan accounts must be distinct.");

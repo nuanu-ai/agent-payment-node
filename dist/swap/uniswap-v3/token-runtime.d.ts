@@ -26,6 +26,8 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
         pair: string;
         fee: number;
         mechanism: import("../pin.js").SwapMechanismPin;
+        route: import("../route-admission.js").SwapRouteAdmission;
+        routeDigest: string;
         approval: string;
         transactionValue: string;
     };

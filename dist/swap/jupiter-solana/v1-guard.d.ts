@@ -18,6 +18,10 @@ export interface JupiterV1GuardedMaterial {
     readonly admissionDigest: string;
 }
 export declare function reject(message: string): never;
+/** Lamports beyond the exact input that one swap may spend or temporarily need: network fee (at most 20,000) and the
+ * temporary wSOL account rent, with margin. It is the same overhead the original 1,000,000 / 6,000,000 lane used. */
+export declare const JUPITER_V1_NATIVE_OVERHEAD_LAMPORTS = 5000000n;
+export declare function jupiterV1MaximumNativeExpense(inputAtomic: string): string;
 export declare function semanticAccount(material: JupiterV1ResolvedMaterial, key: string): JupiterV1SemanticAccount;
 export declare function tokenState(a: JupiterV1SemanticAccount, mint: string, owner: string): {
     amount: bigint;

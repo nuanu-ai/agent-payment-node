@@ -24,6 +24,11 @@ export interface OrcaSimulationBounds {
     readonly minimumOutputAtomic: string;
     readonly maximumSolSpendLamports: string;
     readonly computeUnitLimit: number;
+    /** An existing wSOL account the swap keeps: it must end with exactly its balance before the swap. */
+    readonly wsolKept: {
+        readonly amountAtomic: string;
+        readonly lamports: string;
+    } | null;
 }
 export type OrcaSimulationReason = "orca_simulation_unavailable" | "orca_simulation_protocol" | "orca_simulation_blockhash_not_found" | "orca_simulation_insufficient_funds" | "orca_simulation_instruction_error" | "orca_simulation_rejected" | "orca_simulation_output_shortfall" | "orca_simulation_spend_exceeded";
 /**

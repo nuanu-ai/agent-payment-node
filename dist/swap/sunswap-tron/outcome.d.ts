@@ -2,6 +2,7 @@ import { type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
 import type { SunSwapObservationRpcPort } from "./observer.js";
 import { type SunSwapPreparedMaterial } from "./prepared.js";
 import { type SunSwapReceiptExpectation } from "./receipt.js";
+import { type SwapUnlandedProof } from "../unlanded.js";
 export type SunSwapObservedOutcome = {
     readonly outcome: "succeeded" | "reverted";
     readonly proof: SwapReceiptProof;
@@ -16,6 +17,8 @@ export declare class SunSwapOutcomeObserver {
     private readonly now;
     constructor(rpc: SunSwapObservationRpcPort, now: () => Date);
     observeOutcome(operationValue: SwapOperationRecord, materialValue: SunSwapPreparedMaterial): Promise<SunSwapObservedOutcome | null>;
+    /** Expiration passed at the solidified head and no solidified record of the exact transaction id. */
+    proveUnlanded(materialValue: SunSwapPreparedMaterial): Promise<SwapUnlandedProof | null>;
 }
 /** A solidified failed call: exact bytes, one failed result on both records, fees within the frozen bounds, no logs. */
 export declare function validateSunSwapFailure(transactionValue: unknown, infoValue: unknown, solidifiedHeadNumber: string, expected: SunSwapReceiptExpectation): {

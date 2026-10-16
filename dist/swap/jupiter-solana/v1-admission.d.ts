@@ -22,6 +22,7 @@ export declare class JupiterV1OwnerAdmission {
     resolve(profile: string, amountAtomic: string, minimumOutputAtomic: string, expected?: string, ownReservationAtomic?: string): Promise<JupiterV1OwnerBinding>;
     resolveRoute(profile: string, amountAtomic: string, minimumOutputAtomic: string, expected?: string, ownReservationAtomic?: string): Promise<{
         readonly route: JupiterV1RouteConfig;
+        readonly routes: readonly JupiterV1RouteConfig[];
         readonly owner: JupiterV1OwnerBinding;
     }>;
     assert(operationValue: SwapOperationRecord, materialValue: unknown): Promise<JupiterV1OwnerBinding>;

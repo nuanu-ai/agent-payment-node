@@ -5,6 +5,7 @@ import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
+import type { SwapUnlandedProof } from "../unlanded.js";
 import type { SunSwapLocalOwnerAdmission } from "./admission.js";
 import { createSunSwapTronExecutionBinding, type SunSwapExecutionBindingStore, type SunSwapTronExecutionBinding } from "./execution-binding.js";
 import type { SunSwapExecutionGuard } from "./guard.js";
@@ -24,7 +25,7 @@ export interface SunSwapTronExecutionDriverDependencies {
   readonly guard: Pick<SunSwapExecutionGuard, "inspect">;
   readonly bindings: Pick<SunSwapExecutionBindingStore, "save" | "load">;
   readonly signing: SunSwapSigningPort;
-  readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome">;
+  readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome" | "proveUnlanded">;
   readonly clock: ClockPort;
 }
 
@@ -76,11 +77,17 @@ export class SunSwapTronExecutionDriver implements GuardedSwapExecutionDriver {
     let operation = validateSwapOperation(input.operation);
     if (operation.submissionMarker === null) blocked("SunSwap observation is available only after the submission marker.", "sunswap_resume_before_marker");
     const material = validateSunSwapPreparedMaterial(input.material, "stored");
-    if (["finalized", "failed_confirmed_revert"].includes(operation.state)) return operation;
+    if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state)) return operation;
     const binding = await this.d.bindings.load(operation, material);
     // A marker without a completed send attempt is never resumed into signing: the outcome is unknown and only observed.
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());
     return binding === null ? operation : await this.observeExact(operation, material);
+  }
+
+  /** The transaction id and expiration are fixed in the prepared material, signed or not. */
+  async proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null> {
+    validateSwapOperation(input.operation);
+    return await this.d.observer.proveUnlanded(validateSunSwapPreparedMaterial(input.material, "stored"));
   }
 
   private async observeExact(operation: SwapOperationRecord, material: SunSwapPreparedMaterial): Promise<SwapOperationRecord> {
