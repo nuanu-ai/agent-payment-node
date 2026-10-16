@@ -8,7 +8,7 @@ import { validateGaslessIntent } from "./intent-validation.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation } from "./model.js";
 import { gaslessObservationRpcEnv, gaslessObservationSource } from "./observation-source.js";
 import type { GaslessObservationPort, GaslessObservationRpcFactory } from "./ports.js";
-import { gaslessRpcInvocation, withinGaslessRpcInvocation, type GaslessRpcRequestSession } from "./rpc.js";
+import { gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation, type GaslessRpcRequestSession } from "./rpc.js";
 import { recheckBlock, rpcJson, rpcQuantity, rpcRecord, type GaslessRpcCall, type GaslessRpcMethod } from "./rpc-codec.js";
 import { observeGasless } from "./rpc-observe.js";
 import { verifyProtocolAt } from "./rpc-state.js";
@@ -44,8 +44,13 @@ export function gaslessObservationRpcFactory(environment: Readonly<Record<string
   const transport = new GaslessHttps();
   return (chainId, environmentName) => {
     const name = gaslessObservationRpcEnv(environmentName), rpcUrl = environment[name];
-    if (rpcUrl === undefined || rpcUrl.length === 0) gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_missing");
-    return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing());
+    const action = `Set ${name} to a public, credential-free HTTPS ${gaslessDeployment(chainId).network} RPC endpoint without a query string or fragment, or resume without --observation-rpc-env.`;
+    if (rpcUrl === undefined || rpcUrl.length === 0) throw gaslessConfigError("gasless_observation_rpc_missing", action);
+    try { return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing()); }
+    catch (error) {
+      if (error instanceof ApnError && error.code === "APN_RPC_CONFIG") throw new ApnError(error.code, error.message, { nextActions: [action] });
+      throw error;
+    }
   };
 }
 

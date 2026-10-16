@@ -102,15 +102,24 @@ export function gaslessRpcInvocation(): GaslessRpcRequestSession {
   return session;
 }
 
-export function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>): GaslessRpcFactory {
+/** `rpcSetting` names where the RPC URL came from when it is not the chain's own `APN_*_RPC_URL` (quote: `--rpc-url`). */
+export function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>,
+  rpcSetting?: string): GaslessRpcFactory {
   const cache = new Map<GaslessChainId, GaslessRpcPort>(), transport = new GaslessHttps();
   const fallbackSession = new GaslessRpcRequestSession("observe");
   return (chainId) => {
     const selected = gaslessChain(chainId, "APN_RPC_CONFIG"), existing = cache.get(selected);
     if (existing !== undefined) return existing;
     const deployment = gaslessDeployment(selected), rpcUrl = environment[deployment.rpcEnv];
-    if (rpcUrl === undefined || rpcUrl.length === 0) gaslessFailure("APN_RPC_CONFIG", `missing_${deployment.rpcEnv}`);
+    const setting = rpcSetting ?? deployment.rpcEnv;
+    if (rpcUrl === undefined || rpcUrl.length === 0) {
+      throw gaslessConfigError(`missing_${deployment.rpcEnv}`, `Set ${setting} to a public HTTPS ${deployment.network} RPC endpoint.`);
+    }
     const configuredBundler = environment[deployment.bundlerEnv];
+    guidedEndpoint(rpcUrl, `${deployment.network} RPC`, setting);
+    if (configuredBundler !== undefined && configuredBundler.length > 0) {
+      guidedEndpoint(configuredBundler, `${deployment.network} bundler`, deployment.bundlerEnv);
+    }
     const rpc = new GaslessRpc(selected, rpcUrl, configuredBundler === undefined || configuredBundler.length === 0
       ? undefined : configuredBundler, transport, fallbackSession);
     cache.set(selected, rpc);
@@ -437,4 +446,19 @@ function endpoint(value: string): URL {
   const parsed = parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Gasless RPC endpoint", 2048);
   if (parsed.search !== "" || parsed.hash !== "") gaslessFailure("APN_RPC_CONFIG", "gasless_endpoint_identity");
   return parsed;
+}
+
+/** A configuration failure names the selected network's own setting and its exact cause, never another network's. */
+export function gaslessConfigError(reason: string, nextAction: string): ApnError {
+  return new ApnError("APN_RPC_CONFIG", `Gasless validation failed: ${reason}.`, { nextActions: [nextAction] });
+}
+
+function guidedEndpoint(value: string, endpointName: string, setting: string): void {
+  try { endpoint(value); } catch (error) {
+    if (!(error instanceof ApnError) || error.code !== "APN_RPC_CONFIG") throw error;
+    const query = error.message.includes("gasless_endpoint_identity");
+    throw new ApnError("APN_RPC_CONFIG", error.message, { nextActions: [query
+      ? `Remove the query string or fragment from ${setting}: APN binds the ${endpointName} endpoint by its exact URL.`
+      : `Set ${setting} to a public, credential-free HTTPS ${endpointName} endpoint.`] });
+  }
 }

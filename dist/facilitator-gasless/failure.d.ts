@@ -18,4 +18,6 @@ export declare const FACILITATOR_REASONS: {
 };
 export type FacilitatorReason = keyof typeof FACILITATOR_REASONS;
 export declare function facilitatorFail(reason: FacilitatorReason): never;
+/** The Avalanche RPC setting is missing or unusable; the guidance names this route's own environment variable. */
+export declare function facilitatorRpcConfigFail(cause: "missing" | "invalid"): never;
 export declare function facilitatorReason(error: unknown, fallback: FacilitatorReason): FacilitatorReason;
