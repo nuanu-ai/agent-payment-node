@@ -337,7 +337,9 @@ touches Base. A row with no peer is refused as `asset_has_no_listed_peer`.
 
 RPC URLs must use public HTTPS without URL credentials, query parameters or
 fragments. APN verifies the exact chain ID, pins resolved public addresses and
-uses default TLS verification. It freezes both RPC origins in the intent.
+uses default TLS verification. It records both RPC origins in the intent for
+reference only: guards and proofs bind the chain ID and block hashes, so a
+failing endpoint can be replaced while an operation is in flight.
 LI.FI uses the fixed `https://li.quest/v1` origin. Both transports have bounded
 JSON bodies, two concurrent requests, a 15-second request deadline, and no
 redirects or automatic retries. Bridge preparation uses one command-scoped RPC
@@ -1233,3 +1235,44 @@ Protocol references: [GasZip direct forwarder](https://dev.gas.zip/gas/code-exam
 reads are separate from synthetic tests and actual funding acceptance.
 
 Historical native-fill before/after balances use the explicitly configured archive reader when pinned to a nonzero EIP-1898 block hash with `requireCanonical: true`. The frozen primary RPC origin remains the operation identity, and primary canonical receipt/header witnesses remain required. Numeric or moving balance snapshots keep their existing primary route. Archive chain validation, shared pacing and command/session request limits still apply.
+
+## Phase 1 cleanup, 2026-10-16
+
+- **RPC endpoints.** Operations bind the chain, not the endpoint URL. Every read
+  checks `eth_chainId`; inclusion and safe proofs are compared without their
+  `rpcOrigin`, which stays informational. Records written by 0.5.40/0.5.41 load
+  unchanged.
+- **Observation telemetry.** A poll that changes only read telemetry adds no
+  journal transition, and a transition keeps at most the latest 8 telemetry
+  rows. A 0.5.41 journal with a long telemetry history loads and compacts on its
+  next real change.
+- **Invocation cap.** The per-pair WBTC and USDC continuation caps are gone. Each
+  invocation's physical cap is derived from the operation's read plans: the
+  sign-and-send step when an effect is unsent, plus one source observation, one
+  destination observation and the residual read (at least the base 24). An
+  exhausted read budget defers to the next resume and never records
+  `unknown_finality`.
+- **Residual allowance.** A proven delivery records a zero residual allowance at
+  the safe bridge block without a read: the exact-amount allowance was consumed by
+  the proven exact source `Transfer`. On the failure paths an unavailable read is
+  reported as `residual_allowance_status: unavailable` and never blocks the
+  terminal state.
+- **Effect claims.** Every LI.FI route writes create-only SIGN and SEND claims
+  outside the operation and usage journals. The same claim again is the same
+  effect; a different one is refused. A SEND claim the journal has not recorded
+  (an interrupted send step or a restored journal) is recorded as an attempt from
+  the sealed material and observed, never sent again. Only a SEND claim blocks
+  ending an expired unsent remainder.
+- **GasZip.** Every outcome ends: signed bytes that were never sent, a definite
+  JSON-RPC refusal, a guard that refused before transport, or an unlanded hash
+  whose nonce the safe head already moved past end as `failed_before_effect`
+  (bytes scrubbed, hold released); a cancelled or refunded deposit or a proved
+  payout below the owner floor ends as `destination_failed` (spend kept); an
+  actual Base fee over the quote ceiling is reported as `feeCapExceeded`.
+- **NEAR 1Click.** A nonce sealed by an earlier operation refuses a new submit
+  before consent, and is released once that operation's deadline passed and the
+  node does not know its hash. After consent the Base lane only requires the
+  signed max fee to cover the fresh base fee plus the signed tip. `status`
+  records the safe source receipt and the finalized destination proof and then
+  answers from the journal; the Base USDC to TRON USDT lane proves delivery like
+  the other lanes.
