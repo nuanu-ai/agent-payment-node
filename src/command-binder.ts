@@ -87,7 +87,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
     expectedChallengeHash: value(options, "--expected-challenge-hash"),
     expectedIndex: value(options, "--expected-index"), expectedTerms: value(options, "--expected-terms") },
     rpcUrl: value(options, "--rpc-url") };
-  if (parsed.command.path.join(" ") === "x402 merchant prepare") return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), url: value(options, "--url"), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"]===undefined?{}:{nativeFeeReserveWei:value(options,"--native-fee-reserve-wei")}), idempotencyKey: value(options, "--idempotency-key") } };
+  if (parsed.command.path.join(" ") === "x402 merchant prepare") return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), url: value(options, "--url"), ...(options["--asset"] === undefined ? {} : { asset: options["--asset"] }), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"]===undefined?{}:{nativeFeeReserveWei:value(options,"--native-fee-reserve-wei")}), idempotencyKey: value(options, "--idempotency-key") } };
   if (parsed.command.path.join(" ") === "x402 merchant approve") return { request: { command: "x402.merchant.approve", operationId: value(options, "--operation") } };
   if (parsed.command.path.join(" ") === "x402 merchant observe") return { request: { command: "x402.merchant.observe", operationId: value(options, "--operation"), deliver: options["--deliver"] === "true" } };
   if (parsed.command.path.join(" ") === "x402 merchant retire-unsent") return { request: { command:"x402.merchant.retire-unsent",operationId:value(options,"--operation") } };

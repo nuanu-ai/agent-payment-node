@@ -54,6 +54,7 @@ export type CommandRequest = {
     readonly command: "x402.merchant.prepare";
     readonly profile: string;
     readonly url: string;
+    readonly asset?: string;
     readonly maximumNativeFee: string;
     readonly nativeFeeReserveWei?: string;
     readonly idempotencyKey: string;

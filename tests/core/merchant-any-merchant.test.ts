@@ -32,7 +32,7 @@ const codes = await (async () => {
   const implementation = JSON.parse(await readFile("tests/core/merchant-fee-fixtures/oracle-implementation.json", "utf8")) as { id: string; result: string }[];
   return { token: code.responses[0]!.result, impl: code.responses[1]!.result, oracle: oracle.find((x) => x.id === "3")!.result, oracleImpl: implementation.find((x) => x.id === "0")!.result };
 })();
-interface Merchant { readonly url: string; readonly pin: Pin; readonly payee: string; readonly amount: string; readonly row?: Record<string, unknown> }
+interface Merchant { readonly url: string; readonly pin: Pin; readonly payee: string; readonly amount: string; readonly row?: Record<string, unknown>; readonly extraRows?: readonly Record<string, unknown>[] }
 const USDM_MERCHANT: Merchant = { url: "https://x402engine.app/api/crypto/price?ids=bitcoin", pin: realPins.MEGAETH_USDM, payee: getAddress("0x7dd5Be069f2d2eAd75eC7C3423B116fF043c2629"), amount: "1000000000000000" };
 const SYND_MERCHANT: Merchant = { url: "https://shop.example/reports/42", pin: SYND, payee: getAddress("0x2222222222222222222222222222222222222222"), amount: "2500000" };
 
@@ -91,7 +91,7 @@ class Chain {
 function challenge(m: Merchant, row = m.row ?? {}) {
   return { x402Version: 2, error: "Payment required", resource: { url: m.url, description: "Paid resource", mimeType: "application/json" },
     accepts: [{ scheme: "exact", network: "eip155:8453", amount: "1", asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", payTo: m.payee, maxTimeoutSeconds: 300 },
-      { scheme: "exact", network: "eip155:4326", amount: m.amount, asset: m.pin.token, payTo: m.payee, maxTimeoutSeconds: 600, ...row }] };
+      { scheme: "exact", network: "eip155:4326", amount: m.amount, asset: m.pin.token, payTo: m.payee, maxTimeoutSeconds: 600, ...row }, ...(m.extraRows ?? [])] };
 }
 function observation(m: Merchant, status: number, body = "{}", type = "application/json"): HttpObservation {
   const now = new Date().toISOString();
@@ -137,7 +137,7 @@ async function setup(t: test.TestContext, m: Merchant, profile: string, admissio
       read: async function* () { yield Buffer.from(`${phrase}\n`); }, close: async () => {} }) } };
   const cli = (args: readonly string[]) => runCli(["x402", "merchant", ...args], {}, options as never);
   return { payer, chain, cli, gets, proofs, consent: () => consent,
-    prepare: (key: string) => cli(["prepare", "--profile", profile, "--url", m.url, "--max-native-fee-wei", "1000000000000", "--idempotency-key", key]) };
+    prepare: (key: string, extra: readonly string[] = []) => cli(["prepare", "--profile", profile, "--url", m.url, ...extra, "--max-native-fee-wei", "1000000000000", "--idempotency-key", key]) };
 }
 const reason = (r: { readonly error: { readonly details?: Readonly<Record<string, unknown>> } | null }) => r.error?.details?.reason;
 
@@ -187,5 +187,19 @@ test("a challenge whose only payable row names an unpinned asset is refused befo
   const unpinned: Merchant = { ...SYND_MERCHANT, row: { asset: getAddress("0x7777777777777777777777777777777777777777") } };
   const f = await setup(t, unpinned, "buyer-unpinned");
   assert.equal(reason(await f.prepare("unpinned-0001")), "merchant_exact_requirement_missing_or_ambiguous");
+  assert.equal(f.chain.sends, 0);
+});
+
+test("a merchant offering several pinned assets: --asset chooses, and without it the refusal lists the offered assets", async (t) => {
+  const both: Merchant = { ...SYND_MERCHANT, extraRows: [{ scheme: "exact", network: "eip155:4326", amount: USDM_MERCHANT.amount, asset: realPins.MEGAETH_USDM.token, payTo: SYND_MERCHANT.payee, maxTimeoutSeconds: 60 }] };
+  const f = await setup(t, both, "buyer-two-assets");
+  const unchosen = await f.prepare("two-assets-0001");
+  assert.equal(unchosen.error?.code, "APN_INVALID_INPUT"); assert.equal(reason(unchosen), "merchant_asset_choice_required");
+  assert.match(String(unchosen.error?.message), new RegExp(`SYND ${SYND.token}.*USDm ${realPins.MEGAETH_USDM.token}`, "u"));
+  assert.equal(reason(await f.prepare("two-assets-0002", ["--asset", "0x7777777777777777777777777777777777777777"])), "merchant_asset_not_pinned");
+  const chosen = await f.prepare("two-assets-0003", ["--asset", SYND.token.toLowerCase()]);
+  assert.equal(chosen.ok, true, JSON.stringify(chosen.error));
+  const op = chosen.data as { asset: { token: string; symbol: string }; amountAtomic: string };
+  assert.deepEqual([op.asset.token, op.asset.symbol, op.amountAtomic], [SYND.token, "SYND", SYND_MERCHANT.amount]);
   assert.equal(f.chain.sends, 0);
 });

@@ -766,7 +766,7 @@ apn x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <pro
 apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]
 apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
-apn x402 merchant prepare --profile <profile> --url <https-url> --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
+apn x402 merchant prepare --profile <profile> --url <https-url> [--asset <token>] --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
 apn x402 merchant retire-unsent --operation <operation-id>

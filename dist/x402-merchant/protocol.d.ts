@@ -30,7 +30,7 @@ export declare function checkMerchantChallenge(value: unknown): FrozenMerchantCh
  * from that row; the owner's admission (asset, mechanism, caps, optional recipient pin) bounds them. Any positive payment
  * window (`maxTimeoutSeconds`) is accepted; it is shown on consent and enforced by `assertMerchantPaymentWindow`.
  */
-export declare function checkGenericMerchantChallenge(value: unknown, assets: readonly MerchantAssetPin[]): FrozenMerchantChallenge & {
+export declare function checkGenericMerchantChallenge(value: unknown, assets: readonly MerchantAssetPin[], chosen?: string): FrozenMerchantChallenge & {
     readonly asset: MerchantAssetPin;
 };
 /**
@@ -43,7 +43,7 @@ export declare function checkChallengeFor(ctx: MerchantContext, value: unknown):
 /** The 402 challenge for the operation's URL; version 1 keeps the legacy reader. */
 export declare function merchantChallenge(o: HttpObservation, ctx?: MerchantContext): FrozenMerchantChallenge;
 /** A new merchant's 402: the single row naming any pinned asset selects the asset. */
-export declare function merchantGenericChallenge(o: HttpObservation, url: string, assets: readonly MerchantAssetPin[]): FrozenMerchantChallenge & {
+export declare function merchantGenericChallenge(o: HttpObservation, url: string, assets: readonly MerchantAssetPin[], chosen?: string): FrozenMerchantChallenge & {
     readonly asset: MerchantAssetPin;
 };
 export declare function merchantProof(frozen: FrozenMerchantChallenge, txHash: Hex, ctx?: MerchantContext): string;
