@@ -153,8 +153,9 @@ async function inspect(context, intent, userOperationHash, transactionHash, curs
     const [effectAccount, safeAccount] = await Promise.all([
         readAccountAt(context.rpc, context.deployment, intent.owner.address, included, false),
         readAccountAt(context.rpc, context.deployment, intent.owner.address, safe, true),
-        verifyProtocolAt(context.rpc, context.deployment, included),
-        verifyProtocolAt(context.rpc, context.deployment, safe),
+        // Immutable code needs one proof; the included-block read in this same batch carries it when it is still owed.
+        verifyProtocolAt(context.rpc, context.deployment, included, context.codeProven !== true),
+        verifyProtocolAt(context.rpc, context.deployment, safe, false),
     ]).then(([effect, current]) => [effect, current]);
     const accounting = gaslessAccounting(intent, userOperationHash, protocolReceipt);
     await recheckBlock(context.rpc, included);

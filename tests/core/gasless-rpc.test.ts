@@ -116,21 +116,49 @@ test("gasless owner wait makes no effect and keeps the distinct post-TTY guard",
   assert.equal(s.calls.filter(c => c.method === "eth_sendUserOperation").length, 1);
 });
 
-for (const fault of ["code", "proxy"] as const) {
-  test(`gasless approval invalidates anchored static proof on ${fault} drift`, async t => {
-    const temporary = await temporaryState(); t.after(temporary.cleanup);
-    const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
-    const confirm = s.approval.confirm.bind(s.approval);
-    s.approval.confirm = async input => { const accepted = await confirm(input);
-      s.setBlockHash(`0x${"ab".repeat(32)}`); s.setFault(fault); return accepted; };
-    const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
-    assert.equal(result.ok, true, result.error?.message);
-    const record = await s.record(id);
-    assert.equal(record.bootstrap.signingAttempts, 0);
-    assert.equal(record.userOperation.submissionAttempts, 0);
-    assert.equal(record.failure, "gasless_protocol_identity");
-  });
-}
+test("gasless approval re-reads proxy implementation slots at a changed anchor and blocks a proxy upgrade", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input);
+    s.setBlockHash(`0x${"ab".repeat(32)}`); s.setFault("proxy"); return accepted; };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  const record = await s.record(id);
+  assert.equal(record.bootstrap.signingAttempts, 0);
+  assert.equal(record.userOperation.submissionAttempts, 0);
+  assert.equal(record.failure, "gasless_protocol_identity");
+});
+
+test("gasless downloads pinned bytecode once per invocation and refuses wrong code at that first proof", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
+  const start = s.calls.length;
+  // Every guard sees a new latest anchor, so only the code cache can skip the bytecode reads.
+  let anchor = 0;
+  const confirm = s.approval.confirm.bind(s.approval);
+  s.approval.confirm = async input => { const accepted = await confirm(input);
+    s.setBlockHash(`0x${(++anchor).toString(16).padStart(64, "0")}`); return accepted; };
+  const seal = s.custody.seal.bind(s.custody);
+  s.custody.seal = async (...args) => { s.setBlockHash(`0x${(++anchor).toString(16).padStart(64, "0")}`); return await seal(...args); };
+  const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
+  assert.equal(result.ok, true, result.error?.message);
+  assert.equal((await s.record(id)).userOperation.submissionAttempts, 1);
+  const snapshots = s.calls.slice(start).filter(c => c.methods.length > 3 && c.methods.includes("eth_getStorageAt"));
+  const pinnedCode = snapshots.map(c => c.methods.filter(m => m === "eth_getCode").length - 1); // minus the owner's delegation read
+  assert.equal(snapshots.length, 3);
+  assert.deepEqual(pinnedCode, [gaslessDeployment(8453).code.length, 0, 0]);
+
+  // Wrong bytes at a pinned address are refused by the invocation's first proof, before any signature.
+  const second = await temporaryState(); t.after(second.cleanup);
+  const drifted = await bundledGaslessFixture(second.root), prepared = await drifted.prepare();
+  drifted.setFault("code");
+  const refused = await drifted.core.execute({ command: "gasless.transfer.approve", operationId: prepared.id });
+  assert.equal(refused.ok, true, refused.error?.message);
+  const record = await drifted.record(prepared.id);
+  assert.equal(record.state, "failed_before_effect"); assert.equal(record.failure, "gasless_protocol_identity");
+  assert.equal(record.bootstrap.signingAttempts, 0);
+});
 
 test("gasless pre-send fee check 429 is terminal before the durable send marker", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -631,9 +659,13 @@ test("gasless canonical state reads pin every effect value to one block hash", a
     reads: [{ kind: "call" as const, address: deployment.token, data: "0x12345678" as Hex, expected: word(7n) }] };
   const protocolRead = async (method: string, params: readonly unknown[]) => method === "eth_call" &&
     (params[0] as Json).data === "0x12345678" ? word(7n) : call(method, params);
-  await verifyProtocolAt(async (method, params) => method === "eth_getCode" ? "0x6000" : protocolRead(method, params), tiny, at);
+  await verifyProtocolAt(async (method, params) => method === "eth_getCode" ? "0x6000" : protocolRead(method, params), tiny, at, true);
   await assert.rejects(verifyProtocolAt(async (method, params) => method === "eth_getCode" ? "0x6001" : protocolRead(method, params),
-    tiny, at), { code: "APN_RPC_PROTOCOL" });
+    tiny, at, true), { code: "APN_RPC_PROTOCOL" });
+  // Code already proven in this invocation is not downloaded again; the identity reads still run at the new block.
+  const methods: string[] = [];
+  await verifyProtocolAt(async (method, params) => { methods.push(method); return protocolRead(method, params); }, tiny, at, false);
+  assert.deepEqual(methods, ["eth_call"]);
 });
 
 for (let type = 0; type <= 4; type += 1) test(`gasless outer type ${type} is reconstructed from signed bytes`, async () => {

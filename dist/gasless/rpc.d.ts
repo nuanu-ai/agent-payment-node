@@ -9,6 +9,7 @@ export declare class GaslessRpcRequestSession {
     private terminalStatus;
     private readonly verifiedChains;
     private readonly protocolAnchors;
+    private readonly provenCode;
     readonly maxBatchItems: number;
     /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
     readonly maxPosts: number;
@@ -18,7 +19,10 @@ export declare class GaslessRpcRequestSession {
     rejectHttp(status: number): never;
     hasVerifiedChain(rpc: GaslessRpc): boolean;
     verifyChain(rpc: GaslessRpc): void;
-    protocolAt(rpc: GaslessRpc, hash: Hex, verify: () => Promise<void>): Promise<void>;
+    /** True once this invocation verified the pinned code hashes through `source`; code at those addresses is immutable. */
+    codeProven(source: object): boolean;
+    proveCode(source: object): void;
+    protocolAt(rpc: GaslessRpc, hash: Hex, verify: (withCode: boolean) => Promise<void>): Promise<void>;
 }
 /** Wrap a public APN command so a reused RPC factory receives a fresh budget derived from the command's plan. */
 export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>, plan: GaslessInvocationPlan, maxBatchItems?: number): Promise<T>;

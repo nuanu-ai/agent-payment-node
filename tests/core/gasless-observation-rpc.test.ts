@@ -94,7 +94,9 @@ test("alternate RPC rejects wrong binding, chain and preparation anchor before r
 
 test("current protocol, permission, finality and log faults retain the final guard", async t => {
   const { operation } = await prepared(t, "final", "empty");
-  const protocolAndPermissionFaults: ObservationFault[] = ["protocol_code", "protocol_storage", "protocol_domain",
+  // Pinned bytecode is immutable and proven once per invocation at the initial anchor; proxy slots and identity
+  // reads are what can change at a current block, so those are the protocol faults observed here.
+  const protocolAndPermissionFaults: ObservationFault[] = ["protocol_storage", "protocol_domain",
     "permit", "allowance", "pending", "entrypoint", "eoa", "owner_code", "current_reorg"];
   for (const fault of protocolAndPermissionFaults) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
