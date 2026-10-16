@@ -255,12 +255,13 @@ function validateCoinbaseGasless(operation, value) {
         value.chainId !== CHAIN_ID || value.token !== BASE_USDC || value.grossAtomic !== operation.amountAtomic ||
         value.netAtomic !== operation.amountAtomic || value.feeAtomic !== "0" || value.senderNativeDebitWei !== "0" ||
         value.sponsorship !== "coinbase_cdp_paymaster" || value.exclusiveAccountUseRequired !== true ||
-        value.awalPackage !== "awal" || value.awalVersion !== "2.12.1" || value.awalCommand !== "send_base_usdc" ||
-        typeof value.rpcOrigin !== "string" || value.rpcOrigin.length === 0 || value.entryPoint !== "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" ||
-        value.entryPointCodeHash !== "0xc93c806e738300b5357ecdc2e971d6438d34d8e4e17b99b758b1f9cac91c8e70" ||
-        value.accountCodeHash !== "0xaaa52c8cc8a0e3fd27ce756cc6b4e70c51423e9b597b11f32d3e49f8b1fc890d" ||
-        value.accountImplementation !== "0x00000110dCdEdC9581cb5eCB8467282f2926534d" ||
-        value.accountImplementationCodeHash !== "0x136185896fc519277ec953c0b3d048fc0c9f607b8d04022e60f23ef8dbc6c4d5") {
+        value.awalPackage !== "awal" || typeof value.awalVersion !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+$/u.test(value.awalVersion) ||
+        value.awalCommand !== "send_base_usdc" || typeof value.rpcOrigin !== "string" || value.rpcOrigin.length === 0 ||
+        // Shape only: the AWAL version and Coinbase code pins gate new prepares (coinbaseGaslessSnapshot) and each
+        // approval (coinbaseGaslessPreconditionsMatch). A later release that follows an upgrade keeps old records readable.
+        ![value.entryPoint, value.accountImplementation].every(item => typeof item === "string" && /^0x[0-9a-fA-F]{40}$/u.test(item)) ||
+        ![value.entryPointCodeHash, value.accountCodeHash, value.accountImplementationCodeHash]
+            .every(item => typeof item === "string" && /^0x[0-9a-f]{64}$/u.test(item))) {
         stateCorrupt("Coinbase gasless immutable binding is invalid.");
     }
     const gross = parseAtomic(value.grossAtomic, { positive: true }), minimum = parseAtomic(value.minReceivedAtomic, { positive: true });

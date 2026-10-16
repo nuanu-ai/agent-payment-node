@@ -11,6 +11,7 @@ import {
 } from "./allowlist-inventory.js";
 import {
   sealAssetPolicyRegistry,
+  validateAssetPolicyRegistry,
   type AssetPolicyRegistry,
   type AssetRailAdmission,
   type UnsignedAssetPolicyRegistry,
@@ -152,12 +153,35 @@ export function validateAllowlistPolicyRecord(value: unknown): AllowlistPolicyRe
   if (domainHash(ALLOWLIST_POLICY_RECORD_SCHEMA, canonicalJson(body)) !== recordDigest) {
     corrupt("Allowlist policy record integrity validation failed.");
   }
-  const compiled = compileAllowlistPolicyOverlay(overlayBody(value.overlay));
-  if (canonicalJson(compiled.overlay) !== canonicalJson(value.overlay) ||
-      canonicalJson(compiled.registry) !== canonicalJson(value.registry)) {
-    corrupt("Allowlist policy record does not match its frozen inventory compilation.");
-  }
+  assertStoredAllowlistCompilation(ALLOWLIST_POLICY_OVERLAY_SCHEMA, value.overlay, value.registry);
   return value as unknown as AllowlistPolicyRecord;
+}
+
+/**
+ * A stored staged revision is checked against itself, never recompiled against the inventory this release ships.
+ * The dataset, inventory and mechanism rules apply when the owner stages a revision; the owner then activates the
+ * exact sealed registry the approval screen shows. A release with another dataset may refuse new staging, but it
+ * must not void stored policies (that blocked every allowlist-gated rail of the profile, and its own re-staging).
+ * The digests are unkeyed: they detect corruption, not a rewrite by the same local user.
+ */
+export function assertStoredAllowlistCompilation(overlaySchema: string, overlay: unknown, registryValue: unknown): void {
+  if (!isPlainRecord(overlay) || overlay.schemaVersion !== overlaySchema || typeof overlay.overlayDigest !== "string" ||
+      typeof overlay.profile !== "string" || !PROFILE.test(overlay.profile) || typeof overlay.overlayVersion !== "string" ||
+      typeof overlay.effectiveAt !== "string" || !Array.isArray(overlay.admissions) ||
+      !(typeof overlay.account === "string" || (isPlainRecord(overlay.accounts) &&
+        Object.entries(overlay.accounts).every(([family, account]) => ["evm", "solana", "tron"].includes(family) && typeof account === "string")))) {
+    corrupt("Allowlist policy overlay schema is invalid.");
+  }
+  const { overlayDigest, ...body } = overlay;
+  if (overlay.profileHash !== allowlistProfileHash(overlay.profile) || domainHash(overlaySchema, canonicalJson(body)) !== overlayDigest) {
+    corrupt("Allowlist policy overlay integrity validation failed.");
+  }
+  let registry: AssetPolicyRegistry;
+  try { registry = validateAssetPolicyRegistry(registryValue); } catch { return corrupt("Allowlist policy registry is invalid."); }
+  if (registry.registryVersion !== overlay.overlayVersion || registry.publishedAt !== overlay.effectiveAt ||
+      registry.effectiveAt !== overlay.effectiveAt || registry.expiresAt !== overlay.expiresAt) {
+    corrupt("Allowlist policy registry does not belong to its staged overlay.");
+  }
 }
 
 function overlayInput(value: AllowlistPolicyOverlayInput, inventory: AllowlistInventory): AllowlistPolicyOverlayInput {
@@ -263,13 +287,6 @@ function swapMechanismPin(value: unknown): SwapMechanismPin | undefined {
   if (value === undefined) return undefined;
   try { return validateSwapMechanismPin(value); }
   catch { return invalid("Pinned swap mechanism metadata is invalid.", "invalid_swap_mechanism"); }
-}
-
-function overlayBody(value: unknown): AllowlistPolicyOverlayInput {
-  if (!isPlainRecord(value) || value.schemaVersion !== ALLOWLIST_POLICY_OVERLAY_SCHEMA || typeof value.overlayDigest !== "string" ||
-      typeof value.profileHash !== "string") corrupt("Allowlist policy overlay schema is invalid.");
-  const { schemaVersion: _schema, profileHash: _profileHash, overlayDigest: _digest, ...body } = value;
-  return body as unknown as AllowlistPolicyOverlayInput;
 }
 
 function positiveAtomic(value: unknown, field: string): string {
