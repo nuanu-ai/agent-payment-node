@@ -72,28 +72,24 @@ for (const boundary of ["bootstrap_checked", "user_sealed"] as const) {
 }
 
 for (const branch of ["sponsored", "post_op_reverted", "prefund_too_low"] as const) {
-  test(`gasless ${branch} failure retains actual USDC fee and guard until safe allowance cleanup`, async (t) => {
+  test(`gasless ${branch} failure closes on its safe receipt with the actual USDC fee; a residual allowance is reported, never held`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root), { id } = await s.prepare(); s.rpc.success = false; s.rpc.branch = branch;
     const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
     assert.equal(response.ok, true, response.error?.message);
     assert.equal((await s.record(id)).state, "submitted_pending");
-    assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-    const before = await s.record(id);
-    assert.equal(before.state, "failed_effects_pending"); assert.equal(before.terminal, false); assert.equal(before.settlement, null);
-    const evidence = before.observation!.settlement!, fee = evidence.accounting.feeAtomic;
+    const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true);
+    const final = await s.record(id);
+    assert.equal(final.state, "failed_confirmed_revert"); assert.equal(final.terminal, true);
+    const evidence = final.settlement!, fee = evidence.accounting.feeAtomic;
     assert.ok(BigInt(fee) > 0n); assert.equal(evidence.accounting.deliveredAtomic, "0");
     if (branch !== "sponsored") assert.equal(fee, evidence.accounting.prefundAtomic);
-    await assert.rejects(new OperationService(s.state).assertProfileAvailable(before.profileHash), { code: "APN_OPERATION_BLOCKED" });
-    s.rpc.result = "throw";
-    const unavailable = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(unavailable.ok, true);
-    assert.equal(hashObject(await s.record(id)), hashObject(before));
-    s.rpc.result = "safe"; s.rpc.safeAllowance = "0"; s.rpc.safeNumber = "103";
-    s.now.setTime(s.now.getTime() + 360000);
-    const cleared = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(cleared.ok, true, cleared.error?.message);
-    const final = await s.record(id); assert.equal(final.state, "failed_confirmed_revert");
-    assert.equal(final.settlement!.accounting.feeAtomic, fee); assert.equal(s.rpc.sends.length, 1);
+    assert.notEqual(evidence.safeAccount.allowanceAtomic, "0");
+    assert.equal((resumed.operation as any).permission.residual_allowance_atomic, evidence.safeAccount.allowanceAtomic);
     await new OperationService(s.state).assertProfileAvailable(final.profileHash);
+    s.rpc.result = "throw";
+    assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
+    assert.equal(hashObject(await s.record(id)), hashObject(final)); assert.equal(s.rpc.sends.length, 1);
   });
 }
 

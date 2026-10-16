@@ -322,9 +322,13 @@ limits new APN actions, not the lifetime of already signed material.
 
 The account batch sends exactly `N` USDC and clears the paymaster allowance.
 A failed transfer can still pay a USDC fee. The receipt reports the observed
-prefund, refund, actual charge and residual allowance separately. A failed
-operation with residual permission remains `failed_effects_pending`; APN
-keeps the profile guard until safe evidence proves the permission cleared.
+prefund, refund, actual charge and residual allowance separately. The residual
+allowance is informational: it is read at the latest head
+(`residual_allowance_read_at`) and never holds a close, so a safe receipt ends
+the operation as `completed` or `failed_confirmed_revert` whatever it reads. A
+later gasless prepare still refuses a non-zero paymaster allowance
+(`gasless_allowance_drift`) until the owner clears it. Records written before
+0.5.43 may remain `failed_effects_pending`; the next observation closes them.
 There is no automatic revocation, extra cleanup transaction or new payment.
 
 ## Local wallet recovery and proof
@@ -388,8 +392,15 @@ invalidation probe runs only once the scan has reached the current safe head.
 Observation reads no historical state, so a keyless public RPC that keeps only
 recent state can close an operation at any later time. Success, revert and fee
 accounting come from the receipt logs; inclusion is proven by header membership;
-the residual allowance, nonces and delegation are read at the current safe head
-(Polygon: finalized) and, for an invalidated permission, at the latest head too.
+the verdict waits until the receipt's block is at or below the safe head
+(Polygon: finalized) and that block's hash still matches a header read at its
+height; a receipt above safe is "not yet" and a hash mismatch is a reorg, never
+a terminal. The residual allowance, nonces and delegation are then read at the
+latest head, which every keyless node serves even where the safe head trails by
+more than its state window (Arbitrum, Unichain); nonces only grow, so they show
+the consumed permission. An invalidated-permission proof, which has no receipt
+to anchor it, still reads the account at the safe head and at the latest head;
+on a node that refuses safe-head state it stays unresolved until it can.
 An already-sent operation is observed through the contracts and protocol hash
 saved in its own intent, so a later registry pin update cannot strand it.
 

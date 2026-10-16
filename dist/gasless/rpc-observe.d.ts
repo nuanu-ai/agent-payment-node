@@ -10,8 +10,8 @@ export interface GaslessObservationContext {
     readonly snapshot?: (owner: Address) => Promise<GaslessSnapshot>;
 }
 /**
- * Archive-free observation. Effects are proven by the authenticated receipt logs and header membership; account state
- * is read only at the current safe (Polygon: finalized) head and at the latest head, never at the prepare, inclusion or
- * scan-cursor block, whose state a keyless node with a ~128-block state window no longer serves.
+ * Archive-free observation. Effects are proven by the authenticated receipt logs and header membership; a settlement
+ * reads account state only at the latest head, and the permission-invalidation probe at the safe (Polygon: finalized)
+ * and latest heads; never at the prepare, inclusion or scan-cursor block, whose state a keyless node no longer serves.
  */
 export declare function observeGasless(context: GaslessObservationContext, intent: GaslessIntent, identity: GaslessEffectIdentity, cursorInput: GaslessCursor): Promise<GaslessObservation>;

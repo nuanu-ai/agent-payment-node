@@ -15,6 +15,7 @@ import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/regist
 import { GaslessRpc, GaslessRpcRequestSession, gaslessRpcFactory, withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
 import { gaslessPostBudget, gaslessSnapshotPosts } from "../../src/gasless/rpc-budget.js";
 import { observeGasless, type GaslessObservationContext } from "../../src/gasless/rpc-observe.js";
+import { assertGaslessSettlementContinuation, gaslessSettlementEffect, validateGaslessSettlement } from "../../src/gasless/settlement-validation.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "../../src/gasless/rpc-state.js";
 import { gaslessOuterTransaction } from "../../src/gasless/rpc-transaction.js";
 import { GASLESS_ESTIMATE_SIGNATURE } from "../../src/gasless/signature.js";
@@ -918,15 +919,24 @@ test("gasless scan locates a matching operation in a later range without an effe
   assert.ok(calls.includes("eth_getTransactionReceipt")); assert.equal(calls.some((method) => /send|estimate/iu.test(method)), false);
 });
 
-for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finality observation fixes effect proof while later account state may advance`, async () => {
-  const intent = makeIntent(chainId), userOperationHash = word(72n), signed = await signedOuter(2, chainId);
+// A keyless node keeps state only near latest; on Arbitrum/Unichain the safe head trails by more than that window.
+function laggingSafeContext(chainId: GaslessChainId, intent: GaslessIntent, userOperationHash: Hex,
+  signed: { readonly hash: Hex; readonly rpc: Json }, initial: { safe: bigint; latest: bigint }) {
   const effectBlock = block(101), transaction = { ...signed.rpc, blockNumber: "0x65", blockHash: effectBlock.hash,
     transactionIndex: "0x0" };
   const logs = settlementLogs(intent, userOperationHash), receipt = { transactionHash: signed.hash, blockNumber: "0x65",
     blockHash: effectBlock.hash, transactionIndex: "0x0", type: "0x2", from: OUTER.address, to: intent.entryPoint,
     status: "0x1", logs: logs.map((log) => rawLog(log, signed.hash, effectBlock)) };
-  let safeNumber = 102n, finalityUnavailable = false;
-  const tags: unknown[] = [], finalityTag = chainId === 137 ? "finalized" : "safe";
+  const state = { ...initial, finalityUnavailable: false, reorgedInclusionReads: 0, inclusionReads: 0,
+    tags: [] as unknown[], statePins: [] as unknown[] };
+  const finalityTag = chainId === 137 ? "finalized" : "safe";
+  const header = (number: bigint) => rawBlock(number, blockHash(number), number === 101n ? [signed.hash] : []);
+  const retained = (pin: unknown) => {
+    state.statePins.push(pin);
+    if ((pin as { blockHash?: Hex }).blockHash !== blockHash(state.latest) && pin !== "pending") {
+      throw new Error("missing trie node: state is not available beyond the keyless retention window");
+    }
+  };
   const context = { chainId, rpcOrigin: "https://rpc.example",
     snapshot: async () => intent.initialSnapshot,
     bundler: async (method: string) => method === "eth_getUserOperationReceipt"
@@ -936,36 +946,74 @@ for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finality ob
       if (method === "eth_getTransactionByHash") return transaction;
       if (method === "eth_getTransactionReceipt") return receipt;
       if (method === "eth_getBlockByNumber") {
-        const tag = params[0]; tags.push(tag);
-        if (tag === finalityTag && finalityUnavailable) throw new Error("finality block unavailable");
-        const number = tag === finalityTag ? safeNumber : BigInt(tag as string);
-        return rawBlock(number, blockHash(number), number === 101n ? [signed.hash] : []);
+        const tag = params[0]; state.tags.push(tag);
+        if (tag === finalityTag && state.finalityUnavailable) throw new Error("finality block unavailable");
+        if (tag === finalityTag) return header(state.safe);
+        if (tag === "latest") return header(state.latest);
+        const number = BigInt(tag as string);
+        if (number === 101n && ++state.inclusionReads > 1 && state.reorgedInclusionReads > 0) {
+          state.reorgedInclusionReads -= 1; return rawBlock(101n, word(0xdeadn), [signed.hash]);
+        }
+        return header(number);
       }
+      if (method === "eth_getBalance" || method === "eth_getTransactionCount" || method === "eth_getCode") retained(params.at(-1));
       if (method === "eth_getBalance" || method === "eth_getTransactionCount") return "0x0";
       if (method === "eth_getCode") return `0xef0100${intent.delegate.slice(2).toLowerCase()}`;
-      if (method === "eth_call") return accountRead(params);
+      if (method === "eth_call") { retained(params.at(-1)); return accountRead(params); }
       throw new Error(`unexpected ${method}`);
     },
   } as GaslessObservationContext;
+  return { context, state, finalityTag };
+}
+
+for (const chainId of [8453, 137] as const) test(`gasless ${chainId} lagging safe head beyond keyless state retention closes once the receipt is at or below safe`, async () => {
+  const intent = makeIntent(chainId), userOperationHash = word(72n), signed = await signedOuter(2, chainId);
   const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
-  const first = await observeGasless(context, intent, identity, initialCursor(intent));
-  assert.equal(first.status, "safe"); assert.equal(first.settlement?.safeBlock.numberAtomic, "102");
-  assert.ok(tags.includes(finalityTag)); assert.equal(tags.includes("latest"), false);
-  // No state at the inclusion block (archive): both accounts are the one safe-head read; the receipt is the effect.
+  // The receipt is above the safe head: not yet, retry later, and no account state is read at all.
+  const f = laggingSafeContext(chainId, intent, userOperationHash, signed, { safe: 100n, latest: 2_000n });
+  const early = await observeGasless(f.context, intent, identity, initialCursor(intent));
+  assert.equal(early.status, "pending"); assert.equal(early.settlement, null); assert.deepEqual(f.state.statePins, []);
+  // Safe passes the inclusion block but trails latest by 1,898 blocks; only latest-head state is served.
+  f.state.safe = 102n; f.state.latest = 2_000n;
+  const first = await observeGasless(f.context, intent, identity, early.cursor);
+  assert.equal(first.status, "safe", JSON.stringify(first)); assert.equal(first.settlement?.safeBlock.numberAtomic, "102");
+  assert.equal(first.settlement?.accountBlock?.numberAtomic, "2000", "account facts are read at the latest head");
+  assert.ok(f.state.statePins.every((pin) => pin === "pending" || (pin as { blockHash?: Hex }).blockHash === blockHash(2_000n)));
+  assert.ok(f.state.tags.includes(f.finalityTag)); assert.ok(f.state.tags.includes("0x65"), "the inclusion header is re-read at its height");
   assert.deepEqual(first.settlement?.effectAccount, first.settlement?.safeAccount);
-  assert.equal(first.settlement?.effectAccount.balanceAtomic, "6000000");
   assert.equal(first.settlement?.protocolHash, intent.initialSnapshot.protocolHash);
-  safeNumber = 103n; const second = await observeGasless(context, intent, identity, first.cursor);
-  assert.equal(second.status, "safe"); assert.equal(second.settlement?.safeBlock.numberAtomic, "103");
-  assert.equal(second.settlement?.safeAccount.balanceAtomic, "6000001");
-  const { safeBlock: _firstSafeBlock, safeAccount: _firstSafeAccount, effectAccount: _firstEffectAccount, ...firstEffect } = first.settlement!;
-  const { safeBlock: _secondSafeBlock, safeAccount: _secondSafeAccount, effectAccount: _secondEffectAccount, ...secondEffect } = second.settlement!;
-  assert.deepEqual(secondEffect, firstEffect);
-  finalityUnavailable = true; tags.length = 0;
-  const held = await observeGasless(context, intent, identity, first.cursor);
+  validateGaslessSettlement(intent, userOperationHash, first.settlement);
+  // A later observation may see later account state; the receipt-bound effect stays fixed.
+  f.state.safe = 103n; f.state.latest = 2_001n;
+  const second = await observeGasless(f.context, intent, identity, first.cursor);
+  assert.equal(second.status, "safe"); assert.equal(second.settlement?.accountBlock?.numberAtomic, "2001");
+  assertGaslessSettlementContinuation(first.settlement!, second.settlement!);
+  assert.deepEqual(gaslessSettlementEffect(second.settlement!), gaslessSettlementEffect(first.settlement!));
+  f.state.finalityUnavailable = true;
+  const held = await observeGasless(f.context, intent, identity, first.cursor);
   assert.equal(held.status, "unresolved"); assert.equal(held.settlement, null); assert.deepEqual(held.cursor, first.cursor);
-  assert.ok(tags.includes(finalityTag)); assert.equal(tags.includes("latest"), false);
-  assert.equal(tags.includes(chainId === 137 ? "safe" : "finalized"), false);
+});
+
+test("gasless anchor above the safe head stays pending however far latest has moved", async () => {
+  const intent = makeIntent(42161), userOperationHash = word(73n), signed = await signedOuter(2, 42161);
+  const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
+  const f = laggingSafeContext(42161, intent, userOperationHash, signed, { safe: 100n, latest: 50_000n });
+  for (let pass = 0; pass < 3; pass += 1) {
+    const result = await observeGasless(f.context, intent, identity, initialCursor(intent));
+    assert.equal(result.status, "pending"); assert.equal(result.settlement, null);
+  }
+  assert.deepEqual(f.state.statePins, [], "a latest read whose anchor is not yet safe is never taken as a verdict");
+});
+
+test("gasless reorg of the anchor at its height never yields a terminal verdict", async () => {
+  const intent = makeIntent(8453), userOperationHash = word(74n), signed = await signedOuter(2, 8453);
+  const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
+  const f = laggingSafeContext(8453, intent, userOperationHash, signed, { safe: 102n, latest: 2_000n });
+  f.state.reorgedInclusionReads = 1;
+  const reorged = await observeGasless(f.context, intent, identity, initialCursor(intent));
+  assert.equal(reorged.status, "unresolved"); assert.equal(reorged.settlement, null);
+  const recovered = await observeGasless(f.context, intent, identity, initialCursor(intent));
+  assert.equal(recovered.status, "safe", "the same canonical anchor closes on a later pass");
 });
 
 function makeIntent(chainId: GaslessChainId = 8453): GaslessIntent {
