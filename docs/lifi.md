@@ -692,21 +692,23 @@ durable before custody is entered; a recovered commitment can load only its
 original authenticated seal. Missing committed material blocks recovery and
 never permits a replacement signature.
 
-If an RPC transport fails during a pre-sign guard, the terminal operation and
-receipt keep `unsent_apn_rpc_ambiguous` and add `pre_sign_rpc_failure`. This
-integrity-bound record names the effect role, source or destination chain, the
-finite guard stage, its category and the exact JSON-RPC method when the
-transport reached one. It never stores an endpoint, header, provider message,
-calldata or signing material. The failure remains final and does not add a
-retry, fallback, signature or send. A first-effect guard ends as
-`failed_before_effect`; a bridge guard after a safely completed approval ends
-as `failed_after_approval` and keeps the same bridge-stage context while the
-bridge effect remains unsigned and unsent. If the approval is only included,
-or the residual-allowance read fails, the operation remains
-`unknown_finality`, retains `unsent_apn_rpc_ambiguous` and its finite context,
-and exposes `residual_allowance_status` when that read was attempted. A later
-observation can terminalize the operation without signing or sending the
-bridge, while keeping the original diagnostic in status and receipt.
+If an RPC transport fails, or an endpoint answers HTTP 408 or 5xx after its one
+retry, during a pre-sign guard, nothing has been sealed, signed or sent, so the
+operation is not ended. It keeps its state with reason `pre_sign_rpc_unavailable`
+and adds `pre_sign_rpc_failure`. This integrity-bound record names the effect
+role, source or destination chain, the finite guard stage, its category and the
+exact JSON-RPC method when the transport reached one. It never stores an
+endpoint, header, provider message, calldata or signing material. The next
+action is `apn bridge approve` before consent and `apn operation resume` after
+it; the next run repeats the full guard and clears the reason when it signs. Once
+the quote has expired, that run ends the operation on the usual path:
+`failed_before_effect` before any effect, or `failed_after_approval` with
+`unsent_apn_reprepare_required` and the observed residual allowance after a safe
+approval. A rate limit is treated the same way with `pre_sign_rpc_rate_limited`.
+A timeout or rate limit on the raw send itself keeps the first-attempt rule: the
+attempt is final, it is only observed and never resent. Journals written before
+this change that already retain `unsent_apn_rpc_ambiguous` keep their recorded
+final outcome.
 
 Bridge journals written before the allowlist/usage-ledger upgrade remain
 readable through a separate, strict legacy decoder. The decoder verifies the
@@ -1177,9 +1179,11 @@ signed or sent; the operation keeps its state with reason
 `pre_sign_rpc_rate_limited` and `apn operation resume` as next action, and the
 next resume repeats the full guard (an expired quote then ends on the usual
 `failed_after_approval` / `unsent_apn_reprepare_required` path). Deterministic
-refusals (identity, deployment, fee, allowance, nonce, balance) and transport
-ambiguity keep their terminal outcomes. Source, destination and residual
-observation already keep any RPC failure, including rate limits, recoverable.
+refusals (identity, deployment, fee, allowance, nonce, balance) keep their
+terminal outcomes; a transport failure or HTTP 408/5xx in the guard is recoverable
+in the same way (`pre_sign_rpc_unavailable`, see the pre-sign RPC section).
+Source, destination and residual observation already keep any RPC failure,
+including rate limits, recoverable.
 
 ## Finite Base to Mega native funding
 

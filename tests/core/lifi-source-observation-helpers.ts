@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { decodeFunctionData, encodeFunctionResult, keccak256, parseTransaction, type Hex } from "viem";
 import { canonicalJson } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
 import type { Address } from "../../src/model.js";
 import type { BridgeChainId } from "../../src/lifi/chains.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
@@ -57,8 +58,12 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
   readonly trace?: (hash: string) => unknown;
   /** Accepts raw sends (recorded in `sent`); without it any send fails the test. */
   readonly acceptSend?: boolean;
-  /** Rate-limits one POST as the official Base endpoint does: HTTP 429 with -32011, or HTTP 200 with -32007 per item. */
-  readonly limit?: (post: { readonly role: string; readonly methods: readonly string[]; readonly index: number }) => "http_429" | "json_rpc" | null;
+  /**
+   * Fails one POST: as the official Base endpoint rate-limits (HTTP 429 with -32011, or HTTP 200 with -32007 per item), with
+   * HTTP 503, or with a request timeout.
+   */
+  readonly limit?: (post: { readonly host: string; readonly role: string; readonly methods: readonly string[]; readonly index: number }) =>
+    "http_429" | "json_rpc" | "http_503" | "timeout" | null;
 }) {
   const expected = new Map<string, Hex>(), key = (chainId: number, kind: string, address: string, data: string) =>
     canonicalJson([chainId, kind, address.toLowerCase(), data.toLowerCase()]);
@@ -111,7 +116,9 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
     const chainId = host === "mainnet.base.org" ? 8453 : Number(match?.[2]), role = match?.[1] === "rpc" ? "primary" : match?.[1] ?? "receipt";
     const parsed = JSON.parse(body!) as Rpc | Rpc[], rows = Array.isArray(parsed) ? parsed : [parsed];
     posts.push({ host, role, methods: rows.map((row) => row.method) });
-    const limited = options.limit?.({ role, methods: rows.map((row) => row.method), index: posts.length - 1 }) ?? null;
+    const limited = options.limit?.({ host, role, methods: rows.map((row) => row.method), index: posts.length - 1 }) ?? null;
+    if (limited === "timeout") throw new ApnError("APN_RPC_AMBIGUOUS", "Bridge HTTPS request timed out.", { transportReason: "request_deadline" });
+    if (limited === "http_503") return { status: 503, headers: {}, body: "" };
     if (limited === "http_429") return { status: 429, headers: { "retry-after": "1" },
       body: JSON.stringify({ jsonrpc: "2.0", id: rows[0]!.id, error: { code: -32011, message: "request limit reached" } }) };
     const values = rows.map((row) => limited === "json_rpc" ? { jsonrpc: "2.0", id: row.id, error: { code: -32007, message: "5/second request limit reached" } }
