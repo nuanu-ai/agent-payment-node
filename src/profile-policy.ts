@@ -155,11 +155,19 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
   };
 }
 
+export const REDUCE_EXCESS_ACTION = "Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically.";
+
+export interface FundingPosture {
+  readonly classification: string;
+  readonly next_actions: readonly string[];
+  readonly [field: string]: unknown;
+}
+
 export function fundingPosture(
   usdcAtomic: string,
   ethAtomic: string,
   policy: ProfilePolicyRecord | null,
-): unknown {
+): FundingPosture {
   const usdc = parseAtomic(usdcAtomic);
   const eth = parseAtomic(ethAtomic);
   if (policy === null) {
@@ -200,7 +208,7 @@ export function fundingPosture(
     },
     reason: overfunded ? "local_disposable_balance_overfunded" : "local_disposable_balance_within_limit",
     next_actions: overfunded
-      ? ["Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically."]
+      ? [REDUCE_EXCESS_ACTION]
       : [],
   };
 }

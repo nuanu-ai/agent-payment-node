@@ -15,6 +15,7 @@ import {
   validateBalance,
 } from "./wallet-policy.js";
 import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-policy.js";
+import { walletFundingGuidance } from "./funding-guidance.js";
 import { projectLegacyLocalProfile, type ProviderProfileRecord } from "./provider-profile.js";
 import type { WalletRecord } from "./model.js";
 import type { EvmChainId } from "./evm-asset.js";
@@ -172,6 +173,8 @@ export class WalletService {
       const policy = await this.context.requirePolicy().load(policyBinding(wallet));
       const snapshot = await this.context.requireRpc().getBalances(wallet.address);
       validateBalance(snapshot, wallet.address);
+      const posture = fundingPosture(snapshot.usdcAtomic, snapshot.ethAtomic, policy);
+      const guidance = walletFundingGuidance(snapshot.usdcAtomic, snapshot.ethAtomic, policy, posture.next_actions);
       return {
       profile,
       funding_address: wallet.address,
@@ -188,12 +191,9 @@ export class WalletService {
         },
       },
       provenance: publicProvenance(snapshot),
-      funding_guidance: {
-        action: "Fund this disposable wallet manually with a small amount of Base ETH for gas and Base USDC for the payment.",
-        warning: "Only fund an amount you can afford to lose; this local-software wallet has no backup or hardware protection.",
-      },
-      funding_posture: fundingPosture(snapshot.usdcAtomic, snapshot.ethAtomic, policy),
-      next_actions: ["Fund with low value only", "Re-run apn wallet balance"],
+      funding_guidance: guidance.funding_guidance,
+      funding_posture: posture,
+      next_actions: guidance.next_actions,
       };
     });
   }
