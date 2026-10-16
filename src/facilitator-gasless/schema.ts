@@ -19,7 +19,10 @@ const intentSchema = z.strictObject({ profile: ownerSchema.shape.profile, reques
   facilitator: z.strictObject({ origin: originSchema, endpointHash: hashSchema, signers: z.array(lowerAddress).min(1).max(8),
     supportedResponseHash: hashSchema }),
   initial: z.strictObject({ block: blockSchema, balanceAtomic: uintSchema, rpcOrigin: originSchema, rpcEndpointHash: hashSchema }),
-  preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema });
+  preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema,
+  allowlist: z.strictObject({ policyDigest: hashSchema, policyRevision: z.number().int().positive().safe(), activationDigest: hashSchema,
+    mechanism: z.strictObject({ provider: z.string().min(1).max(256), reference: z.string().min(1).max(256) }),
+    reservationId: hashSchema }).optional() });
 const authorizationSchema = z.strictObject({ from: lowerAddress, to: lowerAddress, value: positive, validAfter: z.literal("0"),
   validBefore: positive, nonce: wordSchema });
 const signedSchema = z.strictObject({ authorization: authorizationSchema, digest: wordSchema, startBlock: blockSchema,

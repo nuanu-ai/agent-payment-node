@@ -19,12 +19,16 @@ The local path reserves a maximum USDC fee and sends the remainder. Circle's
 token paymaster supplies native gas; APN approves and accounts for the fee in
 canonical USDC.
 
-For **local Base USDC** (`eip155:8453`) and **local Ethereum USDC** (`eip155:1`),
-prepare requires an active owner asset policy for the exact local wallet account
-and canonical token on that chain. Base uses
-`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`; Ethereum uses
-`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`. Admit the `gasless` rail
-with positive per-operation and UTC daily caps and the corresponding exact mechanism:
+On **every executable local chain** (Ethereum `eip155:1`, Optimism `eip155:10`,
+Unichain `eip155:130`, Polygon PoS `eip155:137`, Base `eip155:8453` and Arbitrum
+One `eip155:42161`), prepare requires an active owner asset policy for the exact
+local wallet account and canonical USDC on that chain, as for a direct transfer.
+Base uses `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`; Ethereum uses
+`0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`; the other chains use their native
+USDC from the same registry. Admit the `gasless` rail with positive
+per-operation and UTC daily caps and the chain's exact mechanism
+`{ "provider": "local", "reference": "eip155:<chain-id>:<Circle paymaster>" }`,
+for example:
 
 ```json
 { "provider": "local", "reference": "eip155:8453:0x0578cFB241215b77442a541325d6A4E6dFE700Ec" }
@@ -45,9 +49,10 @@ replaces gross reserved usage with the proven USDC fee after allowance cleanup;
 the settlement record keeps that fee separate from the zero delivered amount.
 Safe permission invalidation also releases usage when
 the payment was never submitted; attempted submissions with unknown financial
-results remain reserved. Historical unbound local Base or Ethereum
-operations without this binding cannot be approved or replayed; signed ones
-remain available for observation. These controls have synthetic test evidence,
+results remain reserved. Historical unbound local operations without this
+binding (Base and Ethereum before the allowlist, the other chains before
+0.5.42) cannot be approved or replayed; signed ones remain available for
+observation. These controls have synthetic test evidence,
 not a fresh mainnet transfer acceptance.
 
 Use an existing local EVM wallet profile and an explicit public HTTPS RPC for
@@ -460,6 +465,23 @@ apn gasless transfer approve --operation <operation-id>
 
 `--max-fee` and `--min-received` keep the shared command shape. This route
 charges no fee, so any `--min-received` up to the amount is satisfied.
+
+Prepare requires an active owner asset policy for the local wallet account and
+Avalanche USDC (`eip155:43114`, `0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E`)
+that admits the `gasless` rail with positive per-operation and UTC daily caps
+and this exact mechanism:
+
+```json
+{ "provider": "payai-x402-facilitator", "reference": "eip155:43114:https://facilitator.payai.network" }
+```
+
+Approval reserves the gross amount in the common asset usage ledger before the
+owner signs and rechecks the unchanged policy and caps right before the
+authorization leaves APN. After exposure the full amount stays charged until
+finalized evidence proves delivery (`completed`) or an unused, expired
+authorization (`expired_unused`, which releases the charge). Avalanche
+operations prepared before 0.5.42 carry no policy binding and cannot be
+approved; exposed ones remain observation only.
 
 Preparation checks the bound local wallet, the chain ID, the USDC balance at a
 finalized block and the facilitator's current support for Avalanche `exact`

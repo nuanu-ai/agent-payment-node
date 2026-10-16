@@ -17,6 +17,9 @@ export const FACILITATOR_REASONS = {
   facilitator_gasless_signing: "APN_PROVIDER_EFFECT_UNAVAILABLE",
   facilitator_gasless_capacity: "APN_OPERATION_BLOCKED",
   facilitator_gasless_state_corrupt: "APN_STATE_CORRUPT",
+  facilitator_gasless_allowlist_required: "APN_ALLOWLIST_REFUSED",
+  facilitator_gasless_allowlist_refused: "APN_ALLOWLIST_REFUSED",
+  facilitator_gasless_allowlist_changed: "APN_ALLOWLIST_REFUSED",
 } as const satisfies Readonly<Record<string, ErrorCode>>;
 
 export type FacilitatorReason = keyof typeof FACILITATOR_REASONS;
