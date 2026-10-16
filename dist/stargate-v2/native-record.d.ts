@@ -11,6 +11,12 @@ export declare const DESTINATION_POOL: `0x${string}`;
 export declare const HASH: RegExp;
 export declare const CODE: RegExp;
 export declare const MAX_TTL_MS = 120000;
+/** Owner admission pin for this exact native lane, in the same provider/reference form as the token lane. */
+export declare const STARGATE_NATIVE_MECHANISM: Readonly<{
+    provider: "stargate-v2";
+    reference: `eip155:1:0x${string}/eip155:130:0x${string}`;
+}>;
+export declare const STARGATE_NATIVE_SCHEMAS: readonly ["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2", "apn.stargate-v2-native-operation.v3"];
 export declare function fail(code: "APN_INVALID_INPUT" | "APN_OPERATION_BLOCKED" | "APN_RPC_PROTOCOL" | "APN_RPC_AMBIGUOUS" | "APN_CHAIN_MISMATCH" | "APN_REPREPARE_REQUIRED" | "APN_STATE_CORRUPT", reason: string): never;
 export declare function uint(value: unknown, positive?: boolean): bigint;
 export declare function address(value: unknown): Address;

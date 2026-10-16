@@ -16,6 +16,7 @@ import {
   type StargateNativeJournal, type StargateNativeOperation,
 } from "../../src/stargate-v2/native-execution.js";
 import { StateStore } from "../../src/state.js";
+import { evmAddressLock } from "../../src/evm-address-ownership.js";
 
 const PRIVATE_KEY = `0x${"11".repeat(32)}` as Hex;
 const OWNER = privateKeyToAccount(PRIVATE_KEY).address;
@@ -28,7 +29,7 @@ const AMOUNT = 1_000_000_000_000n;
 const FEE = 100n;
 
 function legacyNativeFixture(operation: StargateNativeOperation): StargateNativeOperation {
-  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, ...current } = operation;
+  const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, policy: _owner, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-native-operation.v1" as const };
   return { ...body, integrityHash: hashObject(body) } as StargateNativeOperation;
 }
@@ -47,16 +48,16 @@ class MemoryJournal implements StargateNativeJournal {
     const prior = this.tail; let release!: () => void; this.tail = new Promise<void>(resolve => { release = resolve; });
     await prior; try { return await work(); } finally { release(); }
   }
-  async withOwnerChainLock<T>(_owner: `0x${string}`, _chainId: number, work: () => Promise<T>): Promise<T> { return await work(); }
+  async withOwnerLock<T>(_owner: `0x${string}`, work: () => Promise<T>): Promise<T> { return await work(); }
 }
 
-function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint } = {}) {
+function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint; baseFee?: bigint } = {}) {
   let quoteRound = 0;
   const methods: string[] = [];
   const call: StargateNativeExecutionPorts["sourceCall"] = async (method, params) => {
     methods.push(method);
     if (method === "eth_chainId") return "0x1";
-    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK };
+    if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK, baseFeePerGas: `0x${(options.baseFee ?? 1n).toString(16)}` };
     if (method === "eth_getCode") return options.code ?? "0x60016000";
     if (method === "eth_getBalance") return "0x1fffffffffffff";
     if (method === "eth_getTransactionCount") return "0x7";
@@ -110,8 +111,12 @@ function sourceReceipt(hash: Hex, owner = OWNER, received = AMOUNT) {
     logs: [{ address: SOURCE, topics, data }] };
 }
 
-function setup(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint; sendError?: boolean; destination?: "event" | "pending" } = {}) {
+const POLICY = { policyDigest: "a".repeat(64), policyRevision: 1, mechanism: { provider: "stargate-v2",
+  reference: `eip155:1:${SOURCE}/eip155:130:${DESTINATION}` } };
+function setup(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint; sendError?: boolean; destination?: "event" | "pending";
+  baseFee?: bigint; revert?: boolean; reserveError?: boolean } = {}) {
   const q = quoteRpc(options), journal = new MemoryJournal(); let sends = 0, signs = 0, approvals = 0, envelope: StargateNativeOperation["envelope"] | undefined;
+  const usage: string[] = [];
   const account = privateKeyToAccount(PRIVATE_KEY);
   const ports: StargateNativeExecutionPorts = {
     sourceCall: q.call,
@@ -124,17 +129,20 @@ function setup(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateG
         value: BigInt(tx.valueAtomic), nonce: Number(tx.nonceAtomic), gas: BigInt(tx.gasLimitAtomic),
         maxFeePerGas: BigInt(tx.maxFeePerGasAtomic), maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGasAtomic), accessList: [] });
     } },
-    signerIdentity: async () => ({ profile: "owner", address: OWNER }),
+    signerIdentity: async () => { usage.push("identity"); return { profile: "owner", address: OWNER }; },
     approve: async () => { approvals++; },
+    admitPolicy: async () => { usage.push("admit"); return POLICY; },
+    reserveUsage: async () => { if (options.reserveError) throw new Error("usage cap race"); usage.push("reserve"); },
+    followUsage: async (_operation, target) => { usage.push(target); },
     sendRawTransaction: async raw => { sends++; if (options.sendError) throw new Error("timeout"); return keccak256(raw); },
-    waitSourceReceipt: async hash => options.sendError ? null : sourceReceipt(hash),
+    waitSourceReceipt: async hash => options.sendError ? null : options.revert ? { ...sourceReceipt(hash), status: "reverted" as const, logs: [] } : sourceReceipt(hash),
     observeDestination: async input => options.destination === "pending" ? null : ({ mode: "oft_received", emitter: DESTINATION,
       sourceTransactionHash: input.sourceTransactionHash, guid: input.guid, sourceEid: 30101,
       destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0",
       blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: "safe", recipient: input.recipient, amountReceivedAtomic: AMOUNT.toString() }),
     now: () => 2_000_000_000_000,
   };
-  return { ports, journal, q, counts: () => ({ sends, signs, approvals }), envelope: () => envelope };
+  return { ports, journal, q, counts: () => ({ sends, signs, approvals }), envelope: () => envelope, usage };
 }
 
 const request = (changes: Partial<Parameters<typeof prepareStargateV2NativeEth>[0]> = {}) => ({
@@ -144,7 +152,7 @@ const request = (changes: Partial<Parameters<typeof prepareStargateV2NativeEth>[
 
 test("prepares only Ethereum native ETH to Unichain self with exact sendToken calldata and total value", async () => {
   const s = setup(), op = await prepareStargateV2NativeEth(request(), s.ports, s.journal);
-  assert.equal(op.phase, "prepared"); assert.equal(op.schemaVersion, "apn.stargate-v2-native-operation.v2");
+  assert.equal(op.phase, "prepared"); assert.equal(op.schemaVersion, "apn.stargate-v2-native-operation.v3"); assert.deepEqual(op.policy, POLICY);
   assert.equal(op.finalityPolicyProvenance, "pinned_v2"); assert.equal(op.sourceEid, 30101); assert.equal(op.destinationEid, 30320);
   assert.deepEqual(op.finalityPolicy, { version: "apn.stargate-v2-finality.v1", source: { chainId: 1, blockTag: "safe" },
     destination: { chainId: 130, blockTag: "safe" } });
@@ -522,4 +530,96 @@ test("opted-in Stargate prepare rejects a same-height source reorg after final f
   };
   await assert.rejects(prepareStargateV2NativeEth(request(), ports, s.journal), { code: "APN_RPC_PROTOCOL" });
   assert.equal(s.journal.value, null);
+});
+
+function rehashNative(body: Record<string, unknown>): StargateNativeOperation {
+  const { integrityHash: _old, ...rest } = body; return { ...rest, integrityHash: hashObject(rest) } as unknown as StargateNativeOperation;
+}
+
+test("BRDG-35: the native lane admits the owner policy at prepare and holds usage before signing, then follows the proven phase", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-usage-order" }), s.ports, s.journal);
+  const observed = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  assert.equal(observed.phase, "observed"); assert.deepEqual(s.usage, ["admit", "reserve", "identity", "submitted", "finalized"]);
+  await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  assert.deepEqual(s.usage.slice(5), ["finalized"]); assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+});
+
+test("BRDG-35: a refused usage hold stops before signing and leaves the operation unsent", async () => {
+  const s = setup({ reserveError: true }), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-usage-refused" }), s.ports, s.journal);
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal), /usage cap race/u);
+  assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 }); assert.equal(s.journal.value?.phase, "approved");
+});
+
+test("BRDG-35: an expired unsent operation releases any hold and never signs", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-usage-expired" }), s.ports, s.journal);
+  (s.ports as any).now = () => Date.parse(prepared.expiresAt) + 1;
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "expired");
+  assert.deepEqual(s.usage, ["admit", "failed_before_effect"]); assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 0 });
+});
+
+test("BRDG-35: a pre-admission v2 prepared operation must be prepared again and never signs", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-v2-prepared" }), s.ports, s.journal);
+  const { policy: _policy, ...body } = prepared;
+  s.journal.value = rehashNative({ ...body, schemaVersion: "apn.stargate-v2-native-operation.v2" });
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "owner_policy_binding_required");
+  assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 0 });
+});
+
+test("BRDG-29: a native envelope that cannot be included now is refused before the hold and the signature", async () => {
+  const s = setup({ baseFee: 2n }), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-fee-spike" }), s.ports, s.journal);
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "fee_spike");
+  assert.deepEqual(s.usage, ["admit"]); assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 1 });
+});
+
+test("BRDG-33: a native send reverted at safe finality becomes terminal failed_confirmed_revert and is never resent", async (t) => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-native-revert-")); t.after(async () => await rm(root, { recursive: true, force: true }));
+  const state = new StateStore(root); await state.initialize(); const journal = new FileStargateNativeJournal(root, state);
+  const s = setup({ revert: true }), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-revert" }), s.ports, journal);
+  const failed = await executeStargateV2NativeEth(prepared.operationId, s.ports, journal);
+  assert.equal(failed.phase, "failed_confirmed_revert"); assert.equal(failed.destinationEvidence, undefined);
+  assert.deepEqual(failed.transitions.map(x => x.phase), ["prepared", "approved", "submission_started", "submitted", "failed_confirmed_revert"]);
+  assert.deepEqual(s.usage.slice(-2), ["submitted", "failed_confirmed_revert"]);
+  const again = await executeStargateV2NativeEth(prepared.operationId, s.ports, journal);
+  assert.equal(again.phase, "failed_confirmed_revert"); assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+  assert.equal((await journal.load(prepared.operationId))?.phase, "failed_confirmed_revert");
+  assert.throws(() => stargateV2NativeCanonicalReceipt(failed), (error: any) => error.code === "APN_OPERATION_BLOCKED");
+});
+
+test("BRDG-33: an old v2 unknown_finality record whose send reverted also ends terminal", async () => {
+  const s = setup({ sendError: true }), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-v2-revert" }), s.ports, s.journal);
+  const unknown = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal); assert.equal(unknown.phase, "unknown_finality");
+  const { policy: _policy, ...body } = unknown;
+  s.journal.value = rehashNative({ ...body, schemaVersion: "apn.stargate-v2-native-operation.v2" });
+  (s.ports as any).waitSourceReceipt = async (hash: Hex) => ({ ...sourceReceipt(hash), status: "reverted", logs: [] });
+  const failed = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  assert.equal(failed.phase, "failed_confirmed_revert"); assert.equal(failed.schemaVersion, "apn.stargate-v2-native-operation.v2");
+  assert.deepEqual(s.counts(), { sends: 1, signs: 1, approvals: 1 });
+});
+
+test("native records bind owner admission to their own schema: v3 requires it, v1/v2 must not carry it, old records keep loading", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-policy-schema" }), s.ports, s.journal);
+  const observed = await executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal);
+  const { policy: _policy, ...withoutPolicy } = observed;
+  assert.throws(() => stargateV2NativeCanonicalReceipt(rehashNative(withoutPolicy)), (error: any) => error.code === "APN_STATE_CORRUPT");
+  assert.throws(() => stargateV2NativeCanonicalReceipt(rehashNative({ ...observed, schemaVersion: "apn.stargate-v2-native-operation.v2" })),
+    (error: any) => error.code === "APN_STATE_CORRUPT");
+  assert.throws(() => stargateV2NativeCanonicalReceipt(rehashNative({ ...observed, policy: { ...POLICY, policyRevision: 0 } })),
+    (error: any) => error.code === "APN_STATE_CORRUPT");
+  const v2 = rehashNative({ ...withoutPolicy, schemaVersion: "apn.stargate-v2-native-operation.v2" });
+  assert.equal(stargateV2NativeCanonicalReceipt(v2).operationId, observed.operationId);
+  assert.equal(stargateV2NativeCanonicalReceipt(legacyNativeFixture(observed)).operationId, observed.operationId);
+});
+
+test("BRDG-35: the file journal owner lock is the kernel evmAddressLock held by every other EVM family", async (t) => {
+  const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-native-owner-lock-")); t.after(async () => await rm(root, { recursive: true, force: true }));
+  const state = new StateStore(root); await state.initialize(); const journal = new FileStargateNativeJournal(root, state);
+  const order: string[] = []; let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
+  const family = state.withLocks([evmAddressLock(OWNER)], async () => { order.push("other-family"); await held; order.push("other-family-done"); });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const stargate = journal.withOwnerLock(OWNER, async () => { order.push("stargate"); });
+  await new Promise(resolve => setTimeout(resolve, 50)); release(); await Promise.all([family, stargate]);
+  assert.deepEqual(order, ["other-family", "other-family-done", "stargate"]);
 });

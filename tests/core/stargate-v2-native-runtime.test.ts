@@ -8,6 +8,10 @@ import { STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import { StargateJsonRpc, StargateNativeService, confirmedStargateSourceReceipt,
   observeStargateDestination, stargateDestinationBalance } from "../../src/stargate-v2/native-runtime.js";
 import { temporaryState } from "./helpers.js";
+import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
+import { StargateNativeUsage } from "../../src/stargate-v2/native-usage.js";
+import { STARGATE_NATIVE_MECHANISM } from "../../src/stargate-v2/native-record.js";
 
 const SOURCE = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 const DESTINATION = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
@@ -151,4 +155,47 @@ test("destination balance snapshot rejects same-height reorg after the balance r
     { number: "0x20", hash: ++blocks === 1 ? BLOCK : DEST_TX } };
   await assert.rejects(stargateDestinationBalance(rpc as any, OWNER, "safe"), { code: "APN_RPC_PROTOCOL" });
   assert.equal(blocks, 2);
+});
+
+function nativeBridgeAdmission(mechanism: Readonly<{ provider: string; reference: string }> = STARGATE_NATIVE_MECHANISM, dailyLimitAtomic = "150") {
+  return { chain: "eip155:1", kind: "native" as const, rail: "bridge" as const, maximumPerTransferAtomic: "150", dailyLimitAtomic, mechanism };
+}
+
+test("BRDG-35: native usage admits the exact lane, holds the principal idempotently in the shared ledger and settles it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date("2026-09-20T10:00:00.000Z");
+  await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission()], now });
+  const state = new StateStore(temporary.root); await state.initialize(); const usage = new StargateNativeUsage(state, () => now.getTime());
+  const ledger = new AssetUsageLedger(temporary.root), identity = { account: OWNER, chain: "eip155:1", asset: { kind: "native" as const, identifier: null } };
+  const policy = await usage.admitPolicy({ profile: "owner", owner: OWNER, amountAtomic: "100" });
+  assert.deepEqual(policy.mechanism, STARGATE_NATIVE_MECHANISM);
+  const op = (id: string, amountAtomic = "100") => ({ operationId: id.repeat(64), profile: "owner", owner: OWNER, amountAtomic, policy, integrityHash: "b".repeat(64) } as any);
+  await usage.reserve(op("1")); await usage.reserve(op("1"));
+  assert.equal((await ledger.usage(identity, now)).amountAtomic, "100");
+  await assert.rejects(usage.reserve(op("2", "60")), (error: any) => error.code === "APN_OPERATION_BLOCKED");
+  await usage.follow(op("1"), "submitted"); await usage.follow(op("1"), "unknown_finality"); await usage.follow(op("1"), "submitted");
+  await usage.follow(op("1"), "finalized"); await usage.follow(op("1"), "finalized");
+  assert.equal((await ledger.load(identity, assetUsageReservationId(identity, `apn.stargate-native-usage:${"1".repeat(64)}`)))?.state, "finalized");
+  assert.equal((await ledger.usage(identity, now)).amountAtomic, "100");
+  await usage.reserve(op("3", "40")); assert.equal((await ledger.usage(identity, now)).amountAtomic, "140");
+  await usage.follow(op("3", "40"), "failed_before_effect"); assert.equal((await ledger.usage(identity, now)).amountAtomic, "100");
+  await usage.follow(op("4", "40"), "failed_before_effect"); // nothing held, nothing to release
+  await usage.reserve(op("5", "30")); await usage.follow(op("5", "30"), "failed_confirmed_revert");
+  assert.equal((await ledger.load(identity, assetUsageReservationId(identity, `apn.stargate-native-usage:${"5".repeat(64)}`)))?.state, "failed_confirmed_revert");
+  await assert.rejects(usage.follow(op("1"), "failed_confirmed_revert"), (error: any) => error.code === "APN_STATE_CORRUPT");
+  await usage.follow({ ...op("6"), policy: undefined }, "finalized"); // pre-admission records hold nothing
+  await assert.rejects(usage.reserve({ ...op("6"), policy: undefined }), (error: any) => error.code === "APN_REPREPARE_REQUIRED");
+});
+
+test("BRDG-35: native usage refuses another bridge pin and a changed owner policy before any hold", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date("2026-09-20T10:00:00.000Z");
+  await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission({ provider: "stargate-v2", reference: "eip155:1:other" })], now });
+  const state = new StateStore(temporary.root); await state.initialize(); const usage = new StargateNativeUsage(state, () => now.getTime());
+  await assert.rejects(usage.admitPolicy({ profile: "owner", owner: OWNER, amountAtomic: "100" }), (error: any) => error.code === "APN_ALLOWLIST_REFUSED");
+  await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission()], now });
+  const policy = await usage.admitPolicy({ profile: "owner", owner: OWNER, amountAtomic: "100" });
+  await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission()], now });
+  await assert.rejects(usage.reserve({ operationId: "7".repeat(64), profile: "owner", owner: OWNER, amountAtomic: "100", policy, integrityHash: "b".repeat(64) } as any),
+    (error: any) => error.code === "APN_ALLOWLIST_REFUSED");
+  const identity = { account: OWNER, chain: "eip155:1", asset: { kind: "native" as const, identifier: null } };
+  assert.equal((await new AssetUsageLedger(temporary.root).usage(identity, now)).amountAtomic, "0");
 });
