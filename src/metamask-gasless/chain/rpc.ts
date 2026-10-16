@@ -1,5 +1,6 @@
 import { canonicalJson, exactKeys, sha256 } from "../../canonical.js";
 import { parsePublicHttpsUrl } from "../../network-policy.js";
+import { classifyX402LogAvailabilityMessage } from "../../rpc-envelope.js";
 import type { ClockPort } from "../../ports.js";
 import type { Address, Hex } from "../../model.js";
 import { GaslessHttps, type GaslessTransport } from "../../gasless/https.js";
@@ -9,7 +10,7 @@ import type { MetaMaskGaslessBalance, MetaMaskGaslessChainId, MetaMaskGaslessCha
   MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot } from "../model.js";
 import type { MetaMaskGaslessObservationRpcFactory, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "../ports.js";
 import { mmRegistry, MM_RPC_ENV } from "../registry.js";
-import { mmFail } from "../reasons.js";
+import { mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { mmEvidenceAt, mmEvidenceFail } from "./diagnostic.js";
 import { mmValidateUnsigned } from "../unsigned.js";
 import { mmAddress, mmChain, mmHex, mmUint } from "../validation.js";
@@ -163,7 +164,7 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     try { response = await this.transport.request(this.rpcUrl, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG"); }
     catch { return mmFail("mm_gasless_rpc_unavailable"); }
     if (response.status !== 200 || Buffer.byteLength(response.body, "utf8") > MAX_RESPONSE) {
-      mmFail("mm_gasless_rpc_unavailable");
+      mmFail(method === "eth_getLogs" && response.status === 429 ? "mm_gasless_rpc_rate_limited" : "mm_gasless_rpc_unavailable");
     }
     let parsed: unknown;
     try { parsed = JSON.parse(response.body) as unknown; }
@@ -173,9 +174,21 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     if (record.jsonrpc !== "2.0" || record.id !== id || hasResult === hasError || !exactKeys(record, keys)) {
       mmEvidenceFail("mm_gasless_evidence_invalid", "rpc_envelope", method);
     }
-    if (hasError) mmFail("mm_gasless_rpc_unavailable");
+    if (hasError) mmFail(method === "eth_getLogs" ? mmLogQueryRefusal(record.error) : "mm_gasless_rpc_unavailable");
     return record.result;
   }
+}
+
+/**
+ * Sort an eth_getLogs error into a closed class from its JSON-RPC message, which is read and then discarded: a range
+ * or result-size limit is deterministic and worth a narrower window; a request limit is a rate limit; anything
+ * else stays plain unavailability.
+ */
+export function mmLogQueryRefusal(error: unknown): MetaMaskGaslessFailureReason {
+  const message = typeof error === "object" && error !== null && typeof (error as { message?: unknown }).message === "string"
+    ? ((error as { message: string }).message).slice(0, 512) : "";
+  if (/\b(?:rate[ -]limit(?:ed|ing)?|request limit|too many requests)\b/iu.test(message)) return "mm_gasless_rpc_rate_limited";
+  return classifyX402LogAvailabilityMessage(message) === "range_unavailable" ? "mm_gasless_rpc_log_range" : "mm_gasless_rpc_unavailable";
 }
 
 function strictOwner(value: Address): Address {
