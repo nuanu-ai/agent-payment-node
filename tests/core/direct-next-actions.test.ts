@@ -45,7 +45,7 @@ test("a refused generic approval names the exact re-prepare command with stored 
 test("default next actions no longer send every RPC configuration failure to a Base --rpc-url", async () => {
   const config = failureEnvelope("x", "r", new ApnError("APN_RPC_CONFIG", "APN_TRON_RPC_URL is required."));
   assert.doesNotMatch(config.next_actions.join(" "), /Base/u);
-  assert.match(config.next_actions[0] ?? "", /environment variable the error names/u);
+  assert.match(config.next_actions[0] ?? "", /RPC setting named in the error \(its --rpc-url or APN_\*_RPC_URL\)/u);
   assert.match(failureEnvelope("x", "r", new ApnError("APN_REPREPARE_REQUIRED", "swap quote expired")).next_actions[0] ?? "", /^Prepare a new operation/u);
   const tron = { account: { rail: "tron", profile: "owner" }, operationId: "a".repeat(64) } as unknown as Parameters<RejectingMcpRailApproval["approve"]>[0];
   await assert.rejects(new RejectingMcpRailApproval().approve(tron), (error: ApnError) => /APN_TRON_RPC_URL/u.test(error.message));
