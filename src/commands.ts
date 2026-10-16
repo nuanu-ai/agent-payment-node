@@ -27,21 +27,21 @@ export type CommandRequest =
   | { readonly command: "x402.permit2.status"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.base.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
-  | { readonly command: "relay.arbitrum.prepare"; readonly profile: string; readonly owner: string; readonly amountAtomic: string;
+  | { readonly command: "relay.arbitrum.prepare"; readonly profile: string; readonly owner: string; readonly recipient: string; readonly amountAtomic: string;
       readonly minOutputAtomic: string; readonly maxProviderFeeAtomic: string; readonly maxApprovalNetworkFeeWei: string;
       readonly maxDepositNetworkFeeWei: string; readonly quoteFile: string; readonly idempotencyKey: string }
-  | { readonly command: "relay.arbitrum.observe"; readonly operationId: string }
+  | { readonly command: "relay.arbitrum.observe"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.approval-check"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.approval-execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.deposit-dispatch"; readonly profile: string; readonly operationId: string }
-  | { readonly command: "relay.native.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
+  | { readonly command: "relay.native.prepare"; readonly profile: string; readonly sourceChain: string; readonly destinationChain: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.preflight"; readonly profile: string; readonly operationId: string }
-  | { readonly command: "relay.execute"; readonly operationId: string }
-  | { readonly command: "relay.native.execute"; readonly operationId: string }
+  | { readonly command: "relay.execute"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "relay.native.execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.retire"; readonly profile: string; readonly operationId: string }
-  | { readonly command: "relay.status"; readonly operationId: string }
-  | { readonly command: "relay.observe"; readonly operationId: string }
-  | { readonly command: "relay.base.observe"; readonly operationId: string }
+  | { readonly command: "relay.status"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "relay.observe"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "relay.base.observe"; readonly profile: string; readonly operationId: string }
   | { readonly command: "stargate.native.prepare"; readonly profile: string; readonly amountAtomic: string;
       readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "stargate.native.execute" | "stargate.native.observe" | "stargate.native.status" | "stargate.native.receipt"; readonly operationId: string }

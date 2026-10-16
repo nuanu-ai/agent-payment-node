@@ -2,6 +2,7 @@
 import { ApnError } from "../errors.js";
 import { getAddress } from "viem";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { proveRelayBaseDestination } from "./destination-proof.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
@@ -52,12 +53,14 @@ export class RelayBaseObserveService {
             return true;
         });
     }
-    async observe(operationId) {
+    /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+    async observe(profile, operationId) {
         if (!/^[a-f0-9]{64}$/u.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay Base observe requires an operation ID.");
-        const op = await new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId);
+        allowlistProfileHash(profile);
+        const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(this.state.profileHash(profile), operationId);
         if (op === null)
-            throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
+            throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
         if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
             throw new ApnError("APN_OPERATION_BLOCKED", "Relay operation is retired.");
         if (op.sourceChainId !== 1 || op.destinationChainId !== 8453 || op.quote?.routeReference !== "ethereum-usdc-base-eth-v1")
@@ -103,7 +106,7 @@ export class RelayBaseObserveService {
             return result("prepared_waiting", "status_locator_missing");
         let provider;
         try {
-            provider = await this.status.status(operationId);
+            provider = await this.status.statusOf(op);
         }
         catch {
             return result("provider_candidate_unproven", "provider_status_unavailable_or_ambiguous");

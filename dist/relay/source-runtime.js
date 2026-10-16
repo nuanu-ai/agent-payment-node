@@ -4,6 +4,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
+import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account-permission-store.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
@@ -85,6 +88,7 @@ export function createRelayEthereumSourceRuntime(state, wrappingSecret, rpcUrl, 
 /** The constructor accepts an injected RPC surface so tests can never reach a network. */
 export class RelayEthereumSourceRuntime {
     state;
+    wrapping;
     transport;
     authorization;
     clock;
@@ -94,8 +98,6 @@ export class RelayEthereumSourceRuntime {
     permissions;
     admissions;
     usage;
-    approvalCustody;
-    depositCustody;
     rpcScope = new AsyncLocalStorage();
     signingNonce = null;
     /** One chain-id check per execute invocation (P2); approvals proven in this invocation are not re-read. */
@@ -103,6 +105,7 @@ export class RelayEthereumSourceRuntime {
     provenApprovals = new Map();
     constructor(state, wrapping, transport, authorization, clock = { now: () => new Date() }, pacedOrigin, approvalWait = { polls: 0, delayMs: 0 }) {
         this.state = state;
+        this.wrapping = wrapping;
         this.transport = transport;
         this.authorization = authorization;
         this.clock = clock;
@@ -112,21 +115,20 @@ export class RelayEthereumSourceRuntime {
         this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
         this.admissions = new RelayExecutionAdmissionStore(state.root);
         this.usage = new AssetUsageLedger(state.root);
-        this.approvalCustody = new RelayEncryptedApprovalCustody(state, wrapping);
-        this.depositCustody = new RelayEncryptedDepositCustody(state, wrapping);
     }
     get rpc() {
         return this.rpcScope.getStore() ?? this.transport;
     }
-    async execute(operationId) {
+    /** `profile` is the caller's explicit profile; the operation is found only under its hash (OWNR 4.1). */
+    async execute(profile, operationId) {
         if (this.pacedOrigin === undefined)
-            return await this.executeScoped(operationId);
+            return await this.executeScoped(profile, operationId);
         const abort = new AbortController();
         const timeout = setTimeout(() => abort.abort(), RELAY_EXECUTION_WALL_MS);
         try {
             const transport = this.transport instanceof HttpsBaseRpc ? this.transport.withAbortSignal(abort.signal) : this.transport;
             const invocation = new RelayRpcInvocation(this.state, this.pacedOrigin, transport, abort.signal, transport instanceof HttpsBaseRpc ? () => transport.primePublicAddresses() : undefined);
-            const journal = await this.rpcScope.run(invocation.rpc, () => this.executeScoped(operationId));
+            const journal = await this.rpcScope.run(invocation.rpc, () => this.executeScoped(profile, operationId));
             invocation.assertAllowed();
             return journal;
         }
@@ -134,20 +136,23 @@ export class RelayEthereumSourceRuntime {
             clearTimeout(timeout);
         }
     }
-    async executeScoped(operationId) {
+    async executeScoped(profile, operationId) {
         if (!HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay execution requires one operation ID.");
+        allowlistProfileHash(profile);
         this.chainVerified = false;
         this.provenApprovals.clear();
-        const profileHash = this.state.profileHash("default");
+        const profileHash = this.state.profileHash(profile);
         const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId);
         if (op === null)
             blocked("prepared_operation_missing");
         this.assertPrepared(op);
+        const approvalCustody = new RelayEncryptedApprovalCustody(this.state, this.wrapping, profile);
+        const depositCustody = new RelayEncryptedDepositCustody(this.state, this.wrapping, profile);
         return this.state.withLocks([`relay-source-execute:${operationId}`, evmAddressLock(op.sourceAccount)], async () => {
             // Recover a crash between cap reservation and the first durable effect.
             // This runs before deadline/policy checks, so an expired quote cannot strand its cap.
-            await this.reconcilePreEffectReservation(op);
+            await this.reconcilePreEffectReservation(op, approvalCustody);
             const existing = await new RelayEffectJournalRepository(this.state.root).load(profileHash, operationId);
             const observationOnly = existing !== null && (existing.effects[0].phase === "submitting" ||
                 existing.effects[1].phase === "submitting" || existing.effects.some(e => e.phase === "failed" || e.phase === "abandoned_unsent") ||
@@ -158,7 +163,7 @@ export class RelayEthereumSourceRuntime {
                 await this.assertOwner(op);
             }
             else
-                await this.assertReady(op);
+                await this.assertReady(op, profile);
             const summary = this.summary(op);
             if (await this.authorization.confirm(summary) !== true)
                 blocked("foreground_authorization_declined");
@@ -167,19 +172,24 @@ export class RelayEthereumSourceRuntime {
                     blocked("execution_admission_missing");
             }
             else
-                await this.assertReady(op);
+                await this.assertReady(op, profile);
             // The same exact operation/requestId is persisted before any effect can be marked.
             if (!observationOnly) {
                 await this.admissions.admit(op, this.clock.now());
-                const active = await this.activePolicy(op);
+                const active = await this.activePolicy(op, profile);
                 if (active === null)
                     blocked("active_policy_missing");
                 const reserveInput = { account: getAddress(op.sourceAccount), chain: "eip155:1",
                     asset: { kind: "token", identifier: ETHEREUM_USDC }, registry: active.registry,
                     rail: "bridge", mechanism: { provider: "relay", reference: relayExecutionRoute(op) }, amountAtomic: op.amountAtomic, idempotencyKey: `relay-execute:${op.operationId}`, now: this.clock.now() };
+                // The owner's optional recipient pin (OD-1) is checked against the policy the reservation is taken under.
+                const at = reserveInput.now.toISOString();
+                assertRecipientAdmitted({ admission: evaluateAssetPolicy(active.registry, { chain: reserveInput.chain, asset: reserveInput.asset,
+                        rail: "bridge", mechanism: reserveInput.mechanism, amountAtomic: op.amountAtomic, dailyUsageAtomic: "0",
+                        asOfDate: at.slice(0, 10), asOf: at }), mechanism: reserveInput.mechanism, recipient: op.recipient });
                 const previous = await this.usage.load(this.usageIdentity(op), this.usageReservationId(op));
                 if (previous?.state === "failed_before_effect") {
-                    await this.withNoEffectProof(op, async () => {
+                    await this.withNoEffectProof(op, approvalCustody, async () => {
                         await this.usage.reserve({ ...reserveInput, retryFailedBeforeEffect: true });
                     });
                 }
@@ -188,8 +198,8 @@ export class RelayEthereumSourceRuntime {
             }
             const common = {
                 now: () => this.clock.now(),
-                activePolicy: async () => this.activePolicy(op),
-                publicAccount: async () => this.publicAccount(op),
+                activePolicy: async () => this.activePolicy(op, profile),
+                publicAccount: async () => this.publicAccount(op, profile),
                 dailyUsage: async (_account, now) => this.dailyUsageExcludingOwn(op, now),
                 executionAdmission: async () => {
                     const record = await this.admissions.load(op);
@@ -205,22 +215,22 @@ export class RelayEthereumSourceRuntime {
                 },
             };
             const approvalPorts = { ...common,
-                sign: async (operation) => this.sign(operation, "approval"), custody: this.approvalCustody,
+                sign: async (operation) => this.sign(operation, profile, "approval"), custody: approvalCustody,
                 observe: async (hash) => this.observeApproval(hash) };
             const depositPorts = { ...common,
-                sign: async (operation) => this.sign(operation, "deposit"), custody: this.depositCustody,
+                sign: async (operation) => this.sign(operation, profile, "deposit"), custody: depositCustody,
                 observeApproval: async (hash) => this.observeApproval(hash), observe: async (hash) => this.observeDeposit(hash) };
             try {
                 const approvals = new RelayApprovalEffectService(this.state, approvalPorts);
-                let journal = await approvals.run(operationId);
+                let journal = await approvals.run(profile, operationId);
                 // A just-sent approval is awaited for a bounded time, so one confirmed run usually sends both legs (BRDG-22).
                 for (let poll = 0; existing?.effects[0].phase !== "submitting" && journal.effects[0].phase === "submitting" && poll < this.approvalWait.polls; poll++) {
                     await new Promise(resolve => setTimeout(resolve, this.approvalWait.delayMs));
-                    journal = await approvals.run(operationId);
+                    journal = await approvals.run(profile, operationId);
                 }
                 await this.updateUsage(op, journal);
                 if (journal.effects[0].phase === "confirmed")
-                    journal = await new RelayDepositEffectService(this.state, depositPorts).run(operationId);
+                    journal = await new RelayDepositEffectService(this.state, depositPorts).run(profile, operationId);
                 await this.updateUsage(op, journal);
                 return journal;
             }
@@ -228,7 +238,7 @@ export class RelayEthereumSourceRuntime {
                 // A cleanup failure must not hide the original execution error. It leaves
                 // the cap conservatively held for the next explicit reconciliation.
                 try {
-                    await this.reconcilePreEffectReservation(op);
+                    await this.reconcilePreEffectReservation(op, approvalCustody);
                 }
                 catch { /* keep original error */ }
                 throw error;
@@ -244,8 +254,8 @@ export class RelayEthereumSourceRuntime {
     }
     /** Profile/operation -> encrypted custody -> exact usage bucket. A journal with
      * any marker, or either signed-material slot, forbids cap release. */
-    async withNoEffectProof(op, action) {
-        return this.state.withLocks([`profile:${op.profileHash}`, `operation:${op.operationId}`], async () => this.approvalCustody.withNoMaterial(op, async () => {
+    async withNoEffectProof(op, custody, action) {
+        return this.state.withLocks([`profile:${op.profileHash}`, `operation:${op.operationId}`], async () => custody.withNoMaterial(op, async () => {
             const journal = await new RelayEffectJournalRepository(this.state.root).load(op.profileHash, op.operationId);
             if (journal !== null && journal.effects.some(effect => effect.phase !== "pending" ||
                 effect.attempt !== null || effect.observedAt !== null))
@@ -253,13 +263,13 @@ export class RelayEthereumSourceRuntime {
             return action();
         }));
     }
-    async reconcilePreEffectReservation(op) {
+    async reconcilePreEffectReservation(op, custody) {
         const identity = this.usageIdentity(op), reservationId = this.usageReservationId(op);
         const current = await this.usage.load(identity, reservationId);
         if (current === null || current.state !== "reserved")
             return;
         try {
-            await this.withNoEffectProof(op, async () => {
+            await this.withNoEffectProof(op, custody, async () => {
                 await this.usage.transition({ ...identity, reservationId, policyDigest: op.policyDigest,
                     state: "failed_before_effect", expectedCurrentStates: ["reserved"], now: this.clock.now(),
                     outcomeDigest: hashObject({ operationId: op.operationId, quoteDigest: op.quoteDigest,
@@ -293,7 +303,7 @@ export class RelayEthereumSourceRuntime {
             quoteDigest: op.quoteDigest, approvalNetworkFeeCeilingWei: op.approvalNetworkFeeCeilingWei,
             depositNetworkFeeCeilingWei: op.depositNetworkFeeCeilingWei };
     }
-    async assertReady(op) {
+    async assertReady(op, profile) {
         this.assertPrepared(op);
         if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
             blocked("operation_retired");
@@ -301,11 +311,11 @@ export class RelayEthereumSourceRuntime {
         if (!Number.isFinite(now.getTime()) || now.getTime() + 60_000 >= Date.parse(op.deadline))
             blocked("quote_deadline");
         await this.assertOwner(op);
-        const active = await this.activePolicy(op);
+        const active = await this.activePolicy(op, profile);
         if (active === null || active.digest !== op.policyDigest || active.revision !== op.policyRevision ||
             !same(active.accounts.evm ?? "", op.sourceAccount))
             blocked("active_policy_or_owner");
-        if (!same(await this.publicAccount(op) ?? "", op.sourceAccount))
+        if (!same(await this.publicAccount(op, profile) ?? "", op.sourceAccount))
             blocked("public_owner");
     }
     async assertOwner(op) {
@@ -322,12 +332,12 @@ export class RelayEthereumSourceRuntime {
                 blocked("foreign_encrypted_metamask_grant");
         }
     }
-    async activePolicy(op) {
+    async activePolicy(op, profile) {
         await this.assertOwner(op);
-        return loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, "default");
+        return loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile);
     }
-    async publicAccount(op) {
-        const wallet = await this.wallets.describe("default");
+    async publicAccount(op, profile) {
+        const wallet = await this.wallets.describe(profile);
         if (wallet === null)
             return null;
         try {
@@ -391,13 +401,13 @@ export class RelayEthereumSourceRuntime {
         return { chainId: 1, nativeBalanceWei: evmRpcQuantity(rows[0]), tokenBalanceAtomic: evmRpcWord(rows[1]),
             allowanceAtomic: evmRpcWord(rows[2]), baseFeePerGasWei: baseFee, nextNonce: nonce };
     }
-    async sign(op, role) {
-        await this.assertReady(op);
+    async sign(op, profile, role) {
+        await this.assertReady(op, profile);
         const nonce = this.signingNonce;
         this.signingNonce = null;
         if (nonce === null || nonce > BigInt(Number.MAX_SAFE_INTEGER))
             blocked("signing_nonce_missing_or_unbounded");
-        const wallet = await this.wallets.describe("default");
+        const wallet = await this.wallets.describe(profile);
         if (wallet === null)
             blocked("encrypted_wallet_missing");
         try {

@@ -3,6 +3,7 @@ import { getAddress } from "viem";
 import { hashObject } from "../canonical.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { ArbitrumSourceEffectJournalRepository } from "./arbitrum-source-effect-journal.js";
 import { RelayArbitrumSourceFinalityObserver } from "./arbitrum-source-finality.js";
@@ -87,14 +88,17 @@ export class RelayArbitrumSourceObserveService {
             state: current.state === "reserved" ? "failed_before_effect" : "failed_confirmed_revert", outcomeDigest: proofDigest,
             expectedCurrentStates: ["reserved", "submitted", "unknown_finality"], now: new Date() });
     }
-    async observe(operationId) {
+    /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+    async observe(profile, operationId) {
         if (!HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum observe requires an operation ID.");
-        const op = await (this.ports.operation?.(operationId) ??
-            new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId));
+        allowlistProfileHash(profile);
+        const profileHash = this.state.profileHash(profile);
+        const op = await (this.ports.operation?.(profileHash, operationId) ??
+            new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId));
         if (op === null)
-            throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
-        if (op.operationId !== operationId || op.sourceChainId !== 42161 || op.destinationChainId !== 1 ||
+            throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
+        if (op.operationId !== operationId || op.profileHash !== profileHash || op.sourceChainId !== 42161 || op.destinationChainId !== 1 ||
             op.arbitrumDraft === undefined || op.arbitrumDraft.executionAdmitted !== false)
             blocked("exact_saved_arbitrum_route");
         if (await new RelayRetirementRepository(this.state.root).load(op) !== null)

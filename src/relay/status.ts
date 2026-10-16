@@ -1,6 +1,7 @@
 /** One keyless provider assertion for a saved Relay quote. This never proves an onchain effect. */
 import { ApnError } from "../errors.js";
-import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
+import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { StateStore } from "../state.js";
 import { relayStatusLocator } from "./quote.js";
 
@@ -48,10 +49,18 @@ async function boundedJson(response: Response): Promise<unknown> {
 export class RelayKeylessStatusService {
   constructor(private readonly state: StateStore, private readonly fetcher: typeof fetch = fetch) {}
 
-  async status(operationId: string) {
+  /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+  async status(profile: string, operationId: string) {
     if (!/^[a-f0-9]{64}$/u.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay status requires an operation ID.");
-    const operation = await new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId);
-    if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
+    allowlistProfileHash(profile);
+    const operation = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(this.state.profileHash(profile), operationId);
+    if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
+    return this.statusOf(operation);
+  }
+
+  /** One provider GET for an operation its caller already loaded under the explicit profile. */
+  async statusOf(operation: RelayUnsignedOperation) {
+    const operationId = operation.operationId;
     // A validated retirement marker is authoritative even though the prepared quote remains intact.
     // A malformed marker throws from the repository before any provider request.
     if (await new RelayRetirementRepository(this.state.root).load(operation) !== null) {

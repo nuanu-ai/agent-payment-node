@@ -75,7 +75,7 @@ export interface RelayExecutionConfirmationSummary {
   readonly depositNetworkFeeCeilingWei: string;
 }
 export type RelayExecuteConfirmation = (summary: RelayExecutionConfirmationSummary) => Promise<boolean>;
-export interface RelayExecuteHandler { execute(operationId: string): Promise<RelayEffectJournal> }
+export interface RelayExecuteHandler { execute(profile: string, operationId: string): Promise<RelayEffectJournal> }
 
 export interface CoreDependencies {
   readonly relayPrepare?: RelayUnsignedPrepareService;

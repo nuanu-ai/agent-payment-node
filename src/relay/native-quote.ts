@@ -1,17 +1,14 @@
-/** Finite Relay native-source quotes to fixed BNB and Base funding recipients; no signing or submission. */
+/** Relay native-source quotes (BNB or Base native input) for any payer and recipient; no signing or submission. */
 import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Hex } from "viem";
 import { hashObject } from "../canonical.js";
 import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator, type RelayStatusLocator } from "./quote.js";
+import { relayNativeRouteByReference } from "./native-routes.js";
+export { POLYGON_USDC, RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BASE_MEGA_ROUTE_REFERENCE,
+  RELAY_BASE_POLYGON_ROUTE_REFERENCE, RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE, RELAY_LEGACY_BASE_MEGA_REFERENCE,
+  RELAY_LEGACY_BASE_POLYGON_REFERENCE, RELAY_MEGA_USDM } from "./native-routes.js";
 
-export const RELAY_BNB_POLYGON_ROUTE_REFERENCE = "bnb-native-polygon-native-v1";
-export const RELAY_BNB_MONAD_ROUTE_REFERENCE = "bnb-native-monad-native-v1";
-export const RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE = "bnb-native-monad-native-default-v1";
-export const POLYGON_USDC = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
-export const RELAY_BNB_SOURCE = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
-export const RELAY_POLYGON_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
-export const RELAY_BNB_DEFAULT_SOURCE = RELAY_POLYGON_RECIPIENT;
 const DEPOSIT_NATIVE = parseAbi(["function depositNative(address depositor, bytes32 id) payable"]);
 const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm", polygon: "ethereum-vm", megaeth: "ethereum-vm", monad: "ethereum-vm" } as const;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u, UINT = /^(0|[1-9][0-9]*)$/u;
@@ -45,55 +42,21 @@ function freeze<T>(value: T): T {
 export interface RelayNativeQuoteIntent {
   readonly payer: string; readonly recipient: string; readonly amountAtomic: string;
   readonly minimumOutputWei: string; readonly nowSeconds: number;
+  /** A route of the native route table; prepare picks it from (source chain, destination chain). */
+  readonly routeReference: string;
+  /** The caller's deposit network fee ceiling. On Base it is the full OP Stack budget (L2 + L1 + operator fee). */
+  readonly maximumNetworkFeeWei: string;
 }
-function legacyRelayNativeRoute(payer: string, recipient: string) {
-  address(payer, "payer"); address(recipient, "recipient");
-  if (same(payer, RELAY_BNB_SOURCE) && same(recipient, RELAY_POLYGON_RECIPIENT)) return {
-    reference: RELAY_BNB_POLYGON_ROUTE_REFERENCE as typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE,
-    chainId: 137 as const, chain: "polygon" as const,
-    payer: RELAY_BNB_SOURCE, profile: "evm-live-buyer" as const,
-    recipient: RELAY_POLYGON_RECIPIENT, refundCurrency: POLYGON_USDC };
-  if (same(payer, RELAY_BNB_SOURCE) && same(recipient, RELAY_BNB_SOURCE)) return {
-    reference: RELAY_BNB_MONAD_ROUTE_REFERENCE as typeof RELAY_BNB_MONAD_ROUTE_REFERENCE,
-    chainId: 143 as const, chain: "monad" as const,
-    payer: RELAY_BNB_SOURCE, profile: "evm-live-buyer" as const,
-    recipient: RELAY_BNB_SOURCE, refundCurrency: BNB_NATIVE };
-  if (same(payer, RELAY_BNB_DEFAULT_SOURCE) && same(recipient, RELAY_BNB_DEFAULT_SOURCE)) return {
-    reference: RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE as typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE,
-    chainId: 143 as const, chain: "monad" as const,
-    payer: RELAY_BNB_DEFAULT_SOURCE, profile: "default" as const,
-    recipient: RELAY_BNB_DEFAULT_SOURCE, refundCurrency: BNB_NATIVE };
-  return fail("lane intent");
-}
-export const RELAY_BASE_SOURCE = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
-export const RELAY_MEGA_USDM = "0xfafddbb3fc7688494971a79cc65dca3ef82079e7";
-export const RELAY_BASE_MEGA_REFERENCE = "base-native-mega-usdm-default-v1";
-export const RELAY_BASE_POLYGON_REFERENCE = "base-native-polygon-native-buyer-v1";
-export const RELAY_BASE_PRINCIPAL = 50_000_000_000_000n;
-export const RELAY_BASE_FULL_FEE = 1_000_000_000_000n;
-export function relayNativeRoute(payer: string, recipient: string) {
-  address(payer, "payer"); address(recipient, "recipient");
-  if (same(payer, RELAY_BASE_SOURCE)) {
-    const common = { sourceChainId: 8453 as const, sourceChain: "base" as const,
-      payer: RELAY_BASE_SOURCE, profile: "evm-live-seller" as const };
-    if (same(recipient, RELAY_POLYGON_RECIPIENT)) return { ...common,
-      reference: RELAY_BASE_MEGA_REFERENCE as typeof RELAY_BASE_MEGA_REFERENCE, chainId: 4326 as const, chain: "megaeth" as const,
-      recipient: RELAY_POLYGON_RECIPIENT, currency: RELAY_MEGA_USDM, refundCurrency: RELAY_MEGA_USDM,
-      floor: 90_000_000_000_000_000n };
-    if (same(recipient, RELAY_BNB_SOURCE)) return { ...common,
-      reference: RELAY_BASE_POLYGON_REFERENCE as typeof RELAY_BASE_POLYGON_REFERENCE, chainId: 137 as const, chain: "polygon" as const,
-      recipient: RELAY_BNB_SOURCE, currency: BNB_NATIVE, refundCurrency: POLYGON_USDC,
-      floor: 700_000_000_000_000_000n };
-    return fail("lane intent");
-  }
-  return { ...legacyRelayNativeRoute(payer, recipient), sourceChainId: 56 as const,
-    sourceChain: "bnb" as const, currency: BNB_NATIVE, floor: 1n };
+/** The protocol row of a quote's route, current or legacy; owner identity never selects a route. */
+export function relayNativeQuoteRoute(reference: string) {
+  const route = relayNativeRouteByReference(reference);
+  return route ?? fail("route reference");
 }
 export function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<string, unknown> {
-  const route = relayNativeRoute(intent.payer, intent.recipient);
-  if (!same(intent.payer, route.payer) || amount(intent.amountAtomic, "amount") <= 0n ||
-    amount(intent.minimumOutputWei, "minimum output") < route.floor ||
-    (route.sourceChainId === 8453 && amount(intent.amountAtomic, "amount") !== RELAY_BASE_PRINCIPAL)) fail("lane intent");
+  const route = relayNativeQuoteRoute(intent.routeReference);
+  address(intent.payer, "payer"); address(intent.recipient, "recipient");
+  if (amount(intent.amountAtomic, "amount") <= 0n || amount(intent.minimumOutputWei, "minimum output") <= 0n ||
+    amount(intent.maximumNetworkFeeWei, "network fee ceiling") <= 0n) fail("intent amounts");
   return { user: intent.payer, originChainId: route.sourceChainId, destinationChainId: route.chainId,
     originCurrency: BNB_NATIVE, destinationCurrency: route.currency,
     amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: intent.recipient,
@@ -101,7 +64,7 @@ export function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<
 }
 export interface ValidatedRelayNativeQuote {
   readonly schemaVersion: "apn.relay-native-quote.v1";
-  readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE | typeof RELAY_BASE_MEGA_REFERENCE | typeof RELAY_BASE_POLYGON_REFERENCE;
+  readonly routeReference: string;
   readonly quoteDigest: string; readonly statusLocator?: RelayStatusLocator;
   readonly orderId: string; readonly orderSignature: string; readonly solver: string;
   readonly payer: string; readonly recipient: string; readonly principalAtomic: string;
@@ -114,7 +77,7 @@ export interface ValidatedRelayNativeQuote {
 
 export async function validateRelayNativeQuote(value: unknown, intent: RelayNativeQuoteIntent): Promise<ValidatedRelayNativeQuote> {
   relayNativeQuoteRequest(intent);
-  const route = relayNativeRoute(intent.payer, intent.recipient);
+  const route = relayNativeQuoteRoute(intent.routeReference), ceiling = BigInt(intent.maximumNetworkFeeWei);
   if (!Number.isSafeInteger(intent.nowSeconds) || intent.nowSeconds < 0) fail("clock");
   const quote = record(value, "quote"), steps = list(quote.steps, "steps");
   if (steps.length !== 1) fail("steps");
@@ -206,7 +169,10 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
   const gas = amount(tx.gas, "gas"), maxFeePerGas = amount(tx.maxFeePerGas, "max fee"),
     priority = amount(tx.maxPriorityFeePerGas, "priority fee");
   if (gas === 0n || gas > 500_000n || maxFeePerGas === 0n || maxFeePerGas > 100_000_000_000n ||
-    priority === 0n || priority > 10_000_000_000n || priority > maxFeePerGas || (route.sourceChainId === 8453 && gas * maxFeePerGas > RELAY_BASE_FULL_FEE)) fail("gas limits");
+    priority === 0n || priority > 10_000_000_000n || priority > maxFeePerGas ||
+    // A Base quote persists the caller's full OP Stack budget as its ceiling, so its L2 part must already fit it;
+    // a BNB quote persists gas x max fee, which prepare compares with the caller's ceiling.
+    (route.sourceChainId === 8453 && gas * maxFeePerGas > ceiling)) fail("gas limits");
   try {
     const decoded = decodeFunctionData({ abi: DEPOSIT_NATIVE, data: string(tx.data, "transaction data") as Hex });
     if (decoded.functionName !== "depositNative" || !same(decoded.args[0], intent.payer) || !same(decoded.args[1], orderId) ||
@@ -223,14 +189,14 @@ export async function validateRelayNativeQuote(value: unknown, intent: RelayNati
     deposit: { from: address(tx.from, "transaction from").toLowerCase(), to: ETHEREUM_DEPOSITORY,
       data: string(tx.data, "transaction data").toLowerCase(), value: amount(tx.value, "transaction value").toString(),
       chainId: route.sourceChainId, gas: gas.toString(), maxFeePerGas: maxFeePerGas.toString(),
-      maxPriorityFeePerGas: priority.toString(), maximumNetworkFeeWei: (route.sourceChainId === 8453 ? RELAY_BASE_FULL_FEE : gas * maxFeePerGas).toString() } };
+      maxPriorityFeePerGas: priority.toString(), maximumNetworkFeeWei: (route.sourceChainId === 8453 ? ceiling : gas * maxFeePerGas).toString() } };
   return freeze({ ...projection, quoteDigest: hashObject(projection) });
 }
 
 /** Recheck the saved quote's solver authority and native deposit at the execution boundary. */
 export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuote): Promise<void> {
-  const route = relayNativeRoute(quote.payer, quote.recipient);
-  if (quote.schemaVersion !== "apn.relay-native-quote.v1" || quote.routeReference !== route.reference ||
+  const route = relayNativeQuoteRoute(quote.routeReference);
+  if (quote.schemaVersion !== "apn.relay-native-quote.v1" ||
     hashObject((({ quoteDigest: _digest, ...projection }) => projection)(quote)) !== quote.quoteDigest) fail("saved digest");
   const order = record(quote.orderData, "saved order"), input = one(order.inputs, "saved inputs"),
     payment = record(input.payment, "saved payment"), output = record(order.output, "saved output"),
@@ -238,17 +204,16 @@ export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuo
   if (order.version !== "v1" || order.solverChainId !== "base" || !same(address(order.solver, "saved solver"), RELAY_SOLVER) ||
     payment.chainId !== route.sourceChain || !same(address(payment.currency, "saved input currency"), BNB_NATIVE) ||
     amount(payment.amount, "saved input amount") !== amount(quote.principalAtomic, "saved principal") || payment.weight !== "1" ||
-    output.chainId !== route.chain || !same(address(payee.recipient, "saved payee"), route.recipient) ||
+    output.chainId !== route.chain || !same(address(payee.recipient, "saved payee"), quote.recipient) ||
     !same(address(payee.currency, "saved output currency"), route.currency) ||
     amount(payee.minimumAmount, "saved minimum") !== amount(quote.minimumOutputWei, "saved minimum") ||
     list(output.calls, "saved calls").length !== 0 || list(order.fees, "saved fees").length !== 0 ||
     refunds.length !== 2 || quote.deadline !== output.deadline ||
-    !same(address(quote.payer, "saved payer"), route.payer) ||
     quote.paymentDetails.chainId !== route.sourceChain || !same(quote.paymentDetails.depository, ETHEREUM_DEPOSITORY) ||
     !same(quote.paymentDetails.currency, BNB_NATIVE) || quote.paymentDetails.amount !== quote.principalAtomic ||
     quote.deposit.chainId !== route.sourceChainId || !same(quote.deposit.from, quote.payer)) fail("saved route");
   for (const [index, expected] of [{ chain: route.sourceChain, recipient: quote.payer, currency: BNB_NATIVE },
-    { chain: route.chain, recipient: route.recipient, currency: route.refundCurrency }].entries()) {
+    { chain: route.chain, recipient: quote.recipient, currency: route.refundCurrency }].entries()) {
     const refund = record(refunds[index], "saved refund");
     if (refund.chainId !== expected.chain || !same(address(refund.recipient, "saved refund recipient"), expected.recipient) ||
       !same(address(refund.currency, "saved refund currency"), expected.currency) ||
@@ -259,9 +224,8 @@ export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuo
     orderId = getOrderId(quote.orderData as Parameters<typeof getOrderId>[0], CHAINS);
     signer = await recoverMessageAddress({ message: { raw: orderId as Hex }, signature: quote.orderSignature as Hex });
   } catch { return fail("saved order authority"); }
-  if (route.sourceChainId === 8453 && (BigInt(quote.principalAtomic) !== RELAY_BASE_PRINCIPAL ||
-    BigInt(quote.minimumOutputWei) < route.floor || quote.deposit.maximumNetworkFeeWei !== RELAY_BASE_FULL_FEE.toString() ||
-    BigInt(quote.deposit.gas) * BigInt(quote.deposit.maxFeePerGas) > RELAY_BASE_FULL_FEE)) fail("saved finite economics");
+  // The stored fee ceiling bounds the signed envelope (on Base it is the full OP Stack budget the owner consented to).
+  if (BigInt(quote.deposit.gas) * BigInt(quote.deposit.maxFeePerGas) > BigInt(quote.deposit.maximumNetworkFeeWei)) fail("saved fee ceiling");
   if (!same(orderId, quote.orderId) || !same(signer, RELAY_SOLVER) || !same(quote.solver, RELAY_SOLVER)) fail("saved order authority");
   try {
     const decoded = decodeFunctionData({ abi: DEPOSIT_NATIVE, data: quote.deposit.data as Hex });

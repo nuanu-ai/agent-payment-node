@@ -1,89 +1,25 @@
 import { type RelayStatusLocator } from "./quote.js";
-export declare const RELAY_BNB_POLYGON_ROUTE_REFERENCE = "bnb-native-polygon-native-v1";
-export declare const RELAY_BNB_MONAD_ROUTE_REFERENCE = "bnb-native-monad-native-v1";
-export declare const RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE = "bnb-native-monad-native-default-v1";
-export declare const POLYGON_USDC = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
-export declare const RELAY_BNB_SOURCE = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
-export declare const RELAY_POLYGON_RECIPIENT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
-export declare const RELAY_BNB_DEFAULT_SOURCE = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
+export { POLYGON_USDC, RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BASE_MEGA_ROUTE_REFERENCE, RELAY_BASE_POLYGON_ROUTE_REFERENCE, RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE, RELAY_LEGACY_BASE_MEGA_REFERENCE, RELAY_LEGACY_BASE_POLYGON_REFERENCE, RELAY_MEGA_USDM } from "./native-routes.js";
 export interface RelayNativeQuoteIntent {
     readonly payer: string;
     readonly recipient: string;
     readonly amountAtomic: string;
     readonly minimumOutputWei: string;
     readonly nowSeconds: number;
+    /** A route of the native route table; prepare picks it from (source chain, destination chain). */
+    readonly routeReference: string;
+    /** The caller's deposit network fee ceiling. On Base it is the full OP Stack budget (L2 + L1 + operator fee). */
+    readonly maximumNetworkFeeWei: string;
 }
-export declare const RELAY_BASE_SOURCE = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04";
-export declare const RELAY_MEGA_USDM = "0xfafddbb3fc7688494971a79cc65dca3ef82079e7";
-export declare const RELAY_BASE_MEGA_REFERENCE = "base-native-mega-usdm-default-v1";
-export declare const RELAY_BASE_POLYGON_REFERENCE = "base-native-polygon-native-buyer-v1";
-export declare const RELAY_BASE_PRINCIPAL = 50000000000000n;
-export declare const RELAY_BASE_FULL_FEE = 1000000000000n;
-export declare function relayNativeRoute(payer: string, recipient: string): {
-    reference: typeof RELAY_BASE_MEGA_REFERENCE;
-    chainId: 4326;
-    chain: "megaeth";
-    recipient: string;
-    currency: string;
-    refundCurrency: string;
-    floor: bigint;
-    sourceChainId: 8453;
-    sourceChain: "base";
-    payer: string;
-    profile: "evm-live-seller";
-} | {
-    reference: typeof RELAY_BASE_POLYGON_REFERENCE;
-    chainId: 137;
-    chain: "polygon";
-    recipient: string;
-    currency: string;
-    refundCurrency: string;
-    floor: bigint;
-    sourceChainId: 8453;
-    sourceChain: "base";
-    payer: string;
-    profile: "evm-live-seller";
-} | {
-    sourceChainId: 56;
-    sourceChain: "bnb";
-    currency: string;
-    floor: bigint;
-    reference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE;
-    chainId: 137;
-    chain: "polygon";
-    payer: string;
-    profile: "evm-live-buyer";
-    recipient: string;
-    refundCurrency: string;
-} | {
-    sourceChainId: 56;
-    sourceChain: "bnb";
-    currency: string;
-    floor: bigint;
-    reference: typeof RELAY_BNB_MONAD_ROUTE_REFERENCE;
-    chainId: 143;
-    chain: "monad";
-    payer: string;
-    profile: "evm-live-buyer";
-    recipient: string;
-    refundCurrency: string;
-} | {
-    sourceChainId: 56;
-    sourceChain: "bnb";
-    currency: string;
-    floor: bigint;
-    reference: typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE;
-    chainId: 143;
-    chain: "monad";
-    payer: string;
-    profile: "default";
-    recipient: string;
-    refundCurrency: string;
+/** The protocol row of a quote's route, current or legacy; owner identity never selects a route. */
+export declare function relayNativeQuoteRoute(reference: string): import("./native-routes.js").RelayNativeRoute & {
+    readonly reference: string;
+    readonly legacy: boolean;
 };
 export declare function relayNativeQuoteRequest(intent: RelayNativeQuoteIntent): Record<string, unknown>;
 export interface ValidatedRelayNativeQuote {
     readonly schemaVersion: "apn.relay-native-quote.v1";
-    readonly routeReference: typeof RELAY_BNB_POLYGON_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_ROUTE_REFERENCE | typeof RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE | typeof RELAY_BASE_MEGA_REFERENCE | typeof RELAY_BASE_POLYGON_REFERENCE;
+    readonly routeReference: string;
     readonly quoteDigest: string;
     readonly statusLocator?: RelayStatusLocator;
     readonly orderId: string;

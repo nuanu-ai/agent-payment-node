@@ -7,20 +7,23 @@ import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { OperationService } from "../operation-service.js";
 import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { ETHEREUM_USDC, requestRelayQuote } from "./quote.js";
-import { RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE, RELAY_BASE_SOURCE, RELAY_BASE_FULL_FEE, relayNativeRoute, requestRelayNativeQuote } from "./native-quote.js";
+import { requestRelayNativeQuote } from "./native-quote.js";
+import { relayNativeRouteFor } from "./native-routes.js";
 import { createRelayArbitrumSourceDraft } from "./arbitrum-usdc-source-draft.js";
-import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT } from "./arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 import { relayStatusLocator } from "./quote.js";
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
 export const RELAY_BASE_ROUTE_REFERENCE = "ethereum-usdc-base-eth-v1";
 const POSITIVE = /^[1-9][0-9]*$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
+const EIP155 = /^eip155:([1-9][0-9]{0,9})$/u;
 function refuse(reason) {
     throw new ApnError("APN_ALLOWLIST_REFUSED", "Relay unsigned prepare is not admitted by the active owner policy.", { reason });
 }
@@ -36,9 +39,7 @@ export class RelayUnsignedPrepareService {
         this.ports = ports;
     }
     async prepare(input, route = "bnb") {
-        if (input.profile !== "default")
-            refuse("relay_default_profile_only");
-        if (!ADDRESS.test(input.recipient) ||
+        if (!ADDRESS.test(input.recipient) || /^0x0{40}$/u.test(input.recipient) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxApprovalNetworkFeeWei, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
             !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
             throw new ApnError("APN_INVALID_INPUT", "Relay prepare inputs are invalid.");
@@ -76,8 +77,10 @@ export class RelayUnsignedPrepareService {
             asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: input.amountAtomic,
             dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
             mechanism: { provider: "relay", reference: route === "base" ? RELAY_BASE_ROUTE_REFERENCE : RELAY_ROUTE_REFERENCE } });
-        if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: route === "base" ? RELAY_BASE_ROUTE_REFERENCE : RELAY_ROUTE_REFERENCE }))
+        const mechanism = { provider: "relay", reference: route === "base" ? RELAY_BASE_ROUTE_REFERENCE : RELAY_ROUTE_REFERENCE };
+        if (!bridgeMechanismAdmitted(admission, mechanism))
             refuse("relay_route_pin_required");
+        assertRecipientAdmitted({ admission, mechanism, recipient: input.recipient });
         await this.state.initialize();
         // Fail closed before quoting. The final owner check and create-only write
         // share one profile/operation/address critical section in OperationService.
@@ -113,7 +116,7 @@ export class RelayUnsignedPrepareService {
     /** A local quote file is validated before create-only persistence; no network or wallet is used. */
     async prepareArbitrum(input) {
         allowlistProfileHash(input.profile);
-        if (!ADDRESS.test(input.owner) || !isAbsolute(input.quoteFile) ||
+        if (!ADDRESS.test(input.owner) || !ADDRESS.test(input.recipient) || /^0x0{40}$/u.test(input.recipient) || !isAbsolute(input.quoteFile) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxProviderFeeAtomic,
                 input.maxApprovalNetworkFeeWei, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
             !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
@@ -123,7 +126,7 @@ export class RelayUnsignedPrepareService {
         const operationId = this.state.operationId(input.profile, input.idempotencyKey);
         const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
         const owner = input.owner.toLowerCase();
-        const requestHash = hashObject({ command: "relay.arbitrum.prepare", ...input, owner });
+        const requestHash = hashObject({ command: "relay.arbitrum.prepare", ...input, owner, recipient: input.recipient.toLowerCase() });
         const replay = await this.operations.resolvePrepare({ kind: "relay_unsigned", profileHash, operationId,
             idempotencyHash, requestHash });
         if (replay !== null) {
@@ -161,7 +164,7 @@ export class RelayUnsignedPrepareService {
                 await file.close();
             }
         })());
-        const draft = await createRelayArbitrumSourceDraft({ profile: input.profile, owner, publicAccount: owner,
+        const draft = await createRelayArbitrumSourceDraft({ profile: input.profile, owner, recipient: input.recipient, publicAccount: owner,
             amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minOutputAtomic,
             maxProviderFeeAtomic: input.maxProviderFeeAtomic,
             maxApprovalNetworkFeeWei: input.maxApprovalNetworkFeeWei,
@@ -170,7 +173,7 @@ export class RelayUnsignedPrepareService {
         const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
             kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
             requestHash, sourceChainId: 42161, destinationChainId: 1, sourceAccount: owner,
-            recipient: RELAY_ETHEREUM_USDC_RECIPIENT.toLowerCase(), quoteDigest: draft.quoteDigest,
+            recipient: draft.recipient.toLowerCase(), quoteDigest: draft.quoteDigest,
             statusLocator: relayStatusLocator(draft.requestId), arbitrumDraft: draft,
             policyDigest: draft.policyDigest, policyRevision: draft.policyRevision,
             approvalNetworkFeeCeilingWei: draft.maxApprovalNetworkFeeWei,
@@ -180,30 +183,21 @@ export class RelayUnsignedPrepareService {
         return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
     }
     async prepareNative(input) {
-        if (!ADDRESS.test(input.recipient) ||
+        const source = EIP155.exec(input.sourceChain), destination = EIP155.exec(input.destinationChain);
+        if (source === null || destination === null || !ADDRESS.test(input.recipient) || /^0x0{40}$/u.test(input.recipient) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
             !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
             throw new ApnError("APN_INVALID_INPUT", "Relay native prepare inputs are invalid.");
         }
         allowlistProfileHash(input.profile);
-        const expectedPayer = input.profile === "evm-live-buyer" ? RELAY_BNB_SOURCE :
-            input.profile === "default" ? RELAY_BNB_DEFAULT_SOURCE : input.profile === "evm-live-seller" ? RELAY_BASE_SOURCE : null;
-        if (expectedPayer === null)
-            refuse("relay_native_profile_route_mismatch");
-        let route;
-        try {
-            route = relayNativeRoute(expectedPayer, input.recipient);
-        }
-        catch {
-            throw new ApnError("APN_INVALID_INPUT", "Relay native payer and recipient are outside admitted routes.");
-        }
-        if (route.sourceChainId === 8453 && BigInt(input.maxDepositNetworkFeeWei) !== RELAY_BASE_FULL_FEE)
-            throw new ApnError("APN_INVALID_INPUT", "Finite Base Relay requires a 1000000000000 wei full native fee budget.");
+        // The route is protocol data chosen by the caller's chains; payer, recipient, amount and fee ceiling are the caller's.
+        const route = relayNativeRouteFor(Number(source[1]), Number(destination[1]));
+        if (route === null)
+            throw new ApnError("APN_INVALID_INPUT", "Relay native has no route between these chains.", { reason: "relay_native_route_unknown" });
         const profileHash = this.state.profileHash(input.profile);
         const operationId = this.state.operationId(input.profile, input.idempotencyKey);
         const idempotencyHash = this.state.idempotencyHash(input.idempotencyKey);
-        const requestHash = hashObject({ ...input, recipient: input.recipient.toLowerCase(),
-            routeReference: route.reference });
+        const requestHash = hashObject({ ...input, recipient: input.recipient.toLowerCase(), routeReference: route.reference });
         const replay = await this.operations.resolvePrepare({ kind: "relay_unsigned", profileHash, operationId,
             idempotencyHash, requestHash });
         if (replay !== null) {
@@ -216,9 +210,9 @@ export class RelayUnsignedPrepareService {
         if (!Number.isFinite(now.getTime()))
             throw new ApnError("APN_INVALID_INPUT", "Relay native prepare clock is invalid.");
         const active = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile));
-        if (active === null || active.profile !== input.profile || active.accounts.evm?.toLowerCase() !== expectedPayer.toLowerCase()) {
-            refuse("relay_bnb_source_owner_policy_required");
-        }
+        if (active === null || active.profile !== input.profile || active.accounts.evm === undefined ||
+            !ADDRESS.test(active.accounts.evm))
+            refuse("relay_native_active_owner_policy_required");
         if (active.registry.expiresAt !== undefined && now.toISOString() >= active.registry.expiresAt)
             refuse("relay_policy_expired");
         const payer = active.accounts.evm.toLowerCase();
@@ -229,17 +223,20 @@ export class RelayUnsignedPrepareService {
         const usage = await (this.ports.dailyUsage?.(active.accounts.evm, now) ?? new AssetUsageLedger(this.state.root).usage({
             account: active.accounts.evm, chain: `eip155:${route.sourceChainId}`, asset: { kind: "native", identifier: null },
         }, now).then(value => value.amountAtomic));
+        const mechanism = { provider: "relay", reference: route.reference };
         const admission = evaluateAssetPolicy(active.registry, { chain: `eip155:${route.sourceChainId}`,
-            asset: { kind: "native", identifier: null }, rail: "bridge", mechanism: { provider: "relay", reference: route.reference }, amountAtomic: input.amountAtomic,
+            asset: { kind: "native", identifier: null }, rail: "bridge", mechanism, amountAtomic: input.amountAtomic,
             dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: route.reference }))
+        if (!bridgeMechanismAdmitted(admission, mechanism))
             refuse("relay_native_route_pin_required");
+        assertRecipientAdmitted({ admission, mechanism, recipient: input.recipient });
         await this.state.initialize();
         const checkOwner = async () => this.state.withLocks([evmAddressLock(payer)], async () => assertExclusiveEvmOwner(this.state, payer, profileHash));
         await checkOwner();
         await this.operations.assertProfileAvailable(profileHash);
         const intent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
-            minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000) };
+            minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000), routeReference: route.reference,
+            maximumNetworkFeeWei: input.maxDepositNetworkFeeWei };
         const quote = await (this.ports.nativeQuote?.(intent) ?? requestRelayNativeQuote(intent));
         const { quoteDigest, ...projection } = quote;
         // A Base order's signed deadline bounds settlement/refunds, not local source-effect authority.

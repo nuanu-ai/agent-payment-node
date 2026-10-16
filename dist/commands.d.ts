@@ -107,6 +107,7 @@ export type CommandRequest = {
     readonly command: "relay.arbitrum.prepare";
     readonly profile: string;
     readonly owner: string;
+    readonly recipient: string;
     readonly amountAtomic: string;
     readonly minOutputAtomic: string;
     readonly maxProviderFeeAtomic: string;
@@ -116,6 +117,7 @@ export type CommandRequest = {
     readonly idempotencyKey: string;
 } | {
     readonly command: "relay.arbitrum.observe";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.arbitrum.approval-check";
@@ -132,6 +134,8 @@ export type CommandRequest = {
 } | {
     readonly command: "relay.native.prepare";
     readonly profile: string;
+    readonly sourceChain: string;
+    readonly destinationChain: string;
     readonly recipient: string;
     readonly amountAtomic: string;
     readonly minOutputAtomic: string;
@@ -143,9 +147,11 @@ export type CommandRequest = {
     readonly operationId: string;
 } | {
     readonly command: "relay.execute";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.native.execute";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.retire";
@@ -153,12 +159,15 @@ export type CommandRequest = {
     readonly operationId: string;
 } | {
     readonly command: "relay.status";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.observe";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.base.observe";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "stargate.native.prepare";

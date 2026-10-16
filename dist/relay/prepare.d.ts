@@ -25,6 +25,9 @@ export interface RelayPreparePorts {
 }
 export interface RelayNativePrepareInput {
     readonly profile: string;
+    /** CAIP-2 source and destination chains select the protocol route: (eip155:56 | eip155:8453) to (eip155:137 | eip155:143 | eip155:4326). */
+    readonly sourceChain: string;
+    readonly destinationChain: string;
     readonly recipient: string;
     readonly amountAtomic: string;
     readonly minOutputAtomic: string;
@@ -34,6 +37,7 @@ export interface RelayNativePrepareInput {
 export interface RelayArbitrumPrepareInput {
     readonly profile: string;
     readonly owner: string;
+    readonly recipient: string;
     readonly amountAtomic: string;
     readonly minOutputAtomic: string;
     readonly maxProviderFeeAtomic: string;

@@ -762,21 +762,21 @@ apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
 apn x402 merchant retire-unsent --operation <operation-id>
 apn x402 merchant status --operation <operation-id>
-apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
-apn relay arbitrum observe --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay arbitrum approval-check --profile default --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay arbitrum approval-execute --profile default --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay arbitrum deposit-dispatch --profile default --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay base prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay base observe --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
-apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay native prepare --profile <fixed-owner-profile> --recipient <pinned-destination-address> --amount-atomic <source-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <source-wei> --idempotency-key <key>
-apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>
-apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>
-apn relay native execute --operation <operation-id> --rpc-url <source-rpc>
-apn relay retire --profile <default|evm-live-buyer|evm-live-seller> --operation <operation-id>
-apn relay status --operation <operation-id>
-apn relay observe --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>
+apn relay arbitrum prepare --profile <profile> --owner <arbitrum-account> --recipient <ethereum-address> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
+apn relay arbitrum observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay arbitrum approval-check --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay arbitrum approval-execute --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay arbitrum deposit-dispatch --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay base prepare --profile <profile> --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
+apn relay base observe --profile <profile> --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
+apn relay prepare --profile <profile> --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
+apn relay native prepare --profile <profile> --source-chain <eip155:56|eip155:8453> --destination-chain <eip155:137|eip155:143|eip155:4326> --recipient <address> --amount-atomic <source-wei> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <source-wei> --idempotency-key <key>
+apn relay preflight --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc>
+apn relay execute --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc>
+apn relay native execute --profile <profile> --operation <operation-id> --rpc-url <source-rpc>
+apn relay retire --profile <profile> --operation <operation-id>
+apn relay status --profile <profile> --operation <operation-id>
+apn relay observe --profile <profile> --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
 apn stargate native execute --operation <operation-id>
 apn stargate native observe --operation <operation-id>

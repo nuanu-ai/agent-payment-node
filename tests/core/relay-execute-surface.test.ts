@@ -11,13 +11,14 @@ import type { RelayEffectJournal } from "../../src/relay/effect-journal.js";
 import { temporaryState } from "./helpers.js";
 
 const operationId = "a".repeat(64);
-const argv = ["relay", "execute", "--operation", operationId, "--rpc-url", "https://rpc.example"];
+const argv = ["relay", "execute", "--profile", "alice", "--operation", operationId, "--rpc-url", "https://rpc.example"];
 
-test("Relay execute binds only an exact saved operation identity and explicit Ethereum RPC", () => {
-  assert.deepEqual(bindArgv(argv), { request: { command: "relay.execute", operationId }, rpcUrl: "https://rpc.example" });
+test("Relay execute binds an explicit profile, an exact saved operation identity and explicit Ethereum RPC", () => {
+  assert.deepEqual(bindArgv(argv), { request: { command: "relay.execute", profile: "alice", operationId }, rpcUrl: "https://rpc.example" });
   for (const invalid of [
-    ["relay", "execute", "--operation", operationId],
-    ["relay", "execute", "--rpc-url", "https://rpc.example"],
+    ["relay", "execute", "--operation", operationId, "--rpc-url", "https://rpc.example"],
+    ["relay", "execute", "--profile", "alice", "--operation", operationId],
+    ["relay", "execute", "--profile", "alice", "--rpc-url", "https://rpc.example"],
     [...argv, "--profile", "default"],
     [...argv, "--dry-run", "false"],
     [...argv, "--operation", operationId],
@@ -30,20 +31,20 @@ test("Relay execute dispatch fails closed without both source handler and foregr
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root);
   let executions = 0;
-  const relayExecute = { async execute(id: string): Promise<RelayEffectJournal> {
-    assert.equal(id, operationId);
+  const relayExecute = { async execute(profile: string, id: string): Promise<RelayEffectJournal> {
+    assert.equal(profile, "alice"); assert.equal(id, operationId);
     executions++;
     return { schemaVersion: "apn.relay-effect-journal.v1", operationId } as RelayEffectJournal;
   } };
   const relayExecuteConfirmation = async () => true;
   for (const deps of [{}, { relayExecute }, { relayExecuteConfirmation }]) {
-    const result = await new ApnCore({ state, ...deps }).execute({ command: "relay.execute", operationId });
+    const result = await new ApnCore({ state, ...deps }).execute({ command: "relay.execute", profile: "alice", operationId });
     assert.equal(result.ok, false);
     assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
     assert.equal(executions, 0);
   }
   const result = await new ApnCore({ state, relayExecute, relayExecuteConfirmation })
-    .execute({ command: "relay.execute", operationId });
+    .execute({ command: "relay.execute", profile: "alice", operationId });
   assert.equal(result.ok, true);
   assert.equal(executions, 1);
   assert.equal(result.proof_class, "source_effect_journal");
@@ -68,7 +69,7 @@ test("Relay execute CLI rejects credential-bearing RPC before source execution",
     submitRawTransaction: async () => { starts++; return `0x${"a".repeat(64)}` as const; } };
   for (const rpcUrl of ["https://rpc.example/private", "https://rpc.example/?key=secret",
     "https://user:pass@rpc.example", "https://rpc.example/#fragment"]) {
-    const result = await runCli(["relay", "execute", "--operation", operationId, "--rpc-url", rpcUrl], {},
+    const result = await runCli(["relay", "execute", "--profile", "alice", "--operation", operationId, "--rpc-url", rpcUrl], {},
       { stateRoot: temporary.root, relayExecuteTransport: transport });
     assert.equal(result.ok, false);
     assert.ok(["APN_INVALID_INPUT", "APN_RPC_CONFIG"].includes(result.error?.code ?? ""));
@@ -81,7 +82,7 @@ test("Relay status and preflight do not install the source execution runtime", a
   let starts = 0;
   const transport = { batchCall: async () => { starts++; return []; },
     submitRawTransaction: async () => { starts++; return `0x${"a".repeat(64)}` as const; } };
-  for (const args of [["relay", "status", "--operation", operationId],
+  for (const args of [["relay", "status", "--profile", "alice", "--operation", operationId],
     ["relay", "preflight", "--profile", "default", "--operation", operationId,
       "--rpc-url", "https://rpc.example"]]) {
     const core = createApnCore(bindArgv(args), { stateRoot: temporary.root, relayExecuteTransport: transport });

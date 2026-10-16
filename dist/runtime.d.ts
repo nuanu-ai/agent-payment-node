@@ -66,7 +66,7 @@ export interface RelayExecutionConfirmationSummary {
 }
 export type RelayExecuteConfirmation = (summary: RelayExecutionConfirmationSummary) => Promise<boolean>;
 export interface RelayExecuteHandler {
-    execute(operationId: string): Promise<RelayEffectJournal>;
+    execute(profile: string, operationId: string): Promise<RelayEffectJournal>;
 }
 export interface CoreDependencies {
     readonly relayPrepare?: RelayUnsignedPrepareService;

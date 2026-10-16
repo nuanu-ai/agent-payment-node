@@ -9,13 +9,13 @@ import { OperationService } from "../../src/operation-service.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT,
-  validateRelayNativeQuote } from "../../src/relay/native-quote.js";
+import { RELAY_BNB_POLYGON_ROUTE_REFERENCE, validateRelayNativeQuote } from "../../src/relay/native-quote.js";
+import { RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT } from "./relay-legacy-accounts.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
 const instant = new Date(1790909529 * 1000);
-const input = { profile: "evm-live-buyer", recipient: RELAY_POLYGON_RECIPIENT, amountAtomic: "1500000000000000",
+const input = { profile: "evm-live-buyer", sourceChain: "eip155:56", destinationChain: "eip155:137", recipient: RELAY_POLYGON_RECIPIENT, amountAtomic: "1500000000000000",
   minOutputAtomic: "9000000000000000000", maxDepositNetworkFeeWei: "30000000000000",
   idempotencyKey: "relay-bnb-pol-0001" };
 const fixture = async (): Promise<unknown> => JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-polygon-native-quote-20260925.json", "utf8"));
@@ -40,7 +40,8 @@ test("BNB native prepare is policy bound, durable, unsigned and replayed without
     activePolicy: async () => policy(), publicAccount: async () => RELAY_BNB_SOURCE, dailyUsage: async () => "0",
     nativeQuote: async intent => { calls++; return validateRelayNativeQuote(await fixture(), intent); },
   });
-  assert.deepEqual(bindArgv(["relay", "native", "prepare", "--profile", input.profile, "--recipient", input.recipient,
+  assert.deepEqual(bindArgv(["relay", "native", "prepare", "--profile", input.profile, "--source-chain", input.sourceChain,
+    "--destination-chain", input.destinationChain, "--recipient", input.recipient,
     "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
     "--max-deposit-network-fee-wei", input.maxDepositNetworkFeeWei, "--idempotency-key", input.idempotencyKey]).request,
     { command: "relay.native.prepare", ...input });
@@ -67,7 +68,7 @@ test("BNB native prepare is policy bound, durable, unsigned and replayed without
   assert.equal(calls, 1);
 });
 
-test("BNB native prepare refuses missing native asset, route pin, wrong owner and fee before persistence", async t => {
+test("BNB native prepare refuses missing native asset, route pin, wrong owner, foreign signed recipient and fee before persistence", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root);
   let calls = 0;
@@ -80,12 +81,16 @@ test("BNB native prepare refuses missing native asset, route pin, wrong owner an
   await assert.rejects(service(policy(RELAY_BNB_POLYGON_ROUTE_REFERENCE, "token")).prepareNative(input));
   await assert.rejects(service({ ...policy(), accounts: { evm: RELAY_POLYGON_RECIPIENT } }).prepareNative(input),
     { code: "APN_ALLOWLIST_REFUSED" });
-  await assert.rejects(service(policy()).prepareNative({ ...input, recipient: "0x1111111111111111111111111111111111111111" }),
-    { code: "APN_INVALID_INPUT" });
+  await assert.rejects(service(policy()).prepareNative({ ...input, sourceChain: "eip155:1" }),
+    { code: "APN_INVALID_INPUT", details: { reason: "relay_native_route_unknown" } });
   assert.equal(calls, 0);
+  // Any recipient is a valid input; the provider's signed order must pay exactly it, so this fixture is refused.
+  await assert.rejects(service(policy()).prepareNative({ ...input, recipient: "0x1111111111111111111111111111111111111111" }),
+    /Relay native quote rejected: order identity/u);
+  assert.equal(calls, 1);
   await assert.rejects(service(policy()).prepareNative({ ...input, maxDepositNetworkFeeWei: "1" }),
     { code: "APN_OPERATION_BLOCKED" });
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   await assert.rejects(new OperationService(state).required(state.operationId(input.profile, input.idempotencyKey)),
     { code: "APN_OPERATION_NOT_FOUND" });
 });
@@ -131,8 +136,9 @@ test("buyer Relay retirement rejects wrong profile and an existing native usage 
   const retire = new RelayRetireService(state, { now: () => instant });
   await assert.rejects(retire.retire({ profile: "default", operationId: first.operationId }),
     { code: "APN_OPERATION_BLOCKED" });
+  // Any profile may retire its own operations only: another profile's operation is not visible to it (OWNR-08).
   await assert.rejects(retire.retire({ profile: "other", operationId: first.operationId }),
-    { code: "APN_INVALID_INPUT" });
+    { code: "APN_OPERATION_BLOCKED" });
   await new AssetUsageLedger(temp.root).reserve({ account: RELAY_BNB_SOURCE, chain: "eip155:56",
     asset: { kind: "native", identifier: null }, registry: policy().registry, rail: "bridge",
     amountAtomic: input.amountAtomic, idempotencyKey: input.idempotencyKey, now: instant });

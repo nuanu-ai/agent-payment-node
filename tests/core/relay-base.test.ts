@@ -35,7 +35,7 @@ test("Base request pins Ethereum USDC, native Base ETH, amount and recipient", (
     "--amount-atomic", "2500000", "--min-output-atomic", "891439003839815",
     "--max-approval-network-fee-wei", "100000000000000", "--max-deposit-network-fee-wei", "100000000000000",
     "--idempotency-key", "relay-base-test-01"]).request.command, "relay.base.prepare");
-  assert.equal(bindArgv(["relay", "base", "observe", "--operation", "a".repeat(64),
+  assert.equal(bindArgv(["relay", "base", "observe", "--profile", "default", "--operation", "a".repeat(64),
     "--rpc-url", "https://base.example", "--ethereum-rpc-url", "https://ethereum.example"]).ethereumRpcUrl,
   "https://ethereum.example");
 });
@@ -144,7 +144,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
       railCaps: { bridge: { maximumPerTransferAtomic: "3000000", dailyLimitAtomic: "5000000" } },
       mechanismPins: { bridge: { provider: "relay", reference: "ethereum-usdc-base-eth-v1" } } }] }] });
   const op = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
-    state: "prepared", terminal: false, profileHash: "1".repeat(64), operationId: "2".repeat(64),
+    state: "prepared", terminal: false, profileHash: state.profileHash("default"), operationId: "2".repeat(64),
     idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64), sourceChainId: 1, destinationChainId: 8453,
     sourceAccount: payer.toLowerCase(), recipient: recipient.toLowerCase(), quoteDigest: quote.quoteDigest, quote,
     statusLocator: locator, policyDigest: registry.policyDigest, policyRevision: 1,
@@ -163,7 +163,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   const fetcher = (async () => { statusCalls++; return new Response(JSON.stringify({ status: "success", originChainId: 1,
     destinationChainId: 8453, txHashes: [hash] }), { status: 200 }); }) as typeof fetch;
   const service = new RelayBaseObserveService(state, () => ports, new RelayKeylessStatusService(state, fetcher));
-  const observed = await service.observe(op.operationId);
+  const observed = await service.observe("default", op.operationId);
   assert.equal(observed.state, "recipient_credit_observed");
   assert.equal(observed.destinationProof?.status, "recipient_credit_proven");
   assert.equal(observed.paidAcceptance, false); assert.equal(observed.sourceFinalized, false);
@@ -172,9 +172,9 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   assert.equal(statusCalls, 1); assert.equal(rpcCalls, 1);
   const routedService = new RelayBaseObserveService(state, () => ({ ...ports }),
     new RelayKeylessStatusService(state, fetcher));
-  const core = createApnCore(bindArgv(["relay", "base", "observe", "--operation", op.operationId,
+  const core = createApnCore(bindArgv(["relay", "base", "observe", "--profile", "default", "--operation", op.operationId,
     "--rpc-url", "https://base.example"]), { stateRoot: temporary.root, relayBaseObserve: routedService });
-  const routed = await core.execute({ command: "relay.base.observe", operationId: op.operationId });
+  const routed = await core.execute({ command: "relay.base.observe", profile: "default", operationId: op.operationId });
   assert.equal(routed.ok, true, JSON.stringify(routed));
   assert.equal(core.context.relayBaseObserve, routedService);
   const effects = new RelayEffectJournalRepository(temporary.root);
@@ -218,7 +218,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   };
   const operationalService = new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
     new RelayKeylessStatusService(state, boundFetcher), finalized, usage);
-  const operational = await operationalService.observe(op.operationId);
+  const operational = await operationalService.observe("default", op.operationId);
   assert.equal(operational.state, "operational_acceptance");
   assert.equal(operational.sourceFinalized, true);
   assert.equal(operational.sourceObservationReason, "source_finalized");
@@ -232,7 +232,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   assert.equal(confirmedJournal?.effects[1].phase, "confirmed");
   assert.equal(finalizedUsage?.state, "finalized");
   assert.equal(finalizedUsage?.outcomeDigest, confirmedJournal?.integrityHash);
-  assert.equal((await operationalService.observe(op.operationId)).state, "operational_acceptance");
+  assert.equal((await operationalService.observe("default", op.operationId)).state, "operational_acceptance");
   assert.equal((await effects.load(op.profileHash, op.operationId))?.integrityHash, confirmedJournal?.integrityHash);
   assert.equal((await usage.load(identity, reservationId))?.reservationDigest, finalizedUsage?.reservationDigest);
   const finalizedObservation = await finalized.finalizedDeposit();
@@ -245,7 +245,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
       receipt: { ...finalizedObservation.receipt, status: "reverted" as const } }) }, "source_deposit_reverted"],
   ] as const) {
     const diagnostic = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
-      new RelayKeylessStatusService(state, boundFetcher), source, usage).observe(op.operationId);
+      new RelayKeylessStatusService(state, boundFetcher), source, usage).observe("default", op.operationId);
     assert.equal(diagnostic.sourceObservationReason, expectedReason);
     assert.equal(diagnostic.sourceFinalized, false);
     assert.equal(diagnostic.sourceUsageFinalized, false);
@@ -253,23 +253,23 @@ test("Base observe reads one provider candidate and never promotes credit to pai
     assert.equal(JSON.stringify(diagnostic).includes("private RPC response and credential"), false);
   }
   const directOnly = await new RelayBaseObserveService(state, () => ({ ...ports }),
-    new RelayKeylessStatusService(state, boundFetcher), finalized, usage).observe(op.operationId);
+    new RelayKeylessStatusService(state, boundFetcher), finalized, usage).observe("default", op.operationId);
   assert.equal(directOnly.state, "recipient_credit_observed");
   assert.equal(directOnly.operationalAcceptance, false);
   const unfinalized = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
-    new RelayKeylessStatusService(state, boundFetcher), { finalizedDeposit: async () => null }, usage).observe(op.operationId);
+    new RelayKeylessStatusService(state, boundFetcher), { finalizedDeposit: async () => null }, usage).observe("default", op.operationId);
   assert.equal(unfinalized.state, "recipient_credit_observed");
   assert.equal(unfinalized.operationalAcceptance, false);
   const unboundFetcher = (async () => new Response(JSON.stringify({ status: "success", originChainId: 1,
     destinationChainId: 8453, inTxHashes: [`0x${"9".repeat(64)}`], txHashes: [hash] }),
     { status: 200 })) as typeof fetch;
   const unbound = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
-    new RelayKeylessStatusService(state, unboundFetcher), finalized, usage).observe(op.operationId);
+    new RelayKeylessStatusService(state, unboundFetcher), finalized, usage).observe("default", op.operationId);
   assert.equal(unbound.state, "recipient_credit_observed");
   assert.equal(unbound.operationalAcceptance, false);
   const missingUsage = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
     new RelayKeylessStatusService(state, boundFetcher), finalized,
-    { load: async () => null } as any).observe(op.operationId);
+    { load: async () => null } as any).observe("default", op.operationId);
   assert.equal(missingUsage.operationalAcceptance, false);
 });
 
