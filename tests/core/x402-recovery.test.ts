@@ -271,6 +271,163 @@ test("first authorized send follows recovered material and a durable Base safe s
   assert.equal((await operation(fixture)).authorizationUsedScan?.status, "complete");
 });
 
+type AnchorFault = (fixture: Fixture, target: string, durable: X402OperationRecord) => void;
+
+function rpcFaultOn(fixture: Fixture, matches: (call: string, count: number) => boolean): void {
+  const counts = new Map<string, number>();
+  fixture.rpc.onX402Call = (call) => {
+    const count = (counts.get(call) ?? 0) + 1;
+    counts.set(call, count);
+    if (matches(call, count)) {
+      throw new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.", { httpStatus: 429 });
+    }
+  };
+}
+
+function foreignOriginBlock(fixture: Fixture, number: string): void {
+  const original = fixture.rpc.getX402Block.bind(fixture.rpc);
+  fixture.rpc.getX402Block = async (requested) => {
+    const block = await original(requested);
+    return requested === number ? { ...block, rpcOrigin: "https://different.example" } : block;
+  };
+}
+
+function nextBlock(number: string): string { return (BigInt(number) + 1n).toString(); }
+
+async function completeZeroScanWithoutSend(fixture: Fixture): Promise<X402OperationRecord> {
+  const recoverMaterial = fixture.native.request;
+  failRecoveredNativeMaterial(fixture, "APN_KEYCHAIN_LOCKED");
+  const locked = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal(locked.ok, true, JSON.stringify(locked));
+  fixture.native.request = recoverMaterial;
+  const durable = await operation(fixture);
+  assert.equal(durable.state, "authorized_not_sent");
+  assert.equal(durable.authorizationUsedScan?.status, "complete");
+  assert.deepEqual(durable.authorizationUsedScan?.candidates, []);
+  assert.equal(durable.attempts.length, 0);
+  assert.equal(fixture.http.calls.length, 1, "only the unpaid challenge precedes the locked material read");
+  const target = durable.authorizationUsedScan!.targetSafeHead;
+  fixture.rpc.blockHashes.set(target.number, target.hash as Hex);
+  return durable;
+}
+
+test("first EIP-3009 send requires this resume's anchor revalidation, not a stored complete zero scan", async (t) => {
+  const cases: readonly {
+    readonly name: string;
+    readonly priorComplete: boolean;
+    readonly paid: 0 | 1;
+    readonly scan: "active" | "complete";
+    readonly fault?: AnchorFault;
+  }[] = [
+    { name: "fresh scan, numbered anchor throws", priorComplete: false, paid: 0, scan: "active",
+      fault: (fixture, target) => rpcFaultOn(fixture, (call) => call === `block:${target}`) },
+    { name: "complete scan, healthy same-head anchor", priorComplete: true, paid: 1, scan: "complete" },
+    { name: "complete scan, numbered anchor throws", priorComplete: true, paid: 0, scan: "complete",
+      fault: (fixture, target) => rpcFaultOn(fixture, (call) => call === `block:${target}`) },
+    { name: "complete scan, numbered anchor has another origin", priorComplete: true, paid: 0, scan: "complete",
+      fault: foreignOriginBlock },
+    { name: "complete scan, canonical hash reorg", priorComplete: true, paid: 0, scan: "active",
+      fault: (fixture, target) => { fixture.rpc.blockHashes.set(target, `0x${"e".repeat(64)}` as Hex); } },
+    { name: "fresh scan, rate-limited log read", priorComplete: false, paid: 0, scan: "active",
+      fault: (fixture) => rpcFaultOn(fixture, (call) => call.startsWith("logs:")) },
+    { name: "complete scan, reorg reset cannot re-read safe", priorComplete: true, paid: 0, scan: "complete",
+      fault: (fixture, target) => {
+        fixture.rpc.blockHashes.set(target, `0x${"e".repeat(64)}` as Hex);
+        rpcFaultOn(fixture, (call, count) => call === "safe" && count === 2);
+      } },
+    { name: "complete scan, safe tag disagrees with numbered anchor", priorComplete: true, paid: 0, scan: "complete",
+      fault: (fixture) => { fixture.rpc.safeHead = { ...fixture.rpc.safeHead, hash: `0x${"c".repeat(64)}` as Hex }; } },
+    { name: "complete scan, safe head has another origin", priorComplete: true, paid: 0, scan: "complete",
+      fault: (fixture) => { fixture.rpc.safeHead = { ...fixture.rpc.safeHead, rpcOrigin: "https://different.example" }; } },
+    { name: "complete scan, extension target read throws", priorComplete: true, paid: 0, scan: "complete",
+      fault: (fixture, target) => {
+        fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: nextBlock(target), hash: `0x${"e".repeat(64)}` as Hex };
+        rpcFaultOn(fixture, (call) => call === `block:${nextBlock(target)}`);
+      } },
+    { name: "complete scan, safe head regressed below the anchor", priorComplete: true, paid: 0, scan: "complete",
+      fault: (fixture) => { fixture.rpc.safeHead = { ...fixture.rpc.finalizedHead, queriedTag: "safe" }; } },
+    { name: "complete scan, finalized anchor throws after chain-time expiry", priorComplete: true, paid: 0, scan: "complete",
+      fault: (fixture, _target, durable) => {
+        const validBefore = durable.authorization.validBefore;
+        assert.equal(BigInt(fixture.clock.now().getTime()) < BigInt(validBefore) * 1000n, true, "local clock has not expired");
+        fixture.rpc.safeHead = {
+          ...fixture.rpc.safeHead,
+          timestamp: validBefore,
+          observedAt: new Date(Number(validBefore) * 1000).toISOString(),
+        };
+        rpcFaultOn(fixture, (call) => call === `block:${fixture.rpc.finalizedHead.number}`);
+      } },
+  ];
+  for (const [index, scenario] of cases.entries()) {
+    await t.test(scenario.name, async (nested) => {
+      const fixture = await authorizedFixture(nested, { idempotencyKey: `anchor-revalidation-${index}` });
+      if (scenario.priorComplete) await completeZeroScanWithoutSend(fixture);
+      const before = await operation(fixture);
+      scenario.fault?.(fixture, before.authorizationUsedScan?.targetSafeHead.number ?? fixture.rpc.safeHead.number, before);
+      fixture.rpc.x402Calls.length = 0;
+      const httpCalls = fixture.http.calls.length;
+      const nativeCalls = fixture.native.calls.length;
+
+      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+      assert.equal(resumed.ok, true, JSON.stringify(resumed));
+      const after = await operation(fixture);
+      assert.equal(fixture.http.calls.length - httpCalls, scenario.paid, "paid HTTP dispatches");
+      assert.equal(after.attempts.length, scenario.paid, "durable paid attempts");
+      assert.equal(after.state, scenario.paid === 1 ? "effect_unknown" : "authorized_not_sent");
+      assert.equal(after.authorizationUsedScan?.status, scenario.scan);
+      assert.equal(fixture.rpc.submissions.length, 0);
+      if (scenario.paid === 1) {
+        assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false, "same-head send needs no new log read");
+        return;
+      }
+      assert.equal(fixture.native.calls.length, nativeCalls, "the gate closes before payment material is recovered");
+      assert.equal(after.nextActions.includes("operation.resume"), true);
+      if (scenario.scan === "complete") assert.equal(after.integrityHash, before.integrityHash, "durable hold is untouched");
+    });
+  }
+});
+
+test("post-exposure zero-scan retry requires this resume's anchor revalidation", async (t) => {
+  const cases: readonly { readonly name: string; readonly paid: 0 | 1; readonly fault?: AnchorFault }[] = [
+    { name: "prior anchor throws", paid: 0, fault: (fixture, target) => rpcFaultOn(fixture, (call) => call === `block:${target}`) },
+    { name: "extension target has another origin", paid: 0, fault: (fixture, target) => foreignOriginBlock(fixture, nextBlock(target)) },
+    { name: "final anchor throws after the zero log read", paid: 0,
+      fault: (fixture, target) => rpcFaultOn(fixture, (call, count) => call === `block:${nextBlock(target)}` && count === 3) },
+    { name: "healthy extension permits one identical retry", paid: 1 },
+  ];
+  for (const [index, scenario] of cases.entries()) {
+    await t.test(scenario.name, async (nested) => {
+      const fixture = await authorizedFixture(nested, {
+        paidOutcomes: [new Error("first ambiguity"), new Error("retry ambiguity")],
+        idempotencyKey: `anchor-retry-${index}`,
+      });
+      await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+      const exposed = await operation(fixture);
+      assert.equal(exposed.state, "effect_unknown");
+      assert.equal(exposed.attempts.length, 1);
+      assert.equal(exposed.authorizationUsedScan?.status, "complete");
+      const target = exposed.authorizationUsedScan!.targetSafeHead;
+      fixture.rpc.blockHashes.set(target.number, target.hash as Hex);
+      fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: nextBlock(target.number), hash: `0x${"e".repeat(64)}` as Hex };
+      fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
+      scenario.fault?.(fixture, target.number, exposed);
+      fixture.rpc.x402Calls.length = 0;
+      const httpCalls = fixture.http.calls.length;
+
+      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+      assert.equal(resumed.ok, true, JSON.stringify(resumed));
+      const after = await operation(fixture);
+      assert.equal(fixture.http.calls.length - httpCalls, scenario.paid, "paid HTTP retries");
+      assert.equal(after.attempts.length, 1 + scenario.paid, "durable paid attempts");
+      assert.equal(after.state, "effect_unknown");
+      assert.equal(fixture.rpc.submissions.length, 0);
+      if (scenario.name.startsWith("final anchor")) {
+        assert.equal(fixture.rpc.x402Calls.includes(`logs:${nextBlock(target.number)}-${nextBlock(target.number)}`), true);
+      }
+    });
+  }
+});
+
 test("one bounded resume waits outside locks and completes through RPC-only settlement observations", async (t) => {
   const wait = new ControlledWait();
   const fixture = await authorizedFixture(t, {
