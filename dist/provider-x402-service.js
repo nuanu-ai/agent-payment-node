@@ -1,7 +1,7 @@
 import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
-import { effectiveX402Cap, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
+import { assertX402PayeeAdmitted, effectiveX402Cap, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
 import { LOCAL_PROVIDER_ID } from "./provider-profile.js";
 import { captureProviderEvidenceLowerBlock, observeProviderSettlement, providerX402ReadPort, } from "./provider-x402-evidence.js";
 import { providerX402RequestHash, publicProviderX402Operation, } from "./provider-x402-model.js";
@@ -104,6 +104,8 @@ export class ProviderX402Service {
             const capAtomic = effectiveX402Cap(policy, callerCap);
             const challenge = await freshChallenge(this.context.requireHttp(), canonicalUrl, httpRequest);
             const selected = soleProviderOffer(challenge);
+            // Payee pin at prepare; later steps refuse any policy change (the frozen policy binds its integrity hash).
+            assertX402PayeeAdmitted(policy, selected.payee);
             assertProviderAtomicAmount(selected.amountAtomic);
             if (BigInt(selected.amountAtomic) > BigInt(capAtomic)) {
                 throw new ApnError("APN_X402_OFFER_EXCEEDS_LIMIT", "The exact seller offer exceeds the effective x402 limit.");

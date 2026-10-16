@@ -9,6 +9,8 @@ export interface ProfilePolicyApprovalIntent {
     readonly maxBalanceUsdcAtomic: string;
     readonly maxX402AmountAtomic: string;
     readonly maxBalanceEthWei?: string;
+    /** The x402 payee pin the change leaves in force; absent means payees are not restricted. */
+    readonly x402Payees?: readonly string[];
 }
 export interface ProfilePolicyApprovalPort {
     approve(intent: ProfilePolicyApprovalIntent): Promise<void>;

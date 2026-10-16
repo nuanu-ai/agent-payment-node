@@ -1,5 +1,4 @@
-import { MEGA_FUNDING_COMMANDS } from "./lifi/mega-gaszip-command-catalog.js";
-import { SEI_FUNDING_COMMANDS } from "./lifi/sei-gaszip-command-catalog.js";
+import { MEGA_FUNDING_COMMANDS, SEI_FUNDING_COMMANDS } from "./lifi/gaszip-direct-command-catalog.js";
 import { CIRCLE_EVM_COMMANDS, CIRCLE_EVM_GROUPS } from "./circle-v2-evm/command-catalog.js";
 import { MERCHANT_COMMANDS } from "./x402-merchant/command-catalog.js";
 import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
@@ -73,7 +72,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
   { path: ["relay"], summary: "Prepare finite Relay quotes; execute only admitted Ethereum USDC source routes.", kind: "group" },
   { path: ["mega"], summary: "Finite Mega native funding.", kind: "group" },
-  { path: ["mega", "funding"], summary: "GasZip direct Base ETH to Mega ETH for the default owner.", kind: "group" },
+  { path: ["mega", "funding"], summary: "GasZip direct Base ETH to Mega ETH, self only.", kind: "group" },
   { path: ["sei"], summary: "Finite Sei native funding.", kind: "group" },
   { path: ["sei", "funding"], summary: "GasZip direct Base ETH to Sei SEI, self only.", kind: "group" },
   { path: ["stargate"], summary: "Execute the pinned Stargate V2 Ethereum ETH to Unichain ETH lane.", kind: "group" },
@@ -95,7 +94,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["wallet", "metamask"], summary: "Finite fixed MetaMask native-paid transfer.", kind: "group" },
   { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
   { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
-  { path: ["x402", "merchant"], summary: "Finite external USDm merchant transfer-proof payment and delivery.", kind: "group" },
+  { path: ["x402", "merchant"], summary: "x402 ERC-20 transfer-proof merchant payment and delivery.", kind: "group" },
   { path: ["x402", "permit2"], summary: "Read owner admission and intents, approve one foreground Permit2 GET and observe chain evidence.", kind: "group" },
   { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
   { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
@@ -289,18 +288,19 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile>", "Read the encrypted owner-approved profile policy.", [profileRequired], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default"]),
   command(
     ["wallet", "policy", "set"],
-    "apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]",
+    "apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]",
     "Create, lower or raise owner-approved balance and x402 limits.",
     [
       profileRequired,
       option("--max-balance-usdc-atomic", "atomic_usdc", true, noDefault, ["positive_canonical_integer"], "operator_input"),
       option("--max-x402-amount-atomic", "atomic_usdc", true, noDefault, ["positive_canonical_integer", "not_greater_than_max_balance_usdc_atomic"], "operator_input"),
       option("--max-balance-eth-wei", "wei", false, noDefault, ["positive_canonical_integer", "omission_preserves_existing_value"], "operator_input"),
+      option("--x402-payees", "string", false, noDefault, ["comma_separated_1_to_16_unique_nonzero_evm_addresses_or_unrestricted", "omission_preserves_existing_value", "widening_requires_foreground_tty"], "operator_input"),
     ],
     "local_write",
     "Writes an encrypted wallet-bound profile policy.",
     "foreground_tty",
-    "Required when a policy is created or any limit increases; a pure decrease is non-interactive.",
+    "Required when a policy is created, any limit increases or the x402 payee pin widens; a pure decrease or a new pin is non-interactive.",
     completedStates,
     [],
     ["apn wallet policy set --profile default --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"],

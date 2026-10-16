@@ -17,6 +17,8 @@ export interface ProfilePolicyApprovalIntent {
   readonly maxBalanceUsdcAtomic: string;
   readonly maxX402AmountAtomic: string;
   readonly maxBalanceEthWei?: string;
+  /** The x402 payee pin the change leaves in force; absent means payees are not restricted. */
+  readonly x402Payees?: readonly string[];
 }
 
 export interface ProfilePolicyApprovalPort {
@@ -76,6 +78,7 @@ export class TtyProfilePolicyApproval implements ProfilePolicyApprovalPort {
         `Maximum wallet USDC: ${intent.maxBalanceUsdcAtomic} atomic`,
         `Maximum unattended x402: ${intent.maxX402AmountAtomic} atomic`,
         `Maximum wallet ETH: ${intent.maxBalanceEthWei ?? "not configured"} wei`,
+        intent.x402Payees === undefined ? "x402 payees: not restricted" : `x402 payees pinned (${intent.x402Payees.length}): ${intent.x402Payees.join(", ")}`,
         "These values are owner policy, not product defaults.",
         `Fingerprint: ${intent.fingerprint}`,
         `Type ${phrase} and press Enter to confirm.`,

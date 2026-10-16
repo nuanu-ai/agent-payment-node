@@ -295,8 +295,7 @@ export class AssetUsageLedger extends SecureStateStore {
         if (durable === null || canonicalJson(durable) !== canonicalJson(o) || durable.submissionAttempts !== 1 || durable.signingAttempts !== 1 || durable.txHash !== receipt.transactionHash || durable.receipt === null || canonicalJson(durable.receipt) !== canonicalJson(o.receipt) || !["payment_finalized", "delivery_unknown", "delivered"].includes(durable.state))
             throw blocked("Merchant actual fee is not bound to this ledger root durable paid operation.");
         const identity = { account: o.custody.walletAddress, chain: "eip155:4326", asset: { kind: "native", identifier: null } }, key = `apn.merchant-native:${o.operationId}`;
-        if (identity.account !== "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14" || o.profile !== "default")
-            throw blocked("Finite merchant native owner mismatch.");
+        // The payer is the operation's own custody (validated with it above); any local profile may pay a merchant.
         const reservationId = assetUsageReservationId(identity, key), at = instant(now);
         await this.ready();
         return this.withLocks([this.bucketLock(identity)], async () => {

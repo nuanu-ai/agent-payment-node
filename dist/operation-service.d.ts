@@ -1,9 +1,8 @@
 import { type CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
 import { type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
-import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
+import { GaszipFundingJournal, type GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
 import { type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
-import { MegaFundingJournal, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import type { CommandOutcome } from "./commands.js";
@@ -27,13 +26,13 @@ import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation
 import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 export type StoredMoneyOperation = {
     readonly kind: "sei_gaszip";
-    readonly record: SeiFundingRecord;
+    readonly record: GaszipFundingRecord;
 } | {
     readonly kind: "circle_route";
     readonly record: CircleKnownOperation;
 } | {
     readonly kind: "mega_gaszip";
-    readonly record: MegaFundingRecord;
+    readonly record: GaszipFundingRecord;
 } | {
     readonly kind: "merchant_x402";
     readonly record: MerchantOperation;
@@ -85,7 +84,7 @@ export declare class OperationService {
     private readonly relayUnsigned;
     private readonly seiFunding;
     private readonly megaFunding;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation">, megaFunding?: Pick<MegaFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation">, megaFunding?: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
     /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
      * locks are acquired together so owner validation and durable write are atomic. */
     persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation>;
