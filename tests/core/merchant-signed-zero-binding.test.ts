@@ -4,16 +4,16 @@ import { fromRlp, keccak256, parseTransaction, toRlp, type Hex, type Transaction
 import { privateKeyToAccount } from "viem/accounts";
 import type { MerchantOperation } from "../../src/x402-merchant/model.js";
 
-// A separate test worker substitutes only the pinned owner with an isolated key.
+// The payer is the operation's own custody wallet: an isolated generated key, never a pinned owner.
 // Signing, RLP parsing, address recovery and the production verifier are real.
 test("production merchant verifier accepts canonical omitted zeros and rejects signed envelope mutations", async t => {
     const account = privateKeyToAccount(`0x${"01".repeat(32)}`);
     const other = privateKeyToAccount(`0x${"02".repeat(32)}`);
     const pins = await import("../../src/x402-merchant/pins.js");
-    const fixture = t.mock.module("../../src/x402-merchant/pins.js", { namedExports: { ...pins, MERCHANT_OWNER: account.address } });
     const { verifyMerchantRaw } = await import("../../src/x402-merchant/custody.js");
-    const { MERCHANT_DATA } = await import("../../src/x402-merchant/rpc.js");
-    const o = { envelope: { nonce: "0", gas: "129299", maxFeePerGas: "2000000", maxPriorityFeePerGas: "0" } } as MerchantOperation;
+    const { merchantTransferData } = await import("../../src/x402-merchant/rpc.js");
+    const MERCHANT_DATA = merchantTransferData({ payee: pins.MERCHANT_PAYEE, amount: pins.MERCHANT_AMOUNT });
+    const o = { custody: { walletAddress: account.address }, envelope: { nonce: "0", gas: "129299", maxFeePerGas: "2000000", maxPriorityFeePerGas: "0" } } as MerchantOperation;
     const payload: TransactionSerializableEIP1559 = { type: "eip1559", chainId: 4326, to: pins.MERCHANT_TOKEN, data: MERCHANT_DATA,
         value: 0n, nonce: 0, gas: 129299n, maxFeePerGas: 2000000n, maxPriorityFeePerGas: 0n, accessList: [] };
     try {
@@ -42,5 +42,5 @@ test("production merchant verifier accepts canonical omitted zeros and rejects s
             fields[8] = ["0x01"];
             await assert.rejects(verifyMerchantRaw(o, `0x02${toRlp(fields).slice(2)}`));
         });
-    } finally { fixture.restore(); }
+    } finally { /* nothing substituted */ }
 });

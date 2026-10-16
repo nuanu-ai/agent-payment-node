@@ -7,16 +7,16 @@ import { canonicalJson, hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { SecureStateStore } from "../secure-state-store.js";
-import { MERCHANT_OWNER, MERCHANT_TOKEN } from "./pins.js";
-import { MERCHANT_DATA } from "./rpc.js";
+import { merchantTransferData } from "./rpc.js";
+import { merchantTerms } from "./terms.js";
 import { refuse } from "./protocol.js";
 export async function verifyMerchantRaw(o, raw) {
-    const tx = parseTransaction(raw), owner = await recoverTransactionAddress({ serializedTransaction: raw }), e = o.envelope;
+    const tx = parseTransaction(raw), owner = await recoverTransactionAddress({ serializedTransaction: raw }), e = o.envelope, t = merchantTerms(o);
     // viem omits canonical RLP zero values and the empty access list.
     const value = tx.value === undefined ? 0n : tx.value;
     const priority = tx.maxPriorityFeePerGas === undefined ? 0n : tx.maxPriorityFeePerGas;
     const accessList = tx.accessList === undefined ? [] : tx.accessList;
-    if (owner !== MERCHANT_OWNER || tx.type !== "eip1559" || tx.chainId !== 4326 || tx.to?.toLowerCase() !== MERCHANT_TOKEN.toLowerCase() || tx.data !== MERCHANT_DATA || value !== 0n ||
+    if (owner !== t.payer || tx.type !== "eip1559" || tx.chainId !== 4326 || tx.to?.toLowerCase() !== t.token.toLowerCase() || tx.data !== merchantTransferData(t) || value !== 0n ||
         tx.nonce !== Number(e.nonce) || tx.gas !== BigInt(e.gas) || tx.maxFeePerGas !== BigInt(e.maxFeePerGas) || priority !== BigInt(e.maxPriorityFeePerGas) || !Array.isArray(accessList) || accessList.length !== 0)
         refuse("merchant_signed_transaction_binding");
     return keccak256(raw);
@@ -56,11 +56,12 @@ export class MerchantCustody extends SecureStateStore {
                     assertMerchantAuthority(grant, controller, o, this.now());
                 }
                 const a = privateKeyToAccount(w.secret.privateKey);
-                if (a.address !== MERCHANT_OWNER || this.now().toISOString() >= o.expiresAt)
+                const t = merchantTerms(o);
+                if (a.address !== t.payer || this.now().toISOString() >= o.expiresAt)
                     refuse("merchant_signing_identity_or_expiry");
                 const e = o.envelope;
                 assertMerchantAuthority(grant, controller, o, this.now());
-                return await a.signTransaction({ type: "eip1559", chainId: 4326, to: MERCHANT_TOKEN, data: MERCHANT_DATA, value: 0n, nonce: Number(e.nonce), gas: BigInt(e.gas), maxFeePerGas: BigInt(e.maxFeePerGas), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGas), accessList: [] });
+                return await a.signTransaction({ type: "eip1559", chainId: 4326, to: t.token, data: merchantTransferData(t), value: 0n, nonce: Number(e.nonce), gas: BigInt(e.gas), maxFeePerGas: BigInt(e.maxFeePerGas), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGas), accessList: [] });
             }
             finally {
                 this.wallets.clear(w.secret);

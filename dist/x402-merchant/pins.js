@@ -3,7 +3,6 @@ import { canonicalJson } from "../canonical.js";
 export const MERCHANT_URL = "https://x402engine.app/api/crypto/price?ids=bitcoin";
 export const MERCHANT_RPC = "https://mainnet.megaeth.com/rpc";
 export const MERCHANT_CHAIN = "eip155:4326";
-export const MERCHANT_OWNER = getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14");
 export const MERCHANT_TOKEN = getAddress("0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7");
 export const MERCHANT_PAYEE = getAddress("0x7dd5Be069f2d2eAd75eC7C3423B116fF043c2629");
 export const MERCHANT_AMOUNT = "1000000000000000";

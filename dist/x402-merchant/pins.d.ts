@@ -2,7 +2,6 @@ import type { CandidateAsset } from "../allowlist-inventory.js";
 export declare const MERCHANT_URL = "https://x402engine.app/api/crypto/price?ids=bitcoin";
 export declare const MERCHANT_RPC = "https://mainnet.megaeth.com/rpc";
 export declare const MERCHANT_CHAIN = "eip155:4326";
-export declare const MERCHANT_OWNER: `0x${string}`;
 export declare const MERCHANT_TOKEN: `0x${string}`;
 export declare const MERCHANT_PAYEE: `0x${string}`;
 export declare const MERCHANT_AMOUNT = "1000000000000000";

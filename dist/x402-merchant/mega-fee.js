@@ -1,7 +1,6 @@
 import { decodeFunctionResult, encodeFunctionData, erc20Abi, getAddress, keccak256, parseAbi, serializeTransaction } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { gaszipOracleUint256 } from "../lifi/gaszip-oracle-data.js";
-import { MERCHANT_AMOUNT, MERCHANT_PAYEE, MERCHANT_TOKEN } from "./pins.js";
 import { refuse } from "./protocol.js";
 export const MEGA_FEE_ORACLE = { address: getAddress("0x420000000000000000000000000000000000000F"),
     proxyHash: "0xfa8c9db6c6cab7108dea276f4cd09d575674eb0852c0fa3187e59e98ef977998",
@@ -16,15 +15,16 @@ const hash = (v) => { if (typeof v !== "string" || !/^0x[0-9a-fA-F]{64}$/u.test(
     refuse("merchant_fee_hash"); return v.toLowerCase(); };
 const data = (v) => { if (typeof v !== "string" || !/^0x(?:[0-9a-fA-F]{2})*$/u.test(v))
     refuse("merchant_fee_data"); return v; };
-export function unsignedMerchantEnvelope(e) {
+/** The unsigned transfer the fee context prices: the operation's own token, payee and amount under its frozen envelope. */
+export function unsignedMerchantEnvelope(e, t) {
     if (BigInt(e.nonce) > BigInt(Number.MAX_SAFE_INTEGER))
         refuse("merchant_fee_nonce");
-    return serializeTransaction({ type: "eip1559", chainId: 4326, nonce: Number(e.nonce), gas: BigInt(e.gas), maxFeePerGas: BigInt(e.maxFeePerGas), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGas), to: MERCHANT_TOKEN, value: 0n, accessList: [], data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [MERCHANT_PAYEE, BigInt(MERCHANT_AMOUNT)] }) });
+    return serializeTransaction({ type: "eip1559", chainId: 4326, nonce: Number(e.nonce), gas: BigInt(e.gas), maxFeePerGas: BigInt(e.maxFeePerGas), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGas), to: t.token, value: 0n, accessList: [], data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [t.payee, BigInt(t.amount)] }) });
 }
-export function validateMerchantFeeContext(v, e) {
+export function validateMerchantFeeContext(v, e, t) {
     if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "anchorNumber", "anchorHash", "oraclePinsDigest", "unsignedBytes", "unsignedHash", "executionUpper", "l1EstimatedUpper", "operatorEstimatedUpper", "admissionEstimatedUpper"]))
         refuse("merchant_fee_context_shape");
-    const f = v, raw = unsignedMerchantEnvelope(e);
+    const f = v, raw = unsignedMerchantEnvelope(e, t);
     for (const key of ["anchorNumber", "unsignedBytes", "executionUpper", "l1EstimatedUpper", "operatorEstimatedUpper", "admissionEstimatedUpper"])
         if (!/^(0|[1-9][0-9]{0,77})$/u.test(f[key]))
             refuse("merchant_fee_context_uint");
@@ -45,15 +45,15 @@ export async function merchantOracleAt(rpc, number, blockHash, gas, unsignedByte
         refuse("merchant_fee_anchor_changed");
     return unsignedBytes === undefined ? 0n : gaszipOracleUint256(values[8], refuse);
 }
-export async function merchantFeeQuote(rpc, head, e) {
-    const raw = unsignedMerchantEnvelope(e), number = q(head.number).toString(), blockHash = hash(head.hash), execution = BigInt(e.gas) * BigInt(e.maxFeePerGas);
+export async function merchantFeeQuote(rpc, head, e, t) {
+    const raw = unsignedMerchantEnvelope(e, t), number = q(head.number).toString(), blockHash = hash(head.hash), execution = BigInt(e.gas) * BigInt(e.maxFeePerGas);
     // Fjord adds its own 68-byte signature allowance. Pass the exact unsigned serialized length once.
     const l1 = await merchantOracleAt(rpc, number, blockHash, BigInt(e.gas), BigInt((raw.length - 2) / 2));
     return { schemaVersion: "apn.merchant-mega-fee.v1", anchorNumber: number, anchorHash: blockHash, oraclePinsDigest: hashObject(MEGA_FEE_ORACLE), unsignedBytes: String((raw.length - 2) / 2), unsignedHash: keccak256(raw), executionUpper: execution.toString(), l1EstimatedUpper: l1.toString(), operatorEstimatedUpper: "0", admissionEstimatedUpper: (execution + l1).toString() };
 }
-export function checkMerchantFullFee(fresh, frozen, e, native) {
-    validateMerchantFeeContext(frozen, e);
-    validateMerchantFeeContext(fresh, e);
+export function checkMerchantFullFee(fresh, frozen, e, native, t) {
+    validateMerchantFeeContext(frozen, e, t);
+    validateMerchantFeeContext(fresh, e, t);
     if (e.nativeFeeReserveWei !== undefined && (!/^[1-9][0-9]*$/u.test(e.nativeFeeReserveWei) || BigInt(e.nativeFeeReserveWei) < BigInt(frozen.admissionEstimatedUpper) || BigInt(e.nativeFeeReserveWei) > BigInt(e.maximumNativeFee)))
         refuse("merchant_native_reserve_binding");
     if (fresh.unsignedHash !== frozen.unsignedHash || BigInt(fresh.admissionEstimatedUpper) > BigInt(e.nativeFeeReserveWei ?? frozen.admissionEstimatedUpper) || BigInt(fresh.admissionEstimatedUpper) > BigInt(e.maximumNativeFee) || BigInt(native) < BigInt(e.nativeFeeReserveWei ?? frozen.admissionEstimatedUpper))

@@ -3,7 +3,7 @@ import { validateMerchantFeeContext } from "./mega-fee.js";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { validateEvmNativeCustody } from "../evm-native-custody.js";
 import { checkMerchantChallenge, refuse } from "./protocol.js";
-import { MERCHANT_OWNER } from "./pins.js";
+import { merchantTerms } from "./terms.js";
 export function merchantFingerprint(o) {
     return hashObject({ schemaVersion: o.schemaVersion, kind: o.kind, operationId: o.operationId, profile: o.profile, profileHash: o.profileHash,
         idempotencyHash: o.idempotencyHash, requestHash: o.requestHash, custody: o.custody, frozen: o.frozen, envelope: o.envelope, ...(o.feeContext === undefined ? {} : { feeContext: o.feeContext }), policy: o.policy, ...(o.effectBinding === undefined ? {} : { effectBinding: o.effectBinding }), createdAt: o.createdAt, expiresAt: o.expiresAt });
@@ -26,14 +26,15 @@ export function validateMerchant(v) {
         o.terminal !== ["delivered", "reverted", "retired_unsent"].includes(o.state) || ![0, 1].includes(o.signingAttempts) || ![0, 1].includes(o.submissionAttempts) || o.submissionAttempts > o.signingAttempts)
         refuse("merchant_state_integrity");
     validateEvmNativeCustody(o.custody);
-    if (o.custody.walletAddress !== MERCHANT_OWNER || o.custody.profileHash !== o.profileHash || canonicalJson(checkMerchantChallenge(o.frozen.challenge)) !== canonicalJson(o.frozen))
+    // The payer is the operation's own custody record for its profile (custody(profile) at prepare), never a fixed owner.
+    if (o.custody.profileHash !== o.profileHash || canonicalJson(checkMerchantChallenge(o.frozen.challenge)) !== canonicalJson(o.frozen))
         refuse("merchant_state_binding");
     if (!exactKeys(o.envelope, ["nonce", "gas", "maxFeePerGas", "maxPriorityFeePerGas", "maximumNativeFee", ...(o.envelope.nativeFeeReserveWei === undefined ? [] : ["nativeFeeReserveWei"])]) || !Object.values(o.envelope).every(a => /^(0|[1-9][0-9]*)$/u.test(a)) ||
         BigInt(o.envelope.nonce) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(o.envelope.gas) < 21000n || BigInt(o.envelope.maxPriorityFeePerGas) > BigInt(o.envelope.maxFeePerGas) ||
         BigInt(o.envelope.maximumNativeFee) < BigInt(o.envelope.gas) * BigInt(o.envelope.maxFeePerGas))
         refuse("merchant_state_envelope");
     if (o.feeContext !== undefined)
-        validateMerchantFeeContext(o.feeContext, o.envelope);
+        validateMerchantFeeContext(o.feeContext, o.envelope, merchantTerms(o));
     if (o.envelope.nativeFeeReserveWei !== undefined && (o.feeContext === undefined || BigInt(o.envelope.nativeFeeReserveWei) < BigInt(o.feeContext.admissionEstimatedUpper) || BigInt(o.envelope.nativeFeeReserveWei) > BigInt(o.envelope.maximumNativeFee)))
         refuse("merchant_native_reserve_binding");
     if (o.failures !== undefined)

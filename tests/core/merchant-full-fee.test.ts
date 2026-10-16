@@ -7,6 +7,7 @@ import { merchantActualFee, merchantOracleAt, merchantPayerDebit, MEGA_FEE_ORACL
 import { issueMerchantAuthority, bindMerchantFeeAdmission, assertMerchantAuthority, disposeMerchantAuthority } from "../../src/x402-merchant/authority.js";
 import { merchantFingerprint, sealMerchant } from "../../src/x402-merchant/model.js";
 import { merchantFixture, TX_HASH, BLOCK_HASH } from "./merchant-x402-fixtures.js";
+import { merchantTerms } from "../../src/x402-merchant/terms.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 const load=async(name:string)=>JSON.parse(await readFile(`tests/core/merchant-fee-fixtures/${name}`,"utf8"));
@@ -64,8 +65,8 @@ test("fresh increased L1 above original hold refuses before signing; safe decrea
  const f=await setup(t),o=await f.prepare();f.rpc.l1Upper=101n;await assert.rejects(f.service.approve(o.operationId));assert.equal(f.signs(),0);assert.equal(f.rpc.sends,0);f.rpc.l1Upper=99n;const done=await f.service.approve(o.operationId);assert.equal(done.state,"delivered");
 });
 test("current canonical fee check is for frozen unsigned bytes, not resealed fresh envelope",async t=>{
- const f=await setup(t),o=await f.prepare(),current=await merchantCurrent(f.rpc,o.envelope);assert.equal(current.feeContext.unsignedHash,o.feeContext!.unsignedHash);checkMerchantEnvelope(current,o.envelope,o.feeContext);
- assert.throws(()=>checkMerchantFullFee({...current.feeContext,admissionEstimatedUpper:(BigInt(o.effectBinding!.nativeAmountAtomic)+1n).toString(),l1EstimatedUpper:"101"},o.feeContext!,o.envelope,current.native));
+ const f=await setup(t),o=await f.prepare(),current=await merchantCurrent(f.rpc,merchantTerms(o),o.envelope);assert.equal(current.feeContext.unsignedHash,o.feeContext!.unsignedHash);checkMerchantEnvelope(current,o.envelope,merchantTerms(o),o.feeContext);
+ assert.throws(()=>checkMerchantFullFee({...current.feeContext,admissionEstimatedUpper:(BigInt(o.effectBinding!.nativeAmountAtomic)+1n).toString(),l1EstimatedUpper:"101"},o.feeContext!,o.envelope,current.native,merchantTerms(o)));
 });
 test(`absolute fee witness expires at queue, zero POST and no resend`,async t=>{
  const f=await setup(t),o=await f.prepare();f.rpc.queued=async()=>f.advance(10001);const held=await f.service.approve(o.operationId);assert.equal(held.state,"unknown_finality");assert.equal(f.rpc.sends,0);assert.equal(f.signs(),1);await assert.rejects(f.service.approve(o.operationId));
@@ -91,5 +92,5 @@ test("production custody fresh fee guard after wallet read blocks private key ac
  const o=merchantMove(prepared,"signing_started",prepared.createdAt,{signingAttempts:1}),controller={},grant=issueMerchantAuthority(controller,o,"token","native",new Date(f.now().getTime()+60000).toISOString());bindMerchantFeeAdmission(grant,controller,o,o.feeContext!,f.now(),f.now());await new MerchantClaims(f.state.root).claim(o,"sign");let reads=0,keyReads=0;
  t.mock.method(EncryptedWalletStore.prototype,"describe",async()=>{reads++;f.rpc.l1Upper=101n;return {identity:{profile:o.profile,address:o.custody.walletAddress,chainId:8453,createdAt:o.custody.walletCreatedAt,bindingHash:o.custody.walletBindingHash},secret:{get privateKey(){keyReads++;throw new Error("private key access forbidden");}}} as never;});t.mock.method(EncryptedWalletStore.prototype,"clear",()=>{});
  const custody=new MerchantCustody(f.state,{load:async()=>null,create:async()=>{throw new Error("unexpected create");}},f.now);
- await assert.rejects(custody.sign(o,grant,controller,async()=>{const current=await merchantCurrent(f.rpc,o.envelope);checkMerchantEnvelope(current,o.envelope,o.feeContext);}),/Pinned USDm merchant operation refused/);assert.equal(reads,1);assert.equal(keyReads,0);assert.equal(f.rpc.sends,0);
+ await assert.rejects(custody.sign(o,grant,controller,async()=>{const current=await merchantCurrent(f.rpc,merchantTerms(o),o.envelope);checkMerchantEnvelope(current,o.envelope,merchantTerms(o),o.feeContext);}),/Pinned USDm merchant operation refused/);assert.equal(reads,1);assert.equal(keyReads,0);assert.equal(f.rpc.sends,0);
 });

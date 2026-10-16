@@ -1,4 +1,5 @@
 import { type Hex } from "viem";
+import type { MerchantTerms } from "./terms.js";
 import type { MerchantEnvelope } from "./model.js";
 import type { MerchantRpcPort } from "./rpc.js";
 export declare const MEGA_FEE_ORACLE: {
@@ -21,12 +22,13 @@ export interface MerchantFeeContext {
     readonly operatorEstimatedUpper: "0";
     readonly admissionEstimatedUpper: string;
 }
-export declare function unsignedMerchantEnvelope(e: Pick<MerchantEnvelope, "nonce" | "gas" | "maxFeePerGas" | "maxPriorityFeePerGas">): Hex;
-export declare function validateMerchantFeeContext(v: unknown, e: MerchantEnvelope): MerchantFeeContext;
+/** The unsigned transfer the fee context prices: the operation's own token, payee and amount under its frozen envelope. */
+export declare function unsignedMerchantEnvelope(e: Pick<MerchantEnvelope, "nonce" | "gas" | "maxFeePerGas" | "maxPriorityFeePerGas">, t: Pick<MerchantTerms, "token" | "payee" | "amount">): Hex;
+export declare function validateMerchantFeeContext(v: unknown, e: MerchantEnvelope, t: Pick<MerchantTerms, "token" | "payee" | "amount">): MerchantFeeContext;
 /** Exact canonical oracle identity and zero-only operator contract; both estimation and inclusion use this pin. */
 export declare function merchantOracleAt(rpc: MerchantRpcPort, number: string, blockHash: Hex, gas: bigint, unsignedBytes?: bigint): Promise<bigint>;
-export declare function merchantFeeQuote(rpc: MerchantRpcPort, head: Record<string, unknown>, e: MerchantEnvelope): Promise<MerchantFeeContext>;
-export declare function checkMerchantFullFee(fresh: MerchantFeeContext, frozen: MerchantFeeContext, e: MerchantEnvelope, native: string): void;
+export declare function merchantFeeQuote(rpc: MerchantRpcPort, head: Record<string, unknown>, e: MerchantEnvelope, t: Pick<MerchantTerms, "token" | "payee" | "amount">): Promise<MerchantFeeContext>;
+export declare function checkMerchantFullFee(fresh: MerchantFeeContext, frozen: MerchantFeeContext, e: MerchantEnvelope, native: string, t: Pick<MerchantTerms, "token" | "payee" | "amount">): void;
 /** L1 is additional to receipt execution cost. Missing quantities/unsupported nonzero operator fields refuse. */
 export declare function merchantActualFee(r: Record<string, unknown>): {
     execution: string;
