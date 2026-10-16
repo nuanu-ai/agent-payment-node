@@ -5,6 +5,7 @@ export declare class SmartAccountGaslessOperationRepository extends SecureStateS
     private initialized;
     private ready;
     loadOperation(profileHash: string, operationId: string): Promise<SmartAccountGaslessOperationRecord | null>;
+    /** Reads only files named by this ID, so another saved operation can never break this lookup. */
     findOperation(operationId: string): Promise<SmartAccountGaslessOperationRecord | null>;
     listOperations(profileHash: string): Promise<readonly SmartAccountGaslessOperationRecord[]>;
     listAllOperations(): Promise<readonly SmartAccountGaslessOperationRecord[]>;

@@ -63,7 +63,7 @@ export async function scanMetaMaskRedemption(context: MetaMaskScanContext, inten
     await recheckBlock(call, finality);
     return { kind: "progress", cursor, evidenceHash: hashObject({ cursor, finality, empty: true }) };
   }
-  const counter = await redemptionCount(context, intent.delegationHash, finality);
+  const counter = await mmRedemptionCount(context, intent.delegationHash, finality);
   await recheckBlock(call, finality);
   if (counter === 0n) {
     return { kind: "progress", cursor: { startBlock: cursor.startBlock, nextBlockAtomic: (last + 1n).toString(),
@@ -73,7 +73,8 @@ export async function scanMetaMaskRedemption(context: MetaMaskScanContext, inten
   return await scanLogs(context, intent, cursor, finality);
 }
 
-async function redemptionCount(context: MetaMaskScanContext, delegationHash: Hex, at: MetaMaskGaslessBlock): Promise<bigint> {
+/** `callCounts(manager, delegationHash)` at one canonical block pinned by hash, against the pinned enforcer code. */
+export async function mmRedemptionCount(context: MetaMaskScanContext, delegationHash: Hex, at: MetaMaskGaslessBlock): Promise<bigint> {
   const pinned = { blockHash: at.hash, requireCanonical: true } as const, enforcer = context.row.protocol.limitedCalls;
   const [code, count] = await Promise.all([
     context.call("eth_getCode", [enforcer.address, pinned]).then(value => rpcHex(value, 256 * 1024)),

@@ -139,7 +139,7 @@ function proofFields(m, intent, material, cursor, lower, at) {
             BigInt(head.timestampAtomic) * 1000n > BigInt(time(observedAt)) ||
             BigInt(expiry.timestampAtomic) < BigInt(intent.beforeUnix) || p.childDelegationHash !== material.childDelegationHash ||
             p.childSpentAtomic !== "0" || !cursor.childScanComplete || !cursor.transferScanComplete ||
-            cursor.candidateHashes.length !== 0 || cursor.transferAnomalies.length !== 0)
+            cursor.candidateHashes.length !== 0)
             corrupt();
     }
     else if (m.state === "expired_unused")

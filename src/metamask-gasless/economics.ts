@@ -4,6 +4,7 @@ import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessQuot
   MetaMaskGaslessQuoteMaterial, MetaMaskGaslessRequest } from "./model.js";
 import { MM_ZERO_ADDRESS } from "./model.js";
 import { mmRegistry } from "./registry.js";
+import { mmRecordedDeployment, type MmDeploymentView } from "./recorded.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "./reasons.js";
 import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmRequest, mmUint } from "./validation.js";
 
@@ -28,18 +29,19 @@ export function mmQuoteHash(quote: MetaMaskGaslessQuoteMaterial): string {
 }
 /** Validate each quote independently; convergence and final G=N+F are separate checks. */
 export function mmQuote(value: unknown, request: MetaMaskGaslessRequest, binding: MetaMaskGaslessBinding,
-  requestedNet: string, reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid"): MetaMaskGaslessQuote {
+  requestedNet: string, reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid",
+  row: MmDeploymentView = mmRegistry(request.chainId).row): MetaMaskGaslessQuote {
   const sponsored = value !== null && typeof value === "object" && "feeMode" in value;
   const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
     ...(sponsored ? ["feeMode", "sponsorshipHash"] : [])], reason);
-  const { row } = mmRegistry(request.chainId), economics = mmEconomics(request);
+  const economics = mmEconomics(request);
   const net = mmUint(q.netAtomic, true, reason), fee = mmUint(q.feeAtomic, false, reason);
   if ((request.fixedNet && q.netAtomic !== request.fixedNet.netAtomic) || q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic)) mmFail(reason);
   if (fee > economics.cap) mmFail(reason === "mm_gasless_state_corrupt" ? reason : "mm_gasless_fee_cap");
   if (sponsored && (q.feeMode !== "sponsored" || q.feeAtomic !== "0" || q.feeRecipient !== null)) mmFail(reason);
   if (sponsored) mmHash(q.sponsorshipHash, reason);
   const feeRecipient = sponsored ? null : mmCanonicalAddress(q.feeRecipient, reason);
-  const excluded = [MM_ZERO_ADDRESS, binding.address, row.token, ...Object.values(row.protocol).map(p => p.address)];
+  const excluded = [MM_ZERO_ADDRESS, binding.address, row.token, ...Object.values(row.protocol).flatMap(p => p === undefined ? [] : [p.address])];
   if (excluded.includes(request.recipient) || (feeRecipient !== null && (excluded.includes(feeRecipient) || feeRecipient === request.recipient))) mmFail(reason);
   if (!Array.isArray(q.executions) || q.executions.length !== (sponsored ? 1 : 2)) mmFail(reason);
   for (let i = 0; i < (sponsored ? 1 : 2); i++) {
@@ -64,26 +66,29 @@ export function mmAssertStableQuote(request: MetaMaskGaslessRequest, quote: Meta
  * stays inside the effective cap, the recipient still clears the floor and the gross still splits exactly.
  */
 export function mmRepriceWithinCap(value: unknown, request: MetaMaskGaslessRequest,
-  binding: MetaMaskGaslessBinding, reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid"): MetaMaskGaslessQuote {
+  binding: MetaMaskGaslessBinding, reason: MetaMaskGaslessFailureReason = "mm_gasless_quote_invalid",
+  row: MmDeploymentView = mmRegistry(request.chainId).row): MetaMaskGaslessQuote {
   const candidate = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
     ...(value !== null && typeof value === "object" && "feeMode" in value ? ["feeMode", "sponsorshipHash"] : [])], reason);
   const netAtomic = typeof candidate.netAtomic === "string" ? candidate.netAtomic : mmFail(reason);
-  const quote = mmQuote(candidate, request, binding, netAtomic, reason);
+  const quote = mmQuote(candidate, request, binding, netAtomic, reason, row);
   mmAssertStableQuote(request, quote, reason);
   return quote;
 }
-export function mmPolicyHash(profileHash: string, binding: MetaMaskGaslessBinding, request: MetaMaskGaslessRequest): string {
+export function mmPolicyHash(profileHash: string, binding: MetaMaskGaslessBinding, request: MetaMaskGaslessRequest,
+  token = mmRegistry(request.chainId).row.token): string {
   return hashObject({ purpose: "apn.metamask-gasless.policy.v1", profileHash, binding,
-    chainId: request.chainId, token: mmRegistry(request.chainId).row.token, recipient: request.recipient,
+    chainId: request.chainId, token, recipient: request.recipient,
     grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic,
     ...(request.fixedNet ? { fixedNet: request.fixedNet } : {}) });
 }
+/** A saved intent is checked against the deployment it froze, never against today's registry. */
 export function mmAssertIntentEconomics(intent: MetaMaskGaslessIntent, profileHash: string): void {
   const r = mmRequest(intent.request, "mm_gasless_state_corrupt");
-  const deployment = mmRegistry(r.chainId);
-  if (intent.token !== deployment.row.token || intent.decimals !== 6 ||
-    intent.deploymentEvidenceHash !== deployment.deploymentEvidenceHash ||
-    intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r)) mmFail("mm_gasless_state_corrupt");
-  mmQuote(intent.quote, r, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt");
+  const deployment = mmRecordedDeployment(intent);
+  if (intent.decimals !== 6 || intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r, deployment.token)) {
+    mmFail("mm_gasless_state_corrupt");
+  }
+  mmQuote(intent.quote, r, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt", deployment);
   mmAssertStableQuote(r, intent.quote, "mm_gasless_state_corrupt");
 }

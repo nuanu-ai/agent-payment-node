@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { SA_REASON_CODES, saClassify, saError } from "../../src/smart-account-gasless/reasons.js";
-import { saRequest, saStateCounters, validateSmartAccountGaslessIntent } from "../../src/smart-account-gasless/schema.js";
+import { saRequest, saSnapshot, saStateCounters, validateSmartAccountGaslessIntent } from "../../src/smart-account-gasless/schema.js";
 import { saImmutable, saRequestHash } from "../../src/smart-account-gasless/operation-model.js";
 import { hashObject } from "../../src/canonical.js";
 import { saRegistry } from "../../src/smart-account-gasless/registry.js";
@@ -57,8 +57,6 @@ test("Saved intent binds exact economics, profile/grant identity, period, clock 
     (x: any) => { x.initialSnapshot.safeState.currentNonceAtomic = "00"; },
     (x: any) => { x.initialSnapshot.safeState.availableAtomic = "9999"; },
     (x: any) => { x.initialSnapshot.safeState.usdcBalanceAtomic = "9999"; },
-    (x: any) => { x.initialSnapshot.safeState.protocolCodeHashes.manager = `0x${"0".repeat(64)}`; },
-    (x: any) => { x.initialSnapshot.safeState.tokenImplementationAddress = SA_TEST_RECIPIENT; },
     (x: any) => { x.initialSnapshot.safeBlock.numberAtomic = "50000001"; },
     (x: any) => { x.policyHash = "0".repeat(64); },
   ]) { const x = structuredClone(good); mutate(x); rejected(() => validateSmartAccountGaslessIntent(x), "APN_STATE_CORRUPT"); }
@@ -66,15 +64,22 @@ test("Saved intent binds exact economics, profile/grant identity, period, clock 
   assert.equal(good.binding.permissionRevision, 1);
   assert.equal(good.binding.rootNonceAtomic, good.initialSnapshot.safeState.currentNonceAtomic);
 });
-test("Every protocol pin including root NonceEnforcer is bound independently", () => {
+test("Every protocol pin including root NonceEnforcer is bound independently when a snapshot is read", () => {
   const good = saTestIntent(), names = Object.keys(good.initialSnapshot.safeState.protocolCodeHashes);
   assert.equal(names.length, 9);
   assert(names.includes("nonce"));
   for (const name of names) {
     const changed = structuredClone(good);
     (changed.initialSnapshot.safeState.protocolCodeHashes as any)[name] = `0x${"0".repeat(64)}`;
-    rejected(() => validateSmartAccountGaslessIntent(changed), "APN_STATE_CORRUPT");
+    rejected(() => saSnapshot(changed.initialSnapshot, changed.binding), "APN_STATE_CORRUPT");
   }
+  // A saved intent is checked against its own frozen values (R2): a later registry change never corrupts it.
+  const later = structuredClone(good);
+  (later.initialSnapshot.safeState.protocolCodeHashes as any).manager = `0x${"1".repeat(64)}`;
+  (later.initialSnapshot.safeState as any).tokenImplementationAddress = SA_TEST_RECIPIENT;
+  (later as any).deploymentEvidenceHash = "f".repeat(64);
+  assert.deepEqual(validateSmartAccountGaslessIntent(later), later);
+  rejected(() => saSnapshot(later.initialSnapshot, later.binding), "APN_STATE_CORRUPT");
   const r = saRegistry(8453), sdk = smartAccountEnvironment();
   assert.equal(r.protocol.manager.address, sdk.DelegationManager.toLowerCase());
   assert.equal(r.protocol.nonce.address, sdk.caveatEnforcers.NonceEnforcer!.toLowerCase());

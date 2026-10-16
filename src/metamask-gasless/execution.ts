@@ -130,8 +130,8 @@ export class MetaMaskGaslessExecution {
     mmAssertSameBinding(binding, op.intent.binding);
     if (op.intent.policyHash !== mmPolicyHash(op.profileHash, binding, op.intent.request)) mmFail("mm_gasless_binding_changed");
     const rpc = this.rpcFor(op.intent.request.chainId);
-    if (rpc.chainId !== op.intent.request.chainId || rpc.endpointHash !== op.intent.initialSnapshot.endpointHash ||
-      rpc.endpointOrigin !== op.intent.initialSnapshot.endpointOrigin) mmFail("mm_gasless_rpc_binding");
+    // Bound to the chain, not to one endpoint: the guard re-reads every value it relies on from this RPC.
+    if (rpc.chainId !== op.intent.request.chainId) mmFail("mm_gasless_rpc_binding");
     let current = op.intent.request.fixedNet ? null : await this.chainState(op, rpc, op.intent.delegationHash, mmActualGross(op.intent.quote));
     const fresh = mmRepriceWithinCap(await metaMaskGaslessQuote(this.provider, binding, op.intent.request,
       rpc.rpcUrl, this.clock), op.intent.request, binding); this.clock.check(op);

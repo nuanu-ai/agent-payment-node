@@ -38,6 +38,8 @@ interface FakeOptions {
   readonly refuseLogs?: (from: bigint, to: bigint) => { readonly status?: number; readonly error?: Json } | undefined;
   readonly reorgBlock?: bigint;
   readonly ownerCode?: "pinned" | "empty" | "foreign";
+  /** Another endpoint of the same chain than the one the operation was prepared through. */
+  readonly endpoint?: string;
 }
 
 class FakeRpcTransport implements GaslessTransport {
@@ -55,7 +57,7 @@ class FakeRpcTransport implements GaslessTransport {
   }
   async request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number,
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG") {
-    assert.equal(endpoint, RPC_URL); assert.equal(method, "POST"); assert.notEqual(body, null);
+    assert.equal(endpoint, this.options.endpoint ?? RPC_URL); assert.equal(method, "POST"); assert.notEqual(body, null);
     assert.equal(maxBytes, 4 * 1024 * 1024); assert.equal(code, "APN_RPC_CONFIG");
     const request = JSON.parse(body!) as Json;
     this.calls.push({ method: request.method, params: request.params });
@@ -385,9 +387,18 @@ test("late type2 redemption uses receipt-block designation instead of frozen pre
   const cursor = { startBlock: value.initialSnapshot.safeBlock, nextBlockAtomic: "100", previousEndBlock: null };
   const options = { finality: 102n, head: 102n, transaction, receipt,
     counter: (number: bigint) => number >= 101n ? 1n : 0n };
-  const pinned = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now,
-    transport: new FakeRpcTransport(8453, options) });
+  const transport = new FakeRpcTransport(8453, options);
+  const pinned = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport });
   assert.equal((await pinned.observe(value, cursor, provider)).observation.phase, "success");
+  // The success proof reads no state at the inclusion block (an archive read once the operation is old).
+  const pinnedTo = (params: readonly unknown[]) => (params.at(-1) as { blockHash?: string } | null)?.blockHash;
+  assert.equal(transport.calls.some(call => ["eth_getCode", "eth_call", "eth_getStorageAt"].includes(call.method) &&
+    pinnedTo(call.params) === txBlock.hash), false);
+  // Any endpoint of the chain may observe; it proves the frozen safe anchor first.
+  const rotatedUrl = "https://rotated.example/other-path";
+  const rotated = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: rotatedUrl, clock: now,
+    transport: new FakeRpcTransport(8453, { ...options, endpoint: rotatedUrl }) });
+  assert.equal((await rotated.observe(value, cursor, provider)).observation.phase, "success");
   for (const ownerCode of ["empty", "foreign"] as const) {
     const rejected = new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now,
       transport: new FakeRpcTransport(8453, { ...options, ownerCode }) });
