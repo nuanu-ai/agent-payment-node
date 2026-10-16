@@ -3,6 +3,7 @@ import { hashObject } from "../canonical.js";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute } from "node:path";
+import { getAddress } from "viem";
 import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { loadActiveAssetPolicyRegistry, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
@@ -177,7 +178,8 @@ export class RelayUnsignedPrepareService {
     if (active === null || active.profile !== input.profile || active.accounts.evm?.toLowerCase() !== owner)
       refuse("relay_arbitrum_active_owner_policy_required");
     const usage = await (this.ports.dailyUsage?.(owner, now) ?? new AssetUsageLedger(this.state.root).usage({
-      account: owner, chain: "eip155:42161", asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC },
+      // The ledger keys usage by the checksum account, the spelling every reservation is written under.
+      account: getAddress(owner), chain: "eip155:42161", asset: { kind: "token", identifier: RELAY_ARBITRUM_USDC },
     }, now).then(value => value.amountAtomic));
     await this.state.initialize();
     await this.state.withLocks([evmAddressLock(owner)], async () => assertExclusiveEvmOwner(this.state, owner, profileHash));
