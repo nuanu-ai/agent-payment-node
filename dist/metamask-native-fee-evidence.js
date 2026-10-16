@@ -109,7 +109,7 @@ export function validateMetaMaskNativeFeeReceipt(value, quoteValue) {
         evmUint(evidence.maxFeePerGasAtomic, true).toString() !== transaction.maxFeePerGasAtomic ||
         evmUint(evidence.maxPriorityFeePerGasAtomic).toString() !== transaction.maxPriorityFeePerGasAtomic ||
         !Array.isArray(evidence.authorizationList) || evidence.authorizationList.length !== 0 ||
-        evidence.rpcOrigin !== quote.feeQuote.rpcOrigin || !/^0x[0-9a-f]{64}$/u.test(evidence.transactionHash) ||
+        !httpsOrigin(evidence.rpcOrigin) || !/^0x[0-9a-f]{64}$/u.test(evidence.transactionHash) ||
         evidence.transactionHash === `0x${"0".repeat(64)}` || (evidence.status !== "success" && evidence.status !== "reverted")) {
         invalid("Mined transaction fields differ from the frozen native-fee quote.");
     }
@@ -236,6 +236,21 @@ function isExactUsdcTransfer(log, quote) {
     const recipientTopic = `0x${transfer.recipient.slice(2).toLowerCase().padStart(64, "0")}`;
     return log.topics[1]?.toLowerCase() === senderTopic && log.topics[2]?.toLowerCase() === recipientTopic &&
         BigInt(log.data).toString() === transfer.amountAtomic;
+}
+/**
+ * The observing endpoint is provenance only (PROV-03, R2): any endpoint of the quote's chain may prove the receipt after
+ * its own eth_chainId check, so the receipt need not come from the endpoint that quoted. Records whose two origins are
+ * equal (0.5.40 to 0.5.43) satisfy this as before.
+ */
+function httpsOrigin(value) {
+    if (typeof value !== "string" || value.length > 2048 || !value.startsWith("https://"))
+        return false;
+    try {
+        return new URL(value).origin === value;
+    }
+    catch {
+        return false;
+    }
 }
 function requireChain(value) {
     const chainId = directEvmChain(value);

@@ -94,11 +94,19 @@ test("exact payload, transaction type, fee bounds and authorizations cannot drif
   }
   const w=new Wire(1);await w.prepare();w.gasPrice="0x4";await assert.rejects(w.observe(),{code:"APN_STATE_CORRUPT"});
 });
-test("a non-canonical receipt block, unsafe head, duplicate Transfer and another endpoint prevent acceptance",async()=>{
+test("a non-canonical receipt block, unsafe head and duplicate Transfer prevent acceptance",async()=>{
   const a=new Wire(1);await a.prepare();a.reorg=true;assert.deepEqual(await a.observe(),{kind:"pending",reason:"receipt_block_not_canonical"});
   const b=new Wire(143);await b.prepare();b.unsafe=true;assert.equal((await b.observe()).kind,"pending");
   const c=new Wire(1);await c.prepare();c.duplicate=true;assert.equal((await c.observe()).kind,"inconclusive");
-  const d=new Wire(1);await d.prepare();await assert.rejects(observeWithRpc(new EvmRpc(d.call,"https://other.example"),"https://other.example",d.quote!,HASH),{code:"APN_RPC_PROTOCOL"});
+});
+test("any endpoint of the quote's chain may observe; its origin is recorded as provenance; another chain is refused by eth_chainId",async()=>{
+  const w=new Wire(1);await w.prepare();w.methods=[];
+  const r=await observeWithRpc(new EvmRpc(w.call,"https://other.example"),"https://other.example",w.quote!,HASH);
+  assert.equal(r.kind,"accepted");if(r.kind==="accepted"){assert.equal(r.evidence.rpcOrigin,"https://other.example");assert.equal(w.quote!.feeQuote.rpcOrigin,ORIGIN);}
+  assert.equal(w.methods[0],"eth_chainId");
+  const x=new Wire(1);await x.prepare();x.wrongChain=true;x.methods=[];
+  await assert.rejects(observeWithRpc(new EvmRpc(x.call,"https://base.example"),"https://base.example",x.quote!,HASH),{code:"APN_CHAIN_MISMATCH"});
+  assert.deepEqual(x.methods,["eth_chainId"]);
 });
 test("read-only transport runtime allowlist rejects write methods",async()=>{
   const w=new Wire(1);

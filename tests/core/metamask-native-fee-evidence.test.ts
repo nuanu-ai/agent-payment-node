@@ -226,6 +226,15 @@ test("version 2 quotes bind any recipient and amount, and the receipt must pay e
   assert.deepEqual(metaMaskNativeQuoteTransfer(makeQuote(1)), { recipient: getAddress(METAMASK_NATIVE_FEE_SELLER), amountAtomic: "1000" });
 });
 
+test("the receipt's observing endpoint is provenance: another https origin of the same chain is accepted, a malformed one is not", () => {
+  const quote = makeQuoteV2(1), receipt = makeReceipt(quote);
+  assert.equal(validateMetaMaskNativeFeeReceipt({ ...receipt, rpcOrigin: "https://another-node.example:8545" }, quote).transferAccepted, true);
+  for (const rpcOrigin of ["", "http://rpc.example", "https://rpc.example/path", "https://rpc.example/?key=x", 7])
+    assert.throws(() => validateMetaMaskNativeFeeReceipt({ ...receipt, rpcOrigin } as never, quote), { code: "APN_STATE_CORRUPT" });
+  // A record written when both origins had to be equal keeps validating.
+  assert.equal(validateMetaMaskNativeFeeReceipt(makeReceipt(makeQuote(1)), makeQuote(1)).transferAccepted, true);
+});
+
 test("version 2 quotes refuse a zero or non-canonical recipient, a malformed amount, foreign calldata and version 1 fields", () => {
   const quote = makeQuoteV2(1), { quoteHash: _, ...body } = quote;
   const reseal = (changed: Record<string, unknown>) => ({ ...changed, quoteHash: hashObject(changed) });

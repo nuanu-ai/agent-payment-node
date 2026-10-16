@@ -81,7 +81,8 @@ export async function observeMetaMaskNativeTransfer(quote, transactionHash) {
     return await observeWithRpc(endpoint.evm, endpoint.rpcOrigin, quote, transactionHash);
 }
 /**
- * One observation of the stored hash on one endpoint (P2): the chain id once, the receipt once, the receipt's block by
+ * One observation of the stored hash on one endpoint of the quote's chain (any endpoint: its eth_chainId binds it, and
+ * its origin is recorded as provenance only). P2: the chain id once, the receipt once, the receipt's block by
  * number, the finality head and the transaction once. The receipt's block hash binds everything read with it; nothing
  * is re-read around it, and the quote's own block is not re-proven (it says nothing about the transfer). OP-stack
  * only: the operator fee is read at the receipt block, a history read that a non-archive node serves for recent blocks;
@@ -93,9 +94,6 @@ export async function observeWithRpc(rpc, rpcOrigin, quoteValue, transactionHash
     const chainId = nativeChain(quote.chainId), hash = evmRpcHex(transactionHash, 32);
     if (hash === `0x${"0".repeat(64)}`)
         throw new ApnError("APN_INVALID_INPUT", "Transaction hash must be nonzero.");
-    if (rpcOrigin !== quote.feeQuote.rpcOrigin) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Observe through the RPC endpoint that quoted this transfer.", { reason: "rpc_origin_changed", nextActions: [ENVS[chainId]] });
-    }
     await rpc.assertChain(chainId);
     const call = (method, params) => rpc.nativeFeeRead(method, params);
     const rawValue = await call("eth_getTransactionReceipt", [hash]);
