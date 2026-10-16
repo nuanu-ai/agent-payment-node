@@ -28,10 +28,12 @@ export interface CircleFundingLifecyclePorts {
     attestation(op: CircleFundingOperationV2): Promise<CircleAttestation | null>;
     mintEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
     cleanupEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
-    usage(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<CircleFundingOperationV2["usage"]>;
-    /** Never-lands proof and discard for signed-but-unsent bytes. Production runtimes always provide it; injected test ports may omit it. */
+    usage(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<CircleFundingOperationV2["usage"]>;
+    /** Never-lands proof and discard for signed-but-unsent bytes (`outcome`) and for possibly-sent bytes (`sentOutcome`, which
+     * also requires no receipt). Production runtimes always provide it; injected test ports may omit it. */
     unsent?: Readonly<{
         outcome(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
+        sentOutcome?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
         discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void>;
     }>;
 }
