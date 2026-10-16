@@ -49,7 +49,7 @@ export class JupiterV1MaterialResolver {
                     invalid("Jupiter V1 ProgramData metadata is invalid.");
                 const payloadHash = sha256(data.subarray(45));
                 if (!registeredPins.some(p => p.programId === programId && p.payloadHash === payloadHash && (p.programDataHash === undefined || p.programDataHash === pd.dataHash)))
-                    throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed.");
+                    throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed: an upstream program was upgraded or the RPC returned other bytes; nothing was signed. Only an APN release that registers the new bytes can quote this route; update APN.", { reason: "jupiter_v1_program_pin_drift", upstreamUpgradeNeedsApnRelease: true });
                 accounts.push(pd);
                 programPins.push({ programId, loader: program.owner, programDataAddress: pointer, deploymentSlot: data.readBigUInt64LE(4).toString(), upgradeAuthority: data[12] === 1 ? getAddressDecoder().decode(data.subarray(13, 45)) : null, accountHash: program.dataHash, programDataHash: pd.dataHash, storedPayloadHash: payloadHash, provenance: "runtime_bytes_only" });
             }
@@ -61,7 +61,7 @@ export class JupiterV1MaterialResolver {
         const generation = generations.filter(g => jupiterV1RegisteredProgramPins(g).every(pin => programPins.some(row => row.programId === pin.programId &&
             row.storedPayloadHash === pin.payloadHash && row.programDataAddress === pin.programDataAddress && (pin.programDataHash === undefined || row.programDataHash === pin.programDataHash))));
         if (generation.length !== 1)
-            throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed.");
+            throw new ApnError("APN_OPERATION_BLOCKED", "Jupiter V1 runtime executable pin changed: an upstream program was upgraded or the RPC returned other bytes; nothing was signed. Only an APN release that registers the new bytes can quote this route; update APN.", { reason: "jupiter_v1_program_pin_drift", upstreamUpgradeNeedsApnRelease: true });
         const rpcLifetime = frozenRpcLifetime === undefined ? undefined : checkedJupiterV1QuoteRpcLifetime(frozenRpcLifetime);
         const compiled = assembleJupiterV1(payer, build, tables, rpcLifetime);
         const [feeValue, heightValue, rentValue] = await boundedPublicReads(this.rpc, [

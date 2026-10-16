@@ -37,6 +37,8 @@ export class OrcaExecutionGuard {
         market.wsolAccount !== plan.wsolAccount || market.usdcAccount !== plan.usdcAccount) {
       blocked("The pool moved away from the approved tick arrays; quote again.", "orca_tick_array_moved");
     }
+    // A wSOL account created or closed since the quote would change what the approved bytes unwrap or leave behind.
+    if ((market.wsol !== null) !== (plan.wsolAccountKept === true)) blocked("The owner's wSOL account changed since the quote; quote again.", "orca_wsol_account_changed");
     if (BigInt(market.swap.amountOutAtomic) < BigInt(operation.quote.minimumOutputAtomic)) {
       blocked("The pool no longer yields the approved minimum output.", "orca_output_below_minimum");
     }
@@ -45,10 +47,10 @@ export class OrcaExecutionGuard {
     const lifetime = await latestLifetime(this.rpc), compiled = compileOrcaSwap(plan, lifetime);
     const fee = await orcaMessageFee(this.rpc, compiled.messageBase64);
     if (fee > BigInt(execution.networkFeeLamports)) blocked("The network fee exceeds the approved fee.", "orca_fee_drift");
-    requireOrcaFunds(market.owner.ownerLamports, BigInt(plan.amountInLamports) + fee + rent + market.tokenAccountRentLamports);
+    requireOrcaFunds(market.owner.ownerLamports, BigInt(plan.amountInLamports) + fee + rent + (market.wsol === null ? market.tokenAccountRentLamports : 0n));
     const simulation = await simulateOrcaSwap(this.rpc, compiled.unsignedPayload, { owner: plan.owner, wsolAccount: plan.wsolAccount,
       usdcAccount: plan.usdcAccount, before: market.owner, minimumOutputAtomic: plan.minimumOutputAtomic,
-      maximumSolSpendLamports: execution.maximumSolSpendLamports, computeUnitLimit: plan.computeUnitLimit }, false, market.slot.toString());
+      maximumSolSpendLamports: execution.maximumSolSpendLamports, computeUnitLimit: plan.computeUnitLimit, wsolKept: market.wsol }, false, market.slot.toString());
     const height = rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
     if (height > BigInt(lifetime.lastValidBlockHeight)) blocked("The fresh blockhash expired before signing.", "orca_lifetime_expired");
     return { lifetime, unsignedPayload: compiled.unsignedPayload, messageHash: compiled.messageHash, networkFeeLamports: fee.toString(),

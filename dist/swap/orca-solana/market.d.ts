@@ -21,6 +21,8 @@ export interface OrcaMarketRead {
     readonly vaultSolLamports: string;
     readonly vaultUsdcAtomic: string;
     readonly owner: OrcaOwnerBalances;
+    /** The owner's existing wSOL account, reused and kept; null when the swap creates and closes it. */
+    readonly wsol: OrcaKeptWsol | null;
     readonly tokenAccountRentLamports: bigint;
     readonly accountDataSha256: Readonly<Record<string, string>>;
     readonly swap: WhirlpoolSwapQuote;
@@ -31,3 +33,7 @@ export interface OrcaMarketRead {
  * the program's swap math. The tick arrays are derived from a first pool read and re-derived from the same-slot read.
  */
 export declare function readOrcaMarket(rpc: SolanaRpcPort, owner: string, amountIn: bigint): Promise<OrcaMarketRead>;
+export interface OrcaKeptWsol {
+    readonly amountAtomic: string;
+    readonly lamports: string;
+}

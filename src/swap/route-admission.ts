@@ -21,6 +21,10 @@ export interface SwapRouteAdmission {
 /** A legacy full mechanism pin is still accepted; it admits by its route identity, never by its version fields. */
 export type SwapAdmissionMechanism = SwapMechanismPin | SwapRouteAdmission;
 export const MAX_SWAP_ADMISSION_OPTIONS = 16;
+/** Inventories take no profile, so they cannot say what an owner admitted; they say how admission is checked instead. */
+export const SWAP_INVENTORY_OWNER_ADMISSION = Object.freeze({ evaluated: false as const, reason: "inventory_has_no_profile",
+  checkedAt: "quote_and_prepare_against_the_profile_active_policy", admitBy: "route",
+  policyField: "swap admission mechanism or mechanisms: the route printed here (apn.swap-route.v1) or a mechanism pin" });
 
 export function validateSwapAdmissionMechanism(value: unknown): SwapAdmissionMechanism {
   if (isPlainRecord(value) && value.schemaVersion === SWAP_MECHANISM_PIN_SCHEMA) return validateSwapMechanismPin(value);

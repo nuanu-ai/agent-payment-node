@@ -2,7 +2,7 @@ import { ApnError } from "../errors.js";
 import { SwapOperationRepository } from "./repository.js";
 import { UNISWAP_OFFICIAL_PIN_CATALOG, UNISWAP_USDC } from "./uniswap-pin.js";
 import { swapMechanismDigest } from "./pin.js";
-import { swapRouteDigest, swapRouteOf } from "./route-admission.js";
+import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./route-admission.js";
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS, USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
 export async function executeUniswapCommand(request, context) {
     if (request.command === "swap.uniswap-token.prepare" || request.command === "swap.uniswap-token.approve" ||
@@ -25,7 +25,7 @@ export async function executeUniswapCommand(request, context) {
         return tokenOutcome(await runtime.status(request.operationId));
     }
     if (request.command === "swap.uniswap.inventory")
-        return data({ catalog: UNISWAP_OFFICIAL_PIN_CATALOG, admitted: false,
+        return data({ catalog: UNISWAP_OFFICIAL_PIN_CATALOG, ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION,
             execution: context.uniswapRuntime === undefined ? "dormant" : "foreground_cli_after_owner_admission",
             keyless: { route: swapRouteOf(UNISWAP_V3_KEYLESS_MECHANISM_PIN), routeDigest: swapRouteDigest(UNISWAP_V3_KEYLESS_MECHANISM_PIN),
                 mechanismPin: UNISWAP_V3_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(UNISWAP_V3_KEYLESS_MECHANISM_PIN),

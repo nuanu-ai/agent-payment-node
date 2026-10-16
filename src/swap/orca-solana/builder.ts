@@ -40,15 +40,15 @@ export class KeylessOrcaQuoteBuilder implements GuardedSwapReadOnlyBuilder<OrcaK
     const plan: OrcaSwapPlan = { owner: request.account, wsolAccount: market.wsolAccount, usdcAccount: market.usdcAccount,
       amountInLamports: request.amount.toString(), minimumOutputAtomic: minimum.toString(), computeUnitLimit: request.computeUnitLimit,
       computeUnitPriceMicroLamports: request.computeUnitPriceMicroLamports, tickArrays: market.tickArrays.map((row) => row.address),
-      oracle: market.oracle };
+      oracle: market.oracle, ...(market.wsol === null ? {} : { wsolAccountKept: true as const }) };
     const lifetime = await latestLifetime(this.rpc), compiled = compileOrcaSwap(plan, lifetime);
     const fee = await orcaMessageFee(this.rpc, compiled.messageBase64);
     if (fee < SOLANA_BASE_FEE_LAMPORTS_PER_SIGNATURE + priorityFeeLamports(plan)) protocolFailure();
     const rent = market.owner.usdcAccountExists ? 0n : market.tokenAccountRentLamports, maximumSpend = request.amount + fee + rent;
-    requireOrcaFunds(market.owner.ownerLamports, maximumSpend + market.tokenAccountRentLamports);
+    requireOrcaFunds(market.owner.ownerLamports, maximumSpend + (market.wsol === null ? market.tokenAccountRentLamports : 0n));
     const simulation = await simulateOrcaSwap(this.rpc, compiled.unsignedPayload, { owner: plan.owner, wsolAccount: plan.wsolAccount,
       usdcAccount: plan.usdcAccount, before: market.owner, minimumOutputAtomic: plan.minimumOutputAtomic,
-      maximumSolSpendLamports: maximumSpend.toString(), computeUnitLimit: plan.computeUnitLimit }, true, market.slot.toString());
+      maximumSolSpendLamports: maximumSpend.toString(), computeUnitLimit: plan.computeUnitLimit, wsolKept: market.wsol }, true, market.slot.toString());
     if (BigInt(simulation.slot) - market.slot > BigInt(ORCA_MAX_SLOT_DRIFT)) blocked("Simulation slot is outside the allowed drift.", "orca_slot_drift");
     const evidence: OrcaQuoteEvidence = { slot: market.slot.toString(), pool: market.poolView, accountDataSha256: market.accountDataSha256,
       tickArrayStarts: market.tickArrays.map((row) => row.startTickIndex), vaultSolLamports: market.vaultSolLamports,

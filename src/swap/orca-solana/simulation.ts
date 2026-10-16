@@ -3,7 +3,7 @@ import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError, type ErrorCode } from "../../errors.js";
 import { rpcArray, rpcAtomic, rpcRecord, solanaAddress, type SolanaRpcPort } from "../../solana/rpc.js";
 import { rawAccount } from "./accounts.js";
-import { SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT } from "./pins.js";
+import { SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WSOL_MINT } from "./pins.js";
 
 /** The owner's balances that the swap may move, read at quote time or re-read before signing. */
 export interface OrcaOwnerBalances { readonly ownerLamports: string; readonly usdcAtomic: string; readonly usdcAccountExists: boolean }
@@ -15,6 +15,8 @@ export interface OrcaSimulationEvidence {
 export interface OrcaSimulationBounds {
   readonly owner: string; readonly wsolAccount: string; readonly usdcAccount: string; readonly before: OrcaOwnerBalances;
   readonly minimumOutputAtomic: string; readonly maximumSolSpendLamports: string; readonly computeUnitLimit: number;
+  /** An existing wSOL account the swap keeps: it must end with exactly its balance before the swap. */
+  readonly wsolKept: { readonly amountAtomic: string; readonly lamports: string } | null;
 }
 export type OrcaSimulationReason = "orca_simulation_unavailable" | "orca_simulation_protocol" | "orca_simulation_blockhash_not_found" |
   "orca_simulation_insufficient_funds" | "orca_simulation_instruction_error" | "orca_simulation_rejected" |
@@ -48,8 +50,15 @@ export async function simulateOrcaSwap(rpc: SolanaRpcPort, unsignedPayload: stri
     const wsol = accounts[1] === null ? null : rawAccount(accounts[1], 165);
     const usdc = accounts[2] === null ? null : rawAccount(accounts[2], 165);
     if (owner === null || owner.owner !== SYSTEM_PROGRAM || owner.data.length !== 0 || owner.executable) throw new Error();
-    // A closed account simulates as absent or as an empty, zero-lamport system account.
-    if (wsol !== null && (wsol.lamports !== 0n || wsol.data.length !== 0 || wsol.owner !== SYSTEM_PROGRAM)) throw new Error();
+    if (bounds.wsolKept === null) {
+      // A closed account simulates as absent or as an empty, zero-lamport system account.
+      if (wsol !== null && (wsol.lamports !== 0n || wsol.data.length !== 0 || wsol.owner !== SYSTEM_PROGRAM)) throw new Error();
+    } else {
+      // A kept account wraps exactly the input and swaps exactly the input: its own balance and lamports are unchanged.
+      if (wsol === null || wsol.owner !== TOKEN_PROGRAM || wsol.data.length !== 165 || wsol.lamports !== BigInt(bounds.wsolKept.lamports)) throw new Error();
+      const kept = getTokenDecoder().decode(wsol.data);
+      if (kept.owner !== bounds.owner || kept.mint !== WSOL_MINT || kept.state !== 1 || kept.amount !== BigInt(bounds.wsolKept.amountAtomic)) throw new Error();
+    }
     if (usdc === null || usdc.owner !== TOKEN_PROGRAM || usdc.data.length !== 165) throw new Error();
     const token = getTokenDecoder().decode(usdc.data);
     if (token.owner !== bounds.owner || token.mint !== USDC_MINT || token.state !== 1) throw new Error();

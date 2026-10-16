@@ -16,6 +16,14 @@ export interface SwapRouteAdmission {
 /** A legacy full mechanism pin is still accepted; it admits by its route identity, never by its version fields. */
 export type SwapAdmissionMechanism = SwapMechanismPin | SwapRouteAdmission;
 export declare const MAX_SWAP_ADMISSION_OPTIONS = 16;
+/** Inventories take no profile, so they cannot say what an owner admitted; they say how admission is checked instead. */
+export declare const SWAP_INVENTORY_OWNER_ADMISSION: Readonly<{
+    evaluated: false;
+    reason: "inventory_has_no_profile";
+    checkedAt: "quote_and_prepare_against_the_profile_active_policy";
+    admitBy: "route";
+    policyField: "swap admission mechanism or mechanisms: the route printed here (apn.swap-route.v1) or a mechanism pin";
+}>;
 export declare function validateSwapAdmissionMechanism(value: unknown): SwapAdmissionMechanism;
 /** The route identity of a lane pin: what an owner copies from an inventory into a policy file. */
 export declare function swapRouteOf(pin: SwapMechanismPin): SwapRouteAdmission;

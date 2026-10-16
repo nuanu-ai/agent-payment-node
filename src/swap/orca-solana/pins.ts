@@ -140,7 +140,9 @@ function verifyProgram(pin: OrcaProgramPin, account: RawSolanaAccount | null): v
       sha256Hex(account.data) !== pin.dataSha256 || (pin.scope === "account" && account.data.length !== pin.space)) drift(pin);
 }
 function drift(pin: OrcaProgramPin): never {
-  throw new ApnError("APN_OPERATION_BLOCKED", `Pinned ${pin.role} bytes, loader, or executable flag changed.`, { reason: "orca_program_pin_drift" });
+  throw new ApnError("APN_OPERATION_BLOCKED", `Pinned ${pin.role} bytes, loader, or executable flag changed. The upstream program was ` +
+    "upgraded or the RPC returned other bytes; nothing was signed. Only an APN release that registers the new bytes can quote this route; update APN.",
+  { reason: "orca_program_pin_drift", role: pin.role, upstreamUpgradeNeedsApnRelease: true });
 }
 function programAccountHash(programdata: string): string {
   return sha256Hex(Buffer.concat([Buffer.from([2, 0, 0, 0]), Buffer.from(getAddressEncoder().encode(address(programdata)))]));
