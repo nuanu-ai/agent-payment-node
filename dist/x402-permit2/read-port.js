@@ -2,6 +2,7 @@ import { encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
 import { performance } from "node:perf_hooks";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { ApnError } from "../errors.js";
 import { evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcWord } from "../evm-rpc-codec.js";
 import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "./registry.js";
@@ -82,6 +83,7 @@ export function createPermit2ProductionReadPort(options) {
                 !equalAddress(admission.asset.mechanismPins.x402.reference, X402_PERMIT2_MECHANISM.reference)) {
                 blocked("The active owner policy lacks the exact Permit2 mechanism.", "x402_permit2_owner_admission_required");
             }
+            assertRecipientAdmitted({ admission, recipient: request.payTo });
             const owner = { active: true, account: getAddress(request.payer), chain: asset.chain,
                 token: asset.token, rail: "x402", mechanism: X402_PERMIT2_MECHANISM,
                 maximumPerTransferAtomic: admission.caps.maximumPerTransferAtomic,

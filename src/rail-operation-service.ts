@@ -61,7 +61,7 @@ export class RailOperationService {
       await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
       const policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
       // Owner amount caps: the active allowlist policy and the shared usage ledger, then the chain policy, before any RPC call.
-      const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
+      const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic, recipient } }));
       await this.policies.assertPrincipal(policy, operationId, amountAtomic);
       const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
       validateRailPrepared(prepared, account);
@@ -121,7 +121,7 @@ export class RailOperationService {
         try {
           await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
           policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
-          allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
+          allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic, recipient } }));
           await this.policies.assertPrincipal(policy, operationId, amountAtomic);
         } catch (error) {
           if (saved !== null) await claims.removeIfMatches(saved);
@@ -159,7 +159,7 @@ export class RailOperationService {
           await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
           const currentPolicy = await this.policies.authorize(currentAccount, input.asset, maximumFeeAtomic);
           if (currentPolicy.policyHash !== policy.policyHash) throw new ApnError("APN_PROFILE_DRIFT", "The Solana chain policy changed during preparation.");
-          const currentAllowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account: currentAccount, prepared: { asset, amountAtomic } }));
+          const currentAllowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account: currentAccount, prepared: { asset, amountAtomic, recipient } }));
           if (canonicalJson(currentAllowlist) !== canonicalJson(allowlist)) throw new ApnError("APN_PROFILE_DRIFT", "The owner allowlist changed during preparation.");
           if (await this.records.loadOperation(profileHash, operationId) !== null) corrupt();
           const operation = newRailOperation({ schemaVersion: "apn.rail-operation.v1", kind: "rail_transfer", operationId,

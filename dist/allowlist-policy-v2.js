@@ -5,6 +5,7 @@ import { allowlistProfileHash, assertStoredAllowlistCompilation, canonicalAllowl
 import { ASSET_POLICY_REGISTRY_SCHEMA_V2, sealAssetPolicyRegistry, } from "./asset-policy-registry.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
+import { isRecipientPinRail } from "./allowlist-recipient-pins.js";
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA_V2 = "apn.allowlist-policy-overlay.v2";
 export const ALLOWLIST_POLICY_RECORD_SCHEMA_V2 = "apn.allowlist-policy-record.v2";
 /** The owner-written file format accepted by `apn allowlist policy stage --file`. */
@@ -26,7 +27,7 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
         const asset = resolveDirectPolicyAsset(admission, inventory);
         const key = `${asset.chain}\0${asset.kind}\0${asset.identifier ?? ""}`;
         const row = merged.get(key) ?? { asset, rails: { direct: false, gasless: false, x402: false, bridge: false, swap: false },
-            railCaps: {}, pins: {} };
+            railCaps: {}, pins: {}, recipients: {} };
         row.rails[admission.rail] = true;
         row.railCaps[admission.rail] = { maximumPerTransferAtomic: admission.maximumPerTransferAtomic ??
                 admission.mechanisms.reduce((max, option) => BigInt(option.maximumPerTransferAtomic) > BigInt(max) ? option.maximumPerTransferAtomic : max, "0"),
@@ -35,6 +36,8 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
             row.pins[admission.rail] = admission.mechanism;
         if (admission.recipient !== undefined)
             row.gaslessRecipient = admission.recipient;
+        if (admission.recipients !== undefined && isRecipientPinRail(admission.rail))
+            row.recipients[admission.rail] = admission.recipients;
         if (admission.mechanisms !== undefined && admission.rail === "swap")
             row.swapOptions = admission.mechanisms;
         else if (admission.mechanisms !== undefined)
@@ -51,6 +54,7 @@ export function compileAllowlistPolicyOverlayV2(raw, inventory = loadAllowlistIn
                     ...(row.bridgeOptions === undefined ? {} : { bridge: row.bridgeOptions }), ...(row.swapOptions === undefined ? {} : { swap: row.swapOptions })
                 } }),
             ...(row.gaslessRecipient === undefined ? {} : { gaslessRecipient: row.gaslessRecipient }),
+            ...(Object.keys(row.recipients).length === 0 ? {} : { recipients: row.recipients }),
         };
         const current = chains.get(row.asset.chain);
         chains.set(row.asset.chain, current === undefined

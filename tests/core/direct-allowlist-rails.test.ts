@@ -50,7 +50,7 @@ function observeSigning(root: string, s: Fixture): () => { state: string; lease:
 async function seedUsage(root: string, s: Fixture, chain: string, amountAtomic: string, now: Date): Promise<void> {
   const active = (await loadActiveAssetPolicyRegistry(root, s.account.profile, now))!;
   const subject: DirectAllowlistSubject = { profile: s.account.profile, operationId: "a".repeat(64), family: s.account.rail, account: s.account.address,
-    chain, asset: { kind: "native", identifier: null }, amountAtomic };
+    chain, asset: { kind: "native", identifier: null }, amountAtomic, recipient: "seeded-usage-recipient" };
   await new DirectAllowlistGate({ state: { root }, clock: { now: () => new Date(now) } })
     .reserve(subject, { schemaVersion: DIRECT_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision });
 }
