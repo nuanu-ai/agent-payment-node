@@ -12,7 +12,7 @@ import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-re
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator } from "./quote.js";
 import { relayExecutionRoute } from "./execution-route.js";
-import { verifyApprovalObservation, type RelayApprovalObservation } from "./approval-effect.js";
+import { relayEnvelopeFeeAdmitted, verifyApprovalObservation, type RelayApprovalObservation } from "./approval-effect.js";
 
 const DEPOSIT_ABI = parseAbi(["function depositErc20(address depositor, address token, uint256 amount, bytes32 id)"]);
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -82,7 +82,7 @@ export interface RelayDepositPorts {
   /** Fresh canonical Ethereum state. The adapter must fail closed if chain or block cannot be verified. */
   funding(op: RelayUnsignedOperation): Promise<Readonly<{
     chainId: number; nativeBalanceWei: bigint; tokenBalanceAtomic: bigint; allowanceAtomic: bigint;
-    currentMaxFeePerGasWei: bigint; nextNonce: bigint;
+    baseFeePerGasWei: bigint; nextNonce: bigint;
   }>>;
   observeApproval(hash: Hex): Promise<RelayApprovalObservation | null>;
   sign(op: RelayUnsignedOperation): Promise<Hex>;
@@ -235,7 +235,7 @@ export class RelayDepositEffectService {
     const funding = await this.ports.funding(op);
     if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.depositNetworkFeeCeilingWei!) ||
       funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < BigInt(op.amountAtomic) ||
-      funding.currentMaxFeePerGasWei < 0n || funding.currentMaxFeePerGasWei > BigInt(op.quote!.deposit.maxFeePerGas) ||
+      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote!.deposit) ||
       funding.nextNonce < 0n) blocked("source_funding_or_fee");
     const after = this.ports.now();
     if (!Number.isFinite(after.getTime()) || after.getTime() + 60_000 >= Date.parse(op.deadline) ||

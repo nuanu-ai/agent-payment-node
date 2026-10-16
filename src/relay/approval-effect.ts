@@ -12,6 +12,7 @@ import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-re
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { relayExecutionRoute } from "./execution-route.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 
 const TX = /^0x[0-9a-fA-F]+$/u;
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -108,7 +109,7 @@ export interface RelayApprovalPorts {
   /** Fresh source state before signing and again before the first submission. */
   funding(op: RelayUnsignedOperation): Promise<Readonly<{
     chainId: number; nativeBalanceWei: bigint; tokenBalanceAtomic: bigint; allowanceAtomic: bigint;
-    currentMaxFeePerGasWei: bigint; nextNonce: bigint;
+    baseFeePerGasWei: bigint; nextNonce: bigint;
   }>>;
   sign(op: RelayUnsignedOperation): Promise<Hex>;
   send(rawTransaction: Hex): Promise<string>;
@@ -216,7 +217,9 @@ export class RelayApprovalEffectService {
     const funding = await this.ports.funding(op);
     if (funding.chainId !== 1 || funding.nativeBalanceWei < BigInt(op.approvalNetworkFeeCeilingWei!) + BigInt(op.depositNetworkFeeCeilingWei!) ||
       funding.tokenBalanceAtomic < BigInt(op.amountAtomic) || funding.allowanceAtomic < 0n ||
-      funding.currentMaxFeePerGasWei < 0n || funding.currentMaxFeePerGasWei > BigInt(op.quote!.approval.maxFeePerGas) ||
+      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote!.approval) ||
+      // The deposit that must follow is admitted now too, so an inadmissible fee never buys a paid approval.
+      !relayEnvelopeFeeAdmitted(funding.baseFeePerGasWei, op.quote!.deposit) ||
       funding.nextNonce < 0n) blocked("source_funding_or_fee");
     const after = this.ports.now();
     if (!Number.isFinite(after.getTime()) || after.getTime() + 60_000 >= Date.parse(op.deadline) ||
@@ -261,4 +264,11 @@ export function verifyApprovalObservation(op: RelayUnsignedOperation, hash: Hex,
     same(log.topics[2]!, spender) && same(log.data, amount));
   if (matches.length !== 1) corrupt("exact Approval event");
   return "confirmed";
+}
+
+/** The shared frozen-envelope rule: the signed `gas × maxFeePerGas` within the consented ceiling bounds spend. */
+export function relayEnvelopeFeeAdmitted(baseFeePerGasWei: bigint,
+  envelope: Readonly<{ maxFeePerGas: string; maxPriorityFeePerGas: string }>): boolean {
+  return evmFrozenFeeAdmitted(baseFeePerGasWei, { maxFeePerGasWei: BigInt(envelope.maxFeePerGas),
+    maxPriorityFeePerGasWei: BigInt(envelope.maxPriorityFeePerGas) });
 }

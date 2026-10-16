@@ -54,19 +54,19 @@ test("batch transport sends one read-only POST and restores request order from r
   assert.equal(bodies.length, 1);
 });
 
-test("BNB native funding accepts the gas price read batch before signing and blocks invalid fees without a send", async (t) => {
+test("BNB native funding admits the frozen fee envelope against the block base fee and blocks an inadmissible one without a send", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const hash = `0x${"a".repeat(64)}`;
-  const op = { sourceChainId: 56, sourceAccount: WALLET, nativeQuote: { deposit: { value: "100", maxFeePerGas: "10" } },
+  const op = { sourceChainId: 56, sourceAccount: WALLET, nativeQuote: { deposit: { value: "100", maxFeePerGas: "10", maxPriorityFeePerGas: "5" } },
     depositNetworkFeeCeilingWei: "100" } as RelayUnsignedOperation;
-  let gasPrice = "0x5", sends = 0;
+  let baseFeePerGas = "0x5", sends = 0;
   const bodies = mockHttps(t, (body) => {
     assert.ok(Array.isArray(body));
     const methods = body.map((item: { method: string }) => item.method);
-    const results = methods.length === 2 ? ["0x38", { number: "0x10", hash }] :
-      [{ number: "0x10", hash }, "0xc9", "0x1", gasPrice, "0x38"];
+    const results = methods.length === 2 ? ["0x38", { number: "0x10", hash, baseFeePerGas }] :
+      [{ number: "0x10", hash, baseFeePerGas }, "0xc9", "0x1", "0x38"];
     assert.deepEqual(methods, methods.length === 2 ? ["eth_chainId", "eth_getBlockByNumber"] :
-      ["eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_gasPrice", "eth_chainId"]);
+      ["eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_chainId"]);
     return { status: 200, raw: JSON.stringify(body.map((item: { id: number }, index: number) =>
       ({ jsonrpc: "2.0", id: item.id, result: results[index] })).reverse()) };
   });
@@ -77,7 +77,7 @@ test("BNB native funding accepts the gas price read batch before signing and blo
       submitRawTransaction: async () => { sends++; throw new Error("unexpected send"); } } });
   assert.equal(await runtime["funding"](op, rpc), 1n);
   assert.equal(bodies.length, 2);
-  gasPrice = "0xb";
+  baseFeePerGas = "0x6";
   await assert.rejects(runtime["funding"](op, rpc), { code: "APN_OPERATION_BLOCKED",
     details: { reason: "native_funding_or_fee" } });
   assert.equal(bodies.length, 4);

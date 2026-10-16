@@ -358,11 +358,10 @@ export class RelayEthereumSourceRuntime {
         const priority = evmRpcQuantity(rows[5]), baseFee = evmRpcQuantity(head.baseFeePerGas);
         const nonce = evmRpcQuantity(rows[4]);
         this.signingNonce = nonce;
-        const currentMaxFeePerGasWei = baseFee * 2n + priority;
-        if (currentMaxFeePerGasWei === 0n)
+        if (baseFee * 2n + priority === 0n)
             blocked("source_fee_unavailable");
         return { chainId: 1, nativeBalanceWei: evmRpcQuantity(rows[1]), tokenBalanceAtomic: evmRpcWord(rows[2]),
-            allowanceAtomic: evmRpcWord(rows[3]), currentMaxFeePerGasWei, nextNonce: nonce };
+            allowanceAtomic: evmRpcWord(rows[3]), baseFeePerGasWei: baseFee, nextNonce: nonce };
     }
     async sign(op, role) {
         await this.assertReady(op);

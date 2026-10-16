@@ -14,6 +14,7 @@ import { EncryptedSmartAccountPermissionStore } from "../encrypted-smart-account
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { isGrantedPermissionRecord } from "../metamask-smart-account-record.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { ClockPort } from "../ports.js";
@@ -267,13 +268,14 @@ export class RelayNativeSourceRuntime {
       { method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] },
       { method: "eth_getBalance", params: [op.sourceAccount, reference] },
       { method: "eth_getTransactionCount", params: [op.sourceAccount, "pending"] },
-      { method: "eth_gasPrice", params: [] }, { method: "eth_chainId", params: [] },
+      { method: "eth_chainId", params: [] },
     ]);
-    if (rows.length !== 5 || evmRpcQuantity(rows[4]) !== BigInt(op.sourceChainId) || evmRpcQuantity(evmRpcRecord(rows[0]).number) !== number ||
+    if (rows.length !== 4 || evmRpcQuantity(rows[3]) !== BigInt(op.sourceChainId) || evmRpcQuantity(evmRpcRecord(rows[0]).number) !== number ||
       evmRpcHex(evmRpcRecord(rows[0]).hash, 32) !== hash) blocked("bnb_source_block_changed");
     const d = op.nativeQuote!.deposit;
     if (evmRpcQuantity(rows[1]) < BigInt(d.value) + BigInt(op.depositNetworkFeeCeilingWei!) ||
-      evmRpcQuantity(rows[3]) > BigInt(d.maxFeePerGas) || evmRpcQuantity(rows[3]) <= 0n) blocked("native_funding_or_fee");
+      !evmFrozenFeeAdmitted(evmRpcQuantity(block.baseFeePerGas), { maxFeePerGasWei: BigInt(d.maxFeePerGas),
+        maxPriorityFeePerGasWei: BigInt(d.maxPriorityFeePerGas) })) blocked("native_funding_or_fee");
     if (op.sourceChainId === 8453) {
       await verifyRelayBaseFunding(op, rpc, `0x${number.toString(16)}`);
       const [again] = await rpc.batchCall([{ method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] }]);

@@ -56,7 +56,7 @@ export interface RelayDepositPorts {
         nativeBalanceWei: bigint;
         tokenBalanceAtomic: bigint;
         allowanceAtomic: bigint;
-        currentMaxFeePerGasWei: bigint;
+        baseFeePerGasWei: bigint;
         nextNonce: bigint;
     }>>;
     observeApproval(hash: Hex): Promise<RelayApprovalObservation | null>;
