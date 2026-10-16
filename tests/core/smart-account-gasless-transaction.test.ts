@@ -63,6 +63,30 @@ test("Smart Account type-4 verifies every authorization and excludes owner and s
   }
 });
 
+test("Smart Account outer and authorization r/s accept RPC QUANTITY scalars without a leading zero nibble", async () => {
+  const fixture = saRedemptionFixture(), found = new Map<string, Awaited<ReturnType<typeof saSignedOuter>>>();
+  for (let key = 0x1001; key < 0x1201 && found.size < 4; key++) {
+    const signed = await saSignedOuter(4, fixture.calldata, fixture.intent, privateKeyToAccount(saWord(BigInt(key))));
+    const authorization = signed.rpc.authorizationList[0];
+    for (const [field, value] of [["r", signed.rpc.r], ["s", signed.rpc.s], ["authorization.r", authorization.r],
+      ["authorization.s", authorization.s]] as const) if (!found.has(field) && BigInt(value) < 1n << 252n) found.set(field, signed);
+  }
+  assert.equal(found.size, 4, "deterministic synthetic signers must yield leading-zero outer and authorization r/s");
+  const quantity = (value: string) => `0x${BigInt(value).toString(16)}`;
+  const noncanonical = (value: string) => { const digits = quantity(value).slice(2); return `0x${digits.length === 63 ? "00" : "0"}${digits}`; };
+  for (const [field, signed] of found) {
+    const authorization = signed.rpc.authorizationList[0], [outer, key] = field.startsWith("authorization.") ? [false, field.slice(14)] : [true, field];
+    const form = (encode: (value: string) => string) => outer ? { ...signed.rpc, [key]: encode(signed.rpc[key]) }
+      : { ...signed.rpc, authorizationList: [{ ...authorization, [key]: encode(authorization[key]) }] };
+    assert.ok(quantity(outer ? signed.rpc[key] : authorization[key]).length < 66);
+    const verified = await verifySmartAccountOuterTransaction(form(quantity), signed.hash, fixture.intent);
+    assert.equal(verified.from, SA_OUTER.address.toLowerCase()); assert.equal(verified.authorizationOwners.length, 1);
+    await assert.rejects(verifySmartAccountOuterTransaction(form(noncanonical), signed.hash, fixture.intent), rejected);
+    await assert.rejects(verifySmartAccountOuterTransaction(form(value => `0x${(BigInt(value) ^ 1n).toString(16)}`), signed.hash,
+      fixture.intent), rejected);
+  }
+});
+
 test("Smart Account redemption requires canonical cardinality, execution and exact validator hashes", async () => {
   const fixture = saRedemptionFixture();
   const verified = await verifySmartAccountRedemption(fixture.calldata, "sa-chain-test", "6".repeat(64),
