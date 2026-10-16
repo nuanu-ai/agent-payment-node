@@ -5,6 +5,20 @@ export interface UsdtReceiptLog {
     readonly topics: readonly string[];
     readonly data: string;
 }
+/**
+ * The contracts a receipt is checked against. For a saved operation they come from the record itself (its token, the
+ * paymaster in its signed UserOperation, the treasury in its signed paymaster payload), never today's constants, so a
+ * later pin update cannot strand the proof of an operation sent under the earlier set. The EntryPoint is the v0.8
+ * singleton the operation's hash is bound to.
+ */
+export interface UsdtReceiptPins {
+    readonly token: Address;
+    readonly paymaster: Address;
+    readonly treasury: Address;
+    readonly entryPoint: Address;
+}
+/** Pins of a freshly prepared plan: the current constants it was just validated against. */
+export declare const USDT_CURRENT_PINS: UsdtReceiptPins;
 export interface UsdtChainReceipt {
     readonly transactionHash: Hex;
     readonly blockNumber: bigint;
@@ -12,7 +26,7 @@ export interface UsdtChainReceipt {
     readonly logs: readonly UsdtReceiptLog[];
 }
 /** A failed UserOperationEvent in a successful, canonical EntryPoint transaction proves no account effect. */
-export declare function verifyUsdtRevert(sender: Address, userOpHash: Hex, receipt: UsdtChainReceipt): void;
+export declare function verifyUsdtRevert(sender: Address, userOpHash: Hex, receipt: UsdtChainReceipt, pins: UsdtReceiptPins): void;
 /** Public accounting a completed transfer proves; nothing here comes from the bundler's own report. */
 export interface UsdtSettlement {
     readonly transactionHash: Hex;
@@ -33,4 +47,4 @@ export interface UsdtSettlement {
  * exactly one USDT debit to the recipient of N, exactly one USDT debit to the treasury of A <= F, and no other USDT
  * leaving the sender in that transaction. Anything else is ambiguous and never closes the operation.
  */
-export declare function verifyUsdtReceipt(plan: Pick<UsdtTransferPlan, "request" | "feeCapAtomic" | "netAtomic">, userOpHash: Hex, receipt: UsdtChainReceipt): UsdtSettlement;
+export declare function verifyUsdtReceipt(plan: Pick<UsdtTransferPlan, "request" | "feeCapAtomic" | "netAtomic">, userOpHash: Hex, receipt: UsdtChainReceipt, pins: UsdtReceiptPins): UsdtSettlement;

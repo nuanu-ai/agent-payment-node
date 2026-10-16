@@ -4,7 +4,7 @@ import { ApnError } from "../errors.js";
 import type { WaitPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { assertGaslessEstimate } from "./economics.js";
-import { assertGaslessRemaining, gaslessReason, guardGaslessOperation } from "./guard.js";
+import { assertGaslessRemaining, gaslessReason, guardGaslessOperation, type GaslessGuardResult } from "./guard.js";
 import { assertGaslessIntentCurrent } from "./intent-validation.js";
 import { validateGaslessMaterial } from "./material-validation.js";
 import { assertGaslessOwner } from "./owner.js";
@@ -37,7 +37,7 @@ export class GaslessExecution {
   }
   async approve(op: GaslessOperationRecord, approval: GaslessApprovalPort): Promise<GaslessOperationRecord> {
     if (op.terminal || op.state !== "awaiting_approval") return op;
-    try { await this.mirror(op, await this.guard(op)); } catch (error) { return await this.halt(op, error); }
+    try { await this.mirror(op, await this.checked(op)); } catch (error) { return await this.halt(op, error); }
     const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
       exactPhrase: approvalCode("gasless", op.fingerprint), summary: publicGaslessOperation(op) });
     if (!accepted) return await this.save(op, { state: "failed_before_effect", failure: "gasless_approval_rejected" });
@@ -69,7 +69,7 @@ export class GaslessExecution {
       return await this.observation.run(await this.unknown(op, "gasless_bootstrap_unresolved"));
     }
     if (op.bootstrap.signingAttempts === 0 && !mirrored) {
-      try { await this.mirror(op, await this.guard(op)); } catch (error) { return await this.halt(op, error); }
+      try { await this.mirror(op, await this.checked(op)); } catch (error) { return await this.halt(op, error); }
     }
     const bootstrapResult = await this.material(op, "bootstrap"); op = bootstrapResult.op;
     if (bootstrapResult.material === null) return op;
@@ -147,9 +147,14 @@ export class GaslessExecution {
     }
     return { op, material, fees };
   }
-  /** The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. */
-  private async mirror(op: GaslessOperationRecord, fees: GaslessFees): Promise<void> {
-    await this.steady(op, GASLESS_STEP_POSTS.mirror, async () => { await this.rpc.mirrorEstimate(op.intent, fees); });
+  /**
+   * The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. The
+   * balance-layout witness is the guard snapshot just taken, a block whose state every keyless node still holds.
+   */
+  private async mirror(op: GaslessOperationRecord, guard: GaslessGuardResult): Promise<void> {
+    await this.steady(op, GASLESS_STEP_POSTS.mirror, async () => {
+      await this.rpc.mirrorEstimate(op.intent, guard.snapshot, guard.fees);
+    });
   }
   /** Owner, policy and caps locally, then one bundler batch: the signed fees must still cover its slow tier. */
   private async feeCheck(op: GaslessOperationRecord, signed: GaslessFees): Promise<void> {
@@ -165,11 +170,14 @@ export class GaslessExecution {
   private key(role: GaslessRole): "bootstrap" | "userOperation" { return role === "bootstrap" ? "bootstrap" : "userOperation"; }
   private at(): string { return new Date(this.now()).toISOString(); }
   private async guard(op: GaslessOperationRecord, signed?: GaslessFees): Promise<GaslessFees> {
+    return (await this.checked(op, signed)).fees;
+  }
+  private async checked(op: GaslessOperationRecord, signed?: GaslessFees): Promise<GaslessGuardResult> {
     return await this.steady(op, GASLESS_STEP_POSTS.guard, async () => {
       await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
-      const fees = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
+      const checked = await guardGaslessOperation(this.state, this.rpc, op, this.now, signed);
       await this.policy?.assert(op, op.bootstrap.signingAttempts === 1 || op.userOperation.signingAttempts === 1);
-      return fees;
+      return checked;
     });
   }
   /**

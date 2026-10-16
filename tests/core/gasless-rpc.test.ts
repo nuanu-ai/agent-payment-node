@@ -15,8 +15,9 @@ import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/regist
 import { GaslessRpc, GaslessRpcRequestSession, gaslessRpcFactory, withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
 import { gaslessPostBudget, gaslessSnapshotPosts } from "../../src/gasless/rpc-budget.js";
 import { observeGasless, type GaslessObservationContext } from "../../src/gasless/rpc-observe.js";
+import { assertGaslessSettlementContinuation, gaslessSettlementEffect, validateGaslessSettlement } from "../../src/gasless/settlement-validation.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "../../src/gasless/rpc-state.js";
-import { verifyGaslessOuterTransaction } from "../../src/gasless/rpc-transaction.js";
+import { gaslessOuterTransaction } from "../../src/gasless/rpc-transaction.js";
 import { GASLESS_ESTIMATE_SIGNATURE } from "../../src/gasless/signature.js";
 import { gaslessBatch, gaslessEnvelopeBinding, gaslessPermitTypedData, gaslessUserOperation,
   gaslessUserOperationHash, gaslessUserOperationTypedData } from "../../src/gasless/wire.js";
@@ -64,8 +65,9 @@ test("gasless production prepare and approval fit one public bundler request win
     afterApproval: bundler.filter(c => c.afterApproval).length,
     finalPhase: record.userOperation.phase, failure: record.failure }));
   // Guard+mirror before the screen, a guard before each owner signature, one estimate, one fee check and the send.
-  assert.equal(approvalPosts, 17, `approve used ${approvalPosts} physical POSTs`);
-  assert.ok(approvalPosts + 4 <= gaslessPostBudget("execute", Number.POSITIVE_INFINITY), "one full guard retry still fits");
+  // Each guard is 3 POSTs: the anchor's header is re-read inside the pinned state batch, not in a separate recheck.
+  assert.equal(approvalPosts, 14, `approve used ${approvalPosts} physical POSTs`);
+  assert.ok(approvalPosts + 3 <= gaslessPostBudget("execute", Number.POSITIVE_INFINITY), "one full guard retry still fits");
   assert.equal(s.calls.slice(preparePosts).filter(c => c.methods.includes("eth_getBlockByNumber") &&
     c.methods.includes("eth_chainId")).length, 3, "three guard snapshots: before the screen and before each signature");
   assert.equal(bundler.filter(c => c.method === "eth_sendUserOperation").length, 1);
@@ -179,7 +181,7 @@ test("gasless extra in-invocation reads exhaust the cap before any send marker",
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root), { id } = await s.prepare();
   const preparePosts = s.calls.length, confirm = s.approval.confirm.bind(s.approval);
-  // Two foreign chain checks (6 POSTs) consume more than the retry allowance; the plan's own steps run out at the fee check.
+  // Two foreign chain checks (6 POSTs) consume more than the retry allowance (3); the plan's own steps run out at the final guard.
   s.approval.confirm = async input => { const accepted = await confirm(input);
     await s.rpc.assertChain(); await s.rpc.assertChain(); return accepted; };
   const result = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
@@ -297,15 +299,19 @@ test("gasless RPC factory is lazy and requires only the selected chain RPC confi
 });
 
 test("gasless POST budgets are derived from each command's step plan", () => {
-  // Guard snapshot: chain+anchor batch, bundler batch, state batch, anchor recheck.
-  assert.equal(gaslessSnapshotPosts(Number.POSITIVE_INFINITY), 4);
-  assert.equal(gaslessPostBudget("read", Number.POSITIVE_INFINITY), 4);
-  // Guard+mirror (6), bootstrap guard (4), estimate (1), final guard (4), fee check (1), send (1) = 17, plus one guard retry.
-  assert.equal(gaslessPostBudget("execute", Number.POSITIVE_INFINITY), 21);
-  assert.equal(gaslessPostBudget("resume", Number.POSITIVE_INFINITY), 24);
-  assert.equal(gaslessPostBudget("first_send", Number.POSITIVE_INFINITY), 9);
+  // Guard snapshot: chain+anchor batch, bundler batch, state batch with the anchor header re-read inside it.
+  assert.equal(gaslessSnapshotPosts(Number.POSITIVE_INFINITY), 3);
+  assert.equal(gaslessPostBudget("read", Number.POSITIVE_INFINITY), 3);
+  // Guard+mirror (5), bootstrap guard (3), estimate (1), final guard (3), fee check (1), send (1) = 14, plus one guard retry.
+  assert.equal(gaslessPostBudget("execute", Number.POSITIVE_INFINITY), 17);
+  // Observation: chain, two locators, the anchors, four scan windows, then the receipt inspection (3) = 11.
+  assert.equal(gaslessPostBudget("observe", Number.POSITIVE_INFINITY), 11);
+  assert.equal(gaslessPostBudget("resume", Number.POSITIVE_INFINITY), 17);
+  assert.equal(gaslessPostBudget("first_send", Number.POSITIVE_INFINITY), 7);
   // A batch cap splits the state batch and is counted, never silently exceeded.
-  assert.equal(gaslessPostBudget("read", 3), 3 + Math.ceil(30 / 3));
+  assert.equal(gaslessPostBudget("read", 3), 2 + Math.ceil(31 / 3));
+  // With a cap the invalidation probe (head header, then 16 account reads) is the larger tail.
+  assert.equal(gaslessPostBudget("observe", 3), 1 + 2 + 1 + 4 * Math.ceil(27 / 3) + 1 + Math.ceil(16 / 3));
 });
 
 test("gasless request sessions cap physical RPC and bundler POSTs at the resume budget and reset per invocation", async () => {
@@ -319,18 +325,19 @@ test("gasless request sessions cap physical RPC and bundler POSTs at the resume 
     return { status: 200, body: JSON.stringify(Array.isArray(request) ? request.map(response) : response(request)) };
   } };
   const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  const budget = gaslessPostBudget("resume", Number.POSITIVE_INFINITY), full = Math.floor(budget / 3);
   await withGaslessRpcInvocation(async () => {
-    for (let index = 0; index < 8; index += 1) await rpc.assertChain();
-    assert.equal(calls.length, 24);
+    for (let index = 0; index < full; index += 1) await rpc.assertChain();
+    assert.equal(calls.length, 3 * full);
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_BUDGET_EXCEEDED" });
-    assert.equal(calls.length, 24);
+    assert.equal(calls.length, budget);
   }, "resume");
   await withGaslessRpcInvocation(async () => { await rpc.assertChain(); }, "resume");
-  assert.equal(calls.length, 27);
+  assert.equal(calls.length, budget + 3);
   // The bundler price batch is one physical POST despite its three logical methods.
   const batch = (rpc as unknown as { bundlerState(): Promise<readonly unknown[]> }).bundlerState.bind(rpc);
   await withGaslessRpcInvocation(async () => { await batch(); }, "read");
-  assert.equal(calls.length, 28);
+  assert.equal(calls.length, budget + 4);
 });
 
 test("gasless concurrent invocations retain independent caps and JSON-RPC request identities", async () => {
@@ -343,12 +350,13 @@ test("gasless concurrent invocations retain independent caps and JSON-RPC reques
       result: request.method === "eth_supportedEntryPoints" ? [deployment.entryPoint] : "0x2105" }) };
   } };
   const rpc = new GaslessRpc(8453, RPC_URL, BUNDLER_URL, transport);
+  const budget = gaslessPostBudget("resume", Number.POSITIVE_INFINITY);
   await Promise.all(Array.from({ length: 2 }, () => withGaslessRpcInvocation(async () => {
-    for (let index = 0; index < 8; index += 1) await rpc.assertChain();
+    for (let index = 0; index < Math.floor(budget / 3); index += 1) await rpc.assertChain();
     await assert.rejects(rpc.assertChain(), { code: "APN_RPC_BUDGET_EXCEEDED" });
   }, "resume")));
-  assert.equal(ids.length, 48);
-  assert.equal(new Set(ids).size, 48);
+  assert.equal(ids.length, 2 * budget);
+  assert.equal(new Set(ids).size, 2 * budget);
 });
 
 test("gasless HTTP 429 is terminal for its invocation without another transport request", async () => {
@@ -493,7 +501,8 @@ test("capped production snapshot keeps block pinning and rejects a reorg", async
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await bundledGaslessFixture(temporary.root);
   await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), "read");
-  assert.equal(s.calls.filter(call => !call.bundler).length, 3);
+  // The chain+anchor batch and the pinned state batch, which re-reads the anchor header instead of a third recheck POST.
+  assert.equal(s.calls.filter(call => !call.bundler).length, 2);
   assert.equal(s.calls.filter(call => call.bundler).length, 1);
   s.calls.length = 0;
   const snapshot = await withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), "read", 3);
@@ -506,6 +515,21 @@ test("capped production snapshot keeps block pinning and rejects a reorg", async
   s.setFault("reorg");
   await assert.rejects(withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address), "read", 3),
     { code: "APN_RPC_PROTOCOL" });
+});
+
+test("a per-chain RPC batch cap splits every invocation's reads and re-derives its budget (GASL-18)", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await bundledGaslessFixture(temporary.root);
+  // The same endpoints as the fixture, with APN_BASE_RPC_MAX_BATCH_ITEMS=3 applied by the RPC itself.
+  const capped = new GaslessRpc(8453, "https://rpc.example/base", "https://bundler.example/base", s.transport, undefined, 3);
+  const snapshot = await withGaslessRpcInvocation(async () => await capped.snapshot(s.account.address), "read");
+  assert.equal(snapshot.owner, s.account.address);
+  const rpcPosts = s.calls.filter(call => !call.bundler);
+  assert.ok(rpcPosts.every(call => call.methods.length <= 3));
+  assert.equal(rpcPosts.length, gaslessSnapshotPosts(3) - 1, "every split POST is inside the budget re-derived at the cap");
+  assert.throws(() => gaslessRpcFactory({ APN_BASE_RPC_URL: RPC_URL, APN_BASE_RPC_MAX_BATCH_ITEMS: "1" })(8453),
+    (error: any) => error.code === "APN_RPC_CONFIG" && /APN_BASE_RPC_MAX_BATCH_ITEMS/u.test(String(error.details?.nextActions)));
+  assert.equal(gaslessRpcFactory({ APN_BASE_RPC_URL: RPC_URL, APN_BASE_RPC_MAX_BATCH_ITEMS: "3" })(8453).chainId, 8453);
 });
 
 test("gasless shared provider-family pacer separates physical POST starts across clients", async () => {
@@ -668,40 +692,20 @@ test("gasless canonical state reads pin every effect value to one block hash", a
   assert.deepEqual(methods, ["eth_call"]);
 });
 
-for (let type = 0; type <= 4; type += 1) test(`gasless outer type ${type} is reconstructed from signed bytes`, async () => {
+for (let type = 0; type <= 4; type += 1) test(`gasless outer type ${type} is projected from RPC fields without signature recovery`, async () => {
   const signed = await signedOuter(type);
-  const verified = await verifyGaslessOuterTransaction(signed.rpc, 8453, signed.hash);
-  assert.equal(verified.from, OUTER.address); assert.equal(verified.to, gaslessDeployment(8453).entryPoint);
-  if (type === 4) {
-    assert.ok([signed.rpc.r, signed.rpc.s].some(value => value.length < 66));
-    assert.ok([signed.rpc.authorizationList[0].r, signed.rpc.authorizationList[0].s]
-      .some(value => value.length < 66));
-  }
-  const padded = { ...signed.rpc, r: word(BigInt(signed.rpc.r)), s: word(BigInt(signed.rpc.s)),
-    ...(type === 4 ? { authorizationList: signed.rpc.authorizationList.map((auth: Json) => ({ ...auth,
-      r: word(BigInt(auth.r)), s: word(BigInt(auth.s)) })) } : {}) };
-  assert.deepEqual(await verifyGaslessOuterTransaction(padded, 8453, signed.hash), verified);
-  await assert.rejects(verifyGaslessOuterTransaction({ ...signed.rpc, input: "0x12345679" }, 8453, signed.hash),
-    { code: "APN_RPC_PROTOCOL" });
-});
-
-test("gasless outer and authorization scalars remain bounded and authenticated", async () => {
-  const signed = await signedOuter(4);
-  for (const location of ["outer", "authorization"] as const) for (const key of ["r", "s"] as const) {
-    for (const value of ["0x0", word(0n), "0x01", `0x1${"0".repeat(64)}`, "0x", "0xgg", null, 1,
-      `0x${"f".repeat(64)}`]) {
-      const changed = structuredClone(signed.rpc);
-      const target = location === "outer" ? changed : changed.authorizationList[0];
-      target[key] = value;
-      await assert.rejects(verifyGaslessOuterTransaction(changed, 8453, signed.hash),
-        { code: "APN_RPC_PROTOCOL" }, `${location}.${key}=${String(value)}`);
-    }
-  }
+  const outer = gaslessOuterTransaction(signed.rpc, 8453, signed.hash);
+  assert.equal(outer.from, OUTER.address); assert.equal(outer.to, gaslessDeployment(8453).entryPoint);
+  assert.equal(outer.valueAtomic, "0"); assert.equal(outer.typeAtomic, String(type));
+  // The receipt binding (hash, chain, canonical block membership) is the authority; the RPC is the trust root.
+  assert.throws(() => gaslessOuterTransaction(signed.rpc, 8453, word(1n)), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => gaslessOuterTransaction({ ...signed.rpc, chainId: "0x1" }, 8453, signed.hash), { code: "APN_RPC_PROTOCOL" });
+  assert.throws(() => gaslessOuterTransaction({ ...signed.rpc, to: "0x12" }, 8453, signed.hash), { code: "APN_RPC_PROTOCOL" });
 });
 
 test("gasless observation reports bootstrap-only permission without inventing a payment hash", async () => {
   const intent = makeIntent(), cursor = initialCursor(intent), calls: string[] = [];
-  const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example", deployment: gaslessDeployment(8453),
+  const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example",
     rpc: async (method: string) => { calls.push(method); throw new Error("no RPC expected"); },
     bundler: async (method: string) => { calls.push(method); throw new Error("no bundler expected"); },
     snapshot: async () => intent.initialSnapshot } as GaslessObservationContext;
@@ -709,7 +713,7 @@ test("gasless observation reports bootstrap-only permission without inventing a 
     { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: null, userOperationHash: null }, cursor);
   assert.equal(observation.status, "unresolved"); assert.equal(observation.transactionHash, null);
   assert.equal(observation.reason, "gasless_bootstrap_unresolved"); assert.equal(observation.evidenceHash, null);
-  assert.deepEqual(calls, ["eth_getBlockByNumber"]);
+  assert.deepEqual(calls, ["eth_getBlockByNumber", "eth_getBlockByNumber"], "the safe and latest heads, one request");
 });
 
 for (const chainId of [8453, 137] as const) for (const designation of ["empty", "expected"] as const) {
@@ -727,11 +731,12 @@ for (const chainId of [8453, 137] as const) for (const designation of ["empty", 
     }
     assert.equal(good.evidenceHash, hashObject(good.permissionInvalidation));
     assert.ok(blockTags.includes(chainId === 137 ? "finalized" : "safe"));
-    assert.ok(calls.includes("eth_getCode")); assert.ok(calls.includes("eth_getStorageAt"));
-    assert.ok(calls.includes("eth_call")); assert.ok(calls.includes("eth_getTransactionCount"));
+    assert.ok(calls.includes("eth_getCode")); assert.ok(calls.includes("eth_call")); assert.ok(calls.includes("eth_getTransactionCount"));
+    // Archive-free: only the safe and latest headers, no prepare-block recheck, no protocol pins of today's registry.
+    assert.deepEqual(blockTags, [chainId === 137 ? "finalized" : "safe", "latest"]);
+    assert.equal(calls.includes("eth_getStorageAt"), false);
     assert.equal(calls.some((m) => /UserOperation|send|estimate|bundler|snapshot/u.test(m)), false);
-    for (const fault of ["permit", "allowance", "pending", "entrypoint", "owner_code", "protocol_code", "storage",
-      "domain", "prepare_reorg", "safe_reorg", "head_reorg", "chain", "safe_ahead", "hash_zero",
+    for (const fault of ["permit", "allowance", "pending", "entrypoint", "owner_code", "chain", "safe_ahead", "hash_zero",
       ...(designation === "empty" ? ["authorization"] : [])]) {
       setFault(fault);
       const held = await observeGasless(context, intent, identity, initialCursor(intent));
@@ -751,9 +756,8 @@ for (const chainId of [8453, 137] as const) for (const designation of ["empty", 
   assert.equal(result.cursor.nextBlockAtomic, "103"); assert.deepEqual(result.cursor.previousEndBlock, result.permissionInvalidation?.safeBlock);
   assert.ok(blockTags.includes(chainId === 137 ? "finalized" : "safe"));
   assert.ok(calls.includes("eth_getLogs")); assert.equal(calls.some(c => /send|estimate|snapshot/iu.test(c)), false);
-  for (const fault of ["permit", "allowance", "pending", "entrypoint", "owner_code", "protocol_code", "storage",
-    "domain", "prepare_reorg", "safe_reorg", "head_reorg", "chain", "safe_ahead", "hash_zero", "scan_error",
-    ...(designation === "empty" ? ["authorization"] : [])]) {
+  for (const fault of ["permit", "allowance", "pending", "entrypoint", "owner_code", "chain", "safe_ahead", "hash_zero",
+    "scan_error", ...(designation === "empty" ? ["authorization"] : [])]) {
     setFault(fault);
     const held = await observeGasless(context, intent, identity, initialCursor(intent));
     assert.notEqual(held.status, "permissions_invalidated", fault); assert.equal(held.permissionInvalidation, undefined, fault);
@@ -769,7 +773,8 @@ for (const final of [false, true]) test(`gasless Polygon ${final ? "final" : "bo
   assert.equal(result.status, "unresolved"); assert.equal(result.settlement, null);
   assert.equal(result.permissionInvalidation, undefined); assert.deepEqual(result.cursor, cursor);
   assert.ok(blockTags.includes("finalized")); assert.equal(blockTags.includes("safe"), false);
-  assert.equal(blockTags.includes("latest"), false);
+  // Latest is read only beside finality for the head side of a bootstrap proof, never in its place.
+  assert.equal(blockTags.includes("latest"), !final);
 });
 
 function bootstrapRpcFixture(designation: "empty" | "expected", final = false, chainId: GaslessChainId = 8453) {
@@ -782,7 +787,7 @@ function bootstrapRpcFixture(designation: "empty" | "expected", final = false, c
     protocolHash: gaslessProtocolHash(deployment) } };
   const eoaNonce = `0x${(BigInt(intent.initialSnapshot.eoaNonceAtomic) + (designation === "empty" ? 1n : 0n)).toString(16)}`;
   const calls: string[] = [], blockTags: unknown[] = []; let fault = "";
-  const context: GaslessObservationContext = { chainId, rpcOrigin: "https://rpc.example", deployment,
+  const context: GaslessObservationContext = { chainId, rpcOrigin: "https://rpc.example",
     snapshot: async () => { calls.push("snapshot"); throw new Error("no snapshot"); },
     bundler: async () => { calls.push("bundler"); if (final) return null; throw new Error("no bundler"); },
     rpc: async (method, params) => {
@@ -823,17 +828,19 @@ function bootstrapRpcFixture(designation: "empty" | "expected", final = false, c
   } };
 }
 
-for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finite finality-block scan uses ten-block RPC ranges and resets on cursor reorg`, async () => {
+for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finite finality-block scan covers four windows of ten-block RPC ranges and resets on cursor reorg`, async () => {
   const intent = makeIntent(chainId), userOperationHash = word(71n), cursor = initialCursor(intent);
   const finalityTag = chainId === 137 ? "finalized" : "safe";
   let reorg = false; const tags: unknown[] = [], ranges: Array<[bigint, bigint]> = [];
-  const context = { chainId, rpcOrigin: "https://rpc.example", deployment: gaslessDeployment(chainId),
+  let posts = 0, queued = false;
+  const context = { chainId, rpcOrigin: "https://rpc.example",
     bundler: async () => null,
     snapshot: async () => intent.initialSnapshot,
     rpc: async (method: string, params: readonly unknown[]) => {
+      if (!queued) { queued = true; posts += 1; queueMicrotask(() => { queued = false; }); }
       if (method === "eth_getBlockByNumber") {
-        const tag = params[0]; tags.push(tag); const number = tag === finalityTag ? 400n : BigInt(tag as string);
-        return rawBlock(number, reorg && number === 355n ? word(123_456n) : blockHash(number));
+        const tag = params[0]; tags.push(tag); const number = tag === finalityTag ? 2_000n : BigInt(tag as string);
+        return rawBlock(number, reorg && number === 1_123n ? word(123_456n) : blockHash(number));
       }
       if (method === "eth_getLogs") { const filter = params[0] as Json;
         const from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock);
@@ -845,28 +852,29 @@ for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finite fina
   } as GaslessObservationContext;
   const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
   const first = await observeGasless(context, intent, identity, cursor);
-  assert.equal(first.status, "not_found"); assert.equal(first.cursor.nextBlockAtomic, "356");
-  assert.equal(first.cursor.previousEndBlock?.numberAtomic, "355"); assert.ok(tags.includes(finalityTag));
-  assert.equal(ranges.length, 26); assert.deepEqual(ranges[0], [100n, 109n]);
-  assert.deepEqual(ranges.at(-1), [350n, 355n]);
+  assert.equal(first.status, "not_found"); assert.equal(first.cursor.nextBlockAtomic, "1124");
+  assert.equal(first.cursor.previousEndBlock?.numberAtomic, "1123"); assert.ok(tags.includes(finalityTag));
+  assert.equal(ranges.length, 4 * 26); assert.deepEqual(ranges[0], [100n, 109n]);
+  assert.deepEqual(ranges.at(-1), [1_118n, 1_123n]);
   for (let index = 1; index < ranges.length; index += 1) assert.equal(ranges[index]![0], ranges[index - 1]![1] + 1n);
+  assert.equal(posts, 5, "the safe anchor, then one request per window; no probe before the scan reaches safe");
+  assert.equal(tags.includes("latest"), false);
   reorg = true; const second = await observeGasless(context, intent, identity, first.cursor);
   assert.equal(second.status, "unresolved"); assert.deepEqual(second.cursor, cursor);
-  assert.equal(ranges.length, 26);
+  assert.equal(ranges.length, 4 * 26);
 });
 
-for (const fault of ["transport", "range", "count", "reorg"] as const) {
+for (const fault of ["transport", "range", "count"] as const) {
   test(`gasless scan retains the original cursor after a later RPC range ${fault} failure`, async () => {
     const intent = makeIntent(), userOperationHash = word(73n), cursor = initialCursor(intent);
     const userLog = settlementLogs(intent, userOperationHash).at(-1)!;
-    let requests = 0, endReads = 0;
+    let requests = 0;
     const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example",
-      deployment: gaslessDeployment(8453), bundler: async () => null, snapshot: async () => intent.initialSnapshot,
+      bundler: async () => null, snapshot: async () => intent.initialSnapshot,
       rpc: async (method, params) => {
         if (method === "eth_getBlockByNumber") {
           const number = params[0] === "safe" ? 400n : BigInt(params[0] as string);
-          if (number === 355n) endReads += 1;
-          return rawBlock(number, fault === "reorg" && number === 355n && endReads === 2 ? word(999n) : blockHash(number));
+          return rawBlock(number, blockHash(number));
         }
         assert.equal(method, "eth_getLogs"); requests += 1;
         const filter = params[0] as Json, from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock);
@@ -890,7 +898,7 @@ test("gasless scan locates a matching operation in a later range without an effe
   const userLog = rawLog(settlementLogs(intent, userOperationHash).at(-1)!, transactionHash, block(125n));
   const ranges: Array<[bigint, bigint]> = [];
   const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example",
-    deployment: gaslessDeployment(8453), bundler: async () => null, snapshot: async () => intent.initialSnapshot,
+    bundler: async () => null, snapshot: async () => intent.initialSnapshot,
     rpc: async (method, params) => {
       calls.push(method);
       if (method === "eth_getBlockByNumber") return rawBlock(params[0] === "safe" ? 150n : BigInt(params[0] as string),
@@ -911,17 +919,25 @@ test("gasless scan locates a matching operation in a later range without an effe
   assert.ok(calls.includes("eth_getTransactionReceipt")); assert.equal(calls.some((method) => /send|estimate/iu.test(method)), false);
 });
 
-for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finality observation fixes effect proof while later account state may advance`, async () => {
-  const intent = makeIntent(chainId), userOperationHash = word(72n), signed = await signedOuter(2, chainId);
+// A keyless node keeps state only near latest; on Arbitrum/Unichain the safe head trails by more than that window.
+function laggingSafeContext(chainId: GaslessChainId, intent: GaslessIntent, userOperationHash: Hex,
+  signed: { readonly hash: Hex; readonly rpc: Json }, initial: { safe: bigint; latest: bigint }) {
   const effectBlock = block(101), transaction = { ...signed.rpc, blockNumber: "0x65", blockHash: effectBlock.hash,
     transactionIndex: "0x0" };
   const logs = settlementLogs(intent, userOperationHash), receipt = { transactionHash: signed.hash, blockNumber: "0x65",
     blockHash: effectBlock.hash, transactionIndex: "0x0", type: "0x2", from: OUTER.address, to: intent.entryPoint,
     status: "0x1", logs: logs.map((log) => rawLog(log, signed.hash, effectBlock)) };
-  let safeNumber = 102n, finalityUnavailable = false;
-  const tags: unknown[] = [], finalityTag = chainId === 137 ? "finalized" : "safe";
+  const state = { ...initial, finalityUnavailable: false, reorgedInclusionReads: 0, inclusionReads: 0,
+    tags: [] as unknown[], statePins: [] as unknown[] };
+  const finalityTag = chainId === 137 ? "finalized" : "safe";
+  const header = (number: bigint) => rawBlock(number, blockHash(number), number === 101n ? [signed.hash] : []);
+  const retained = (pin: unknown) => {
+    state.statePins.push(pin);
+    if ((pin as { blockHash?: Hex }).blockHash !== blockHash(state.latest) && pin !== "pending") {
+      throw new Error("missing trie node: state is not available beyond the keyless retention window");
+    }
+  };
   const context = { chainId, rpcOrigin: "https://rpc.example",
-    deployment: { ...gaslessDeployment(chainId), code: [], reads: [] } as GaslessDeployment,
     snapshot: async () => intent.initialSnapshot,
     bundler: async (method: string) => method === "eth_getUserOperationReceipt"
       ? { userOpHash: userOperationHash, receipt: { transactionHash: signed.hash } }
@@ -930,33 +946,74 @@ for (const chainId of [8453, 137] as const) test(`gasless ${chainId} finality ob
       if (method === "eth_getTransactionByHash") return transaction;
       if (method === "eth_getTransactionReceipt") return receipt;
       if (method === "eth_getBlockByNumber") {
-        const tag = params[0]; tags.push(tag);
-        if (tag === finalityTag && finalityUnavailable) throw new Error("finality block unavailable");
-        const number = tag === finalityTag ? safeNumber : BigInt(tag as string);
-        return rawBlock(number, blockHash(number), number === 101n ? [signed.hash] : []);
+        const tag = params[0]; state.tags.push(tag);
+        if (tag === finalityTag && state.finalityUnavailable) throw new Error("finality block unavailable");
+        if (tag === finalityTag) return header(state.safe);
+        if (tag === "latest") return header(state.latest);
+        const number = BigInt(tag as string);
+        if (number === 101n && ++state.inclusionReads > 1 && state.reorgedInclusionReads > 0) {
+          state.reorgedInclusionReads -= 1; return rawBlock(101n, word(0xdeadn), [signed.hash]);
+        }
+        return header(number);
       }
+      if (method === "eth_getBalance" || method === "eth_getTransactionCount" || method === "eth_getCode") retained(params.at(-1));
       if (method === "eth_getBalance" || method === "eth_getTransactionCount") return "0x0";
       if (method === "eth_getCode") return `0xef0100${intent.delegate.slice(2).toLowerCase()}`;
-      if (method === "eth_call") return accountRead(params);
+      if (method === "eth_call") { retained(params.at(-1)); return accountRead(params); }
       throw new Error(`unexpected ${method}`);
     },
   } as GaslessObservationContext;
+  return { context, state, finalityTag };
+}
+
+for (const chainId of [8453, 137] as const) test(`gasless ${chainId} lagging safe head beyond keyless state retention closes once the receipt is at or below safe`, async () => {
+  const intent = makeIntent(chainId), userOperationHash = word(72n), signed = await signedOuter(2, chainId);
   const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
-  const first = await observeGasless(context, intent, identity, initialCursor(intent));
-  assert.equal(first.status, "safe"); assert.equal(first.settlement?.safeBlock.numberAtomic, "102");
-  assert.ok(tags.includes(finalityTag)); assert.equal(tags.includes("latest"), false);
-  assert.equal(first.settlement?.effectAccount.balanceAtomic, "6000000");
-  safeNumber = 103n; const second = await observeGasless(context, intent, identity, first.cursor);
-  assert.equal(second.status, "safe"); assert.equal(second.settlement?.safeBlock.numberAtomic, "103");
-  assert.equal(second.settlement?.safeAccount.balanceAtomic, "6000001");
-  const { safeBlock: _firstSafeBlock, safeAccount: _firstSafeAccount, ...firstEffect } = first.settlement!;
-  const { safeBlock: _secondSafeBlock, safeAccount: _secondSafeAccount, ...secondEffect } = second.settlement!;
-  assert.deepEqual(secondEffect, firstEffect);
-  finalityUnavailable = true; tags.length = 0;
-  const held = await observeGasless(context, intent, identity, first.cursor);
+  // The receipt is above the safe head: not yet, retry later, and no account state is read at all.
+  const f = laggingSafeContext(chainId, intent, userOperationHash, signed, { safe: 100n, latest: 2_000n });
+  const early = await observeGasless(f.context, intent, identity, initialCursor(intent));
+  assert.equal(early.status, "pending"); assert.equal(early.settlement, null); assert.deepEqual(f.state.statePins, []);
+  // Safe passes the inclusion block but trails latest by 1,898 blocks; only latest-head state is served.
+  f.state.safe = 102n; f.state.latest = 2_000n;
+  const first = await observeGasless(f.context, intent, identity, early.cursor);
+  assert.equal(first.status, "safe", JSON.stringify(first)); assert.equal(first.settlement?.safeBlock.numberAtomic, "102");
+  assert.equal(first.settlement?.accountBlock?.numberAtomic, "2000", "account facts are read at the latest head");
+  assert.ok(f.state.statePins.every((pin) => pin === "pending" || (pin as { blockHash?: Hex }).blockHash === blockHash(2_000n)));
+  assert.ok(f.state.tags.includes(f.finalityTag)); assert.ok(f.state.tags.includes("0x65"), "the inclusion header is re-read at its height");
+  assert.deepEqual(first.settlement?.effectAccount, first.settlement?.safeAccount);
+  assert.equal(first.settlement?.protocolHash, intent.initialSnapshot.protocolHash);
+  validateGaslessSettlement(intent, userOperationHash, first.settlement);
+  // A later observation may see later account state; the receipt-bound effect stays fixed.
+  f.state.safe = 103n; f.state.latest = 2_001n;
+  const second = await observeGasless(f.context, intent, identity, first.cursor);
+  assert.equal(second.status, "safe"); assert.equal(second.settlement?.accountBlock?.numberAtomic, "2001");
+  assertGaslessSettlementContinuation(first.settlement!, second.settlement!);
+  assert.deepEqual(gaslessSettlementEffect(second.settlement!), gaslessSettlementEffect(first.settlement!));
+  f.state.finalityUnavailable = true;
+  const held = await observeGasless(f.context, intent, identity, first.cursor);
   assert.equal(held.status, "unresolved"); assert.equal(held.settlement, null); assert.deepEqual(held.cursor, first.cursor);
-  assert.ok(tags.includes(finalityTag)); assert.equal(tags.includes("latest"), false);
-  assert.equal(tags.includes(chainId === 137 ? "safe" : "finalized"), false);
+});
+
+test("gasless anchor above the safe head stays pending however far latest has moved", async () => {
+  const intent = makeIntent(42161), userOperationHash = word(73n), signed = await signedOuter(2, 42161);
+  const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
+  const f = laggingSafeContext(42161, intent, userOperationHash, signed, { safe: 100n, latest: 50_000n });
+  for (let pass = 0; pass < 3; pass += 1) {
+    const result = await observeGasless(f.context, intent, identity, initialCursor(intent));
+    assert.equal(result.status, "pending"); assert.equal(result.settlement, null);
+  }
+  assert.deepEqual(f.state.statePins, [], "a latest read whose anchor is not yet safe is never taken as a verdict");
+});
+
+test("gasless reorg of the anchor at its height never yields a terminal verdict", async () => {
+  const intent = makeIntent(8453), userOperationHash = word(74n), signed = await signedOuter(2, 8453);
+  const identity = { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: "b".repeat(64), userOperationHash };
+  const f = laggingSafeContext(8453, intent, userOperationHash, signed, { safe: 102n, latest: 2_000n });
+  f.state.reorgedInclusionReads = 1;
+  const reorged = await observeGasless(f.context, intent, identity, initialCursor(intent));
+  assert.equal(reorged.status, "unresolved"); assert.equal(reorged.settlement, null);
+  const recovered = await observeGasless(f.context, intent, identity, initialCursor(intent));
+  assert.equal(recovered.status, "safe", "the same canonical anchor closes on a later pass");
 });
 
 function makeIntent(chainId: GaslessChainId = 8453): GaslessIntent {

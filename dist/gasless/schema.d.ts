@@ -283,6 +283,11 @@ export declare const settlementSchema: z.ZodObject<{
             empty: "empty";
         }>;
     }, z.core.$strict>;
+    accountBlock: z.ZodOptional<z.ZodObject<{
+        numberAtomic: z.ZodString;
+        hash: z.ZodString;
+        timestampAtomic: z.ZodString;
+    }, z.core.$strict>>;
     accounting: z.ZodObject<{
         success: z.ZodBoolean;
         branch: z.ZodEnum<{
@@ -410,6 +415,11 @@ export declare const observationSchema: z.ZodObject<{
                 empty: "empty";
             }>;
         }, z.core.$strict>;
+        accountBlock: z.ZodOptional<z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>>;
         accounting: z.ZodObject<{
             success: z.ZodBoolean;
             branch: z.ZodEnum<{
@@ -760,6 +770,11 @@ export declare const transitionSchema: z.ZodObject<{
                     empty: "empty";
                 }>;
             }, z.core.$strict>;
+            accountBlock: z.ZodOptional<z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>>;
             accounting: z.ZodObject<{
                 success: z.ZodBoolean;
                 branch: z.ZodEnum<{
@@ -894,6 +909,11 @@ export declare const transitionSchema: z.ZodObject<{
                 empty: "empty";
             }>;
         }, z.core.$strict>;
+        accountBlock: z.ZodOptional<z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>>;
         accounting: z.ZodObject<{
             success: z.ZodBoolean;
             branch: z.ZodEnum<{
@@ -1211,6 +1231,11 @@ export declare const operationSchema: z.ZodObject<{
                         empty: "empty";
                     }>;
                 }, z.core.$strict>;
+                accountBlock: z.ZodOptional<z.ZodObject<{
+                    numberAtomic: z.ZodString;
+                    hash: z.ZodString;
+                    timestampAtomic: z.ZodString;
+                }, z.core.$strict>>;
                 accounting: z.ZodObject<{
                     success: z.ZodBoolean;
                     branch: z.ZodEnum<{
@@ -1345,6 +1370,11 @@ export declare const operationSchema: z.ZodObject<{
                     empty: "empty";
                 }>;
             }, z.core.$strict>;
+            accountBlock: z.ZodOptional<z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>>;
             accounting: z.ZodObject<{
                 success: z.ZodBoolean;
                 branch: z.ZodEnum<{
@@ -1547,6 +1577,11 @@ export declare const operationSchema: z.ZodObject<{
                     empty: "empty";
                 }>;
             }, z.core.$strict>;
+            accountBlock: z.ZodOptional<z.ZodObject<{
+                numberAtomic: z.ZodString;
+                hash: z.ZodString;
+                timestampAtomic: z.ZodString;
+            }, z.core.$strict>>;
             accounting: z.ZodObject<{
                 success: z.ZodBoolean;
                 branch: z.ZodEnum<{
@@ -1681,6 +1716,11 @@ export declare const operationSchema: z.ZodObject<{
                 empty: "empty";
             }>;
         }, z.core.$strict>;
+        accountBlock: z.ZodOptional<z.ZodObject<{
+            numberAtomic: z.ZodString;
+            hash: z.ZodString;
+            timestampAtomic: z.ZodString;
+        }, z.core.$strict>>;
         accounting: z.ZodObject<{
             success: z.ZodBoolean;
             branch: z.ZodEnum<{

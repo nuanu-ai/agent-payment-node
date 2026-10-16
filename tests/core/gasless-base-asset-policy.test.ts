@@ -166,7 +166,7 @@ test("revocation after the durable send marker keeps saved-hash observation and 
   assert.equal(lease?.state, "finalized");
 });
 
-test("safe reverted transfers charge their proven USDC fees to the daily cap after allowance cleanup", async t => {
+test("safe reverted transfers charge their proven USDC fees to the daily cap whatever the residual allowance", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root, 8453, { now, activatePolicy: false });
   await activate(temporary.root, s.profile, s.account.address, { daily: "10299849" });
@@ -176,8 +176,10 @@ test("safe reverted transfers charge their proven USDC fees to the daily cap aft
   const usage = new AssetUsageLedger(temporary.root), identity = { ...account, account: s.account.address };
   assert.equal((await usage.usage(identity, now)).amountAtomic, s.request.grossAtomic);
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-  assert.equal((await s.record(id)).state, "failed_effects_pending");
-  assert.equal((await usage.usage(identity, now)).amountAtomic, s.request.grossAtomic);
+  // The safe receipt closes the revert at once; the residual allowance it read is reported, never held.
+  assert.equal((await s.record(id)).state, "failed_confirmed_revert");
+  assert.notEqual((await s.record(id)).settlement?.safeAccount.allowanceAtomic, "0");
+  assert.equal((await usage.usage(identity, now)).amountAtomic, "149925");
   s.rpc.safeAllowance = "0";
   s.rpc.safeNumber = "103";
   s.now.setTime(s.now.getTime() + 360000);
@@ -198,7 +200,7 @@ test("safe reverted transfers charge their proven USDC fees to the daily cap aft
   s.rpc.safeAllowance = undefined; s.rpc.safeNumber = "102";
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: second.id })).ok, true);
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: second.id })).ok, true);
-  assert.equal((await s.record(second.id)).state, "failed_effects_pending");
+  assert.equal((await s.record(second.id)).state, "failed_confirmed_revert");
   s.rpc.safeAllowance = "0"; s.rpc.safeNumber = "103";
   s.now.setTime(s.now.getTime() + 360000);
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: second.id })).ok, true);

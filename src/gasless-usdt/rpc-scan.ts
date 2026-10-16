@@ -1,7 +1,7 @@
 import { toEventSelector } from "viem";
 import { addressWord, rpcAddress, rpcHex, rpcQuantity, rpcRecord } from "../gasless/rpc-codec.js";
 import type { Hex } from "../model.js";
-import { USDT_GASLESS, usdtFailure } from "./model.js";
+import { usdtFailure } from "./model.js";
 import type { UsdtUserOperationScan, UsdtUserOperationScanInput } from "./recovery.js";
 import type { UsdtJsonRpc } from "./rpc.js";
 
@@ -43,10 +43,10 @@ export async function scanUsdtUserOperation(rpc: Pick<UsdtJsonRpc, "batch">,
   const end = finalized.number < lastPossible ? finalized.number : lastPossible;
   const span = end - input.fromBlock + 1n, ceiling = (span + LOG_WINDOWS - 1n) / LOG_WINDOWS;
   const size = ceiling > LOG_WINDOW ? ceiling : LOG_WINDOW;
-  const topics = [USER_OPERATION_EVENT, input.userOpHash.toLowerCase(), addressWord(input.sender), addressWord(USDT_GASLESS.paymaster)];
+  const topics = [USER_OPERATION_EVENT, input.userOpHash.toLowerCase(), addressWord(input.sender), addressWord(input.paymaster)];
   const ranges: { from: bigint; to: bigint }[] = [];
   for (let start = input.fromBlock; start <= end; start += size) ranges.push({ from: start, to: start + size - 1n < end ? start + size - 1n : end });
-  const values = await rpc.batch([...ranges.map(range => ({ method: "eth_getLogs", params: [{ address: USDT_GASLESS.entryPoint,
+  const values = await rpc.batch([...ranges.map(range => ({ method: "eth_getLogs", params: [{ address: input.entryPoint,
     fromBlock: quantity(range.from), toBlock: quantity(range.to), topics }] })),
   { method: "eth_getBlockByNumber", params: [quantity(end), false] }]);
   const endBlock = header(values.at(-1));
@@ -58,7 +58,7 @@ export async function scanUsdtUserOperation(rpc: Pick<UsdtJsonRpc, "batch">,
     if (!Array.isArray(value) || value.length > 16) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_scan_logs");
     for (const item of value) {
       const log = rpcRecord(item), number = rpcQuantity(log.blockNumber);
-      if (rpcAddress(log.address) !== USDT_GASLESS.entryPoint || log.removed === true || number < ranges[index]!.from ||
+      if (rpcAddress(log.address) !== input.entryPoint || log.removed === true || number < ranges[index]!.from ||
         number > ranges[index]!.to || !Array.isArray(log.topics) || log.topics.length !== 4 ||
         log.topics.some((topic, at) => rpcHex(topic, 32, 32) !== topics[at])) {
         usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_scan_log_identity");

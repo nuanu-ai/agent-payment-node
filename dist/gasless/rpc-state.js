@@ -26,6 +26,13 @@ export async function verifyProtocolAt(call, deployment, block, withCode) {
     });
     await Promise.all([...codes, ...reads]);
 }
+/**
+ * The contracts an already-sent operation is observed through are the ones its own intent saved, never today's
+ * registry row: a later pin update cannot strand the proof of an operation sent under the earlier pin set.
+ */
+export function gaslessObservedContracts(intent) {
+    return { token: intent.token, paymaster: intent.paymaster, entryPoint: intent.entryPoint, delegate: intent.delegate };
+}
 export async function readAccountAt(call, deployment, ownerInput, block, readPending) {
     const owner = gaslessAddress(ownerInput);
     if (owner !== ownerInput)

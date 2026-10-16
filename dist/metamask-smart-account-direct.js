@@ -93,6 +93,8 @@ export class OfficialSmartAccountDelegationEngine {
         });
     }
 }
+/** How long a pre-effect preflight of this invocation stands for the execute that follows it. */
+const PREFLIGHT_REUSE_MS = 60_000;
 export class MetaMaskSmartAccountDirectAdapter {
     permissions;
     effects;
@@ -101,6 +103,7 @@ export class MetaMaskSmartAccountDirectAdapter {
     engine;
     now;
     mode = "delegated_session_transaction";
+    preflighted = null;
     constructor(permissions, effects, rpc, allowance, engine = new OfficialSmartAccountDelegationEngine(), now = () => new Date()) {
         this.permissions = permissions;
         this.effects = effects;
@@ -122,13 +125,20 @@ export class MetaMaskSmartAccountDirectAdapter {
     async preflight(input) {
         const record = await this.preflightRecord(input);
         assertFrozenBinding(input.binding, record);
+        this.preflighted = { operationId: input.operationId, at: this.now().getTime(), record };
     }
     async execute(input) {
         const binding = delegatedBinding(input.binding);
         const existing = await this.effects.load(input.operationId);
         if (existing !== null)
             return await this.resumeEffect(existing, input);
-        const record = await this.preflightRecord(input);
+        // The pre-effect preflight of this same invocation already read allowance and balances for this operation; it is
+        // not repeated. A resumed execute without one reads them again. The exact eth_estimateGas simulation of the
+        // redemption (on-chain enforcers, token transfer) and the session gas check below still run before signing.
+        const now = this.now().getTime(), previous = this.preflighted;
+        this.preflighted = null;
+        const record = previous !== null && previous.operationId === input.operationId && now >= previous.at &&
+            now - previous.at < PREFLIGHT_REUSE_MS ? previous.record : await this.preflightRecord(input);
         assertFrozenBinding(binding, record);
         let redemption;
         try {

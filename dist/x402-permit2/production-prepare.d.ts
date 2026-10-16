@@ -1,4 +1,3 @@
-import type { GaslessTransport } from "../gasless/https.js";
 import { type Permit2CheckedChallenge } from "./checked-challenge.js";
 import { type Permit2ReadRpcSource } from "./read-port.js";
 import { type Permit2Requirement } from "./offer.js";
@@ -15,7 +14,6 @@ export interface Permit2ProductionPrepareInput {
 }
 export interface Permit2ProductionPreparePorts {
     readonly rpc: Permit2ReadRpcSource;
-    readonly transport?: GaslessTransport;
     readonly now?: () => Date;
 }
 /** Durable unsigned production preparation. No custody, send, merchant HTTP or settlement port exists. */

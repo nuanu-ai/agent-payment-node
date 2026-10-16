@@ -7,7 +7,7 @@ import { inspectPermit2ProductionReceipt } from "./production-receipt-facts.js";
 import { validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./production-repository.js";
 import { permit2ProductionOperationDigest, validatePermit2ProductionSigned, type Permit2ProductionSigned } from "./production-signed.js";
 import { Permit2ObserverRpc, type Permit2ObservationMetrics } from "./production-observer-rpc.js";
-import { assertExpiredUnused, assertObserverChain, assertObserverIdentity, nonceConsumed, observerBlock, observerIdentityCalls,
+import { assertExpiredUnused, assertObserverChain, nonceConsumed, observerBlock,
   observerNonceCalls, observerReceipt, observerTransaction, type Permit2ObservedBlock } from "./production-observer-facts.js";
 
 export type Permit2ObservationMode = "settlement" | "expired_unused";
@@ -77,15 +77,11 @@ export async function observePermit2Production(input: Permit2ProductionObservati
       } catch { /* batched, relayed or suffixed calls cannot be attributed byte for byte; the nonce bit still settles them */ }
     }
     block = head;
-    const identity = observerIdentityCalls(record.material, block);
-    const reads = await rpc.batch([...identity, ...observerNonceCalls(record.material, block)]);
-    assertObserverIdentity(record.material, reads.slice(0, 3));
-    if (mode === "expired_unused") assertExpiredUnused(record.material, block, reads.slice(3));
-    else if (!nonceConsumed(record.material, reads[3])) return Object.freeze({ projection: projection("hold", "unavailable_or_mismatch"), proof: null });
-    const rechecked = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: [block.tag, false] }]);
-    assertObserverChain(rechecked[0]);
-    const again = observerBlock(rechecked[1], block.tag);
-    if (again.hash !== block.hash || again.timestamp !== block.timestamp) invalid();
+    // The nonce state is read pinned by EIP-1898 to the canonical finalized block: no header recheck, and no re-read of the
+    // immutable Permit2/proxy code or the token domain, which settlement and expiry do not depend on.
+    const reads = await rpc.batch(observerNonceCalls(record.material, block));
+    if (mode === "expired_unused") assertExpiredUnused(record.material, block, reads);
+    else if (!nonceConsumed(record.material, reads[0])) return Object.freeze({ projection: projection("hold", "unavailable_or_mismatch"), proof: null });
     const checked = projection(mode === "settlement" ? "settled" : "expired_unused", "checked");
     const proof = Object.freeze({ kind: "checked-permit2-production-observation" as const });
     proofs.set(proof, { binding: binding(record, signed, mode), projection: checked });

@@ -4,7 +4,7 @@ import { StateStore } from "../../src/state.js";
 import { Permit2ProductionSigningFence } from "../../src/x402-permit2/production-signing-fence.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
-import { factHash, word } from "./x402-permit2-production-observer-fixture.js";
+import { word } from "./x402-permit2-production-observer-fixture.js";
 async function setup(t: test.TestContext, sponsor = false) {
   const f = await journalFixture(t, sponsor);
   (f.input as { mode: string }).mode = "expired_unused";
@@ -20,7 +20,10 @@ for (const sponsor of [false, true]) for (const mode of ["reserved", "exposed"] 
     const before = await f.journal.findOperation(id), result = await f.fence.check(id, mode);
     assert.equal(result.projection.outcome, "checked"); assert.ok(result.fact);
     assert.equal(result.projection.blockHash, f.wire.finalized.hash); assert.equal(result.projection.capturedAt, f.now().toISOString());
-    assert.equal(result.projection.rpc.physicalDispatches, 4); assert.equal(result.projection.rpc.logicalReads, sponsor ? 12 : 11);
+    assert.equal(result.projection.rpc.physicalDispatches, 2); assert.equal(result.projection.rpc.logicalReads, sponsor ? 7 : 6);
+    assert.deepEqual(f.batches.map(batch => batch.map((call: any) => call.method === "eth_getCode" ? `code:${call.params[0]}` : call.method)),
+      [["eth_chainId", "eth_getBlockByNumber"], [`code:${f.prepared.payer}`, "eth_call", "eth_call", "eth_call", ...(sponsor ? ["eth_call"] : [])]],
+      "two POSTs: no chain/header recheck and no re-read of immutable proxy/Permit2 code or the token domain");
     assert.deepEqual(await f.journal.findOperation(id), before); // Read-only fence never changes journal/lease.
     if (mode === "exposed") assert.notEqual(result.projection.originalLeaseDigest, result.projection.currentLeaseDigest);
     assert.equal((await f.fence.consume(result.fact, id, mode)).outcome, "checked");
@@ -28,7 +31,7 @@ for (const sponsor of [false, true]) for (const mode of ["reserved", "exposed"] 
     const serialized = JSON.stringify(result);
     for (const secret of ["private", f.permit2Signature, f.input.rpcUrl, "bodyBase64"]) assert.equal(serialized.includes(secret), false);
   });
-const faults = ["payer_code", "malformed_code", "missing_code", "chain", "recheck_chain", "reorg", "proxy", "permit2", "domain", "bit", "token_nonce",
+const faults = ["payer_code", "malformed_code", "missing_code", "chain", "bit", "token_nonce",
   "balance", "allowance", "future_block", "stale_block", "future_clock", "expired_clock", "canonical"] as const;
 for (const fault of faults) test(`signing fence refuses ${fault} without cache or fallback`, async t => {
   const f = await setup(t, fault === "token_nonce"), w = f.wire;
@@ -37,11 +40,6 @@ for (const fault of faults) test(`signing fence refuses ${fault} without cache o
     case "malformed_code": (w as any).payerCode = "0xz"; break;
     case "missing_code": (w as any).payerCode = null; break;
     case "chain": w.chain = "0x1"; break;
-    case "recheck_chain": w.beforeBatch = async calls => { if (calls.some(c => c.method === "eth_getBlockByNumber" && c.params[0] !== "finalized")) w.chain = "0x1"; }; break;
-    case "reorg": w.headReorg = true; break;
-    case "proxy": w.proxyCode = "0x6000"; break;
-    case "permit2": w.permit2Code = "0x6000"; break;
-    case "domain": w.domain = factHash("a"); break;
     case "bit": w.bitmap = word(1n << 7n); break;
     case "token_nonce": w.tokenNonce = word(10n); break;
     case "balance": w.balance = word(9999n); break;
@@ -53,12 +51,12 @@ for (const fault of faults) test(`signing fence refuses ${fault} without cache o
     case "canonical": w.unsupportedCanonical = true; break;
   }
   const result = await f.fence.check(f.record.operationId, "reserved");
-  assert.equal(result.projection.outcome, "hold"); assert.equal(result.fact, null); assert.ok(f.batches.length <= 4);
+  assert.equal(result.projection.outcome, "hold"); assert.equal(result.fact, null); assert.ok(f.batches.length <= 2);
 });
 for (const fault of ["revocation", "wallet", "clock"] as const) test(`owner ${fault} across RPC prevents late fact mint`, async t => {
   const f = await setup(t), id = f.record.operationId;
   f.wire.beforeBatch = async calls => {
-    if (!calls.some(c => c.method === "eth_getBlockByNumber" && c.params[0] !== "finalized")) return;
+    if (!calls.some(c => c.method === "eth_getCode")) return;
     if (fault === "revocation") await f.revoke();
     if (fault === "clock") f.advance(60);
     if (fault === "wallet") {
@@ -117,7 +115,7 @@ for (const stage of ["before", "after"] as const) test(`whole signing fence dead
   });
   let gateNext = stage === "before";
   if (stage === "after") f.wire.beforeBatch = async calls => {
-    if (calls.some(c => c.method === "eth_getBlockByNumber" && c.params[0] !== "finalized")) gateNext = true;
+    if (calls.some(c => c.method === "eth_getCode")) gateNext = true;
   };
   t.mock.method(StateStore.prototype, "loadWalletArtifacts", async function(this: StateStore, ...args: Parameters<typeof original>) {
     if (gateNext) { gateNext = false; entered(); await gate; try { return await original.apply(this, args); } finally { drained(); } }

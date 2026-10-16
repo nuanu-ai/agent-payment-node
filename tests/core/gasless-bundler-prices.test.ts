@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { gaslessGas } from "../../src/gasless/economics.js";
 import { bundlerGasPrices } from "../../src/gasless/rpc-gas-prices.js";
+import { withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
 import { bundledGaslessFixture } from "./gasless-fixtures/bundler-transport.js";
 import { temporaryState } from "./helpers.js";
 
@@ -32,7 +33,8 @@ test("gasless strict bundler batches accept reordered IDs and deny malformed, du
   ];
   for (const fault of faults) {
     s.setBatchReply(fault);
-    await assert.rejects(s.rpc.snapshot(s.account.address, approved), (error: any) => {
+    // Each refused snapshot is its own read invocation, as every public command is.
+    await assert.rejects(withGaslessRpcInvocation(async () => await s.rpc.snapshot(s.account.address, approved), "read"), (error: any) => {
       assert.match(error.code, /^APN_(RPC_PROTOCOL|PROVIDER_EFFECT_UNAVAILABLE)$/u);
       assert.equal(String(error.message).includes("canary_secret"), false); return true;
     });

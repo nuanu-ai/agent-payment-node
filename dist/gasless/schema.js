@@ -79,7 +79,7 @@ export const accountingSchema = z.strictObject({ success: z.boolean(),
 export const settlementSchema = z.strictObject({ chainId: chainSchema, userOperationHash: wordSchema,
     transactionHash: wordSchema, block: blockSchema, safeBlock: blockSchema, outerSender: addressSchema,
     transactionProofHash: hashSchema, receiptHash: hashSchema, protocolHash: hashSchema,
-    effectAccount: accountSchema, safeAccount: accountSchema, accounting: accountingSchema });
+    effectAccount: accountSchema, safeAccount: accountSchema, accountBlock: blockSchema.optional(), accounting: accountingSchema });
 export const permissionInvalidationSchema = z.strictObject({ chainId: chainSchema, intentHash: hashSchema,
     bootstrapMaterialHash: hashSchema, protocolHash: hashSchema, safeBlock: blockSchema, headBlock: blockSchema,
     safeAccount: accountSchema, headAccount: accountSchema,

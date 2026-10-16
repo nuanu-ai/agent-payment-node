@@ -71,16 +71,11 @@ export class GaslessObservationService {
         }
         const proof = result.settlement;
         if (proof !== null) {
-            const cleared = proof.safeAccount.allowanceAtomic === "0";
-            if (proof.accounting.success && !cleared) {
-                return await this.save(op, { state: "unknown_finality", observation: result, cursor: result.cursor,
-                    failure: "gasless_residual_allowance" });
-            }
-            const state = proof.accounting.success ? "completed" : cleared ? "failed_confirmed_revert" : "failed_effects_pending";
-            return await this.save(op, { state, observation: result, cursor: result.cursor,
-                settlement: cleared ? proof : null,
+            // The verdict is the safe receipt. The residual allowance (read at latest) is reported, and never holds a close.
+            return await this.save(op, { state: proof.accounting.success ? "completed" : "failed_confirmed_revert",
+                observation: result, cursor: result.cursor, settlement: proof,
                 userOperation: { ...op.userOperation, phase: proof.accounting.success ? "safe_success" : "safe_revert" },
-                failure: proof.accounting.success ? null : cleared ? "gasless_transfer_reverted" : "gasless_residual_allowance" });
+                failure: proof.accounting.success ? null : "gasless_transfer_reverted" });
         }
         return await this.save(op, { state: result.status === "pending" ? "submitted_pending" : "unknown_finality",
             observation: result, cursor: result.cursor,

@@ -150,12 +150,12 @@ test("a mirror estimate whose balance-layout claim the chain contradicts fails c
   const fees = { maxFeePerGas: operation.intent.gas.maxFeePerGas,
     maxPriorityFeePerGas: operation.intent.gas.maxPriorityFeePerGas };
   s.setFault("layout");
-  await assert.rejects(s.rpc.mirrorEstimate(operation.intent, fees),
+  await assert.rejects(s.rpc.mirrorEstimate(operation.intent, operation.intent.initialSnapshot, fees),
     { code: "APN_PROVIDER_PROTOCOL", message: "Gasless validation failed: gasless_balance_layout_mismatch." });
   assert.equal(s.estimates.length, 0);
   // The same intent estimates once the chain agrees with the row again, so only the claim was ever in question.
   s.setFault("");
-  const estimate = await s.rpc.mirrorEstimate(operation.intent, fees);
+  const estimate = await s.rpc.mirrorEstimate(operation.intent, operation.intent.initialSnapshot, fees);
   assert.match(estimate.responseHash, /^[a-f0-9]{64}$/u);
   assert.equal(s.estimates.length, 1);
 });

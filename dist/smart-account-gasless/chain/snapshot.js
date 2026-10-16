@@ -5,10 +5,14 @@ import { saRegistry } from "../registry.js";
 import { saBinding, saBlock, saBlockOrder, saSnapshot } from "../schema.js";
 import { readChildSpent, readCurrentAllowance, readCurrentNonce } from "./allowance.js";
 import { SA_BALANCE_OF_SELECTOR, SA_DECIMALS_SELECTOR, SA_DOMAIN_SEPARATOR_SELECTOR, addressWord, quantity, recheckBlock, rpcAddress, rpcBlock, rpcHex, rpcQuantity, rpcWord } from "./abi.js";
-/** Read every preparation identity and economic value at one captured numeric safe block. */
-export async function readSmartAccountGaslessChainState(call, bindingInput, block) {
+/**
+ * Read every preparation identity and economic value at one captured numeric safe block. With `proven`, the protocol
+ * and token code pins proven earlier in this operation's invocation are not downloaded again; the owner and session
+ * code, balances, allowance and nonce are always read fresh.
+ */
+export async function readSmartAccountGaslessChainState(call, bindingInput, block, proven) {
     const binding = saBinding(bindingInput), deployment = saRegistry(8453), tag = quantity(BigInt(block.numberAtomic));
-    const base = await readDeployment(call, binding, block);
+    const base = await readDeployment(call, binding, block, proven);
     const [balance, ownerNative, sessionNative, allowance, nonce] = await Promise.all([
         call("eth_call", [{ to: deployment.token.address,
                 data: `${SA_BALANCE_OF_SELECTOR}${addressWord(binding.ownerAddress).slice(2)}` }, tag]).then(rpcWord),
@@ -28,13 +32,21 @@ export async function readSmartAccountGaslessChainState(call, bindingInput, bloc
         allowancePeriodAtomic: allowance.currentPeriodAtomic, allowanceIsNewPeriod: allowance.isNewPeriod,
         currentNonceAtomic: nonce };
 }
-/** Historical proof deliberately omits current allowance and nonce validity. */
-export async function readSmartAccountGaslessProofState(call, binding, childHash, block) {
-    const deployment = await readDeployment(call, saBinding(binding), block);
-    const childSpentAtomic = await readChildSpent(call, binding.delegationManager, childHash, block);
-    return { ...deployment, childSpentAtomic };
+/**
+ * The settlement and unused proofs read only the child's spent amount at the current safe or finalized block. The
+ * deployment identity in the proof is the pin set this operation froze at prepare (owner rule: an operation sent
+ * before a pin change is proven against its own pins); code is not re-read, so a later token or protocol upgrade
+ * never strands an operation that already moved money or provably did not.
+ */
+export async function readSmartAccountGaslessProofState(call, intent, childHash, block) {
+    const frozen = intent.initialSnapshot.safeState;
+    const childSpentAtomic = await readChildSpent(call, intent.binding.delegationManager, childHash, block);
+    return { protocolCodeHashes: frozen.protocolCodeHashes, ownerCodeHash: frozen.ownerCodeHash,
+        sessionCodeHash: frozen.sessionCodeHash, tokenProxyCodeHash: frozen.tokenProxyCodeHash,
+        tokenImplementationAddress: frozen.tokenImplementationAddress, tokenImplementationCodeHash: frozen.tokenImplementationCodeHash,
+        tokenDomainSeparator: frozen.tokenDomainSeparator, tokenDecimals: 6, childSpentAtomic };
 }
-export async function captureSmartAccountGaslessSnapshot(call, chainId, endpointOrigin, endpointHash, clock, bindingInput) {
+export async function captureSmartAccountGaslessSnapshot(call, chainId, endpointOrigin, endpointHash, clock, bindingInput, proven) {
     if (chainId !== 8453)
         saFail("sa_gasless_rpc_binding");
     const binding = saBinding(bindingInput), preparation = (await rpcBlock(call, "latest")).block;
@@ -45,8 +57,8 @@ export async function captureSmartAccountGaslessSnapshot(call, chainId, endpoint
     catch {
         return saFail("sa_gasless_evidence");
     }
-    const safeState = await readSmartAccountGaslessChainState(call, binding, safe);
-    await recheckBlock(call, safe);
+    const safeState = await readSmartAccountGaslessChainState(call, binding, safe, proven);
+    // A safe block does not reorg; the latest block is the stored preparation anchor, so it alone is rechecked.
     await recheckBlock(call, preparation);
     const snapshot = { chainId, endpointOrigin, endpointHash, observedAt: instant(clock),
         preparationBlock: preparation, safeBlock: safe, safeState };
@@ -68,8 +80,17 @@ export async function recheckSmartAccountPreparation(call, expectedInput, curren
     }
     await recheckBlock(call, expected);
 }
-async function readDeployment(call, binding, block) {
+async function readDeployment(call, binding, block, proven) {
     const deployment = saRegistry(8453), tag = quantity(BigInt(block.numberAtomic));
+    if (proven !== undefined) {
+        const [ownerCode, sessionCode] = await Promise.all([
+            call("eth_getCode", [binding.ownerAddress, tag]).then(value => rpcHex(value, 32 * 1024)),
+            call("eth_getCode", [binding.sessionAddress, tag]).then(value => rpcHex(value, 32 * 1024)),
+        ]);
+        if (ownerCode !== deployment.ownerDesignationCode || sessionCode !== "0x")
+            saFail("sa_gasless_evidence");
+        return { ...proven, ownerCodeHash: keccak256(ownerCode), sessionCodeHash: keccak256(sessionCode) };
+    }
     const protocolEntries = SA_PROTOCOL_NAMES.map(name => [name, deployment.protocol[name]]);
     const protocolPromise = Promise.all(protocolEntries.map(async ([name, pin]) => {
         const code = rpcHex(await call("eth_getCode", [pin.address, tag]), 256 * 1024);

@@ -1,9 +1,9 @@
-import { encodeFunctionData, keccak256, parseAbi } from "viem";
+import { encodeFunctionData, parseAbi } from "viem";
 import { ApnError } from "../errors.js";
 import { evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
 import { reconstructPermit2ProductionMaterial } from "./production-material.js";
-import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY } from "./registry.js";
-const TOKEN = parseAbi(["function DOMAIN_SEPARATOR() view returns (bytes32)", "function nonces(address owner) view returns (uint256)"]);
+import { PERMIT2_ADDRESS } from "./registry.js";
+const TOKEN = parseAbi(["function nonces(address owner) view returns (uint256)"]);
 const PERMIT2 = parseAbi(["function nonceBitmap(address owner,uint256 wordPos) view returns (uint256)"]);
 export function observerBlock(value, tag) {
     const block = evmRpcBlockResult(value, tag), timestamp = evmRpcQuantity(block.raw.timestamp);
@@ -11,19 +11,6 @@ export function observerBlock(value, tag) {
 }
 export function assertObserverChain(value) { if (evmRpcQuantity(value) !== 43114n)
     mismatch(); }
-export function observerIdentityCalls(material, block) {
-    const p = reconstructPermit2ProductionMaterial(material), pinned = { blockHash: block.hash, requireCanonical: true };
-    return [{ method: "eth_getCode", params: [X402_EXACT_PERMIT2_PROXY, pinned] },
-        { method: "eth_getCode", params: [PERMIT2_ADDRESS, pinned] },
-        { method: "eth_call", params: [{ to: p.token, data: encodeFunctionData({ abi: TOKEN, functionName: "DOMAIN_SEPARATOR" }) }, pinned] }];
-}
-export function assertObserverIdentity(material, values) {
-    const p = reconstructPermit2ProductionMaterial(material);
-    if (values.length !== 3 || keccak256(evmRpcHex(values[0])) !== p.plan.selection.listAsset.proxyCodeHash ||
-        keccak256(evmRpcHex(values[1])) !== PERMIT2_CODE_HASH ||
-        evmRpcHex(values[2], 32) !== p.plan.selection.listAsset.tokenDomainSeparator)
-        mismatch();
-}
 export function observerNonceCalls(material, block) {
     const p = reconstructPermit2ProductionMaterial(material), pinned = { blockHash: block.hash, requireCanonical: true };
     return [{ method: "eth_call", params: [{ to: PERMIT2_ADDRESS, data: encodeFunctionData({ abi: PERMIT2,

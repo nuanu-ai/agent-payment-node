@@ -18,14 +18,16 @@ export interface SmartAccountReceiptAccounting {
 /** Validate the full canonical receipt against the one exact child/root redemption and one USDC transfer. */
 export function verifySmartAccountReceipt(intent: SmartAccountGaslessIntent, outerSender: Address,
   redemption: VerifiedSmartAccountRedemption, logs: readonly SaReceiptLog[]): SmartAccountReceiptAccounting {
-  const registry = saRegistry(8453), gross = BigInt(intent.request.grossAtomic);
+  // Token and manager are the ones this operation froze (owner rule); the spent enforcer address is the chain's.
+  const registry = saRegistry(8453), gross = BigInt(intent.request.grossAtomic), token = intent.token,
+    manager = intent.binding.delegationManager;
   const exactTransfers: SaReceiptLog[] = [], ownerOutflows: SaReceiptLog[] = [];
   for (const log of logs) {
     if (log.topics.length === 3 && log.topics[0] === SA_TRANSFER_TOPIC &&
       topicAddress(log.topics[1]!) === intent.binding.ownerAddress && log.data.length === 66) {
       const amount = BigInt(log.data);
       if (amount > 0n) ownerOutflows.push(log);
-      if (log.address === registry.token.address && topicAddress(log.topics[2]!) === intent.request.recipient &&
+      if (log.address === token && topicAddress(log.topics[2]!) === intent.request.recipient &&
         amount === gross) exactTransfers.push(log);
     }
   }
@@ -33,7 +35,7 @@ export function verifySmartAccountReceipt(intent: SmartAccountGaslessIntent, out
     saFail("sa_gasless_evidence");
   }
 
-  const managerEvents = logs.filter(log => log.address === registry.protocol.manager.address &&
+  const managerEvents = logs.filter(log => log.address === manager &&
     log.topics[0] === SA_REDEEMED_TOPIC);
   if (managerEvents.length !== 2) saFail("sa_gasless_evidence");
   const expectedData = [redemption.child, redemption.root].map(delegation =>
@@ -50,7 +52,7 @@ export function verifySmartAccountReceipt(intent: SmartAccountGaslessIntent, out
     log.topics[0] === SA_INCREASED_SPENT_TOPIC);
   if (spentEvents.length !== 1) saFail("sa_gasless_evidence");
   const spent = spentEvents[0]!;
-  if (spent.topics.length !== 4 || topicAddress(spent.topics[1]!) !== registry.protocol.manager.address ||
+  if (spent.topics.length !== 4 || topicAddress(spent.topics[1]!) !== manager ||
     topicAddress(spent.topics[2]!) !== outerSender || spent.topics[3] !== redemption.childDelegationHash) {
     saFail("sa_gasless_evidence");
   }
@@ -68,7 +70,7 @@ export function verifyChildScanLog(value: Record<string, unknown>, intent: Smart
   if (rpcAddress(value.address) !== registry.protocol.amount.address || value.removed !== false ||
     number < from || number > to || !Array.isArray(topics) || topics.length !== 4 ||
     rpcHex(topics[0], 32, 32) !== SA_INCREASED_SPENT_TOPIC ||
-    rpcHex(topics[1], 32, 32) !== addressTopic(registry.protocol.manager.address) ||
+    rpcHex(topics[1], 32, 32) !== addressTopic(intent.binding.delegationManager) ||
     !intent.provider.facilitatorAddresses.some(address => rpcHex(topics[2], 32, 32) === addressTopic(address)) ||
     rpcHex(topics[3], 32, 32) !== childHash) saFail("sa_gasless_evidence");
   twoWords(rpcHex(value.data, 64, 64)); validateScanIdentity(value);
@@ -77,8 +79,8 @@ export function verifyChildScanLog(value: Record<string, unknown>, intent: Smart
 
 export function verifyTransferScanLog(value: Record<string, unknown>, intent: SmartAccountGaslessIntent,
   from: bigint, to: bigint): Hex | null {
-  const registry = saRegistry(8453), number = rpcQuantity(value.blockNumber), topics = value.topics;
-  if (rpcAddress(value.address) !== registry.token.address || value.removed !== false || number < from || number > to ||
+  const number = rpcQuantity(value.blockNumber), topics = value.topics;
+  if (rpcAddress(value.address) !== intent.token || value.removed !== false || number < from || number > to ||
     !Array.isArray(topics) || topics.length !== 3 || rpcHex(topics[0], 32, 32) !== SA_TRANSFER_TOPIC ||
     rpcHex(topics[1], 32, 32) !== addressTopic(intent.binding.ownerAddress) ||
     rpcHex(topics[2], 32, 32) !== addressTopic(intent.request.recipient)) saFail("sa_gasless_evidence");

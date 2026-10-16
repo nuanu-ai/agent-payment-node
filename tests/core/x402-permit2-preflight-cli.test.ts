@@ -1,21 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
-import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { hashObject, sha256 } from "../../src/canonical.js";
+import { hashObject } from "../../src/canonical.js";
 import { runCli } from "../../src/cli.js";
 import { STATE_VERSION } from "../../src/constants.js";
-import { ApnError } from "../../src/errors.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { StateStore, sealWallet } from "../../src/state.js";
 import { encodeCanonicalBase64Json, encodePaymentRequiredHeader, type X402PaymentRequired } from "../../src/x402-codec.js";
 import { hashChallenge } from "../../src/x402-permit2/prepare.js";
 import { permit2PublicRpc } from "../../src/x402-permit2/preflight.js";
-import { createPermit2ProductionReadPort } from "../../src/x402-permit2/read-port.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
-import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
+import { PERMIT2_ADDRESS, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
@@ -60,30 +57,29 @@ async function paymentSnapshot(root: string) {
 test("CLI current-owner preflight is admissible and leaves no journal, POST, signature or send", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
   const before = await snapshot(temp.root);
-  const calls: string[] = [], http: string[] = [];
-  const rpc = { call: async (method: string, params: readonly unknown[]) => {
-    calls.push(method);
-    if (method === "eth_chainId") return "0xa86a";
-    if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`,
-      timestamp: `0x${(Math.floor(at.getTime() / 1000) - 5).toString(16)}` };
-    if (method === "eth_call") {
-      const index = calls.filter(value => value === "eth_call").length - 1;
-      assert.equal(params[1], "0x12");
-      return [word(20000n), word(10000n), asset.tokenDomainSeparator, word(9n), word(0n)][index];
-    }
-    if (method === "eth_getProof") return { address: params[0],
-      codeHash: params[0] === PERMIT2_ADDRESS ? PERMIT2_CODE_HASH : asset.proxyCodeHash };
-    throw new Error(`Unexpected RPC method ${method}`);
-  } };
-  const transport = { request: async (_url: string, method: string, body: unknown) => {
-    http.push(method); assert.equal(method, "GET"); assert.equal(body, null);
-    return { status: 200, body: JSON.stringify({ kinds: [{ x402Version: 2, scheme: "exact", network: asset.chain }],
-      extensions: [] }) };
+  const calls: string[] = [], posts: number[] = [];
+  const proxyCode = readFileSync("tests/fixtures/x402-permit2/original-proxy-runtime.hex", "utf8").trim();
+  const permit2Code = readFileSync("tests/fixtures/x402-permit2/avalanche-permit2-runtime.hex", "utf8").trim();
+  const rpc = { batch: async (batch: readonly { method: string; params: readonly unknown[] }[]) => {
+    posts.push(batch.length);
+    return batch.map(({ method, params }) => {
+      calls.push(method);
+      if (method === "eth_chainId") return "0xa86a";
+      if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`,
+        timestamp: `0x${(Math.floor(at.getTime() / 1000) - 5).toString(16)}` };
+      assert.deepEqual(params[1], { blockHash: `0x${"1".repeat(64)}`, requireCanonical: true });
+      if (method === "eth_getCode") return params[0] === PERMIT2_ADDRESS ? permit2Code : proxyCode;
+      if (method === "eth_call") {
+        const index = calls.filter(value => value === "eth_call").length - 1;
+        return [word(20000n), word(10000n), asset.tokenDomainSeparator, word(9n), word(0n)][index];
+      }
+      throw new Error(`Unexpected RPC method ${method}`);
+    });
   } };
   const argv = ["x402", "permit2", "preflight", "--profile", "owner", "--payment-required", encodePaymentRequiredHeader(challenge),
     "--expected-challenge-hash", hashChallenge(challenge), "--expected-index", "0",
     "--expected-terms", encodeCanonicalBase64Json(selection.requirement), "--rpc-url", "https://rpc.example"];
-  const options = { stateRoot: temp.root, permit2PreflightPorts: { rpc, transport, now: () => at } };
+  const options = { stateRoot: temp.root, permit2PreflightPorts: { rpc, now: () => at } };
   const result = await runCli(argv, process.env, options);
   assert.equal(result.ok, true, JSON.stringify(result.error));
   const data = result.data as Record<string, unknown>;
@@ -93,14 +89,14 @@ test("CLI current-owner preflight is admissible and leaves no journal, POST, sig
   assert.equal(JSON.stringify(result).includes("typedData"), false);
   assert.equal(JSON.stringify(result).includes("signature"), false);
   assert.equal(projectMcpTools().some(tool => tool.name === "apn_x402_permit2_preflight"), false);
-  assert.equal(calls.length, 10); assert.deepEqual(http, ["GET"]);
+  assert.equal(calls.length, 9); assert.deepEqual(posts, [2, 7], "two POSTs, no facilitator GET");
   assert.deepEqual(await snapshot(temp.root), before);
 
-  calls.length = 0; http.length = 0;
+  calls.length = 0;
   const changed = [...argv]; changed[changed.indexOf("--expected-challenge-hash") + 1] = "f".repeat(64);
   const mismatch = await runCli(changed, process.env, options);
   assert.equal(mismatch.ok, false); assert.equal(mismatch.error?.details?.reason, "x402_permit2_merchant_terms_mismatch");
-  assert.deepEqual(calls, []); assert.deepEqual(http, []); assert.deepEqual(await snapshot(temp.root), before);
+  assert.deepEqual(calls, []); assert.deepEqual(await snapshot(temp.root), before);
 
   const alteredTerms = [...argv];
   alteredTerms[alteredTerms.indexOf("--expected-terms") + 1] = encodeCanonicalBase64Json({
@@ -108,186 +104,37 @@ test("CLI current-owner preflight is admissible and leaves no journal, POST, sig
   const termsMismatch = await runCli(alteredTerms, process.env, options);
   assert.equal(termsMismatch.ok, false);
   assert.equal(termsMismatch.error?.details?.reason, "x402_permit2_merchant_terms_mismatch");
-  assert.deepEqual(calls, []); assert.deepEqual(http, []); assert.deepEqual(await snapshot(temp.root), before);
+  assert.deepEqual(calls, []); assert.deepEqual(await snapshot(temp.root), before);
 
   const staleCalls: string[] = [];
   const stale = await runCli(argv, process.env, { ...options, permit2PreflightPorts: {
-    ...options.permit2PreflightPorts, rpc: { call: async (method: string) => {
+    ...options.permit2PreflightPorts, rpc: { batch: async (batch: readonly { method: string }[]) => batch.map(({ method }) => {
       staleCalls.push(method);
       if (method === "eth_chainId") return "0xa86a";
       if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`, timestamp: "0x1" };
       throw new Error("stale read advanced");
-    } } } });
+    }) } } });
   assert.equal(stale.ok, false); assert.equal(stale.error?.details?.reason, "x402_permit2_chain_evidence_required");
   assert.deepEqual(staleCalls, ["eth_chainId", "eth_getBlockByNumber"]);
-  assert.deepEqual(http, []); assert.deepEqual(await snapshot(temp.root), before);
+  assert.deepEqual(await snapshot(temp.root), before);
 });
 
-test("separate RPC sources share durable 750 ms endpoint pacing and leave other endpoints independent", async t => {
+test("public Permit2 reads send one batch per call through the shared transport and honor abort", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
   const before = await paymentSnapshot(temp.root);
-  const starts: number[] = [], otherStarts: number[] = [];
-  const sameTransport = { permit2ReadCall: async () => { starts.push(performance.now()); return "0xa86a"; } };
-  const otherTransport = { permit2ReadCall: async () => { otherStarts.push(performance.now()); return "0xa86a"; } };
-  const first = permit2PublicRpc("https://RPC.example:443/", temp.root, sameTransport);
-  const second = permit2PublicRpc("https://rpc.example", temp.root, sameTransport);
-  const other = permit2PublicRpc("https://other-rpc.example", temp.root, otherTransport);
-  const signal = new AbortController().signal;
-  await Promise.all([
-    first.call("eth_chainId", [], signal), second.call("eth_chainId", [], signal),
-    other.call("eth_chainId", [], signal),
-  ]);
-  assert.equal(starts.length, 2);
-  assert.ok(starts[1]! - starts[0]! >= 740, `same endpoint gap ${starts[1]! - starts[0]!}`);
-  assert.equal(otherStarts.length, 1);
-  assert.ok(Math.abs(otherStarts[0]! - starts[0]!) < 300, "another endpoint is not queued behind the first");
-  assert.equal((await readdir(join(temp.root, "rpc-provider-pacing"))).length, 2);
-  assert.deepEqual(await paymentSnapshot(temp.root), before);
-});
-
-test("public RPC pacing follows physical transport completion across separate sources", async t => {
-  const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
-  const before = await paymentSnapshot(temp.root);
-  let invoked!: () => void;
-  const firstInvoked = new Promise<void>(resolve => { invoked = resolve; });
-  let firstEntry = 0, firstCompletion = 0, secondEntry = 0, otherEntry = 0;
-  const first = permit2PublicRpc("https://slow-rpc.example", temp.root, {
-    permit2ReadCall: async () => {
-      invoked();
-      await new Promise(resolve => setTimeout(resolve, 250));
-      firstEntry = Date.now();
-      await new Promise(resolve => setTimeout(resolve, 100));
-      firstCompletion = Date.now();
-      return "0xa86a";
-    },
-  });
-  const second = permit2PublicRpc("https://slow-rpc.example/", temp.root, {
-    permit2ReadCall: async () => { secondEntry = Date.now(); return "0xa86a"; },
-  });
-  const other = permit2PublicRpc("https://independent-rpc.example", temp.root, {
-    permit2ReadCall: async () => { otherEntry = Date.now(); return "0xa86a"; },
-  });
-  const signal = new AbortController().signal;
-  const active = first.call("eth_chainId", [], signal);
-  await firstInvoked;
-  await Promise.all([active, second.call("eth_chainId", [], signal), other.call("eth_chainId", [], signal)]);
-  assert.ok(firstEntry > 0 && firstCompletion >= firstEntry && secondEntry > 0);
-  assert.ok(secondEntry - firstEntry >= 750, `physical entry gap ${secondEntry - firstEntry}`);
-  assert.ok(secondEntry - firstCompletion >= 750, `completion gap ${secondEntry - firstCompletion}`);
-  assert.ok(otherEntry > 0 && otherEntry < firstCompletion, "another endpoint runs during the slow transport");
-  assert.deepEqual(await paymentSnapshot(temp.root), before);
-});
-
-test("concurrent slow production reads fail closed before a second transport", async t => {
-  const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
-  const before = await paymentSnapshot(temp.root);
-  let entered!: () => void;
-  const firstEntered = new Promise<void>(resolve => { entered = resolve; });
-  let firstCalls = 0, secondCalls = 0;
-  const first = permit2PublicRpc("https://contended-rpc.example", temp.root, {
-    permit2ReadCall: async () => {
-      firstCalls++;
-      entered();
-      await new Promise(resolve => setTimeout(resolve, 1_750));
-      return "0x1";
-    },
-  });
-  const second = permit2PublicRpc("https://contended-rpc.example/", temp.root, {
-    permit2ReadCall: async () => { secondCalls++; return "0xa86a"; },
-  });
-  const options = { profile: "owner", stateRoot: temp.root,
-    localAccount: async () => payer,
-    usage: { usage: (identity: Parameters<AssetUsageLedger["usageReadOnly"]>[0], when: Date) =>
-      new AssetUsageLedger(temp.root).usageReadOnly(identity, when) },
-    now: () => at,
-    transport: { request: async () => { throw new Error("facilitator must not be called"); } } };
-  const firstPort = createPermit2ProductionReadPort({ ...options, rpc: first });
-  const secondPort = createPermit2ProductionReadPort({ ...options, rpc: second });
-  const request = { payer, chainId: 43114 as const, token: asset.token,
-    challengeHash: "a".repeat(64), offerHash: "b".repeat(64), amountAtomic: "10000",
-    nonceBitmapWordIndex: "0", nowSeconds: Math.floor(at.getTime() / 1000) };
-  const active = firstPort.read(request);
-  await firstEntered;
-  const waiting = secondPort.read(request);
-  const waitingRefusal = assert.rejects(waiting, (error: unknown) => error instanceof ApnError &&
-    (error.code === "APN_STATE_BUSY" || error.code === "APN_RPC_PROTOCOL"));
-  await assert.rejects(active);
-  await waitingRefusal;
-  assert.equal(firstCalls, 1);
-  assert.equal(secondCalls, 0);
-  assert.deepEqual(await paymentSnapshot(temp.root), before);
-});
-
-test("failed and aborted in-flight public RPC reads retain pacing before another source retries", async t => {
-  for (const mode of ["failed", "aborted"] as const) {
-    const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
-    let entered!: () => void;
-    const firstEntered = new Promise<void>(resolve => { entered = resolve; });
-    let firstCompletion = 0, retryEntry = 0;
-    const first = permit2PublicRpc("https://retry-rpc.example", temp.root, {
-      permit2ReadCall: async (_method, _params, signal) => {
-        entered();
-        try {
-          if (mode === "aborted") {
-            await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
-          }
-          throw new Error("transport failed");
-        } finally {
-          firstCompletion = Date.now();
-        }
-      },
-    });
-    const retry = permit2PublicRpc("https://retry-rpc.example/", temp.root, {
-      permit2ReadCall: async () => { retryEntry = Date.now(); return "0xa86a"; },
-    });
-    const controller = new AbortController();
-    const active = first.call("eth_chainId", [], controller.signal);
-    await firstEntered;
-    if (mode === "aborted") controller.abort();
-    await assert.rejects(active, mode === "aborted" ? /aborted/u : /transport failed/u);
-    const result = await retry.call("eth_chainId", [], new AbortController().signal);
-    assert.equal(result, "0xa86a");
-    assert.ok(retryEntry - firstCompletion >= 750,
-      `${mode} retry gap ${retryEntry - firstCompletion}`);
-  }
-});
-
-test("a failed completion write leaves a durable guard against rapid cross-source retry", async t => {
-  const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
-  const endpointHash = sha256("permit2-rpc-endpoint\0https://write-failure-rpc.example/");
-  const originalWrite = StateStore.prototype.writeRpcProviderPacing;
-  StateStore.prototype.writeRpcProviderPacing = async function (familyHash, timestamp) {
-    if (familyHash === endpointHash) throw new Error("pacing write failed");
-    return await originalWrite.call(this, familyHash, timestamp);
-  };
-  t.after(() => { StateStore.prototype.writeRpcProviderPacing = originalWrite; });
-  let physicalCalls = 0;
-  const transport = { permit2ReadCall: async () => { physicalCalls++; return "0xa86a"; } };
-  const first = permit2PublicRpc("https://write-failure-rpc.example", temp.root, transport);
-  await assert.rejects(first.call("eth_chainId", [], new AbortController().signal), /pacing write failed/u);
-  const cooldown = await new StateStore(temp.root).loadRpcProviderCooldown(endpointHash);
-  assert.ok(cooldown !== null && cooldown - Date.now() > 14_000, "pre-call crash guard remains durable");
-  const retry = permit2PublicRpc("https://write-failure-rpc.example/", temp.root, transport);
+  const sent: (readonly { method: string }[])[] = [];
+  let release!: () => void;
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const source = permit2PublicRpc("https://rpc.example", temp.root, { batchCall: async (calls) => {
+    sent.push(calls); if (sent.length === 2) await hold; return calls.map(() => "0xa86a");
+  } });
+  assert.deepEqual(await source.batch([{ method: "eth_chainId", params: [] }, { method: "eth_chainId", params: [] }], new AbortController().signal), ["0xa86a", "0xa86a"]);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 100);
-  try { await assert.rejects(retry.call("eth_chainId", [], controller.signal), /aborted/u); }
-  finally { clearTimeout(timer); }
-  assert.equal(physicalCalls, 1);
-});
-
-test("cancelling a queued public RPC read removes it without a transport call", async t => {
-  const temp = await temporaryState(); t.after(temp.cleanup); await setup(temp.root);
-  const before = await paymentSnapshot(temp.root);
-  let calls = 0;
-  const transport = { permit2ReadCall: async () => { calls++; await new Promise(resolve => setTimeout(resolve, 100)); return "0xa86a"; } };
-  const first = permit2PublicRpc("https://cancel-rpc.example", temp.root, transport);
-  const second = permit2PublicRpc("https://cancel-rpc.example/", temp.root, transport);
-  const active = first.call("eth_chainId", [], new AbortController().signal);
-  const cancelled = new AbortController();
-  const waiting = second.call("eth_chainId", [], cancelled.signal);
-  cancelled.abort();
+  const waiting = source.batch([{ method: "eth_chainId", params: [] }], controller.signal);
+  controller.abort(); release();
   await assert.rejects(waiting, /aborted/u);
-  await active;
-  assert.equal(calls, 1);
+  const aborted = new AbortController(); aborted.abort();
+  await assert.rejects(source.batch([{ method: "eth_chainId", params: [] }], aborted.signal), /aborted/u);
+  assert.equal(sent.length, 2, "an already-aborted read sends nothing");
   assert.deepEqual(await paymentSnapshot(temp.root), before);
 });

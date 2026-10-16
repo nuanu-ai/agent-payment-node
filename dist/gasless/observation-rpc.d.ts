@@ -11,19 +11,19 @@ export declare function gaslessObservationRpcFactory(environment: Readonly<Recor
 export declare class GaslessObservationRpc implements GaslessObservationPort {
     private readonly transport;
     private readonly pacing;
+    private readonly maxBatchItems?;
     readonly chainId: GaslessChainId;
     readonly rpcOrigin: string;
     readonly rpcEndpointHash: string;
     private readonly endpoint;
     private readonly environmentName;
-    private readonly deployment;
     private sequence;
     private readonly rpcCall;
     private queue;
     private readonly pendingReads;
     private lastRequestAt;
     private unavailable;
-    constructor(chainId: GaslessChainId, rpcUrl: string, environmentName: string, transport?: GaslessTransport, pacing?: GaslessObservationPacing);
+    constructor(chainId: GaslessChainId, rpcUrl: string, environmentName: string, transport?: GaslessTransport, pacing?: GaslessObservationPacing, maxBatchItems?: number | undefined);
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
     private observeWithinInvocation;
     private call;
