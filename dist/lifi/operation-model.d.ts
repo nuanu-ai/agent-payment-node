@@ -134,6 +134,9 @@ export interface BridgeOperationRecord extends BridgeMutable {
 }
 /** The bridge was never signed or submitted, so keep the original pre-sign diagnostic across observation retries. */
 export declare function retainedUnsentBridgeRpcFailure(op: Pick<BridgeOperationRecord, "effects" | "failure">): BridgeFailure | null;
+/** Recoverable pre-sign guard outcomes: nothing was sealed, signed or sent, and the next resume repeats the full guard. */
+export declare const BRIDGE_PRE_SIGN_RPC_RATE_LIMITED = "pre_sign_rpc_rate_limited";
+export declare const BRIDGE_PRE_SIGN_RPC_UNAVAILABLE = "pre_sign_rpc_unavailable";
 export declare const BRIDGE_TERMINAL: readonly BridgeState[];
 export declare function bridgeIntentBinding(operation: Pick<BridgeOperationRecord, "schemaVersion" | "kind" | "profileHash" | "operationId" | "idempotencyHash" | "requestHash" | "intent" | "effects">): {
     schemaVersion: "apn.bridge-operation.v1";

@@ -30,25 +30,26 @@ const cases: readonly Readonly<{
   chainRole: BridgePreSignRpcFailure["chainRole"];
   category: BridgePreSignRpcFailure["category"];
   method: NonNullable<BridgePreSignRpcFailure["method"]>;
-  fail: (fixture: Awaited<ReturnType<typeof lifiFixture>>, error: ApnError) => void;
+  fail: (fixture: Awaited<ReturnType<typeof lifiFixture>>, error: ApnError) => () => void;
 }>[] = [
   { name: "source deployment transport", stage: "source_deployment_refresh", chainRole: "source", category: "deployment_refresh",
-    method: "eth_getCode", fail: (s, error) => { s.source.deployment = async () => { throw error; }; } },
+    method: "eth_getCode", fail: (s, error) => { const o = s.source.deployment; s.source.deployment = async () => { throw error; }; return () => { s.source.deployment = o; }; } },
   { name: "destination deployment trace probe transport", stage: "destination_deployment_refresh", chainRole: "destination", category: "deployment_refresh",
-    method: "debug_traceTransaction", fail: (s, error) => { s.destination.deployment = async () => { throw error; }; } },
+    method: "debug_traceTransaction", fail: (s, error) => { const o = s.destination.deployment; s.destination.deployment = async () => { throw error; }; return () => { s.destination.deployment = o; }; } },
   { name: "source account and nonce transport", stage: "source_account_refresh", chainRole: "source", category: "account_nonce",
-    method: "eth_getTransactionCount", fail: (s, error) => { s.source.account = async () => { throw error; }; } },
+    method: "eth_getTransactionCount", fail: (s, error) => { const o = s.source.account; s.source.account = async () => { throw error; }; return () => { s.source.account = o; }; } },
   { name: "source simulation transport", stage: "source_execution_simulation", chainRole: "source", category: "simulation",
-    method: "eth_estimateGas", fail: (s, error) => { s.source.estimate = async () => { throw error; }; } },
+    method: "eth_estimateGas", fail: (s, error) => { const o = s.source.estimate; s.source.estimate = async () => { throw error; }; return () => { s.source.estimate = o; }; } },
   { name: "source fee quote transport", stage: "source_fee_quote", chainRole: "source", category: "fee_quote",
-    method: "eth_call", fail: (s, error) => { s.source.feeQuote = async () => { throw error; }; } },
+    method: "eth_call", fail: (s, error) => { const o = s.source.feeQuote; s.source.feeQuote = async () => { throw error; }; return () => { s.source.feeQuote = o; }; } },
 ];
+const pendingEffects = (record: BridgeOperationRecord) => record.effects.map(({ role, phase, submissionAttempts }) => ({ role, phase, submissionAttempts }));
 
-for (const row of cases) test(`LI.FI ${row.name} persists only its exact redacted pre-sign boundary`, async (t) => {
+for (const row of cases) test(`LI.FI ${row.name} defers the approval with only its exact redacted pre-sign boundary`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
   const loads = s.wrapping.loads;
-  row.fail(s, new ApnError("APN_RPC_AMBIGUOUS", `transport failed at ${endpoint}`, { rpcMethod: row.method, leaked: secret }));
+  const restore = row.fail(s, new ApnError("APN_RPC_AMBIGUOUS", `transport failed at ${endpoint}`, { rpcMethod: row.method, leaked: secret }));
 
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
@@ -59,14 +60,16 @@ for (const row of cases) test(`LI.FI ${row.name} persists only its exact redacte
       ? operation.intent.materialization.request.fromChainId : operation.intent.materialization.request.toChainId,
     category: row.category, method: row.method,
   };
-  assert.equal(record.state, "failed_before_effect");
-  assert.equal(record.failure?.reason, "unsent_apn_rpc_ambiguous");
+  // Nothing is signed before the guard passes, so an unavailable endpoint leaves the approval pending, not failed.
+  assert.equal(record.state, "awaiting_approval"); assert.equal(record.terminal, false);
+  assert.equal(record.failure?.reason, "pre_sign_rpc_unavailable");
   assert.deepEqual(record.failure?.preSignRpc, expected);
   assert.ok(record.effects.every((effect) => effect.phase === "unsealed" && effect.submissionAttempts === 0));
-  assert.equal(s.source.submissions.length, 0); assert.equal(s.wrapping.loads, loads);
+  assert.equal(s.source.submissions.length, 0); assert.equal(s.wrapping.loads, loads); assert.equal(s.approval.calls.length, 0);
 
   const status = await s.core.execute({ command: "operation.status", operationId: id });
   assert.equal(status.ok, true, status.error?.message);
+  assert.deepEqual((status.operation as any).next_actions, [`apn bridge approve --operation ${id}`]);
   assert.deepEqual((status.operation as any).pre_sign_rpc_failure, {
     schema_version: expected.schemaVersion, phase: expected.phase, effect_role: expected.effectRole,
     stage: expected.stage, chain_role: expected.chainRole, chain_id: expected.chainId,
@@ -79,18 +82,29 @@ for (const row of cases) test(`LI.FI ${row.name} persists only its exact redacte
   const serialized = JSON.stringify({ durable, status, receipt });
   assert.equal(serialized.includes(endpoint), false); assert.equal(serialized.includes(secret), false);
   assert.equal(serialized.includes("leaked"), false);
+
+  restore();
+  const approved = await s.core.execute({ command: "bridge.approve", operationId: id });
+  assert.equal(approved.ok, true, approved.error?.message); assert.equal((approved.operation as { state: string }).state, "completed");
+  assert.equal(s.source.submissions.length, 2);
 });
 
-test("LI.FI bridge simulation ambiguity after safe approval retains its redacted boundary without bridge signing or send", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
-  const estimate = s.source.estimate.bind(s.source);
+/** Fails the bridge simulation once the approval allowance exists, as a transport failure. Returns the restore. */
+function failBridgeSimulation(s: Awaited<ReturnType<typeof lifiFixture>>, operation: BridgeOperationRecord): () => void {
+  const estimate = s.source.estimate.bind(s.source), original = s.source.estimate;
   s.source.estimate = async (transaction) => {
     if (transaction.to === operation.effects.at(-1)!.envelope.to && s.source.allowance === s.request.amountAtomic) {
       throw new ApnError("APN_RPC_AMBIGUOUS", `transport failed at ${endpoint}`, { rpcMethod: "eth_estimateGas", leaked: secret });
     }
     return await estimate(transaction);
   };
+  return () => { s.source.estimate = original; };
+}
+
+test("LI.FI bridge simulation transport failure after safe approval defers with its redacted boundary, then a resume sends", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
+  const restore = failBridgeSimulation(s, operation);
 
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
@@ -98,9 +112,9 @@ test("LI.FI bridge simulation ambiguity after safe approval retains its redacted
   const expected: BridgePreSignRpcFailure = { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard",
     effectRole: "bridge", stage: "source_execution_simulation", chainRole: "source",
     chainId: operation.intent.materialization.request.fromChainId, category: "simulation", method: "eth_estimateGas" };
-  assert.equal(record.state, "failed_after_approval"); assert.equal(record.failure?.reason, "unsent_apn_rpc_ambiguous");
-  assert.deepEqual(record.failure?.preSignRpc, expected);
-  assert.deepEqual(record.effects.map(({ role, phase, submissionAttempts }) => ({ role, phase, submissionAttempts })), [
+  assert.equal(record.state, "source_pending"); assert.equal(record.terminal, false);
+  assert.equal(record.failure?.reason, "pre_sign_rpc_unavailable"); assert.deepEqual(record.failure?.preSignRpc, expected);
+  assert.deepEqual(pendingEffects(record), [
     { role: "approval", phase: "safe_success", submissionAttempts: 1 },
     { role: "bridge", phase: "unsealed", submissionAttempts: 0 },
   ]);
@@ -109,114 +123,81 @@ test("LI.FI bridge simulation ambiguity after safe approval retains its redacted
   const status = await s.core.execute({ command: "operation.status", operationId: id });
   const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
   assert.equal(status.ok, true, status.error?.message); assert.equal(receipt.ok, true, receipt.error?.message);
-  assert.equal((status.operation as any).pre_sign_rpc_failure.effect_role, "bridge");
+  assert.equal((status.operation as any).reason, "pre_sign_rpc_unavailable");
+  assert.deepEqual((status.operation as any).next_actions, [`apn operation resume --operation ${id}`, `apn operation status --operation ${id}`]);
   assert.equal((status.operation as any).pre_sign_rpc_failure.stage, "source_execution_simulation");
-  assert.equal((status.operation as any).pre_sign_rpc_failure.method, "eth_estimateGas");
   assert.deepEqual((receipt.receipt as any).pre_sign_rpc_failure, (status.operation as any).pre_sign_rpc_failure);
   const serialized = JSON.stringify({ record, status, receipt });
   assert.equal(serialized.includes(endpoint), false); assert.equal(serialized.includes(secret), false); assert.equal(serialized.includes("leaked"), false);
 
   const loads = s.wrapping.loads;
-  const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
-  assert.equal(resumed.ok, true, resumed.error?.message); assert.equal(s.source.submissions.length, 1); assert.equal(s.wrapping.loads, loads);
+  const still = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(still.ok, true, still.error?.message); assert.equal(s.source.submissions.length, 1); assert.equal(s.wrapping.loads, loads);
+  assert.equal((still.operation as any).reason, "pre_sign_rpc_unavailable");
+  restore();
+  const sent = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(sent.ok, true, sent.error?.message); assert.equal((sent.operation as { state: string }).state, "completed");
+  assert.equal(s.source.submissions.length, 2);
 
-  assert.throws(() => validateBridgeOperation(resealFailure(record, { reason: "unsent_apn_operation_blocked" })), { code: "APN_STATE_CORRUPT" });
-  assert.throws(() => validateBridgeOperation(resealFailure(record, { bridgePhase: "signing_started" })), { code: "APN_STATE_CORRUPT" });
+  for (const patch of [{ reason: "unsent_apn_operation_blocked" }, { bridgePhase: "signing_started" as const },
+    { state: "failed_after_approval" as const, terminal: true }]) {
+    assert.throws(() => validateBridgeOperation(resealFailure(record, patch)), { code: "APN_STATE_CORRUPT" });
+  }
 });
 
-test("LI.FI safe approval keeps bridge ambiguity when residual allowance read fails, then terminalizes with the same diagnostic", async (t) => {
+test("LI.FI deferred bridge guard after safe approval ends on the expired path, even when the residual read first fails", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
-  const estimate = s.source.estimate.bind(s.source);
-  s.source.estimate = async (transaction) => {
-    if (transaction.to === operation.effects.at(-1)!.envelope.to && s.source.allowance === s.request.amountAtomic) {
-      s.source.failAccount = true;
-      throw new ApnError("APN_RPC_AMBIGUOUS", `transport failed at ${endpoint}`, { rpcMethod: "eth_estimateGas", leaked: secret });
-    }
-    return await estimate(transaction);
-  };
-
+  failBridgeSimulation(s, operation);
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
+  assert.equal((await s.core.bridges.records.findOperation(id))!.failure?.reason, "pre_sign_rpc_unavailable");
+
+  const loads = s.wrapping.loads; s.now.setTime(Date.parse(operation.intent.expiresAt) + 60_000); s.source.failAccount = true;
+  const unresolved = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(unresolved.ok, true, unresolved.error?.message);
   const record = (await s.core.bridges.records.findOperation(id))!;
-  const expected: BridgePreSignRpcFailure = { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard",
-    effectRole: "bridge", stage: "source_execution_simulation", chainRole: "source",
-    chainId: operation.intent.materialization.request.fromChainId, category: "simulation", method: "eth_estimateGas" };
-  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "unsent_apn_rpc_ambiguous");
-  assert.deepEqual(record.failure?.preSignRpc, expected); assert.equal(record.failure?.residualAllowance, null);
-  assert.equal(record.failure?.residualAllowanceStatus, "unavailable");
-  assert.deepEqual(record.effects.map(({ role, phase, submissionAttempts }) => ({ role, phase, submissionAttempts })), [
-    { role: "approval", phase: "safe_success", submissionAttempts: 1 },
-    { role: "bridge", phase: "unsealed", submissionAttempts: 0 },
-  ]);
-  assert.equal(s.source.submissions.length, 1);
+  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "unsent_apn_reprepare_required");
+  assert.equal(record.failure?.residualAllowance, null);
 
-  const status = await s.core.execute({ command: "operation.status", operationId: id });
-  const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
-  assert.equal(status.ok, true, status.error?.message); assert.equal(receipt.ok, true, receipt.error?.message);
-  assert.equal((status.operation as any).reason, "unsent_apn_rpc_ambiguous");
-  assert.equal((status.operation as any).residual_allowance_status, "unavailable");
-  assert.equal((status.operation as any).pre_sign_rpc_failure.method, "eth_estimateGas");
-  assert.deepEqual((receipt.receipt as any).pre_sign_rpc_failure, (status.operation as any).pre_sign_rpc_failure);
-  const serialized = JSON.stringify({ record, status, receipt });
-  assert.equal(serialized.includes(endpoint), false); assert.equal(serialized.includes(secret), false); assert.equal(serialized.includes("leaked"), false);
-
-  const loads = s.wrapping.loads; s.source.failAccount = false;
+  s.source.failAccount = false;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(resumed.ok, true, resumed.error?.message);
   const recovered = (await s.core.bridges.records.findOperation(id))!;
-  assert.equal(recovered.state, "failed_after_approval"); assert.equal(recovered.failure?.reason, "unsent_apn_rpc_ambiguous");
-  assert.deepEqual(recovered.failure?.preSignRpc, expected); assert.equal(recovered.failure?.residualAllowanceStatus, "observed");
-  assert.equal(recovered.effects.at(-1)?.phase, "unsealed"); assert.equal(recovered.effects.at(-1)?.submissionAttempts, 0);
+  assert.equal(recovered.state, "failed_after_approval"); assert.equal(recovered.failure?.reason, "unsent_apn_reprepare_required");
+  assert.equal(recovered.failure?.residualAllowance?.amountAtomic, operation.intent.materialization.request.amountAtomic);
+  assert.deepEqual(pendingEffects(recovered), [
+    { role: "approval", phase: "safe_success", submissionAttempts: 1 },
+    { role: "bridge", phase: "unsealed", submissionAttempts: 0 },
+  ]);
   assert.equal(s.source.submissions.length, 1); assert.equal(s.wrapping.loads, loads);
-  const recoveredStatus = await s.core.execute({ command: "operation.status", operationId: id });
-  const recoveredReceipt = await s.core.execute({ command: "receipt.get", operationId: id });
-  assert.equal((recoveredStatus.operation as any).residual_allowance_status, "observed");
-  assert.equal((recoveredStatus.operation as any).pre_sign_rpc_failure.method, "eth_estimateGas");
-  assert.deepEqual((recoveredReceipt.receipt as any).pre_sign_rpc_failure, (recoveredStatus.operation as any).pre_sign_rpc_failure);
-  assert.throws(() => validateBridgeOperation(resealFailure(recovered, { bridgePhase: "signing_started" })), { code: "APN_STATE_CORRUPT" });
 });
 
-test("LI.FI bridge ambiguity with approval only included is retained through later safe observation", async (t) => {
+test("LI.FI bridge guard transport failure with the approval only included stays recoverable through later safe observation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
-  s.source.safeApproval = false;
-  const estimate = s.source.estimate.bind(s.source);
-  s.source.estimate = async (transaction) => {
-    if (transaction.to === operation.effects.at(-1)!.envelope.to && s.source.allowance === s.request.amountAtomic) {
-      throw new ApnError("APN_RPC_AMBIGUOUS", `transport failed at ${endpoint}`, { rpcMethod: "eth_estimateGas", leaked: secret });
-    }
-    return await estimate(transaction);
-  };
+  s.source.safeApproval = false; const restore = failBridgeSimulation(s, operation);
 
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
   const record = (await s.core.bridges.records.findOperation(id))!;
-  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "unsent_apn_rpc_ambiguous");
+  assert.equal(record.terminal, false); assert.equal(record.failure?.reason, "pre_sign_rpc_unavailable");
   assert.equal(record.failure?.preSignRpc?.method, "eth_estimateGas");
   assert.equal(record.effects[0]?.phase, "included_success");
   assert.equal(record.effects.at(-1)?.phase, "unsealed"); assert.equal(record.effects.at(-1)?.submissionAttempts, 0);
   assert.equal(s.source.submissions.length, 1);
-  const status = await s.core.execute({ command: "operation.status", operationId: id });
-  const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
-  assert.equal(status.ok, true, status.error?.message); assert.equal(receipt.ok, true, receipt.error?.message);
-  assert.equal((status.operation as any).pre_sign_rpc_failure.effect_role, "bridge");
-  assert.equal((status.operation as any).pre_sign_rpc_failure.method, "eth_estimateGas");
-  assert.deepEqual((receipt.receipt as any).pre_sign_rpc_failure, (status.operation as any).pre_sign_rpc_failure);
 
-  const loads = s.wrapping.loads; s.source.safeApproval = true;
-  const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
-  assert.equal(resumed.ok, true, resumed.error?.message);
-  const recovered = (await s.core.bridges.records.findOperation(id))!;
-  assert.equal(recovered.state, "failed_after_approval"); assert.equal(recovered.failure?.reason, "unsent_apn_rpc_ambiguous");
-  assert.equal(recovered.failure?.preSignRpc?.method, "eth_estimateGas");
-  assert.equal(recovered.effects.at(-1)?.phase, "unsealed"); assert.equal(recovered.effects.at(-1)?.submissionAttempts, 0);
-  assert.equal(s.source.submissions.length, 1); assert.equal(s.wrapping.loads, loads);
-  const recoveredStatus = await s.core.execute({ command: "operation.status", operationId: id });
-  const recoveredReceipt = await s.core.execute({ command: "receipt.get", operationId: id });
-  assert.equal(recoveredStatus.ok, true, recoveredStatus.error?.message); assert.equal(recoveredReceipt.ok, true, recoveredReceipt.error?.message);
-  assert.equal((recoveredStatus.operation as any).pre_sign_rpc_failure.method, "eth_estimateGas");
-  assert.deepEqual((recoveredReceipt.receipt as any).pre_sign_rpc_failure, (recoveredStatus.operation as any).pre_sign_rpc_failure);
+  s.source.safeApproval = true;
+  const observed = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(observed.ok, true, observed.error?.message);
+  const safe = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(safe.effects[0]?.phase, "safe_success"); assert.equal(safe.terminal, false);
+  assert.equal(safe.failure?.reason, "pre_sign_rpc_unavailable"); assert.equal(s.source.submissions.length, 1);
+
+  restore();
+  const sent = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(sent.ok, true, sent.error?.message); assert.equal((sent.operation as { state: string }).state, "completed");
+  assert.equal(s.source.submissions.length, 2);
 });
 
 test("LI.FI successful current operation and receipt retain their existing projection", async (t) => {
