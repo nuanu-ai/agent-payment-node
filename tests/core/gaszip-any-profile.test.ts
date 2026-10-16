@@ -11,10 +11,11 @@ import { keccak256, parseTransaction, type Hex } from "viem";
 import { TtyAllowlistPolicyApproval } from "../../src/allowlist-policy-activation.js";
 import { runCli } from "../../src/cli.js";
 import { StateStore } from "../../src/state.js";
-import { MEGA_FUNDING } from "../../src/lifi/mega-gaszip-contract.js";
-import { MegaFundingService } from "../../src/lifi/mega-gaszip-service.js";
-import { SEI_FUNDING } from "../../src/lifi/sei-gaszip-contract.js";
-import { SeiFundingService } from "../../src/lifi/sei-gaszip-service.js";
+import { GASZIP_DIRECT_ROUTES, gaszipCodec, inspectGaszipDelivery, inspectGaszipFundingQuote, type GaszipCorrelatedDelivery } from "../../src/lifi/gaszip-direct-route.js";
+import { GaszipFundingJournal, publicGaszipFunding, sealGaszipFunding, validateGaszipFunding, type GaszipFundingRecord } from "../../src/lifi/gaszip-direct-journal.js";
+import { GaszipFundingRpc, assertGaszipFundingFresh, proveGaszipDelivery, proveGaszipSafeTransaction, readGaszipFundingPlan, type GaszipRpcPort } from "../../src/lifi/gaszip-direct-rpc.js";
+import { GaszipFundingService } from "../../src/lifi/gaszip-direct-service.js";
+const SEI_ROUTE=GASZIP_DIRECT_ROUTES.sei,MEGA_ROUTE=GASZIP_DIRECT_ROUTES.mega,seiCodec=gaszipCodec(SEI_ROUTE),megaCodec=gaszipCodec(MEGA_ROUTE);
 import { temporaryState } from "./helpers.js";
 
 const h = (v: bigint): Hex => `0x${v.toString(16)}`;
@@ -23,11 +24,10 @@ const SIGNER = "0x2222222222222222222222222222222222222222", OTHER = "0x55555555
 interface Route {
   readonly name: "mega" | "sei"; readonly chain: bigint; readonly short: string; readonly data: Hex; readonly target: string;
   readonly mechanism: { readonly provider: string; readonly reference: string }; readonly output: string;
-  readonly service: typeof MegaFundingService | typeof SeiFundingService;
 }
 const ROUTES: readonly Route[] = [
-  { name: "mega", chain: 4326n, short: "514", data: MEGA_FUNDING.data, target: MEGA_FUNDING.target, mechanism: MEGA_FUNDING.mechanism, output: "6800000000000", service: MegaFundingService },
-  { name: "sei", chain: 1329n, short: "246", data: SEI_FUNDING.data, target: SEI_FUNDING.target, mechanism: SEI_FUNDING.mechanism, output: "258965737575087424", service: SeiFundingService },
+  { name: "mega", chain: 4326n, short: "514", data: MEGA_ROUTE.data, target: MEGA_ROUTE.target, mechanism: MEGA_ROUTE.mechanism, output: "6800000000000" },
+  { name: "sei", chain: 1329n, short: "246", data: SEI_ROUTE.data, target: SEI_ROUTE.target, mechanism: SEI_ROUTE.mechanism, output: "258965737575087424" },
 ];
 const OTHER_ROUTE = (route: Route): Route => ROUTES.find((candidate) => candidate.name !== route.name)!;
 
@@ -102,9 +102,9 @@ async function setup(t: test.TestContext, route: Route, profile: string, admissi
     if (url.includes("/quotes/")) { amountSent = url.split("/quotes/8453/")[1]!.split("/")[0]!; return { status: 200, body: quote(amountSent) }; }
     return { status: 200, body: deposit(amountSent) };
   } };
-  const service = new route.service(state, wrapping, {}, { https, source: () => source, destination: () => destination, approve: async () => { approvals++; }, now: () => now });
+  const service = new GaszipFundingService(route.name === "mega" ? MEGA_ROUTE : SEI_ROUTE, state, wrapping, {}, { https, source: () => source, destination: () => destination, approve: async () => { approvals++; }, now: () => now });
   const cli = (args: readonly string[]) => runCli([route.name, "funding", ...args], {}, { stateRoot: temp.root, wrappingSecret: wrapping,
-    ...(route.name === "mega" ? { megaFunding: service as MegaFundingService } : { seiFunding: service as SeiFundingService }) });
+    ...(route.name === "mega" ? { megaFunding: service } : { seiFunding: service }) });
   const prepareArgs = (overrides: Record<string, string> = {}) => Object.entries({ "--profile": profile, "--expected-payer": owner, "--amount-atomic": "7000000000000",
     "--minimum-output-atomic": "1000000000000", "--maximum-fee-atomic": "1000000000000", "--idempotency-key": `${route.name}-any-profile-01`, ...overrides }).flat();
   return { owner, source, cli, prepareArgs, approvals: () => approvals, advance: (ms: number) => { now += ms; } };

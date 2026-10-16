@@ -1,9 +1,10 @@
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { StateStore } from "../state.js";
 import { BridgeHttps } from "./https.js";
-import { type MegaFundingRecord } from "./mega-gaszip-journal.js";
-import { type MegaRpcPort } from "./mega-gaszip-rpc.js";
-export interface MegaFundingPrepareRequest {
+import { type GaszipDirectRoute } from "./gaszip-direct-route.js";
+import { type GaszipFundingRecord } from "./gaszip-direct-journal.js";
+import { type GaszipRpcPort } from "./gaszip-direct-rpc.js";
+export interface GaszipFundingPrepareRequest {
     readonly profile: string;
     readonly expectedPayer: string;
     readonly amountAtomic: string;
@@ -11,15 +12,16 @@ export interface MegaFundingPrepareRequest {
     readonly maximumFeeAtomic: string;
     readonly idempotencyKey: string;
 }
-export interface MegaFundingPorts {
+export interface GaszipFundingPorts {
     readonly https?: Pick<BridgeHttps, "request">;
-    readonly source?: () => MegaRpcPort;
-    readonly destination?: () => MegaRpcPort;
-    readonly approve?: (record: MegaFundingRecord) => Promise<void>;
+    readonly source?: () => GaszipRpcPort;
+    readonly destination?: () => GaszipRpcPort;
+    readonly approve?: (record: GaszipFundingRecord) => Promise<void>;
     readonly now?: () => number;
 }
-/** Strictly Base-native to Mega-native, self recipient; adapters cannot supply authoritative receipts in place of RPC reads. */
-export declare class MegaFundingService {
+/** Strictly Base native to the payer's own destination native balance; adapters cannot supply authoritative receipts in place of RPC reads. */
+export declare class GaszipFundingService {
+    readonly route: GaszipDirectRoute;
     private readonly state;
     private readonly wrapping;
     private readonly environment;
@@ -28,13 +30,16 @@ export declare class MegaFundingService {
     private readonly ledger;
     private readonly https;
     private readonly now;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, ports?: MegaFundingPorts);
+    private readonly c;
+    constructor(route: GaszipDirectRoute, state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, ports?: GaszipFundingPorts);
     private rpc;
+    private publicRecord;
+    private seal;
     private identity;
     private policy;
     private required;
     private locks;
-    prepare(input: MegaFundingPrepareRequest): Promise<unknown>;
+    prepare(input: GaszipFundingPrepareRequest): Promise<unknown>;
     approve(id: string): Promise<unknown>;
     private usage;
     /** A signed effect APN proved never landed ends before effect: its bytes are scrubbed and never sent again. */

@@ -9,6 +9,11 @@ through the GasZip direct route below.
 
 ## Finite GasZip direct funding for Sei
 
+The Sei and Mega GasZip direct routes are one implementation (`src/lifi/gaszip-direct-*.ts`)
+driven by a protocol table keyed by destination chain (chain id, GasZip short id, calldata,
+mechanism reference, destination RPC variable). Each route keeps its own commands, journal
+directory, schema version and reference, so stored operations of either route load unchanged.
+
 `sei funding` adds one separate local-wallet funding route: native Base ETH
 (chain 8453) to the same owner's native Sei SEI (chain 1329). The source sends
 the amount the asset policy and usage ledger admit to the official GasZip V2 direct deposit address
