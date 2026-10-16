@@ -625,6 +625,17 @@ provider policy changes. The saved operation stays guarded while confirmation
 is pending; neither another CLI approval nor resume sends a second request.
 Provider metadata, approval links and signatures are discarded from public output.
 
+If MetaMask then closes that request as `DENIED` or `EXPIRED`, the operation
+reports `mm_gasless_provider_mfa_rejected`: by MetaMask's job order the request
+closed at the MFA step, before signing. That is the provider's word, not proof
+that no signature exists, so the operation stays guarded until a proved
+completion or owner abandonment. A `FAILED` or `BROADCAST_FAILED` request, or a
+`DENIED` or `EXPIRED` one that never reported MFA, stays
+`mm_gasless_provider_failed`. Once MetaMask reports a closed status, a later
+failed provider read, such as an expired session, keeps that status and reason
+instead of replacing it with `mm_gasless_provider_unavailable` or
+`mm_gasless_session_unavailable`.
+
 Continue with `apn operation resume --operation <operation-id>`, without
 `--wait-seconds`, including after the APN deadline. A provider status or hash
 is only a hint. Completion requires the independently authenticated transaction,

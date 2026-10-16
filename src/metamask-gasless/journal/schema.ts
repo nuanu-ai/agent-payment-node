@@ -14,7 +14,7 @@ import type {
   MetaMaskGaslessSettlement,
   MetaMaskGaslessState,
 } from "../model.js";
-import { MM_MIN_REMAINING_MS, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
+import { MM_MIN_REMAINING_MS, MM_PROVIDER_STATUSES, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
 import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
 import { mmProtocolPins } from "../single-protocol.js";
@@ -132,7 +132,7 @@ function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, at: 
   if (value === null) return null;
   const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"]);
   if (time(mmIso(p.observedAt)) > time(at) || p.requestIdHash !== mmPrivateHash("request-id", intent.requestId) ||
-    !["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(p.status as string)) corrupt();
+    !(MM_PROVIDER_STATUSES as readonly string[]).includes(p.status as string)) corrupt();
   if (p.txHash !== null) mmHex(p.txHash, 32);
   return p as unknown as MetaMaskGaslessProviderObservation;
 }

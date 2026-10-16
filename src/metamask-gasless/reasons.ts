@@ -29,6 +29,8 @@ export const MM_REASON_CODES = {
   mm_gasless_provider_unavailable: "APN_PROVIDER_UNAVAILABLE",
   mm_gasless_guard_unavailable: "APN_PROVIDER_UNAVAILABLE",
   mm_gasless_provider_failed: "APN_PROVIDER_EFFECT_UNAVAILABLE",
+  /** DENIED or EXPIRED after AWAITING_MFA: by MetaMask's job order the request closed before signing. Not proof. */
+  mm_gasless_provider_mfa_rejected: "APN_PROVIDER_EFFECT_UNAVAILABLE",
   mm_gasless_transaction_reverted: "APN_PROVIDER_EFFECT_UNAVAILABLE",
   mm_gasless_owner_abandoned: "APN_OPERATION_BLOCKED",
   mm_gasless_state_corrupt: "APN_STATE_CORRUPT",

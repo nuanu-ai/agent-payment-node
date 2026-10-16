@@ -242,3 +242,40 @@ test("MM re-observation that changes nothing writes nothing, and full history st
     assert.equal(f.provider.submissions.length, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("MM DENIED or EXPIRED after MFA reads as rejected before signing, stays guarded and survives a lost session", async () => {
+  const root = await sandbox();
+  try {
+    for (const closed of ["denied", "expired"] as const) {
+      const f = await mmFixture(join(root, closed)), { id } = await f.prepare();
+      f.rpc.phase = "pending"; f.rpc.candidate = null; f.provider.status = "awaiting_approval"; f.provider.txHash = null;
+      assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+      assert.equal((await f.record(id)).failure?.reason, "mm_gasless_provider_approval");
+      f.advance(600_000); f.provider.status = closed;
+      const rejected = await f.restart().execute({ command: "operation.resume", operationId: id });
+      assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
+      const saved = await f.record(id);
+      assert.equal(saved.state, "unknown_finality"); assert.equal(saved.terminal, false);
+      assert.equal(saved.failure?.reason, "mm_gasless_provider_mfa_rejected"); assert.equal(saved.providerObservation?.status, closed);
+      const operation = rejected.operation as { next_actions: string[]; permission: { guard_held: boolean } };
+      assert.equal(operation.permission.guard_held, true);
+      assert.match(operation.next_actions[0]!, /denied or expired at the MFA step, before signing/u);
+      assert.equal(operation.next_actions[1], `apn operation resume --operation ${id}`);
+      assert.match(operation.next_actions[2]!, new RegExp(`apn operation abandon --operation ${id}$`, "u"));
+      // A later failed provider read (an expired session) keeps the closed status, so nothing new is written.
+      f.advance(60_000); f.provider.failObserve = true;
+      assert.equal((await f.restart().execute({ command: "operation.resume", operationId: id })).ok, true);
+      assert.deepEqual(await f.record(id), saved);
+      assert.equal((await f.restart().execute({ command: "receipt.get", operationId: id })).ok, true);
+      assert.equal(f.provider.submissions.length, 1);
+    }
+    for (const [first, closed] of [["broadcasted", "denied"], ["awaiting_approval", "failed"]] as const) {
+      const f = await mmFixture(join(root, `${first}-${closed}`)), { id } = await f.prepare();
+      f.rpc.phase = "pending"; f.rpc.candidate = null; f.provider.status = first; f.provider.txHash = null;
+      assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+      f.advance(600_000); f.provider.status = closed;
+      assert.equal((await f.restart().execute({ command: "operation.resume", operationId: id })).ok, true);
+      assert.equal((await f.record(id)).failure?.reason, "mm_gasless_provider_failed", `${first}->${closed}`);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
