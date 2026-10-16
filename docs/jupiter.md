@@ -433,7 +433,8 @@ Materials store 45-byte headers instead of complete ProgramData (18.2 MB →
 about 0.1 MB per quote and per execution); older chunked materials still load.
 
 A quote freezes the configured RPC blockhash inside the one resolve, so it
-needs one official build instead of two. Per quote: 2 official API calls
-(was 3) and 6 Solana POSTs including the simulation (was 17), about 0.1 MB
-received instead of 18.4 MB. The approval's pre-consent re-resolve shrinks the
+needs one official build instead of two. Every account read sends at most
+eight keys (PublicNode's limit), each request pinned to the quote's context
+slot. Per quote: 2 official API calls (was 3) and 8 Solana POSTs including the
+simulation (was 17), about 0.1 MB received instead of 18.4 MB. The approval's pre-consent re-resolve shrinks the
 same way. Pool fee rates and adaptive-fee constants are read, not pinned.

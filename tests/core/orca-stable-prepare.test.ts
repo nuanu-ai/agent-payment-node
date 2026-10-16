@@ -124,14 +124,15 @@ const snapshotRequest = (value: OrcaStablePrepareInput) => ({ owner: value.owner
   computeUnitPriceMicroLamports: value.computeUnitPriceMicroLamports, createUsdtAta: false,
   maximumTotalFeeLamports: value.maximumTotalFeeLamports });
 
-test("read-only snapshot observes market and owner in one slot before offline preview", async () => {
+test("read-only snapshot observes market and owner in eight-key pages before offline preview", async () => {
   const f = await snapshotRpc(); let verified = 0;
   const result = await readOrcaStableSnapshotCore(f.rpc, snapshotRequest(f.source), async () => { verified++; return []; });
   assert.equal(verified, 1);
   assert.equal(result.slot, "450687913");
   assert.equal(result.preview.trust, "untrusted_offline_snapshot");
   assert.equal(result.preview.signable, false); assert.equal(result.preview.executable, false);
-  assert.deepEqual(f.calls, ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts", "getLatestBlockhash", "getBlockHeight"]);
+  // The ten-key market and owner read goes out as an eight-key and a two-key request (PublicNode's limit).
+  assert.deepEqual(f.calls, ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts", "getMultipleAccounts", "getLatestBlockhash", "getBlockHeight"]);
   assert.equal(result.quote.expectedOutputAtomic, f.source.quote.expectedOutputAtomic);
 });
 
@@ -141,7 +142,8 @@ test("block height is read at the blockhash context, rejecting an expired hash f
   await assert.rejects(readOrcaStableSnapshotCore(f.rpc, snapshotRequest(f.source), async () => []),
     (error) => reason(error) === "orca_stable_lifetime");
   assert.equal(f.heightMinContextSlot(), 450_687_923);
-  assert.deepEqual(f.calls, ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts", "getLatestBlockhash", "getBlockHeight"]);
+  // The ten-key market and owner read goes out as an eight-key and a two-key request (PublicNode's limit).
+  assert.deepEqual(f.calls, ["getGenesisHash", "getMultipleAccounts", "getMultipleAccounts", "getMultipleAccounts", "getLatestBlockhash", "getBlockHeight"]);
 });
 
 test("snapshot reader refuses regressed slot, vault drift, terminal RPC error and unguarded transport", async () => {

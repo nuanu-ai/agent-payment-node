@@ -13,8 +13,8 @@ import type { OrcaOwnerBalances, OrcaSimulationEvidence } from "./simulation.js"
 export const ORCA_KEYLESS_EXECUTION_SCHEMA = "apn.orca-whirlpool-keyless-execution.v1" as const;
 export const ORCA_EVIDENCE_DOMAIN = "apn.orca-whirlpool-onchain-evidence.v1" as const;
 export const ORCA_ROUTE_DOMAIN = "apn.orca-whirlpool-route.v1" as const;
-/** Slots between the account read and the simulation; the quote refuses beyond it. */
-export const ORCA_MAX_SLOT_DRIFT = 150;
+import { ORCA_MAX_SLOT_DRIFT } from "./accounts.js";
+export { ORCA_MAX_SLOT_DRIFT };
 export const SOLANA_BASE_FEE_LAMPORTS_PER_SIGNATURE = 5_000n;
 
 /** Read-only chain facts behind one quote. Its domain hash is the quote's providerResponseHash. */
