@@ -44,7 +44,8 @@ export const EVM_COMMANDS: readonly CommandDefinition[] = [
       required("--max-fee-wei", "wei", ["positive_canonical_integer", "total_presubmission_quote_budget_not_onchain_total_cap"]),
       { ...required("--priority-fee-wei", "wei", ["canonical_integer", "owner_tip_per_gas_replaces_rpc_suggestion", "max_fee_per_gas_is_twice_base_fee_plus_tip",
         "counts_toward_max_fee_wei", "refused_on_arbitrum_inclusive_fees", "part_of_idempotency"]), required: false },
-      { ...required("--rpc-read-mode", "string", ["batch_only", "ethereum_native_usdc_or_weth_linea_native_unichain_native_or_usdc_polygon_usdc", "prepare_only", "default_scalar"]), required: false },
+      // Every direct network now reads in batches; the flag stays accepted so manifest v1 never loses an option.
+      { ...required("--rpc-read-mode", "string", ["batch_only", "every_direct_network_reads_in_batches", "accepted_for_compatibility"]), required: false },
       required("--idempotency-key", "idempotency_key", ["8_to_200_safe_ascii_characters"]),
     ],
     effect: { class: "payment_prepare", summary: "Persists one exact chain, asset, amount, fee budget and transaction intent; never signs or submits." },

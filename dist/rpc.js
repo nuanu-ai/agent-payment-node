@@ -10,6 +10,7 @@ import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRA
 import { ApnError } from "./errors.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
+import { directEvmStepBudget } from "./evm-direct-reads.js";
 import { parseAtomic } from "./money.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses } from "./network-policy.js";
 const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
@@ -38,19 +39,17 @@ export class HttpsBaseRpc {
         this.directGuardState = options.directGuardState;
         this.x402ChainId = x402Network(options.x402ChainId).chainId;
     }
-    armBnbDirectRpcGuard() {
-        this.armEvmDirectRpcGuard();
-    }
-    armEvmDirectRpcGuard() {
+    /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
+    armEvmDirectRpcGuard(maxPhysicalRequests = 24) {
         if (this.directGuardState === undefined)
             throw new ApnError("APN_RPC_CONFIG", "Direct EVM RPC guard state is unavailable.");
         if (this.abortSignal === undefined) {
-            this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState);
+            this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, maxPhysicalRequests);
             return;
         }
         const signal = this.abortSignal;
         const wait = rpcAbortableWait(signal);
-        this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, 24, Date.now, wait, () => this.remainingTimeoutMs());
+        this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, maxPhysicalRequests, Date.now, wait, () => this.remainingTimeoutMs());
     }
     async seiNativeBalance(address, selection, deadlineAtMs) {
         if (selection.chainId !== 1329 || selection.token !== "native") {
@@ -82,8 +81,8 @@ export class HttpsBaseRpc {
                 if (onAbort !== undefined)
                     controller.signal.removeEventListener("abort", onAbort);
             }
-            bounded.armEvmDirectRpcGuard();
-            return await bounded.evm.prepareSeiNative().balance(address, selection);
+            bounded.armEvmDirectRpcGuard(directEvmStepBudget(1329, "balance"));
+            return await bounded.evm.directReads(1329).balance(address, selection);
         }
         finally {
             clearTimeout(timeout);
@@ -123,10 +122,12 @@ export class HttpsBaseRpc {
         await this.evm.assertChain(chainId);
         return { chainId, rpcOrigin: this.rpcOrigin };
     }
+    /** Proven once per instance (its IP is pinned); later Base reads in the same invocation do not re-ask. */
     async assertBaseChain() {
-        const chainId = rpcQuantity(await this.call("eth_chainId", []));
-        if (chainId !== BigInt(CHAIN_ID))
-            throw new ApnError("APN_CHAIN_MISMATCH", "RPC endpoint is not Base chain ID 8453.");
+        await this.evm.assertChain(CHAIN_ID).catch((error) => {
+            throw error instanceof ApnError && error.code === "APN_CHAIN_MISMATCH"
+                ? new ApnError("APN_CHAIN_MISMATCH", "RPC endpoint is not Base chain ID 8453.") : error;
+        });
         return { chainId: CHAIN_ID, rpcOrigin: this.rpcOrigin };
     }
     async getBalances(address) {

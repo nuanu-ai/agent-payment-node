@@ -58,6 +58,7 @@ test("an orphan exact usage reservation blocks retirement and stays reserved", a
 
 test("expiry never retires an approved effect-bearing operation", async context => {
   const setup = await prepared(context);
+  setup.rpc.receiptEnabled = false;
   await setup.core.transfer.approve(setup.old.operationId);
   const approved = (await setup.state.findOperation(setup.old.operationId))!;
   assert.notEqual(approved.state, "awaiting_approval"); assert.ok(approved.transactionHash);
