@@ -12,7 +12,10 @@ import { metaMaskGaslessQuote } from "./quotation.js";
 import { mmClassify, mmFail, mmFailure } from "./reasons.js";
 import { mmValidateUnsigned } from "./unsigned.js";
 import { mmSame } from "./validation.js";
-/** A transient check failure is waited out inside the window the owner approved, never past it. */
+/**
+ * A transient check failure is waited out inside the window the owner approved, never past it. A rate limit is not
+ * transient here: the RPC asked APN to slow down, so the guard stops instead of re-taking a full snapshot.
+ */
 const MM_GUARD_ATTEMPTS = 18, MM_GUARD_RETRY_MS = 5_000;
 const MM_TRANSIENT_REASONS = new Set(["mm_gasless_provider_unavailable",
     "mm_gasless_rpc_unavailable", "mm_gasless_state_busy", "mm_gasless_quote_unstable"]);
@@ -151,17 +154,15 @@ export class MetaMaskGaslessExecution {
         // Bound to the chain, not to one endpoint: the guard re-reads every value it relies on from this RPC.
         if (rpc.chainId !== op.intent.request.chainId)
             mmFail("mm_gasless_rpc_binding");
-        let current = op.intent.request.fixedNet ? null : await this.chainState(op, rpc, op.intent.delegationHash, mmActualGross(op.intent.quote));
+        // Quote first, then one chain snapshot for the delegation actually dispatched: a repriced batch never discards a
+        // snapshot taken for the old one. The permission counter is keyed by the delegation, so the dispatched one is
+        // proven unconsumed in its own right.
         const fresh = mmRepriceWithinCap(await metaMaskGaslessQuote(this.provider, binding, op.intent.request, rpc.rpcUrl, this.clock), op.intent.request, binding);
         this.clock.check(op);
         let dispatch = null;
-        if (!mmSame(fresh, op.intent.quote)) {
+        if (!mmSame(fresh, op.intent.quote))
             dispatch = { quote: fresh, ...await this.redelegate(op, binding, fresh) };
-            // The permission counter is keyed by the delegation, so the repriced one is proven unconsumed in its own right.
-            current = await this.chainState(op, rpc, dispatch.delegationHash, mmActualGross(fresh));
-        }
-        if (current === null)
-            current = await this.chainState(op, rpc, op.intent.delegationHash, mmActualGross(fresh));
+        const current = await this.chainState(op, rpc, dispatch?.delegationHash ?? op.intent.delegationHash, mmActualGross(fresh));
         this.clock.beforeDispatchAtCurrent(op, current.observedAt);
         return { observedAt: current.observedAt, dispatch };
     }
