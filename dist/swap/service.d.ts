@@ -15,6 +15,8 @@ export declare class GuardedSwapService {
         readonly idempotencyKey: string;
         readonly approvalCapAtomic: string;
         readonly now: Date;
+        /** Required only when the lane's registry holds several mechanisms of one route. */
+        readonly laneMechanismDigest?: string;
     }): Promise<SwapOperationRecord>;
     reserve(operation: SwapOperationRecord, policy: AssetPolicyRegistry, now: Date): Promise<SwapOperationRecord>;
     markSubmitting(operation: SwapOperationRecord, now: Date): Promise<SwapOperationRecord>;

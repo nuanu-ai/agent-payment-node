@@ -19,6 +19,8 @@ export declare class UniswapTokenQuoteBuilder {
         pair: string;
         fee: number;
         mechanism: import("../pin.js").SwapMechanismPin;
+        route: import("../route-admission.js").SwapRouteAdmission;
+        routeDigest: string;
         approval: string;
         transactionValue: string;
     };

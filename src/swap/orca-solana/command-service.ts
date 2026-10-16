@@ -3,6 +3,8 @@ import { ApnError } from "../../errors.js";
 import { isPlainRecord } from "../../canonical.js";
 import type { RuntimeContext } from "../../runtime.js";
 import { swapMechanismDigest } from "../pin.js";
+import { swapRouteDigest, swapRouteOf } from "../route-admission.js";
+import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "./stable-mechanism.js";
 import { SwapOperationRepository } from "../repository.js";
 import { orcaStableInventory } from "./stable-readonly.js";
 import {
@@ -19,14 +21,16 @@ export function orcaInventory(runtimeInstalled: boolean): unknown {
     pool: { address: ORCA_SOL_USDC_POOL, program: WHIRLPOOL_PROGRAM, config: WHIRLPOOLS_CONFIG, tokenA: WSOL_MINT, tokenB: USDC_MINT,
       vaultA: ORCA_SOL_VAULT, vaultB: ORCA_USDC_VAULT, tickSpacing: ORCA_POOL_TICK_SPACING, feeRate: ORCA_POOL_FEE_RATE, direction: "SOL_to_USDC_exact_input" },
     allowedPrograms: [COMPUTE_BUDGET_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM], programPins: ORCA_PROGRAM_PINS,
-    keyless: { mechanismPin: ORCA_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(ORCA_KEYLESS_MECHANISM_PIN),
+    keyless: { route: swapRouteOf(ORCA_KEYLESS_MECHANISM_PIN), routeDigest: swapRouteDigest(ORCA_KEYLESS_MECHANISM_PIN),
+      mechanismPin: ORCA_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(ORCA_KEYLESS_MECHANISM_PIN),
       protocolRegistryDigest: ORCA_KEYLESS_PROTOCOL_REGISTRY.registryDigest } };
 }
 
 export async function executeOrcaCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
   const runtime = context.orcaRuntime;
   if (request.command === "swap.orca.inventory") return data(orcaInventory(runtime !== undefined), "official_catalog_not_owner_admission");
-  if (request.command === "swap.orca.stable-inventory") return data(orcaStableInventory(), "pinned_read_only_inventory");
+  if (request.command === "swap.orca.stable-inventory") return data({ ...orcaStableInventory(), route: swapRouteOf(ORCA_STABLE_GUARDED_MECHANISM_PIN),
+    routeDigest: swapRouteDigest(ORCA_STABLE_GUARDED_MECHANISM_PIN) }, "pinned_read_only_inventory");
   if (request.command === "swap.orca.stable-quote") {
     if (context.orcaStableQuote === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca quote reader is unavailable.");
     return data(await context.orcaStableQuote(request), "read_only_market_quote");

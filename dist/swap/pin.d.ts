@@ -17,5 +17,11 @@ export interface SwapMechanismPin {
     readonly validationPolicyIdentity: string;
     readonly validationPolicyVersion: string;
 }
+/** Exact network of each protocol family. Shared with route admissions, which carry no network family of their own. */
+export declare const SWAP_PROTOCOL_NETWORKS: Readonly<Record<SwapProtocolFamily, {
+    family: SwapNetworkFamily;
+    chain: string;
+}>>;
 export declare function validateSwapMechanismPin(value: unknown): SwapMechanismPin;
 export declare function swapMechanismDigest(value: unknown): string;
+export declare function canonicalProgramIdentity(family: SwapNetworkFamily, value: string): string;

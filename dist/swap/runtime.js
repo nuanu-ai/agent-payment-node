@@ -4,7 +4,7 @@ import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { SWAP_TERMINAL_STATES, validateSwapOperation } from "./model.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry } from "./protocol-registry.js";
-import { swapMechanismDigest } from "./pin.js";
+import { assetAdmitsSwapMechanism } from "./route-admission.js";
 import { validateSwapQuote } from "./quote.js";
 import { SwapOperationRepository } from "./repository.js";
 import { GuardedSwapService } from "./service.js";
@@ -173,19 +173,18 @@ export class GuardedSwapRuntime {
         const policy = await this.activePolicy(operation.quote.profile), at = this.now().toISOString();
         if (policy.policyDigest !== operation.policyDigest || policy.registryVersion !== operation.policyVersion)
             blocked("Swap asset policy no longer matches the prepared operation.", "swap_policy_drift");
+        const registry = validateSwapProtocolRegistry(immutableSnapshot(this.dependencies.protocolRegistry));
+        if (registry.registryDigest !== operation.protocolRegistryDigest || registry.registryVersion !== operation.protocolRegistryVersion)
+            blocked("Swap protocol registry changed.", "swap_policy_drift");
+        const lane = requireSwapProtocol(registry, operation.mechanismDigest).pin;
         for (const [asset, amount] of [[operation.quote.sourceAsset, operation.quote.inputAmountAtomic],
             [operation.quote.destinationAsset, operation.quote.minimumOutputAtomic]]) {
             const admission = evaluateAssetPolicy(policy, { chain: asset.chain, asset: asset.kind === "native" ?
                     { kind: "native", identifier: null } : { kind: "token", identifier: asset.identifier }, rail: "swap",
                 amountAtomic: amount, dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
-            const pin = admission.asset.mechanismPins?.swap;
-            if (pin === undefined || swapMechanismDigest(pin) !== operation.mechanismDigest)
+            if (!assetAdmitsSwapMechanism(admission.asset, lane))
                 blocked("Swap mechanism admission changed.", "swap_policy_drift");
         }
-        const registry = validateSwapProtocolRegistry(immutableSnapshot(this.dependencies.protocolRegistry));
-        if (registry.registryDigest !== operation.protocolRegistryDigest || registry.registryVersion !== operation.protocolRegistryVersion)
-            blocked("Swap protocol registry changed.", "swap_policy_drift");
-        requireSwapProtocol(registry, operation.mechanismDigest);
         return policy;
     }
     async required(operationId) {

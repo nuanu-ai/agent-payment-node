@@ -1,7 +1,7 @@
 import { evaluateAssetPolicy } from "../../asset-policy-registry.js";
 import { SOLANA_USDT } from "../../chain-policy.js";
 import { ApnError } from "../../errors.js";
-import { swapMechanismDigest } from "../pin.js";
+import { assetAdmitsSwapMechanism } from "../route-admission.js";
 import { requireSwapProtocol } from "../protocol-registry.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT, WHIRLPOOL_PROGRAM } from "./pins.js";
 import { ORCA_STABLE_POOL } from "./stable-readonly.js";
@@ -23,17 +23,15 @@ export async function admitOrcaStableOwner(ports, request, expectedMechanismDige
     if (account === null || account.provider !== "local" || account.custody !== "local_software" ||
         account.address !== request.owner)
         blocked("The local wallet does not own this Solana account.", "orca_stable_owner_account");
-    const at = request.now.toISOString();
+    const at = request.now.toISOString(), lane = requireSwapProtocol(ORCA_PROTOCOL_REGISTRY, expectedMechanismDigest).pin;
     for (const [mint, amount] of [[USDC_MINT, request.amountInAtomic], [SOLANA_USDT, request.minimumOutputAtomic]]) {
         const admitted = evaluateAssetPolicy(active.registry, { chain: ORCA_SOLANA_CHAIN,
             asset: { kind: "token", identifier: mint }, rail: "swap", amountAtomic: amount,
             dailyUsageAtomic: await ports.dailyUsage(request.owner, mint, request.now), asOfDate: at.slice(0, 10), asOf: at });
-        if (admitted.asset.mechanismPins?.swap === undefined ||
-            swapMechanismDigest(admitted.asset.mechanismPins.swap) !== expectedMechanismDigest) {
+        if (!assetAdmitsSwapMechanism(admitted.asset, lane)) {
             blocked("Both stable assets require the exact USDC to USDT mechanism pin.", "orca_stable_mechanism_mismatch");
         }
     }
-    requireSwapProtocol(ORCA_PROTOCOL_REGISTRY, expectedMechanismDigest);
     return { profile: request.profile, owner: request.owner, policyDigest: active.digest,
         policyRevision: active.revision, activationDigest: active.activationDigest,
         mechanismDigest: expectedMechanismDigest, pool: ORCA_STABLE_POOL, program: WHIRLPOOL_PROGRAM,

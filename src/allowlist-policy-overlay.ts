@@ -18,7 +18,7 @@ import {
 import { parseAtomic } from "./money.js";
 import { stateCorrupt } from "./secure-state-store.js";
 import { tronAddress } from "./tron/codec.js";
-import { validateSwapMechanismPin, type SwapMechanismPin } from "./swap/pin.js";
+import { MAX_SWAP_ADMISSION_OPTIONS, swapRouteDigest, validateSwapAdmissionMechanism, type SwapAdmissionMechanism } from "./swap/route-admission.js";
 import { resolveDirectPolicyAsset } from "./evm-direct-supplemental-assets.js";
 
 export const ALLOWLIST_POLICY_OVERLAY_SCHEMA = "apn.allowlist-policy-overlay.v1" as const;
@@ -34,7 +34,7 @@ export interface AllowlistMechanismPin {
   readonly reference: string;
 }
 
-export type AllowlistAdmissionMechanismPin = AllowlistMechanismPin | SwapMechanismPin;
+export type AllowlistAdmissionMechanismPin = AllowlistMechanismPin | SwapAdmissionMechanism;
 
 export interface AllowlistPolicyAdmissionInput {
   readonly chain: string;
@@ -46,8 +46,8 @@ export interface AllowlistPolicyAdmissionInput {
   readonly mechanism?: AllowlistAdmissionMechanismPin;
   /** Optional exact recipient for Ethereum/Base local or Base Coinbase gasless transfers. */
   readonly recipient?: string;
-  /** Bridge only: exact alternative pins, each with its own per-transfer ceiling. */
-  readonly mechanisms?: readonly (AllowlistMechanismPin & { readonly maximumPerTransferAtomic: string })[];
+  /** Bridge: exact alternative pins, each with its own per-transfer ceiling. Swap: two to sixteen admitted routes under one cap. */
+  readonly mechanisms?: readonly (AllowlistMechanismPin & { readonly maximumPerTransferAtomic: string })[] | readonly SwapAdmissionMechanism[];
 }
 
 export interface AllowlistPolicyOverlayInput {
@@ -112,12 +112,13 @@ export function compileAllowlistPolicyOverlay(
       decimals: asset.decimals,
       rails,
       caps: {
-        maximumPerTransferAtomic: admission.maximumPerTransferAtomic ?? maximumMechanismCap(admission.mechanisms!),
+        maximumPerTransferAtomic: admission.maximumPerTransferAtomic ?? maximumMechanismCap(admission.mechanisms as BridgeAlternatives),
         dailyLimitAtomic: admission.dailyLimitAtomic,
       },
       ...(admission.mechanism === undefined ? {} : { mechanismPins: { [admission.rail]: admission.mechanism } }),
       ...(admission.recipient === undefined ? {} : { gaslessRecipient: admission.recipient }),
-      ...(admission.mechanisms === undefined ? {} : { mechanismOptions: { bridge: admission.mechanisms } }),
+      ...(admission.mechanisms === undefined ? {} : { mechanismOptions: admission.rail === "swap"
+        ? { swap: admission.mechanisms as readonly SwapAdmissionMechanism[] } : { bridge: admission.mechanisms as BridgeAlternatives } }),
     } as const;
     const current = chains.get(asset.chain);
     if (current === undefined) {
@@ -201,6 +202,7 @@ export function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmis
     invalid("Allowlist admission row is invalid.", "invalid_admission");
   }
   const alternatives = value.mechanisms;
+  if (alternatives !== undefined && value.rail === "swap") return swapAlternatives(value);
   if (alternatives !== undefined && (value.rail !== "bridge" || value.mechanism !== undefined ||
       value.maximumPerTransferAtomic !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > 16)) {
     invalid("Bridge alternatives require two to sixteen exact pins and no legacy cap or pin.", "invalid_mechanisms");
@@ -246,6 +248,24 @@ export function validateAllowlistAdmission(value: unknown): AllowlistPolicyAdmis
     ...(mechanisms === undefined ? {} : { mechanisms }) };
 }
 
+type BridgeAlternatives = readonly (AllowlistMechanismPin & { readonly maximumPerTransferAtomic: string })[];
+/** Swap rows may admit several routes (for example Orca and Jupiter on one pool asset) under the row's own caps. */
+function swapAlternatives(value: Record<string, unknown>): AllowlistPolicyAdmissionInput {
+  const alternatives = value.mechanisms;
+  if (value.mechanism !== undefined || !Array.isArray(alternatives) || alternatives.length < 2 || alternatives.length > MAX_SWAP_ADMISSION_OPTIONS) {
+    invalid("Swap alternatives require two to sixteen admitted routes and no single pin.", "invalid_mechanisms");
+  }
+  const mechanisms = alternatives.map((item: unknown) => swapMechanismPin(item)!);
+  if (new Set(mechanisms.map((item) => swapRouteDigest(item))).size !== mechanisms.length) {
+    invalid("Swap alternatives contain a duplicate route.", "duplicate_mechanism");
+  }
+  const maximum = positiveAtomic(value.maximumPerTransferAtomic, "maximum_per_transfer"), daily = positiveAtomic(value.dailyLimitAtomic, "daily_limit");
+  if (BigInt(maximum) > BigInt(daily)) invalid("Per-transfer cap cannot exceed daily cap.", "cap_order");
+  if (value.recipient !== undefined) invalid("Recipient pins are available only for Ethereum/Base local or Base Coinbase gasless admissions.", "recipient_not_applicable");
+  return { chain: value.chain as string, kind: value.kind as "native" | "token", ...(value.identifier === undefined ? {} : { identifier: value.identifier as string }),
+    rail: "swap", maximumPerTransferAtomic: maximum, dailyLimitAtomic: daily, mechanisms };
+}
+
 function maximumMechanismCap(value: readonly { readonly maximumPerTransferAtomic: string }[]): string {
   return value.reduce((max, item) => BigInt(item.maximumPerTransferAtomic) > BigInt(max) ? item.maximumPerTransferAtomic : max, "0");
 }
@@ -259,9 +279,9 @@ function mechanismPin(value: unknown): AllowlistMechanismPin | undefined {
   return value as unknown as AllowlistMechanismPin;
 }
 
-function swapMechanismPin(value: unknown): SwapMechanismPin | undefined {
+function swapMechanismPin(value: unknown): SwapAdmissionMechanism | undefined {
   if (value === undefined) return undefined;
-  try { return validateSwapMechanismPin(value); }
+  try { return validateSwapAdmissionMechanism(value); }
   catch { return invalid("Pinned swap mechanism metadata is invalid.", "invalid_swap_mechanism"); }
 }
 
