@@ -1,16 +1,15 @@
 import { assertBridgePhysicalGrant } from "./effect-authority.js";
-import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256 } from "viem";
+import { encodeFunctionData, getAddress, keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { EvmRpc } from "../evm-rpc.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
-import { MULTICALL3_ADDRESS, PORTFOLIO_NETWORK_RPC } from "../portfolio/registry.js";
-import { MULTICALL3_ABI } from "../portfolio/evm-reader.js";
+import { MULTICALL3_ADDRESS } from "../portfolio/registry.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolConfiguration } from "./bnb-composite.js";
 import { bridgeDeployment } from "./deployments.js";
-import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcHexValue, rpcQuantityValue, rpcRecordValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
-import { BASE_ECOTONE_EIP6780_TIMESTAMP, deploymentAggregateItem, deploymentMulticallEligible, ERC20_READ, GAS_ORACLE, GAS_ORACLE_ABI, L1_BLOCK, LINEA_TRACE_PROBE_TRANSACTION, MONAD_TRACE_PROBE_TRANSACTION } from "./rpc-deployment.js";
+import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcQuantityValue, rpcRecordValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
+import { BASE_ECOTONE_EIP6780_TIMESTAMP, basePinnedFeeReadPlan, bridgeDeploymentReadPlan, bridgeRetainedDeploymentReadPlan, bridgeRetainedRefreshEligible, ERC20_READ, GAS_ORACLE, GAS_ORACLE_ABI, L1_BLOCK } from "./rpc-deployment.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { exactNativeTransfer, parseReceiptLogs } from "./rpc-proof-codec.js";
 import { assertMatchingHeader, eip7702Delegation, quantity, rpcArchiveChainValue, submitDirect } from "./rpc-support.js";
@@ -67,36 +66,8 @@ export class BridgeRpc {
     async deployment(tool, peerChainId, token, block, exactHashPin = false) {
         if (this.batchCall === undefined)
             await this.assertChain();
-        const at = block ?? await this.block("safe"), contract = bridgeDeployment(this.chainId, peerChainId, tool, token), compactDeployment = (tool === "stargateV2" && (this.chainId === 8453 || this.chainId === 42161)) ||
-            (tool === "across" && this.chainId === 8453 && token === BRIDGE_ZERO_ADDRESS), tag = exactHashPin ? { blockHash: at.hash, requireCanonical: true } : quantity(BigInt(at.numberAtomic));
+        const at = block ?? await this.block("safe"), { contract, feeContract, verificationCodeRows, readRows, directRows, aggregateGroups, traceProbe, items } = bridgeDeploymentReadPlan(this.chainId, peerChainId, tool, token, at, exactHashPin);
         const code = [], configuration = [];
-        const feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
-        const multicallHash = compactDeployment
-            ? PORTFOLIO_NETWORK_RPC.find((row) => row.evmChainId === this.chainId)?.multicall3CodeHash : null;
-        if (compactDeployment && (multicallHash === undefined || multicallHash === null))
-            bridgeFailure("APN_RPC_CONFIG", "bridge_multicall_unreviewed");
-        const codeRows = [...contract.code, ...feeContract.code], verificationCodeRows = compactDeployment
-            ? [...codeRows, { address: getAddress(MULTICALL3_ADDRESS), codeHash: multicallHash }] : codeRows, readRows = [...contract.reads, ...feeContract.reads], aggregateGroups = compactDeployment ? [contract.reads, feeContract.reads].map((rows) => rows.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data))).filter((rows) => rows.length > 0) : [], aggregateRows = aggregateGroups.flat(), directRows = readRows.filter((row) => !aggregateRows.includes(row));
-        const extraItems = [];
-        if (this.chainId === 56 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
-            extraItems.push({ method: "eth_call", params: [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.registration }, tag], cachePolicy: "immutable", decoder: rpcHexValue(256) }, { method: "eth_call", params: [{ to: BNB_COMPOSITE.vault, data: bnbPoolReadData.tokens }, tag], cachePolicy: "immutable", decoder: rpcHexValue(2048) });
-        }
-        let traceProbe;
-        if ((this.chainId === 143 || this.chainId === 59144) && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
-            traceProbe = this.chainId === 143 ? { transaction: MONAD_TRACE_PROBE_TRANSACTION, from: "0x6f49a8f621353f12378d0046e7d7e4b9b249dc9e", to: "0x0000000000000000000000000000000000001000", value: 18000000000000000000n }
-                : { transaction: LINEA_TRACE_PROBE_TRANSACTION, from: "0x9629fe86f04e735923e8542ddd9f265f576e7421", to: "0xbcc016e2a79d509d2b776827ed986568d9b56d59", value: 243939205000000000n };
-            extraItems.push({ method: "debug_traceTransaction", params: [traceProbe.transaction, { tracer: "callTracer", tracerConfig: { onlyTopCall: true, withLog: false } }], cachePolicy: "immutable", decoder: rpcRecordValue });
-        }
-        const items = [
-            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-            ...verificationCodeRows.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable", decoder: rpcHexValue(128 * 1024) })),
-            ...directRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
-                params: row.kind === "storage" ? [row.address, row.data, tag] : [{ to: row.address, data: row.data }, tag], cachePolicy: "immutable",
-                decoder: rpcHexValue(64 * 1024) })),
-            ...aggregateGroups.map((rows) => deploymentAggregateItem(rows, tag)),
-            ...extraItems,
-            { method: "eth_getBlockByNumber", params: [quantity(BigInt(at.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-        ];
         const values = this.batchCall === undefined ? await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params))))
             : await this.batchCall(items, "archive_deployment");
         let offset = 0;
@@ -154,47 +125,14 @@ export class BridgeRpc {
             bridgeFailure("APN_OPERATION_BLOCKED", "bridge_prepared_deployment_binding_changed");
         }
         // Only this compact lane is admitted to retained code proof reuse. All proxy/admin/facet/storage/config reads remain fresh.
-        if (this.batchCall === undefined || tool !== "stargateV2" || this.chainId !== 8453) {
+        if (this.batchCall === undefined || !bridgeRetainedRefreshEligible(this.chainId, tool, frozen.block)) {
             return await this.deployment(tool, peerChainId, token);
         }
-        if (BigInt(frozen.block.timestampAtomic) < BASE_ECOTONE_EIP6780_TIMESTAMP) {
-            return await this.deployment(tool, peerChainId, token);
-        }
-        const at = await this.block("safe"), tag = quantity(BigInt(at.numberAtomic)), readRows = [...contract.reads, ...feeContract.reads];
+        const at = await this.block("safe");
         if (BigInt(at.timestampAtomic) < BASE_ECOTONE_EIP6780_TIMESTAMP || BigInt(at.numberAtomic) < BigInt(frozen.block.numberAtomic)) {
             bridgeFailure("APN_OPERATION_BLOCKED", "bridge_retained_deployment_proof_not_final");
         }
-        const aggregateRows = readRows.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data));
-        const directRows = readRows.filter((row) => !aggregateRows.includes(row));
-        const aggregateData = encodeFunctionData({ abi: MULTICALL3_ABI, functionName: "aggregate3", args: [aggregateRows.map((row) => ({
-                    target: row.address, allowFailure: false, callData: row.data,
-                }))] });
-        const aggregateDecoder = (value) => {
-            const raw = rpcHexValue(512 * 1024)(value);
-            let decoded;
-            try {
-                decoded = decodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", data: raw });
-            }
-            catch {
-                return bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
-            }
-            if (decoded.length !== aggregateRows.length || decoded.some((row) => !row.success))
-                bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
-            return decoded.map((row) => rpcHexValue(64 * 1024)(row.returnData));
-        };
-        const items = [
-            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-            // Base fee machinery is system/predeploy code and is never covered by retained ordinary-code proof.
-            ...feeContract.code.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable",
-                decoder: rpcHexValue(128 * 1024) })),
-            ...directRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
-                params: row.kind === "storage" ? [row.address, row.data, tag] : [{ to: row.address, data: row.data }, tag],
-                cachePolicy: "immutable", decoder: rpcHexValue(64 * 1024) })),
-            ...(aggregateRows.length === 0 ? [] : [{ method: "eth_call", params: [{ to: MULTICALL3_ADDRESS, data: aggregateData }, tag],
-                    cachePolicy: "immutable", decoder: aggregateDecoder }]),
-            { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
-            { method: "eth_getBlockByNumber", params: [quantity(BigInt(frozen.block.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-        ];
+        const { readRows, directRows, aggregateRows, items } = bridgeRetainedDeploymentReadPlan(this.chainId, peerChainId, tool, token, at, frozen.block);
         const values = await this.batchCall(items, "archive_deployment");
         let offset = 0;
         if (values[offset++] !== BigInt(this.chainId))
@@ -412,22 +350,7 @@ export class BridgeRpc {
     async basePinnedFeeValues(gas, block, safe) {
         if (this.batchCall === undefined)
             bridgeFailure("APN_RPC_CONFIG", "bridge_batch_unavailable");
-        const tag = { blockHash: block.hash, requireCanonical: true }, multicallHash = PORTFOLIO_NETWORK_RPC.find((row) => row.evmChainId === 8453)?.multicall3CodeHash;
-        if (multicallHash === undefined || multicallHash === null)
-            bridgeFailure("APN_RPC_CONFIG", "bridge_multicall_unreviewed");
-        const codeRows = [...BASE_FEE_CONTRACT.code, { address: getAddress(MULTICALL3_ADDRESS), codeHash: multicallHash }], directRows = BASE_FEE_CONTRACT.reads.filter((row) => row.kind !== "call" || !deploymentMulticallEligible(row.data)), aggregateRows = BASE_FEE_CONTRACT.reads.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data));
-        const operatorData = `0x275aedd2${gas.toString(16).padStart(64, "0")}`;
-        const items = [
-            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-            ...codeRows.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable", decoder: rpcHexValue(128 * 1024) })),
-            ...directRows.map((row) => ({ method: "eth_getStorageAt", params: [row.address, row.data, tag], cachePolicy: "immutable", decoder: rpcHexValue(64 * 1024) })),
-            deploymentAggregateItem(aggregateRows, tag),
-            { method: "eth_call", params: [{ from: BRIDGE_ZERO_ADDRESS, to: GAS_ORACLE, data: operatorData }, tag], cachePolicy: "immutable", decoder: rpcHexValue(32) },
-            { method: "eth_call", params: [{ from: BRIDGE_ZERO_ADDRESS, to: L1_BLOCK, data: "0x4d5d9a2a" }, tag], cachePolicy: "immutable", decoder: rpcHexValue(32) },
-            { method: "eth_call", params: [{ from: BRIDGE_ZERO_ADDRESS, to: L1_BLOCK, data: "0x16d3bc7f" }, tag], cachePolicy: "immutable", decoder: rpcHexValue(32) },
-            { method: "eth_getBlockByNumber", params: [quantity(BigInt(block.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-            { method: "eth_getBlockByNumber", params: [quantity(BigInt(safe.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-        ];
+        const { codeRows, directRows, aggregateRows, items } = basePinnedFeeReadPlan(gas, block, safe);
         const values = await this.batchCall(items, "archive_deployment");
         let offset = 0;
         if (values[offset++] !== BigInt(this.chainId))

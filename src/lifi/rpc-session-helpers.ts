@@ -14,11 +14,13 @@ export class BridgeRpcPhysicalBudget {
   private tail: Promise<void> = Promise.resolve();
   constructor(private readonly now: () => number = Date.now,
     private readonly wait: (milliseconds: number) => Promise<void> = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
-    private readonly policy: BridgeRpcPhysicalPolicy = "default") {}
+    private readonly policy: BridgeRpcPhysicalPolicy = "default",
+    /** The derived sign-and-send step with its retry headroom; it raises the policy cap and is zero without an unsent effect. */
+    private readonly sendStepPosts = 0) {}
   remaining(): number {
     const limit = this.policy === "canonical_wbtc_across_approval_continuation" ? WBTC_ACROSS_CONTINUATION_POST_LIMIT
       : this.policy === "canonical_usdc_across_approval_continuation" ? USDC_ACROSS_CONTINUATION_POST_LIMIT : BRIDGE_INVOCATION_RPC_POST_LIMIT;
-    return limit - this.posts;
+    return Math.max(limit, this.sendStepPosts) - this.posts;
   }
   require(posts: number, method: string): void {
     if (this.remaining() < posts) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC invocation POST budget exhausted.",
