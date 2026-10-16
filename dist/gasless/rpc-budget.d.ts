@@ -1,3 +1,9 @@
+/** Blocks one canonical scan window covers; each window is one request of bounded `eth_getLogs` ranges. */
+export declare const GASLESS_SCAN_WINDOW_BLOCKS = 256n;
+/** Range of one `eth_getLogs` request, inside the limits public RPCs put on log queries. */
+export declare const GASLESS_LOG_REQUEST_BLOCKS = 10n;
+/** Windows one observation step may scan before it stops at a durable cursor (1,024 blocks). */
+export declare const GASLESS_SCAN_WINDOWS = 4;
 export declare function gaslessSnapshotPosts(maxBatchItems: number): number;
 /** Unsplit step costs of the original-window path (`execution.ts`); approve and resume never take a batch cap. */
 export declare const GASLESS_STEP_POSTS: Readonly<{

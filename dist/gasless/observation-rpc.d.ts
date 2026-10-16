@@ -16,7 +16,6 @@ export declare class GaslessObservationRpc implements GaslessObservationPort {
     readonly rpcEndpointHash: string;
     private readonly endpoint;
     private readonly environmentName;
-    private readonly deployment;
     private sequence;
     private readonly rpcCall;
     private queue;

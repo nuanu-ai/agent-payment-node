@@ -31,7 +31,7 @@ export async function bundledGaslessFixture(root: string) {
   const at = { number: "0x64", hash: blockHash, timestamp: `0x${Math.floor(s.now.getTime() / 1000).toString(16)}`,
     baseFeePerGas: "0xf4240" };
   const calls: Array<{ method: string; methods: readonly string[]; bundler: boolean; afterApproval: boolean }> = [];
-  const estimates: unknown[][] = [];
+  const estimates: unknown[][] = [], layoutWitnessBlocks: unknown[] = [];
   let approved = false, limit = 20, intent: GaslessIntent | undefined;
   let fault: "" | "chain" | "entrypoint" | "balance" | "allowance" | "nonce" | "fees" | "decimals" | "layout" |
     "code" | "proxy" | "reorg" = "";
@@ -77,7 +77,7 @@ export async function bundledGaslessFixture(root: string) {
       const read = row.reads.find(r => r.kind === "storage" && r.address === params[0] && r.data === params[1]);
       if (read) return fault === "proxy" ? word(1n) : read.expected;
       // The mirror estimate measures the row's balance-layout claim before overriding it.
-      assert.equal(params[0], asset.token); assert.equal(params[1], balanceLayoutSlot);
+      assert.equal(params[0], asset.token); assert.equal(params[1], balanceLayoutSlot); layoutWitnessBlocks.push(params[2]);
       return word(fault === "layout" ? 1n : fault === "balance" ? 0n : 100_000_000n);
     }
     if (method === "eth_call") {
@@ -109,7 +109,7 @@ export async function bundledGaslessFixture(root: string) {
     clock: { now: () => new Date(s.now) }, wait: s.wait });
   const execute = core.execute.bind(core);
   core.execute = async request => await withGaslessRpcInvocation(async () => await execute(request), "resume");
-  return { ...s, core, rpc, calls, estimates, setLimit: (value: number) => { limit = value; },
+  return { ...s, core, rpc, calls, estimates, layoutWitnessBlocks, setLimit: (value: number) => { limit = value; },
     setFault: (value: typeof fault) => { fault = value; },
     setBlockHash: (hash: string) => { at.hash = hash; },
     setBatchReply: (value: typeof batchReply) => { batchReply = value; },
