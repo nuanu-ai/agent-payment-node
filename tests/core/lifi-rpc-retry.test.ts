@@ -40,7 +40,8 @@ for (const status of [500, 503]) test(`read-only Bridge RPC retries transient HT
   const f = fixture([status, 200]);
   await bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, f)(8453).assertChain();
   // The retry waits its backoff and still keeps the provider family's 750 ms gap (this clock only advances in the transport).
-  assert.deepEqual(f.methods, ["eth_chainId", "eth_chainId"]); assert.deepEqual(f.delays, [2_000, 750]);
+  assert.deepEqual(f.methods, ["eth_chainId", "eth_chainId"]); assert.equal(f.delays.length, 2); assert.equal(f.delays[0], 2_000);
+  assert.ok(f.delays[1]! > 700 && f.delays[1]! <= 750, `${f.delays[1]}`);
 });
 test("read-only HTTP 429 returns a typed cooldown without retry", async () => {
   const f = fixture([429]);

@@ -285,7 +285,10 @@ function validateTransition(p: BridgeTransition, n: BridgeTransition, legacy = f
   if (p.destinationProof !== null && !bridgeSame(p.destinationProof, n.destinationProof)) bridgeCorrupt();
 }
 export function validateBridgeContinuity(previous: BridgeOperationRecord, next: BridgeOperationRecord): void {
-  validateBridgeOperation(previous); validateBridgeOperation(next);
+  validateBridgeOperation(previous); validateBridgeOperation(next); assertBridgeAppend(previous, next);
+}
+/** `next` equals `previous` or appends exactly one transition to it. Both records must already be validated. */
+export function assertBridgeAppend(previous: BridgeOperationRecord, next: BridgeOperationRecord): void {
   if (bridgeSame(previous, next)) return;
   if (previous.terminal || previous.fingerprint !== next.fingerprint || next.transitions.length !== previous.transitions.length + 1 ||
     !bridgeSame(previous.transitions, next.transitions.slice(0, -1))) bridgeCorrupt();

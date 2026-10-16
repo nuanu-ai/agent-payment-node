@@ -356,6 +356,10 @@ function validateTransition(p, n, legacy = false) {
 export function validateBridgeContinuity(previous, next) {
     validateBridgeOperation(previous);
     validateBridgeOperation(next);
+    assertBridgeAppend(previous, next);
+}
+/** `next` equals `previous` or appends exactly one transition to it. Both records must already be validated. */
+export function assertBridgeAppend(previous, next) {
     if (bridgeSame(previous, next))
         return;
     if (previous.terminal || previous.fingerprint !== next.fingerprint || next.transitions.length !== previous.transitions.length + 1 ||
