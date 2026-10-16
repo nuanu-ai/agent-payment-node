@@ -343,11 +343,16 @@ bytes.
 ## Program authority pins and the public-RPC diet (APN 0.5.43)
 
 The byte pins of the 16 October re-pin are retired. One keyless quote now sends
-8 Solana POSTs and receives about 46 KB (it was 15 POSTs and 14.3 MB: seven
+9 Solana POSTs and receives about 46 KB (it was 15 POSTs and 14.3 MB: seven
 1.5 MB ProgramData slices); the pre-signing guard sends one header read
-instead of eight reads. Each Orca keyless command's physical request budget is
-derived from its read plan (`src/swap/solana-read-plan.ts`): quote 8,
-approve 12, status 4, plus 2 of headroom. The stable USDC→USDT route uses the
+instead of eight reads. Every account read goes out in requests of at most
+eight keys (PublicNode's limit), so the ten-key market read is an eight-key
+request (pool and tick arrays first, one slot) and a two-key request for the
+owner's token accounts, at most 150 slots apart; they share one JSON-RPC
+batch where the endpoint batches account reads. Each Orca keyless command's
+physical request budget is derived from its read plan
+(`src/swap/solana-read-plan.ts`): quote 9, approve 13, status 4, plus 2 of
+headroom. The stable USDC→USDT route uses the
 same header verifier and no fee-rate pin; its mechanism is
 `whirlpool-stable-upgrade-authority.1`, with the slot 440170207 and 457152296
 generations kept for existing operations.

@@ -8,8 +8,8 @@ import { ORCA_SOL_USDC_POOL, ORCA_SOLANA_CHAIN, USDC_MINT } from "./pins.js";
 export const ORCA_KEYLESS_EXECUTION_SCHEMA = "apn.orca-whirlpool-keyless-execution.v1";
 export const ORCA_EVIDENCE_DOMAIN = "apn.orca-whirlpool-onchain-evidence.v1";
 export const ORCA_ROUTE_DOMAIN = "apn.orca-whirlpool-route.v1";
-/** Slots between the account read and the simulation; the quote refuses beyond it. */
-export const ORCA_MAX_SLOT_DRIFT = 150;
+import { ORCA_MAX_SLOT_DRIFT } from "./accounts.js";
+export { ORCA_MAX_SLOT_DRIFT };
 export const SOLANA_BASE_FEE_LAMPORTS_PER_SIGNATURE = 5000n;
 export function orcaEvidenceHash(evidence) { return domainHash(ORCA_EVIDENCE_DOMAIN, canonicalJson(evidence)); }
 export function orcaRouteHash(plan) {

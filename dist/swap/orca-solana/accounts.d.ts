@@ -39,10 +39,14 @@ export interface TickArrayState {
 export declare const WHIRLPOOL_ACCOUNT_BYTES = 653;
 export declare const TICK_ARRAY_ACCOUNT_BYTES = 9988;
 export declare const TICK_ARRAY_SIZE = 88;
+/** Slots between the account read and the simulation (and between the pages of one read); the quote refuses beyond it. */
+export declare const ORCA_MAX_SLOT_DRIFT = 150;
 /**
- * Bounded base64 `getMultipleAccounts` read. The shared rail decoder caps account data at 2 KiB; pool state, tick
- * arrays and program bytes are larger, so this reader takes an explicit per-account byte cap and still rejects
- * unknown fields, non-canonical base64 and any size disagreement.
+ * Bounded base64 account read in requests of at most eight keys (readSolanaAccountPages), so the keyless PublicNode
+ * endpoint answers it. Keys that must agree (a pool and its tick arrays) are passed first and share the first page; the
+ * pages may be at most ORCA_MAX_SLOT_DRIFT slots apart and the read reports the highest page slot. The shared rail
+ * decoder caps account data at 2 KiB; pool state, tick arrays and program headers are larger, so this reader takes an
+ * explicit per-account byte cap and still rejects unknown fields, non-canonical base64 and any size disagreement.
  */
 export declare function readRawAccounts(rpc: SolanaRpcPort, addresses: readonly string[], maximumBytes: number, slice?: {
     readonly offset: number;
