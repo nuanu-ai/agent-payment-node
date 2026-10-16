@@ -5,6 +5,7 @@ export interface X402ReconciliationStore {
 }
 export interface X402ReconciliationOutcome {
     readonly operation: X402OperationRecord;
+    /** True only when this call revalidated a complete zero scan anchored at or below its observed safe head. */
     readonly completeZeroScanValidated: boolean;
     readonly completeZeroScanRead: boolean;
 }
