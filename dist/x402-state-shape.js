@@ -19,7 +19,7 @@ const LEGAL_NEXT = {
     authorization_material_pending: ["authorization_material_pending", "authorized_not_sent", "failed_before_effect", "failed_expired_unused", "abandoned_unknown"],
     authorized_not_sent: ["authorized_not_sent", "paid_request_pending", "effect_unknown", "failed_before_effect", "failed_expired_unused", "abandoned_unknown"],
     paid_request_pending: ["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed"],
-    settlement_pending: ["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed", "failed_settled_without_result", "abandoned_unknown"],
+    settlement_pending: ["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed", "failed_expired_unused", "failed_settled_without_result", "abandoned_unknown"],
     effect_unknown: ["effect_unknown", "settlement_pending", "paid_request_pending", "seller_result_recovery_pending", "completed", "failed_expired_unused", "failed_settled_without_result", "abandoned_unknown"],
     seller_result_recovery_pending: ["seller_result_recovery_pending", "effect_unknown", "completed", "failed_settled_without_result", "abandoned_unknown"],
     completed: [], failed_before_effect: [], failed_expired_unused: [], failed_settled_without_result: [], abandoned_unknown: [],

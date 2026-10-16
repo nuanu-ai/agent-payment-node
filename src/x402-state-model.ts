@@ -198,7 +198,24 @@ export interface Erc7710SettlementEvidence {
   readonly evidenceHash: string;
 }
 
-export type SettlementEvidence = Eip3009SettlementEvidence | Erc7710SettlementEvidence;
+/** Settlement read from authorizationState(wallet, nonce) = true at a safe block; a transaction only when its receipt matched. */
+export interface Eip3009StateSettlementEvidence {
+  readonly schemaVersion: "apn.x402.settlement-evidence.v2";
+  readonly network: X402Network;
+  readonly chainId: X402ChainText;
+  readonly token: `0x${string}`;
+  readonly safeHead: { readonly number: string; readonly hash: `0x${string}`; readonly observedAt: string };
+  readonly authorizationState: {
+    readonly value: true; readonly blockNumber: string; readonly blockHash: `0x${string}`;
+    readonly blockTag: "safe"; readonly observedAt: string;
+  };
+  readonly transactionHash?: `0x${string}`;
+  readonly transactionBlock?: { readonly number: string; readonly hash: `0x${string}` };
+  readonly rpcOriginHash: string;
+  readonly evidenceHash: string;
+}
+
+export type SettlementEvidence = Eip3009SettlementEvidence | Eip3009StateSettlementEvidence | Erc7710SettlementEvidence;
 
 export interface Eip3009UnusedExpiryEvidence {
   readonly schemaVersion: "apn.x402.unused-expiry-evidence.v1";

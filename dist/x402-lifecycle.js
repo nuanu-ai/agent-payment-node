@@ -93,7 +93,8 @@ export class X402Lifecycle {
         }
         if (operation.settlementEvidence === undefined)
             return operation;
-        if (operation.settlementResponseObservation !== undefined &&
+        // A nonce-state proof without a matched receipt names no transaction; the single-use nonce alone proves this payment.
+        if (operation.settlementResponseObservation !== undefined && operation.settlementEvidence.transactionHash !== undefined &&
             settlementResponseTransaction(operation.settlementResponseObservation) !== operation.settlementEvidence.transactionHash)
             return operation;
         if (operation.resultLink !== undefined)

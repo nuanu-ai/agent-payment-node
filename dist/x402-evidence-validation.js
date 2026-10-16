@@ -2,6 +2,7 @@ import { validX402Tuple } from "./x402-network.js";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { x402OperationBindingHash } from "./x402-state-model.js";
+import { validateStateSettlementEvidence } from "./x402-state-evidence.js";
 import { address, allowedRecord, bytes32, canonicalText, exactRecord, hash, mediaType, positive, record, stateCorrupt, timestamp, transactionHash, uint, } from "./x402-state-validation-primitives.js";
 export function validateAttempts(value, operation) {
     if (!Array.isArray(value) || value.length > 64)
@@ -138,7 +139,7 @@ export function validateTransferMethodEvidence(method, transactionHint, authoriz
         }
         return;
     }
-    if (settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.settlement-evidence.v1" ||
+    if (settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" ||
         unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1") {
         stateCorrupt("x402 EIP-3009 operation contains ERC-7710 settlement evidence.");
     }
@@ -226,7 +227,9 @@ export function validateSettlementEvidence(value, operation) {
     const candidate = record(value);
     return candidate.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1"
         ? validateErc7710SettlementEvidence(candidate, operation)
-        : validateEip3009SettlementEvidence(candidate, operation);
+        : candidate.schemaVersion === "apn.x402.settlement-evidence.v2"
+            ? validateStateSettlementEvidence(candidate, operation)
+            : validateEip3009SettlementEvidence(candidate, operation);
 }
 function validateEip3009SettlementEvidence(value, operation) {
     const evidence = exactRecord(value, [
