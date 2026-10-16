@@ -144,15 +144,23 @@ for (const fault of ["owner", "expired", "identity", "describe"] as const) test(
   if (fault === "identity") assert.equal(f.cleared()!.privateKey, `0x${"0".repeat(64)}`);
   const decrypts = f.decrypts(); await assert.rejects(f.sign()); assert.equal(f.decrypts(), decrypts);
 });
-test("fresh fence failure after optional token signing ends the partial attempt without a second decrypt", async t => {
-  const f = await setup(t, true); let fences = 0;
+test("fresh fence failure after key load ends the attempt without a signature or a second decrypt", async t => {
+  const f = await setup(t, true), originalSign = secp256k1.sign; let fences = 0, signatures = 0;
+  t.mock.method(secp256k1, "sign", (...args: Parameters<typeof originalSign>) => { signatures++; return originalSign(...args); });
   f.wire.beforeBatch = async calls => {
     if (calls.some(c => c.method === "eth_chainId") && calls.some(c => c.method === "eth_getBlockByNumber" && c.params[0] === "finalized"))
-      if (++fences === 4) f.wire.chain = "0x1";
+      if (++fences === 2) f.wire.chain = "0x1";
   };
-  await assert.rejects(f.sign()); assert.equal(fences, 4); assert.equal(f.decrypts(), 1);
+  await assert.rejects(f.sign()); assert.equal(fences, 2); assert.equal(f.decrypts(), 1); assert.equal(signatures, 0);
   assert.equal((await f.journal.findOperation(f.record.operationId))!.exposureJournal!.signed, null);
   await assert.rejects(f.sign()); assert.equal(f.decrypts(), 1); assert.equal(f.cleared()!.privateKey, `0x${"0".repeat(64)}`);
+});
+test("native signing observes the chain before and after key load only, not around every signature", async t => {
+  const f = await setup(t, true), before = f.batches.length;
+  assert.ok((await f.sign()).signingOrigin);
+  const posts = f.batches.slice(before);
+  assert.equal(posts.length, 4, "two fence checks of two POSTs (was 5-7 checks of 4 POSTs)");
+  assert.equal(posts.filter(batch => batch.some((call: any) => call.method === "eth_chainId")).length, 2);
 });
 
 test("deadline expiry after successful signed persistence produces no signing origin", async t => {
@@ -171,7 +179,7 @@ for (const point of ["describe", "token", "permit2"] as const) test(`await-resum
   const f = await setup(t, point !== "describe", 120), original = Permit2ProductionJournal.assertNativeSigningContinuation;
   const originalSign = secp256k1.sign; let signatures = 0, assertions = 0;
   t.mock.method(secp256k1, "sign", (...args: Parameters<typeof originalSign>) => { signatures++; return originalSign(...args); });
-  const cutoff = point === "describe" ? 3 : point === "token" ? 10 : 17;
+  const cutoff = point === "describe" ? 3 : point === "token" ? 8 : 10;
   t.mock.method(Permit2ProductionJournal, "assertNativeSigningContinuation", async (...args: Parameters<typeof original>) => {
     const record = await original(...args);
     if (++assertions === cutoff) queueMicrotask(() => f.advance(62));
@@ -195,7 +203,7 @@ for (const point of ["describe", "token", "permit2"] as const) test(`6000ms fact
   const f = await setup(t, point !== "describe", 120), original = Permit2ProductionJournal.assertNativeSigningContinuation;
   const originalSign = secp256k1.sign; let signatures = 0, assertions = 0;
   t.mock.method(secp256k1, "sign", (...args: Parameters<typeof originalSign>) => { signatures++; return originalSign(...args); });
-  const cutoff = point === "describe" ? 3 : point === "token" ? 10 : 17;
+  const cutoff = point === "describe" ? 3 : point === "token" ? 8 : 10;
   t.mock.method(Permit2ProductionJournal, "assertNativeSigningContinuation", async (...args: Parameters<typeof original>) => {
     const record = await original(...args); if (++assertions === cutoff) { const before = f.now().getTime(); queueMicrotask(() => { f.advance(7); assert.equal(f.now().getTime() - before, 6000); }); } return record;
   });

@@ -5,7 +5,7 @@ import { Permit2ProductionRepository } from "./production-repository.js";
 import { permit2ProductionOperationDigest } from "./production-signed.js";
 import { Permit2ObserverRpc } from "./production-observer-rpc.js";
 import { assertObserverChain, observerBlock } from "./production-observer-facts.js";
-import { signingIdentityCalls, signingTokenCalls, assertSigningIdentity, assertSigningTokens, assertSigningTime } from "./production-signing-facts.js";
+import { signingCalls, assertSigningReads, assertSigningTime } from "./production-signing-facts.js";
 import { signingOwnerFence } from "./production-signing-owner.js";
 import { Permit2MetadataLockOwner } from "./production-signing-scope.js";
 /** Actual read-only observation only. Never human approval, custody permission, or transport authority. */
@@ -106,17 +106,13 @@ export class Permit2ProductionSigningFence {
                 const context = await this.#owner(id, selected, scope);
                 open(rpc.signal);
                 freeze(context);
+                // Two POSTs: chain id with the finalized header, then one batch pinned by EIP-1898 to that canonical block, so no
+                // header recheck follows it (was four POSTs with a chain/header recheck and re-downloaded immutable code).
                 const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["finalized", false] }]);
                 assertObserverChain(first[0]);
                 const block = observerBlock(first[1], "finalized");
                 assertSigningTime(context.record, this.#now(), block);
-                assertSigningIdentity(context.record, await rpc.batch(signingIdentityCalls(context.record, block)));
-                assertSigningTokens(context.record, await rpc.batch(signingTokenCalls(context.record, block)));
-                const again = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: [block.tag, false] }]);
-                assertObserverChain(again[0]);
-                const rechecked = observerBlock(again[1], block.tag);
-                if (rechecked.hash !== block.hash || rechecked.number !== block.number || rechecked.timestamp !== block.timestamp)
-                    invalid();
+                assertSigningReads(context.record, await rpc.batch(signingCalls(context.record, block)));
                 await this.#owner(id, selected, scope, context);
                 open(rpc.signal);
                 const captured = this.#now();

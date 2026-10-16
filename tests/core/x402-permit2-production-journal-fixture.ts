@@ -36,7 +36,7 @@ export async function journalFixture(t: TestContext, sponsor = false, maxTimeout
     checkpoint: { ...m.checkpoint, registryVersion: active.registry.registryVersion, policyRevision: active.revision,
       activationDigest: active.activationDigest } });
   const record = sealPermit2ProductionRecord({ ...productionRecordBody(f.record), material });
-  const preparation = new Permit2ProductionPreparation(root, { now, rpc: { call: async () => { throw new Error("Unexpected preparation RPC"); } } });
+  const preparation = new Permit2ProductionPreparation(root, { now, rpc: { batch: async () => { throw new Error("Unexpected preparation RPC"); } } });
   await preparation.records.ready();
   await state.withLocks([`profile:${record.profileHash}`, `operation:${record.operationId}`],
     () => preparation.records.persistPreparedLocked(record, { now }));
