@@ -14,6 +14,7 @@ import { usdtUserOperation } from "./userop.js";
 
 import { USDT_BOUND_V2_SCHEMA, validateUsdtBoundOperationV2, type UsdtBoundOperationV2 } from "./bound-v2-codec.js";
 import { consumeUsdtV2Prepared, type UsdtPolicyPreparedV2 } from "./policy-prepare-v2.js";
+import { validateUsdtStoredBoundOperation } from "./bound-stored.js";
 export type UsdtAnyBoundOperation = UsdtBoundOperation | UsdtBoundOperationV2;
 export function validateUsdtAnyBoundOperation(value: unknown): UsdtAnyBoundOperation {
   return isPlainRecord(value) && value.schemaVersion === USDT_BOUND_V2_SCHEMA ? validateUsdtBoundOperationV2(value) : validateUsdtBoundOperation(value);
@@ -202,7 +203,8 @@ export class UsdtBoundOperationRepository {
       (stat.mode & 0o777) !== FILE_MODE || stat.size > MAX_BYTES) fail("bound_file", "APN_STATE_SECURITY");
     let parsed: unknown;
     try { parsed = JSON.parse(await readFile(path, "utf8")); } catch { fail("bound_json"); }
-    return validateUsdtAnyBoundOperation(parsed);
+    // R2: a saved record loads against its own hashes and schema; signing and sending re-validate it against current pins.
+    return validateUsdtStoredBoundOperation(parsed);
   }
   private async readClaim(idempotencyKey: string): Promise<UsdtAnyBoundOperation | null> {
     if (!await this.dir(this.claimsPath(), false)) return null;

@@ -12,6 +12,7 @@ import { planUsdtTransfer } from "./quote.js";
 import { usdtUserOperation } from "./userop.js";
 import { USDT_BOUND_V2_SCHEMA, validateUsdtBoundOperationV2 } from "./bound-v2-codec.js";
 import { consumeUsdtV2Prepared } from "./policy-prepare-v2.js";
+import { validateUsdtStoredBoundOperation } from "./bound-stored.js";
 export function validateUsdtAnyBoundOperation(value) {
     return isPlainRecord(value) && value.schemaVersion === USDT_BOUND_V2_SCHEMA ? validateUsdtBoundOperationV2(value) : validateUsdtBoundOperation(value);
 }
@@ -234,7 +235,8 @@ export class UsdtBoundOperationRepository {
         catch {
             fail("bound_json");
         }
-        return validateUsdtAnyBoundOperation(parsed);
+        // R2: a saved record loads against its own hashes and schema; signing and sending re-validate it against current pins.
+        return validateUsdtStoredBoundOperation(parsed);
     }
     async readClaim(idempotencyKey) {
         if (!await this.dir(this.claimsPath(), false))

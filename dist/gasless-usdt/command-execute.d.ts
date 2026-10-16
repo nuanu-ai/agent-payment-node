@@ -10,6 +10,11 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 export interface UsdtForegroundApproval {
     approve(bound: UsdtBoundOperation): Promise<void>;
 }
+/**
+ * A saved operation loads against its own hashes (R2). Before any prompt, signature or send it must also match every
+ * current pin, address and bound; a record an earlier release wrote under other constants needs a new preparation.
+ */
+export declare function assertUsdtBoundCurrent(bound: UsdtBoundOperation): void;
 /** Render only integrity-checked, frozen operation facts before asking for a foreground code. */
 export declare function usdtApprovalPrompt(bound: UsdtBoundOperation, now: number): {
     readonly text: string;
