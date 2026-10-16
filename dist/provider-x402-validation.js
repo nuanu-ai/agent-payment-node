@@ -39,7 +39,7 @@ function validateRangeSettlement(evidence, operation) {
         evidence.chainId !== "8453" || evidence.network !== CHAIN_CAIP2 || evidence.token !== BASE_USDC.toLowerCase() ||
         evidence.payer !== operation.provider.payer || evidence.payee !== operation.requirement.payee ||
         evidence.amountAtomic !== operation.requirement.amountAtomic || evidence.receiptStatus !== "success" ||
-        evidence.rpcOriginHash !== operation.rpcOriginHash || lower === undefined || upper === undefined ||
+        !/^[a-f0-9]{64}$/u.test(evidence.rpcOriginHash) || lower === undefined || upper === undefined ||
         canonicalJson(evidence.lowerBlock) !== canonicalJson(lower) || canonicalJson(evidence.upperBlock) !== canonicalJson(upper) ||
         evidence.transactionHash !== transfer.transactionHash || !validBlock(lower, "safe") || !validBlock(upper, "number") ||
         !validTransfer(transfer, operation) || BigInt(transfer.blockNumber) < BigInt(lower.number) ||
@@ -57,7 +57,7 @@ function validateTransactionSettlement(evidence, operation) {
         evidence.network !== CHAIN_CAIP2 || evidence.token !== BASE_USDC.toLowerCase() ||
         evidence.payer !== operation.provider.payer || evidence.payee !== operation.requirement.payee ||
         evidence.amountAtomic !== operation.requirement.amountAtomic || evidence.receiptStatus !== "success" ||
-        evidence.rpcOriginHash !== operation.rpcOriginHash || evidence.qualifyingTransferCount !== "1" ||
+        !/^[a-f0-9]{64}$/u.test(evidence.rpcOriginHash) || evidence.qualifyingTransferCount !== "1" ||
         binding?.transactionHash !== evidence.transactionHash || binding.evidenceDigest !== evidence.evidenceHash ||
         binding.stage !== "evidence_validated" || !validBlock(evidence.receiptBlock, "number") ||
         !validBlock(evidence.safeHead, "safe") || BigInt(evidence.receiptBlock.number) > BigInt(evidence.safeHead.number) ||

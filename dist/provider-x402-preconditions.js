@@ -1,4 +1,3 @@
-import { sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { effectiveX402Cap } from "./profile-policy.js";
 import { capabilityHash, LOCAL_PROVIDER_ID, markProviderProfileDrift } from "./provider-profile.js";
@@ -52,11 +51,6 @@ export function assertFrozenProviderX402Policy(operation, policy, balance) {
         throw new ApnError("APN_REPREPARE_REQUIRED", "The bound x402 policy changed before provider effect.");
     }
     assertProviderPolicyBalance(policy, balance, operation.requirement.amountAtomic);
-}
-export function assertProviderX402RpcBinding(context, operation) {
-    if (sha256(`provider-x402-rpc\0${canonicalProviderX402RpcUrl(context.requireRpcUrl())}`) !== operation.rpcBindingHash) {
-        throw new ApnError("APN_RPC_CONFIG", "Provider x402 recovery RPC URL changed from the frozen operation.");
-    }
 }
 export function canonicalProviderX402RpcUrl(value) {
     const parsed = new URL(value);

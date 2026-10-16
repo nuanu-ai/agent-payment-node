@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeSellerResultJson } from "./normalized-provider-json.js";
 import { x402WaitProjectedStatus } from "./x402-state-integrity.js";
 import { providerX402CompleteBindingHash, providerX402FrozenFingerprint, validateProviderX402Settlement, } from "./provider-x402-validation.js";
 import { providerX402SettledWithoutResultProof } from "./provider-x402-proof.js";
@@ -16,7 +16,7 @@ export function providerX402RequestHash(input) {
         method: "x402.fetch.prepare",
         profile: input.profile,
         canonicalUrl: input.canonicalUrl,
-        rpcUrl: input.rpcUrl,
+        ...(input.legacyRpcUrl === undefined ? {} : { rpcUrl: input.legacyRpcUrl }),
         methodShape: input.httpRequest === undefined ? "GET_absent_body" : "apn.http-request.v1",
         ...x402HttpRequestBinding(input.httpRequest),
         callerCapAtomic: input.callerCapAtomic ?? null,
@@ -231,7 +231,7 @@ function validateSellerResult(result, amount) {
         corrupt();
     try {
         const parsed = JSON.parse(result.canonical_json);
-        if (canonicalizeNormalizedProviderJson(parsed) !== result.canonical_json)
+        if (canonicalizeSellerResultJson(parsed) !== result.canonical_json)
             corrupt();
     }
     catch {

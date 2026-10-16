@@ -23,7 +23,7 @@ export async function observeProviderSettlement(operation, rpc) {
     let upperBlock = operation.immutableUpperBlock;
     try {
         const identity = await rpc.assertBaseChain();
-        if (sha256(identity.rpcOrigin) !== operation.rpcOriginHash)
+        if (identity.chainId !== 8453 || identity.rpcOrigin.length === 0)
             throw protocol();
         const safe = await rpc.getX402Head("safe");
         assertHead(safe, identity.rpcOrigin);
@@ -66,14 +66,14 @@ export async function observeProviderSettlement(operation, rpc) {
             payer: operation.provider.payer,
             payee: operation.requirement.payee,
             amountAtomic: operation.requirement.amountAtomic,
-            rpcOriginHash: operation.rpcOriginHash,
+            rpcOriginHash: sha256(identity.rpcOrigin),
         };
         return { kind: "verified", upperBlock, evidence: { ...base, evidenceHash: hashObject(base) } };
     }
     catch (error) {
         return {
             kind: "ambiguous",
-            reason: error instanceof ApnError && error.code === "APN_RPC_PROTOCOL"
+            reason: error instanceof FrozenEvidenceContradiction
                 ? "settlement_evidence_contradiction"
                 : "provider_evidence_capability_gap",
             ...(upperBlock === undefined ? {} : { upperBlock }),
@@ -84,8 +84,9 @@ async function immutableUpper(operation, rpc, safeNumber, deadline, rpcOrigin) {
     if (operation.immutableUpperBlock !== undefined) {
         const observed = await rpc.getX402Block(operation.immutableUpperBlock.number);
         assertBlock(observed, rpcOrigin);
-        if (observed.hash !== operation.immutableUpperBlock.hash || observed.timestamp !== operation.immutableUpperBlock.timestamp)
-            throw protocol();
+        if (observed.hash !== operation.immutableUpperBlock.hash || observed.timestamp !== operation.immutableUpperBlock.timestamp) {
+            throw new FrozenEvidenceContradiction();
+        }
         return operation.immutableUpperBlock;
     }
     let low = BigInt(operation.evidenceLowerBlock?.number ?? "0");
@@ -97,7 +98,7 @@ async function immutableUpper(operation, rpc, safeNumber, deadline, rpcOrigin) {
     const frozenLower = operation.evidenceLowerBlock;
     if (frozenLower === undefined || lower.number !== frozenLower.number || lower.hash !== frozenLower.hash ||
         lower.timestamp !== frozenLower.timestamp)
-        throw protocol();
+        throw new FrozenEvidenceContradiction();
     if (BigInt(lower.timestamp) >= deadline)
         throw protocol();
     while (low + 1n < high) {
@@ -163,4 +164,8 @@ function assertIdentity(number, hash, timestamp, observedAt) {
         throw protocol();
 }
 function protocol() { return new ApnError("APN_RPC_PROTOCOL", "Provider x402 Base evidence is invalid."); }
+/** The chain contradicts a block hash this operation already froze; every other failure is retried. */
+class FrozenEvidenceContradiction extends Error {
+    constructor() { super("Provider x402 frozen block evidence changed."); }
+}
 //# sourceMappingURL=provider-x402-evidence.js.map
