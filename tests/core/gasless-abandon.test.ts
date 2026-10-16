@@ -73,6 +73,22 @@ test("MetaMask gasless unknown relay is owner-abandoned only after its approval 
   await new OperationService(f.state).assertProfileAvailable(after.profileHash);
 });
 
+test("a canonically reverted MetaMask relay leaves a live delegation; the owner may release it after its window (R4)", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const approval = new AbandonApproval();
+  const f = await mmFixture(temporary.root, 8453, "empty", { abandonApproval: approval }), { id } = await f.prepare();
+  f.rpc.phase = "reverted";
+  assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+  assert.equal((await f.record(id)).state, "failed_effects_pending");
+  assert.equal((await f.core.execute({ command: "operation.abandon", operationId: id })).error?.code, "APN_OPERATION_BLOCKED");
+  f.now.setTime(f.now.getTime() + 600_000); f.provider.failObserve = true;
+  const abandoned = await f.core.execute({ command: "operation.abandon", operationId: id });
+  assert.equal(abandoned.ok, true, JSON.stringify(abandoned.error));
+  const after = await f.record(id);
+  assert.equal(after.state, "abandoned_unknown"); assert.equal(after.terminal, true); assert.equal(approval.calls.length, 1);
+  await new OperationService(f.state).assertProfileAvailable(after.profileHash);
+});
+
 test("MetaMask gasless owner abandonment still fits a journal an earlier release filled to the history limit", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const approval = new AbandonApproval();

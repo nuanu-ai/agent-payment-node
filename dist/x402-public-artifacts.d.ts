@@ -7,7 +7,7 @@ interface NormalizedProviderReceipt {
     readonly variant: "normalized_provider_json";
     readonly kind: "x402_fetch";
     readonly operationId: string;
-    readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result";
+    readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result" | "abandoned_unknown";
     readonly reason: string;
     readonly proofClass: string;
     readonly resource: {

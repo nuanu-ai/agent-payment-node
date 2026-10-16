@@ -22,7 +22,7 @@ export function transitionProviderX402Operation(
 ): ProviderX402OperationRecord {
   const transitions = appendProviderX402Transition(operation.transitions, { at, state, reason, proofClass });
   const { integrityHash: _integrity, ...base } = operation;
-  const terminal = ["completed", "failed_before_effect", "failed_settled_without_result"].includes(state);
+  const terminal = ["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(state);
   return sealProviderX402Operation({
     ...base,
     ...extra,

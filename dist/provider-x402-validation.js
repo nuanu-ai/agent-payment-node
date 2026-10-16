@@ -71,6 +71,7 @@ function validateTransactionSettlement(evidence, operation) {
 export function assertProviderX402ReceiptAuthority(operation, receipt) {
     const completed = receipt.terminalState === "completed";
     const settledWithoutResult = receipt.terminalState === "failed_settled_without_result";
+    const abandoned = receipt.terminalState === "abandoned_unknown";
     const receiptTime = Date.parse(receipt.createdAt);
     const operationTime = Date.parse(operation.updatedAt);
     if (receipt.operationId !== operation.operationId || receipt.fingerprint !== operation.fingerprint ||
@@ -84,7 +85,8 @@ export function assertProviderX402ReceiptAuthority(operation, receipt) {
         (completed && (receipt.reason !== "x402_completed" || receipt.proofClass !== "x402_safe_settlement")) ||
         (settledWithoutResult && (receipt.reason !== "seller_result_missing" ||
             receipt.proofClass !== providerX402SettledWithoutResultProof(receipt.settlement))) ||
-        (!completed && !settledWithoutResult && receipt.proofClass !== "x402_proven_no_effect") ||
+        (!completed && !settledWithoutResult && !abandoned && receipt.proofClass !== "x402_proven_no_effect") ||
+        (abandoned && receipt.proofClass !== "owner_acknowledgement_only") ||
         (completed !== (operation.sellerResult !== undefined && operation.settlementEvidence !== undefined)) ||
         (settledWithoutResult !== (operation.sellerResult === undefined && operation.settlementEvidence !== undefined)) ||
         canonicalJson(receipt.settlement ?? null) !== canonicalJson(operation.settlementEvidence ?? null) ||

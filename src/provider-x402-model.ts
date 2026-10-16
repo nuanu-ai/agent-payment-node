@@ -32,7 +32,8 @@ export type ProviderX402State =
   | "ambiguous_effect"
   | "completed"
   | "failed_before_effect"
-  | "failed_settled_without_result";
+  | "failed_settled_without_result"
+  | "abandoned_unknown";
 
 export interface ProviderX402Transition {
   readonly sequence: string;
@@ -175,7 +176,7 @@ export interface ProviderX402ReceiptRecord {
   readonly schemaVersion: "apn.provider-x402.receipt.v1";
   readonly kind: "x402_fetch";
   readonly operationId: string;
-  readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result";
+  readonly terminalState: "completed" | "failed_before_effect" | "failed_settled_without_result" | "abandoned_unknown";
   readonly reason: string;
   readonly proofClass: string;
   readonly fingerprint: string;
@@ -271,7 +272,7 @@ export function validateProviderX402Operation(value: unknown): ProviderX402Opera
     !Array.isArray(operation.transitions) || operation.transitions.length === 0 ||
     operation.transitions.at(-1)?.state !== operation.state || operation.transitions.at(-1)?.reason !== operation.reason ||
     operation.transitions.at(-1)?.proofClass !== operation.proofClass ||
-    operation.terminal !== ["completed", "failed_before_effect", "failed_settled_without_result"].includes(operation.state)
+    operation.terminal !== ["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(operation.state)
   ) corrupt();
   validateProviderHttpRequest(operation.request);
   validateTransitions(operation.transitions);
@@ -293,6 +294,8 @@ export function validateProviderX402Operation(value: unknown): ProviderX402Opera
     operation.evidenceLowerBlock === undefined || operation.evidenceDeadlineAt === undefined
   )) corrupt();
   if (operation.state === "completed" && (operation.sellerResult === undefined || operation.settlementEvidence === undefined)) corrupt();
+  if (operation.state === "abandoned_unknown" && (operation.reason !== "owner_acknowledged_unresolved_effect" ||
+    operation.proofClass !== "owner_acknowledgement_only" || operation.settlementEvidence !== undefined)) corrupt();
   if (operation.state === "failed_settled_without_result" && (
     operation.reason !== "seller_result_missing" ||
     operation.proofClass !== providerX402SettledWithoutResultProof(operation.settlementEvidence) ||
@@ -317,7 +320,7 @@ export function validateProviderX402Receipt(value: unknown): ProviderX402Receipt
     receipt.schemaVersion !== "apn.provider-x402.receipt.v1" || receipt.kind !== "x402_fetch" ||
     !hash(receipt.operationId) || !hash(receipt.fingerprint) || !hash(receipt.requestDigest) ||
     !hash(receipt.requirementDigest) || receipt.integrityHash !== hashObject(without) ||
-    !["completed", "failed_before_effect", "failed_settled_without_result"].includes(receipt.terminalState) ||
+    !["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(receipt.terminalState) ||
     receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase()
   ) corrupt();
   if (receipt.result !== undefined && (
@@ -326,6 +329,8 @@ export function validateProviderX402Receipt(value: unknown): ProviderX402Receipt
   )) corrupt();
   if (receipt.terminalState === "completed" && (receipt.result === undefined || receipt.settlement === undefined)) corrupt();
   if (receipt.terminalState === "failed_before_effect" && (receipt.result !== undefined || receipt.settlement !== undefined)) corrupt();
+  if (receipt.terminalState === "abandoned_unknown" && (receipt.reason !== "owner_acknowledged_unresolved_effect" ||
+    receipt.proofClass !== "owner_acknowledgement_only" || receipt.settlement !== undefined)) corrupt();
   if (receipt.terminalState === "failed_settled_without_result" && (
     receipt.reason !== "seller_result_missing" ||
     receipt.proofClass !== providerX402SettledWithoutResultProof(receipt.settlement) ||
@@ -359,15 +364,16 @@ export function validateProviderX402Continuity(
     preparing: ["preparing", "awaiting_approval", "failed_before_effect"],
     awaiting_approval: ["started", "failed_before_effect"],
     started: ["settlement_pending", "ambiguous_effect", "failed_before_effect"],
-    settlement_pending: ["settlement_pending", "ambiguous_effect", "completed", "failed_settled_without_result"],
-    ambiguous_effect: ["ambiguous_effect", "settlement_pending", "failed_settled_without_result"],
+    settlement_pending: ["settlement_pending", "ambiguous_effect", "completed", "failed_settled_without_result", "abandoned_unknown"],
+    ambiguous_effect: ["ambiguous_effect", "settlement_pending", "failed_settled_without_result", "abandoned_unknown"],
+    abandoned_unknown: [],
     completed: [],
     failed_before_effect: [],
     failed_settled_without_result: [],
   };
   if (!allowed[previous.state].includes(next.state)) corrupt();
   if (previous.state === "ambiguous_effect" && next.state === "settlement_pending" && (
-    !["provider_evidence_capability_gap", "settlement_receipt_missing"].includes(previous.reason) ||
+    !["provider_evidence_capability_gap", "settlement_receipt_missing", "settlement_evidence_contradiction"].includes(previous.reason) ||
     next.reason !== "x402_settlement_verified" || next.proofClass !== "x402_settlement_verified_result_pending" ||
     next.sellerResult === undefined || next.settlementEvidence === undefined
   )) corrupt();

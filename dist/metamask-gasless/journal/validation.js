@@ -15,7 +15,7 @@ const EDGES = {
     dispatch_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed"],
     submitted_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
     unknown_finality: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
-    failed_effects_pending: ["failed_effects_pending", "completed"],
+    failed_effects_pending: ["failed_effects_pending", "completed", "abandoned_unknown"],
     completed: [], failed_before_effect: [], abandoned_unknown: [],
 };
 function corrupt() { return mmFail("mm_gasless_state_corrupt"); }
@@ -85,7 +85,7 @@ function step(previous, next) {
         if (n < p || (n === p && !mmSame(previous.cursor.previousEndBlock, next.cursor.previousEndBlock)))
             corrupt();
     }
-    if (previous.state === "failed_effects_pending" && next.state !== "failed_effects_pending" && next.state !== "completed")
+    if (previous.state === "failed_effects_pending" && !["failed_effects_pending", "completed", "abandoned_unknown"].includes(next.state))
         corrupt();
     if (previous.state !== "failed_effects_pending" && next.state === "failed_effects_pending" &&
         next.observation?.phase !== "reverted")

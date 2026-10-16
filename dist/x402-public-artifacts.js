@@ -63,7 +63,7 @@ export function validatePublicX402Receipt(value) {
         receipt.schemaVersion !== "apn.x402.public-receipt.v1" || receipt.variant !== "normalized_provider_json" ||
         receipt.kind !== "x402_fetch" || !hash(receipt.operationId) || !safeLabel(receipt.reason) || !safeLabel(receipt.proofClass) ||
         receipt.integrityHash !== domainHash("apn.x402.public-receipt.v1", canonicalJson(base)) ||
-        !["completed", "failed_before_effect", "failed_settled_without_result"].includes(receipt.terminalState) ||
+        !["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(receipt.terminalState) ||
         receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase() || !address(receipt.payer) ||
         !address(receipt.payee) || !positive(receipt.amountAtomic) || !hash(receipt.fingerprint) ||
         !hash(receipt.requestDigest) || !hash(receipt.requirementDigest) || !hash(receipt.operationBindingHash) ||
