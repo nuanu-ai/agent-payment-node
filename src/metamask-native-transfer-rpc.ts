@@ -1,12 +1,13 @@
 import { performance } from "node:perf_hooks";
 import { nativeDeadlineRemaining, type MetaMaskNativeDeadlineInput } from "./metamask-native-diagnostic.js";
-import { encodeFunctionData, getAddress, type Address } from "viem";
+import { getAddress, type Address } from "viem";
 import { hashObject } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { evmUint } from "./evm-asset.js";
 import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { EvmRpc } from "./evm-rpc.js";
-import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "./evm-rpc-codec.js";
+import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "./evm-rpc-codec.js";
+import { decodeRelayBaseReceiptFee } from "./relay/source-fee-proof.js";
 import type { EvmBalanceSnapshot } from "./evm-ports.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import type { Hex } from "./model.js";
@@ -15,8 +16,8 @@ import { METAMASK_NATIVE_FEE_RECEIPT_SCHEMA, METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2
   type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeReceiptEvidence, type MetaMaskNativeFeeReceiptVerdict } from "./metamask-native-fee-evidence.js";
 
 const ENVS = { 1: "APN_ETHEREUM_RPC_URL", 10: "APN_OPTIMISM_RPC_URL", 143: "APN_MONAD_RPC_URL", 59144: "APN_LINEA_RPC_URL", 1329: "APN_SEI_RPC_URL" } as const;
-const OP_ORACLE = "0x420000000000000000000000000000000000000F";
-const OP_ABI = [{ type: "function", name: "getOperatorFee", stateMutability: "view", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] }] as const;
+/** The OP-stack fee rule read from the receipt, as the Relay and LI.FI rails read it. */
+const OP_RECEIPT_FEE_RULE = "receipt l1Fee + gasUsed * operatorFeeScalar * 100 + operatorFeeConstant";
 export type MetaMaskNativeObservation =
   { readonly kind: "accepted"; readonly receipt: MetaMaskNativeFeeReceiptVerdict; readonly evidence: MetaMaskNativeFeeReceiptEvidence } |
   { readonly kind: "pending" | "inconclusive"; readonly reason: string };
@@ -97,9 +98,9 @@ export async function observeMetaMaskNativeTransfer(quote: MetaMaskNativeFeeQuot
  * One observation of the stored hash on one endpoint of the quote's chain (any endpoint: its eth_chainId binds it, and
  * its origin is recorded as provenance only). P2: the chain id once, the receipt once, the receipt's block by
  * number, the finality head and the transaction once. The receipt's block hash binds everything read with it; nothing
- * is re-read around it, and the quote's own block is not re-proven (it says nothing about the transfer). OP-stack
- * only: the operator fee is read at the receipt block, a history read that a non-archive node serves for recent blocks;
- * when refused the observation stays inconclusive and can be repeated.
+ * is re-read around it, and the quote's own block is not re-proven (it says nothing about the transfer). OP-stack:
+ * the L1 data fee and the operator fee come from the receipt's own fields (P1, no state read at the receipt block), so
+ * a non-archive node proves an old receipt too.
  */
 export async function observeWithRpc(rpc: EvmRpc, rpcOrigin: string, quoteValue: MetaMaskNativeFeeQuote, transactionHash: Hex): Promise<MetaMaskNativeObservation> {
   // A mined receipt remains observable after quote TTL; TTL still gates preparing/submitting the frozen transaction.
@@ -127,13 +128,13 @@ export async function observeWithRpc(rpc: EvmRpc, rpcOrigin: string, quoteValue:
   let opStackFeeComponents: MetaMaskNativeFeeReceiptEvidence["opStackFeeComponents"];
   if (chainId === 10) {
     if (raw.l1Fee === undefined) return { kind: "inconclusive", reason: "op_l1_fee_unavailable" };
-    const data = encodeFunctionData({ abi: OP_ABI, functionName: "getOperatorFee", args: [evmRpcQuantity(raw.gasUsed)] });
-    let operatorRaw: unknown;
-    try { operatorRaw = await call("eth_call", [{ to: OP_ORACLE, data }, canonical.tag]); }
-    catch { return { kind: "inconclusive", reason: "op_operator_fee_unavailable" }; }
-    opStackFeeComponents = { l1DataFeeAtomic: evmRpcQuantity(raw.l1Fee).toString(), operatorFeeAtomic: evmRpcWord(operatorRaw).toString(),
-      receiptExtensionHash: hashObject({ transactionHash: hash, blockHash: canonical.hash, rpcOrigin,
-        l1Fee: raw.l1Fee, oracle: OP_ORACLE, data, result: operatorRaw }) };
+    // Absent operator fields are zero parameters; a scalar without its constant, or an operatorFee that contradicts them, is refused.
+    let fee: ReturnType<typeof decodeRelayBaseReceiptFee>;
+    try { fee = decodeRelayBaseReceiptFee(raw); }
+    catch { throw new ApnError("APN_RPC_PROTOCOL", "OP-stack receipt fee fields are invalid.", { reason: "op_receipt_fee_fields" }); }
+    opStackFeeComponents = { l1DataFeeAtomic: fee.l1FeeWei, operatorFeeAtomic: fee.operatorFeeWei,
+      receiptExtensionHash: hashObject({ transactionHash: hash, blockHash: canonical.hash, rpcOrigin, rule: OP_RECEIPT_FEE_RULE,
+        l1Fee: raw.l1Fee, operatorFeeScalar: raw.operatorFeeScalar ?? null, operatorFeeConstant: raw.operatorFeeConstant ?? null, operatorFee: raw.operatorFee ?? null }) };
   }
   const evidence: MetaMaskNativeFeeReceiptEvidence = { schemaVersion: METAMASK_NATIVE_FEE_RECEIPT_SCHEMA, quoteHash: quote.quoteHash,
     transactionHash: hash, chainId, sender: evmRpcAddress(tx.from), to: evmRpcAddress(tx.to), valueAtomic: evmRpcQuantity(tx.value).toString() as "0",

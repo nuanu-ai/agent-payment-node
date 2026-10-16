@@ -39,8 +39,8 @@ export declare function observeMetaMaskNativeTransfer(quote: MetaMaskNativeFeeQu
  * One observation of the stored hash on one endpoint of the quote's chain (any endpoint: its eth_chainId binds it, and
  * its origin is recorded as provenance only). P2: the chain id once, the receipt once, the receipt's block by
  * number, the finality head and the transaction once. The receipt's block hash binds everything read with it; nothing
- * is re-read around it, and the quote's own block is not re-proven (it says nothing about the transfer). OP-stack
- * only: the operator fee is read at the receipt block, a history read that a non-archive node serves for recent blocks;
- * when refused the observation stays inconclusive and can be repeated.
+ * is re-read around it, and the quote's own block is not re-proven (it says nothing about the transfer). OP-stack:
+ * the L1 data fee and the operator fee come from the receipt's own fields (P1, no state read at the receipt block), so
+ * a non-archive node proves an old receipt too.
  */
 export declare function observeWithRpc(rpc: EvmRpc, rpcOrigin: string, quoteValue: MetaMaskNativeFeeQuote, transactionHash: Hex): Promise<MetaMaskNativeObservation>;
