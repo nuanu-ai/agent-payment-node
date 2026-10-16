@@ -20,7 +20,7 @@ export class JupiterV1MaterialResolver {
     async refreshQuoteBuild(material, build, useRpcLifetime = false) {
         return await refreshJupiterV1QuoteBuild(this.rpc, material, build, useRpcLifetime);
     }
-    async resolve(payer, quote, build, maximumNativeExpenseLamports = "6000000", frozenRpcLifetime, expectedRouteId) {
+    async resolve(payer, quote, build, maximumNativeExpenseLamports, frozenRpcLifetime, expectedRouteId) {
         canonicalAddress(payer);
         decodeJupiterV1Quote(quote);
         decodeJupiterV1Build(build);

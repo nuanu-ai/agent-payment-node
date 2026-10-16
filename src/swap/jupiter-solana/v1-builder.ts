@@ -3,6 +3,7 @@ import { ApnError } from "../../errors.js";
 import type { GuardedSwapReadOnlyBuilder } from "../runtime.js";
 import { snapshotFromJupiterV1QuoteProof, type JupiterV1QuoteProof as ProducedJupiterV1QuoteProof } from "./v1-proof.js";
 import { WRAPPED_SOL_MINT, SOLANA_USDC_MINT } from "./catalog.js";
+import { jupiterV1MaximumNativeExpense } from "./v1-guard.js";
 import { jupiterV1GasDisplay, assertJupiterV1FreshMaterial, validateJupiterV1PreparedMaterial, type JupiterV1ResolvedMaterial, type JupiterV1PreparedMaterial, type SavedJupiterV1MaterialStore } from "./v1-material.js";
 import type { JupiterV1ReadOnlyProvider } from "./v1-provider.js";
 import type { JupiterV1MaterialResolver } from "./v1-resolver.js";
@@ -15,12 +16,12 @@ export type JupiterV1QuoteProof = (material: JupiterV1ResolvedMaterial, input: J
     readonly now: Date;
 }) => Promise<ProducedJupiterV1QuoteProof>;
 export interface JupiterV1QuoteBuilderOptions {
-    readonly resolvePayer: (profile: string) => Promise<string>;
+    /** Resolved against the owner policy for this exact input amount. */
+    readonly resolvePayer: (profile: string, amountAtomic: string) => Promise<string>;
     readonly proveQuote: JupiterV1QuoteProof;
-    readonly maximumNativeExpenseLamports: string;
     readonly computeUnitPriceMicroLamports: number;
     /** Internal authoritative policy selection, never a caller-controlled pool selector. */
-    readonly resolveRouteId?: (profile: string) => Promise<JupiterV1RouteId>;
+    readonly resolveRouteId?: (profile: string, amountAtomic: string) => Promise<JupiterV1RouteId>;
     /** Canonical factory only: obtain the final official lifetime after bulky public code reads. */
     readonly refreshBuildAfterPublicReads?: boolean;
     readonly refreshRpcLifetimeBeforeFreeze?: boolean;
@@ -32,10 +33,10 @@ export class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder<Jupiter
     }): Promise<unknown> {
         if (!(input.now instanceof Date) || !Number.isFinite(input.now.getTime()))
             throw new ApnError("APN_INVALID_INPUT", "Jupiter V1 quote time is invalid.");
-        const payer = await this.options.resolvePayer(input.profile);
+        const payer = await this.options.resolvePayer(input.profile, input.amountAtomic);
         if (input.account !== payer || input.recipient !== payer)
             throw new ApnError("APN_INVALID_INPUT", "Jupiter V1 quoted parties differ from the owned payer.");
-        const routeId = this.options.resolveRouteId === undefined ? JUPITER_V1_OLD_ROUTE.routeId : await this.options.resolveRouteId(input.profile);
+        const routeId = this.options.resolveRouteId === undefined ? JUPITER_V1_OLD_ROUTE.routeId : await this.options.resolveRouteId(input.profile, input.amountAtomic);
         const legacy = JUPITER_V1_FINITE_ROUTES.find(route => route.routeId === routeId)?.variant === 17;
         const request = { inputMint: WRAPPED_SOL_MINT, outputMint: SOLANA_USDC_MINT, amount: input.amountAtomic, taker: payer, recipient: payer, slippageBps: input.slippageBps, computeUnitPriceMicroLamports: this.options.computeUnitPriceMicroLamports,
             ...(legacy ? { maximumInnerAccounts: 12 as const } : {}) };
@@ -53,7 +54,7 @@ export class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder<Jupiter
         }
         const build = await this.provider.buildExactIn(request, quoteResponse);
         routeConfigForQuoteBuild(quoteResponse, build, routeId);
-        let execution = await this.resolver.resolve(payer, quoteResponse, build, this.options.maximumNativeExpenseLamports, undefined, routeId);
+        let execution = await this.resolver.resolve(payer, quoteResponse, build, jupiterV1MaximumNativeExpense(input.amountAtomic), undefined, routeId);
         if (this.options.refreshBuildAfterPublicReads === true) {
             const refreshed = await this.provider.buildExactIn(request, quoteResponse);
             routeConfigForQuoteBuild(quoteResponse, refreshed, routeId);

@@ -12,7 +12,8 @@ import { detached } from "./v1-admission.js";
 import { createJupiterV1ExecutionBinding, type JupiterV1ExecutionBindingStore, JupiterV1LocalSigner } from "./v1-effects.js";
 import { guardJupiterV1WhirlpoolMaterial, validateJupiterV1GuardedMaterial } from "./v1-guard.js";
 import { validateJupiterV1PreparedMaterial, type SavedJupiterV1MaterialStore } from "./v1-material.js";
-import { proveJupiterV1Simulation, validateFinalizedJupiterV1Receipt } from "./v1-proof.js";
+import { proveJupiterV1Simulation, validateFinalizedJupiterV1Receipt, type JupiterV1SimulationProof } from "./v1-proof.js";
+import type { JupiterV1ResolvedMaterial } from "./v1-material.js";
 import { JupiterV1MaterialResolver } from "./v1-resolver.js";
 import { routeConfigForMaterial } from "./v1-route-config.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
@@ -52,10 +53,28 @@ export class JupiterV1SingleSender {
   }
  });}
 }
+/** Executable bytes, exact-message simulation and balance deltas proved before the owner's prompt, for the send after it. */
+export interface JupiterV1PreconsentProof {readonly operationId:string;readonly materialDigest:string;readonly fresh:JupiterV1ResolvedMaterial;readonly simulation:JupiterV1SimulationProof}
+/**
+ * Every program-byte, account and simulation check that can fail runs before consent, against the same frozen message.
+ * After the prompt only the lifetime reserve, the local owner re-check, the marker, the signature and the one send remain,
+ * so the frozen blockhash is not spent on bulky public reads after the human typed the code.
+ */
+export async function proveJupiterV1Preconsent(rpc:SolanaRpc,clock:ClockPort,op:SwapOperationRecord,materialValue:unknown):Promise<JupiterV1PreconsentProof>{
+ const material=validateJupiterV1PreparedMaterial(materialValue);
+ const fresh=await new JupiterV1MaterialResolver(rpc).resolve(material.execution.payer,material.execution.quoteResponse,
+  material.execution.rawBuildResponse,material.execution.maximumNativeExpenseLamports,material.execution.quoteRpcLifetime,routeConfigForMaterial(material.execution).routeId);
+ if(fresh.transactionBase64!==material.execution.transactionBase64||fresh.messageHash!==material.execution.messageHash||
+  fresh.lookupBindingDigest!==material.execution.lookupBindingDigest||canonicalJson(fresh.programPins)!==canonicalJson(material.execution.programPins))blocked("Jupiter's frozen message, lookup or runtime executable identity changed.");
+ const guarded=await guardJupiterV1WhirlpoolMaterial(fresh,{now:clock.now().getTime(),deadline:op.quote.expiresAt}),simulation=await proveJupiterV1Simulation(rpc,guarded);
+ return detached({operationId:op.operationId,materialDigest:material.execution.materialDigest,fresh,simulation});
+}
 export interface JupiterV1ExecutionDependencies {
  readonly core:GuardedSwapService;readonly materials:SavedJupiterV1MaterialStore;readonly bindings:JupiterV1ExecutionBindingStore;
  readonly admission:JupiterV1OwnerAdmission;readonly native:JupiterV1LocalSigner;readonly sender:JupiterV1SingleSender;
  readonly rpc:SolanaRpc;readonly clock:ClockPort;
+ /** Filled by the foreground approval of this process before its prompt; consumed once by the first execution. */
+ readonly preconsent:Map<string,JupiterV1PreconsentProof>;
 }
 export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
  constructor(private readonly d:JupiterV1ExecutionDependencies){JupiterV1LocalSigner.assertGenuine(d.native,d.core.operations.root);}
@@ -63,12 +82,10 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
   const op=detached(input.operation),material=detached(validateJupiterV1PreparedMaterial(input.material));
   if(op.state!=="reserved"||op.submissionMarker!==null||!this.d.native.hasForegroundGrant(op))blocked("A fresh genuine TTY grant is required before Jupiter's first effect marker.");
   const admission=await this.d.admission.assert(op,material);await this.d.bindings.assertPrepared(op,admission,material);
-  // Re-resolve the same frozen official build. No new quote, lifetime, transaction, or route bytes are substituted.
-  const fresh=await new JupiterV1MaterialResolver(this.d.rpc).resolve(material.execution.payer,material.execution.quoteResponse,
-   material.execution.rawBuildResponse,material.execution.maximumNativeExpenseLamports,material.execution.quoteRpcLifetime,routeConfigForMaterial(material.execution).routeId);
-  if(fresh.transactionBase64!==material.execution.transactionBase64||fresh.messageHash!==material.execution.messageHash||
-   fresh.lookupBindingDigest!==material.execution.lookupBindingDigest||canonicalJson(fresh.programPins)!==canonicalJson(material.execution.programPins))blocked("Jupiter's frozen message, lookup or runtime executable identity changed.");
-  const guarded=await guardJupiterV1WhirlpoolMaterial(fresh,{now:this.d.clock.now().getTime(),deadline:op.quote.expiresAt}),simulation=await proveJupiterV1Simulation(this.d.rpc,guarded);
+  // The executable bytes and the exact-message simulation were proved before the prompt; only their use remains here.
+  const proved=this.d.preconsent.get(op.operationId);this.d.preconsent.delete(op.operationId);
+  if(proved===undefined||proved.materialDigest!==material.execution.materialDigest)blocked("Jupiter's pre-consent executable and simulation proof is missing; approve again in this terminal.");
+  const {fresh,simulation}=proved;
   const height=rpcAtomic(await this.d.rpc.call("getBlockHeight",[{commitment:"confirmed"}]));if(height>BigInt(fresh.lifetime.lastValidBlockHeight))blocked("Jupiter's frozen blockhash expired before signing.");
   // Leave a bounded reserve for custody, final ownership checks, paced send and preflight.
   // This refuses before any marker or signature; it never replaces the frozen lifetime.
