@@ -67,6 +67,8 @@ test("one current route per pool names no bytes; it shares its pool's route iden
   }
  }
  const digests = JUPITER_V1_ROUTES.map(r => swapMechanismDigest(r.mechanismPin));
+ assert.deepEqual(digests, ["661c34724fb8d84d21077056341f1d38725f106eecb56253d6f31eca1cc4303e", "c1ea8de6f3359088e114f32d57e123f70ba236ad02c5bbd85fc8e1b028db4273",
+  "798d533799a59c7706050700e2d4f310b88a8c7c23005a056bd042475ca60630", "c549ef3dd6d5fc9c1787a3411d0a98eb8232fcca41101965573c7e69374cd74c"]);
  assert.equal(new Set([...digests, ...HISTORICAL.map(h => h[1])]).size, 16);
  assert.deepEqual(JUPITER_V1_PROGRAM_AUTHORITIES.map(p => [p.role, p.upgradeAuthority]), [
   ["jupiter_v6_program", "CvQZZ23qYDWF2RUpxYJ8y9K4skmuvYEEjH7fK58jtipQ"], ["whirlpool_program", "GwH3Hiv5mACLX3ufTw1pFsrhSPon5tdw252DBs4Rx4PV"],

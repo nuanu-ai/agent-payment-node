@@ -90,6 +90,9 @@ test("historical Orca identities keep their exact 0.5.40 and 0.5.41 digests; the
   assert.equal(swapRouteDigest(ORCA_STABLE_GUARDED_MECHANISM_PIN), swapRouteDigest(ORCA_STABLE_GUARDED_MECHANISM_PIN_SLOT_457152296));
   const fresh = [swapMechanismDigest(ORCA_KEYLESS_MECHANISM_PIN), ORCA_STABLE_MECHANISM_DIGEST, ORCA_STABLE_GUARDED_MECHANISM_DIGEST,
     ORCA_KEYLESS_PROTOCOL_REGISTRY.registryDigest, ORCA_PROTOCOL_REGISTRY.registryDigest];
+  assert.deepEqual(fresh, ["bf55422e985eaa33dc1ee952e3d71dde28af0fc2092fb47041a8b5ffff5d6081", ORCA_STABLE_MECHANISM_DIGEST,
+    "a2d7b04169a6a5f68f5625f5585490707fd1a414bdbc727292658d42dd1230ca", "83c4b5acac83b0a93a191f2fa8f7cd764660e4475a57ebfb1e4ebe7647e92d39",
+    "ff6ffcc763c8644b778a1615626e3ef4c4b896289756a83a9a171672b7d06845"]);
   assert.equal(new Set(fresh).size, 5);
   for (const digest of fresh) assert.equal(["7cef079e773ae2cc19e53714edce77873e2d1abb4acee3bf5af70f7090295928", "3daa0909114ad86a7c4c95d17ddc9ecebbecd22e7b9b74452e3745500dc442cb",
     "a154c98d2b3c36b51bedeb90750b7e279b10f0f577189f50eb1c11533c4e76e5", "edd3f14d873a2e722923322a4137261441832afbab1eb3c66ae878f7d078ce49",
