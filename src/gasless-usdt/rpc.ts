@@ -9,6 +9,7 @@ import type { UsdtAccountState, UsdtChainPort, UsdtSponsorPort } from "./engine.
 import { USDT_GASLESS, usdtFailure } from "./model.js";
 import type { UsdtChainReceipt } from "./receipt.js";
 import type { UsdtRecoveryPort } from "./recovery.js";
+import { scanUsdtUserOperation } from "./rpc-scan.js";
 import type { UsdtUserOperation } from "./userop.js";
 
 const MAX_RESPONSE = 1024 * 1024;
@@ -209,8 +210,10 @@ export function usdtSendPort(transport: GaslessTransport): (op: UsdtUserOperatio
 /** One keyless locator read and bounded public chain reads; the caller supplies its paced transport. */
 export function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): UsdtRecoveryPort {
   const sponsor = new UsdtJsonRpc(transport, USDT_GASLESS.bundlerUrl, new Set(["eth_getUserOperationReceipt"]));
-  const chainRpc = new UsdtJsonRpc(transport, rpcUrl, new Set(["eth_chainId"]));
+  const chainRpc = new UsdtJsonRpc(transport, rpcUrl, new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getLogs"]));
   const chain = usdtChainPort(transport, rpcUrl);
+  // One pass talks to one endpoint; its chain identity is proved once, by the scan batch or the first receipt read.
+  let chainProven = false;
   return {
     async userOperationReceipt(hash) {
       const raw = await sponsor.call("eth_getUserOperationReceipt", [hash]);
@@ -223,8 +226,14 @@ export function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): U
         transactionHash };
     },
     async canonicalFinalizedReceipt(transactionHash) {
-      if (rpcQuantity(await chainRpc.call("eth_chainId", [])) !== 1n) usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_chain");
+      if (!chainProven && rpcQuantity(await chainRpc.call("eth_chainId", [])) !== 1n) usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_chain");
+      chainProven = true;
       return await chain.receiptAt(transactionHash, "finalized");
+    },
+    async scanUserOperation(input) {
+      const scan = await scanUsdtUserOperation(chainRpc, input);
+      chainProven = true;
+      return scan;
     },
   };
 }

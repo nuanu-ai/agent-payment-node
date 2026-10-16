@@ -11,9 +11,11 @@ import { restoreUsdtPlan } from "./restored-plan.js";
 import { signedUsdtV2 } from "./economics-v2.js";
 import { usdtEffectiveFeeCap } from "./quote.js";
 export const USDT_EXECUTION_SCHEMA = "apn.gasless-usdt-execution.v1";
+/** States that may still sign, send or land: they hold the sender's Ethereum account and its usage lease. */
+export const USDT_EXECUTION_OPEN_STATES = ["planned", "reserved", "submitting", "submitted_pending", "unknown_finality"];
 const HASH = /^[a-f0-9]{64}$/u;
 const DECIMAL = /^(0|[1-9][0-9]*)$/u;
-const STATES = ["planned", "reserved", "failed_before_effect", "submitting", "submitted_pending", "unknown_finality", "finalized", "failed_confirmed_revert"];
+const STATES = ["planned", "reserved", "failed_before_effect", "submitting", "submitted_pending", "unknown_finality", "finalized", "failed_confirmed_revert", "expired_never_landed"];
 function fail(reason, code = "APN_OPERATION_BLOCKED") {
     throw new ApnError(code, `Gasless USDT execution refused: ${reason}.`, { rail: "gasless_usdt", reason });
 }
@@ -69,7 +71,7 @@ export function validateUsdtExecutionRecord(value) {
         "operationId", "profileHash", "bindingHash", "policyDigest", "policyRevision", "activationDigest", "sender",
         "smartAccount", "recipient", "entryPointNonce", "eoaNonce", "safeBlockNumber", "safeBlockHash", "quoteHash",
         "paymasterValidUntil", "maxFeeAtomic"];
-    const terminal = isPlainRecord(value) && (value.state === "finalized" || value.state === "failed_confirmed_revert");
+    const terminal = isPlainRecord(value) && (value.state === "finalized" || value.state === "failed_confirmed_revert" || value.state === "expired_never_landed");
     if (!isPlainRecord(value) || !exactKeys(value, terminal ? [...keys, "outcomeDigest", "settlement"] : keys) || value.schemaVersion !== USDT_EXECUTION_SCHEMA ||
         !STATES.includes(value.state) ||
         [value.operationId, value.profileHash, value.bindingHash, value.policyDigest, value.activationDigest,
@@ -78,7 +80,7 @@ export function validateUsdtExecutionRecord(value) {
         (value.userOperationHash !== null && (typeof value.userOperationHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(value.userOperationHash))) ||
         ((value.state === "planned" || value.state === "reserved" || value.state === "failed_before_effect") && value.userOperationHash !== null) ||
         ((value.state === "submitting" || value.state === "submitted_pending" || value.state === "finalized" ||
-            value.state === "failed_confirmed_revert") && value.userOperationHash === null) ||
+            value.state === "failed_confirmed_revert" || value.state === "expired_never_landed") && value.userOperationHash === null) ||
         (terminal && (typeof value.outcomeDigest !== "string" || !HASH.test(value.outcomeDigest) ||
             (value.state === "finalized" ? !isPlainRecord(value.settlement) : value.settlement !== null))) ||
         !Number.isSafeInteger(value.policyRevision) || value.policyRevision < 1 ||
@@ -357,6 +359,44 @@ export class UsdtExecutionJournal extends SecureStateStore {
             await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
                 policyDigest: current.policyDigest, state: "unknown_finality", expectedCurrentStates: ["reserved", "unknown_finality"], now });
             const next = seal({ ...recordBody(current), state: "unknown_finality", updatedAt: instant(now) });
+            await this.write(next);
+            return next;
+        });
+    }
+    /**
+     * Terminal exit for an operation the chain proves can never land: no EntryPoint event for its hash through a finalized
+     * block after its signed paymaster `validUntil`. The usage lease is released; replaying the same proof repairs a crash
+     * between the ledger and journal writes.
+     */
+    async recordNeverLanded(boundValue, digest, now) {
+        const bound = validateUsdtBoundOperation(boundValue);
+        await this.ready();
+        if (!HASH.test(digest))
+            fail("observation_outcome_invalid");
+        return this.withLocks([this.lock(bound.operationId)], async () => {
+            const current = await this.load(bound.operationId);
+            if (current === null || canonicalJson(exactIntent(current)) !== canonicalJson(expected(bound)) ||
+                current.userOperationHash === null)
+                fail("observation_source_invalid");
+            if (current.state === "expired_never_landed") {
+                if (current.outcomeDigest !== digest)
+                    fail("observation_replay_conflict", "APN_IDEMPOTENCY_CONFLICT");
+                return current;
+            }
+            if (!["submitting", "submitted_pending", "unknown_finality"].includes(current.state))
+                fail("observation_source_invalid");
+            instant(now);
+            if (BigInt(Math.floor(now.getTime() / 1000)) <= BigInt(current.paymasterValidUntil))
+                fail("paymaster_still_valid");
+            const lease = await this.usage.load(identity(current.sender), current.reservationId);
+            if (lease === null || lease.policyDigest !== current.policyDigest || lease.amountAtomic !== bound.binding.plan.request.grossAtomic ||
+                !["reserved", "unknown_finality", "released_unsubmitted"].includes(lease.state))
+                fail("usage_reservation_mismatch", "APN_STATE_CORRUPT");
+            await this.usage.transition({ ...identity(current.sender), reservationId: current.reservationId,
+                policyDigest: current.policyDigest, state: "released_unsubmitted",
+                expectedCurrentStates: ["reserved", "unknown_finality", "released_unsubmitted"], outcomeDigest: digest, now });
+            const next = seal({ ...recordBody(current), state: "expired_never_landed", outcomeDigest: digest, settlement: null,
+                updatedAt: instant(now) });
             await this.write(next);
             return next;
         });

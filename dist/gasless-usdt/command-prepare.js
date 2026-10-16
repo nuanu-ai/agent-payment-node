@@ -13,7 +13,12 @@ import { preparePolicyBoundUsdtV2 } from "./policy-prepare-v2.js";
 import { attestUsdtSponsor } from "./sponsor-auth.js";
 import { UsdtCodePins, usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
-/** Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. */
+/**
+ * Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. One observation
+ * pass permits ten: the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two
+ * batches when the locator is missing or contradicted, and the scanned receipt's three reads.
+ */
+const READ_ADMISSIONS = { "execute": 7, "prepare-v2": 8, "observe": 10 };
 export class UsdtCommandReadBudget {
     state;
     transport;
@@ -42,7 +47,7 @@ export class UsdtCommandReadBudget {
     count() { return this.attempts; }
     async request(endpoint, method, body, maxBytes, code) {
         this.guard(0);
-        if (this.attempts >= (this.scope === "prepare-v2" ? 8 : 7))
+        if (this.attempts >= READ_ADMISSIONS[this.scope])
             throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read budget exhausted.", { reason: "gasless_usdt_read_budget" });
         this.attempts += 1;
         const result = await this.scheduler.schedule(endpoint, this.now, this.wait, (milliseconds) => this.guard(milliseconds), async () => {

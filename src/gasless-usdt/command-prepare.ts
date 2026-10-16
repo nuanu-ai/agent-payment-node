@@ -29,7 +29,12 @@ export interface UsdtCommandPrepareOptions {
   readonly pacingNow?: () => number;
 }
 
-/** Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. */
+/**
+ * Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. One observation
+ * pass permits ten: the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two
+ * batches when the locator is missing or contradicted, and the scanned receipt's three reads.
+ */
+const READ_ADMISSIONS = { "execute": 7, "prepare-v2": 8, "observe": 10 } as const;
 export class UsdtCommandReadBudget implements GaslessTransport {
   private readonly started: number;
   private attempts = 0;
@@ -38,7 +43,7 @@ export class UsdtCommandReadBudget implements GaslessTransport {
     private readonly now: () => number = Date.now,
     private readonly wait: (milliseconds: number) => Promise<void> = async (milliseconds) =>
       await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
-    private readonly scope: "execute" | "prepare-v2" = "execute") {
+    private readonly scope: keyof typeof READ_ADMISSIONS = "execute") {
     this.started = now();
     if (!Number.isFinite(this.started)) throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read clock is invalid.");
     const coordinator: RpcProviderPacingCoordinator = { coordinate: async <T>(family: string,
@@ -56,7 +61,7 @@ export class UsdtCommandReadBudget implements GaslessTransport {
   async request(endpoint: string, method: "POST" | "GET", body: string | null, maxBytes: number,
     code: "APN_RPC_CONFIG" | "APN_HTTP_CONFIG") {
     this.guard(0);
-    if (this.attempts >= (this.scope === "prepare-v2" ? 8 : 7)) throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read budget exhausted.",
+    if (this.attempts >= READ_ADMISSIONS[this.scope]) throw new ApnError("APN_RPC_CONFIG", "Gasless USDT read budget exhausted.",
       { reason: "gasless_usdt_read_budget" });
     this.attempts += 1;
     const result = await this.scheduler.schedule(endpoint, this.now, this.wait, (milliseconds) => this.guard(milliseconds), async () => {
