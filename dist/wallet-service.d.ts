@@ -4,7 +4,7 @@ import type { EvmChainId } from "./evm-asset.js";
 export declare class WalletService {
     private readonly context;
     constructor(context: RuntimeContext);
-    doctorKeychain(): Promise<unknown>;
+    doctorKeychain(profileInput: string): Promise<unknown>;
     ensure(profileInput: string): Promise<unknown>;
     importNew(profileInput: string, keyFile: string, keyName: string, expectedAddress: string): Promise<unknown>;
     private materializeLocalProfile;

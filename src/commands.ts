@@ -135,7 +135,7 @@ export type CommandRequest =
   | { readonly command: "policy.admit-solana"; readonly profile: string; readonly asset: "sol" | "usdc" | "usdt"; readonly maximumPerTransfer: string; readonly dailyLimit: string; readonly maximumFee: string }
   | { readonly command: "transfer.prepare-solana"; readonly profile: string; readonly asset: "sol" | "usdc" | "usdt"; readonly recipient: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string }
   | { readonly command: "version" }
-  | { readonly command: "doctor.keychain" }
+  | { readonly command: "doctor.keychain"; readonly profile: string }
   | { readonly command: "wallet.ensure"; readonly profile: string }
   | { readonly command: "wallet.import"; readonly profile: string; readonly keyFile: string; readonly keyName: string; readonly expectedAddress: string }
   | {

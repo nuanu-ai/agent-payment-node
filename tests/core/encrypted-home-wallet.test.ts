@@ -129,7 +129,7 @@ test("public wallet status reads no keys; explicit doctor fails closed for missi
     }).execute({ command: "wallet.status", profile: "default" });
     assert.equal(result.ok, true); assert.equal(wrapping.loads, 0);
     const diagnostic = await new ApnCore({ state: new StateStore(temporary.root), keychainProbe: wrapping,
-      native: new LocalWalletNative(new StateStore(temporary.root), wrapping) }).execute({ command: "doctor.keychain" });
+      native: new LocalWalletNative(new StateStore(temporary.root), wrapping) }).execute({ command: "doctor.keychain", profile: "default" });
     assert.equal(diagnostic.ok, false);
     assert.equal(diagnostic.error?.code, "APN_STATE_CORRUPT");
   }
@@ -146,7 +146,7 @@ test("public wallet status reads no keys; explicit doctor fails closed for missi
   assert.equal(tagResult.ok, true);
   const tagWrapping = new TestWrappingSecret();
   const tagDiagnostic = await new ApnCore({ state: new StateStore(temporary.root), keychainProbe: tagWrapping,
-    native: new LocalWalletNative(new StateStore(temporary.root), tagWrapping) }).execute({ command: "doctor.keychain" });
+    native: new LocalWalletNative(new StateStore(temporary.root), tagWrapping) }).execute({ command: "doctor.keychain", profile: "default" });
   assert.equal(tagDiagnostic.ok, false); assert.equal(tagDiagnostic.error?.code, "APN_STATE_CORRUPT");
 
   await writeFile(envelopePath, original, { encoding: "utf8", mode: 0o600 });

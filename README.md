@@ -787,7 +787,7 @@ apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <nati
 apn --version
 apn mcp serve
 apn mcp config
-apn doctor keychain
+apn doctor keychain [--profile <profile>]
 apn wallet ensure [--profile <profile>]
 apn wallet import --profile <profile> --key-file <absolute-path> --key-name <env-name> --expected-address <checksummed-address>
 apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>]
