@@ -9,6 +9,7 @@ import {
   X402_STATE_VERSION,
   TRANSITION_VERSION,
   ZERO_HASH,
+  deliversX402Result,
   x402AuthorizationIntentHash,
   x402Fingerprint,
   x402RequestHash,
@@ -335,7 +336,7 @@ export function validateStateSummary(
       ? evidence.attempts[attemptIndex]
       : undefined;
     if (
-      response?.classification !== "success" || attempt?.phase !== "observed" ||
+      !deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
       !isX402ResultStatus(operation.resource, attempt.observation?.status) || attempt.observation?.bodyHash !== resultLink.resultHash
     ) stateCorrupt("x402 result link does not bind its designated successful response.");
   }
@@ -402,7 +403,7 @@ export function validateStateSummary(
     const response = evidence.settlementResponseObservation;
     const attempt = response === undefined ? undefined : evidence.attempts[Number(response.httpAttemptNumber) - 1];
     if (
-      response?.classification !== "success" || evidence.transactionHint?.source !== "payment_response" ||
+      !deliversX402Result(response?.classification) || evidence.transactionHint?.source !== "payment_response" ||
       (attempt?.purpose !== "payment" && attempt?.purpose !== "result_recovery") || attempt.phase !== "observed" ||
       !isX402ResultStatus(operation.resource, attempt.observation?.status)
     ) stateCorrupt("x402 completed state lacks an observed successful paid response.");

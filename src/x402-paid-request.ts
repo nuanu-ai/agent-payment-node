@@ -9,6 +9,7 @@ import {
 import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
 import { observePaidX402Response, type PaidHttpResult } from "./x402-http.js";
 import {
+  deliversX402Result,
   publicX402Operation,
   x402TransactionHintSourceBindingHash,
   type SettlementResponseObservation,
@@ -335,7 +336,8 @@ export class X402PaidRequest extends X402Lifecycle {
         ));
       }
 
-      if (purpose === "result_recovery" && (decoded.classification !== "success" || paid.result === undefined)) {
+      const delivered = deliversX402Result(decoded.classification) && paid.result !== undefined;
+      if (purpose === "result_recovery" && !delivered) {
         const observed = await this.finishPaidAttempt(
           pending,
           "observed",
@@ -354,9 +356,8 @@ export class X402PaidRequest extends X402Lifecycle {
         purpose === "payment" ? "settlement_pending" : "seller_result_recovery_pending",
         { settlementResponseObservation: response, transactionHint: hint },
       );
-      if (decoded.classification !== "success" || paid.result === undefined) {
-        return publicX402Operation(observed);
-      }
+      // The purchased body is kept and returned now; on-chain settlement proof continues on resume.
+      if (!delivered || paid.result === undefined) return publicX402Operation(observed);
       const linked = await this.persistAndLinkResult(observed, paid.result, paid.observation.observedAt);
       return publicX402Operation(terminalizeFromExistingEvidence
         ? await this.finishReconciledEvidence(linked)

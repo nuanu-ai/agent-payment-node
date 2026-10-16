@@ -7,7 +7,7 @@ import { ApnError } from "./errors.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, unbracket, } from "./network-policy.js";
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader, inspectCandidates, } from "./x402-codec.js";
 import { decodeX402RequestBody, optionalX402HttpRequest } from "./x402-http-request.js";
-import { opaqueHttpResult, parseResultMediaType } from "./x402-opaque-result.js";
+import { observedPaidResult } from "./x402-opaque-result.js";
 import { inspectPermit2Offer } from "./x402-permit2/inspection.js";
 const MAX_HEADER_PAIRS = 64;
 const MAX_HEADER_NAME_BYTES = 256;
@@ -84,20 +84,10 @@ export function observePaidX402Response(raw, input) {
     const selectedFamily = isIP(raw.selectedAddress);
     if (selectedFamily !== 4 && selectedFamily !== 6)
         throw httpError("APN_HTTP_PROTOCOL", "Paid seller selected address is invalid.");
-    if (raw.bodyBytes.byteLength > MAX_BODY_BYTES)
-        throw resultError("Seller result exceeds the supported bound.");
     validateRawHeaders(raw.rawHeaderPairs);
     if (optionalSingleHeader(raw.rawHeaderPairs, "payment-signature") !== undefined) {
         throw httpError("APN_HTTP_PROTOCOL", "Seller response must not echo PAYMENT-SIGNATURE.");
     }
-    const contentEncoding = optionalSingleHeader(raw.rawHeaderPairs, "content-encoding");
-    if (contentEncoding !== undefined && contentEncoding !== "identity") {
-        throw resultError("Compressed seller results are unsupported.");
-    }
-    const contentLength = optionalSingleHeader(raw.rawHeaderPairs, "content-length");
-    if (contentLength !== undefined &&
-        (!/^(?:0|[1-9][0-9]*)$/u.test(contentLength) || BigInt(contentLength) !== BigInt(raw.bodyBytes.byteLength)))
-        throw resultError("Seller result length is invalid or truncated.");
     const paymentRequiredHeader = optionalSingleHeader(raw.rawHeaderPairs, "payment-required");
     if (paymentRequiredHeader !== undefined) {
         if (raw.status !== 402)
@@ -108,31 +98,7 @@ export function observePaidX402Response(raw, input) {
     const paymentResponseHeader = optionalPaymentResponseHeader(raw.rawHeaderPairs);
     if (paymentResponseHeader !== undefined)
         requireAsciiControl(paymentResponseHeader, "PAYMENT-RESPONSE");
-    let result = input.opaqueResult === true ? opaqueHttpResult(raw) : undefined;
-    if (raw.status === 200 && input.opaqueResult !== true) {
-        const mediaType = parseResultMediaType(singleControlLikeHeader(raw.rawHeaderPairs, "content-type"));
-        let bodyText;
-        try {
-            bodyText = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(raw.bodyBytes);
-        }
-        catch {
-            throw resultError("Seller result is not strict UTF-8.");
-        }
-        if (mediaType === "application/json") {
-            try {
-                JSON.parse(bodyText);
-            }
-            catch {
-                throw resultError("Seller JSON result is malformed.");
-            }
-        }
-        result = {
-            mediaType,
-            bodyText,
-            resultHash: domainHash("apn.x402.result-body.v1", raw.bodyBytes),
-            byteLength: raw.bodyBytes.byteLength.toString(),
-        };
-    }
+    const result = observedPaidResult(raw, input.opaqueResult === true, MAX_BODY_BYTES);
     const observation = {
         attemptNumber: input.attemptNumber,
         purpose: input.purpose,
@@ -403,21 +369,11 @@ function optionalPaymentResponseHeader(pairs) {
     }
     return values[0];
 }
-function singleControlLikeHeader(pairs, name) {
-    const value = optionalSingleHeader(pairs, name);
-    if (value === undefined || value.trim() !== value || value.includes(",")) {
-        throw resultError(`Seller response requires one canonical ${name.toUpperCase()} header.`);
-    }
-    return value;
-}
 function requireAsciiControl(value, name) {
     if (!/^[\x20-\x7e]+$/u.test(value))
         throw httpError("APN_HTTP_PROTOCOL", `${name} must be exact ASCII.`);
 }
 function httpError(code, message) {
     return new ApnError(code, message);
-}
-function resultError(message) {
-    return new ApnError("APN_X402_RESULT_INVALID", message);
 }
 //# sourceMappingURL=x402-http.js.map

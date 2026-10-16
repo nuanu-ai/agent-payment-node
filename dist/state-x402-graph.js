@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { stateCorrupt } from "./secure-state-store.js";
 import { sameOptionalCanonical } from "./x402-state-continuity.js";
-import { x402OperationBindingHash, validateX402Receipt, validateX402Result, } from "./x402-state-integrity.js";
+import { deliversX402Result, x402OperationBindingHash, validateX402Receipt, validateX402Result, } from "./x402-state-integrity.js";
 export async function validateX402TerminalGraph(readJson, operation) {
     let linkedResult;
     if (operation.resultLink !== undefined) {
@@ -16,7 +16,7 @@ export async function validateX402TerminalGraph(readJson, operation) {
             ? operation.attempts[attemptIndex]
             : undefined;
         if (linkedResult.operationId !== operation.operationId || linkedResult.integrityHash !== operation.resultLink.resultIntegrityHash ||
-            linkedResult.resultHash !== operation.resultLink.resultHash || response?.classification !== "success" ||
+            linkedResult.resultHash !== operation.resultLink.resultHash || !deliversX402Result(response?.classification) ||
             attempt?.phase !== "observed" || attempt.observation?.status !== result.responseStatus ||
             attempt.observation.bodyHash !== result.resultHash || attempt.observation.bodyByteLength !== result.byteLength ||
             attempt.observation.mediaType !== result.mediaType)

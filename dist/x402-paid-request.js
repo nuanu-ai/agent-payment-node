@@ -4,7 +4,7 @@ import { ApnError } from "./errors.js";
 import { assertUnattendedX402Balance, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
 import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
 import { observePaidX402Response } from "./x402-http.js";
-import { publicX402Operation, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
+import { deliversX402Result, publicX402Operation, x402TransactionHintSourceBindingHash, } from "./x402-state-integrity.js";
 import { isNativeNotFound, isNativeExpired, isTransientNativeFailure, requestX402Authorization, x402NativeRequest, } from "./x402-native.js";
 import { X402Lifecycle } from "./x402-lifecycle.js";
 import { readX402UnusedExpiryEvidence } from "./x402-expiry-proof.js";
@@ -262,16 +262,17 @@ export class X402PaidRequest extends X402Lifecycle {
                     ? { settlementResponseObservation: response }
                     : {}));
             }
-            if (purpose === "result_recovery" && (decoded.classification !== "success" || paid.result === undefined)) {
+            const delivered = deliversX402Result(decoded.classification) && paid.result !== undefined;
+            if (purpose === "result_recovery" && !delivered) {
                 const observed = await this.finishPaidAttempt(pending, "observed", paid.observation, "seller_result_recovery_pending", terminalizeFromExistingEvidence ? { settlementResponseObservation: response, transactionHint: hint } : {});
                 return publicX402Operation(!terminalizeFromExistingEvidence || observed.settlementEvidence === undefined
                     ? observed
                     : await this.commitTerminal(observed, "failed_settled_without_result"));
             }
             const observed = await this.finishPaidAttempt(pending, "observed", paid.observation, purpose === "payment" ? "settlement_pending" : "seller_result_recovery_pending", { settlementResponseObservation: response, transactionHint: hint });
-            if (decoded.classification !== "success" || paid.result === undefined) {
+            // The purchased body is kept and returned now; on-chain settlement proof continues on resume.
+            if (!delivered || paid.result === undefined)
                 return publicX402Operation(observed);
-            }
             const linked = await this.persistAndLinkResult(observed, paid.result, paid.observation.observedAt);
             return publicX402Operation(terminalizeFromExistingEvidence
                 ? await this.finishReconciledEvidence(linked)

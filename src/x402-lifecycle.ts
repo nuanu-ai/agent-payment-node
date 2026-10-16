@@ -5,6 +5,7 @@ import type { RuntimeContext } from "./runtime.js";
 import type { PaidHttpResult } from "./x402-http.js";
 import {
   appendX402Transition,
+  deliversX402Result,
   sealX402Operation,
   sealX402Receipt,
   sealX402Result,
@@ -104,7 +105,7 @@ export class X402Lifecycle {
       ? operation.attempts[attemptIndex]
       : undefined;
     if (
-      response?.classification !== "success" || attempt?.phase !== "observed" ||
+      !deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
       attempt.observation?.status !== result.responseStatus || attempt.observation.bodyHash !== result.resultHash ||
       attempt.observation.bodyByteLength !== result.byteLength || attempt.observation.mediaType !== result.mediaType
     ) throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 result lacks its designated successful response.");

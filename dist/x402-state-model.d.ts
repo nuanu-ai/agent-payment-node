@@ -290,6 +290,8 @@ export interface X402ResultRecord {
     readonly createdAt: string;
     readonly integrityHash: string;
 }
+/** A seller body that arrives with a success or a pending settlement answer is the purchased result. */
+export declare function deliversX402Result(classification: SettlementResponseObservation["classification"] | undefined): boolean;
 export type X402TerminalState = "completed" | "failed_before_effect" | "failed_expired_unused" | "failed_settled_without_result" | "abandoned_unknown";
 export interface X402ReceiptRecord {
     readonly schemaVersion: "apn.x402.receipt.v1";
