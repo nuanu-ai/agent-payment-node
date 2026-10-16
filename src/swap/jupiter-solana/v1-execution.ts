@@ -112,7 +112,7 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
  }
  async observe(input:GuardedSwapObservationInput):Promise<SwapOperationRecord>{return await this.d.core.operations.withLocks([`jupiter-v1-operation:${input.operation.operationId}`],async()=>{
   let op=await this.d.core.operations.loadAny(input.operation.operationId);if(op===null)corrupt();if(op.submissionMarker===null)blocked("Jupiter observation requires its durable effect marker.");
-  if(["finalized","failed_confirmed_revert","expired_unlanded"].includes(op.state))return op;
+  if(["finalized","failed_confirmed_revert","expired_unlanded","abandoned_unknown"].includes(op.state))return op;
   if(op.state==="submitting")op=await this.d.core.recordPossibleSend(op,"unknown_finality",this.d.clock.now());
   const material=validateJupiterV1PreparedMaterial(input.material),binding=await this.d.bindings.load(op,material);if(binding===null)return op;
   // Read the public signature marker first. Status never decrypts custody and never signs or sends.
