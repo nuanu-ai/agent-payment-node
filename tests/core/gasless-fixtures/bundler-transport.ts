@@ -109,7 +109,7 @@ export async function bundledGaslessFixture(root: string) {
     clock: { now: () => new Date(s.now) }, wait: s.wait });
   const execute = core.execute.bind(core);
   core.execute = async request => await withGaslessRpcInvocation(async () => await execute(request), "resume");
-  return { ...s, core, rpc, calls, estimates, layoutWitnessBlocks, setLimit: (value: number) => { limit = value; },
+  return { ...s, core, rpc, transport, calls, estimates, layoutWitnessBlocks, setLimit: (value: number) => { limit = value; },
     setFault: (value: typeof fault) => { fault = value; },
     setBlockHash: (hash: string) => { at.hash = hash; },
     setBatchReply: (value: typeof batchReply) => { batchReply = value; },

@@ -6,7 +6,7 @@ import { parsePublicHttpsUrl } from "../network-policy.js";
 import { GaslessHttps } from "./https.js";
 import { validateGaslessIntent } from "./intent-validation.js";
 import { gaslessObservationRpcEnv, gaslessObservationSource } from "./observation-source.js";
-import { gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation } from "./rpc.js";
+import { gaslessBatchCap, gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation } from "./rpc.js";
 import { rpcJson, rpcQuantity, rpcRecord } from "./rpc-codec.js";
 import { observeGasless } from "./rpc-observe.js";
 import { gaslessDeployment } from "./registry.js";
@@ -27,8 +27,9 @@ export function gaslessObservationRpcFactory(environment) {
         const action = `Set ${name} to a public, credential-free HTTPS ${gaslessDeployment(chainId).network} RPC endpoint without a query string or fragment, or resume without --observation-rpc-env.`;
         if (rpcUrl === undefined || rpcUrl.length === 0)
             throw gaslessConfigError("gasless_observation_rpc_missing", action);
+        const batchCap = gaslessBatchCap(environment, name);
         try {
-            return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing());
+            return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing(), batchCap);
         }
         catch (error) {
             if (error instanceof ApnError && error.code === "APN_RPC_CONFIG")
@@ -41,6 +42,7 @@ export function gaslessObservationRpcFactory(environment) {
 export class GaslessObservationRpc {
     transport;
     pacing;
+    maxBatchItems;
     chainId;
     rpcOrigin;
     rpcEndpointHash;
@@ -52,9 +54,10 @@ export class GaslessObservationRpc {
     pendingReads = new Map();
     lastRequestAt = null;
     unavailable = false;
-    constructor(chainId, rpcUrl, environmentName, transport = new GaslessHttps(), pacing = defaultPacing()) {
+    constructor(chainId, rpcUrl, environmentName, transport = new GaslessHttps(), pacing = defaultPacing(), maxBatchItems) {
         this.transport = transport;
         this.pacing = pacing;
+        this.maxBatchItems = maxBatchItems;
         this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
         this.environmentName = gaslessObservationRpcEnv(environmentName);
         const endpoint = parsePublicHttpsUrl(rpcUrl, "APN_RPC_CONFIG", "Observation RPC endpoint", 2048);
@@ -105,22 +108,27 @@ export class GaslessObservationRpc {
             return;
         this.pendingReads.delete(session);
         try {
-            const requests = reads.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
-            const response = await this.request(canonicalJson(requests.length === 1 ? requests[0] : requests), session);
-            if (reads.length === 1) {
-                reads[0].resolve(parseObservationResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), reads[0].id));
-                return;
-            }
-            const rows = rpcJson(response.body, MAX_RESPONSE);
-            if (!Array.isArray(rows) || rows.length !== reads.length)
-                gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
-            const expected = new Set(reads.map(row => row.id)), results = new Map();
-            for (const value of rows) {
-                const record = rpcRecord(value), id = record.id;
-                if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
-                    gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+            session.limitBatch(this.maxBatchItems);
+            const results = new Map();
+            for (let start = 0; start < reads.length; start += session.maxBatchItems) {
+                const chunk = reads.slice(start, start + session.maxBatchItems);
+                const requests = chunk.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
+                const response = await this.request(canonicalJson(requests.length === 1 ? requests[0] : requests), session);
+                if (chunk.length === 1) {
+                    results.set(chunk[0].id, parseObservationResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), chunk[0].id));
+                    continue;
                 }
-                results.set(id, parseObservationResult(record, id));
+                const rows = rpcJson(response.body, MAX_RESPONSE);
+                if (!Array.isArray(rows) || rows.length !== chunk.length)
+                    gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+                const expected = new Set(chunk.map(row => row.id));
+                for (const value of rows) {
+                    const record = rpcRecord(value), id = record.id;
+                    if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
+                        gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+                    }
+                    results.set(id, parseObservationResult(record, id));
+                }
             }
             for (const read of reads)
                 read.resolve(results.get(read.id));

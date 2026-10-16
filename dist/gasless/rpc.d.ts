@@ -1,20 +1,28 @@
-import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 import { type GaslessTransport } from "./https.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessFees, GaslessGas, GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
 import type { GaslessBootstrapMaterial, GaslessRpcFactory, GaslessRpcPort, GaslessUserOperationMaterial } from "./ports.js";
 import { type GaslessInvocationPlan } from "./rpc-budget.js";
+export { gaslessBatchCap, gaslessBatchCapSetting, gaslessConfigError } from "./rpc-config.js";
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
 export declare class GaslessRpcRequestSession {
+    private readonly plan;
     private posts;
     private terminalStatus;
     private readonly verifiedChains;
     private readonly protocolAnchors;
     private readonly provenCode;
-    readonly maxBatchItems: number;
-    /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
-    readonly maxPosts: number;
+    private batchCap;
+    private postCap;
     constructor(plan: GaslessInvocationPlan, maxBatchItems?: number);
+    get maxBatchItems(): number;
+    /** Derived from the invocation's step plan (`rpc-budget.ts`) and batch cap, including its explicit retry allowance. */
+    get maxPosts(): number;
+    /**
+     * An endpoint's own batch cap (`APN_<NETWORK>_RPC_MAX_BATCH_ITEMS`) tightens this invocation before its reads are
+     * split; the POST budget is re-derived from the same step plan at that cap, so the split is counted, never exceeded.
+     */
+    limitBatch(cap: number | undefined): void;
     reserve(): void;
     assertActive(): void;
     rejectHttp(status: number): never;
@@ -35,6 +43,7 @@ export declare function gaslessRpcFactory(environment: Readonly<Record<string, s
 export declare class GaslessRpc implements GaslessRpcPort {
     private readonly transport;
     private readonly fallbackSession;
+    private readonly maxBatchItems?;
     readonly chainId: GaslessChainId;
     readonly rpcOrigin: string;
     readonly rpcEndpointHash: string;
@@ -47,7 +56,7 @@ export declare class GaslessRpc implements GaslessRpcPort {
     private readonly rpcCall;
     private readonly bundlerCall;
     private readonly pendingReads;
-    constructor(chainId: GaslessChainId, rpcUrl: string, bundlerUrl?: string, transport?: GaslessTransport, fallbackSession?: GaslessRpcRequestSession);
+    constructor(chainId: GaslessChainId, rpcUrl: string, bundlerUrl?: string, transport?: GaslessTransport, fallbackSession?: GaslessRpcRequestSession, maxBatchItems?: number | undefined);
     assertChain(): Promise<void>;
     private validateChain;
     private validateBundler;
@@ -84,5 +93,3 @@ export declare class GaslessRpc implements GaslessRpcPort {
 }
 /** Storage key of a Solidity `mapping(address => uint256)` entry at the given base slot. */
 export declare function gaslessBalanceSlot(holder: Address, base: string): Hex;
-/** A configuration failure names the selected network's own setting and its exact cause, never another network's. */
-export declare function gaslessConfigError(reason: string, nextAction: string): ApnError;

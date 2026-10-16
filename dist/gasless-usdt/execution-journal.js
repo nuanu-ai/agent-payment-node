@@ -297,6 +297,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
         if (canonicalJson(intent) !== canonicalJson(wanted))
             fail("execution_intent_mismatch", "APN_IDEMPOTENCY_CONFLICT");
         await this.ready();
+        let created;
         let current = await this.withLocks([this.lock(bound.operationId)], async () => {
             const found = await this.load(bound.operationId);
             if (found !== null) {
@@ -304,7 +305,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
                     fail("execution_replay_conflict", "APN_IDEMPOTENCY_CONFLICT");
                 return found;
             }
-            const checked = await this.guard(bound, port);
+            const checked = created = await this.guard(bound, port);
             const body = { schemaVersion: USDT_EXECUTION_SCHEMA, ...wanted,
                 reservationId: assetUsageReservationId(identity(bound), usageKey(wanted.operationId)),
                 state: "planned", userOperationHash: null, createdAt: instant(checked.now), updatedAt: instant(checked.now) };
@@ -315,7 +316,9 @@ export class UsdtExecutionJournal extends SecureStateStore {
         if (current.state !== "planned")
             return current;
         // The ledger is separately locked. A crash here leaves a planned record and a deterministic reservation to reconcile.
-        const checked = await this.guard(bound, port);
+        // When this call just created the planned record, its guard is the fresh check: only a local write separates them
+        // (GASL-09). A resumed planned record takes its own guard.
+        const checked = created ?? await this.guard(bound, port);
         const lease = await this.usage.reserve({ ...identity(bound), registry: checked.registry, rail: "gasless",
             amountAtomic: bound.binding.plan.request.grossAtomic, idempotencyKey: usageKey(wanted.operationId), now: checked.now });
         if (lease.reservationId !== current.reservationId || lease.policyDigest !== wanted.policyDigest || lease.state !== "reserved")

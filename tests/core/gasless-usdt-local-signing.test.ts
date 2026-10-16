@@ -198,7 +198,8 @@ test("pre-submit signing and fresh-guard failures durably release usage without 
     const port = { ...f.port, safeSnapshot: async (...args: Parameters<typeof f.port.safeSnapshot>) => {
       const snapshot = await f.port.safeSnapshot(...args);
       snapshots++;
-      return failure === "fresh_guard" && snapshots >= 3
+      // The reservation guard, then the submission guard (the second read) sees the drift.
+      return failure === "fresh_guard" && snapshots >= 2
         ? { ...snapshot, account: { ...snapshot.account, entryPointNonce: 8n } } : snapshot;
     } };
     const sender = new GuardedUsdtSendService(journal, failure === "signer"

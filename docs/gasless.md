@@ -108,8 +108,17 @@ both fee fields at preparation from the fast tier. Before each effect, those
 frozen fields must still cover a fresh slow tier. A higher current fee stops the
 action without changing its approved budget. v4 operations take fresh prices at
 each step until signing, as described below.
-Configured bundlers must support this batch and gas-price API. Batch members and
-HTTP requests are separate counts; a batch does not guarantee provider admission.
+A configured `APN_<NETWORK>_BUNDLER_RPC_URL` must be Pimlico-compatible: every
+snapshot calls `pimlico_getUserOperationGasPrice` in this batch, so a bundler
+without that method fails each snapshot. Batch members and HTTP requests are
+separate counts; a batch does not guarantee provider admission.
+
+APN sends independent RPC reads as JSON-RPC batches. For an endpoint that limits
+batch size, set `APN_<NETWORK>_RPC_MAX_BATCH_ITEMS` (2 to 30, for example
+`APN_BASE_RPC_MAX_BATCH_ITEMS=3`). Every gasless command on that chain then
+splits its batches to that size and derives its request budget at that size.
+An explicit observation endpoint `APN_X_RPC_URL` takes `APN_X_RPC_MAX_BATCH_ITEMS`
+the same way.
 
 ### Offers, fee headroom and the pre-signing check
 
@@ -147,13 +156,15 @@ two, so the bootstrap disclosure uses the bootstrap guard's prices and the send
 is preceded by one bundler batch that proves the bundler chain, EntryPoint
 support and that the signed prices still cover its slow tier. A seal from an
 earlier invocation is always guarded by a full snapshot before its disclosure
-or send. The whole approval takes 17 HTTP requests; its request budget is
-derived from these steps plus one more guard's worth of requests for retries.
+or send. Each guard snapshot is three HTTP requests (the anchor header is
+re-read inside the pinned state batch, not by a separate request), so the whole
+approval takes 14; its request budget is derived from these steps plus one more
+guard's worth of requests for retries.
 
 Every check retries a transient failure inside the approval window while that
 retry allowance still pays for the step: a quote above your maximum fee,
 bundler price drift, a provider error, an RPC transport failure, or a mirror
-estimate the bundler could not run. One guard retry, two mirror retries or four
+estimate the bundler could not run. One guard retry, one mirror retry or three
 pre-send price checks fit. A retry waits 5 seconds and stops while the window
 still leaves room for the remaining steps. Interrupting the command stops the
 wait at once. A retry never re-signs, never re-discloses and never re-sends.

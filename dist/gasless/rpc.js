@@ -15,6 +15,8 @@ import { gaslessDeployment, gaslessIntentAsset, gaslessProtocolHash } from "./re
 import { GASLESS_ESTIMATE_SIGNATURE, verifyGaslessBootstrap, verifyGaslessUserOperation } from "./signature.js";
 import { assertGaslessExecutionChain, gaslessChain, gaslessFailure } from "./validation.js";
 import { gaslessUserOperation, gaslessUserOperationHash, validateGaslessWire } from "./wire.js";
+import { gaslessBatchCap, gaslessConfigError, validBatchCap } from "./rpc-config.js";
+export { gaslessBatchCap, gaslessBatchCapSetting, gaslessConfigError } from "./rpc-config.js";
 const RPC_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode",
     "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_maxPriorityFeePerGas",
     "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
@@ -24,20 +26,33 @@ const MAX_RESPONSE = 2 * 1024 * 1024;
 const invocation = new AsyncLocalStorage();
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
 export class GaslessRpcRequestSession {
+    plan;
     posts = 0;
     terminalStatus = null;
     verifiedChains = new Set();
     protocolAnchors = new Map();
     provenCode = new Set();
-    maxBatchItems;
-    /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
-    maxPosts;
+    batchCap;
+    postCap;
     constructor(plan, maxBatchItems) {
-        if (maxBatchItems !== undefined && (!Number.isSafeInteger(maxBatchItems) || maxBatchItems < 2 || maxBatchItems > 30)) {
+        this.plan = plan;
+        if (maxBatchItems !== undefined && !validBatchCap(maxBatchItems))
             gaslessFailure("APN_INVALID_INPUT", "gasless_RPC_batch_cap");
-        }
-        this.maxBatchItems = maxBatchItems ?? Number.POSITIVE_INFINITY;
-        this.maxPosts = gaslessPostBudget(plan, this.maxBatchItems);
+        this.batchCap = maxBatchItems ?? Number.POSITIVE_INFINITY;
+        this.postCap = gaslessPostBudget(plan, this.batchCap);
+    }
+    get maxBatchItems() { return this.batchCap; }
+    /** Derived from the invocation's step plan (`rpc-budget.ts`) and batch cap, including its explicit retry allowance. */
+    get maxPosts() { return this.postCap; }
+    /**
+     * An endpoint's own batch cap (`APN_<NETWORK>_RPC_MAX_BATCH_ITEMS`) tightens this invocation before its reads are
+     * split; the POST budget is re-derived from the same step plan at that cap, so the split is counted, never exceeded.
+     */
+    limitBatch(cap) {
+        if (cap === undefined || cap >= this.batchCap)
+            return;
+        this.batchCap = cap;
+        this.postCap = gaslessPostBudget(this.plan, cap);
     }
     reserve() {
         this.assertActive();
@@ -108,7 +123,7 @@ export function gaslessRpcFactory(environment, rpcSetting) {
             guidedEndpoint(configuredBundler, `${deployment.network} bundler`, deployment.bundlerEnv);
         }
         const rpc = new GaslessRpc(selected, rpcUrl, configuredBundler === undefined || configuredBundler.length === 0
-            ? undefined : configuredBundler, transport, fallbackSession);
+            ? undefined : configuredBundler, transport, fallbackSession, gaslessBatchCap(environment, deployment.rpcEnv));
         cache.set(selected, rpc);
         return rpc;
     };
@@ -116,6 +131,7 @@ export function gaslessRpcFactory(environment, rpcSetting) {
 export class GaslessRpc {
     transport;
     fallbackSession;
+    maxBatchItems;
     chainId;
     rpcOrigin;
     rpcEndpointHash;
@@ -128,9 +144,12 @@ export class GaslessRpc {
     rpcCall;
     bundlerCall;
     pendingReads = new Map();
-    constructor(chainId, rpcUrl, bundlerUrl, transport = new GaslessHttps(), fallbackSession = new GaslessRpcRequestSession("observe")) {
+    constructor(chainId, rpcUrl, bundlerUrl, transport = new GaslessHttps(), fallbackSession = new GaslessRpcRequestSession("observe"), maxBatchItems) {
         this.transport = transport;
         this.fallbackSession = fallbackSession;
+        this.maxBatchItems = maxBatchItems;
+        if (maxBatchItems !== undefined && !validBatchCap(maxBatchItems))
+            gaslessFailure("APN_RPC_CONFIG", "gasless_RPC_batch_cap");
         this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
         this.deployment = gaslessDeployment(this.chainId);
         const rpc = endpoint(rpcUrl), bundler = endpoint(bundlerUrl ?? this.deployment.publicBundlerUrl);
@@ -417,6 +436,7 @@ export class GaslessRpc {
             return;
         this.pendingReads.delete(session);
         try {
+            session.limitBatch(this.maxBatchItems);
             const results = new Map();
             for (let start = 0; start < reads.length; start += session.maxBatchItems) {
                 const chunk = reads.slice(start, start + session.maxBatchItems);
@@ -473,10 +493,6 @@ function endpoint(value) {
     if (parsed.search !== "" || parsed.hash !== "")
         gaslessFailure("APN_RPC_CONFIG", "gasless_endpoint_identity");
     return parsed;
-}
-/** A configuration failure names the selected network's own setting and its exact cause, never another network's. */
-export function gaslessConfigError(reason, nextAction) {
-    return new ApnError("APN_RPC_CONFIG", `Gasless validation failed: ${reason}.`, { nextActions: [nextAction] });
 }
 function guidedEndpoint(value, endpointName, setting) {
     try {
