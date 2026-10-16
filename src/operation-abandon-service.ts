@@ -16,6 +16,7 @@ import type { FacilitatorGaslessService } from "./facilitator-gasless/service.js
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
 import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
+import { X402AbandonService } from "./x402-abandon.js";
 
 export class OperationAbandonService {
   private readonly operations: OperationService;
@@ -41,6 +42,7 @@ export class OperationAbandonService {
     if (found.kind === "facilitator_gasless_transfer" && this.facilitatorGasless !== undefined) {
       return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
     }
+    if (found.kind === "x402_fetch" && found.strategy === "local") return await new X402AbandonService(this.context).abandon(operationId);
     if (found.kind !== "direct_transfer") return ineligible(found.kind);
     if (found.record.providerDirect === undefined) return await new TransferService(this.context).abandonUndispatched(operationId);
     const profileHash = found.record.profileHash;

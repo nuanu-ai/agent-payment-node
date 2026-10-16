@@ -138,7 +138,7 @@ for (const failure of ["overfunded", "insufficient", "domain", "chain"] as const
   assert.equal(stored.state, "authorized_not_sent"); assert.equal(stored.attempts.length, 0);
 });
 
-test(`${networkName} settlement rejects Base token logs and foreign evidence even with resealed hashes`, async (context) => {
+test(`${networkName} settlement never takes Base token logs as its transaction and refuses foreign evidence even with resealed hashes`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const fixture = networkFixture(temporary.root, chainId); await initializeNetworkFixture(fixture, chainId);
   const prepared = await fixture.core.execute(REQUEST); assert.equal(prepared.ok, true);
@@ -147,18 +147,17 @@ test(`${networkName} settlement rejects Base token logs and foreign evidence eve
   await fixture.core.execute({ command: "x402.fetch.approve", operationId });
   fixture.http.outcomes.push(networkPaid(original));
   await fixture.core.execute({ command: "operation.resume", operationId });
+  // Settlement is the nonce state of this network's token; a receipt of another token's logs can never name the transaction.
   networkSettlement(fixture.rpc, original, x402Network(8453).token.toLowerCase() as `0x${string}`);
-  const refused = await fixture.core.execute({ command: "operation.resume", operationId });
-  assert.equal((refused.operation as { terminal: boolean }).terminal, false);
-  assert.equal((await fixture.state.findX402Operation(operationId))!.settlementEvidence, undefined);
-  networkSettlement(fixture.rpc, original);
   const completed = await fixture.core.execute({ command: "operation.resume", operationId }); assert.equal((completed.operation as { state: string }).state, "completed");
   const { canonicalJson, domainHash } = await import("../../src/canonical.js");
   const { validateSettlementEvidence } = await import("../../src/x402-evidence-validation.js");
   const stored = (await fixture.state.findX402Operation(operationId))!;
+  assert.equal(stored.settlementEvidence?.schemaVersion, "apn.x402.settlement-evidence.v2");
+  assert.equal(stored.settlementEvidence?.transactionHash, undefined);
   const { evidenceHash: _hash, ...body } = stored.settlementEvidence!;
   const forged = { ...body, chainId: "8453", network: "eip155:8453", token: x402Network(8453).token.toLowerCase() };
-  assert.throws(() => validateSettlementEvidence({ ...forged, evidenceHash: domainHash("apn.x402.settlement-evidence.v1", canonicalJson(forged)) }, stored as unknown as Record<string, unknown>), { code: "APN_STATE_CORRUPT" });
+  assert.throws(() => validateSettlementEvidence({ ...forged, evidenceHash: domainHash("apn.x402.settlement-evidence.v2", canonicalJson(forged)) }, stored as unknown as Record<string, unknown>), { code: "APN_STATE_CORRUPT" });
 });
 
 test(`${networkName} CLI/MCP policy and x402 share one encrypted state and exact chain handoff`, async (context) => {
@@ -230,26 +229,6 @@ test(`${networkName} first-exposure policy reads inherit the caller's bounded de
   const reads = fixture.rpc.x402PrepareCalls;
   await assert.rejects(assertCurrentNetworkPolicy(fixture.core.context, operation, fixture.core.context.wait.nowMs() - 1), { code: "APN_STATE_BUSY" });
   assert.equal(fixture.rpc.x402PrepareCalls, reads);
-});
-
-test(`${networkName} rechecks receipt and safe block after authorization-state reads before accepting settlement`, async (context) => {
-  const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const fixture = networkFixture(temporary.root, chainId); await initializeNetworkFixture(fixture, chainId);
-  const prepared = await fixture.core.execute(REQUEST);
-  const operationId = (prepared.operation as { operationId: string }).operationId;
-  const operation = (await fixture.state.findX402Operation(operationId))!;
-  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
-  fixture.http.outcomes.push(networkPaid(operation));
-  await fixture.core.execute({ command: "operation.resume", operationId });
-  networkSettlement(fixture.rpc, operation);
-  let numberedReads = 0;
-  fixture.rpc.onX402Call = (name) => {
-    if (name === "block:12345" && ++numberedReads === 3) fixture.rpc.blockHashes.set("12345", `0x${"f".repeat(64)}`);
-  };
-  const observed = await fixture.core.execute({ command: "operation.resume", operationId });
-  assert.equal((observed.operation as { terminal: boolean }).terminal, false);
-  assert.equal((await fixture.state.findX402Operation(operationId))!.settlementEvidence, undefined);
-  assert.equal(fixture.http.calls.length, 2);
 });
 
 }

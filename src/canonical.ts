@@ -12,7 +12,9 @@ function toCanonical(value: unknown): Canonical {
   if (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER) return value;
   if (Array.isArray(value)) return value.map(toCanonical);
   if (typeof value === "object") {
-    const output: { [key: string]: Canonical } = {};
+    // A null prototype keeps an own "__proto__" member as data; an ordinary {} would route it to the
+    // prototype setter and drop it. Objects without that key serialize exactly as before.
+    const output = Object.create(null) as { [key: string]: Canonical };
     for (const key of Object.keys(value).sort()) {
       const item = (value as Record<string, unknown>)[key];
       if (item === undefined) continue;

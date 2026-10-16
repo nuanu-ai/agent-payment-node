@@ -23,7 +23,8 @@ export type X402State =
   | "completed"
   | "failed_before_effect"
   | "failed_expired_unused"
-  | "failed_settled_without_result";
+  | "failed_settled_without_result"
+  | "abandoned_unknown";
 
 export type X402FinalityClass = "pre_effect" | "unknown_finality" | "known_settled" | "terminal";
 export type X402Reason =
@@ -37,7 +38,8 @@ export type X402Reason =
   | "x402_completed"
   | "x402_failed_before_effect"
   | "x402_failed_expired_unused"
-  | "x402_failed_settled_without_result";
+  | "x402_failed_settled_without_result"
+  | "x402_owner_abandoned_unknown";
 export type X402ProofClass =
   | "x402_frozen_offer"
   | "x402_authorization_recovery"
@@ -47,7 +49,8 @@ export type X402ProofClass =
   | "x402_safe_settlement"
   | "x402_proven_no_effect"
   | "x402_expired_unused_finalized"
-  | "x402_settled_result_unavailable";
+  | "x402_settled_result_unavailable"
+  | "x402_owner_acknowledgement_only";
 export type SafeNextAction = "x402.fetch.approve" | "operation.resume" | "operation.status" | "receipt.get" | "use.archival_rpc";
 
 interface X402SelectedOfferBase {
@@ -195,7 +198,24 @@ export interface Erc7710SettlementEvidence {
   readonly evidenceHash: string;
 }
 
-export type SettlementEvidence = Eip3009SettlementEvidence | Erc7710SettlementEvidence;
+/** Settlement read from authorizationState(wallet, nonce) = true at a safe block; a transaction only when its receipt matched. */
+export interface Eip3009StateSettlementEvidence {
+  readonly schemaVersion: "apn.x402.settlement-evidence.v2";
+  readonly network: X402Network;
+  readonly chainId: X402ChainText;
+  readonly token: `0x${string}`;
+  readonly safeHead: { readonly number: string; readonly hash: `0x${string}`; readonly observedAt: string };
+  readonly authorizationState: {
+    readonly value: true; readonly blockNumber: string; readonly blockHash: `0x${string}`;
+    readonly blockTag: "safe"; readonly observedAt: string;
+  };
+  readonly transactionHash?: `0x${string}`;
+  readonly transactionBlock?: { readonly number: string; readonly hash: `0x${string}` };
+  readonly rpcOriginHash: string;
+  readonly evidenceHash: string;
+}
+
+export type SettlementEvidence = Eip3009SettlementEvidence | Eip3009StateSettlementEvidence | Erc7710SettlementEvidence;
 
 export interface Eip3009UnusedExpiryEvidence {
   readonly schemaVersion: "apn.x402.unused-expiry-evidence.v1";
@@ -250,7 +270,23 @@ export interface Erc7710UnusedExpiryEvidence {
   readonly evidenceHash: string;
 }
 
-export type UnusedExpiryEvidence = Eip3009UnusedExpiryEvidence | Erc7710UnusedExpiryEvidence;
+/** Non-use proven by the token's own nonce state at a finalized block at or after validBefore. */
+export interface Eip3009StateUnusedExpiryEvidence {
+  readonly schemaVersion: "apn.x402.unused-expiry-evidence.v2";
+  readonly network: X402Network;
+  readonly chainId: X402ChainText;
+  readonly token: `0x${string}`;
+  readonly validBefore: string;
+  readonly finalizedHead: { readonly number: string; readonly hash: `0x${string}`; readonly timestamp: string; readonly observedAt: string };
+  readonly authorizationState: {
+    readonly value: false; readonly blockNumber: string; readonly blockHash: `0x${string}`;
+    readonly blockTag: "finalized"; readonly observedAt: string;
+  };
+  readonly rpcOriginHash: string;
+  readonly evidenceHash: string;
+}
+
+export type UnusedExpiryEvidence = Eip3009UnusedExpiryEvidence | Eip3009StateUnusedExpiryEvidence | Erc7710UnusedExpiryEvidence;
 
 export interface X402ResultRecord {
   readonly schemaVersion: "apn.x402.result.v1" | "apn.x402.result.v2";
@@ -265,7 +301,12 @@ export interface X402ResultRecord {
   readonly integrityHash: string;
 }
 
-export type X402TerminalState = "completed" | "failed_before_effect" | "failed_expired_unused" | "failed_settled_without_result";
+/** A seller body that arrives with a success or a pending settlement answer is the purchased result. */
+export function deliversX402Result(classification: SettlementResponseObservation["classification"] | undefined): boolean {
+  return classification === "success" || classification === "settlement_pending";
+}
+
+export type X402TerminalState = "completed" | "failed_before_effect" | "failed_expired_unused" | "failed_settled_without_result" | "abandoned_unknown";
 
 export interface X402ReceiptRecord {
   readonly schemaVersion: "apn.x402.receipt.v1";
