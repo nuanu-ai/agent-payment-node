@@ -484,7 +484,10 @@ test("LI.FI Base actual fee comes from the receipt: explicit L1 fee, operator fe
   assert.equal(actual.blobFeeWei, "0"); assert.equal(actual.feeEvidence.baseOracle, null); assert.equal(actual.feeEvidence.ruleHash, BRIDGE_RECEIPT_FEE_RULE_HASH);
   const operated = bridgeActualFees(8453, { ...receipt, operatorFeeScalar: "0x2", operatorFeeConstant: "0x3" });
   assert.equal(operated.operatorFeeWei, (0x108bdn * 2n * 100n + 3n).toString());
-  for (const broken of [{ l1Fee: undefined }, { daFootprintGasScalar: undefined }, { operatorFeeScalar: "0x1" }, { operatorFeeScalar: "0x100000000", operatorFeeConstant: "0x0" },
+  // The Jovian DA footprint scalar is not a charge; an RPC that omits it still yields the same fee (BRDG-24, LIFI-02).
+  const { daFootprintGasScalar: _footprint, ...withoutFootprint } = receipt;
+  assert.equal(bridgeActualFees(8453, withoutFootprint).actualTotalFeeWei, actual.actualTotalFeeWei);
+  for (const broken of [{ l1Fee: undefined }, { daFootprintGasScalar: "0x094" }, { operatorFeeScalar: "0x1" }, { operatorFeeScalar: "0x100000000", operatorFeeConstant: "0x0" },
     { type: "0x3" }]) {
     assert.throws(() => bridgeActualFees(8453, Object.fromEntries(Object.entries({ ...receipt, ...broken }).filter(([, value]) => value !== undefined))),
       { code: "APN_RPC_PROTOCOL" });

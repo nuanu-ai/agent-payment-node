@@ -27,7 +27,8 @@ async function fixture(): Promise<CircleV2DraftInput> {
     recipientWallet: wallet, amountAtomic: "1000000", maxSourceFeeAtomic: "25000", recipientSetup: "existing_ata" };
 }
 function harness(change?: (response: any) => void, options?: { reorg?: boolean; revert?: boolean; stale?: boolean }): CircleV2PreflightTransport {
-  let reads = 0;
+  // One block, one timestamp: a per-read clock made the pinned re-read differ across a second boundary.
+  let reads = 0; const timestamp = options?.stale ? "0x1" : `0x${Math.floor(Date.now() / 1000).toString(16)}`;
   return async request => {
     if (request.target === "circle") {
       const response = { signedQuote: quote, feeTotalAmount: "20000", feeToken: usdc, nonce: "0", claimable: true, failedChecks: [],
@@ -38,8 +39,7 @@ function harness(change?: (response: any) => void, options?: { reorg?: boolean; 
     }
     if (request.method === "eth_getBlockByNumber") {
       const after = reads++ > 0;
-      return { number: "0x63", hash: after && options?.reorg ? `0x${"b".repeat(64)}` : hash,
-        timestamp: options?.stale ? "0x1" : `0x${Math.floor(Date.now() / 1000).toString(16)}` };
+      return { number: "0x63", hash: after && options?.reorg ? `0x${"b".repeat(64)}` : hash, timestamp };
     }
     if (options?.revert) throw Error("revert");
     return "0x";

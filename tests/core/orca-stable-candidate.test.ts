@@ -822,7 +822,8 @@ test("private stable first attempt consumes 23 preflight POSTs and one persisted
   const sender = new OrcaStableSingleSender(f.service, materials, bindings, custody, rpc, f.clock);
   let signs = 0;
   const ports = { admission: f.ports, preflight: async () => {
-    for (let index = 0; index < 23; index++) assert.equal(await rpc.call("getGenesisHash", []), SOLANA_GENESIS);
+    // A read SolanaRpc does not answer from memory: the genesis is proven once per instance (SURF-10).
+    for (let index = 0; index < 23; index++) await rpc.call("getBlockHeight", []);
     return { preview: (await materials.loadStaged(prepared.operation.operationId))!.preview,
       checkedAt: NOW.toISOString(), elapsedMs: 17_000, physicalPostCount: budget.physicalRequests,
       simulationHash: "d".repeat(64) };
@@ -1083,7 +1084,7 @@ async function privateStableSenderHarness(nearExpiry: boolean) {
     preflight: async () => {
       for (let index = 0; index < 23; index++) {
         if (nearExpiry && index === 22) time = Date.parse(prepared.operation.quote.expiresAt) - 100;
-        await rpc.call("getGenesisHash", []);
+        await rpc.call("getBlockHeight", []); // Paced like every physical read; a repeated genesis is not (SURF-10).
       }
       return { preview: (await materials.loadStaged(prepared.operation.operationId))!.preview,
         checkedAt: clock().toISOString(), elapsedMs: 17_000, physicalPostCount: budget.physicalRequests,
