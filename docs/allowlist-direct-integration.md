@@ -1,6 +1,6 @@
 # Direct transfers under the owner allowlist
 
-Every direct transfer passes one gate: explicit-asset EVM (`apn pay transfer prepare-asset`), TRON (`prepare-tron`) and Solana (`prepare-solana`). The gate lives in `src/direct-allowlist-gate.ts`. EVM glue is in `src/evm-direct-allowlist.ts` and TRON/Solana glue in `src/rail-direct-allowlist.ts`.
+Every local direct transfer passes one gate: explicit-asset EVM (`apn pay transfer prepare-asset`), the local-wallet Base USDC `apn pay transfer prepare`, TRON (`prepare-tron`) and Solana (`prepare-solana`). The gate lives in `src/direct-allowlist-gate.ts`. EVM glue is in `src/evm-direct-allowlist.ts` and TRON/Solana glue in `src/rail-direct-allowlist.ts`.
 
 ## Owner workflow
 
@@ -8,7 +8,7 @@ Every direct transfer passes one gate: explicit-asset EVM (`apn pay transfer pre
    - `evm`: the local wallet address (`apn wallet status --profile <profile>`);
    - `tron` and `solana`: the chain account address (`apn wallet ensure-tron|ensure-solana`).
 2. Stage and activate it in a foreground terminal with `apn allowlist policy stage` and then `apn allowlist policy activate`.
-3. For TRON and Solana, keep the chain policy (`apn policy admit-tron|admit-solana`). It now caps only the native fee, rent and resources, through `--max-fee-trx` and `--max-fee-sol`. The command still requires `--max-per-transfer` and `--daily-limit`, but direct transfers no longer enforce them. The allowlist policy is the only principal cap, so an amount is never counted twice.
+3. For TRON and Solana, keep the chain policy (`apn policy admit-tron|admit-solana`). It caps the native fee, rent and resources through `--max-fee-trx` and `--max-fee-sol`, and its `--max-per-transfer` and `--daily-limit` are enforced as shown on its consent screen: at prepare and again before signing, counting every unresolved transfer of the asset. A transfer must fit both the chain policy and the allowlist caps; the operation itself is never counted twice.
 
 Example direct admissions, using the owner's example caps:
 
@@ -78,7 +78,6 @@ A tampered staged or activation file still fails closed with `APN_STATE_CORRUPT`
 
 These paths are not gated yet and keep their existing controls:
 
-- the legacy Base-USDC `apn pay transfer prepare` without `--chain` and `--asset`;
 - provider-direct routes (Coinbase Agentic Wallet, MetaMask);
 - gasless, x402 and bridge.
 

@@ -4,6 +4,7 @@ import { BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.j
 import { ApnError } from "./errors.js";
 import { validateEvmTransferEvidence } from "./direct-terminal-receipt.js";
 import { validateEvmDirectBinding, validateEvmOperation } from "./evm-direct.js";
+import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { evmUint } from "./evm-asset.js";
 import { validateCoinbaseGaslessAllowlist } from "./coinbase-gasless-policy.js";
 import { formatAtomic, parseAtomic } from "./money.js";
@@ -106,7 +107,9 @@ export function validateOperation(value: unknown): OperationRecord {
     !/^0x[0-9a-fA-F]{40}$/u.test(operation.recipient)
   ) stateCorrupt("Operation frozen transfer identity is invalid.");
   if (operation.evm !== undefined) validateEvmOperation(operation);
-  else if (operation.allowlist !== undefined || operation.allowlistLease !== undefined) stateCorrupt("Only an explicit EVM asset operation carries a direct allowlist binding.");
+  else if (operation.providerDirect !== undefined && (operation.allowlist !== undefined || operation.allowlistLease !== undefined)) {
+    stateCorrupt("Only a local direct EVM operation carries a direct allowlist binding.");
+  } else if (operation.providerDirect === undefined) validateEvmAllowlist(operation);
   if (operation.providerDirect === undefined) validateLocalDirect(operation);
   else validateProviderDirect(operation, operation.providerDirect);
   return operation;
@@ -161,8 +164,12 @@ function validateTransitions(values: readonly Transition[]): void {
 }
 
 function validateLocalDirect(operation: OperationRecord): void {
-  if (operation.state === "abandoned_unknown" || operation.transitions.some((transition) => transition.state === "abandoned_unknown")) {
-    stateCorrupt("Local direct operation cannot use provider owner abandonment.");
+  // The owner may abandon only a signature APN never dispatched; it is then the final transition.
+  const abandoned = operation.transitions.findIndex((transition) => transition.state === "abandoned_unknown");
+  if (abandoned !== -1 && (abandoned !== operation.transitions.length - 1 || operation.transitions[abandoned - 1]?.state !== "signed_not_submitted" ||
+      operation.reason !== "owner_abandoned_undispatched_signature" || operation.proofClass !== "owner_acknowledgement_only" ||
+      !operation.terminal || operation.transactionHash === undefined)) {
+    stateCorrupt("Local direct abandonment is valid only as the final transition of an undispatched signature.");
   }
   if (
     operation.transactionData === undefined || operation.economics === undefined ||

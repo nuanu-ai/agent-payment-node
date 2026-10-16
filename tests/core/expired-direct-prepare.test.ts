@@ -14,7 +14,7 @@ async function prepared(context: { after(fn: () => Promise<void>): void }, stopA
   const rpc = new EvmTestRpc();
   const setup = evmCore(temporary.root, rpc, undefined, undefined, native => ({ request: async request => {
     const result = await native.request(request);
-    if (stopAfterSigning && request.operation === "directTransfer.approveAndSign") rpc.nativeAtomic = "0";
+    if (stopAfterSigning && request.operation === "directTransfer.approveAndSign") throw new Error("simulated process loss after signing");
     return result;
   } })); setup.rpc.chainId = 1; setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n;
   await ensureDirectWallet(setup);
@@ -96,11 +96,11 @@ test("simultaneous expiry approval and fresh prepare serialize one terminal tran
 });
 
 
-test("expiry never retires a signed but unsubmitted operation", async context => {
+test("expiry never retires a signed but undispatched operation", async context => {
   const setup = await prepared(context, true);
-  await assert.rejects(setup.core.transfer.approve(setup.old.operationId), { code: "APN_INSUFFICIENT_ASSET" });
+  await assert.rejects(setup.core.transfer.approve(setup.old.operationId), /simulated process loss/u);
   const signed = (await setup.state.findOperation(setup.old.operationId))!;
-  assert.equal(signed.state, "signed_not_submitted"); assert.equal(setup.rpc.broadcastCount, 0);
+  assert.equal(signed.state, "started"); assert.equal(setup.rpc.broadcastCount, 0);
   setup.clock.value = new Date(setup.old.expiresAt); const calls = setup.rpc.genericBalanceCalls;
   await assert.rejects(setup.core.transfer.prepare(setup.fresh), { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(await setup.state.findOperation(setup.old.operationId), signed); assert.equal(setup.rpc.genericBalanceCalls, calls);

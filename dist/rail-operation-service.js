@@ -12,6 +12,7 @@ import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject, requireListedRailAsset } from "./rail-direct-allowlist.js";
 import { RailPrepareClaimStore, RailApprovalClaimStore, sealPrepareClaim, sealApprovalClaim } from "./rail-operation-claims.js";
 import { RailOperationLifecycle, binding } from "./rail-operation-lifecycle.js";
+import { reportingRateLimits } from "./rpc-rate-limit.js";
 export class RailOperationService {
     context;
     records;
@@ -28,7 +29,8 @@ export class RailOperationService {
         this.lifecycle = new RailOperationLifecycle({ context, records: this.records, policies: this.policies,
             operations: this.operations, allowlist: this.allowlist });
     }
-    async prepare(input) {
+    async prepare(input) { return await reportingRateLimits(() => this.prepareOperation(input)); }
+    async prepareOperation(input) {
         const profile = canonicalProfile(input.profile);
         const asset = chainAsset(input.rail, input.asset);
         requireListedRailAsset(asset);
@@ -58,8 +60,9 @@ export class RailOperationService {
             }
             await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
             const policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
-            // Owner amount caps: the active allowlist policy and the shared usage ledger, checked before any RPC call.
+            // Owner amount caps: the active allowlist policy and the shared usage ledger, then the chain policy, before any RPC call.
             const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
+            await this.policies.assertPrincipal(policy, operationId, amountAtomic);
             const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
             validateRailPrepared(prepared, account);
             if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic || canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity)
@@ -122,6 +125,7 @@ export class RailOperationService {
                     await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
                     policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
                     allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
+                    await this.policies.assertPrincipal(policy, operationId, amountAtomic);
                 }
                 catch (error) {
                     if (saved !== null)
@@ -187,7 +191,8 @@ export class RailOperationService {
             }
         }, { waitMs: 300_000 });
     }
-    async approve(operationId) {
+    async approve(operationId) { return await reportingRateLimits(() => this.approveOperation(operationId)); }
+    async approveOperation(operationId) {
         const found = await this.lifecycle.required(canonicalOperationId(operationId));
         if (found.account.rail === "solana" && found.account.provider === "local" && found.allowlist !== undefined) {
             return await this.approveLocalSolana(found.operationId, found.profileHash);
@@ -342,7 +347,8 @@ export class RailOperationService {
             await claims.removeIfMatches(claim);
         });
     }
-    async resume(operationId) {
+    async resume(operationId) { return await reportingRateLimits(() => this.resumeOperation(operationId)); }
+    async resumeOperation(operationId) {
         const found = await this.lifecycle.required(canonicalOperationId(operationId));
         if (found.account.rail === "solana" && found.account.provider === "local")
             return await this.resumeLocalSolana(found.operationId, found.profileHash);

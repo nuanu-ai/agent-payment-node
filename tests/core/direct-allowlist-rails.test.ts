@@ -111,6 +111,25 @@ test("TRX owner caps refuse per operation and per day against the shared ledger;
   assert.equal(await directUsage(temporary.root, s.account.address, TRON_CHAIN, null, s.now), "3000000");
 });
 
+test("the TRX chain policy's admitted principal caps are enforced beside the allowlist caps, before any RPC", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await tronFixture(temporary.root);
+  const admitted = await s.core.execute({ command: "policy.admit-tron", profile: s.account.profile, asset: "trx", maximumPerTransfer: "1", dailyLimit: "1.5", maximumFee: "30" });
+  assert.equal(admitted.ok, true, admitted.error?.message);
+  const prepare = async (amount: string, idempotencyKey: string) => await s.core.execute({ command: "transfer.prepare-tron", profile: s.account.profile,
+    asset: "trx", recipient: TRON_RECIPIENT, amount, maximumFee: "30", idempotencyKey });
+  const calls = s.rpc.calls.length;
+  const over = await prepare("1.5", "tron-chain-cap-0001");
+  assert.equal(over.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(over.error?.details?.reason, "chain_policy_per_transfer_cap_exceeded");
+  assert.equal(s.rpc.calls.length, calls, "refused before any RPC read");
+  const first = await prepare("1", "tron-chain-cap-0002"); assert.equal(first.ok, true, first.error?.message);
+  const id = (first.operation as { operation_id: string }).operation_id; s.rpc.prepared = (await s.core.rails.records.findOperation(id))!.prepared;
+  const approved = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(approved.ok, true, approved.error?.message);
+  assert.equal((approved.operation as { state: string }).state, "completed");
+  const daily = await prepare("1", "tron-chain-cap-0003");
+  assert.equal(daily.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(daily.error?.details?.reason, "chain_policy_daily_limit_exceeded");
+});
+
 test("a TRON effect refused after signing but before its first send releases the lease; an interrupted approval replays its reservation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await tronFixture(temporary.root);

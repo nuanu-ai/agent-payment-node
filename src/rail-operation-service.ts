@@ -14,6 +14,7 @@ import { DirectAllowlistGate, refuse, type DirectAllowlistBinding } from "./dire
 import { railAllowlistSubject, requireListedRailAsset } from "./rail-direct-allowlist.js";
 import { RailPrepareClaimStore, RailApprovalClaimStore, sealPrepareClaim, sealApprovalClaim, type RailApprovalClaim } from "./rail-operation-claims.js";
 import { RailOperationLifecycle, binding } from "./rail-operation-lifecycle.js";
+import { reportingRateLimits } from "./rpc-rate-limit.js";
 
 interface RailPrepareInput {
   readonly profile: string; readonly rail: DirectRailName; readonly asset: ChainAssetAlias;
@@ -34,7 +35,8 @@ export class RailOperationService {
     this.lifecycle = new RailOperationLifecycle({ context, records: this.records, policies: this.policies,
       operations: this.operations, allowlist: this.allowlist });
   }
-  async prepare(input: RailPrepareInput): Promise<unknown> {
+  async prepare(input: RailPrepareInput): Promise<unknown> { return await reportingRateLimits(() => this.prepareOperation(input)); }
+  private async prepareOperation(input: RailPrepareInput): Promise<unknown> {
     const profile = canonicalProfile(input.profile); const asset = chainAsset(input.rail, input.asset);
     requireListedRailAsset(asset);
     const amountAtomic = chainDecimal(input.amount, asset.decimals);
@@ -58,8 +60,9 @@ export class RailOperationService {
       }
       await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
       const policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
-      // Owner amount caps: the active allowlist policy and the shared usage ledger, checked before any RPC call.
+      // Owner amount caps: the active allowlist policy and the shared usage ledger, then the chain policy, before any RPC call.
       const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
+      await this.policies.assertPrincipal(policy, operationId, amountAtomic);
       const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
       validateRailPrepared(prepared, account);
       if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic || canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity) corrupt();
@@ -119,6 +122,7 @@ export class RailOperationService {
           await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
           policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
           allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic } }));
+          await this.policies.assertPrincipal(policy, operationId, amountAtomic);
         } catch (error) {
           if (saved !== null) await claims.removeIfMatches(saved);
           throw error;
@@ -172,7 +176,8 @@ export class RailOperationService {
       }
     }, { waitMs: 300_000 });
   }
-  async approve(operationId: string): Promise<unknown> {
+  async approve(operationId: string): Promise<unknown> { return await reportingRateLimits(() => this.approveOperation(operationId)); }
+  private async approveOperation(operationId: string): Promise<unknown> {
     const found = await this.lifecycle.required(canonicalOperationId(operationId));
     if (found.account.rail === "solana" && found.account.provider === "local" && found.allowlist !== undefined) {
       return await this.approveLocalSolana(found.operationId, found.profileHash);
@@ -303,7 +308,8 @@ export class RailOperationService {
       await claims.removeIfMatches(claim);
     });
   }
-  async resume(operationId: string): Promise<unknown> {
+  async resume(operationId: string): Promise<unknown> { return await reportingRateLimits(() => this.resumeOperation(operationId)); }
+  private async resumeOperation(operationId: string): Promise<unknown> {
     const found = await this.lifecycle.required(canonicalOperationId(operationId));
     if (found.account.rail === "solana" && found.account.provider === "local") return await this.resumeLocalSolana(found.operationId, found.profileHash);
     return await this.locked(operationId, async (operation) => {

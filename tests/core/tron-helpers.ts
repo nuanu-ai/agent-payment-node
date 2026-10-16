@@ -154,7 +154,7 @@ export async function tronFixture(root: string, options: { rpc?: TronTestRpc; wr
       const result = await core.execute({ command: "policy.admit-tron", profile: account.profile, asset, maximumPerTransfer: "2", dailyLimit: "3", maximumFee: "30" });
       assert.equal(result.ok, true, result.error?.message);
     }
-    // The chain policy now caps only fees and resources; the owner's amount caps come from the activated allowlist policy.
+    // A transfer must fit both the chain policy above and these owner allowlist caps; the fixture keeps them equal.
     const caps = { maximumPerTransferAtomic: "2000000", dailyLimitAtomic: "3000000" };
     await activateDirectPolicy(root, account.profile, { accounts: { tron: account.address }, now: new Date(now),
       admissions: [directAdmission(TRON_CHAIN, null, caps), directAdmission(TRON_CHAIN, TRON_USDT, caps)] });

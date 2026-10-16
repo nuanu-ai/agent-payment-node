@@ -101,16 +101,19 @@ export function chainUsage(policy, operations, now, excluding) {
     return { principalAtomic: principal.toString(), nativeFeeAtomic: nativeFees.toString() };
 }
 export function assertChainPolicy(policy, account, asset, amount, maximumFee, operations, now, excluding) {
+    assertChainFeePolicy(policy, account, asset, maximumFee);
+    assertChainPrincipal(policy, amount, operations, now, excluding);
+}
+/** The per-transfer and UTC-daily principal caps the owner approved on the admission screen; unresolved transfers stay charged. */
+export function assertChainPrincipal(policy, amount, operations, now, excluding) {
     validateChainPolicy(policy);
-    if (canonicalJson(policy.account) !== canonicalJson(account) || canonicalJson(policy.asset) !== canonicalJson(asset))
-        denied();
-    if (atomic(amount, true) > atomic(policy.maximumPerTransferAtomic) || atomic(maximumFee, true) > atomic(policy.maximumNativeFeeAtomic))
-        denied();
+    if (atomic(amount, true) > atomic(policy.maximumPerTransferAtomic))
+        denied("chain_policy_per_transfer_cap_exceeded");
     const usage = chainUsage(policy, operations, now, excluding);
     if (BigInt(usage.principalAtomic) + atomic(amount) > atomic(policy.dailyLimitAtomic))
-        denied();
+        denied("chain_policy_daily_limit_exceeded");
 }
-/** Direct rails keep chain policies only for the native fee, rent and resource cap; owner amount caps live in the allowlist policy. */
+/** The native fee, rent and resource cap; the principal caps are checked by assertChainPrincipal beside the allowlist caps. */
 export function assertChainFeePolicy(policy, account, asset, maximumFee) {
     validateChainPolicy(policy);
     if (canonicalJson(policy.account) !== canonicalJson(account) || canonicalJson(policy.asset) !== canonicalJson(asset))
@@ -118,7 +121,9 @@ export function assertChainFeePolicy(policy, account, asset, maximumFee) {
     if (atomic(maximumFee, true) > atomic(policy.maximumNativeFeeAtomic))
         denied();
 }
-function denied() { throw new ApnError("APN_OPERATION_BLOCKED", "The chain asset policy or spending limit does not authorize this transfer."); }
+function denied(reason) {
+    throw new ApnError("APN_OPERATION_BLOCKED", "The chain asset policy or spending limit does not authorize this transfer.", reason === undefined ? undefined : { reason });
+}
 function invalidAmount() { throw new ApnError("APN_INVALID_INPUT", "Use a positive canonical decimal amount within the asset precision and integer range."); }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "The chain policy, asset or atomic value is invalid."); }
 //# sourceMappingURL=chain-policy.js.map
