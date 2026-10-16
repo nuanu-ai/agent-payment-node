@@ -24,7 +24,7 @@ export interface MerchantReceipt {
     readonly fullFee?: {
         readonly executionWei: string;
         readonly l1Wei: string;
-        readonly operatorWei: "0";
+        readonly operatorWei: string;
         readonly signedExecutionCapWei: string;
         readonly admissionEstimatedUpperWei: string;
         readonly payerDebit: {
@@ -140,6 +140,8 @@ export declare function publicMerchant(o: MerchantOperation): {
     signedExecutionCapWei?: string;
     admissionEstimatedUpperWei?: string;
     l1EstimatedUpperWei?: string;
+    operatorEstimatedUpperWei?: string;
+    feeRule?: "apn.merchant-mega-fee.v1" | "apn.merchant-mega-fee.v2";
     kind: "merchant_x402";
     operationId: string;
     state: MerchantPhase;

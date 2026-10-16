@@ -22,6 +22,7 @@ export declare const LEGACY_MERCHANT_MECHANISM: {
     readonly provider: "x402engine-erc20-transfer-proof";
     readonly reference: "megaeth-usdm-crypto-price-v1";
 };
+/** USDm as v1 operations read it, with the deployment pins 0.5.41-0.5.43 checked; never used for a new prepare. */
 export declare const LEGACY_MERCHANT_ASSET: MerchantAssetPin;
 /** A stored v2 asset binding: the registry entry exactly as frozen at prepare. Never compared with the current registry. */
 export declare function validMerchantAssetPin(value: unknown): value is MerchantAssetPin;
