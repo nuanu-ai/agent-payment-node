@@ -210,9 +210,11 @@ test("V1 frozen expired blockhash refuses before the effect marker, decryption o
  const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-expired");f.setHeight(1101);
  await assert.rejects(f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date()),/expired/);assert.equal(f.heightBatches,0);assert.equal(f.sends,0);assert.equal(f.secretReads,0);
  const saved=await new (await import("../../src/swap/repository.js")).SwapOperationRepository(f.temp.root).loadAny(op.operationId);assert.equal(saved?.submissionMarker,null);
+ // SWAP-03: the lifetime is part of the pre-consent proof, so an expired frozen blockhash refuses before the prompt and the reservation.
+ assert.equal(saved?.state,"awaiting_approval");assert.equal(saved?.usageLease,null);
  f.setNow(new Date(Date.parse(op.quote.expiresAt)+1));
  const released=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());
- assert.equal(released.state,"failed_before_effect");assert.equal(released.usageLease?.state,"failed_before_effect");assert.equal(released.submissionMarker,null);
+ assert.equal(released.state,"failed_before_effect");assert.equal(released.usageLease,null);assert.equal(released.submissionMarker,null);
  assert.equal(f.sends,0);assert.equal(f.secretReads,0);
  assert.equal((await new AssetUsageLedger(f.temp.root).usage({account:f.owner,chain:PIN.chain,asset:{kind:"native",identifier:null}},new Date())).amountAtomic,"0");
 });

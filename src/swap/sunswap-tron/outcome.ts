@@ -7,6 +7,7 @@ import type { SunSwapObservationRpcPort } from "./observer.js";
 import { validateSunSwapPreparedMaterial, type SunSwapPreparedMaterial } from "./prepared.js";
 import { validateSunSwapReceipt, type SunSwapReceiptExpectation } from "./receipt.js";
 import { normalizeTronEvidence } from "./tron-call.js";
+import { proveTronUnlanded, type SwapUnlandedProof } from "../unlanded.js";
 
 /** Failed contract results TRON records in a block: state, including the call value, is rolled back and only fees burn. */
 const FAILED_RESULTS = new Set(["REVERT", "BAD_JUMP_DESTINATION", "OUT_OF_MEMORY", "PRECOMPILED_CONTRACT", "STACK_TOO_SMALL",
@@ -50,6 +51,13 @@ export class SunSwapOutcomeObserver {
     if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime())) conflict();
     return { outcome: succeeded ? "succeeded" : "reverted", proof: { receiptHash: finalized.receiptHash,
       transactionHash: txid, observedAt: observedAt.toISOString(), finalized: true } };
+  }
+
+  /** Expiration passed at the solidified head and no solidified record of the exact transaction id. */
+  async proveUnlanded(materialValue: SunSwapPreparedMaterial): Promise<SwapUnlandedProof | null> {
+    const material = validateSunSwapPreparedMaterial(materialValue, "stored");
+    return await proveTronUnlanded(this.rpc, { transactionId: material.execution.transaction.txID,
+      expirationMs: material.execution.intent.expirationMs });
   }
 }
 

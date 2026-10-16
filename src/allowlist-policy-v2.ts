@@ -83,7 +83,8 @@ interface MergedRow {
   readonly railCaps: Partial<Record<CandidateRail, AssetAtomicCaps>>;
   readonly pins: Partial<Record<CandidateRail, AllowlistAdmissionMechanismPin>>;
   gaslessRecipient?: string;
-  bridgeOptions?: AllowlistPolicyAdmissionInput["mechanisms"];
+  bridgeOptions?: NonNullable<AssetPolicyRow["mechanismOptions"]>["bridge"];
+  swapOptions?: NonNullable<AssetPolicyRow["mechanismOptions"]>["swap"];
 }
 
 /**
@@ -105,11 +106,13 @@ export function compileAllowlistPolicyOverlayV2(
       railCaps: {}, pins: {} };
     row.rails[admission.rail] = true;
     row.railCaps[admission.rail] = { maximumPerTransferAtomic: admission.maximumPerTransferAtomic ??
-      admission.mechanisms!.reduce((max, option) => BigInt(option.maximumPerTransferAtomic) > BigInt(max) ? option.maximumPerTransferAtomic : max, "0"),
+      (admission.mechanisms as NonNullable<MergedRow["bridgeOptions"]>).reduce((max, option) =>
+        BigInt(option.maximumPerTransferAtomic) > BigInt(max) ? option.maximumPerTransferAtomic : max, "0"),
       dailyLimitAtomic: admission.dailyLimitAtomic };
     if (admission.mechanism !== undefined) row.pins[admission.rail] = admission.mechanism;
     if (admission.recipient !== undefined) row.gaslessRecipient = admission.recipient;
-    if (admission.mechanisms !== undefined) row.bridgeOptions = admission.mechanisms;
+    if (admission.mechanisms !== undefined && admission.rail === "swap") row.swapOptions = admission.mechanisms as MergedRow["swapOptions"];
+    else if (admission.mechanisms !== undefined) row.bridgeOptions = admission.mechanisms as MergedRow["bridgeOptions"];
     merged.set(key, row);
   }
   const chains = new Map<string, AssetPolicyChain>();
@@ -118,7 +121,8 @@ export function compileAllowlistPolicyOverlayV2(
       kind: row.asset.kind, identifier: row.asset.identifier, symbol: row.asset.symbol, decimals: row.asset.decimals,
       rails: row.rails as AssetRailAdmission, railCaps: row.railCaps,
       ...(Object.keys(row.pins).length === 0 ? {} : { mechanismPins: row.pins as NonNullable<AssetPolicyRow["mechanismPins"]> }),
-      ...(row.bridgeOptions === undefined ? {} : { mechanismOptions: { bridge: row.bridgeOptions } }),
+      ...(row.bridgeOptions === undefined && row.swapOptions === undefined ? {} : { mechanismOptions: {
+        ...(row.bridgeOptions === undefined ? {} : { bridge: row.bridgeOptions }), ...(row.swapOptions === undefined ? {} : { swap: row.swapOptions }) } }),
       ...(row.gaslessRecipient === undefined ? {} : { gaslessRecipient: row.gaslessRecipient }),
     };
     const current = chains.get(row.asset.chain);
@@ -192,7 +196,9 @@ function overlayInput(value: AllowlistPolicyOverlayV2Input, inventory: Allowlist
     const identity = `${asset.chain}\0${asset.kind}\0${asset.identifier ?? ""}\0${row.rail}`;
     if (identities.has(identity)) invalid("Allowlist policy contains a duplicate admission row.", "duplicate_admission");
     identities.add(identity);
-    if (row.rail === "swap" && (row.mechanism === undefined || !("chain" in row.mechanism) || row.mechanism.chain !== asset.chain)) {
+    const swapMechanisms = row.rail !== "swap" ? [] : row.mechanism !== undefined ? [row.mechanism] : (row.mechanisms ?? []) as readonly unknown[];
+    if (row.rail === "swap" && (swapMechanisms.length === 0 || swapMechanisms.some((mechanism) =>
+      !isPlainRecord(mechanism) || mechanism.chain !== asset.chain))) {
       invalid("A swap admission must pin a swap mechanism for its exact network.", "swap_mechanism_chain_mismatch");
     }
   }

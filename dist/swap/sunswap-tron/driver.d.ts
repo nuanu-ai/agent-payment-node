@@ -3,6 +3,7 @@ import { type SwapOperationRecord } from "../model.js";
 import { type SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
+import type { SwapUnlandedProof } from "../unlanded.js";
 import type { SunSwapLocalOwnerAdmission } from "./admission.js";
 import { type SunSwapExecutionBindingStore } from "./execution-binding.js";
 import type { SunSwapExecutionGuard } from "./guard.js";
@@ -24,7 +25,7 @@ export interface SunSwapTronExecutionDriverDependencies {
     readonly guard: Pick<SunSwapExecutionGuard, "inspect">;
     readonly bindings: Pick<SunSwapExecutionBindingStore, "save" | "load">;
     readonly signing: SunSwapSigningPort;
-    readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome">;
+    readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome" | "proveUnlanded">;
     readonly clock: ClockPort;
 }
 /**
@@ -37,6 +38,8 @@ export declare class SunSwapTronExecutionDriver implements GuardedSwapExecutionD
     constructor(d: SunSwapTronExecutionDriverDependencies);
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
+    /** The transaction id and expiration are fixed in the prepared material, signed or not. */
+    proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
     private observeExact;
     private releaseUnsent;
 }

@@ -62,6 +62,14 @@ export declare function verifyNativeCodePins(call: NativeBatchCall, tag: Hex, pi
     readonly to: string;
     readonly data: Hex;
 }): Promise<readonly UniswapV3CodePin[]>;
+/**
+ * Send-time verifier (SWAP-17): only upstream state the code pins cannot fix, the USDC proxy implementation and USDT's
+ * deprecation flag. The router, quoter, factory, WETH9, pools and token proxies have no upgrade path and, after EIP-6780,
+ * cannot have their code replaced; their hashes were verified once for this operation at quote.
+ */
+export declare const verifyUniswapV3MutablePins: UniswapV3PinVerifier;
+/** The WBTC lane touches no upgradeable contract; its code and pool identity were verified once at quote. */
+export declare const verifyUniswapWbtcMutablePins: UniswapV3PinVerifier;
 export declare function verifyUsdtNotDeprecated(call: EvmRpcCall, tag: Hex): Promise<void>;
 export declare function verifyCodePins(call: EvmRpcCall, tag: Hex, pins: readonly UniswapV3CodePin[], implementation: {
     readonly proxy: string;

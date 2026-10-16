@@ -3,6 +3,7 @@ import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { rpcArray, rpcAtomic, rpcRecord, solanaSignature } from "../../solana/rpc.js";
 import { validateSwapOperation } from "../model.js";
+import { proveSolanaUnlanded } from "../unlanded.js";
 import { sha256Hex, USDC_MINT } from "./pins.js";
 /**
  * Observe-only receipt reader. A finalized success must carry the exact signature and message, a fee within the
@@ -15,6 +16,10 @@ export class OrcaReceiptObserver {
     constructor(rpc, now) {
         this.rpc = rpc;
         this.now = now;
+    }
+    /** Finalized height past the bound lifetime and no status for the persisted signature: it can never land. */
+    async proveUnlanded(lastValidBlockHeight, loadSignature) {
+        return await proveSolanaUnlanded(this.rpc, { lastValidBlockHeight, loadSignature });
     }
     async observeOutcome(operationValue, binding, material, signature) {
         const operation = validateSwapOperation(operationValue);

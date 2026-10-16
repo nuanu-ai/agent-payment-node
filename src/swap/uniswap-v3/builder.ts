@@ -89,7 +89,7 @@ export class KeylessUniswapQuoteBuilder implements GuardedSwapReadOnlyBuilder<Un
     } else { await recheckEvmBlock(this.call, block); head = await evmRpcBlock(this.call, "latest"); }
     const drift = BigInt(head.number) - BigInt(block.number);
     if (drift < 0n || drift > BigInt(MAX_HEAD_DRIFT)) blocked("Quote block is outside the allowed head drift.", "uniswap_head_drift");
-    if (!grouped) await this.assertChain();
+    // Chain 1 was proved at the start of this quote on the same transport; the re-read block hash binds the same chain.
     const envelope: UniswapTransactionEnvelope = { from: request.account, to: UNISWAP_ROUTER, data: encoded.data,
       value: request.amount.toString(), gasLimit: gasLimit.toString(), chainId: 1, maxFeePerGas: request.maxFeePerGas.toString(),
       maxPriorityFeePerGas: request.maxPriorityFeePerGas.toString() };

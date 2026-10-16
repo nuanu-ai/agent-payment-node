@@ -6,7 +6,7 @@ export declare class JupiterV1MaterialResolver {
     private readonly rpc;
     constructor(rpc: SolanaRpcPort);
     refreshQuoteBuild(material: JupiterV1ResolvedMaterial, build: JupiterV1RawBuildResponse, useRpcLifetime?: boolean): Promise<JupiterV1ResolvedMaterial>;
-    resolve(payer: string, quote: JupiterV1QuoteResponse, build: JupiterV1RawBuildResponse, maximumNativeExpenseLamports?: string, frozenRpcLifetime?: JupiterV1QuoteRpcLifetime, expectedRouteId?: JupiterV1RouteId): Promise<JupiterV1ResolvedMaterial>;
+    resolve(payer: string, quote: JupiterV1QuoteResponse, build: JupiterV1RawBuildResponse, maximumNativeExpenseLamports: string, frozenRpcLifetime?: JupiterV1QuoteRpcLifetime, expectedRouteId?: JupiterV1RouteId): Promise<JupiterV1ResolvedMaterial>;
     private read;
     private readProgramData;
     private readProgramDataChunk;

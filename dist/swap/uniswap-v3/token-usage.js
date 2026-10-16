@@ -3,7 +3,7 @@ import { evaluateAssetPolicy } from "../../asset-policy-registry.js";
 import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../../asset-usage-ledger.js";
 import { ApnError } from "../../errors.js";
-import { swapMechanismDigest } from "../pin.js";
+import { assetAdmitsSwapMechanism } from "../route-admission.js";
 import { UNISWAP_TOKEN_MECHANISM_PIN } from "./token-route.js";
 export class UniswapTokenUsage {
     state;
@@ -22,9 +22,7 @@ export class UniswapTokenUsage {
         const destination = evaluateAssetPolicy(active.registry, { chain: "eip155:1", asset: { kind: "token", identifier: request.outputToken },
             rail: "swap", amountAtomic: request.minimumOutputAtomic, dailyUsageAtomic: "0",
             asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        const mechanism = swapMechanismDigest(UNISWAP_TOKEN_MECHANISM_PIN);
-        if (source.asset.mechanismPins?.swap === undefined || destination.asset.mechanismPins?.swap === undefined ||
-            swapMechanismDigest(source.asset.mechanismPins.swap) !== mechanism || swapMechanismDigest(destination.asset.mechanismPins.swap) !== mechanism) {
+        if (!assetAdmitsSwapMechanism(source.asset, UNISWAP_TOKEN_MECHANISM_PIN) || !assetAdmitsSwapMechanism(destination.asset, UNISWAP_TOKEN_MECHANISM_PIN)) {
             blocked("Token pair lacks the exact Uniswap mechanism admission.", "uniswap_token_policy_mechanism");
         }
         return active.digest;

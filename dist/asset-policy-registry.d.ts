@@ -1,4 +1,4 @@
-import { type SwapMechanismPin } from "./swap/pin.js";
+import { type SwapAdmissionMechanism } from "./swap/route-admission.js";
 export declare const ASSET_POLICY_REGISTRY_SCHEMA: "apn.asset-policy-registry.v1";
 /** Version 2 replaces the single asset cap pair with exactly one owner cap pair per admitted rail. */
 export declare const ASSET_POLICY_REGISTRY_SCHEMA_V2: "apn.asset-policy-registry.v2";
@@ -45,10 +45,13 @@ export interface AssetPolicyRow {
             provider: string;
             reference: string;
         }>;
-        swap: SwapMechanismPin;
+        /** A legacy full pin or a route admission; either admits by route identity (protocol, router, pools). */
+        swap: SwapAdmissionMechanism;
     }>>;
+    /** Alternatives: bridge pins with their own caps, or several admitted swap routes under the swap rail caps. */
     readonly mechanismOptions?: Readonly<{
-        bridge: readonly AssetMechanismOption[];
+        bridge?: readonly AssetMechanismOption[];
+        swap?: readonly SwapAdmissionMechanism[];
     }>;
     /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
     readonly gaslessRecipient?: string;

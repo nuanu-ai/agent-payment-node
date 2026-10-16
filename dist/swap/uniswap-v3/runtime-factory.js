@@ -10,7 +10,7 @@ import { UniswapLocalOwnerAdmission } from "./admission.js";
 import { KeylessUniswapQuoteBuilder } from "./builder.js";
 import { SavedUniswapQuoteStore } from "./material.js";
 import { scalarUniswapRpcCall } from "./native-rpc.js";
-import { ETHEREUM_WBTC, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_MECHANISM_PIN, verifyUniswapWbtcCodePins, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY } from "./pins.js";
+import { ETHEREUM_WBTC, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_MECHANISM_PIN, verifyUniswapWbtcCodePins, verifyUniswapWbtcMutablePins, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY } from "./pins.js";
 import { swapMechanismDigest } from "../pin.js";
 import { TtyUniswapSwapApproval } from "./tty.js";
 /** Only the foreground CLI approve command receives a terminal; every other surface refuses consent outright. */
@@ -44,7 +44,7 @@ function createRouteRuntime(options, wbtc = false) {
     const signer = new LocalUniswapEthereumSigner(state, wrapping, effects), sender = new UniswapSingleSendAdapter(effects, call);
     const observer = new UniswapEthereumReceiptObserver(call, () => clock.now(), new UniswapBalanceEvidenceStore(root));
     const execution = new UniswapEthereumExecutionDriver({ core: new GuardedSwapService(operations, usage),
-        protocolRegistry, admission, guard: new UniswapExecutionGuard(executionCall, clock, options.verifyPins),
+        protocolRegistry, admission, guard: new UniswapExecutionGuard(executionCall, clock, options.verifySendPins),
         bindings: new UniswapExecutionBindingStore(root), signer, sender, observer, effects, clock });
     const foregroundApproval = options.foreground === "tty" ? new TtyUniswapSwapApproval(quotes, clock, options.tty) : options.foreground;
     return new GuardedSwapRuntime({ chain: "eip155:1", builder: new KeylessUniswapQuoteBuilder(call, quotes, options.verifyPins),
@@ -54,7 +54,8 @@ function createRouteRuntime(options, wbtc = false) {
 }
 /** Route old operations through their original immutable registry; WBTC has its own digest and lifecycle. */
 export function createUniswapKeylessRuntime(options) {
-    const stable = createRouteRuntime(options), wbtc = createRouteRuntime({ ...options, verifyPins: verifyUniswapWbtcCodePins }, true);
+    const stable = createRouteRuntime(options), wbtc = createRouteRuntime({ ...options, verifyPins: verifyUniswapWbtcCodePins,
+        verifySendPins: verifyUniswapWbtcMutablePins }, true);
     const quotes = new SavedUniswapQuoteStore(options.state.root), operations = new SwapOperationRepository(options.state.root);
     const digest = swapMechanismDigest(UNISWAP_WBTC_MECHANISM_PIN);
     return new Proxy(stable, { get(target, property) {

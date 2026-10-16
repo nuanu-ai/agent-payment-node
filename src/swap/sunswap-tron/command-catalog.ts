@@ -10,7 +10,7 @@ const option = (name: CommandOption["name"], type: CommandOption["type"], constr
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "Frozen SunSwap inventory, unsigned exact simulated quote, prepared operation, or durable status.",
   failures: ["Classified refusal; no signing, broadcast, approval, or provider fallback."] } as const;
-const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert"], non_terminal: ["quoted", "prepared", "awaiting_approval",
+const states = { terminal: ["finalized", "failed_before_effect", "failed_confirmed_revert", "expired_unlanded"], non_terminal: ["quoted", "prepared", "awaiting_approval",
   "reserved", "submitting", "submitted", "unknown_finality"] } as const;
 const profile = option("--profile", "profile", ["existing_profile_name"]);
 const account = option("--account", "string", ["canonical_tron_base58check_address"]);

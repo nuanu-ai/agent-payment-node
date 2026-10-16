@@ -87,7 +87,8 @@ export function stableApprovalScreen(operation, material, deadline) {
         `Policy revision: ${material.policyRevision}; policy digest: ${material.policyDigest}`,
         `Activation: ${material.activationDigest}; mechanism: ${operation.mechanismDigest}`,
         `Approval deadline: ${deadline}; quote expiry: ${quote.expiresAt}`,
-        "This approval reserves the USDC principal only. It does not sign or send a transaction."];
+        "This approval reserves the USDC principal and authorizes the one execution that follows in this command:",
+        "refresh the pool and policy, sign the exact bounded transaction, then make one send attempt; an ambiguous send is never retried."];
 }
 /** A second, explicit foreground decision is required after principal reservation and before fresh execution. */
 export async function confirmOrcaStableExecution(service, materials, operationId, consent, clock) {
@@ -103,7 +104,7 @@ export async function confirmOrcaStableExecution(service, materials, operationId
     const before = checkedNow(clock);
     assertWindow(operation, before);
     const deadline = new Date(Math.min(Date.parse(operation.quote.expiresAt), before.getTime() + 60_000)).toISOString();
-    const lines = [...stableApprovalScreen(operation, material, deadline).slice(0, -1),
+    const lines = [...stableApprovalScreen(operation, material, deadline).slice(0, -2),
         "Execution consent: refresh the pool and policy, sign the exact bounded transaction, then make one send attempt.",
         "A submission marker or send claim makes this operation observe-only; an ambiguous send is never retried."];
     const code = approvalCode("swap", operationId, domainHash("apn.orca-stable-execution-screen.v1", canonicalJson(lines)));

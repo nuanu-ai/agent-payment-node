@@ -1,7 +1,7 @@
 import type { AllowlistPolicyAccounts } from "./allowlist-policy-v2.js";
 import type { StagedAllowlistPolicyRecord } from "./allowlist-policy-store.js";
 import { type AssetPolicyRail, type AssetPolicyRegistry, type AssetMechanismOption } from "./asset-policy-registry.js";
-import { type SwapMechanismPin } from "./swap/pin.js";
+import { type SwapAdmissionMechanism } from "./swap/route-admission.js";
 import { type TtyTransferApprovalOptions } from "./tty-approval.js";
 export type AllowlistPolicyAction = "activate" | "revoke";
 /** Everything the owner must see before one activation or revocation is written. */
@@ -31,8 +31,9 @@ export interface AllowlistAdmissionView {
     readonly mechanism: Readonly<{
         provider: string;
         reference: string;
-    }> | SwapMechanismPin | null;
+    }> | SwapAdmissionMechanism | null;
     readonly mechanismOptions?: readonly AssetMechanismOption[];
+    readonly swapMechanisms?: readonly SwapAdmissionMechanism[];
     readonly recipient?: string;
 }
 export declare function allowlistAdmissions(registry: AssetPolicyRegistry): readonly AllowlistAdmissionView[];

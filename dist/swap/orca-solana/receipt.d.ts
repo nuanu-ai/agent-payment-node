@@ -1,5 +1,6 @@
 import { type SolanaRpcPort } from "../../solana/rpc.js";
 import { type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
+import { type SwapUnlandedProof } from "../unlanded.js";
 import type { OrcaExecutionBinding } from "./effects.js";
 import type { OrcaKeylessMaterial } from "./material.js";
 export type OrcaObservedOutcome = {
@@ -15,5 +16,7 @@ export declare class OrcaReceiptObserver {
     private readonly rpc;
     private readonly now;
     constructor(rpc: SolanaRpcPort, now: () => Date);
+    /** Finalized height past the bound lifetime and no status for the persisted signature: it can never land. */
+    proveUnlanded(lastValidBlockHeight: string, loadSignature: () => Promise<string | null>): Promise<SwapUnlandedProof | null>;
     observeOutcome(operationValue: SwapOperationRecord, binding: OrcaExecutionBinding, material: OrcaKeylessMaterial, signature: string): Promise<OrcaObservedOutcome | null>;
 }

@@ -10,6 +10,8 @@ export interface OrcaSwapPlan {
     readonly computeUnitPriceMicroLamports: string;
     readonly tickArrays: readonly string[];
     readonly oracle: string;
+    /** The owner's wSOL account existed at quote: it is reused and kept (never closed), so its own balance never unwraps. */
+    readonly wsolAccountKept?: true;
 }
 export interface OrcaSwapLifetime {
     readonly blockhash: string;

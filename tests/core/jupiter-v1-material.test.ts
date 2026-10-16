@@ -96,7 +96,7 @@ async function withBuilder(callback: (material: JupiterV1ResolvedMaterial) => Bu
             override async resolve() { return material; }
         }
         const resolver = new CapturedResolver({ originHash: "0".repeat(64), async call() { throw new Error("capture resolver does not call live RPC"); } });
-        const builder = new JupiterV1QuoteBuilder(provider, resolver, store, { resolvePayer: async () => material.payer, proveQuote: callback(material), maximumNativeExpenseLamports: "6000000", computeUnitPriceMicroLamports: 1000 });
+        const builder = new JupiterV1QuoteBuilder(provider, resolver, store, { resolvePayer: async () => material.payer, proveQuote: callback(material), computeUnitPriceMicroLamports: 1000 });
         await run(builder, material, store);
     }
     finally {

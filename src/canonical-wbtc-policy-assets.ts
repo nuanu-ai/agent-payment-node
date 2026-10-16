@@ -1,6 +1,7 @@
 import type { CandidateAsset } from "./allowlist-inventory.js";
 import { canonicalJson } from "./canonical.js";
 import { UNISWAP_WBTC_MECHANISM_PIN } from "./swap/uniswap-v3/pins.js";
+import { swapRouteDigest } from "./swap/route-admission.js";
 
 /** Reviewed supplement, independent of the historical frozen dataset and its digest. No rail is admitted by listing. */
 export const CANONICAL_WBTC_POLICY_ASSETS: readonly CandidateAsset[] = [
@@ -18,6 +19,10 @@ export function reviewedWbtcPolicyAsset(input: { readonly chain: string; readonl
   const asset = CANONICAL_WBTC_POLICY_ASSETS.find(row => row.chain === input.chain && row.identifier === input.identifier);
   if (asset === undefined) return undefined;
   if (input.rail === "bridge" && canonicalJson(input.mechanism ?? null) === canonicalJson({ provider: "lifi", reference: "across-v4" })) return asset;
-  if (input.rail === "swap" && input.chain === "eip155:1" && canonicalJson(input.mechanism ?? null) === canonicalJson(UNISWAP_WBTC_MECHANISM_PIN)) return asset;
+  if (input.rail === "swap" && input.chain === "eip155:1" && input.mechanism !== undefined && sameSwapRoute(input.mechanism)) return asset;
   return undefined;
+}
+/** The WBTC lane admits by its route (router and pools), so a pin from any APN version or the route itself resolves. */
+function sameSwapRoute(value: unknown): boolean {
+  try { return swapRouteDigest(value) === swapRouteDigest(UNISWAP_WBTC_MECHANISM_PIN); } catch { return false; }
 }

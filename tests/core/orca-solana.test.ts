@@ -14,10 +14,10 @@ import { decodeTickArray, decodeWhirlpool, type RawSolanaAccount } from "../../s
 import { compileOrcaSwap, orcaSwapInstructions, validateOrcaSwapMessage, type OrcaSwapPlan } from "../../src/swap/orca-solana/instructions.js";
 import { quoteWhirlpoolExactInAToB } from "../../src/swap/orca-solana/math.js";
 import { ORCA_PROGRAM_PINS, ORCA_SOL_USDC_POOL, TICK_ARRAY_ACCOUNT_DISCRIMINATOR, verifyOrcaProgramPins, WHIRLPOOL_ACCOUNT_DISCRIMINATOR,
-  WHIRLPOOL_PROGRAM } from "../../src/swap/orca-solana/pins.js";
+  WHIRLPOOL_PROGRAM, TOKEN_PROGRAM } from "../../src/swap/orca-solana/pins.js";
 import { createOrcaKeylessRuntime } from "../../src/swap/orca-solana/runtime-factory.js";
 import { temporaryState } from "./helpers.js";
-import { AMOUNT_IN, FakeOrcaRpc, FIXTURE, orcaOwner, orcaPolicy, PROFILE, signatureOf, tickArrayBytes } from "./orca-solana-helpers.js";
+import { AMOUNT_IN, FakeOrcaRpc, FIXTURE, orcaOwner, orcaPolicy, PROFILE, signatureOf, tickArrayBytes, wsolAccountBytes } from "./orca-solana-helpers.js";
 
 const pins = async () => ORCA_PROGRAM_PINS;
 const raw = (data: Buffer): RawSolanaAccount => ({ owner: WHIRLPOOL_PROGRAM, lamports: 1n, executable: false, space: data.length, data });
@@ -163,4 +163,30 @@ test("a finalized failed swap becomes failed_confirmed_revert, and a pre-sign re
   await assert.rejects(g.runtime.approveAndExecute(ready.operationId, g.clock.now()), (error) => reason(error) === "orca_simulation_output_shortfall");
   const released = await g.runtime.status(ready.operationId, g.clock.now());
   assert.equal(released.state, "failed_before_effect"); assert.equal(released.submissionMarker, null); assert.equal(g.rpc.sends.length, 0);
+});
+
+// SWAP-20: an owner who already holds a wSOL account can swap; the account is reused and kept, never closed or unwrapped.
+test("an existing own wSOL account is reused without close, keeps its balance, and a changed account refuses before signing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await flow(temporary.root);
+  f.rpc.accounts.set(f.owner.wsol, { owner: TOKEN_PROGRAM, lamports: f.rpc.rent + 7n, executable: false, data: wsolAccountBytes(f.owner.address, 7n, f.rpc.rent) });
+  const quoted = await f.quote();
+  const prepared = await f.runtime.prepare({ profile: PROFILE, quoteHash: quoted.quoteHash, idempotencyKey: "orca-flow-kept-wsol" }, f.clock.now());
+  const sent = await f.runtime.approveAndExecute(prepared.operationId, f.clock.now());
+  assert.equal(sent.state, "submitted"); assert.equal(f.rpc.sends.length, 1);
+  const message = getCompiledTransactionMessageDecoder().decode(getTransactionDecoder().decode(Buffer.from(f.rpc.sends[0]!, "base64")).messageBytes);
+  if (message.version !== 0) throw new Error("expected a v0 message");
+  assert.equal(message.instructions.length, 7, "no close instruction for a kept wSOL account");
+  const other = await temporaryState(); t.after(other.cleanup);
+  const g = await flow(other.root);
+  g.rpc.accounts.set(g.owner.wsol, { owner: TOKEN_PROGRAM, lamports: g.rpc.rent, executable: false, data: wsolAccountBytes(g.owner.address, 0n, g.rpc.rent) });
+  const kept = await g.quote();
+  const next = await g.runtime.prepare({ profile: PROFILE, quoteHash: kept.quoteHash, idempotencyKey: "orca-flow-kept-wsol-closed" }, g.clock.now());
+  g.rpc.accounts.delete(g.owner.wsol);
+  await assert.rejects(g.runtime.approveAndExecute(next.operationId, g.clock.now()), (error) => reason(error) === "orca_wsol_account_changed");
+  assert.equal(g.rpc.sends.length, 0);
+  const foreign = await temporaryState(); t.after(foreign.cleanup);
+  const h = await flow(foreign.root);
+  h.rpc.accounts.set(h.owner.wsol, { owner: TOKEN_PROGRAM, lamports: h.rpc.rent, executable: false, data: wsolAccountBytes(ORCA_SOL_USDC_POOL, 0n, h.rpc.rent) });
+  await assert.rejects(h.quote(), (error) => reason(error) === "orca_wsol_account_unusable");
 });
