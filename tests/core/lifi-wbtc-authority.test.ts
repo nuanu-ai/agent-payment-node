@@ -77,8 +77,13 @@ test("permanent SIGN/SEND claims survive valid journal restoration and usage rem
   const current = (await f.core.bridges.records.findOperation(op.operationId))!, material = (await f.custody.load(current, "approval"))!;
   await writeFile(path, saved); await rm(join(temp.root, "asset-usage"), { recursive: true, force: true });
   const claims = new BridgeEffectClaims(temp.root);
-  await assert.rejects(claims.claim(op, "approval", "sign"));
-  await assert.rejects(claims.claim(op, "approval", "send", material));
+  // The same claim is the same effect; a different effect for a claimed boundary is refused.
+  await claims.claim(op, "approval", "sign"); await claims.claim(op, "approval", "send", material);
+  await assert.rejects(claims.claim(op, "approval", "send", { ...material, materialHash: "0".repeat(64) }), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal((await claims.sendClaim(op, "approval"))?.transactionHash, material.transactionHash);
+  // The restored journal cannot release or resend the claimed approval.
+  const again = await f.core.execute({ command: "bridge.approve", operationId: op.operationId });
+  assert.equal(again.ok, false); assert.equal((await f.core.bridges.records.findOperation(op.operationId))!.terminal, false);
   assert.equal(f.source.submissions.length, 1);
 });
 
@@ -273,7 +278,8 @@ test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or
   const current = (await core.bridges.records.findOperation(op.operationId))!;
   assert.equal(current.intent.expiresAt, op.intent.expiresAt);
   assert.equal(current.effects[1]!.submissionAttempts, 0);
-  if (phase === "safe") {
+  // An interrupted seal (signing_started, no material, no SEND claim) signed nothing: it ends like the unsealed remainder.
+  if (phase === "safe" || phase === "signing_started") {
     assert.equal(current.state, "failed_after_approval"); assert.equal(current.terminal, true);
     assert.equal(current.effects[0]!.phase, "safe_success"); assert.equal(current.effects[1]!.phase, "unsealed");
     assert.match(current.failure!.reason, /^unsent_apn_reprepare_required$/u);
@@ -285,7 +291,7 @@ test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or
     assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "0");
   } else {
     assert.equal(current.terminal, false);
-    assert.equal(current.effects[1]!.phase, phase === "signing_started" ? "signing_started" : "unsealed");
+    assert.equal(current.effects[1]!.phase, "unsealed");
     const lease = current.usageLease!;
     assert.notEqual((await new AssetUsageLedger(temp.root).load(lease, lease.reservationId))!.state, "failed_confirmed_revert");
   }
@@ -297,8 +303,10 @@ import { privateKeyToAccount } from "viem/accounts";
 import { keccak256 } from "viem";
 import { LIFI_SYNTHETIC_KEY } from "./lifi-helpers.js";
 import { verifyBridgeSigned } from "../../src/lifi/transaction.js";
-for (const boundary of ["sign", "send", "malformed", "lateSign"] as const)
-test(`expired valid UNSEALED journal with permanent bridge ${boundary} claim keeps held usage`, async t => {
+// APN broadcasts only after a SEND claim. A SEND claim (valid without sealed material, or malformed) keeps the expired
+// unsent bridge held; a SIGN claim alone proves no broadcast, so the expired remainder ends as failed_after_approval.
+for (const boundary of ["sign", "send", "malformed", "malformedSend", "lateSign"] as const)
+test(`expired valid UNSEALED journal with permanent bridge ${boundary} claim ${["send", "malformedSend"].includes(boundary) ? "keeps held usage" : "ends the unsent remainder"}`, async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
   const current = (await f.core.bridges.records.findOperation(op.operationId))!, claims = new BridgeEffectClaims(temp.root);
   if (boundary === "send") {
@@ -315,6 +323,9 @@ test(`expired valid UNSEALED journal with permanent bridge ${boundary} claim kee
     f.source.account = async (...args) => {
       const result = await account(...args); await claims.claim(current, "bridge", "sign"); return result;
     };
+  } else if (boundary === "malformedSend") {
+    await claims.claim(current, "bridge", "sign");
+    await writeFile(join(temp.root, "bridge-effect-claims", current.profileHash, `${current.operationId}-bridge-send.json`), "null\n", { mode: 0o600 });
   } else {
     await claims.claim(current, "bridge", "sign");
     if (boundary === "malformed") await writeFile(join(temp.root, "bridge-effect-claims", current.profileHash,
@@ -325,16 +336,22 @@ test(`expired valid UNSEALED journal with permanent bridge ${boundary} claim kee
   const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
   const before = f.wrapping.loads, lease = current.usageLease!;
   const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
-  assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
-  assert.equal(result.error?.details?.reason, "bridge_expired_effect_claim_present");
   const latest = (await core.bridges.records.findOperation(op.operationId))!;
-  assert.equal(latest.terminal, false); assert.equal(latest.effects[1]!.phase, "unsealed");
-  assert.equal(f.source.submissions.length, 1); assert.equal(f.wrapping.loads, before);
-  assert.notEqual((await new AssetUsageLedger(temp.root).load(lease, lease.reservationId))!.state, "failed_confirmed_revert");
-  assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "1000");
+  assert.equal(f.source.submissions.length, 1); assert.equal(f.wrapping.loads, before); assert.equal(latest.effects[1]!.phase, "unsealed");
+  if (boundary === "send" || boundary === "malformedSend") {
+    assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
+    assert.equal(result.error?.details?.reason, boundary === "send" ? "bridge_effect_send_claim_unresolved" : "bridge_effect_claim_conflict");
+    assert.equal(latest.terminal, false);
+    assert.notEqual((await new AssetUsageLedger(temp.root).load(lease, lease.reservationId))!.state, "failed_confirmed_revert");
+    assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "1000");
+  } else {
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(latest.state, "failed_after_approval"); assert.equal(latest.terminal, true);
+    assert.equal(latest.effects[1]!.submissionAttempts, 0);
+  }
 });
 
-test("expired SAFE approval with unavailable residual allowance remains held UNKNOWN", async t => {
+test("expired SAFE approval with unavailable residual allowance still ends the unsent bridge", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
   f.source.safeApproval = true; f.source.failAccount = true; f.now.setTime(Date.parse(op.intent.expiresAt) + 1);
   const { approval, ...withoutApproval } = f.dependencies;
@@ -342,10 +359,10 @@ test("expired SAFE approval with unavailable residual allowance remains held UNK
   const before = f.wrapping.loads, result = await core.execute({ command: "operation.resume", operationId: op.operationId });
   assert.equal(result.ok, true, JSON.stringify(result.error));
   const current = (await core.bridges.records.findOperation(op.operationId))!;
-  assert.equal(current.state, "unknown_finality"); assert.equal(current.terminal, false);
-  assert.equal(current.failure!.residualAllowance, null); assert.equal(current.effects[1]!.phase, "unsealed");
-  const lease = current.usageLease!;
-  assert.equal((await new AssetUsageLedger(temp.root).usage(lease, new Date(f.now))).amountAtomic, "1000");
+  // The residual allowance is reported, never required: the proven outcome stays terminal and says the read was unavailable.
+  assert.equal(current.state, "failed_after_approval"); assert.equal(current.terminal, true);
+  assert.equal(current.failure!.residualAllowance, null); assert.equal(current.failure!.residualAllowanceStatus, "unavailable");
+  assert.equal(current.effects[1]!.phase, "unsealed"); assert.equal(current.effects[1]!.submissionAttempts, 0);
   assert.equal(f.source.submissions.length, 1); assert.equal(f.wrapping.loads, before);
 });
 

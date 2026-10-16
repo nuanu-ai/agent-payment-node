@@ -8,7 +8,7 @@ import { temporaryState } from "./helpers.js";
 import { StateStore } from "../../src/state.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
-import { SEI_FUNDING, seiJson, inspectSeiDelivery } from "../../src/lifi/sei-gaszip-contract.js";
+import { SEI_FUNDING, seiJson, inspectSeiDelivery, type SeiCorrelatedDelivery } from "../../src/lifi/sei-gaszip-contract.js";
 import { MEGA_FUNDING, megaJson, inspectMegaDelivery } from "../../src/lifi/mega-gaszip-contract.js";
 import { SeiFundingRpc, proveSeiDelivery, type SeiRpcPort } from "../../src/lifi/sei-gaszip-rpc.js";
 import { MegaFundingRpc, proveMegaDelivery } from "../../src/lifi/mega-gaszip-rpc.js";
@@ -42,7 +42,7 @@ async function fixture(lane:"sei"|"mega"){
  const sourceRaw=serializeTransaction({type:"eip1559",chainId:8453,nonce:Number(BigInt(tx.nonce)),gas:BigInt(tx.gas),maxFeePerGas:BigInt(tx.maxFeePerGas),maxPriorityFeePerGas:BigInt(tx.maxPriorityFeePerGas),to:prepare.owner.address===MEGA_FUNDING.owner?MEGA_FUNDING.target:SEI_FUNDING.target,value:BigInt(tx.value),data:tx.input,accessList:tx.accessList},{r:tx.r,s:tx.s,yParity:Number(BigInt(tx.yParity))});
  const parsed=(lane==="sei"?seiJson:megaJson)(body) as Row;
  const inspect=lane==="sei"?inspectSeiDelivery:inspectMegaDelivery;
- const delivery=()=>inspect(parsed,sourceHash,prepare.owner.address,prepare.amountAtomic,String(BigInt(tx.blockNumber)))!;
+ const delivery=()=>inspect(parsed,sourceHash,prepare.owner.address,prepare.amountAtomic,String(BigInt(tx.blockNumber))) as SeiCorrelatedDelivery;
  let providerBody=body;const transport={request:async(url:string,method:string,requestBody:string|null)=>{
   if(method==="GET"){assert.equal(url,`https://backend.gas.zip/v2/deposit/${sourceHash}`);return {status:200,body:providerBody};}
   const req=JSON.parse(requestBody!);assert.notEqual(req.method,"eth_sendRawTransaction");assert.notEqual(req.method,"eth_estimateGas");
@@ -58,7 +58,7 @@ for(const lane of ["sei","mega"] as const){
   const f=await fixture(lane),d=f.delivery();assert.equal(d.grossNative,true);assert.equal(d.amount,f.parsed.txs[0].value);
   const proof=await (lane==="sei"?proveSeiDelivery:proveMegaDelivery)(f.rpc(),f.prepare.owner.address,d);assert.equal(proof?.amount,f.net);assert.equal(proof?.status,"success");
  });
- for(const raisedFloor of [false,true])test(`${lane} full actual fixture normal observer ${raisedFloor?"refuses net below frozen owner floor":"appends proof, finalizes usage, and cannot double claim"}`,async t=>{
+ for(const raisedFloor of [false,true])test(`${lane} full actual fixture normal observer ${raisedFloor?"ends a proved net below the frozen owner floor as destination_failed":"appends proof, finalizes usage, and cannot double claim"}`,async t=>{
   const f=await fixture(lane),temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root);await state.initialize();
   const ledger=new AssetUsageLedger(temp.root),identity={account:f.prepare.owner.address,chain:"eip155:8453",asset:{kind:"native" as const,identifier:null}};
   const registry=sealAssetPolicyRegistry({schemaVersion:"apn.asset-policy-registry.v1",registryVersion:"synthetic.observer.1",publishedAt:"2026-10-09T00:00:00.000Z",effectiveDate:"2026-10-09",chains:[{chain:identity.chain,family:"evm",name:"Base",assets:[{kind:"native",identifier:null,symbol:"ETH",decimals:18,rails:{direct:false,gasless:false,x402:false,swap:false,bridge:true},caps:{maximumPerTransferAtomic:"10000000000000",dailyLimitAtomic:"10000000000000"},mechanismPins:{bridge:lane==="sei"?SEI_FUNDING.mechanism:MEGA_FUNDING.mechanism}}]}]});
@@ -69,15 +69,23 @@ for(const lane of ["sei","mega"] as const){
   const journal=lane==="sei"?new SeiFundingJournal(temp.root):new MegaFundingJournal(temp.root);
   if(lane==="sei")await (journal as SeiFundingJournal).saveLocked(sealSeiFunding(record as SeiFundingRecord),true);else await (journal as MegaFundingJournal).saveLocked(sealMegaFunding(record as MegaFundingRecord),true);
   const service=lane==="sei"?new SeiFundingService(state,wrapping,{APN_BASE_RPC_URL:base,APN_SEI_RPC_URL:sei},{https:f.transport,now:()=>now.getTime()}):new MegaFundingService(state,wrapping,{APN_BASE_RPC_URL:base,APN_MEGA_RPC_URL:mega},{https:f.transport,now:()=>now.getTime()});
-  if(raisedFloor){await assert.rejects(service.status(record.operationId),/delivery_owner_floor/);assert.equal((await journal.findOperation(record.operationId))?.terminal,false);assert.equal((await ledger.load(identity,reservation.reservationId))?.state,"submitted");return;}
+  if(raisedFloor){const failed=await service.status(record.operationId) as Row;assert.equal(failed.state,"destination_failed");assert.equal(failed.terminal,true);
+   assert.equal(failed.destinationProof.amount,f.net);assert.equal(failed.destinationProof.belowOwnerFloor,true);
+   assert.equal((await ledger.load(identity,reservation.reservationId))?.state,"finalized");return;}
   const done=await service.status(record.operationId) as Row;assert.equal(done.state,"completed");assert.equal(done.destinationProof.amount,f.net);assert.equal(done.rawTransaction,undefined);
   assert.equal((await ledger.load(identity,reservation.reservationId))?.state,"finalized");await service.status(record.operationId);
   await assert.rejects(journal.claimDestinationLocked(f.delivery().hash,"a".repeat(64)),/destination_already_claimed/);
   const saved=await journal.findOperation(record.operationId);assert.equal(saved?.rawTransaction,f.sourceRaw);assert.equal(saved?.submissionAttempts,1);
  });
- for(const kind of ["truncated","refund","cancelled","wrong-native","token","type","chain","receiver","status","data","minValue","extra","null-flag"] as const)test(`${lane} full provider fixture rejects ${kind}`,async()=>{
+ for(const kind of ["refund","cancelled","deposit-cancelled"] as const)test(`${lane} full provider fixture ends ${kind} as a terminal provider failure`,()=>{
+  const fixtureValue=fixture(lane);return fixtureValue.then(f=>{const v=structuredClone(f.parsed);
+  if(kind==="refund")v.txs[0].refund=true;if(kind==="cancelled")v.txs[0].cancelled=true;if(kind==="deposit-cancelled")v.deposit.status="CANCELLED";
+  const outcome=(lane==="sei"?inspectSeiDelivery:inspectMegaDelivery)(v,f.sourceHash,f.prepare.owner.address,f.prepare.amountAtomic) as Row;
+  assert.equal(outcome.providerFailure,kind==="refund"?"provider_refund":"provider_cancelled");assert.equal(typeof outcome.providerDigest,"string");});
+ });
+ for(const kind of ["truncated","wrong-native","token","type","chain","receiver","status","data","minValue","extra","null-flag"] as const)test(`${lane} full provider fixture rejects ${kind}`,async()=>{
   const f=await fixture(lane),v=structuredClone(f.parsed);
-  if(kind==="truncated")delete v.deposit.seen;if(kind==="refund")v.txs[0].refund=true;if(kind==="cancelled")v.txs[0].cancelled=true;if(kind==="wrong-native")v.txs[0].valueNative="1";if(kind==="token")v.deposit.token=f.prepare.owner.address;if(kind==="type")v.deposit.type="TOKEN";if(kind==="chain")v.txs[0].chain="1";if(kind==="receiver")v.txs[0].to=SEI_FUNDING.target;if(kind==="status")v.txs[0].status="SUCCESS";if(kind==="data")v.txs[0].data="0x01";if(kind==="minValue")v.txs[0].minValue="1";if(kind==="extra")v.txs[0].unknown=true;if(kind==="null-flag")v.txs[0].refund=null;
+  if(kind==="truncated")delete v.deposit.seen;if(kind==="wrong-native")v.txs[0].valueNative="1";if(kind==="token")v.deposit.token=f.prepare.owner.address;if(kind==="type")v.deposit.type="TOKEN";if(kind==="chain")v.txs[0].chain="1";if(kind==="receiver")v.txs[0].to=SEI_FUNDING.target;if(kind==="status")v.txs[0].status="SUCCESS";if(kind==="data")v.txs[0].data="0x01";if(kind==="minValue")v.txs[0].minValue="1";if(kind==="extra")v.txs[0].unknown=true;if(kind==="null-flag")v.txs[0].refund=null;
   assert.throws(()=>(lane==="sei"?inspectSeiDelivery:inspectMegaDelivery)(v,f.sourceHash,f.prepare.owner.address,f.prepare.amountAtomic));
  });
  test(`${lane} pending complete fixture stays unresolved`,async()=>{const f=await fixture(lane);f.parsed.txs[0].status="PENDING";assert.equal(f.delivery(),null);});
@@ -108,7 +116,7 @@ for(const lane of ["sei","mega"] as const){
 /** QA GASZIP-LIVE-SCALAR-001: the real Sei payout whose RPC `s` is a 63-digit QUANTITY (no leading zero nibble). */
 async function shortScalarPayout(){
  const q=JSON.parse(await raw("sei-short-scalar-payout.json")) as Row,captured=q.calls.find((c:Row)=>c.method==="eth_getTransactionByHash").body.result as Row;
- const delivery=inspectSeiDelivery(seiJson(q.provider.body),q.sourceHash,q.owner,q.amountAtomic,q.sourceBlock)!;
+ const delivery=inspectSeiDelivery(seiJson(q.provider.body),q.sourceHash,q.owner,q.amountAtomic,q.sourceBlock) as SeiCorrelatedDelivery;
  const port=(tx:Row):SeiRpcPort=>({call:async(method:string,params:readonly unknown[])=>{
   const header=q.recordedHeaders;if(method==="eth_chainId")return header.chainId;if(method==="eth_getTransactionByHash")return structuredClone(tx);
   if(method==="eth_getBlockByNumber"&&params[0]==="safe")return header.safe;if(method==="eth_getBlockByNumber"&&params[0]===header.previous.number)return header.previous;

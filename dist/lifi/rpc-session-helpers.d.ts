@@ -1,5 +1,4 @@
 import { ApnError } from "../errors.js";
-import { type BridgeRpcPhysicalPolicy } from "./rpc-execution-budget.js";
 import type { RpcReadTelemetry } from "./rpc-session.js";
 export type RpcDecoder<T = unknown> = (value: unknown) => T;
 export declare const MAX_READ_ATTEMPTS = 2;
@@ -8,19 +7,23 @@ export declare const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
 export declare class BridgeRpcPhysicalBudget {
     private readonly now;
     private readonly wait;
-    private readonly policy;
-    /** The derived sign-and-send step with its retry headroom; it raises the policy cap and is zero without an unsent effect. */
-    private readonly sendStepPosts;
+    /** The operation's invocation cap derived from its read plans (send-budget.ts); it raises the base cap, never lowers it. */
+    private readonly derivedPosts;
     private posts;
     private lastStart;
     private tail;
-    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>, policy?: BridgeRpcPhysicalPolicy, 
-    /** The derived sign-and-send step with its retry headroom; it raises the policy cap and is zero without an unsent effect. */
-    sendStepPosts?: number);
+    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>, 
+    /** The operation's invocation cap derived from its read plans (send-budget.ts); it raises the base cap, never lowers it. */
+    derivedPosts?: number);
     remaining(): number;
     require(posts: number, method: string): void;
     beforePost(method: string): Promise<void>;
 }
+/**
+ * An exhausted invocation or session read budget means "not read in this invocation": the caller defers to the next
+ * resume and never records it as unknown finality. A batch over its item bound is a fixed shape error, not a deferral.
+ */
+export declare function bridgeRpcBudgetDeferred(error: unknown): boolean;
 export declare function jsonRpcRateLimit(error: unknown): boolean;
 export declare const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 export declare const RPC_DEFAULT_LOGICAL_ITEMS = 96;

@@ -250,19 +250,20 @@ test("LI.FI validated safe destination proof resumes locally without destination
   assert.equal(s.source.submissions.length, 2);
 });
 
-test("LI.FI journals destination proof before residual failure and reuses it on retry", async (t) => {
+test("LI.FI proven delivery completes without a residual allowance read, so an unavailable read cannot block it", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   const { id } = await s.prepare(); const observe = s.destination.observe.bind(s.destination);
+  let accountsAfterDelivery = 0; const account = s.source.account.bind(s.source);
   s.destination.observe = async (...args) => { const result = await observe(...args); if (result !== null) s.source.failAccount = true; return result; };
+  s.source.account = async (...args) => { if (s.source.failAccount) accountsAfterDelivery++; return await account(...args); };
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
-  const checkpoint = (await s.core.bridges.records.findOperation(id))!;
-  assert.equal(checkpoint.state, "unknown_finality"); assert.ok(checkpoint.destinationProof);
-  assert.equal(checkpoint.failure?.reason, "residual_allowance_unavailable");
+  const completed = (await s.core.bridges.records.findOperation(id))!;
+  assert.equal(completed.state, "completed"); assert.ok(completed.destinationProof); assert.equal(accountsAfterDelivery, 0);
+  // The exact-amount allowance was consumed by the proven exact source Transfer: the residual is zero at the safe bridge block.
+  assert.deepEqual(completed.failure?.residualAllowance, { amountAtomic: "0", block: completed.effects[1]!.safeProof!.block,
+    rpcOrigin: completed.effects[1]!.safeProof!.rpcOrigin });
   const destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
-  s.source.failAccount = false;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
-  const completed = (await s.core.bridges.records.findOperation(id))!; assert.equal(completed.state, "completed");
-  assert.deepEqual(completed.destinationProof, checkpoint.destinationProof);
   assert.equal(s.destination.calls.length, destinationCalls); assert.equal(s.provider.statusCalls, providerCalls);
 });
 

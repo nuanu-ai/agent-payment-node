@@ -38,6 +38,10 @@ export declare class BridgeObservation {
         value?: never;
     }>;
     private residualFrom;
+    /**
+     * Proven delivery needs no residual read: the allowance was exactly the principal (or the native constant zero) and the
+     * proven source Transfer consumed exactly that amount, so the residual at the safe bridge block is zero.
+     */
     private finish;
     private finishDestinationFailure;
     private destinationCandidate;

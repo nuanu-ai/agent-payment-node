@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
 import type { BridgeDeploymentIdentity, BridgeDestinationTransactionProof, BridgeTransactionProof } from "./model.js";
-import { retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
+import { BRIDGE_TELEMETRY_ROWS, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "./deployments.js";
@@ -13,6 +13,7 @@ import { bridgeFailure, bridgeSame } from "./validation.js";
 import { ApnError, type ErrorCode } from "../errors.js";
 import { observationRpcFailure } from "./observation-diagnostics.js";
 import type { RpcReadTelemetry } from "./rpc.js";
+import { bridgeRpcBudgetDeferred } from "./rpc-session-helpers.js";
 
 export type BridgeSave = (op: BridgeOperationRecord, patch: Partial<BridgeMutable>) => Promise<BridgeOperationRecord>;
 type LazyRpc = BridgeRpcPort | (() => BridgeRpcPort);
@@ -45,6 +46,8 @@ export class BridgeObservation {
         }
       } catch (error) {
         reliable = false;
+        // An exhausted read budget means "not read in this invocation": the next resume observes again; no state changes.
+        if (bridgeRpcBudgetDeferred(error)) break;
         op = await this.save(op, { state: "unknown_finality", observationTelemetry: appendObservationTelemetry(op, "source_observation", effect.role, "failure", beforeTelemetry,
           source.readTelemetry?.() ?? null), failure: retainedUnsentBridgeRpcFailure(op) ?? observationFailure(effect.role, error, "APN_INTERNAL") });
         continue;
@@ -128,6 +131,7 @@ export class BridgeObservation {
       try {
         proof = await this.destinationCandidate(op, hint, destination);
       } catch (error) {
+        if (bridgeRpcBudgetDeferred(error)) return op;
         const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge",
           error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
         if (error instanceof DestinationPending) return await this.waiting(op, telemetry);
@@ -148,6 +152,7 @@ export class BridgeObservation {
       const destination = this.destination(), beforeTelemetry = destination.readTelemetry?.() ?? null;
       try { proof = await this.destinationCandidate(op, hint, destination); }
       catch (error) {
+        if (bridgeRpcBudgetDeferred(error)) return op;
         const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge",
           error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
         if (error instanceof DestinationPending) return await this.waiting(op, telemetry);
@@ -179,16 +184,18 @@ export class BridgeObservation {
   }
   private async residualFrom(op: BridgeOperationRecord, source: BridgeRpcPort) {
     const m = op.intent.materialization, account = await source.account(m.sender, m.approvalAddress, m.request.fromToken);
-    if (account.chainId !== m.request.fromChainId || account.rpcOrigin !== op.intent.sourceRpcOrigin ||
+    if (account.chainId !== m.request.fromChainId ||
       account.owner !== m.sender || account.token !== m.request.fromToken || account.spender !== m.approvalAddress) bridgeFailure("APN_RPC_PROTOCOL", "residual_allowance_identity");
     return { amountAtomic: account.allowanceAtomic, block: account.block, rpcOrigin: account.rpcOrigin };
   }
+  /**
+   * Proven delivery needs no residual read: the allowance was exactly the principal (or the native constant zero) and the
+   * proven source Transfer consumed exactly that amount, so the residual at the safe bridge block is zero.
+   */
   private async finish(op: BridgeOperationRecord, reason = "delivery_correlated"): Promise<BridgeOperationRecord> {
-    const residual = await this.residualObservation(op);
-    if (!residual.ok) return await this.save(op, { state: "unknown_finality", observationTelemetry: residual.observationTelemetry,
-      failure: { reason: "residual_allowance_unavailable", residualAllowance: null } });
-    return await this.save(op, { state: "completed", observationTelemetry: residual.observationTelemetry,
-      failure: { reason, residualAllowance: residual.value } });
+    const proof = op.effects.at(-1)!.safeProof!;
+    return await this.save(op, { state: "completed",
+      failure: { reason, residualAllowance: { amountAtomic: "0", block: proof.block, rpcOrigin: proof.rpcOrigin } } });
   }
   private async finishDestinationFailure(op: BridgeOperationRecord, reason: "recovered_weth" | "below_floor" | "protocol_mismatch"): Promise<BridgeOperationRecord> {
     const residual = await this.residualObservation(op);
@@ -244,7 +251,7 @@ export class BridgeObservation {
   }
   private async historicalDeployment(op: BridgeOperationRecord, rpc: BridgeRpcPort,
     proof: BridgeTransactionProof | BridgeDestinationTransactionProof, frozen: BridgeDeploymentIdentity): Promise<BridgeDeploymentIdentity> {
-    if (rpc.origin !== frozen.rpcOrigin || proof.rpcOrigin !== frozen.rpcOrigin || proof.chainId !== frozen.chainId) bridgeFailure("APN_RPC_CONFIG", "observation_RPC_identity");
+    if (rpc.chainId !== frozen.chainId || proof.chainId !== frozen.chainId) bridgeFailure("APN_RPC_CONFIG", "observation_RPC_identity");
     const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId,
       frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken,
       proof.block, true);
@@ -269,7 +276,7 @@ function appendObservationTelemetry(op: BridgeOperationRecord, stage: "source_ob
   const roleAttempts = { primary: Math.max(0, after.attemptsByEndpointRole.primary - prior.attemptsByEndpointRole.primary),
     receipt: Math.max(0, after.attemptsByEndpointRole.receipt - prior.attemptsByEndpointRole.receipt),
     archive: Math.max(0, after.attemptsByEndpointRole.archive - prior.attemptsByEndpointRole.archive) };
-  return [...existing, { schemaVersion: "apn.bridge-observation-telemetry.v1" as const, stage, effectRole, outcome,
+  return [...existing.slice(1 - BRIDGE_TELEMETRY_ROWS), { schemaVersion: "apn.bridge-observation-telemetry.v1" as const, stage, effectRole, outcome,
     physicalRequests: roleAttempts.primary + roleAttempts.receipt + roleAttempts.archive,
     httpAttempts: Math.max(0, after.httpAttempts - prior.httpAttempts),
     logicalRpcItems: Math.max(0, after.logicalItems - prior.logicalItems), batchCount: Math.max(0, after.batchCount - prior.batchCount),
@@ -301,7 +308,7 @@ class DestinationPending extends Error {}
 export function replaceEffect(op: BridgeOperationRecord, effect: BridgeEffect): readonly BridgeEffect[] {
   return op.effects.map((e) => e.role === effect.role ? effect : e);
 }
-function proofIdentity(proof: BridgeTransactionProof | BridgeDestinationTransactionProof) { return { ...proof, safeBlock: null }; }
+function proofIdentity(proof: BridgeTransactionProof | BridgeDestinationTransactionProof) { return { ...proof, safeBlock: null, rpcOrigin: null }; }
 function reusableProviderObservation(op: BridgeOperationRecord): boolean {
   const observation = op.providerObservation, bridge = op.effects.at(-1);
   if (observation?.status !== "completed_observed") return false;

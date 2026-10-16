@@ -21,19 +21,24 @@ function hex(n: bigint): Hex { return `0x${n.toString(16)}`; }
 export interface OneClickSourceCaps { readonly maxGas: bigint; readonly maxFee: bigint; readonly maxPriority: bigint; readonly maxNative: bigint }
 export interface OneClickSourcePlan {
   readonly blockHash: Hex; readonly nonce: bigint; readonly gas: bigint; readonly fee: bigint; readonly tip: bigint;
-  readonly nativeDebit: bigint; readonly depositCode: "eoa" | "contract" | null;
+  /** The block's base fee the plan was priced from; after consent only the signed max fee must still cover it plus the signed tip. */
+  readonly baseFee: bigint; readonly nativeDebit: bigint; readonly depositCode: "eoa" | "contract" | null;
 }
 /** Raw hash-pinned Ethereum reads for a native deposit. Caps are applied once, by planOneClickNative. */
 export interface OneClickNativeObservation {
   readonly blockHash: Hex; readonly nonce: bigint; readonly depositCode: "eoa" | "contract"; readonly gas: bigint;
   readonly baseFee: bigint; readonly tip: bigint; readonly balance: bigint;
 }
+/**
+ * After consent the signed envelope keeps the approved nonce, gas, max fee and tip (the bounded fee cap shown at consent).
+ * A fresh base fee may move: require the same nonce, no larger gas need, a signed max fee that still covers the fresh base
+ * fee plus the signed tip, and a debit at the signed values that still fits the owner's cap. A one-wei tick never aborts.
+ */
 export function assertOneClickPostApproval(initial: Readonly<{ nonce: bigint; gas: bigint; fee: bigint; tip: bigint }>,
-  fresh: Readonly<{ nonce: bigint; gas: bigint; fee: bigint; tip: bigint; nativeDebit: bigint }>,
+  fresh: Readonly<{ nonce: bigint; gas: bigint; baseFee: bigint; nativeDebit: bigint }>,
   maxNativeDebit: bigint, effectiveDeadlineMs: number, nowMs: number): void {
-  if (fresh.nonce !== initial.nonce || fresh.gas > initial.gas || fresh.fee > initial.fee ||
-    fresh.tip > initial.tip || fresh.nativeDebit > maxNativeDebit ||
-    nowMs > effectiveDeadlineMs - 30_000) fail("post_approval_drift");
+  if (fresh.nonce !== initial.nonce || fresh.gas > initial.gas || fresh.baseFee + initial.tip > initial.fee ||
+    fresh.nativeDebit > maxNativeDebit || nowMs > effectiveDeadlineMs - 30_000) fail("post_approval_drift");
 }
 /**
  * Native debit is exactly value plus gas times the signed max fee; both must fit the owner's caps and the pinned balance.
@@ -44,7 +49,7 @@ export function planOneClickNative(observed: OneClickNativeObservation, amount: 
   const tip = caps.maxPriority, fee = 2n * observed.baseFee + tip, nativeDebit = amount + observed.gas * fee;
   if (tip <= 0n || observed.gas > caps.maxGas || fee > caps.maxFee) fail("gas_fee");
   if (nativeDebit > caps.maxNative || observed.balance < nativeDebit) fail("native_balance_or_cap");
-  return { blockHash: observed.blockHash, nonce: observed.nonce, gas: observed.gas, fee, tip, nativeDebit,
+  return { blockHash: observed.blockHash, nonce: observed.nonce, gas: observed.gas, fee, tip, baseFee: observed.baseFee, nativeDebit,
     depositCode: observed.depositCode };
 }
 /**
@@ -68,8 +73,12 @@ export class OneClickEvmSource {
   private async chain(): Promise<void> {
     if (quantity(await this.rpc.call("eth_chainId", [])) !== BigInt(this.lane.origin.chainId)) fail("chain");
   }
-  /** Base USDC: hash-pinned token, native, nonce, simulation and OP-stack fee reads (unchanged lane behaviour). */
-  async readToken(payer: string, data: Hex, amount: bigint, caps: OneClickSourceCaps, effectiveDeadlineMs: number, now: () => number): Promise<OneClickSourcePlan> {
+  /**
+   * Base USDC: hash-pinned token, native, nonce, simulation and OP-stack fee reads. Before consent the fresh suggestions must
+   * fit the owner's caps; after consent (`signed`) the debit is priced at the signed gas and max fee instead.
+   */
+  async readToken(payer: string, data: Hex, amount: bigint, caps: OneClickSourceCaps, effectiveDeadlineMs: number, now: () => number,
+    signed?: Readonly<{ gas: bigint; fee: bigint }>): Promise<OneClickSourcePlan> {
     const token = this.lane.origin.token;
     if (this.lane.origin.kind !== "erc20" || this.lane.origin.chainId !== 8453 || token === null) fail("token_origin");
     const rpc = this.rpc; await this.chain();
@@ -87,18 +96,19 @@ export class OneClickEvmSource {
     const nonce = quantity(latest);
     if (nonce > BigInt(Number.MAX_SAFE_INTEGER) || word(tokenBalance) < amount || nonce !== quantity(pending) ||
       bridgeHex(simulation, 32, 32) !== `0x${"0".repeat(63)}1`) fail("balance_nonce_or_simulation");
-    const gas = quantity(gasEstimate) * 12n / 10n + 1n;
-    const tip = quantity(tipEstimate), fee = 2n * quantity(block.baseFeePerGas) + tip;
-    if (gas > caps.maxGas || fee > caps.maxFee || tip > caps.maxPriority) fail("gas_fee");
+    const gas = quantity(gasEstimate) * 12n / 10n + 1n, baseFee = quantity(block.baseFeePerGas);
+    const tip = quantity(tipEstimate), fee = 2n * baseFee + tip;
+    if (signed === undefined && (gas > caps.maxGas || fee > caps.maxFee || tip > caps.maxPriority)) fail("gas_fee");
+    const debitGas = signed?.gas ?? gas, debitFee = signed?.fee ?? fee;
     const [l1, operator] = await Promise.all([
       rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: FEE, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] }) }, tag]),
-      rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: FEE, functionName: "getOperatorFee", args: [gas] }) }, tag]),
+      rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: FEE, functionName: "getOperatorFee", args: [debitGas] }) }, tag]),
     ]);
-    const nativeDebit = gas * fee + word(l1) + word(operator);
+    const nativeDebit = debitGas * debitFee + word(l1) + word(operator);
     if (nativeDebit > caps.maxNative || quantity(nativeBalance) < nativeDebit) fail("native_balance_or_cap");
     const check = bridgeRecord(await rpc.call("eth_getBlockByNumber", [hex(blockNumber), false]));
-    if (bridgeHex(check.hash, 32, 32) !== blockHash || now() > effectiveDeadlineMs - 45_000) fail("block_or_quote_expired");
-    return { blockHash, nonce, gas, fee, tip, nativeDebit, depositCode: null };
+    if (bridgeHex(check.hash, 32, 32) !== blockHash || (signed === undefined && now() > effectiveDeadlineMs - 45_000)) fail("block_or_quote_expired");
+    return { blockHash, nonce, gas, fee, tip, baseFee, nativeDebit, depositCode: null };
   }
   /** Ethereum ETH: balance and deposit code pinned to the safe block; the base fee reference is max(safe, latest). */
   async observeNative(payer: string, deposit: string, amount: bigint): Promise<OneClickNativeObservation> {
@@ -129,6 +139,8 @@ export class OneClickEvmSource {
     return { blockHash, nonce, depositCode, gas, baseFee: safeFee > latestFee ? safeFee : latestFee, tip: quantity(tip), balance: quantity(balance) };
   }
   async send(raw: Hex): Promise<Hex> { return await this.rpc.send(raw); }
+  /** Whether the node knows this hash at all (pending or mined). Read only when an earlier operation still reserves the nonce. */
+  async transactionKnown(hash: Hex): Promise<boolean> { await this.chain(); return await this.raw("eth_getTransactionByHash", [hash]) !== null; }
   /** Safe-block receipt observation. It never implies destination delivery. */
   async observe(record: OneClickSourceRecord): Promise<unknown> {
     await this.chain();
@@ -164,8 +176,8 @@ export class OneClickEvmSource {
       blockNumber: quantity(r.blockNumber).toString(), blockHash: bridgeHex(r.blockHash, 32, 32),
       receiptHash: hashObject(receipt), destinationDelivered: false };
   }
-  /** Two reads outside the shared reader's method list, over the same validated endpoint and transport. */
-  private async raw(method: "eth_getCode" | "eth_getTransactionReceipt", params: readonly unknown[]): Promise<unknown> {
+  /** Reads outside the shared reader's method list, over the same validated endpoint and transport. */
+  private async raw(method: "eth_getCode" | "eth_getTransactionReceipt" | "eth_getTransactionByHash", params: readonly unknown[]): Promise<unknown> {
     const response = await this.https.request(this.url, "POST", canonicalJson({ jsonrpc: "2.0", id: 1, method, params }), 1024 * 1024, "APN_RPC_CONFIG");
     if (response.status !== 200) fail("rpc_http");
     let body: Record<string, unknown>;

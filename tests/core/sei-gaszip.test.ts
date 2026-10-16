@@ -6,13 +6,15 @@ import { join } from "node:path";
 import { getAddress, parseTransaction, keccak256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { temporaryState } from "./helpers.js";
+import { hashObject } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
 import { StateStore } from "../../src/state.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { TtyAllowlistPolicyApproval } from "../../src/allowlist-policy-activation.js";
 import { runCli } from "../../src/cli.js";
 import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import { OperationService } from "../../src/operation-service.js";
-import { SEI_FUNDING, inspectSeiFundingQuote, inspectSeiDelivery, seiJson, seiFail, seiObject, seiUint, seiQuantity, seiHash, seiAddress, seiExact } from "../../src/lifi/sei-gaszip-contract.js";
+import { SEI_FUNDING, type SeiCorrelatedDelivery, inspectSeiFundingQuote, inspectSeiDelivery, seiJson, seiFail, seiObject, seiUint, seiQuantity, seiHash, seiAddress, seiExact } from "../../src/lifi/sei-gaszip-contract.js";
 import { MEGA_FUNDING, megaFail, megaObject, megaUint, megaQuantity, megaHash, megaAddress, megaExact } from "../../src/lifi/mega-gaszip-contract.js";
 import { gaszipNativeNet } from "../../src/lifi/gaszip-native-delivery.js";
 import { SeiFundingJournal, sealSeiFunding, validateSeiFunding, type SeiFundingRecord } from "../../src/lifi/sei-gaszip-journal.js";
@@ -29,8 +31,12 @@ test("lossless numeric lexemes retain native outputs and quote expiry; unsafe al
 });
 function provider(owner:string,hash:Hex,changes:Record<string,unknown>={}){return {deposit:{block:"100",chain:"8453",hash,log:"0",sender:owner,shorts:["246"],status:"CONFIRMED",time:"1",to:owner,usd:0.02,value:"10000000000000"},txs:[{chain:"1329",hash:DEST_HASH,nonce:"7",refund:false,cancelled:false,signer:SIGNER,status:"CONFIRMED",time:"2",to:owner,usd:0.02,value:OUTPUT,...changes}]};}
 test("provider mapping refuses alternate source, destination, refunds, missing or ambiguous delivery",()=>{
- const owner=SIGNER,source=`0x${"9".repeat(64)}` as Hex;assert.equal(inspectSeiDelivery(provider(owner,source),source,owner,"10000000000000")?.amount,OUTPUT);
- for(const changed of [{refund:true},{cancelled:true},{to:SEI_FUNDING.target},{value:"1"}])assert.throws(()=>inspectSeiDelivery(provider(owner,source,changed),source,owner,"10000000000000"));
+ const owner=SIGNER,source=`0x${"9".repeat(64)}` as Hex;assert.equal((inspectSeiDelivery(provider(owner,source),source,owner,"10000000000000") as SeiCorrelatedDelivery).amount,OUTPUT);
+ for(const changed of [{to:SEI_FUNDING.target},{refund:null}])assert.throws(()=>inspectSeiDelivery(provider(owner,source,changed),source,owner,"10000000000000"));
+ // A refunded or cancelled payout is a terminal provider failure; a low payout is proved first and judged against the owner's floor.
+ assert.deepEqual(inspectSeiDelivery(provider(owner,source,{refund:true}),source,owner,"10000000000000"),{providerFailure:"provider_refund",providerDigest:hashObject(provider(owner,source,{refund:true}))});
+ assert.equal((inspectSeiDelivery(provider(owner,source,{cancelled:true}),source,owner,"10000000000000") as {providerFailure:string}).providerFailure,"provider_cancelled");
+ assert.equal((inspectSeiDelivery(provider(owner,source,{value:"1"}),source,owner,"10000000000000") as {amount:string}).amount,"1");
  const ambiguous=provider(owner,source);ambiguous.txs.push(ambiguous.txs[0]!);assert.throws(()=>inspectSeiDelivery(ambiguous,source,owner,"10000000000000"));
  assert.throws(()=>inspectSeiDelivery(provider(owner,source),DEST_HASH,owner,"10000000000000"));
  assert.equal(inspectSeiDelivery(provider(owner,source,{status:"PENDING"}),source,owner,"10000000000000"),null);
@@ -101,13 +107,45 @@ test("unknown source and missing correlated delivery remain held and never resen
  assert.equal((await f.service.status(r.operationId) as SeiFundingRecord).terminal,false);await f.service.approve(r.operationId);assert.equal(f.source.sends,1);
  f.source.hidden=false;f.pending();assert.equal((await f.service.status(r.operationId) as SeiFundingRecord).terminal,false);assert.equal(f.source.sends,1);
 });
-test("source calldata/actual-fee drift and destination amount/delta drift cannot finalize",async(t)=>{
+test("source calldata drift and destination amount/delta drift cannot finalize",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
  f.source.wrongData=true;await assert.rejects(f.service.status(r.operationId));f.source.wrongData=false;
- f.source.feeOver=true;await assert.rejects(f.service.status(r.operationId));f.source.feeOver=false;
  f.source.operatorNonzero=true;await assert.rejects(f.service.status(r.operationId),/base_operator_fee_unreviewed/);f.source.operatorNonzero=false;
  f.destination.wrongAmount=true;await assert.rejects(f.service.status(r.operationId));f.destination.wrongAmount=false;
  f.destination.balanceDrift=true;await assert.rejects(f.service.status(r.operationId));assert.equal((await new SeiFundingJournal(f.state.root).findOperation(r.operationId))?.terminal,false);assert.equal(f.source.sends,1);
+});
+test("an actual Base fee over the owner's quote ceiling is reported on the terminal outcome, never a wedge",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
+ // The L1 data fee is charged by the receipt, not bounded by the signed max fee: here it alone exceeds the owner's ceiling.
+ f.source.call=(original=>async(m:string,p:readonly unknown[],guard?:()=>void)=>{const v=await original(m,p,guard);
+  return m==="eth_getTransactionReceipt" && v!==null?{...(v as object),l1Fee:h(BigInt(r.maximumFeeAtomic)+1n)}:v;})(f.source.call.bind(f.source));
+ const done=await f.service.status(r.operationId) as SeiFundingRecord & {sourceProof:{feeCapExceeded:boolean}};
+ assert.equal(done.state,"completed");assert.equal(done.sourceProof.feeCapExceeded,true);assert.equal(f.source.sends,1);
+});
+test("signed but never sent, definite send refusal and a consumed nonce each end before effect and release the Base wallet",async(t)=>{
+ const sealed=await setup(t),r=await sealed.service.prepare(sealed.input) as SeiFundingRecord,journal=new SeiFundingJournal(sealed.state.root);
+ const saved=(await journal.findOperation(r.operationId))!,raw=await privateKeyToAccount((await new EncryptedWalletStore(sealed.state,sealed.wrapping).describe("gaszip-test"))!.secret.privateKey)
+  .signTransaction({type:"eip1559",chainId:8453,to:SEI_FUNDING.target,data:SEI_FUNDING.data,value:BigInt(saved.amountAtomic),nonce:Number(saved.plan.nonce),gas:BigInt(saved.plan.gas),maxFeePerGas:BigInt(saved.plan.maxFee),maxPriorityFeePerGas:BigInt(saved.plan.tip)});
+ await journal.withLocks([`operation:${r.operationId}`],async()=>{await journal.saveLocked(sealSeiFunding({...saved,state:"signing_started"}));await journal.sealTransaction(sealSeiFunding({...saved,state:"signing_started"}),raw);});
+ const retired=await sealed.service.status(r.operationId) as SeiFundingRecord;
+ assert.equal(retired.state,"failed_before_effect");assert.equal(retired.terminal,true);assert.equal(retired.transactionHash,null);assert.equal(sealed.source.sends,0);
+ await new OperationService(sealed.state).assertEvmAccountAvailable(r.profileHash,8453,sealed.owner);
+ const rejected=await setup(t),r2=await rejected.service.prepare(rejected.input) as SeiFundingRecord;
+ rejected.source.call=(original=>async(m:string,p:readonly unknown[],guard?:()=>void)=>{if(m==="eth_sendRawTransaction"){guard!();guard!();throw new ApnError("APN_OPERATION_BLOCKED","sei_gaszip_send_rejected",{reason:"sei_gaszip_send_rejected"});}return original(m,p,guard);})(rejected.source.call.bind(rejected.source));
+ const refused=await rejected.service.approve(r2.operationId) as SeiFundingRecord;assert.equal(refused.state,"failed_before_effect");assert.equal(refused.submissionAttempts,1);
+ await new OperationService(rejected.state).assertEvmAccountAvailable(r2.profileHash,8453,rejected.owner);
+ const lost=await setup(t),r3=await lost.service.prepare(lost.input) as SeiFundingRecord;await lost.service.approve(r3.operationId);lost.source.hidden=true;
+ assert.equal((await lost.service.status(r3.operationId) as SeiFundingRecord).state,"submitted");
+ lost.source.nonce=BigInt(r3.plan.nonce)+1n;
+ const consumed=await lost.service.status(r3.operationId) as SeiFundingRecord;assert.equal(consumed.state,"failed_before_effect");assert.equal(lost.source.sends,1);
+ await new OperationService(lost.state).assertEvmAccountAvailable(r3.profileHash,8453,lost.owner);
+});
+test("a cancelled GasZip deposit ends as destination_failed with the source spend kept",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
+ f.service=new SeiFundingService(f.state,f.wrapping,{}, {https:{request:async()=>({status:200,body:JSON.stringify({...provider(f.owner,keccak256(f.source.raw!)),deposit:{...provider(f.owner,keccak256(f.source.raw!)).deposit,status:"CANCELLED"}})})},
+  source:()=>f.source,destination:()=>f.destination,now:()=>Date.now()});
+ const failed=await f.service.status(r.operationId) as SeiFundingRecord&{destinationProof:{providerFailure:string}};
+ assert.equal(failed.state,"destination_failed");assert.equal(failed.terminal,true);assert.equal(failed.destinationProof.providerFailure,"provider_cancelled");assert.equal(f.source.sends,1);
 });
 test("safe confirmed source revert releases only principal after independent receipt proof",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);f.source.reverted=true;
@@ -134,10 +172,11 @@ test("fresh lower fees cannot weaken the frozen signed envelope affordability ch
  await assert.rejects(f.service.approve(r.operationId));
  const saved=await new SeiFundingJournal(f.state.root).findOperation(r.operationId);assert.equal(saved?.state,"prepared");assert.equal(saved?.rawTransaction,null);assert.equal(f.source.sends,0);
  });
- for(const point of ["queueHook","tlsHook"] as const)test(`expiry at ${point} retains unknown fence and never sends again`,async(t)=>{
+ for(const point of ["queueHook","tlsHook"] as const)test(`expiry at ${point} refuses before transport, ends before effect and never sends again`,async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;f.source[point]=async()=>{f.advance();};
  await f.service.approve(r.operationId);const saved=await new SeiFundingJournal(f.state.root).findOperation(r.operationId);
- assert.equal(saved?.state,"unknown_finality");assert.equal(saved?.submissionAttempts,1);assert.equal(f.source.sends,0);
+ // The refused guard proves the bytes never left APN: the attempt is recorded and the hold is released as unsubmitted.
+ assert.equal(saved?.state,"failed_before_effect");assert.equal(saved?.submissionAttempts,1);assert.equal(saved?.rawTransaction,null);assert.equal(f.source.sends,0);
  assert.throws(()=>f.source.guard!());await f.service.approve(r.operationId);await f.service.status(r.operationId);assert.equal(f.source.sends,0);
  });
  test("legacy prepared activation absence preserves its hash and refuses foreground effects",async(t)=>{

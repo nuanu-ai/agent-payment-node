@@ -11,6 +11,8 @@ export function retainedUnsentBridgeRpcFailure(op) {
 /** Recoverable pre-sign guard outcomes: nothing was sealed, signed or sent, and the next resume repeats the full guard. */
 export const BRIDGE_PRE_SIGN_RPC_RATE_LIMITED = "pre_sign_rpc_rate_limited";
 export const BRIDGE_PRE_SIGN_RPC_UNAVAILABLE = "pre_sign_rpc_unavailable";
+/** Telemetry is diagnostics, not evidence: a transition keeps only the latest rows and a telemetry-only change adds none. */
+export const BRIDGE_TELEMETRY_ROWS = 8;
 export const BRIDGE_TERMINAL = ["completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
 export function bridgeIntentBinding(operation) {
     return { schemaVersion: operation.schemaVersion, kind: operation.kind, profileHash: operation.profileHash,

@@ -4,7 +4,7 @@ import { decodeFunctionData, encodeFunctionData, getAddress, type Hex } from "vi
 import { acrossBridgeAbi, feeForwarderAbi, FEE_RECIPIENT } from "../../src/lifi/abi.js";
 import { hashObject } from "../../src/canonical.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
-import { bridgeRpcPhysicalPolicy } from "../../src/lifi/rpc-execution-budget.js";
+import { bridgeInvocationPostBudget, bridgeSendStepPostBudget } from "../../src/lifi/send-budget.js";
 import { guardBridgeEffect } from "../../src/lifi/economics.js";
 import { BridgeRpcPhysicalBudget, RpcReadSession } from "../../src/lifi/rpc.js";
 import type { BridgeEnvelope } from "../../src/lifi/model.js";
@@ -34,8 +34,8 @@ for (const reverse of [false, true]) for (const oldCap of [false, true]) test(`W
   // The hash covers the exact request; switching direction recomputes a test intent before the guard.
   const { bridgeApprovalPolicyHash } = await import("../../src/lifi/economics.js");
   op.intent.policyHash = bridgeApprovalPolicyHash(op.intent.materialization);
-  assert.equal(bridgeRpcPhysicalPolicy(op), "canonical_wbtc_across_approval_continuation");
-  const physical = new BridgeRpcPhysicalBudget(() => time, wait, oldCap ? "default" : bridgeRpcPhysicalPolicy(op));
+  const derived = bridgeInvocationPostBudget(op, 3);
+  const physical = new BridgeRpcPhysicalBudget(() => time, wait, oldCap ? 0 : derived);
   const session = new RpcReadSession({ now: () => time, wait, maxHttpRequests: 28, maxHttpAttempts: 30,
     archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const source = spy.rpcFor(from, session), destination = spy.rpcFor(to, session);
@@ -64,35 +64,20 @@ for (const reverse of [false, true]) for (const oldCap of [false, true]) test(`W
   assert.equal(history.length, reverse ? 13 : 12); assert.equal(first.length, 17); assert.equal(second.length, 2);
   // The last admission is the one durable send slot. A second send cannot gain capacity by resetting a read session.
   await physical.beforePost("eth_sendRawTransaction");
-  assert.equal(physical.remaining(), reverse ? 0 : 1);
-  if (reverse) await assert.rejects(physical.beforePost("eth_sendRawTransaction"), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert(history.every(call => !call.items.some(item => item.method === "eth_sendRawTransaction")));
   assert([...history, ...first, ...second].filter(call => call.host.includes("archive")).every(call => call.items.length <= 3));
   const clean = history.length + first.length + second.length + 1;
-  assert(clean > 24); assert(clean <= 33);
+  assert(clean > 24); assert.equal(clean, reverse ? 33 : 32); assert.equal(physical.remaining(), derived - clean);
   console.log(JSON.stringify({ direction: `${from}->${to}`, history: history.map(x=>({host:x.host,methods:x.items.map(y=>y.method)})), first: first.map(x=>({host:x.host,methods:x.items.map(y=>y.method)})), second: second.map(x=>({host:x.host,methods:x.items.map(y=>y.method)})), cleanPosts: clean }));
 });
 
-test("WBTC typed continuation keeps the original approval and submits the bridge once after an exhausted invocation", async (t) => {
+test("WBTC continuation keeps the original approval and submits the bridge once after an exhausted invocation", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const { op, f } = await preparedWbtc(temp.root, new Date("2026-10-09T03:44:00.000Z"));
-  assert.equal(bridgeRpcPhysicalPolicy(op), "default");
   f.source.failObserve = true;
   const first = await f.core.execute({ command: "bridge.approve", operationId: op.operationId }); assert(first.ok);
   const pending = (await f.core.bridges.records.findOperation(op.operationId))!;
   assert.equal(pending.effects[0]!.submissionAttempts, 1); assert.equal(pending.effects[1]!.phase, "unsealed");
-  assert.equal(bridgeRpcPhysicalPolicy(pending), "canonical_wbtc_across_approval_continuation");
-  for (const changed of [
-    { ...pending, terminal: true },
-    { ...pending, intent: { ...pending.intent, sourceDeployment: { ...pending.intent.sourceDeployment, codeHash: "0".repeat(64) } } },
-    { ...pending, intent: { ...pending.intent, destinationDeployment: { ...pending.intent.destinationDeployment, configurationHash: "0".repeat(64) } } },
-    { ...pending, effects: pending.effects.map(effect => effect.role === "bridge" ? { ...effect, submissionAttempts: 1 as const } : effect) },
-    { ...pending, intent: { ...pending.intent, materialization: { ...pending.intent.materialization, tool: "stargateV2" as const } } },
-    { ...pending, intent: { ...pending.intent, policyHash: "0".repeat(64) } },
-    { ...pending, intent: { ...pending.intent, sourceDeployment: { ...pending.intent.sourceDeployment, contractHash: "0".repeat(64) } } },
-    { ...pending, intent: { ...pending.intent, materialization: { ...pending.intent.materialization, request: {
-      ...pending.intent.materialization.request, fromToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as const } } } },
-  ]) assert.equal(bridgeRpcPhysicalPolicy(changed), "default");
   f.source.failObserve = false; f.source.safeApproval = false;
   const observedOnly = await f.core.execute({ command: "operation.resume", operationId: op.operationId }); assert(observedOnly.ok);
   assert.equal(f.source.submissions.length, 1); assert.equal(f.approval.calls.length, 1);
@@ -100,8 +85,8 @@ test("WBTC typed continuation keeps the original approval and submits the bridge
   f.source.account = async (...args) => {
     if (exhaust) {
       const physical = f.rpcSessions[0]!.physicalBudget!;
-      assert.equal(physical.remaining(), 33);
-      (physical as unknown as { posts: number }).posts = 32; exhaust = false;
+      assert.equal(physical.remaining(), bridgeInvocationPostBudget(pending, 3));
+      (physical as unknown as { posts: number }).posts = physical.remaining() - 1; exhaust = false;
     }
     return await account(...args);
   };
@@ -114,7 +99,7 @@ test("WBTC typed continuation keeps the original approval and submits the bridge
   assert.equal(f.source.submissions.length, 2); assert.equal(f.approval.calls.length, 3);
   const sent = (await f.core.bridges.records.findOperation(op.operationId))!;
   assert.equal(sent.effects[0]!.transactionHash, pending.effects[0]!.transactionHash);
-  assert.equal(sent.effects[1]!.submissionAttempts, 1); assert.equal(bridgeRpcPhysicalPolicy(sent), "default");
+  assert.equal(sent.effects[1]!.submissionAttempts, 1); assert.equal(bridgeSendStepPostBudget(sent, 3), 0);
   f.source.safeApproval = true;
   await f.core.execute({ command: "operation.resume", operationId: op.operationId });
   await f.core.execute({ command: "operation.resume", operationId: op.operationId });

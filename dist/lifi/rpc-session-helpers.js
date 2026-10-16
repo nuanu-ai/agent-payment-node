@@ -1,29 +1,24 @@
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { WBTC_ACROSS_CONTINUATION_POST_LIMIT, USDC_ACROSS_CONTINUATION_POST_LIMIT } from "./rpc-execution-budget.js";
 export const MAX_READ_ATTEMPTS = 2;
 export const BRIDGE_INVOCATION_RPC_POST_LIMIT = 24;
 /** One invocation's physical transport gate, shared by every chain and read/observation session. */
 export class BridgeRpcPhysicalBudget {
     now;
     wait;
-    policy;
-    sendStepPosts;
+    derivedPosts;
     posts = 0;
     lastStart = Number.NEGATIVE_INFINITY;
     tail = Promise.resolve();
-    constructor(now = Date.now, wait = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)), policy = "default", 
-    /** The derived sign-and-send step with its retry headroom; it raises the policy cap and is zero without an unsent effect. */
-    sendStepPosts = 0) {
+    constructor(now = Date.now, wait = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)), 
+    /** The operation's invocation cap derived from its read plans (send-budget.ts); it raises the base cap, never lowers it. */
+    derivedPosts = 0) {
         this.now = now;
         this.wait = wait;
-        this.policy = policy;
-        this.sendStepPosts = sendStepPosts;
+        this.derivedPosts = derivedPosts;
     }
     remaining() {
-        const limit = this.policy === "canonical_wbtc_across_approval_continuation" ? WBTC_ACROSS_CONTINUATION_POST_LIMIT
-            : this.policy === "canonical_usdc_across_approval_continuation" ? USDC_ACROSS_CONTINUATION_POST_LIMIT : BRIDGE_INVOCATION_RPC_POST_LIMIT;
-        return Math.max(limit, this.sendStepPosts) - this.posts;
+        return Math.max(BRIDGE_INVOCATION_RPC_POST_LIMIT, this.derivedPosts) - this.posts;
     }
     require(posts, method) {
         if (this.remaining() < posts)
@@ -51,6 +46,13 @@ export class BridgeRpcPhysicalBudget {
             release();
         }
     }
+}
+/**
+ * An exhausted invocation or session read budget means "not read in this invocation": the caller defers to the next
+ * resume and never records it as unknown finality. A batch over its item bound is a fixed shape error, not a deferral.
+ */
+export function bridgeRpcBudgetDeferred(error) {
+    return error instanceof ApnError && error.code === "APN_RPC_BUDGET_EXCEEDED" && error.details?.reason !== "maxBatchItems";
 }
 /**
  * JSON-RPC error codes that only report a provider rate limit: EIP-1474 "limit exceeded" (-32005), the official Base
