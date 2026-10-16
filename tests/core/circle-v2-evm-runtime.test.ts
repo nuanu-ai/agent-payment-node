@@ -55,13 +55,17 @@ test("lost broadcast holds a durable submission fence and explicit replay observ
   assert.ok(p.saved.some(x => x.effects[0]!.phase === "submission_started")); assert.ok(op.usage.every(x => x.state === "unknown_finality"));
   await approveCircleSource(op, p.p); assert.equal(p.signs(), 1); assert.equal(p.sends(), 0);
 });
-test("crash immediately after signing mark cannot re-enter custody even if no sealed bytes were saved", async () => {
+test("crash after the signing mark with no saved bytes resumes the same frozen envelope once under fresh consent", async () => {
   let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); op = advanceCircle(op, { effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "signing_started" } : e), state: "source_unknown" }, "signing_fence", at);
-  const p = ports(op, { loadMaterial: async () => null }); const recovered = await approveCircleSource(op, p.p); assert.equal(recovered.effects[0]!.phase, "signing_started"); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+  let saved = false; const p = ports(op, { loadMaterial: async (o, e) => saved && e.role === "approval" ? { schemaVersion: "apn.circle-v2-evm-effect.v1", operationId: o.operationId, role: e.role, fingerprint: o.fingerprint, envelopeHash: e.envelope.envelopeHash, rawTransaction: "0x02", transactionHash: tx, materialHash: "9".repeat(64) } : null });
+  const seal = p.p.seal; p.p.seal = async (o, e, g) => { assert.equal(e.phase, "signing_started"); const m = await seal(o, e, g); saved = true; return m; };
+  const resumed = await approveCircleSource(op, p.p); assert.equal(resumed.effects[0]!.phase, "submitted"); assert.equal(p.signs(), 1); assert.equal(p.sends(), 1);
+  assert.ok(p.saved.some(x => x.effects[0]!.phase === "submission_started"));
 });
-test("unknown signing can recover encrypted material only for observation", async () => {
+test("a signing fence with saved material recovers as resumable sealed bytes, never as unknown", async () => {
   let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); op = advanceCircle(op, { effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "signing_started" } : e), state: "source_unknown" }, "signing_fence", at);
-  const p = ports(op); const recovered = await observeCircle(op, p.p); assert.equal(recovered.effects[0]!.phase, "unknown"); assert.equal(recovered.effects[0]!.transactionHash, tx); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+  const p = ports(op); const recovered = await observeCircle(op, p.p); assert.equal(recovered.effects[0]!.phase, "sealed"); assert.equal(recovered.effects[0]!.transactionHash, tx); assert.equal(p.signs(), 0); assert.equal(p.sends(), 0);
+  const sent = await approveCircleSource(recovered, p.p); assert.equal(sent.effects[0]!.phase, "submitted"); assert.equal(p.signs(), 0); assert.equal(p.sends(), 1);
 });
 async function sourceReady(finalized = false, chain: 143 | 1329 | 59144 = 143) {
   let op = initial(undefined, chain); op = advanceCircle(op, { usage: usage(op, "unknown_finality") }, "reserved", at);
@@ -178,16 +182,45 @@ test("expired TTY and first preflight fail before any private marker", async () 
   let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); let now = Date.parse(op.expiresAt) - 1;
   const p = ports(op, { now: () => now, approve: async () => { now += 2; } }); await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0);
 });
-test("expiry after signing or submission fences becomes unknown and never signs or sends again", async () => {
+test("expiry before the submission fence keeps signed bytes resumable; after the fence it is unknown and never signs or sends again", async () => {
   for (const delayed of ["signing_fence", "sign", "sign_result", "material_sealed", "submission_fence", "dispatch"] as const) {
-    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const p = ports(op, { now: () => now });
-    const save = p.p.save, seal = p.p.seal, broadcast = p.p.broadcast;
-    p.p.save = async next => { await save(next); const reason = next.transitions.at(-1)!.reason; if (delayed === "signing_fence" && reason === "approval_signing_fence" || delayed === "material_sealed" && reason === "approval_material_sealed" || delayed === "submission_fence" && reason === "approval_submission_fence") now += 60000; };
-    p.p.seal = async (current, effect, guard) => { if (delayed === "sign") { now += 60000; guard(); } const result = await seal(current, effect, guard); if (delayed === "sign_result") now += 60000; return result; };
-    p.p.broadcast = async (effect, raw, guard) => { if (delayed === "dispatch") now += 60000; guard(); return broadcast(effect, raw, guard); };
-    op = await approveCircleSource(op, p.p); assert.equal(op.effects[0]!.phase, "unknown", delayed); assert.equal(p.sends(), 0, delayed);
-    const signed = p.signs(); await approveCircleSource(op, p.p); assert.equal(p.signs(), signed, delayed); assert.equal(p.sends(), 0, delayed);
+    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const signed = new Set<string>();
+    const p = ports(op, { now: () => now, loadMaterial: async (o, e) => signed.has(e.role) ? { schemaVersion: "apn.circle-v2-evm-effect.v1", operationId: o.operationId, role: e.role, fingerprint: o.fingerprint, envelopeHash: e.envelope.envelopeHash, rawTransaction: "0x02", transactionHash: tx, materialHash: "9".repeat(64) } : null });
+    const save = p.p.save, broadcast = p.p.broadcast; let fired = false;
+    const fake = ports(op).p.seal, seal = async (...args: Parameters<typeof fake>) => { const m = await fake(...args); signed.add(args[1].role); return m; };
+    let signCount = 0;
+    const once = (hit: boolean) => { if (hit && !fired) { fired = true; now += 60000; } };
+    p.p.save = async next => { await save(next); const reason = next.transitions.at(-1)!.reason; once(delayed === "signing_fence" && reason === "approval_signing_fence" || delayed === "material_sealed" && reason === "approval_material_sealed" || delayed === "submission_fence" && reason === "approval_submission_fence"); };
+    p.p.seal = async (current, effect, guard) => { if (delayed === "sign" && !fired) { once(true); guard(); } signCount++; const result = await seal(current, effect, guard); once(delayed === "sign_result"); return result; };
+    p.p.broadcast = async (effect, raw, guard) => { once(delayed === "dispatch"); guard(); return broadcast(effect, raw, guard); };
+    if (delayed === "submission_fence" || delayed === "dispatch") {
+      op = await approveCircleSource(op, p.p); assert.equal(op.effects[0]!.phase, "unknown", delayed); assert.equal(p.sends(), 0, delayed);
+      const before = signCount; await approveCircleSource(op, p.p); assert.equal(signCount, before, delayed); assert.equal(p.sends(), 0, delayed);
+      continue;
+    }
+    await assert.rejects(approveCircleSource(op, p.p), /consent/, delayed);
+    const unsent = p.current().effects[0]!; assert.ok(["signing_started", "sealed"].includes(unsent.phase), delayed); assert.equal(p.sends(), 0, delayed);
+    assert.ok(!p.saved.some(x => x.effects[0]!.phase === "unknown"), delayed);
+    const resumed = await approveCircleSource(p.current(), p.p); assert.equal(resumed.effects[0]!.phase, "submitted", delayed);
+    assert.equal(signCount, 1, delayed); assert.equal(p.sends(), 1, delayed);
   }
+});
+test("a signed-but-unsent source effect stays resumable after the preparation window; nothing new is signed after it", async () => {
+  const ready = await sourceReady();
+  const sealedBurn = advanceCircle(ready, { source: null, attestation: null, state: "source_unknown", residualAllowanceAtomic: "40100", effects: ready.effects.map(e => e.role === "burn" ? { ...e, phase: "sealed", proof: null } : e) }, "burn_sealed_unsent", at);
+  const now = Date.parse(sealedBurn.expiresAt) + 1, p = ports(sealedBurn, { now: () => now });
+  const sent = await approveCircleSource(sealedBurn, p.p); assert.equal(sent.effects[1]!.phase, "submitted"); assert.equal(p.signs(), 0); assert.equal(p.sends(), 1);
+  const preparedBurn = advanceCircle(sealedBurn, { effects: sealedBurn.effects.map(e => e.role === "burn" ? { ...e, phase: "prepared", transactionHash: null, materialHash: null } : e) }, "burn_not_signed", at);
+  const q = ports(preparedBurn, { now: () => now });
+  await assert.rejects(approveCircleSource(preparedBurn, q.p), /source_preparation_expired/); assert.equal(q.signs(), 0); assert.equal(q.sends(), 0);
+});
+test("an abandoned signed-but-unsent burn exits through approve-zero cleanup at the same pending nonce", async () => {
+  const ready = await sourceReady();
+  const sealedBurn = advanceCircle(ready, { source: null, attestation: null, state: "source_unknown", residualAllowanceAtomic: "40100", effects: ready.effects.map(e => e.role === "burn" ? { ...e, phase: "sealed", proof: null } : e) }, "burn_sealed_unsent", at);
+  const p = ports(sealedBurn, { cleanupEnvelope: async () => circleEnvelope({ chainId: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_SOURCE_TOKEN, data: encodeCircleApproval(true), valueAtomic: "0", nonceAtomic: "2", gasLimitAtomic: "50000", maxFeePerGasAtomic: "20000000", maxPriorityFeePerGasAtomic: "0" }) });
+  const cleaned = await cleanupCircle(sealedBurn, p.p); const cleanup = cleaned.effects.find(e => e.role === "cleanup")!;
+  assert.equal(cleaned.state, "cleanup_required"); assert.equal(cleanup.phase, "submitted"); assert.equal(cleaned.effects[1]!.phase, "sealed"); assert.equal(p.signs(), 1); assert.equal(p.sends(), 1);
+  await assert.rejects(approveCircleSource(cleaned, p.p), /explicit_cleanup_required/); assert.equal(p.sends(), 1);
 });
 test("private consent cannot be forged, reused after controller return or applied to another effect", async () => {
   let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const p = ports(op);
@@ -202,14 +235,18 @@ test("mint and no-effect cancellation have fresh finite TTY authority", async ()
   let cancelled = initial(); cancelled = advanceCircle(cancelled, { usage: usage(cancelled) }, "reserved", at); now = at + 1;
   p = ports(cancelled, { now: () => now, loadMaterial: async () => null, approve: async () => { now += 60000; } }); await assert.rejects(cleanupCircle(cancelled, p.p), /consent/); assert.equal(p.current().terminal, false);
 });
-test("bound policy expiry at either preflight prevents dispatch even after all policy confirmations", async () => {
-  for (const second of [false, true]) {
-    let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); let preflights = 0, confirms = 0;
-    const p = ports(op, { now: () => now, authorizationDeadline: async () => new Date(at + 2).toISOString(), assertOwnerPolicyAndConflicts: async () => { confirms++; }, preflight: async () => { preflights++; if (preflights === (second ? 2 : 1)) now += 1; } });
-    if (second) { op = await approveCircleSource(op, p.p); assert.equal(op.effects[0]!.phase, "unknown"); assert.equal(p.signs(), 1); assert.equal(confirms, 4); }
-    else { await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.current().effects[0]!.phase, "prepared"); }
-    assert.equal(p.sends(), 0); const signs = p.signs(); if (second) { await approveCircleSource(op, p.p); assert.equal(p.signs(), signs); assert.equal(p.sends(), 0); }
-  }
+test("bound policy expiry at the single pre-signing preflight prevents signing and dispatch", async () => {
+  let now = at + 1, op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); let preflights = 0, confirms = 0;
+  const p = ports(op, { now: () => now, authorizationDeadline: async () => new Date(at + 2).toISOString(), assertOwnerPolicyAndConflicts: async () => { confirms++; }, preflight: async () => { preflights++; now += 1; } });
+  await assert.rejects(approveCircleSource(op, p.p), /consent/); assert.equal(p.signs(), 0); assert.equal(p.current().effects[0]!.phase, "prepared");
+  assert.equal(p.sends(), 0); assert.equal(preflights, 1); assert.equal(confirms, 3);
+});
+test("owner, policy and chain preflight run once per effect before signing and never after the seal", async () => {
+  let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at); const order: string[] = [];
+  const p = ports(op, { assertOwnerPolicyAndConflicts: async () => { order.push("owner"); }, preflight: async () => { order.push("preflight"); } });
+  const seal = p.p.seal, broadcast = p.p.broadcast;
+  p.p.seal = async (o, e, g) => { order.push("seal"); return seal(o, e, g); }; p.p.broadcast = async (e, r, g) => { order.push("send"); return broadcast(e, r, g); };
+  await approveCircleSource(op, p.p); assert.deepEqual(order, ["owner", "owner", "owner", "preflight", "seal", "send"]);
 });
 test("policy expiry after a submission fence or queued dispatch remains observation-only", async () => {
   for (const delayed of ["fence", "dispatch"] as const) {

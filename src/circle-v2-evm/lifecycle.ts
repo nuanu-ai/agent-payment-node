@@ -26,24 +26,32 @@ export interface CircleLifecyclePorts {
   usage(op: CircleOperationV1, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<CircleOperationV1["usage"]>;
 }
 type Consent = () => void;
+/** Phases whose signed bytes, if any, never crossed the submission fence: resumable with fresh consent (R3). */
+const UNSENT_SIGNING: readonly string[] = ["signing_started", "sealed"];
 interface Authority { readonly ports: CircleLifecyclePorts; readonly binding: string; readonly deadline: number; readonly envelopes: ReadonlyMap<CircleRole, string>; readonly claimed: Set<CircleRole>; active: CircleRole | null; }
 const authorities = new WeakMap<Consent, Authority>();
 const effectGuards = new WeakMap<() => void, { readonly token: Consent; readonly ports: CircleLifecyclePorts; readonly role: CircleRole }>();
 const consentBinding = (op: CircleOperationV1, ports: CircleLifecyclePorts) => hashObject({ context: ports.consentContext?.() ?? null, operationId: op.operationId, fingerprint: op.fingerprint, source: op.sourceCustody, destination: op.destinationCustody, policies: op.policies });
-async function consent(op: CircleOperationV1, role: "source" | "mint" | "cleanup", ports: CircleLifecyclePorts): Promise<Consent> {
+/** The prompt gets its own answer window; the 60 s execution window starts when the owner's answer returns.
+ * Only a source effect that is already signed may be resumed after the preparation window (nothing new is signed after it). */
+async function consent(op: CircleOperationV1, role: "source" | "mint" | "cleanup", ports: CircleLifecyclePorts, resumeSignedSource = false): Promise<Consent> {
   const policyDeadline = await ports.authorizationDeadline(op);
   if (policyDeadline !== null && (!Number.isFinite(Date.parse(policyDeadline)) || new Date(policyDeadline).toISOString() !== policyDeadline)) circleBlocked("owner_policy_window_invalid");
-  const deadline = Math.min(ports.now() + 60_000, role === "source" ? Date.parse(op.expiresAt) : Infinity, policyDeadline === null ? Infinity : Date.parse(policyDeadline));
-  if (ports.now() >= deadline) circleBlocked("consent_expired");
-  await ports.approve(op, role, new Date(deadline).toISOString());
-  if (ports.now() >= deadline) circleBlocked("consent_expired_after_tty");
+  const window = Math.min(role === "source" && !(resumeSignedSource && ports.now() >= Date.parse(op.expiresAt)) ? Date.parse(op.expiresAt) : Infinity, policyDeadline === null ? Infinity : Date.parse(policyDeadline));
+  const prompt = Math.min(ports.now() + 60_000, window);
+  if (ports.now() >= prompt) circleBlocked("consent_expired");
+  await ports.approve(op, role, new Date(prompt).toISOString());
+  if (ports.now() >= prompt) circleBlocked("consent_expired_after_tty");
+  const deadline = Math.min(ports.now() + 60_000, window);
   const token = () => {}; authorities.set(token, { ports, binding: consentBinding(op, ports), deadline, envelopes: new Map(op.effects.filter(e => role === "source" ? e.role === "approval" || e.role === "burn" : e.role === role).map(e => [e.role, e.envelope.envelopeHash])), claimed: new Set(), active: null });
   return token;
 }
 async function cancellationConsent(op: CircleOperationV1, ports: CircleLifecyclePorts): Promise<() => void> {
-  const deadline = ports.now() + 60_000, binding = consentBinding(op, ports);
+  const prompt = ports.now() + 60_000, binding = consentBinding(op, ports);
+  await ports.approve(op, "cancel", new Date(prompt).toISOString()); if (ports.now() >= prompt) circleBlocked("cancellation_consent_expired");
+  const deadline = ports.now() + 60_000;
   const guard = () => { if (ports.now() >= deadline || consentBinding(op, ports) !== binding) circleBlocked("cancellation_consent_expired"); };
-  await ports.approve(op, "cancel", new Date(deadline).toISOString()); guard();
+  guard();
   // This no-effect guard is deliberately absent from authorities: it cannot authorize signing or dispatch.
   return guard;
 }
@@ -60,40 +68,55 @@ const updateEffect = (op: CircleOperationV1, role: CircleRole, patch: Partial<Ci
 export async function approveCircleSource(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
   let op = validateCircle(input);
   if (op.terminal) return op;
-  if (op.effects.some(e => e.role !== "mint" && e.role !== "cleanup" && ["signing_started", "submission_started", "submitted", "unknown"].includes(e.phase))) return observeCircle(op, ports);
+  if (op.effects.some(e => e.role !== "mint" && e.role !== "cleanup" && ["submission_started", "submitted", "unknown"].includes(e.phase))) return observeCircle(op, ports);
   if (op.state === "cleanup_required") circleBlocked("explicit_cleanup_required");
   if (op.source !== null) return observeCircle(op, ports);
-  if (ports.now() >= Date.parse(op.expiresAt)) circleBlocked("source_preparation_expired");
-  await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "source", ports); await ports.assertOwnerPolicyAndConflicts(op); checkConsent(token, op, ports);
+  // A signed source effect that never reached its submission fence stays resumable with fresh consent (R3).
+  if (op.effects.some(e => e.phase === "signing_started")) op = await observeCircle(op, ports);
+  const resumeSigned = op.effects.some(e => (e.role === "approval" || e.role === "burn") && UNSENT_SIGNING.includes(e.phase));
+  if (!resumeSigned && ports.now() >= Date.parse(op.expiresAt)) circleBlocked("source_preparation_expired");
+  await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "source", ports, resumeSigned); await ports.assertOwnerPolicyAndConflicts(op); checkConsent(token, op, ports);
   for (const role of ["approval", "burn"] as const) {
     const effect = op.effects.find(e => e.role === role)!;
     if (["confirmed", "reverted"].includes(effect.phase)) continue;
+    if (effect.phase === "prepared" && ports.now() >= Date.parse(op.expiresAt)) circleBlocked("source_preparation_expired");
     op = await executeCircleEffect(op, role, ports, token);
     op = await observeCircle(op, ports);
     if (op.effects.find(e => e.role === role)?.phase !== "confirmed") return op;
   }
   return op;
 }
-/** Each marker is fsynced before crossing its boundary. Marked recovery never enters signing or broadcast again. */
+/** Each marker is fsynced before crossing its boundary. Every refusable check runs before signing; after the
+ * submission fence the effect is observed only, never signed or broadcast again. A failure before that fence
+ * keeps the effect signed-but-unsent and resumable instead of turning it into a permanent unknown. */
 export async function executeCircleEffect(input: CircleOperationV1, role: CircleRole, ports: CircleLifecyclePorts, token?: Consent): Promise<CircleOperationV1> {
+  return executeEffect(input, role, ports, token, "resumable");
+}
+/** `observe_only` is the nonce-retirement cleanup: its permanent sign claim forbids any second signature, so a
+ * failure after that claim is fenced as unknown and only observed (historical recovery semantics). */
+async function executeEffect(input: CircleOperationV1, role: CircleRole, ports: CircleLifecyclePorts, token: Consent | undefined,
+  unsentFailure: "resumable" | "observe_only"): Promise<CircleOperationV1> {
   let op = input, effect = op.effects.find(e => e.role === role); if (effect === undefined) circleCorrupt("missing_effect");
-  if (!["prepared", "sealed"].includes(effect.phase)) return op;
+  if (!["prepared", ...UNSENT_SIGNING].includes(effect.phase)) return op;
   const authority = checkConsent(token, op, ports);
   if (authority.claimed.has(role) || authority.active !== null || authority.envelopes.get(role) !== effect.envelope.envelopeHash) circleBlocked("consent_effect_reuse_or_mismatch");
   authority.claimed.add(role); authority.active = role;
   const guard = () => { checkConsent(token, op, ports, effect); ports.effectAuthorityGuard?.(op); };
   effectGuards.set(guard, { token: token!, ports, role });
   try {
+    // The owner, policy, conflict and chain preflight run once, immediately before signing, under the run's held locks.
     guard(); await ports.assertOwnerPolicyAndConflicts(op, role); guard(); await ports.preflight(op, effect); guard();
     if (effect.phase === "prepared") {
       guard(); op = await persist(op, { effects: updateEffect(op, role, { phase: "signing_started" }), state: role === "mint" ? "mint_unknown" : role === "cleanup" ? "cleanup_required" : "source_unknown" }, `${role}_signing_fence`, ports);
       effect = op.effects.find(e => e.role === role)!; guard();
+    }
+    if (effect.phase === "signing_started") {
+      // Custody returns already-saved material for this exact envelope, or deterministically signs the same bytes.
       const material = await ports.seal(op, effect, guard); guard();
       op = await persist(op, { effects: updateEffect(op, role, { phase: "sealed", transactionHash: material.transactionHash, materialHash: material.materialHash }) }, `${role}_material_sealed`, ports);
     }
     effect = op.effects.find(e => e.role === role)!; guard();
     const material = await ports.loadMaterial(op, effect); guard(); if (material === null) circleCorrupt("sealed_material_missing");
-    await ports.assertOwnerPolicyAndConflicts(op, role); guard(); await ports.preflight(op, effect); guard();
     const usage = await ports.usage(op, "unknown_finality"); guard();
     op = await persist(op, { usage, effects: updateEffect(op, role, { phase: "submission_started" }) }, `${role}_submission_fence`, ports);
     effect = op.effects.find(e => e.role === role)!; guard();
@@ -101,14 +124,15 @@ export async function executeCircleEffect(input: CircleOperationV1, role: Circle
     if (returned !== effect.transactionHash) throw new Error("transaction hash mismatch");
     return await persist(op, { effects: updateEffect(op, role, { phase: "submitted" }) }, `${role}_submitted_once`, ports);
   } catch (error) {
-    if (op.effects.find(e => e.role === role)!.phase === "prepared") throw error;
+    const phase = op.effects.find(e => e.role === role)!.phase;
+    if (phase === "prepared" || unsentFailure === "resumable" && UNSENT_SIGNING.includes(phase)) throw error;
     await ports.recordEffectFailure?.(op, role, error);
     return await persist(op, { effects: updateEffect(op, role, { phase: "unknown" }) }, `${role}_fenced_unknown_observe_only`, ports);
   } finally { effectGuards.delete(guard); authority.active = null; }
 }
 export async function approveCircleMint(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
   let op = await observeCircle(input, ports); if (op.terminal) return op;
-  const existing = op.effects.find(e => e.role === "mint"); if (existing !== undefined && existing.phase !== "prepared" && existing.phase !== "sealed") return op;
+  const existing = op.effects.find(e => e.role === "mint"); if (existing !== undefined && existing.phase !== "prepared" && !UNSENT_SIGNING.includes(existing.phase)) return op;
   if (op.source === null || op.attestation === null || op.residualAllowanceAtomic !== "0") circleBlocked("verified_source_attestation_and_zero_allowance_required");
   assertCircleAttestation(op.source, op.attestation);
   await ports.assertOwnerPolicyAndConflicts(op, "mint");
@@ -125,7 +149,9 @@ export async function observeCircle(input: CircleOperationV1, ports: CircleLifec
     let effect = op.effects.find(e => e.role === initial.role)!;
     if (effect.phase === "signing_started" || effect.phase === "unknown" && effect.transactionHash === null) {
       const material = await ports.loadMaterial(op, effect);
-      if (material !== null) op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "unknown", transactionHash: material.transactionHash, materialHash: material.materialHash }) }, `${effect.role}_material_recovered_observe_only`, ports);
+      // Material saved under a signing fence was never broadcast (no submission fence): recover it as resumable sealed bytes.
+      if (material !== null) op = await persist(op, { effects: updateEffect(op, effect.role, { phase: effect.phase === "signing_started" ? "sealed" : "unknown", transactionHash: material.transactionHash, materialHash: material.materialHash }) },
+        effect.phase === "signing_started" ? `${effect.role}_material_recovered_unsent` : `${effect.role}_material_recovered_observe_only`, ports);
       effect = op.effects.find(e => e.role === initial.role)!;
     }
     if (effect.transactionHash === null || effect.phase === "prepared" || effect.phase === "sealed" || ["confirmed", "reverted"].includes(effect.phase)) continue;
@@ -178,14 +204,16 @@ export async function refreshCircleAttestation(input: CircleOperationV1, ports: 
 export async function cleanupCircle(input: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
   let op = await observeCircle(input, ports); if (op.terminal) return op;
   const burn = op.effects.find(e => e.role === "burn")!, approval = op.effects.find(e => e.role === "approval")!;
-  if (approval.phase === "prepared" && burn.phase === "prepared" && op.effects.length === 2 && op.source === null) {
+  // An effect whose signing never saved material holds no signed bytes: it is as cancellable as a prepared one.
+  if (["prepared", "signing_started"].includes(approval.phase) && ["prepared", "signing_started"].includes(burn.phase) && op.effects.length === 2 && op.source === null) {
     for (const effect of op.effects) if (await ports.loadMaterial(op, effect) !== null) circleBlocked("unsubmitted_cancel_private_material_present");
     if (await ports.allowance(op) !== "0") circleBlocked("unsubmitted_cancel_nonzero_allowance");
     const guard = await cancellationConsent(op, ports); guard();
     const usage = await ports.usage(op, "failed_before_effect"); guard();
     return persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "explicit_no_private_entry_cancellation", ports);
   }
-  if (!["prepared", "reverted"].includes(burn.phase) || !["confirmed", "reverted"].includes(approval.phase) || op.source !== null) circleBlocked("cleanup_requires_confirmed_approval_and_no_burn_attempt");
+  // A signed-but-unsent burn never crossed its submission fence; the approve-zero cleanup takes the same pending nonce, so it can never land after it.
+  if (!["prepared", "reverted", ...UNSENT_SIGNING].includes(burn.phase) || !["confirmed", "reverted"].includes(approval.phase) || op.source !== null) circleBlocked("cleanup_requires_confirmed_approval_and_no_burn_attempt");
   if (approval.phase === "reverted" && await ports.allowance(op) === "0") {
     const token = await consent(op, "cleanup", ports); checkConsent(token, op, ports);
     return persist(op, { usage: await ports.usage(op, "failed_confirmed_revert"), usageFinalized: true, residualAllowanceAtomic: "0", state: "cleaned", terminal: true }, "confirmed_revert_zero_allowance_recovery", ports);
@@ -196,7 +224,7 @@ export async function cleanupCircle(input: CircleOperationV1, ports: CircleLifec
     op = await persist(op, { state: "cleanup_required", effects: [...op.effects, { role: "cleanup", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "cleanup_envelope_frozen", ports);
   }
   cleanup = op.effects.find(e => e.role === "cleanup")!;
-  if (["prepared", "sealed"].includes(cleanup.phase)) { await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "cleanup", ports); checkConsent(token, op, ports); op = await executeCircleEffect(op, "cleanup", ports, token); }
+  if (["prepared", ...UNSENT_SIGNING].includes(cleanup.phase)) { await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "cleanup", ports); checkConsent(token, op, ports); op = await executeCircleEffect(op, "cleanup", ports, token); }
   op = await observeCircle(op, ports); cleanup = op.effects.find(e => e.role === "cleanup")!;
   if (cleanup.phase === "confirmed" && cleanup.proof?.finalityTag === "finalized" && await ports.allowance(op) === "0") {
     const usage = await ports.usage(op, "failed_confirmed_revert");
@@ -208,7 +236,7 @@ export async function cleanupCircle(input: CircleOperationV1, ports: CircleLifec
 /** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
 export async function executeCircleCleanupWithConsent(op: CircleOperationV1, ports: CircleLifecyclePorts): Promise<CircleOperationV1> {
   await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "cleanup", ports);
-  try { return await executeCircleEffect(op, "cleanup", ports, token); } finally { authorities.delete(token); }
+  try { return await executeEffect(op, "cleanup", ports, token, "observe_only"); } finally { authorities.delete(token); }
 }
 
 /** Production retirement custody accepts only the private controller's currently active exact guard. */

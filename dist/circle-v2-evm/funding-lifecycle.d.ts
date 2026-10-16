@@ -31,7 +31,9 @@ export interface CircleFundingLifecyclePorts {
 }
 type Consent = () => void;
 export declare function approveCircleFundingSource(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
-/** Each marker is fsynced before crossing its boundary. Marked recovery never enters signing or broadcast again. */
+/** Each marker is fsynced before crossing its boundary. Every refusable check runs before signing; after the
+ * submission fence the effect is observed only, never signed or broadcast again. A failure before that fence
+ * keeps the effect signed-but-unsent and resumable instead of turning it into a permanent unknown. */
 export declare function executeCircleFundingEffect(input: CircleFundingOperationV2, role: CircleRole, ports: CircleFundingLifecyclePorts, token?: Consent): Promise<CircleFundingOperationV2>;
 export declare function approveCircleFundingMint(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 export declare function observeCircleFunding(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
