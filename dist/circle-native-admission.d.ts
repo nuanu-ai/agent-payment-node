@@ -2,7 +2,7 @@ import { type EvmNativeCustody } from "./evm-native-custody.js";
 import type { OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import type { StateStore } from "./state.js";
-import type { CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
+import type { CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
 export interface CircleNativeAdmission {
     readonly schemaVersion: "apn.circle-finalized-native-admission.v1";
     readonly recipientCustody: EvmNativeCustody;
@@ -16,7 +16,10 @@ export interface VerifiedCircleNativeAdmission {
 }
 export declare function verifiedCircleNativeSources(token: VerifiedCircleNativeAdmission, profileHash: string, account: string): ReadonlyMap<string, string>;
 export declare function validateCircleNativeAdmission(value: unknown): CircleNativeAdmission;
-export declare function circleNativeSourceIdentity(op: CircleOperationV1): string;
+/** A Circle route of this account whose source burn is FINALIZED with zero residual allowance: it never signs on its
+ * source chain again (cleanup and nonce retirement need an unburned source), only the mint on its destination. */
+export declare function circleSourceSettled(op: CircleKnownOperation, profileHash: string, account: string): boolean;
+export declare function circleNativeSourceIdentity(op: CircleKnownOperation): string;
 export declare function verifyCircleNativeAdmission(state: StateStore, port: RpcPort, profile: string, account: string, recipient: string, expected?: CircleNativeAdmission): Promise<{
     readonly binding: CircleNativeAdmission;
     readonly token: VerifiedCircleNativeAdmission;

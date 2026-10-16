@@ -38,5 +38,5 @@ export declare class CircleUsage {
     followFundingExternalFulfillment(op: CircleFundingOperationV2): Promise<readonly AssetUsageReservation[]>;
     /** Only a fully verified versioned recovery chooses the new86 fee; old cleanup85 stays unknown. */
     closeCleanup85Recovery(op: CircleOperationV1, proof: CircleNonceRetirementProof, authority: VerifiedCleanup85Settlement): Promise<readonly AssetUsageReservation[]>;
-    follow(op: CircleKnownOperation, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<readonly AssetUsageReservation[]>;
+    follow(op: CircleKnownOperation, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<readonly AssetUsageReservation[]>;
 }

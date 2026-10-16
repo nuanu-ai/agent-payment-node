@@ -25,17 +25,12 @@ export async function executeCircleCommand(request: Extract<CommandRequest, { co
         await service.approveCleanup86(request.operationId); return operationOutcome(await service.status(request.operationId));
       }
       case "circle.evm.prepare": {
-        const fields = ["command", "profile", "destinationProfile", "destinationChain", "idempotencyKey"];
-        if (!isPlainRecord(request) || !exactKeys(request, [...fields, ...(Object.hasOwn(request, "funding") ? ["funding"] : [])])) throw new ApnError("APN_INVALID_INPUT", "Circle prepare input is invalid.");
-        const supplied = Object.hasOwn(request, "funding");
-        const funding = deriveCircleFundingParameters(supplied ? request.funding : {});
-        if (supplied && funding === null) throw new ApnError("APN_INVALID_INPUT", "Circle funding requires all four inputs.");
-        if (funding !== null) {
-          const service = context.circleFundingEvm; if (service === undefined) unavailable();
-          return operationOutcome(publicKnownCircle(validateKnownCircle(await service.prepare({ profile: request.profile, destinationProfile: request.destinationProfile, destinationChain: request.destinationChain, idempotencyKey: request.idempotencyKey, funding }))));
-        }
-        const service = context.circleEvm; if (service === undefined) unavailable();
-        return operationOutcome(publicCircle(await service.prepare(request)));
+        // One route: every new operation is v2 with all four economic inputs; the fixed v1 shape is read-only.
+        if (!isPlainRecord(request) || !exactKeys(request, ["command", "profile", "destinationProfile", "destinationChain", "idempotencyKey", "funding"])) throw new ApnError("APN_INVALID_INPUT", "Circle prepare requires --profile, --destination-profile, --destination-chain, --idempotency-key, --beneficiary, --gross-atomic, --max-issuer-fee-atomic and --min-mint-atomic.");
+        const funding = deriveCircleFundingParameters(request.funding);
+        if (funding === null) throw new ApnError("APN_INVALID_INPUT", "Circle funding requires all four inputs.");
+        const service = context.circleFundingEvm; if (service === undefined) unavailable();
+        return operationOutcome(publicKnownCircle(validateKnownCircle(await service.prepare({ profile: request.profile, destinationProfile: request.destinationProfile, destinationChain: request.destinationChain, idempotencyKey: request.idempotencyKey, funding }))));
       }
       case "circle.evm.approve-source": case "circle.evm.approve-mint": case "circle.evm.observe": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.cleanup-nonce": case "circle.evm.status": {
         const op = await checkedOperation(context, request.operationId);

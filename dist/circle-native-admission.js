@@ -26,7 +26,9 @@ export function validateCircleNativeAdmission(value) {
             blocked();
     return value;
 }
-function eligible(op, profileHash, account) {
+/** A Circle route of this account whose source burn is FINALIZED with zero residual allowance: it never signs on its
+ * source chain again (cleanup and nonce retirement need an unburned source), only the mint on its destination. */
+export function circleSourceSettled(op, profileHash, account) {
     return op.profileHash === profileHash && op.sourceCustody.profileHash === profileHash && op.sourceCustody.walletAddress === account &&
         ["awaiting_mint", "mint_unknown", "awaiting_finality", "completed"].includes(op.state) && op.source?.finalityTag === "finalized" &&
         op.attestation !== null && op.residualAllowanceAtomic === "0" && op.effects.some(e => e.role === "approval") &&
@@ -51,7 +53,7 @@ function sameReceipt(old, current) {
 }
 export async function verifyCircleNativeAdmission(state, port, profile, account, recipient, expected) {
     const profileHash = state.profileHash(profile);
-    const candidates = (await new CircleRepository(state.root).listOperations(profileHash)).filter(op => !op.terminal && eligible(op, profileHash, account));
+    const candidates = (await new CircleRepository(state.root).listOperations(profileHash)).filter(op => !op.terminal && circleSourceSettled(op, profileHash, account));
     if (expected === undefined && candidates.length === 0)
         return null;
     const recipientCustody = await evmNativeCustody(state, "default");
@@ -70,7 +72,7 @@ export async function verifyCircleNativeAdmission(state, port, profile, account,
             blocked();
         return null;
     }
-    if (!eligible(op, profileHash, account) || hashObject(owner) !== hashObject(op.sourceCustody) ||
+    if (!circleSourceSettled(op, profileHash, account) || hashObject(owner) !== hashObject(op.sourceCustody) ||
         expected !== undefined && expected.sources[0].sourceIdentityHash !== circleNativeSourceIdentity(op))
         blocked();
     port.armEvmDirectRpcGuard?.();

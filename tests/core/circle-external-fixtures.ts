@@ -7,7 +7,7 @@ import { projectLegacyLocalProfile } from "../../src/provider-profile.js";import
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { CircleUsage,circleMechanism } from "../../src/circle-v2-evm/usage.js";import { CircleRepository } from "../../src/circle-v2-evm/repository.js";
 import { CircleEvmService } from "../../src/circle-v2-evm/runtime.js";import { CIRCLE_RPC_ABI } from "../../src/circle-v2-evm/rpc.js";
-import { CIRCLE_DEPLOYMENT_PINS,CIRCLE_SOURCE_OWNER,CIRCLE_SOURCE_TOKEN,CIRCLE_MESSENGER,CIRCLE_MINTER,CIRCLE_TRANSMITTER,CIRCLE_RECIPIENT,circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_DEPLOYMENT_PINS,CIRCLE_SOURCE_OWNER,CIRCLE_SOURCE_TOKEN,CIRCLE_MESSENGER,CIRCLE_MINTER,CIRCLE_TRANSMITTER,CIRCLE_RECIPIENT,circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { advanceCircle,sealCircle,type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
 import { bindCircleAttestation,decodeCircleSource,verifyCircleApproval,encodeCircleApproval,encodeCircleBurn,encodeCircleMint,circleWord,type CircleObservation } from "../../src/circle-v2-evm/protocol.js";
 import { source,event,observation,iris,message,snapshot } from "./circle-v2-evm-runtime-fixtures.js";import { initial,at } from "./circle-v2-evm-nonce-runtime-fixtures.js";

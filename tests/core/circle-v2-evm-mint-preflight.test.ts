@@ -4,7 +4,7 @@ import { StateStore } from "../../src/state.js";
 import { CircleEvmService } from "../../src/circle-v2-evm/runtime.js";
 import { CircleRpc, readCircleAttesters } from "../../src/circle-v2-evm/rpc.js";
 import { circleEnvelope, type CircleOperationV1, type CircleEffect } from "../../src/circle-v2-evm/operation-model.js";
-import { CIRCLE_MESSENGER, CIRCLE_SOURCE_OWNER, CIRCLE_TRANSMITTER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_MESSENGER, CIRCLE_SOURCE_OWNER, CIRCLE_TRANSMITTER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { decodeCircleSource, bindCircleAttestation, encodeCircleBurn, encodeCircleMint } from "../../src/circle-v2-evm/protocol.js";
 import type { CircleLifecyclePorts } from "../../src/circle-v2-evm/lifecycle.js";
 import { source, iris, snapshot } from "./circle-v2-evm-runtime-fixtures.js";
@@ -14,7 +14,7 @@ test("one command verifies both chains once and passes its digest to current att
   const proof = decodeCircleSource(raw, 143), attestation = await bindCircleAttestation(proof, await iris(proof), snapshot(143));
   const burn = { role: "burn", phase: "confirmed", transactionHash: proof.transactionHash, envelope: circleEnvelope({ chainId: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_MESSENGER, data: encodeCircleBurn(143), valueAtomic: "0", nonceAtomic: "2", gasLimitAtomic: "500000", maxFeePerGasAtomic: "20000000", maxPriorityFeePerGasAtomic: "0" }) } as CircleEffect;
   const mint = { role: "mint", phase: "prepared", envelope: circleEnvelope({ chainId: 143, from: route.gasPayer, to: CIRCLE_TRANSMITTER, data: encodeCircleMint(attestation), valueAtomic: "0", nonceAtomic: "10", gasLimitAtomic: "400000", maxFeePerGasAtomic: "100000000000", maxPriorityFeePerGasAtomic: "0" }) } as CircleEffect;
-  const op = { destinationChain: 143, destinationProfile: "default", source: proof, attestation, effects: [burn, mint] } as unknown as CircleOperationV1;
+  const op = { destinationChain: 143, destinationProfile: "default", source: proof, attestation, effects: [burn, mint], sourceCustody: { walletAddress: CIRCLE_SOURCE_OWNER }, destinationCustody: { walletAddress: route.gasPayer } } as unknown as CircleOperationV1;
   const service = new CircleEvmService(new StateStore("/tmp/circle-preflight-no-effects"), { load: async () => { throw new Error("private_material_forbidden"); } } as never, {});
   const internal = service as unknown as { preflightDeployments(source: CircleRpc, destination: CircleRpc, chain: number): Promise<{ digest: string }>; preflightAttesters(destination: CircleRpc, digest: string): ReturnType<typeof readCircleAttesters>; ports(op: CircleOperationV1): CircleLifecyclePorts };
   let verifications = 0, wrongAttesters = false; const usedDigests: string[] = [];

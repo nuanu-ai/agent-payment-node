@@ -2,7 +2,7 @@ import { decodeEventLog, encodeEventTopics, erc20Abi, getAddress, serializeTrans
 import { canonicalJson, hashObject } from "../canonical.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { listLocalWallets } from "../wallet-import-collision.js";
-import { CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleLegacyRoute as circleRoute } from "./catalog.js";
 import { CircleEffectStore, verifyCircleMaterial } from "./custody.js";
 import { circleBlocked } from "./operation-model.js";
 import { circleHex, circleRecord, circleUint, decodeCircleDestination, circleAttesterConfigurationHash, verifyCircleAttestationSigners } from "./protocol.js";

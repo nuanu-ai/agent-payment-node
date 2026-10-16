@@ -38,7 +38,7 @@ test("current86 actual permission issuer with explicit future F85 TEST public-st
   const { temporaryState } = await import("./helpers.js"), { cleanup85PublicState, cleanup85PublicTransport } = await import("./cleanup85-native-public-fixture.js");
   const { hashObject, canonicalJson } = await import("../../src/canonical.js"), { CircleRpc } = await import("../../src/circle-v2-evm/rpc.js");
   const { circleEnvelope } = await import("../../src/circle-v2-evm/operation-model.js"), { circleMechanism } = await import("../../src/circle-v2-evm/usage.js");
-  const { CIRCLE_SOURCE_TOKEN, circleRoute } = await import("../../src/circle-v2-evm/catalog.js");
+  const { CIRCLE_SOURCE_TOKEN, circleLegacyRoute: circleRoute } = await import("../../src/circle-v2-evm/catalog.js");
   const { Cleanup85RecoveryStore, assertCleanup85Window } = await import("../../src/circle-v2-evm/cleanup85-recovery-store.js");
   const { Cleanup86Store, validateCleanup86Intent } = await import("../../src/circle-v2-evm/cleanup86-store.js");
   const { verifyCleanup86CurrentPurpose, verifiedCleanup86CurrentPurpose, assertCleanup86CurrentPermission } = await import("../../src/circle-v2-evm/cleanup86-current-purpose.js");

@@ -847,7 +847,7 @@ apn circle source submit --profile <profile> --expected-payer <base-address> --r
 apn sei funding prepare --profile <profile> --expected-payer <address> --amount-atomic <wei> --minimum-output-atomic <sei-wei> --maximum-fee-atomic <wei> --idempotency-key <key>
 apn sei funding approve --operation <operation-id>
 apn sei funding status --operation <operation-id>
-apn circle evm prepare --profile <profile> --destination-profile <profile> --destination-chain <string> --idempotency-key <idempotency_key> [--beneficiary <address>] [--gross-atomic <atomic_usdc>] [--max-issuer-fee-atomic <atomic_usdc>] [--min-mint-atomic <atomic_usdc>]
+apn circle evm prepare --profile <profile> --destination-profile <profile> --destination-chain <string> --idempotency-key <idempotency_key> --beneficiary <address> --gross-atomic <atomic_usdc> --max-issuer-fee-atomic <atomic_usdc> --min-mint-atomic <atomic_usdc>
 apn circle evm approve-source --operation <operation_id>
 apn circle evm adopt-external-mint --operation <operation_id> --transaction-hash <string>
 apn circle evm approve-mint --operation <operation_id>

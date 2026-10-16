@@ -166,7 +166,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       };
     }), [
       { name: "apn_circle_evm_adopt_external_mint", properties: ["operation", "transaction_hash"], required: ["operation", "transaction_hash"], defaults: {} },
-      { name: "apn_circle_evm_prepare", properties: ["profile", "destination_profile", "destination_chain", "idempotency_key", "beneficiary", "gross_atomic", "max_issuer_fee_atomic", "min_mint_atomic"], required: ["profile", "destination_profile", "destination_chain", "idempotency_key"], defaults: {} },
+      { name: "apn_circle_evm_prepare", properties: ["profile", "destination_profile", "destination_chain", "idempotency_key", "beneficiary", "gross_atomic", "max_issuer_fee_atomic", "min_mint_atomic"], required: ["profile", "destination_profile", "destination_chain", "idempotency_key", "beneficiary", "gross_atomic", "max_issuer_fee_atomic", "min_mint_atomic"], defaults: {} },
       { name: "apn_circle_evm_approve_source", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_approve_mint", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_observe", properties: ["operation"], required: ["operation"], defaults: {} },

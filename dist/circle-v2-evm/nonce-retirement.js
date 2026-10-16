@@ -13,7 +13,9 @@ export function assertCircleNonceRetirementCase(op, now) {
         return;
     }
     const approval = op.effects[0], burn = op.effects[1];
-    if (op.destinationChain !== 143 || op.destinationProfile !== "default" || op.terminal || now < Date.parse(op.expiresAt) ||
+    // Shape-based for every destination (OWNR-14): an expired operation whose approval is sealed and unknown and whose burn
+    // was never signed. The replacement takes the approval's own nonce, so the original can never land after it.
+    if (op.terminal || now < Date.parse(op.expiresAt) ||
         approval.phase !== "unknown" || approval.transactionHash === null || approval.materialHash === null || approval.proof !== null ||
         burn.phase !== "prepared" || burn.transactionHash !== null || burn.materialHash !== null || burn.proof !== null ||
         op.source !== null || op.attestation !== null || op.destination !== null || op.effects.some(x => x.role === "mint") || op.residualAllowanceAtomic !== "0" || op.usageFinalized || op.usage.length !== 5 ||

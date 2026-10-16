@@ -12,6 +12,7 @@ import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER } from "./circle-v2-evm/catalog.j
 import { circleHex, circleRecord, circleUint, assertCircleAttestation, decodeCircleSource, verifyCircleApproval, type CircleReceiptProof } from "./circle-v2-evm/protocol.js";
 import { verifyCircleClosureFinality } from "./circle-v2-evm/preflight.js";
 import type { CircleEffect, CircleOperationV1 } from "./circle-v2-evm/operation-model.js";
+import type { CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
 
 export interface CircleNativeAdmission {
   readonly schemaVersion: "apn.circle-finalized-native-admission.v1";
@@ -32,13 +33,15 @@ export function validateCircleNativeAdmission(value: unknown): CircleNativeAdmis
       ![source.operationId, source.sourceIdentityHash].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x))) blocked();
   return value as unknown as CircleNativeAdmission;
 }
-function eligible(op: CircleOperationV1, profileHash: string, account: string): boolean {
+/** A Circle route of this account whose source burn is FINALIZED with zero residual allowance: it never signs on its
+ * source chain again (cleanup and nonce retirement need an unburned source), only the mint on its destination. */
+export function circleSourceSettled(op: CircleKnownOperation, profileHash: string, account: string): boolean {
   return op.profileHash === profileHash && op.sourceCustody.profileHash === profileHash && op.sourceCustody.walletAddress === account &&
     ["awaiting_mint", "mint_unknown", "awaiting_finality", "completed"].includes(op.state) && op.source?.finalityTag === "finalized" &&
     op.attestation !== null && op.residualAllowanceAtomic === "0" && op.effects.some(e => e.role === "approval") &&
     op.effects.some(e => e.role === "burn") && op.effects.filter(e => e.role !== "mint").every(e => e.phase === "confirmed" && e.proof !== null);
 }
-export function circleNativeSourceIdentity(op: CircleOperationV1): string {
+export function circleNativeSourceIdentity(op: CircleKnownOperation): string {
   return hashObject({ sourceCustody: op.sourceCustody, source: op.source, attestation: op.attestation,
     effects: op.effects.filter(e => e.role !== "mint"), residualAllowanceAtomic: op.residualAllowanceAtomic });
 }
@@ -57,7 +60,7 @@ function sameReceipt(old: CircleReceiptProof, current: CircleReceiptProof): void
 export async function verifyCircleNativeAdmission(state: StateStore, port: RpcPort, profile: string, account: string, recipient: string,
   expected?: CircleNativeAdmission): Promise<{ readonly binding: CircleNativeAdmission; readonly token: VerifiedCircleNativeAdmission } | null> {
   const profileHash = state.profileHash(profile);
-  const candidates = (await new CircleRepository(state.root).listOperations(profileHash)).filter(op => !op.terminal && eligible(op, profileHash, account));
+  const candidates = (await new CircleRepository(state.root).listOperations(profileHash)).filter(op => !op.terminal && circleSourceSettled(op, profileHash, account));
   if (expected === undefined && candidates.length === 0) return null;
   const recipientCustody = await evmNativeCustody(state, "default");
   if (recipientCustody.walletAddress !== recipient) { if (expected !== undefined) blocked(); return null; }
@@ -66,7 +69,7 @@ export async function verifyCircleNativeAdmission(state: StateStore, port: RpcPo
   const op = expected === undefined ? candidates.length === 1 ? candidates[0] : undefined :
     await new CircleRepository(state.root).load(expected.sources[0]!.operationId);
   if (op == null) { if (expected !== undefined) blocked(); return null; }
-  if (!eligible(op, profileHash, account) || hashObject(owner) !== hashObject(op.sourceCustody) ||
+  if (!circleSourceSettled(op, profileHash, account) || hashObject(owner) !== hashObject(op.sourceCustody) ||
       expected !== undefined && expected.sources[0]!.sourceIdentityHash !== circleNativeSourceIdentity(op)) blocked();
   port.armEvmDirectRpcGuard?.();
   assertCircleAttestation(op.source!, op.attestation!);
