@@ -181,14 +181,6 @@ export function isReceiptBatchShape(items) {
     return chain?.method === "eth_chainId" && chain.params.length === 0 && receipt?.method === "eth_getTransactionReceipt" &&
         receipt.params.length === 1 && typeof receipt.params[0] === "string" && /^0x[0-9a-f]{64}$/u.test(receipt.params[0]);
 }
-export function rpcArchiveChainValue(chainId) {
-    return (value) => {
-        const observed = evmRpcQuantity(value);
-        if (observed !== BigInt(chainId))
-            bridgeFailure("APN_RPC_CONFIG", "bridge_archive_RPC_chain");
-        return observed;
-    };
-}
 export function rpcFallbackChainValue(chainId, role) {
     return (value) => {
         const observed = evmRpcQuantity(value);

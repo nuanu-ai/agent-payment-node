@@ -46,7 +46,6 @@ export declare class BridgeObservation {
     private finishDestinationFailure;
     private destinationCandidate;
     private waiting;
-    private historicalDeployment;
 }
 export declare function replaceEffect(op: BridgeOperationRecord, effect: BridgeEffect): readonly BridgeEffect[];
 export {};

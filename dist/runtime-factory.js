@@ -295,7 +295,7 @@ export function createApnCore(bound, options = {}) {
         ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
         ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
         ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
-            circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
+            circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
         } : {}),
         ...finiteFundingRuntime(bound.request.command, state, wrappingSecret, options, process.env, () => clock.now().getTime()),
         ...(bound.request.command.startsWith("oneclick.source.") || options.oneClickSource !== undefined ? {
@@ -331,8 +331,6 @@ export function createApnCore(bound, options = {}) {
             gaslessUsdtExecute: options.gaslessUsdtExecute ?? new GaslessUsdtCommandExecute(state, clock, wrappingSecret, options.gaslessUsdtExecuteOptions),
         } : {}),
         bridge: options.bridge ?? { provider: new LifiProvider(), rpcFor: bridgeRpcFactory(process.env),
-            lineaArchiveDeploymentScalarCode: bound.request.command === "bridge.prepare" &&
-                process.env.APN_LIFI_LINEA_ARCHIVE_SCALAR_CODE === "1",
             custody: new LocalBridgeCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
             ...((bound.request.command === "bridge.approve" || (bound.request.command === "operation.resume" && bound.request.observeOnly !== true)) ? { approval: new TtyBridgeApproval() } : {}) },
         chainAccounts, directRails,

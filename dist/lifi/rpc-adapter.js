@@ -1,272 +1,132 @@
 import { assertBridgePhysicalGrant } from "./effect-authority.js";
-import { encodeFunctionData, getAddress, keccak256 } from "viem";
-import { canonicalJson, hashObject } from "../canonical.js";
-import { ApnError } from "../errors.js";
-import { EvmRpc } from "../evm-rpc.js";
-import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
-import { MULTICALL3_ADDRESS } from "../portfolio/registry.js";
+import { encodeFunctionData, keccak256 } from "viem";
+import { hashObject } from "../canonical.js";
+import { evmRpcHex, evmRpcQuantity } from "../evm-rpc-codec.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
-import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolConfiguration } from "./bnb-composite.js";
-import { bridgeDeployment } from "./deployments.js";
-import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcQuantityValue, rpcRecordValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
-import { BASE_ECOTONE_EIP6780_TIMESTAMP, basePinnedFeeReadPlan, bridgeDeploymentReadPlan, bridgeRetainedDeploymentReadPlan, bridgeRetainedRefreshEligible, ERC20_READ, GAS_ORACLE, GAS_ORACLE_ABI, L1_BLOCK } from "./rpc-deployment.js";
-import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
-import { exactNativeTransfer, parseReceiptLogs } from "./rpc-proof-codec.js";
-import { assertMatchingHeader, eip7702Delegation, quantity, rpcArchiveChainValue, submitDirect } from "./rpc-support.js";
-import { verifyRpcTransaction } from "./rpc-transaction.js";
-import { BRIDGE_ZERO_ADDRESS, bridgeFailure, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
+import { bridgeDeploymentCheck, bridgeDeploymentCheckIdentity, bridgeDeploymentCheckItems } from "./deployment-check.js";
+import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcQuantityValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
+import { ERC20_READ, GAS_ORACLE, GAS_ORACLE_ABI, L1_BLOCK } from "./rpc-deployment.js";
+import { legacyBaseFees, legacyDeploymentProof } from "./rpc-legacy-proof.js";
+import { observeCanonical } from "./rpc-observation.js";
+import { quantity, submitDirect } from "./rpc-support.js";
+import { bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
+const L1_UPPER_BOUND = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [16384n] });
+const chainItem = (chainId) => ({ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(chainId) });
+const latestCall = (to, data) => ({ method: "eth_call", params: [{ to, data }, "latest"], cachePolicy: "none", decoder: rpcWordValue });
+function blockOf(raw) {
+    return { numberAtomic: evmRpcQuantity(raw.number).toString(), hash: evmRpcHex(raw.hash, 32), timestampAtomic: evmRpcQuantity(raw.timestamp).toString() };
+}
+/**
+ * The LI.FI rail's EVM reader. Every read is a planned JSON-RPC batch through the command session: one chain identity per
+ * endpoint and session, mutable state at the moving head the transaction will execute against, inclusion proofs pinned to
+ * block hashes. A transport without batches (a single-request `call`) reads the same planned items one by one.
+ */
 export class BridgeRpc {
     chainId;
     origin;
-    evm;
     call;
     submit;
     batchCall;
+    receipts;
     commandLatestBlock;
     commandPrices;
     commandFeeInputs;
     preparedEstimates = new Map();
     readSession;
-    constructor(chainId, origin, call, session, oneAttempt, sessionCall, sessionBatchCall) {
+    constructor(chainId, origin, call, session, oneAttempt, sessionCall, sessionBatchCall, receipts = { reader: false, fallback: false }) {
         this.chainId = chainId;
         this.origin = origin;
         bridgeChain(chainId);
         this.readSession = session;
+        this.receipts = receipts;
         this.call = session === undefined ? call : sessionCall?.(session) ?? session.wrap(origin, chainId, call, oneAttempt ?? call);
         this.submit = session === undefined || oneAttempt === undefined ? call :
             sessionCall?.(session) ?? (async (method, params, beforeSend) => await submitDirect(method, params, (m, p) => oneAttempt(m, p, beforeSend)));
-        this.batchCall = session === undefined ? undefined : sessionBatchCall?.(session);
-        this.evm = new EvmRpc(this.call, origin, 16 * 1024);
+        this.batchCall = session !== undefined && sessionBatchCall !== undefined ? sessionBatchCall(session)
+            : async (items) => await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params))));
     }
     readTelemetry() { return this.readSession?.telemetry() ?? null; }
-    async assertChain() { await this.evm.assertChain(this.chainId); }
+    async assertChain() { await this.batchCall([chainItem(this.chainId)]); }
     async block(tag) {
-        if (this.batchCall !== undefined) {
-            const rpcTag = tag === "latest" || tag === "safe" ? tag : quantity(bridgeUint(tag));
-            const [chain, raw] = await this.batchCall([
-                { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-                { method: "eth_getBlockByNumber", params: [rpcTag, false], cachePolicy: tag === "latest" ? "snapshot" : "immutable", decoder: rpcBlockValue },
-            ]);
-            if (chain !== BigInt(this.chainId))
-                throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-            const b = raw, number = evmRpcQuantity(b.number).toString(), hash = evmRpcHex(b.hash, 32);
-            if (tag !== "latest" && tag !== "safe" && number !== bridgeUint(tag).toString())
-                bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_number");
-            const block = { numberAtomic: number, hash, timestampAtomic: evmRpcQuantity(b.timestamp).toString() };
-            if (tag === "latest")
-                this.commandLatestBlock = block;
-            return block;
-        }
-        await this.assertChain();
         const rpcTag = tag === "latest" || tag === "safe" ? tag : quantity(bridgeUint(tag));
-        const b = await evmRpcBlock(this.call, rpcTag);
-        await this.assertChain();
-        return { numberAtomic: b.number, hash: b.hash, timestampAtomic: evmRpcQuantity(b.raw.timestamp).toString() };
+        const [, raw] = await this.batchCall([chainItem(this.chainId), { method: "eth_getBlockByNumber", params: [rpcTag, false],
+                cachePolicy: tag === "latest" || tag === "safe" ? "snapshot" : "immutable", decoder: rpcBlockValue }]);
+        const block = blockOf(raw);
+        if (tag !== "latest" && tag !== "safe" && block.numberAtomic !== bridgeUint(tag).toString())
+            bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_number");
+        if (tag === "latest")
+            this.commandLatestBlock = block;
+        return block;
     }
+    /** The legacy full historical proof at one block, only for the frozen migration proofs. */
     async deployment(tool, peerChainId, token, block, exactHashPin = false) {
-        if (this.batchCall === undefined)
-            await this.assertChain();
-        const at = block ?? await this.block("safe"), { contract, feeContract, verificationCodeRows, readRows, directRows, aggregateGroups, traceProbe, items } = bridgeDeploymentReadPlan(this.chainId, peerChainId, tool, token, at, exactHashPin);
-        const code = [], configuration = [];
-        const values = this.batchCall === undefined ? await Promise.all(items.map(async (item) => item.decoder(await this.call(item.method, item.params))))
-            : await this.batchCall(items, "archive_deployment");
-        let offset = 0;
-        if (values[offset++] !== BigInt(this.chainId))
-            throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-        for (const row of verificationCodeRows) {
-            const bytes = values[offset++];
-            if (bytes === "0x" || eip7702Delegation(bytes) || keccak256(bytes) !== row.codeHash)
-                bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_code_changed");
-            if (row.address !== getAddress(MULTICALL3_ADDRESS))
-                code.push({ address: row.address, codeHash: keccak256(bytes) });
-        }
-        const observedByRead = new Map();
-        for (const row of directRows)
-            observedByRead.set(hashObject(row), values[offset++]);
-        for (const rows of aggregateGroups) {
-            const aggregate = values[offset++];
-            for (let index = 0; index < rows.length; index += 1)
-                observedByRead.set(hashObject(rows[index]), aggregate[index]);
-        }
-        for (const row of readRows) {
-            const observed = observedByRead.get(hashObject(row));
-            if (observed === undefined)
-                bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
-            if (observed !== row.expected)
-                bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
-            configuration.push({ ...row, expected: observed });
-        }
-        if (this.chainId === 56 && peerChainId === 1 && tool === "across" && token === BRIDGE_ZERO_ADDRESS) {
-            const registrationRaw = values[offset++], tokensRaw = values[offset++];
-            const pool = verifyBnbPoolConfiguration(bridgeHex(registrationRaw, 256, undefined, "APN_RPC_PROTOCOL"), bridgeHex(tokensRaw, 2048, undefined, "APN_RPC_PROTOCOL"));
-            configuration.push({ kind: "pool", address: BNB_COMPOSITE.vault, data: bnbPoolReadData.tokens,
-                expected: `0x${Buffer.from(canonicalJson(pool)).toString("hex")}` });
-        }
-        if (traceProbe !== undefined) {
-            const trace = values[offset++];
-            if (trace.type !== "CALL" || evmRpcAddress(trace.from).toLowerCase() !== traceProbe.from ||
-                evmRpcAddress(trace.to).toLowerCase() !== traceProbe.to || evmRpcQuantity(trace.value) !== traceProbe.value) {
-                bridgeFailure("APN_PROVIDER_PROTOCOL", "native_destination_trace_capability_changed");
-            }
-        }
-        const recheck = values[offset];
-        if (evmRpcQuantity(recheck.number).toString() !== at.numberAtomic || evmRpcHex(recheck.hash, 32) !== at.hash)
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
-        if (this.batchCall === undefined)
-            await this.assertChain();
-        return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,
-            contractHash: hashObject({ protocol: contract, feeContract }), codeHash: hashObject(code), configurationHash: hashObject(configuration) };
+        return await legacyDeploymentProof(this.chainId, this.origin, this.batchCall, tool, peerChainId, token, block ?? await this.block("safe"), exactHashPin);
     }
-    async refreshDeployment(tool, peerChainId, token, frozen) {
-        const contract = bridgeDeployment(this.chainId, peerChainId, tool, token), feeContract = this.chainId === 8453 ? BASE_FEE_CONTRACT : { code: [], reads: [] };
-        const contractHash = hashObject({ protocol: contract, feeContract });
-        if (frozen.chainId !== this.chainId || frozen.peerChainId !== peerChainId || frozen.tool !== tool ||
-            frozen.contractHash !== contractHash || !/^[a-f0-9]{64}$/u.test(frozen.codeHash)) {
-            bridgeFailure("APN_OPERATION_BLOCKED", "bridge_prepared_deployment_binding_changed");
-        }
-        // Only this compact lane is admitted to retained code proof reuse. All proxy/admin/facet/storage/config reads remain fresh.
-        if (this.batchCall === undefined || !bridgeRetainedRefreshEligible(this.chainId, tool, frozen.block)) {
-            return await this.deployment(tool, peerChainId, token);
-        }
-        const at = await this.block("safe");
-        if (BigInt(at.timestampAtomic) < BASE_ECOTONE_EIP6780_TIMESTAMP || BigInt(at.numberAtomic) < BigInt(frozen.block.numberAtomic)) {
-            bridgeFailure("APN_OPERATION_BLOCKED", "bridge_retained_deployment_proof_not_final");
-        }
-        const { readRows, directRows, aggregateRows, items } = bridgeRetainedDeploymentReadPlan(this.chainId, peerChainId, tool, token, at, frozen.block);
-        const values = await this.batchCall(items, "archive_deployment");
-        let offset = 0;
-        if (values[offset++] !== BigInt(this.chainId))
-            throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-        for (const row of feeContract.code) {
-            const bytes = values[offset++];
-            if (bytes === "0x" || eip7702Delegation(bytes) || keccak256(bytes) !== row.codeHash)
-                bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_code_changed");
-        }
-        const observedByRead = new Map();
-        for (const row of directRows)
-            observedByRead.set(hashObject(row), values[offset++]);
-        if (aggregateRows.length > 0) {
-            const aggregate = values[offset++];
-            for (let index = 0; index < aggregateRows.length; index += 1)
-                observedByRead.set(hashObject(aggregateRows[index]), aggregate[index]);
-        }
-        const configuration = readRows.map((row) => {
-            const observed = observedByRead.get(hashObject(row));
-            if (observed === undefined)
-                return bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
-            if (observed !== row.expected)
-                return bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
-            return { ...row, expected: observed };
-        });
-        const recheck = values[offset++], preparedRecheck = values[offset];
-        if (evmRpcQuantity(recheck.number).toString() !== at.numberAtomic || evmRpcHex(recheck.hash, 32) !== at.hash)
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
-        if (evmRpcQuantity(preparedRecheck.number).toString() !== frozen.block.numberAtomic || evmRpcHex(preparedRecheck.hash, 32) !== frozen.block.hash) {
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_prepared_block_reorg");
-        }
-        return { chainId: this.chainId, peerChainId, tool, block: at, rpcOrigin: this.origin,
-            contractHash, codeHash: frozen.codeHash, configurationHash: hashObject(configuration) };
+    /** The light deployment check of one role at the moving head, with that head: one POST. */
+    async deploymentCheck(tool, peerChainId, token, role) {
+        const check = bridgeDeploymentCheck(this.chainId, peerChainId, tool, token, role);
+        const [, raw, ...values] = await this.batchCall([chainItem(this.chainId),
+            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: rpcBlockValue }, ...bridgeDeploymentCheckItems(check)]);
+        return bridgeDeploymentCheckIdentity(check, values, blockOf(raw), this.origin);
+    }
+    /** The source deployment check and the account snapshot in the same POST, at the same moving head. */
+    async checkedAccount(check, owner, spender, token, planned = []) {
+        const deployment = bridgeDeploymentCheck(this.chainId, check.peerChainId, check.tool, token, "source");
+        const { account, extra } = await this.readAccount(owner, spender, token, planned, bridgeDeploymentCheckItems(deployment));
+        return { account, deployment: bridgeDeploymentCheckIdentity(deployment, extra, account.block, this.origin) };
     }
     /** A native principal's balance is the native balance itself and its allowance is the constant zero: nothing is approved. */
     async account(owner, spender, token, planned = []) {
-        if (this.batchCall !== undefined) {
-            const asset = bridgeAssetRow(this.chainId, token, "APN_RPC_CONFIG");
-            const data = encodeFunctionData({ abi: ERC20_READ, functionName: "balanceOf", args: [owner] });
-            const allowanceData = encodeFunctionData({ abi: ERC20_READ, functionName: "allowance", args: [owner, spender] });
-            const l1Data = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [16384n] });
-            // Approval inclusion and foreground consent can change the account within this invocation.
-            // Keep exact block-pinned reads cached, but acquire a new moving head and fee suggestion each time.
-            const phaseOne = [
-                { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-                { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: rpcFeeBlockValue },
-                ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none", decoder: rpcQuantityValue }]),
-            ];
-            const head = await this.batchCall(phaseOne);
-            let headOffset = 0;
-            if (head[headOffset++] !== BigInt(this.chainId))
-                throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-            const raw = head[headOffset++], at = { numberAtomic: evmRpcQuantity(raw.number).toString(), hash: evmRpcHex(raw.hash, 32),
-                timestampAtomic: evmRpcQuantity(raw.timestamp).toString() };
-            const priority = this.chainId === 42161 ? 0n : head[headOffset++], maximum = 2n * evmRpcQuantity(raw.baseFeePerGas) + priority;
-            bridgeUint(maximum.toString(), true, "APN_RPC_PROTOCOL");
-            this.commandLatestBlock = at;
-            this.commandPrices = { maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
-            const tag = quantity(BigInt(at.numberAtomic));
-            const phaseTwo = [
-                { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-                { method: "eth_getBalance", params: [owner, tag], cachePolicy: "immutable", decoder: rpcQuantityValue },
-                ...(asset.kind === "native" ? [] : [
-                    { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
-                    { method: "eth_call", params: [{ to: token, data: allowanceData }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
-                ]),
-                ...(this.chainId === 8453 ? [
-                    { method: "eth_call", params: [{ to: GAS_ORACLE, data: l1Data }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
-                    { method: "eth_call", params: [{ to: L1_BLOCK, data: "0x4d5d9a2a" }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
-                    { method: "eth_call", params: [{ to: L1_BLOCK, data: "0x16d3bc7f" }, tag], cachePolicy: "immutable", decoder: rpcWordValue },
-                ] : []),
-                { method: "eth_getTransactionCount", params: [owner, tag], cachePolicy: "immutable", decoder: rpcQuantityValue },
-                { method: "eth_getTransactionCount", params: [owner, "pending"], cachePolicy: "none", decoder: rpcQuantityValue },
-                ...planned.map((transaction) => ({ method: "eth_estimateGas", params: [rpcTransactionInput(transaction), tag], cachePolicy: "none", decoder: rpcQuantityValue })),
-                { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
-            ];
-            const values = await this.batchCall(phaseTwo);
-            let offset = 0;
-            if (values[offset++] !== BigInt(this.chainId))
-                throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-            const native = values[offset++], balance = asset.kind === "native" ? native : values[offset++];
-            const allowance = asset.kind === "native" ? 0n : values[offset++];
-            this.commandFeeInputs = this.chainId === 8453 ? { l1DataFeeUpperWei: values[offset++],
-                operatorScalar: values[offset++], operatorConstant: values[offset++] } :
-                { l1DataFeeUpperWei: 0n, operatorScalar: 0n, operatorConstant: 0n };
-            const latest = values[offset++], pending = values[offset++];
-            for (const transaction of planned)
-                this.preparedEstimates.set(hashObject(transaction), values[offset++].toString());
-            const recheck = values[offset];
-            if (evmRpcQuantity(recheck.number).toString() !== at.numberAtomic || evmRpcHex(recheck.hash, 32) !== at.hash)
-                bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
-            return { chainId: this.chainId, rpcOrigin: this.origin, block: at, owner, token, spender, balanceAtomic: balance.toString(),
-                nativeBalanceWei: native.toString(), allowanceAtomic: allowance.toString(), latestNonceAtomic: latest.toString(), pendingNonceAtomic: pending.toString() };
-        }
-        await this.assertChain();
-        const at = await this.block("latest"), tag = quantity(BigInt(at.numberAtomic));
-        const asset = bridgeAssetRow(this.chainId, token, "APN_RPC_CONFIG");
-        const data = encodeFunctionData({ abi: ERC20_READ, functionName: "balanceOf", args: [owner] });
-        const allowanceData = encodeFunctionData({ abi: ERC20_READ, functionName: "allowance", args: [owner, spender] });
-        const nativeBalance = this.call("eth_getBalance", [owner, tag]).then(evmRpcQuantity);
-        const [balance, native, allowance, latest, pending] = await Promise.all([
-            asset.kind === "native" ? nativeBalance : this.call("eth_call", [{ to: token, data }, tag]).then(evmRpcWord), nativeBalance,
-            asset.kind === "native" ? Promise.resolve(0n) : this.call("eth_call", [{ to: token, data: allowanceData }, tag]).then(evmRpcWord),
-            this.call("eth_getTransactionCount", [owner, "latest"]).then(evmRpcQuantity), this.call("eth_getTransactionCount", [owner, "pending"]).then(evmRpcQuantity),
-        ]);
-        await this.recheck(at);
-        await this.assertChain();
-        return { chainId: this.chainId, rpcOrigin: this.origin, block: at, owner, token, spender, balanceAtomic: balance.toString(),
-            nativeBalanceWei: native.toString(), allowanceAtomic: allowance.toString(), latestNonceAtomic: latest.toString(), pendingNonceAtomic: pending.toString() };
+        return (await this.readAccount(owner, spender, token, planned, [])).account;
+    }
+    /**
+     * One POST at the moving head: approval inclusion and foreground consent can change the account within one invocation,
+     * so nothing here is cached and each guard predicate stands on its own answer. Prices, Base fee inputs and the planned
+     * estimates are kept for this command so the envelope and fee quotes reuse them instead of reading again.
+     */
+    async readAccount(owner, spender, token, planned, extraItems) {
+        const asset = bridgeAssetRow(this.chainId, token, "APN_RPC_CONFIG"), base = this.chainId === 8453, arbitrum = this.chainId === 42161;
+        const values = await this.batchCall([chainItem(this.chainId),
+            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: rpcFeeBlockValue },
+            ...(arbitrum ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none", decoder: rpcQuantityValue }]),
+            { method: "eth_getBalance", params: [owner, "latest"], cachePolicy: "none", decoder: rpcQuantityValue },
+            ...(asset.kind === "native" ? [] : [latestCall(token, encodeFunctionData({ abi: ERC20_READ, functionName: "balanceOf", args: [owner] })),
+                latestCall(token, encodeFunctionData({ abi: ERC20_READ, functionName: "allowance", args: [owner, spender] }))]),
+            ...(base ? [latestCall(GAS_ORACLE, L1_UPPER_BOUND), latestCall(L1_BLOCK, "0x4d5d9a2a"), latestCall(L1_BLOCK, "0x16d3bc7f")] : []),
+            { method: "eth_getTransactionCount", params: [owner, "latest"], cachePolicy: "none", decoder: rpcQuantityValue },
+            { method: "eth_getTransactionCount", params: [owner, "pending"], cachePolicy: "none", decoder: rpcQuantityValue },
+            ...planned.map((transaction) => ({ method: "eth_estimateGas", params: [rpcTransactionInput(transaction), "latest"],
+                cachePolicy: "none", decoder: rpcQuantityValue })),
+            ...extraItems]);
+        let offset = 1;
+        const raw = values[offset++], at = blockOf(raw);
+        const priority = arbitrum ? 0n : values[offset++], maximum = 2n * evmRpcQuantity(raw.baseFeePerGas) + priority;
+        bridgeUint(maximum.toString(), true, "APN_RPC_PROTOCOL");
+        const native = values[offset++], balance = asset.kind === "native" ? native : values[offset++];
+        const allowance = asset.kind === "native" ? 0n : values[offset++];
+        const fees = base ? { l1DataFeeUpperWei: values[offset++], operatorScalar: values[offset++], operatorConstant: values[offset++] }
+            : { l1DataFeeUpperWei: 0n, operatorScalar: 0n, operatorConstant: 0n };
+        const latest = values[offset++], pending = values[offset++];
+        const estimates = planned.map(() => values[offset++]);
+        this.commandLatestBlock = at;
+        this.commandFeeInputs = fees;
+        this.commandPrices = { maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
+        planned.forEach((transaction, index) => this.preparedEstimates.set(hashObject(transaction), estimates[index].toString()));
+        return { extra: values.slice(offset), account: { chainId: this.chainId, rpcOrigin: this.origin, block: at, owner, token, spender,
+                balanceAtomic: balance.toString(), nativeBalanceWei: native.toString(), allowanceAtomic: allowance.toString(),
+                latestNonceAtomic: latest.toString(), pendingNonceAtomic: pending.toString() } };
     }
     async prices() {
         if (this.commandPrices !== undefined)
             return this.commandPrices;
-        if (this.batchCall !== undefined) {
-            const items = [
-                { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-                { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "snapshot", decoder: rpcFeeBlockValue },
-                ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "snapshot", decoder: rpcQuantityValue }]),
-            ];
-            const values = await this.batchCall(items);
-            if (values[0] !== BigInt(this.chainId))
-                throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-            const block = values[1], priority = this.chainId === 42161 ? 0n : values[2];
-            this.commandLatestBlock = { numberAtomic: evmRpcQuantity(block.number).toString(), hash: evmRpcHex(block.hash, 32), timestampAtomic: evmRpcQuantity(block.timestamp).toString() };
-            const maximum = 2n * evmRpcQuantity(block.baseFeePerGas) + priority;
-            bridgeUint(maximum.toString(), true, "APN_RPC_PROTOCOL");
-            return this.commandPrices = { maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
-        }
-        await this.assertChain();
-        const b = await evmRpcBlock(this.call, "latest"), priority = this.chainId === 42161 ? 0n : evmRpcQuantity(await this.call("eth_maxPriorityFeePerGas", []));
-        const maximum = 2n * evmRpcQuantity(b.raw.baseFeePerGas) + priority;
+        const values = await this.batchCall([chainItem(this.chainId),
+            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "snapshot", decoder: rpcFeeBlockValue },
+            ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "snapshot", decoder: rpcQuantityValue }])]);
+        const block = values[1], priority = this.chainId === 42161 ? 0n : values[2];
+        this.commandLatestBlock = blockOf(block);
+        const maximum = 2n * evmRpcQuantity(block.baseFeePerGas) + priority;
         bridgeUint(maximum.toString(), true, "APN_RPC_PROTOCOL");
-        await this.assertChain();
-        return { maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
+        return this.commandPrices = { maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
     }
     async estimate(transaction) {
         if (transaction.chainId !== this.chainId)
@@ -274,67 +134,36 @@ export class BridgeRpc {
         const prepared = this.preparedEstimates.get(hashObject(transaction));
         if (prepared !== undefined && this.commandPrices !== undefined)
             return { gasLimitAtomic: prepared, ...this.commandPrices };
-        if (this.batchCall !== undefined) {
-            const items = [
-                { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-                { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
-                            value: quantity(bridgeUint(transaction.valueAtomic)) }], cachePolicy: "none", decoder: rpcQuantityValue },
-                { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "snapshot", decoder: rpcFeeBlockValue },
-                ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "snapshot", decoder: rpcQuantityValue }]),
-            ];
-            const values = await this.batchCall(items);
-            if (values[0] !== BigInt(this.chainId))
-                throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-            const gas = values[1], block = values[2], priority = this.chainId === 42161 ? 0n : values[3];
-            this.commandLatestBlock = { numberAtomic: evmRpcQuantity(block.number).toString(), hash: evmRpcHex(block.hash, 32), timestampAtomic: evmRpcQuantity(block.timestamp).toString() };
-            const maximum = 2n * evmRpcQuantity(block.baseFeePerGas) + priority;
-            if (maximum === 0n)
-                bridgeFailure("APN_RPC_PROTOCOL", "bridge_zero_gas_price");
-            return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
-        }
-        return await this.evm.estimate(transaction);
+        const values = await this.batchCall([chainItem(this.chainId),
+            { method: "eth_estimateGas", params: [{ from: transaction.from, to: transaction.to, data: transaction.data,
+                        value: quantity(bridgeUint(transaction.valueAtomic)) }], cachePolicy: "none", decoder: rpcQuantityValue },
+            { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "snapshot", decoder: rpcFeeBlockValue },
+            ...(this.chainId === 42161 ? [] : [{ method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "snapshot", decoder: rpcQuantityValue }])]);
+        const gas = values[1], block = values[2], priority = this.chainId === 42161 ? 0n : values[3];
+        this.commandLatestBlock = blockOf(block);
+        const maximum = 2n * evmRpcQuantity(block.baseFeePerGas) + priority;
+        if (maximum === 0n)
+            bridgeFailure("APN_RPC_PROTOCOL", "bridge_zero_gas_price");
+        return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priority.toString() };
     }
     async feeQuote(envelope) { return (await this.feeQuotes([envelope]))[0]; }
     async feeQuotes(envelopes) {
-        if (this.batchCall === undefined)
-            return await Promise.all(envelopes.map(async (envelope) => await this.evm.feeQuote(this.chainId, envelope.economics)));
         if (this.commandLatestBlock !== undefined && this.commandFeeInputs !== undefined)
             return envelopes.map((envelope) => {
                 const execution = bridgeUint(envelope.economics.maximumGasCostAtomic, true), input = this.commandFeeInputs;
                 const operator = BigInt(envelope.economics.gasLimitAtomic) * input.operatorScalar * 100n + input.operatorConstant;
                 return bridgeFeeQuote(this.chainId, this.origin, this.commandLatestBlock, execution, input.l1DataFeeUpperWei, operator);
             });
-        const block = this.commandLatestBlock ?? await this.block("latest"), tag = quantity(BigInt(block.numberAtomic));
-        const items = [
-            { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-            ...(this.chainId === 8453 ? envelopes.flatMap((envelope) => {
-                const l1 = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", args: [16384n] });
-                const operator = encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [bridgeUint(envelope.economics.gasLimitAtomic, true)] });
-                return [
-                    { method: "eth_call", params: [{ to: GAS_ORACLE, data: l1 }, tag], cachePolicy: "none", decoder: rpcWordValue },
-                    { method: "eth_call", params: [{ to: GAS_ORACLE, data: operator }, tag], cachePolicy: "none", decoder: rpcWordValue },
-                ];
-            }) : []),
-            { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
-        ];
-        const values = await this.batchCall(items);
-        if (values[0] !== BigInt(this.chainId))
-            throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+        const block = this.commandLatestBlock ?? await this.block("latest");
+        const values = await this.batchCall([chainItem(this.chainId), ...(this.chainId === 8453 ? envelopes.flatMap((envelope) => [
+                latestCall(GAS_ORACLE, L1_UPPER_BOUND),
+                latestCall(GAS_ORACLE, encodeFunctionData({ abi: GAS_ORACLE_ABI, functionName: "getOperatorFee", args: [bridgeUint(envelope.economics.gasLimitAtomic, true)] })),
+            ]) : [])]);
         let offset = 1;
-        const quotes = envelopes.map((envelope) => {
-            const execution = bridgeUint(envelope.economics.maximumGasCostAtomic, true);
-            const l1 = this.chainId === 8453 ? values[offset++] : 0n;
-            const operator = this.chainId === 8453 ? values[offset++] : 0n;
-            const total = execution + l1 + operator;
-            return { chainId: this.chainId, ...(this.chainId === 42161 ? { feeModel: "arbitrum-inclusive" } : this.chainId === 143 ? { feeModel: "monad-gas-limit" } : {}),
-                l1DataFeeUpperWei: l1.toString(), operatorFeeUpperWei: operator.toString(), maximumExecutionFeeWei: execution.toString(),
-                totalQuoteWei: total.toString(), totalFeeEnforcedOnchain: false, blockNumberAtomic: block.numberAtomic, blockHash: block.hash,
-                rpcOrigin: this.origin, observedAt: new Date().toISOString() };
+        return envelopes.map((envelope) => {
+            const l1 = this.chainId === 8453 ? values[offset++] : 0n, operator = this.chainId === 8453 ? values[offset++] : 0n;
+            return bridgeFeeQuote(this.chainId, this.origin, block, bridgeUint(envelope.economics.maximumGasCostAtomic, true), l1, operator);
         });
-        const recheck = values[offset];
-        if (evmRpcQuantity(recheck.number).toString() !== block.numberAtomic || evmRpcHex(recheck.hash, 32) !== block.hash)
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
-        return quotes;
     }
     async send(raw, beforeSend) {
         bridgeHex(raw, 16 * 1024, undefined, "APN_PROVIDER_EFFECT_UNAVAILABLE");
@@ -347,118 +176,15 @@ export class BridgeRpc {
             bridgeFailure("APN_RPC_AMBIGUOUS", "submitted_transaction_hash_mismatch");
         return hash;
     }
-    async basePinnedFeeValues(gas, block, safe) {
-        if (this.batchCall === undefined)
-            bridgeFailure("APN_RPC_CONFIG", "bridge_batch_unavailable");
-        const { codeRows, directRows, aggregateRows, items } = basePinnedFeeReadPlan(gas, block, safe);
-        const values = await this.batchCall(items, "archive_deployment");
-        let offset = 0;
-        if (values[offset++] !== BigInt(this.chainId))
-            throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
-        for (const row of codeRows) {
-            const bytes = values[offset++];
-            if (bytes === "0x" || eip7702Delegation(bytes) || keccak256(bytes) !== row.codeHash)
-                bridgeFailure("APN_RPC_PROTOCOL", "Base_fee_code_identity");
-        }
-        for (const row of directRows)
-            if (values[offset++] !== row.expected)
-                bridgeFailure("APN_RPC_PROTOCOL", "Base_fee_configuration_identity");
-        const aggregate = values[offset++];
-        for (let index = 0; index < aggregateRows.length; index += 1) {
-            if (aggregate[index] !== aggregateRows[index].expected)
-                bridgeFailure("APN_RPC_PROTOCOL", "Base_fee_configuration_identity");
-        }
-        const rawReturn = values[offset++], rawScalar = values[offset++], rawConstant = values[offset++];
-        assertMatchingHeader(values[offset++], block);
-        assertMatchingHeader(values[offset], safe);
-        return { rawReturn, rawScalar, rawConstant };
+    async observe(hash, expected, nativeDelivery, options) {
+        return await observeCanonical(this.observation(options), hash, expected, nativeDelivery, true, options);
     }
-    async observe(hash, expected, nativeDelivery) {
-        return await this.observeCanonical(hash, expected, nativeDelivery, true);
+    async observeDestination(hash, nativeDelivery, options) {
+        return await observeCanonical(this.observation(options), hash, undefined, nativeDelivery, false, options);
     }
-    async observeDestination(hash, nativeDelivery) {
-        return await this.observeCanonical(hash, undefined, nativeDelivery, false);
-    }
-    async observeCanonical(hash, expected, nativeDelivery, includeFees) {
-        await this.assertChain();
-        bridgeHex(hash, 32, 32, "APN_RPC_PROTOCOL");
-        const [rawTx, rawReceipt] = await Promise.all([this.call("eth_getTransactionByHash", [hash]), this.call("eth_getTransactionReceipt", [hash])]);
-        if (rawTx === null || rawReceipt === null)
-            return null;
-        const tx = evmRpcRecord(rawTx), r = evmRpcRecord(rawReceipt), number = evmRpcQuantity(r.blockNumber), blockHash = evmRpcHex(r.blockHash, 32);
-        if (evmRpcHex(r.transactionHash, 32) !== hash || evmRpcHex(tx.blockHash, 32) !== blockHash ||
-            evmRpcQuantity(tx.blockNumber) !== number || evmRpcQuantity(tx.type) !== evmRpcQuantity(r.type) || evmRpcQuantity(tx.transactionIndex) !== evmRpcQuantity(r.transactionIndex))
-            bridgeFailure("APN_RPC_PROTOCOL", "receipt_transaction_membership");
-        const included = await evmRpcBlock(this.call, quantity(number));
-        const index = evmRpcQuantity(r.transactionIndex);
-        if (included.hash !== blockHash || !Array.isArray(included.raw.transactions) || included.raw.transactions.length > 20_000 ||
-            index >= BigInt(included.raw.transactions.length) || included.raw.transactions[Number(index)] !== hash)
-            bridgeFailure("APN_RPC_PROTOCOL", "canonical_transaction_membership");
-        const block = { numberAtomic: number.toString(), hash: blockHash, timestampAtomic: evmRpcQuantity(included.raw.timestamp).toString() };
-        const safeRaw = await evmRpcBlock(this.call, "safe");
-        const safe = { numberAtomic: safeRaw.number, hash: safeRaw.hash, timestampAtomic: evmRpcQuantity(safeRaw.raw.timestamp).toString() };
-        const safeBlock = BigInt(safe.numberAtomic) >= number ? safe : null;
-        const status = evmRpcQuantity(r.status);
-        if (status !== 0n && status !== 1n)
-            bridgeFailure("APN_RPC_PROTOCOL", "receipt_status");
-        const identity = await verifyRpcTransaction(tx, this.chainId, hash, expected);
-        if (evmRpcAddress(r.from) !== identity.from || evmRpcAddress(r.to) !== identity.to)
-            bridgeFailure("APN_RPC_PROTOCOL", "receipt_sender_target");
-        const logs = parseReceiptLogs(r.logs, hash, block, index);
-        const fees = includeFees ? await bridgeActualFees(this.chainId, r, block, this.call, this.chainId === 8453 && this.batchCall !== undefined ? async (gas, pinned) => await this.basePinnedFeeValues(gas, pinned, safe) : undefined) : null;
-        if (fees !== null && (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) ||
-            BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic)))
-            bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
-        let nativeBalance = null;
-        let nativeTransfer = null;
-        let compositeTrace = null;
-        if (nativeDelivery !== undefined) {
-            if (number === 0n)
-                bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
-            const beforeRaw = await evmRpcBlock(this.call, quantity(number - 1n));
-            const before = { numberAtomic: (number - 1n).toString(), hash: beforeRaw.hash, timestampAtomic: evmRpcQuantity(beforeRaw.raw.timestamp).toString() };
-            const [beforeBalance, afterBalance, trace] = await Promise.all([
-                this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: before.hash, requireCanonical: true }]).then(evmRpcQuantity),
-                this.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
-                this.chainId === 59144 && this.batchCall !== undefined ? this.batchCall([
-                    { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcArchiveChainValue(this.chainId) },
-                    { method: "debug_traceTransaction", params: [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }],
-                        cachePolicy: "immutable", decoder: rpcRecordValue },
-                ], "archive_deployment").then((values) => values[1])
-                    : this.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
-            ]);
-            if (afterBalance < beforeBalance)
-                bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
-            nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
-                beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
-            if (nativeDelivery.composite === undefined)
-                nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
-            else
-                compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call, { sender: identity.from, calldata: bridgeHex(tx.input, 24_576, undefined, "APN_RPC_PROTOCOL") });
-            await this.recheck(before);
-        }
-        if (this.batchCall === undefined) {
-            await this.recheck(block);
-            if (safeBlock !== null)
-                await this.recheck(safeBlock);
-        }
-        else {
-            const values = await this.batchCall([
-                { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcArchiveChainValue(this.chainId) },
-                { method: "eth_getBlockByNumber", params: [quantity(number), false], cachePolicy: "none", decoder: rpcBlockValue },
-                { method: "eth_getBlockByNumber", params: [quantity(BigInt(safe.numberAtomic)), false], cachePolicy: "none", decoder: rpcBlockValue },
-            ], "primary");
-            assertMatchingHeader(values[1], block);
-            assertMatchingHeader(values[2], safe);
-        }
-        await this.assertChain();
-        return { transaction: { chainId: this.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: this.origin, ...identity,
-                ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
-            receipt: { chainId: this.chainId, transactionHash: hash, blockNumberAtomic: number.toString(), blockHash, logs, nativeBalance, nativeTransfer, compositeTrace } };
-    }
-    async recheck(block) {
-        if (!bridgeSame(await this.block(block.numberAtomic), block))
-            bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_reorg");
+    observation(options) {
+        return { chainId: this.chainId, origin: this.origin, call: this.call, batchCall: this.batchCall, receipts: this.receipts,
+            ...(options?.legacyBaseFees === true ? { legacyFees: legacyBaseFees(this.chainId, this.call, this.batchCall) } : {}) };
     }
 }
 //# sourceMappingURL=rpc-adapter.js.map

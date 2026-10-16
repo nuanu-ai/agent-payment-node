@@ -22,7 +22,8 @@ function accountReader() {
     if (item.method === "eth_chainId") return "0xa4b1";
     if (item.method === "eth_getBlockByNumber") return header(item.params[0] === "latest" ? head : BigInt(String(item.params[0])));
     if (item.method === "eth_getTransactionCount" && item.params[1] === "pending") return quantity(pendingNonce);
-    const at = blocks.get(BigInt(String(item.params[1])))!;
+    // State is read at the moving head the transaction will execute against.
+    const at = blocks.get(item.params[1] === "latest" ? head : BigInt(String(item.params[1])))!;
     if (item.method === "eth_getBalance") return quantity(at.native);
     if (item.method === "eth_getTransactionCount") return quantity(at.nonce);
     if (item.method === "eth_call") {
@@ -56,7 +57,8 @@ test("one bridge invocation rereads the latest account block after an approval i
   assert.equal(current.latestNonceAtomic, "76"); assert.equal(current.pendingNonceAtomic, "76");
   assert.equal(current.allowanceAtomic, "100000"); assert.equal(current.nativeBalanceWei, "892589446115754");
   assert.equal((await reader.rpc.prices()).maxFeePerGasAtomic, "80000000");
-  assert(reader.session.telemetry().httpRequests <= 4);
+  // One batch per account read, nothing cached across the approval boundary.
+  assert.equal(reader.session.telemetry().httpRequests, 2);
 });
 
 test("a stable account block still observes a new pending nonce within the same command", async () => {
@@ -64,5 +66,5 @@ test("a stable account block still observes a new pending nonce within the same 
   reader.pendingApproval(); const current = await reader.rpc.account(owner, spender, token);
   assert.equal(current.block.numberAtomic, "1"); assert.equal(current.latestNonceAtomic, "75");
   assert.equal(current.pendingNonceAtomic, "76"); assert.equal(current.allowanceAtomic, "0");
-  assert(reader.session.telemetry().httpRequests <= 4);
+  assert.equal(reader.session.telemetry().httpRequests, 2);
 });

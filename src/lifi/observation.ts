@@ -1,7 +1,7 @@
 import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
-import type { BridgeDeploymentIdentity, BridgeDestinationTransactionProof, BridgeTransactionProof } from "./model.js";
+import type { BridgeDestinationTransactionProof, BridgeTransactionProof } from "./model.js";
 import { BRIDGE_TELEMETRY_ROWS, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
@@ -36,9 +36,11 @@ export class BridgeObservation {
       let observation: Awaited<ReturnType<BridgeRpcPort["observe"]>>;
       const source = this.source(), beforeTelemetry = source.readTelemetry?.() ?? null;
       try {
-        observation = await source.observe(effect.transactionHash!, effect.envelope);
+        // An effect already seen included re-polls in one batch with its inclusion header. No deployment re-proof after the
+        // money moved (P2): the guard checked it before the send and the log proofs bind the known emitters.
+        const known = (effect.safeProof ?? effect.includedProof)?.block;
+        observation = await source.observe(effect.transactionHash!, effect.envelope, undefined, known === undefined ? {} : { includedBlock: known });
         if (observation !== null) {
-          await this.historicalDeployment(op, source, observation.transaction, op.intent.sourceDeployment);
           if (observation.transaction.status === "success" && effect.role === "approval") {
             const m = op.intent.materialization;
             approvalIncluded(observation.receipt, m.request.fromToken, m.sender, m.approvalAddress, m.request.amountAtomic);
@@ -71,7 +73,7 @@ export class BridgeObservation {
       if (effect.safeProof !== null) {
         const observedTelemetry = appendObservationTelemetry(op, "source_observation", effect.role, "success", beforeTelemetry,
           source.readTelemetry?.() ?? null);
-        if (transaction.safeBlock === null || !bridgeSame(proofIdentity(effect.safeProof), proofIdentity(transaction))) {
+        if (transaction.safeBlock === null || !bridgeSame(inclusionIdentity(effect.safeProof), inclusionIdentity(transaction))) {
           reliable = false;
           op = await this.save(op, { state: "unknown_finality", observationTelemetry: observedTelemetry,
             failure: retainedUnsentBridgeRpcFailure(op) ?? { reason: "safe_source_observation_conflict", residualAllowance: null } });
@@ -79,7 +81,7 @@ export class BridgeObservation {
         continue;
       }
       // An inclusion can disappear or move before safe finality. Preserve that change in a separate journal entry.
-      if (effect.includedProof !== null && !bridgeSame(proofIdentity(effect.includedProof), proofIdentity(transaction))) {
+      if (effect.includedProof !== null && !bridgeSame(inclusionIdentity(effect.includedProof), inclusionIdentity(transaction))) {
         op = await this.save(op, { state: "unknown_finality", effects: replaceEffect(op, {
           ...effect, phase: "unknown_finality", includedProof: null, safeProof: null,
         }), ...(effect.role === "bridge" ? { sourceProof: null } : {}) });
@@ -208,14 +210,12 @@ export class BridgeObservation {
     const proveNativeDelta = bridgeProviderBoundNativeDestination(request);
     const bnb = op.intent.decoded.composite !== undefined;
     let canonical = null;
-    let canonicalDeployment: BridgeDeploymentIdentity | null = null;
     const observe = async (transactionHash: Hex, nativeDelivery?: Parameters<BridgeRpcPort["observe"]>[2]) =>
       destination.observeDestination === undefined
         ? await destination.observe(transactionHash, undefined, nativeDelivery)
         : await destination.observeDestination(transactionHash, nativeDelivery);
     if (bnb) {
       canonical = requireSafeDestination(await observe(hash));
-      canonicalDeployment = await this.historicalDeployment(op, destination, canonical.transaction, op.intent.destinationDeployment);
       try { validateBnbFilledRelay(op.sourceProof!, op.intent.materialization, op.intent.decoded, canonical.receipt); }
       catch { throw new BnbProtocolMismatch(); }
     }
@@ -226,8 +226,6 @@ export class BridgeObservation {
         ? op.sourceProof!.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic }) } : undefined));
     if (canonical !== null && (!bridgeSame(proofIdentity(canonical.transaction), proofIdentity(found.transaction)) ||
       !bridgeSame(canonical.receipt.logs, found.receipt.logs))) bridgeFailure("APN_RPC_PROTOCOL", "destination_trace_rebind");
-    const observedDeployment = canonicalDeployment ??
-      await this.historicalDeployment(op, destination, found.transaction, op.intent.destinationDeployment);
     let proof;
     const nativeStargate = op.intent.decoded.protocol.kind === "stargateV2" &&
       op.intent.decoded.protocol.assetId === 13;
@@ -235,8 +233,7 @@ export class BridgeObservation {
     const poolCodeHash = pool?.code.find((row) => row.address === pool.protocolEmitter)?.codeHash;
     if (nativeStargate && poolCodeHash === undefined) bridgeFailure("APN_RPC_PROTOCOL", "stargate_native_destination_pin");
     try { proof = bridgeDestinationProof(op.sourceProof!, op.intent.materialization, op.intent.decoded, found.receipt,
-      nativeStargate ? { pool: pool!.protocolEmitter, frozenDeployment: op.intent.destinationDeployment,
-        observedDeployment, frozenPoolCodeHash: poolCodeHash!, observedPoolCodeHash: poolCodeHash! } : undefined); }
+      nativeStargate ? { pool: pool!.protocolEmitter, poolCodeHash: poolCodeHash! } : undefined); }
     catch (error) { if (bnb) throw new BnbProtocolMismatch(); throw error; }
     const safeBlock = found.transaction.safeBlock;
     if (safeBlock === null) throw new DestinationPending();
@@ -248,18 +245,6 @@ export class BridgeObservation {
     const exceptional = provider !== undefined && !["not_found", "pending", "completed_observed"].includes(provider);
     return await this.save(op, { state: exceptional ? "unknown_finality" : "destination_pending", ...(observationTelemetry === undefined ? {} : { observationTelemetry }),
       failure: exceptional ? { reason: `provider_${provider}_unproved`, residualAllowance: null } : null });
-  }
-  private async historicalDeployment(op: BridgeOperationRecord, rpc: BridgeRpcPort,
-    proof: BridgeTransactionProof | BridgeDestinationTransactionProof, frozen: BridgeDeploymentIdentity): Promise<BridgeDeploymentIdentity> {
-    if (rpc.chainId !== frozen.chainId || proof.chainId !== frozen.chainId) bridgeFailure("APN_RPC_CONFIG", "observation_RPC_identity");
-    const current = await rpc.deployment(op.intent.materialization.tool, frozen.peerChainId,
-      frozen.chainId === op.intent.materialization.request.fromChainId ? op.intent.materialization.request.fromToken : op.intent.materialization.request.toToken,
-      proof.block, true);
-    if (current.contractHash !== frozen.contractHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_contract_hash");
-    if (current.codeHash !== frozen.codeHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_code_hash");
-    if (current.configurationHash !== frozen.configurationHash) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_configuration_hash");
-    if (!bridgeSame(current.block, proof.block)) bridgeFailure("APN_PROVIDER_PROTOCOL", "historical_deployment_block");
-    return current;
   }
 }
 function sourceProofDiagnostic(error: unknown): ApnError {
@@ -309,6 +294,8 @@ export function replaceEffect(op: BridgeOperationRecord, effect: BridgeEffect): 
   return op.effects.map((e) => e.role === effect.role ? effect : e);
 }
 function proofIdentity(proof: BridgeTransactionProof | BridgeDestinationTransactionProof) { return { ...proof, safeBlock: null, rpcOrigin: null }; }
+/** A source inclusion's identity. Fee evidence is how the fee was derived (legacy oracle or receipt), not where the effect landed. */
+function inclusionIdentity(proof: BridgeTransactionProof) { return { ...proofIdentity(proof), feeEvidence: null }; }
 function reusableProviderObservation(op: BridgeOperationRecord): boolean {
   const observation = op.providerObservation, bridge = op.effects.at(-1);
   if (observation?.status !== "completed_observed") return false;

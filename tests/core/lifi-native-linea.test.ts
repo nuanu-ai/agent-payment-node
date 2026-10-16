@@ -60,11 +60,7 @@ test("immutable Linea RPC baseline verifies the finalized canonical SpokePool pr
   assert.equal(proof.codeHash, "92be1364e421c29baa34aca55cac947d45f9ea91a05a16753aba3c97dc501ad0");
   assert.equal(proof.configurationHash, "37419cf0d4a7311341ed94f791aaa187951be14730c647036c7794c61ae965de");
   assert.equal(bridgeProtocolEmitter(59144, "across", BRIDGE_ZERO_ADDRESS), capture.sourceOfTruth.lineaSpokePool);
-  const unavailable: EvmRpcCall = async (method, params) => {
-    if (method === "debug_traceTransaction") throw new Error("method unavailable");
-    return await call(method, params);
-  };
-  await assert.rejects(new BridgeRpc(59144, capture.rpcOrigin, unavailable).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block));
+  // No trace capability probe on a fixed historical transaction (LIFI-13): the delivery's own trace fails closed instead.
 });
 
 test("Linea deployment identity refuses the former SpokePool, swapped proxy and implementation, wrong code and wrong configuration", async () => {

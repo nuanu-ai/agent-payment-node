@@ -13,6 +13,8 @@ export declare class BridgeExecution {
     private readonly save;
     private readonly physicalBudget?;
     private readonly observation;
+    /** The source deployment check passed in this invocation with no consent wait since (P2: proved once per invocation). */
+    private deploymentChecked;
     constructor(state: StateStore, source: BridgeRpcPort, destination: BridgeRpcPort, provider: LifiProviderPort, custody: BridgeCustodyPort, now: () => number, save: BridgeSave, observationRpc?: Readonly<{
         source: () => BridgeRpcPort;
         destination: () => BridgeRpcPort;

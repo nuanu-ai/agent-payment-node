@@ -19,6 +19,8 @@ import { bridgeRpcBudgetDeferred } from "./rpc-session-helpers.js";
 
 export class BridgeExecution {
   private readonly observation: BridgeObservation;
+  /** The source deployment check passed in this invocation with no consent wait since (P2: proved once per invocation). */
+  private deploymentChecked = false;
   constructor(private readonly state: StateStore, private readonly source: BridgeRpcPort,
     private readonly destination: BridgeRpcPort, provider: LifiProviderPort, private readonly custody: BridgeCustodyPort,
     private readonly now: () => number, private readonly save: BridgeSave, observationRpc: Readonly<{
@@ -37,12 +39,15 @@ export class BridgeExecution {
       async () => await this.confirmForeground(op, approval),
       async () => await this.save(op, { state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } }),
       async current => await this.authorityPolicy(current), async (authority, approvedAt) => {
+        this.deploymentChecked = false;
         try { op = await this.approved(op, approvedAt); }
         catch (error) { return await this.haltUnsent(op, error); }
         return await this.run(op, authority);
       });
     if (!await this.confirmForeground(op, approval)) return await this.save(op, {
       state: "failed_before_effect", failure: { reason: "approval_rejected", residualAllowance: null } });
+    // Consent can take minutes: the signing guard reads the deployment again.
+    this.deploymentChecked = false;
     try { op = await this.approved(op, this.now()); }
     catch (error) { return await this.haltUnsent(op, error); }
     return await this.run(op);
@@ -195,7 +200,8 @@ export class BridgeExecution {
       reason: "allowlist_binding_missing", rail: "bridge",
     });
     await this.allowlist().confirm(op.intent.profile, op.intent.materialization.request, op.intent.materialization.tool, op.intent.allowlist);
-    await guardBridgeEffect(op, role, this.source, this.destination, this.now);
+    await guardBridgeEffect(op, role, this.source, this.destination, this.now, !this.deploymentChecked);
+    this.deploymentChecked = true;
   }
   private async authorityPolicy(op: BridgeOperationRecord): Promise<string | undefined> {
     await assertExclusiveEvmRawSigner(this.state, op.intent.owner.address, op.profileHash);

@@ -6,7 +6,7 @@ import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
 import { bridgeExecutionDestination, bridgeNativeDenominationConversion, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
 import { approvalData } from "./transaction.js";
-import { BRIDGE_FEE_RULE_HASH } from "./rpc-fees.js";
+import { BRIDGE_FEE_RULE_HASH, BRIDGE_RECEIPT_FEE_RULE_HASH } from "./rpc-fees.js";
 import { assetUsageReservationId, validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { bridgeMechanism, validateBridgeAllowlistBinding } from "./allowlist.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
@@ -169,11 +169,16 @@ export function validateEnvelopeProof(p, e, hash) {
     if (BigInt(p.gasUsedAtomic) > BigInt(c.gasLimitAtomic) || BigInt(p.effectiveGasPriceAtomic) > BigInt(c.maxFeePerGasAtomic) ||
         BigInt(p.executionFeeWei) !== BigInt(p.gasUsedAtomic) * BigInt(p.effectiveGasPriceAtomic) ||
         BigInt(p.actualTotalFeeWei) !== BigInt(p.executionFeeWei) + BigInt(p.l1DataFeeWei) + BigInt(p.operatorFeeWei) ||
-        p.blobFeeWei !== "0" || p.feeEvidence.ruleHash !== BRIDGE_FEE_RULE_HASH ||
+        p.blobFeeWei !== "0" || (p.feeEvidence.ruleHash !== BRIDGE_FEE_RULE_HASH && p.feeEvidence.ruleHash !== BRIDGE_RECEIPT_FEE_RULE_HASH) ||
         (e.chainId !== 8453 && (p.l1DataFeeWei !== "0" || p.operatorFeeWei !== "0")) ||
         (p.safeBlock !== null && BigInt(p.safeBlock.numberAtomic) < BigInt(p.block.numberAtomic)))
         bridgeCorrupt();
-    if (e.chainId === 8453) {
+    if (e.chainId === 8453 && p.feeEvidence.ruleHash === BRIDGE_RECEIPT_FEE_RULE_HASH) {
+        // Receipt-derived Base fees carry no oracle evidence; the receipt hash binds the fields the fees came from.
+        if (p.feeEvidence.baseOracle !== null || p.feeEvidence.arbitrumPosterGasAtomic !== null)
+            bridgeCorrupt();
+    }
+    else if (e.chainId === 8453) {
         const o = p.feeEvidence.baseOracle;
         if (o === null || o.blockHash !== p.block.hash || o.oracle !== "0x420000000000000000000000000000000000000F" ||
             o.from !== `0x${"0".repeat(40)}` || o.callData !== `0x275aedd2${BigInt(p.gasUsedAtomic).toString(16).padStart(64, "0")}` ||
