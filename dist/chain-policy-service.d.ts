@@ -23,8 +23,10 @@ export declare class ChainPolicyService {
         readonly maximumFee: string;
     }): Promise<unknown>;
     requiredPolicy(account: ChainAccount, alias: ChainAssetAlias): Promise<ChainPolicy>;
-    /** The chain policy caps only native fees, rent and resources; the owner allowlist policy caps the amount (one counter, no double count). */
+    /** The fee, rent and resource cap; prepare and the pre-sign reservation also check the principal caps with assertPrincipal. */
     authorize(account: ChainAccount, alias: ChainAssetAlias, maximumFee: string): Promise<ChainPolicy>;
+    /** The admitted per-transfer and daily principal caps, beside the allowlist caps; this operation itself is never counted twice. */
+    assertPrincipal(policy: ChainPolicy, operationId: string, amountAtomic: string): Promise<void>;
 }
 export declare function solanaCapabilities(): {
     rail: string;

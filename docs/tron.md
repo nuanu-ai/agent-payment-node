@@ -106,10 +106,11 @@ can show a USDT balance while remaining unable to originate a transaction.
 
 TRX and USDT start denied. Two owner decisions are needed. The owner allowlist
 policy must admit the asset on the `direct` rail; its per-operation and daily
-caps are the only principal caps (see `docs/allowlist-direct-integration.md`).
-The chain policy below, admitted in a foreground terminal, now caps only the
-total resource fee in TRX; its principal flags are still required by the
-command but are not enforced. The values below only illustrate command syntax.
+caps apply (see `docs/allowlist-direct-integration.md`). The chain policy
+below, admitted in a foreground terminal, caps the total resource fee in TRX
+and enforces its per-transfer and UTC-daily principal limits too, at prepare
+and again before signing; a transfer must fit both. The values below only
+illustrate command syntax.
 
 ```sh
 apn policy admit-tron --profile tron-local --asset trx \
