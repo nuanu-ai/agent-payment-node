@@ -158,6 +158,8 @@ export type CommandRequest =
   | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: EvmChainId }
   | {
     readonly command: "wallet.policy.set";
+    /** Omitted keeps the current x402 payee pin; null removes it; a list sets it. */
+    readonly x402Payees?: readonly string[] | null;
     readonly chainId?: EvmChainId;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;

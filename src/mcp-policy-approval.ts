@@ -3,6 +3,7 @@ import { cliHandoffDetails, createCliHandoff, type CliHandoff } from "./cli-hand
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
 import { x402Network } from "./x402-network.js";
+import { X402_PAYEES_UNRESTRICTED, canonicalX402Payees } from "./profile-policy.js";
 import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "./policy-approval.js";
 
 type PolicySetRequest = Extract<CommandRequest, { readonly command: "wallet.policy.set" }>;
@@ -21,7 +22,8 @@ export class RejectingMcpPolicyApproval implements ProfilePolicyApprovalPort {
       (intent.x402Network !== undefined && intent.x402Network.token !== x402Network(this.request.chainId).token) ||
       intent.maxBalanceUsdcAtomic !== this.request.maxBalanceUsdcAtomic ||
       intent.maxX402AmountAtomic !== this.request.maxX402AmountAtomic ||
-      (this.request.maxBalanceEthWei !== undefined && intent.maxBalanceEthWei !== this.request.maxBalanceEthWei)
+      (this.request.maxBalanceEthWei !== undefined && intent.maxBalanceEthWei !== this.request.maxBalanceEthWei) ||
+      (this.request.x402Payees !== undefined && JSON.stringify(intent.x402Payees ?? null) !== JSON.stringify(canonicalX402Payees(this.request.x402Payees)))
     ) {
       throw new ApnError("APN_INTERNAL", "The policy approval handoff does not match the validated request.");
     }
@@ -43,6 +45,7 @@ function policyHandoff(request: PolicySetRequest): CliHandoff {
     "--max-balance-usdc-atomic": request.maxBalanceUsdcAtomic,
     "--max-x402-amount-atomic": request.maxX402AmountAtomic,
     "--max-balance-eth-wei": request.maxBalanceEthWei,
+    "--x402-payees": request.x402Payees === undefined ? undefined : request.x402Payees === null ? X402_PAYEES_UNRESTRICTED : request.x402Payees.join(","),
   };
   const tokens = ["apn", ...definition.path];
   for (const option of definition.options) {

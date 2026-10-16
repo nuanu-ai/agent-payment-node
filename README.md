@@ -246,7 +246,8 @@ does not compile or substitute monetary defaults:
 apn wallet policy set --profile default \
   --max-balance-usdc-atomic <owner-limit-in-6-decimal-units> \
   --max-x402-amount-atomic <owner-limit-in-6-decimal-units> \
-  [--max-balance-eth-wei <optional-owner-limit>]
+  [--max-balance-eth-wei <optional-owner-limit>] \
+  [--x402-payees <address,...|unrestricted>]
 
 apn wallet policy show --profile default
 ```
@@ -261,6 +262,14 @@ starting a new unattended x402 purchase until the owner resolves it. Its
 `funding_guidance` and `next_actions` follow that posture per asset: an asset
 at or above its owner limit is never suggested for funding, and an excess is
 named with its asset, amount and effect on unattended x402.
+
+`--x402-payees` optionally pins which sellers local x402 may pay (1-16 EVM
+addresses). Without a pin the policy does not restrict payees; the payee is the
+seller's offer, shown and bound into the authorization. With a pin, prepare only
+selects offers paying a pinned payee, and approval and the first paid request
+refuse (`x402_payee_not_admitted`) if the pin no longer lists it. Omitting the
+option keeps the current pin, `unrestricted` removes it; removing the pin or
+adding a payee needs the foreground phrase, pinning or narrowing does not.
 
 Prepare and approve a direct transfer:
 
@@ -807,7 +816,7 @@ apn wallet metamask native-transfer-observe --operation <id>
 apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>
-apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
+apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
 apn x402 inspect --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
 apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
@@ -820,7 +829,7 @@ apn operation recover-provider-request --operation <operation-id> --provider-req
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
 apn wallet policy show-network --chain <caip2> --profile <profile>
-apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
+apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
 apn x402 inspect-network --chain <caip2> --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
 apn x402 fetch prepare-network --chain <caip2> --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true]

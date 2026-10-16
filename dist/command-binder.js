@@ -9,6 +9,7 @@ import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { directEvmChain } from "./evm-direct-networks.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
 import { chainDecimal } from "./chain-policy.js";
+import { X402_PAYEES_UNRESTRICTED } from "./profile-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
 import { tronAddress } from "./tron/codec.js";
 import { bindBridgeCommand } from "./lifi/command-catalog.js";
@@ -293,6 +294,7 @@ function bindParsedCatalog(parsed) {
                 maxBalanceUsdcAtomic: value(options, "--max-balance-usdc-atomic"),
                 maxX402AmountAtomic: value(options, "--max-x402-amount-atomic"),
                 ...(options["--max-balance-eth-wei"] === undefined ? {} : { maxBalanceEthWei: options["--max-balance-eth-wei"] }),
+                ...(options["--x402-payees"] === undefined ? {} : { x402Payees: options["--x402-payees"] === X402_PAYEES_UNRESTRICTED ? null : options["--x402-payees"].split(",") }),
             },
         };
         case "x402 inspect-network":
