@@ -11,6 +11,7 @@ import type { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { BridgeHttps } from "./https.js";
+import { CircleV2SourceAdmission } from "./circle-v2-source-admission.js";
 import { NonEvmSourceJournalRepository } from "./non-evm-source-journal.js";
 import { TtyCircleV2SourceApproval } from "./circle-v2-source-tty.js";
 import { inspectCircleV2PreflightedDraft, type CircleV2DraftInput } from "./circle-v2-draft.js";
@@ -92,6 +93,9 @@ export class CircleV2SourceService {
     try {
     if (loaded.identity.address !== payer || loaded.identity.profile !== profile ||
       privateKeyToAccount(loaded.secret.privateKey).address !== payer) fail("wallet_owner");
+    // Owner allowlist admission before any quote or prompt; the hold itself is taken after consent, before signing.
+    const admission = new CircleV2SourceAdmission(this.state, profile, payer, amount.toString(), operationId, () => new Date());
+    await admission.admit();
     const ata = await associatedUsdc(request.recipientOwner);
     const bytes = getBase58Encoder().encode(ata);
     if (bytes.length !== 32) fail("recipient_ata");
@@ -136,6 +140,7 @@ export class CircleV2SourceService {
           signTransaction: tx => privateKeyToAccount(loaded.secret.privateKey).signTransaction(tx) },
         sendRawTransaction: raw => rpc.send(raw),
         approve: p => new TtyCircleV2SourceApproval().approve(p),
+        admission,
         journal: new NonEvmSourceJournalRepository(this.state.root),
         admitLive: async p => {
           if (validationHash === undefined) fail("validation_missing");
@@ -231,6 +236,8 @@ interface CircleV2SourceExecutionPorts {
   }>) => Promise<Hex> }>;
   readonly sendRawTransaction: (raw: Hex) => Promise<Hex>;
   readonly approve: (preparation: CircleV2SourcePreparation) => Promise<void>;
+  /** Owner allowlist hold: reserved before signing, released if nothing is signed, followed after the one send. */
+  readonly admission: Pick<CircleV2SourceAdmission, "reserve" | "releaseBeforeEffect" | "followSend">;
   readonly journal: NonEvmSourceJournalRepository;
   /** Concrete HTTPS/RPC adapter supplies the final response digest and pinned origins. */
   readonly admitLive?: (preparation: CircleV2SourcePreparation) => Promise<NonEvmSourceJournalV3["admissionProof"]>;
@@ -310,11 +317,15 @@ async function submitCircleV2BaseSourceBurnLive(intent: CircleV2SourceExecutionI
     admission.preparationDigest !== afterConsent.preparationDigest.slice(7) ||
     admission.feeTotalAtomic !== p.quote.feeTotalAtomic ||
     !/^https:\/\//u.test(admission.rpcOrigin) || !/^[a-f0-9]{64}$/u.test(admission.validationHash)) blocked("live_admission_binding");
+  await ports.admission.reserve();
   let j: NonEvmSourceJournal = await ports.journal.stageLiveCircle({ ...binding.binding,
     admissionProof: admission, protocolInputHash: hashObject({ binding: binding.protocolInputHash, admission }) });
+  // An earlier attempt owns its hold; only a hold whose journal never reached signing is released here.
   if (j.phase !== "staged_untrusted") blocked("already_started");
-  if (j.schemaVersion !== "apn.non-evm-source-journal.v3" || j.executionAdmitted !== true) blocked("synthetic_admission");
-  j = await ports.journal.signingStarted(j.profileHash, j.operationId, j.integrityHash, new Date(now()).toISOString());
+  try {
+    if (j.schemaVersion !== "apn.non-evm-source-journal.v3" || j.executionAdmitted !== true) blocked("synthetic_admission");
+    j = await ports.journal.signingStarted(j.profileHash, j.operationId, j.integrityHash, new Date(now()).toISOString());
+  } catch (error) { await ports.admission.releaseBeforeEffect(); throw error; }
   const tx = p.transaction, nonce = BigInt(tx.nonceAtomic);
   if (nonce > BigInt(Number.MAX_SAFE_INTEGER) || Date.parse(p.expiresAt) - now() < BRIDGE_MIN_REMAINING_MS) blocked("signing_expired");
   const raw = await ports.signer.signTransaction({ type: "eip1559", chainId: 8453, to: getAddress(tx.to),
@@ -334,6 +345,7 @@ async function submitCircleV2BaseSourceBurnLive(intent: CircleV2SourceExecutionI
     j = await ports.journal.observeUnknown(j.profileHash, j.operationId, j.integrityHash,
       "send_result_ambiguous", new Date(now()).toISOString());
   }
+  await ports.admission.followSend(phase === "submitted_pending" ? "submitted" : "unknown_finality");
   return { journal: j, sourceTransactionHash: hash, sourceState: phase,
     circleAttestationObserved: false, solanaDestinationFinalized: false, bridgeCompletion: false };
 }
