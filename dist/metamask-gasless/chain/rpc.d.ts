@@ -3,6 +3,7 @@ import type { Address, Hex } from "../../model.js";
 import { type GaslessTransport } from "../../gasless/https.js";
 import type { MetaMaskGaslessBalance, MetaMaskGaslessChainId, MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessProviderObservation, MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot } from "../model.js";
 import type { MetaMaskGaslessObservationRpcFactory, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "../ports.js";
+import { type MetaMaskGaslessFailureReason } from "../reasons.js";
 export { validateMetaMaskGaslessSnapshot } from "./snapshot.js";
 export interface MetaMaskGaslessRpcOptions {
     readonly chainId: MetaMaskGaslessChainId;
@@ -41,3 +42,9 @@ export declare class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     private assertChain;
     private call;
 }
+/**
+ * Sort an eth_getLogs error into a closed class from its JSON-RPC message, which is read and then discarded: a range
+ * or result-size limit is deterministic and worth a narrower window; a request limit is a rate limit; anything
+ * else stays plain unavailability.
+ */
+export declare function mmLogQueryRefusal(error: unknown): MetaMaskGaslessFailureReason;

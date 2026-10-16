@@ -1,6 +1,8 @@
 import { mmDispatchIntent } from "./dispatch.js";
 import { mmPrivateHash } from "./identity.js";
-import { assertMetaMaskGaslessObservationCapacity } from "./journal/transitions.js";
+import { assertMetaMaskGaslessObservable, metaMaskGaslessObservationRoom, metaMaskGaslessObservationUnchanged } from "./journal/transitions.js";
+import { MM_CLOSED_PROVIDER_STATUSES, MM_PROVIDER_STATUSES } from "./model.js";
+import { MM_TERMINAL } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import { mmClassify, mmFail, mmFailure } from "./reasons.js";
 import { mmExact, mmHex, mmIso } from "./validation.js";
@@ -8,7 +10,7 @@ export function metaMaskGaslessProviderObservation(value, op) {
     const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_evidence_invalid");
     mmIso(p.observedAt, "mm_gasless_evidence_invalid");
     if (p.requestIdHash !== mmPrivateHash("request-id", op.intent.requestId) ||
-        !["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(String(p.status)))
+        !MM_PROVIDER_STATUSES.includes(String(p.status)))
         mmFail("mm_gasless_evidence_invalid");
     if (p.txHash !== null)
         mmHex(p.txHash, 32, "mm_gasless_evidence_invalid");
@@ -34,7 +36,7 @@ export class MetaMaskGaslessObservationService {
             return { operation: op };
         try {
             this.clock.check(op);
-            assertMetaMaskGaslessObservationCapacity(op);
+            assertMetaMaskGaslessObservable(op);
             const result = submitted ?? await this.readProvider(op);
             this.clock.check(op, result.hint === null ? [] : [result.hint.observedAt]);
             const providerObservation = this.retainProvider(op, result.hint);
@@ -71,6 +73,13 @@ export class MetaMaskGaslessObservationService {
             const patch = this.decide(op, chain, providerObservation, result.failure);
             const at = new Date(this.clock.check(op, [chain.observation.observedAt,
                 ...(providerObservation === null ? [] : [providerObservation.observedAt])])).toISOString();
+            if (metaMaskGaslessObservationUnchanged(op, patch))
+                return { operation: op };
+            // Full history never blocks a read or the terminal transition; it only stops saving nonterminal results.
+            if (!MM_TERMINAL.includes(patch.state ?? op.state) && !metaMaskGaslessObservationRoom(op)) {
+                return { operation: op, warning: mmFailure("mm_gasless_record_capacity"),
+                    unsaved: { observation: chain.observation, cursor: chain.cursor } };
+            }
             return { operation: await this.save(op, patch, at) };
         }
         catch (error) {
@@ -113,6 +122,9 @@ export class MetaMaskGaslessObservationService {
             return { ...current, txHash: current.txHash ?? previousHash };
         if (op.providerObservation === null)
             return null;
+        // A closed provider job is final: a failed read (an expired session included) cannot replace what it said.
+        if (closedProvider(op.providerObservation))
+            return op.providerObservation;
         return { observedAt: new Date(this.clock.check(op)).toISOString(),
             requestIdHash: mmPrivateHash("request-id", op.intent.requestId), status: "unavailable", txHash: previousHash };
     }
@@ -136,10 +148,25 @@ export class MetaMaskGaslessObservationService {
         }
         const usableHint = provider !== null && ["broadcasted", "confirmed"].includes(provider.status) &&
             provider.txHash !== null && provider.txHash === chain.observation.candidateTxHash;
-        const reason = providerFailure ?? (provider?.status === "awaiting_approval" ? "mm_gasless_provider_approval" :
-            provider?.status === "failed" ? "mm_gasless_provider_failed" :
-                provider?.status === "unavailable" ? "mm_gasless_provider_unavailable" : "mm_gasless_pending");
+        const closed = provider !== null && closedProvider(provider) ? closedReason(op, provider) : null;
+        const reason = closed ?? providerFailure ?? (provider?.status === "awaiting_approval" ? "mm_gasless_provider_approval" :
+            provider?.status === "unavailable" ? "mm_gasless_provider_unavailable" : "mm_gasless_pending");
         return { ...base, state: usableHint ? "submitted_pending" : "unknown_finality", failure: mmFailure(reason) };
     }
+}
+function closedProvider(provider) {
+    return MM_CLOSED_PROVIDER_STATUSES.includes(provider.status);
+}
+/**
+ * MetaMask runs a job EVALUATING, AWAITING_MFA, SIGNING, BROADCASTING, and its own SDK reads DENIED or EXPIRED after
+ * AWAITING_MFA as the MFA being rejected, i.e. closed before SIGNING. That is the provider's word, not proof that no
+ * signature exists, so the operation stays guarded; only the reason and next action become specific. Every other
+ * closed status keeps `mm_gasless_provider_failed`.
+ */
+function closedReason(op, provider) {
+    const awaitedMfa = op.providerObservation?.status === "awaiting_approval" ||
+        op.transitions.some(transition => transition.providerObservation?.status === "awaiting_approval");
+    return (provider.status === "denied" || provider.status === "expired") && awaitedMfa
+        ? "mm_gasless_provider_mfa_rejected" : "mm_gasless_provider_failed";
 }
 //# sourceMappingURL=observation.js.map

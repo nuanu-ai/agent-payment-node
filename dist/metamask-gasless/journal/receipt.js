@@ -14,18 +14,41 @@ const RECEIPT_KEYS = ["schema_version", "kind", "operation_id", "profile", "prof
     "transaction_hash", "settlement", "scan_cursor", "endpoint_origin", "endpoint_hash", "approved_at", "created_at",
     "updated_at", "expires_at", "next_actions", "operation_binding_hash", "transition_hash", "receipt_hash"];
 function corrupt() { return mmFail("mm_gasless_state_corrupt"); }
-export function metaMaskGaslessNextActions(operation) {
+/**
+ * `legacy` reproduces the next actions of releases that never carried the observation RPC option, so receipts they
+ * wrote for an operation observed through a named RPC still validate as exact historical derivatives.
+ */
+export function metaMaskGaslessNextActions(operation, legacy = false) {
     const op = validateMetaMaskGaslessOperation(operation);
     if (op.state === "awaiting_approval")
         return [`apn gasless transfer approve --operation ${op.operationId}`];
     if (op.terminal)
         return [`apn receipt get --operation ${op.operationId}`];
+    const source = legacy ? undefined : op.observation?.source;
+    const resume = `apn operation resume --operation ${op.operationId}${source === undefined ? "" :
+        ` --observation-rpc-env ${source.environmentName}`}`;
     if (op.failure?.reason === "mm_gasless_provider_approval")
         return [
             "Confirm this existing transaction in MetaMask Mobile or the email registered to your MetaMask dashboard.",
-            `apn operation resume --operation ${op.operationId}`,
+            resume,
         ];
-    return [`apn operation resume --operation ${op.operationId}`];
+    if (op.failure?.reason === "mm_gasless_provider_mfa_rejected")
+        return [
+            "MetaMask closed this request as denied or expired at the MFA step, before signing. Do not confirm the old request. APN cannot prove that no signature exists, so the operation stays guarded.",
+            resume,
+            `After its approval window, accept the unknown outcome with apn operation abandon --operation ${op.operationId}`,
+        ];
+    if (op.failure?.reason === "mm_gasless_rpc_log_range")
+        return [
+            "The RPC refused even narrow eth_getLogs ranges. Put a public HTTPS RPC that serves bounded log queries in an APN_<NAME>_RPC_URL variable and add --observation-rpc-env APN_<NAME>_RPC_URL to the resume.",
+            resume,
+        ];
+    if (op.failure?.reason === "mm_gasless_rpc_rate_limited")
+        return [
+            "The RPC asked APN to slow down. Wait before resuming; every block already proved stays proved.",
+            resume,
+        ];
+    return [resume];
 }
 export function metaMaskGaslessProofClass(operation) {
     const op = validateMetaMaskGaslessOperation(operation);
@@ -36,7 +59,7 @@ export function metaMaskGaslessProofClass(operation) {
             ? "rpc_finalized_correlated" : "rpc_safe_correlated";
     return op.submissionAttempts === 1 ? "effect_observation_pending" : "durable_pre_effect";
 }
-export function publicMetaMaskGaslessOperation(operation) {
+export function publicMetaMaskGaslessOperation(operation, legacyNextActions = false) {
     const op = validateMetaMaskGaslessOperation(operation), settlement = op.settlement;
     // The prepared intent stays immutable; the price, batch and delegation reported are the ones dispatched.
     const intent = mmDispatchIntent(op);
@@ -72,12 +95,12 @@ export function publicMetaMaskGaslessOperation(operation) {
         scan_cursor: op.cursor, endpoint_origin: intent.initialSnapshot.endpointOrigin,
         endpoint_hash: intent.initialSnapshot.endpointHash, approved_at: op.approval?.approvedAt ?? null,
         created_at: op.createdAt, updated_at: op.updatedAt, expires_at: intent.expiresAt,
-        next_actions: metaMaskGaslessNextActions(op),
+        next_actions: metaMaskGaslessNextActions(op, legacyNextActions),
     };
 }
-export function metaMaskGaslessReceipt(operation) {
+export function metaMaskGaslessReceipt(operation, legacyNextActions = false) {
     const op = validateMetaMaskGaslessOperation(operation), body = {
-        ...publicMetaMaskGaslessOperation(op), schema_version: MM_RECEIPT_VERSION,
+        ...publicMetaMaskGaslessOperation(op, legacyNextActions), schema_version: MM_RECEIPT_VERSION,
         operation_binding_hash: op.integrityHash, transition_hash: op.transitions.at(-1).transitionHash,
     };
     return { ...body, receipt_hash: hashObject(body) };
@@ -90,8 +113,9 @@ export function validateMetaMaskGaslessReceipt(value, operation) {
     for (let index = 0; index < op.transitions.length; index += 1) {
         const historical = metaMaskGaslessAtTransition(op, index);
         if (historical.integrityHash === binding && historical.transitions.at(-1).transitionHash === transitionHash &&
-            mmSame(receipt, metaMaskGaslessReceipt(historical)))
+            (mmSame(receipt, metaMaskGaslessReceipt(historical)) || mmSame(receipt, metaMaskGaslessReceipt(historical, true)))) {
             return receipt;
+        }
     }
     return corrupt();
 }
