@@ -7,6 +7,8 @@ import { resolvePublicAddresses } from "../network-policy.js";
 export const tronHttpsFetch = createTronHttpsFetch(request, resolvePublicAddresses);
 /** Ten ten-second TRX prepare requests, nine gaps and the ten-second expiry reserve fit the 120-second TRON window. */
 export const TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS = 1_000;
+/** Keyless public TRON APIs answer bursts with HTTP 429; two POST starts per second stay under them. "0" turns pacing off. */
+export const TRON_RPC_DEFAULT_MINIMUM_POST_INTERVAL_MS = 500;
 /** One pacing queue belongs to one APN TRON client, never a process-wide provider limit. */
 export function configuredTronHttpsFetch(options) {
     return createTronHttpsFetch(request, resolvePublicAddresses, options);
@@ -25,7 +27,7 @@ export function createTronHttpsFetch(requestHttps, resolveAddresses, pacing = {}
         if (raw !== undefined && raw !== "0" && (!/^[1-9][0-9]{0,3}$/u.test(raw) || Number(raw) > TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS)) {
             throw new ApnError("APN_RPC_CONFIG", "TRON RPC minimum POST interval must be a canonical integer from 0 to 1000 milliseconds.");
         }
-        const interval = raw === undefined ? 0 : Number(raw);
+        const interval = raw === undefined ? TRON_RPC_DEFAULT_MINIMUM_POST_INTERVAL_MS : Number(raw);
         const addresses = await resolveBounded(endpoint, signal, resolveAddresses);
         const selected = addresses[0];
         if (selected === undefined)
@@ -51,6 +53,12 @@ export function createTronHttpsFetch(requestHttps, resolveAddresses, pacing = {}
             }, (incoming) => {
                 const contentType = incoming.headers["content-type"] ?? "";
                 const declared = Number(incoming.headers["content-length"] ?? "0");
+                if (incoming.statusCode === 429) {
+                    // A provider cooldown is a rate limit, not malformed evidence; the request was refused, not executed.
+                    finish(new ApnError("APN_RPC_RATE_LIMITED", "The TRON RPC provider requested a cooldown.", { httpStatus: 429 }));
+                    incoming.destroy();
+                    return;
+                }
                 if (incoming.statusCode !== 200) {
                     fail("http_status", incoming.statusCode);
                     incoming.destroy();

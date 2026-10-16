@@ -111,9 +111,10 @@ export class TronLocalAdapter implements DirectRailPort {
     requireFunds(owner.balance, token, atomic(prepared.amountAtomic), atomic(snapshot.totalFeeMaximumAtomic), prepared.asset.kind === "native");
     if (BigInt(this.now().getTime()) + 10_000n >= atomic(snapshot.expirationMsAtomic)) tronReprepare();
   }
+  /** The lifecycle revalidated immediately before calling this; signing reads no chain state of its own. */
   async sign(binding: RailEffectBinding): Promise<RailSignedEffect> {
     const previous = await this.recoverEffect(binding); if (previous !== null) return previous;
-    await this.revalidate(binding.account, binding.prepared);
+    if (this.now().getTime() + 10_000 >= Date.parse(binding.prepared.expiresAt)) tronReprepare();
     const effect = await this.storage.withSeed(binding.account, async (seed) => {
       const transaction = signTronTransaction(binding.prepared, seed); const rawPayload = canonicalJson(transaction);
       return { operationId: binding.operationId, fingerprint: binding.fingerprint, transactionId: transaction.txID, rawPayload, rawPayloadHash: sha256(rawPayload) };
@@ -128,7 +129,8 @@ export class TronLocalAdapter implements DirectRailPort {
   async submit(binding: RailEffectBinding, effect: RailSignedEffect | null): Promise<{ readonly transactionId: string }> {
     if (effect === null) mismatch();
     const stored = await this.recoverEffect(binding); if (stored === null || canonicalJson(stored) !== canonicalJson(effect)) mismatch();
-    const transaction = validateTronEffect(binding.prepared, effect); await this.revalidate(binding.account, binding.prepared);
+    // The lifecycle's one revalidation already ran for this send; TRON itself refuses an expired or unfunded transaction.
+    const transaction = validateTronEffect(binding.prepared, effect);
     const result = tronRecord(await this.rpc.call("wallet/broadcasttransaction", transaction as unknown as Readonly<Record<string, unknown>>));
     if (result.result !== true || result.txid !== effect.transactionId) throw new ApnError("APN_RPC_AMBIGUOUS", "TRON did not acknowledge the exact frozen transaction identity.");
     return { transactionId: effect.transactionId };

@@ -44,11 +44,11 @@ function safe(error: ApnError): void {
   assert.equal(error.details?.rpcMethod, "wallet/getaccount");
 }
 
-test("TRON HTTPS keeps a 429 status and method without response or request secrets", async () => {
+test("TRON HTTPS reports 429 as a rate limit with its method and no response or request secrets", async () => {
   const offline = offlineFetch({ status: 429, contentType: `text/plain; ${canary}`, body: canary });
   const error = await rpcError(offline.fetcher);
-  assert.equal(error.code, "APN_RPC_PROTOCOL");
-  assert.deepEqual(error.details, { reason: "http_status", httpStatus: "429", rpcMethod: "wallet/getaccount" });
+  assert.equal(error.code, "APN_RPC_RATE_LIMITED");
+  assert.deepEqual(error.details, { httpStatus: 429, rpcMethod: "wallet/getaccount" });
   assert.equal(offline.calls(), 1);
   safe(error);
 });

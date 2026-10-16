@@ -9,8 +9,10 @@ export const tronHttpsFetch: typeof fetch = createTronHttpsFetch(request, resolv
 
 /** Ten ten-second TRX prepare requests, nine gaps and the ten-second expiry reserve fit the 120-second TRON window. */
 export const TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS = 1_000;
+/** Keyless public TRON APIs answer bursts with HTTP 429; two POST starts per second stay under them. "0" turns pacing off. */
+export const TRON_RPC_DEFAULT_MINIMUM_POST_INTERVAL_MS = 500;
 export interface TronHttpsPacingOptions {
-  /** Optional canonical decimal milliseconds. Unset or zero preserves the existing behavior. */
+  /** Optional canonical decimal milliseconds. Unset uses the default interval above; "0" disables pacing. */
   readonly minimumPostStartIntervalMs?: string | undefined;
   /** Monotonic clock and cancellable delay are injectable for offline transport tests. */
   readonly now?: () => number;
@@ -37,7 +39,7 @@ export function createTronHttpsFetch(
   if (raw !== undefined && raw !== "0" && (!/^[1-9][0-9]{0,3}$/u.test(raw) || Number(raw) > TRON_RPC_MAX_MINIMUM_POST_INTERVAL_MS)) {
     throw new ApnError("APN_RPC_CONFIG", "TRON RPC minimum POST interval must be a canonical integer from 0 to 1000 milliseconds.");
   }
-  const interval = raw === undefined ? 0 : Number(raw);
+  const interval = raw === undefined ? TRON_RPC_DEFAULT_MINIMUM_POST_INTERVAL_MS : Number(raw);
   const addresses = await resolveBounded(endpoint, signal, resolveAddresses);
   const selected = addresses[0]; if (selected === undefined) invalid();
   if (signal.aborted) throw new ApnError("APN_RPC_PROTOCOL", "The bounded TRON HTTPS transport did not return valid evidence.", { reason: "deadline" });
@@ -56,6 +58,11 @@ export function createTronHttpsFetch(
     }, (incoming) => {
       const contentType = incoming.headers["content-type"] ?? "";
       const declared = Number(incoming.headers["content-length"] ?? "0");
+      if (incoming.statusCode === 429) {
+        // A provider cooldown is a rate limit, not malformed evidence; the request was refused, not executed.
+        finish(new ApnError("APN_RPC_RATE_LIMITED", "The TRON RPC provider requested a cooldown.", { httpStatus: 429 }));
+        incoming.destroy(); return;
+      }
       if (incoming.statusCode !== 200) { fail("http_status", incoming.statusCode); incoming.destroy(); return; }
       if (!contentType.includes("application/json")) { fail("content_type"); incoming.destroy(); return; }
       if (!Number.isSafeInteger(declared) || declared < 0 || declared > 2_097_152) { fail("content_length"); incoming.destroy(); return; }

@@ -57,9 +57,11 @@ the full mainnet genesis block
 `00000000000000001ebf88508a03865c71d452e25f4d51194196a1d22b6653dc`.
 Endpoint text and raw RPC errors are not included in receipts.
 
-For an endpoint that needs slower request starts, set the optional
-`APN_TRON_RPC_MIN_POST_INTERVAL_MS` to a canonical integer from `0` to `1000`.
-Unset or `0` keeps the current behavior. The interval applies at the physical
+Keyless public TRON APIs answer request bursts with HTTP 429, which APN reports
+as `APN_RPC_RATE_LIMITED`. APN therefore starts at most two TRON POSTs per second
+by default (500 ms apart). Set the optional `APN_TRON_RPC_MIN_POST_INTERVAL_MS`
+to a canonical integer from `0` to `1000` to change it; `0` turns pacing off for
+an endpoint that needs none. The interval applies at the physical
 HTTPS POST start after DNS validation for all TRON RPC calls made by this APN
 client, including concurrent calls; it does not
 remove any safety reads or retry a failed request. The maximum is bounded for
@@ -184,12 +186,17 @@ chain parameters. A different version, missing parameter or unsupported flag
 returns `APN_PROVIDER_CAPABILITY_UNAVAILABLE` before signing.
 
 Bandwidth price, Energy price, activation fees and chain maximum `fee_limit` are
-dynamic governance parameters rather than documentation constants. APN reads
-them twice around a fresh head and next-maintenance snapshot, binds the exact
-values into the operation, and sets expiry to at most 120 seconds while staying
-strictly before that maintenance boundary. It rechecks the version, parameter
-hash, maintenance time, reference block, solidified activation snapshot, funding
-and Energy estimate before and after approval and again before submission. A
+dynamic governance parameters rather than documentation constants. APN reads the
+next maintenance time, then the parameters, then the head once: a head still
+before that maintenance proves no maintenance ran between the reads. It binds the
+exact values into the operation and sets expiry to at most 120 seconds while
+staying strictly before that maintenance boundary. Because parameters change only
+at a maintenance boundary, a later check needs only the current head (still inside
+the window) and the named reference block, not the parameters again; the
+solidified activation snapshot is irreversible and is not re-read. Funding, the
+owner permission and the Energy estimate are rechecked before and after approval;
+nothing is re-read between signing and the first broadcast, which TRON itself
+refuses once expired or unfunded. The genesis block is read once per command. A
 stale or changed window, including fewer than ten seconds remaining, returns
 `APN_REPREPARE_REQUIRED` before signing. Only a terminal `failed_before_effect`
 operation can be replaced with a new idempotency key after review; once
@@ -221,7 +228,9 @@ total sender resource maximum, policy hash, operation fingerprint, maintenance
 boundary and expiry. It requires the exact displayed phrase within 60 seconds or
 the shorter transaction expiry. APN revalidates immediately before and after
 that approval, then signs at most one permission-0 transaction with one
-signature and no memo.
+signature and no memo, and re-reads only the owner's local policy before the
+first broadcast. A synthetic USDT approval made 65 TRON requests before the
+broadcast in 0.5.42 and makes 13 now.
 
 Local signing persists the exact signed transaction in encrypted custody storage
 before submission. APN durably records submission intent before the first
