@@ -22,9 +22,8 @@ export interface JupiterV1QuoteBuilderOptions {
     readonly computeUnitPriceMicroLamports: number;
     /** Internal authoritative policy selection, never a caller-controlled pool selector. */
     readonly resolveRouteId?: (profile: string, amountAtomic: string) => Promise<JupiterV1RouteId>;
-    /** Canonical factory only: obtain the final official lifetime after bulky public code reads. */
-    readonly refreshBuildAfterPublicReads?: boolean;
-    readonly refreshRpcLifetimeBeforeFreeze?: boolean;
+    /** Canonical factory: the configured RPC supplies the frozen blockhash after the account reads (one official build). */
+    readonly freezeRpcLifetime?: boolean;
 }
 export class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder<JupiterV1QuoteRequest> {
     constructor(private readonly provider: JupiterV1ReadOnlyProvider, private readonly resolver: JupiterV1MaterialResolver, private readonly store: SavedJupiterV1MaterialStore, private readonly options: JupiterV1QuoteBuilderOptions) { }
@@ -54,12 +53,8 @@ export class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder<Jupiter
         }
         const build = await this.provider.buildExactIn(request, quoteResponse);
         routeConfigForQuoteBuild(quoteResponse, build, routeId);
-        let execution = await this.resolver.resolve(payer, quoteResponse, build, jupiterV1MaximumNativeExpense(input.amountAtomic), undefined, routeId);
-        if (this.options.refreshBuildAfterPublicReads === true) {
-            const refreshed = await this.provider.buildExactIn(request, quoteResponse);
-            routeConfigForQuoteBuild(quoteResponse, refreshed, routeId);
-            execution = await this.resolver.refreshQuoteBuild(execution, refreshed, this.options.refreshRpcLifetimeBeforeFreeze === true);
-        }
+        const execution = await this.resolver.resolve(payer, quoteResponse, build, jupiterV1MaximumNativeExpense(input.amountAtomic), undefined, routeId,
+            this.options.freezeRpcLifetime === true);
         assertJupiterV1FreshMaterial(execution);
         const produced = await this.options.proveQuote(execution, input);
         const quote = snapshotFromJupiterV1QuoteProof(produced, execution, { profile: input.profile, account: input.account, recipient: input.recipient, amountAtomic: input.amountAtomic, slippageBps: input.slippageBps, now: input.now });

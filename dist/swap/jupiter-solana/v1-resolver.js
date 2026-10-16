@@ -9,16 +9,17 @@ import { JUPITER_V1_MATERIAL_SCHEMA, jupiterV1MaterialDigest, assertJupiterV1Rpc
 import { routeConfigForQuoteBuild, jupiterV1RouteProgramAuthorities } from "./v1-route-config.js";
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { PROGRAM_HEADER_SLICE, programAuthorityReadKeys, verifyProgramAuthorities } from "../solana-program-authority.js";
-import { refreshJupiterV1QuoteBuild } from "./v1-quote-refresh.js";
+import { assertJupiterV1RpcLifetimeWindow, readJupiterV1QuoteRpcLifetime } from "./v1-rpc-lifetime.js";
 export class JupiterV1MaterialResolver {
     rpc;
     constructor(rpc) {
         this.rpc = rpc;
     }
-    async refreshQuoteBuild(material, build, useRpcLifetime = false) {
-        return await refreshJupiterV1QuoteBuild(this.rpc, material, build, useRpcLifetime);
-    }
-    async resolve(payer, quote, build, maximumNativeExpenseLamports, frozenRpcLifetime, expectedRouteId) {
+    /**
+     * A new quote passes `freezeRpcLifetime`: the configured RPC supplies the blockhash after the account reads, and the one
+     * fee/height/rent read prices that exact message. A saved quote passes its `frozenRpcLifetime` and must rebuild the same bytes.
+     */
+    async resolve(payer, quote, build, maximumNativeExpenseLamports, frozenRpcLifetime, expectedRouteId, freezeRpcLifetime = false) {
         canonicalAddress(payer);
         decodeJupiterV1Quote(quote);
         decodeJupiterV1Build(build);
@@ -42,7 +43,8 @@ export class JupiterV1MaterialResolver {
         const programPins = verifyProgramAuthorities(authorities, view).map(o => ({ programId: o.programId, loader: o.loader,
             programDataAddress: o.programDataAddress, deploymentSlot: o.deploymentSlot, upgradeAuthority: o.upgradeAuthority, accountHash: o.accountSha256,
             programDataHeaderHash: o.programDataHeaderSha256, provenance: "upgrade_authority" }));
-        const rpcLifetime = frozenRpcLifetime === undefined ? undefined : checkedJupiterV1QuoteRpcLifetime(frozenRpcLifetime);
+        const freezing = frozenRpcLifetime === undefined && freezeRpcLifetime;
+        const rpcLifetime = frozenRpcLifetime !== undefined ? checkedJupiterV1QuoteRpcLifetime(frozenRpcLifetime) : freezing ? await readJupiterV1QuoteRpcLifetime(this.rpc, accounts) : undefined;
         const compiled = assembleJupiterV1(payer, build, tables, rpcLifetime);
         const [feeValue, heightValue, rentValue] = await boundedPublicReads(this.rpc, [
             { method: "getFeeForMessage", params: [compiled.messageBase64, { commitment: "confirmed" }] },
@@ -51,6 +53,8 @@ export class JupiterV1MaterialResolver {
         ]);
         const feeResponse = rpcRecord(feeValue);
         const fee = feeResponse.value === null ? null : rpcAtomic(feeResponse.value).toString(), height = rpcAtomic(heightValue).toString(), rent = rpcAtomic(rentValue).toString();
+        if (freezing)
+            assertJupiterV1RpcLifetimeWindow(rpcLifetime, height);
         if (!/^[1-9][0-9]{0,19}$/u.test(maximumNativeExpenseLamports))
             invalid("Jupiter V1 native cap is invalid.");
         const body = { schemaVersion: JUPITER_V1_MATERIAL_SCHEMA, genesis: SOLANA_MAINNET_GENESIS, payer, quoteResponse: quote, rawBuildResponse: build, quoteResponseHash: jupiterV1ResponseHash(quote), rawBuildResponseHash: jupiterV1ResponseHash(build), lifetime: rpcLifetime === undefined ? jupiterV1Lifetime(build) : { blockhash: rpcLifetime.blockhash, lastValidBlockHeight: rpcLifetime.lastValidBlockHeight }, ...(rpcLifetime === undefined ? {} : { quoteRpcLifetime: rpcLifetime }), ...compiled, rawInstructions: instructions, semanticAccounts: accounts, addressTables: tables, programPins, accountSlot: accounts[0].slot, currentBlockHeight: height, networkFeeLamports: fee, tokenAccountRentLamports: rent, maximumNativeExpenseLamports };
