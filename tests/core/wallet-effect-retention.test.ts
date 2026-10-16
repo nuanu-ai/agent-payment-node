@@ -14,7 +14,7 @@ import { StateStore } from "../../src/state.js";
 import type { TransferApprovalPort } from "../../src/tty-approval.js";
 import { releaseSettledWalletEffects } from "../../src/wallet-effect-retention.js";
 import { x402AuthorizationIntentHash } from "../../src/x402-state-integrity.js";
-import { RECIPIENT, TestClock, TestRpc, temporaryState } from "./helpers.js";
+import { RECIPIENT, TestClock, TestRpc, activateBaseUsdcDirectPolicy, temporaryState } from "./helpers.js";
 
 const MASTER = Buffer.from("33".repeat(32), "hex");
 const wrapping: WrappingSecretPort = { load: async () => Buffer.from(MASTER), create: async () => Buffer.from(MASTER) };
@@ -33,6 +33,8 @@ async function harness(root: string) {
   const core = new ApnCore({ state, native: new LocalWalletNative(state, wrapping, approval), rpc, clock });
   const address = ((await core.execute({ command: "wallet.ensure", profile: "default" })).data as { address: Address }).address;
   rpc.balances = { ...rpc.balances, address };
+  // Since 0.5.42 a Base USDC direct prepare is admitted by the owner's active allowlist policy (SURF-04).
+  await activateBaseUsdcDirectPolicy(root, address);
   const wallets = new EncryptedWalletStore(state, wrapping);
   const effects = async () => { const loaded = (await wallets.describe("default"))!; try { return structuredClone(loaded.secret.directEffects); } finally { wallets.clear(loaded.secret); } };
   const transfer = async (key: string, complete: boolean) => {
