@@ -225,7 +225,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_allowlist_policy_revoke", properties: ["profile", "revision"], required: ["profile", "revision"], defaults: {} },
       { name: "apn_allowlist_policy_status", properties: ["profile"], required: ["profile"], defaults: {} },
       { name: "apn_version", properties: [], required: [], defaults: {} },
-      { name: "apn_doctor_keychain", properties: [], required: [], defaults: {} },
+      { name: "apn_doctor_keychain", properties: ["profile"], required: [], defaults: { profile: "default" } },
       { name: "apn_wallet_ensure", properties: ["profile"], required: [], defaults: { profile: "default" } },
       {
         name: "apn_wallet_connect",

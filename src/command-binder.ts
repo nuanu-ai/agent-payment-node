@@ -151,7 +151,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   if (parsed.command.path[0] === "circle") return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
   switch (parsed.command.path.join(" ")) {
     case "--version": return { request: { command: "version" } };
-    case "doctor keychain": return { request: { command: "doctor.keychain" } };
+    case "doctor keychain": return { request: { command: "doctor.keychain", profile: value(options, "--profile") } };
     case "wallet ensure-tron": {
       if (value(options, "--provider") !== "local" || value(options, "--accept-risk") !== "true") throw new ApnError("APN_INVALID_INPUT", "TRON requires the explicit local provider and literal true risk acknowledgement.");
       return { request: { command: "wallet.ensure-tron", profile: value(options, "--profile"), provider: "local", acceptRisk: true } };
