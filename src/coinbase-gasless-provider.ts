@@ -18,6 +18,7 @@ import { COINBASE_ENTRY_POINT, coinbaseGaslessSnapshot, observeCoinbaseGasless }
 import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 import { AWAL_VERSION } from "./awal-package.js";
+import { resolveProviderPrepare } from "./provider-prepare-identity.js";
 
 const DIRECT_POLICY = {
   identity: "apn.direct.foreground-approval.v1",
@@ -57,9 +58,10 @@ export async function prepareCoinbaseGasless(
       profileRevision: bound.revision, capabilityHash: bound.capability_hash, accountBindingHash: bound.account_binding_hash,
       chainId: CHAIN_ID, token: BASE_USDC, sender: bound.public_address, recipient, grossAtomic: gross.toString(),
       netAtomic: gross.toString(), feeAtomic: "0", maxFeeAtomic: maximumFee.toString(), minReceivedAtomic: minimum.toString(),
-      senderNativeDebitWei: "0", sponsorship: "coinbase_cdp_paymaster", rpcBindingHash };
+      senderNativeDebitWei: "0", sponsorship: "coinbase_cdp_paymaster" };
     const requestHash = hashObject(materialRequest);
-    const existing = await operations.resolvePrepare({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash });
+    const existing = await resolveProviderPrepare(operations, { kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash },
+      hashObject({ ...materialRequest, rpcBindingHash }));
     const policy = new CoinbaseGaslessPolicy(context);
     if (existing !== null) {
       if (existing.record.state === "awaiting_approval") await policy.assert(existing.record as OperationRecord);
@@ -103,7 +105,7 @@ export async function coinbaseGaslessPreconditionsMatch(context: RuntimeContext,
   // The AWAL release that executes must be the one the owner's operation was prepared and fingerprinted for.
   if (frozen.awalVersion !== AWAL_VERSION) return false;
   const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), operation.walletAddress);
-  return snapshot.rpcOrigin === frozen.rpcOrigin && snapshot.entryPointCodeHash === frozen.entryPointCodeHash &&
+  return snapshot.entryPointCodeHash === frozen.entryPointCodeHash &&
     snapshot.accountCodeHash === frozen.accountCodeHash && snapshot.accountImplementation === frozen.accountImplementation &&
     snapshot.accountImplementationCodeHash === frozen.accountImplementationCodeHash &&
     BigInt(snapshot.balanceAtomic) >= BigInt(operation.amountAtomic);

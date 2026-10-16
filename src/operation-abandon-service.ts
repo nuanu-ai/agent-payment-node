@@ -17,6 +17,8 @@ import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
 import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
 import { X402AbandonService } from "./x402-abandon.js";
+import { abandonProviderX402, abandonSmartAccountGasless } from "./operation-abandon-provider.js";
+import { abandonFixedMetaMaskNativeTransfer, metaMaskNativeOperationExists } from "./metamask-native-transfer-owner.js";
 
 export class OperationAbandonService {
   private readonly operations: OperationService;
@@ -32,6 +34,10 @@ export class OperationAbandonService {
   async abandon(operationIdInput: string): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
+    if (await metaMaskNativeOperationExists(this.context.state.root, operationId)) {
+      return await abandonFixedMetaMaskNativeTransfer(this.context.state.root, operationId,
+        async (intent) => await this.context.requireOperationAbandonApproval().approve(intent), () => this.context.clock.now());
+    }
     const found = await this.operations.required(operationId);
     if (found.kind === "rail_transfer") return found.record.account.rail === "solana"
       ? await this.abandonLocalSolana(found.record.profileHash, operationId)
@@ -43,6 +49,8 @@ export class OperationAbandonService {
       return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
     }
     if (found.kind === "x402_fetch" && found.strategy === "local") return await new X402AbandonService(this.context).abandon(operationId);
+    if (found.kind === "x402_fetch" && found.strategy === "provider_atomic") return await abandonProviderX402(this.context, this.operations, operationId);
+    if (found.kind === "smart_account_gasless_transfer") return await abandonSmartAccountGasless(this.context, this.operations, operationId);
     if (found.kind !== "direct_transfer") return ineligible(found.kind);
     if (found.record.providerDirect === undefined) return await new TransferService(this.context).abandonUndispatched(operationId);
     const profileHash = found.record.profileHash;
@@ -56,10 +64,14 @@ export class OperationAbandonService {
       if (selected.record.state === "abandoned_unknown" && selected.record.terminal) {
         return publicOperation(selected.record);
       }
-      assertEligible(selected.record);
+      const now = this.context.clock.now().getTime();
+      assertEligible(selected.record, now);
       let operation = await this.durable.recoverOrphanTerminal(selected.record);
       if (operation.state === "abandoned_unknown" && operation.terminal) return publicOperation(operation);
-      assertEligible(operation);
+      // A known transaction is read once more: a receipt that landed closes the operation instead.
+      operation = await this.durable.inspectReceipt(operation);
+      if (operation.terminal) return publicOperation(operation);
+      assertEligible(operation, now);
       const binding = operation.providerDirect!;
       await this.context.requireOperationAbandonApproval().approve({
         operationId: operation.operationId,
@@ -73,7 +85,8 @@ export class OperationAbandonService {
         chainLabel: "Base (8453)",
         assetLabel: "canonical Base USDC",
         unit: "USDC",
-        outcomeNote: "Financial outcome: UNKNOWN. The provider may already have sent this transfer.",
+        outcomeNote: `Financial outcome: UNKNOWN. The provider may already have sent this transfer${operation.transactionHash === undefined
+          ? "." : `; its last known transaction ${operation.transactionHash} may still land.`}`,
       });
       operation = await this.durable.transition(
         operation,
@@ -159,25 +172,28 @@ export class OperationAbandonService {
 }
 
 function assertProviderAbandonFamily(operation: OperationRecord): void {
-  if (
-    operation.providerDirect?.executionMode !== "provider_atomic_send" ||
-    operation.providerDirect.coinbaseGasless !== undefined ||
-    operation.chainId !== CHAIN_ID || operation.token !== BASE_USDC
-  ) ineligible();
+  if (operation.providerDirect === undefined || operation.chainId !== CHAIN_ID || operation.token !== BASE_USDC) ineligible();
 }
 
-function assertEligible(operation: OperationRecord): void {
-  if (
-    operation.terminal || operation.state !== "ambiguous_effect" ||
-    operation.transactionHash !== undefined || operation.providerEffect !== undefined
-  ) ineligible();
+const UNRESOLVED_PROVIDER_STATES: readonly string[] = ["ambiguous_effect", "evidence_pending", "provider_pending", "provider_acknowledged"];
+
+/**
+ * An outcome with no identifier is released at once, as before. Every other unresolved provider effect (a known
+ * transaction, a provider request, a delegated send, Coinbase gasless) is released only after its approval window.
+ */
+function assertEligible(operation: OperationRecord, now: number): void {
+  const identifierless = operation.state === "ambiguous_effect" && operation.transactionHash === undefined &&
+    operation.providerEffect === undefined && operation.providerDirect?.executionMode === "provider_atomic_send" &&
+    operation.providerDirect.coinbaseGasless === undefined;
+  if (operation.terminal || !UNRESOLVED_PROVIDER_STATES.includes(operation.state) ||
+    (!identifierless && now < Date.parse(operation.expiresAt))) ineligible();
 }
 
 function ineligible(kind?: string): never {
   throw new ApnError(
     "APN_OPERATION_BLOCKED",
     kind === undefined
-      ? "Only an eligible ambiguous provider-atomic direct operation can be abandoned; Coinbase gasless guards have no manual release."
+      ? "Only an unresolved provider direct or gasless operation can be abandoned, and one with a known transaction, request or delegated send only after its approval window."
       : `Operation abandon does not cover ${kind} operations yet; use that family's own recovery command.`,
     kind === undefined ? undefined : { reason: "operation_kind_not_abandonable", kind, abandon_kinds: ABANDON_OPERATION_KINDS },
   );

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { providerX402InvocationIntentHash } from "./provider-x402-model.js";
-import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeNormalizedProviderJson, canonicalizeSellerResultJson } from "./normalized-provider-json.js";
 import { isConflictingProviderX402OuterKey, providerX402RejectionShape, PROVIDER_X402_KNOWN_ENVELOPE_KEYS, } from "./provider-x402-rejection-shape.js";
 import { resolveAwalBin } from "./awal-package.js";
 import { assertAwalHttpRequest } from "./provider-x402-http-request.js";
@@ -202,7 +202,7 @@ function parseSellerResult(bytes, expectedAmount) {
         throw protocol();
     let canonical;
     try {
-        canonical = canonicalizeNormalizedProviderJson(value.data);
+        canonical = canonicalizeSellerResultJson(value.data);
     }
     catch {
         throw protocol();

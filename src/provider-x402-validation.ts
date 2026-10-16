@@ -56,7 +56,7 @@ function validateRangeSettlement(
     evidence.chainId !== "8453" || evidence.network !== CHAIN_CAIP2 || evidence.token !== BASE_USDC.toLowerCase() ||
     evidence.payer !== operation.provider.payer || evidence.payee !== operation.requirement.payee ||
     evidence.amountAtomic !== operation.requirement.amountAtomic || evidence.receiptStatus !== "success" ||
-    evidence.rpcOriginHash !== operation.rpcOriginHash || lower === undefined || upper === undefined ||
+    !/^[a-f0-9]{64}$/u.test(evidence.rpcOriginHash) || lower === undefined || upper === undefined ||
     canonicalJson(evidence.lowerBlock) !== canonicalJson(lower) || canonicalJson(evidence.upperBlock) !== canonicalJson(upper) ||
     evidence.transactionHash !== transfer.transactionHash || !validBlock(lower, "safe") || !validBlock(upper, "number") ||
     !validTransfer(transfer, operation) || BigInt(transfer.blockNumber) < BigInt(lower.number) ||
@@ -79,7 +79,7 @@ function validateTransactionSettlement(
     evidence.network !== CHAIN_CAIP2 || evidence.token !== BASE_USDC.toLowerCase() ||
     evidence.payer !== operation.provider.payer || evidence.payee !== operation.requirement.payee ||
     evidence.amountAtomic !== operation.requirement.amountAtomic || evidence.receiptStatus !== "success" ||
-    evidence.rpcOriginHash !== operation.rpcOriginHash || evidence.qualifyingTransferCount !== "1" ||
+    !/^[a-f0-9]{64}$/u.test(evidence.rpcOriginHash) || evidence.qualifyingTransferCount !== "1" ||
     binding?.transactionHash !== evidence.transactionHash || binding.evidenceDigest !== evidence.evidenceHash ||
     binding.stage !== "evidence_validated" || !validBlock(evidence.receiptBlock, "number") ||
     !validBlock(evidence.safeHead, "safe") || BigInt(evidence.receiptBlock.number) > BigInt(evidence.safeHead.number) ||
@@ -97,6 +97,7 @@ export function assertProviderX402ReceiptAuthority(
 ): void {
   const completed = receipt.terminalState === "completed";
   const settledWithoutResult = receipt.terminalState === "failed_settled_without_result";
+  const abandoned = receipt.terminalState === "abandoned_unknown";
   const receiptTime = Date.parse(receipt.createdAt);
   const operationTime = Date.parse(operation.updatedAt);
   if (
@@ -115,7 +116,8 @@ export function assertProviderX402ReceiptAuthority(
       receipt.reason !== "seller_result_missing" ||
       receipt.proofClass !== providerX402SettledWithoutResultProof(receipt.settlement)
     )) ||
-    (!completed && !settledWithoutResult && receipt.proofClass !== "x402_proven_no_effect") ||
+    (!completed && !settledWithoutResult && !abandoned && receipt.proofClass !== "x402_proven_no_effect") ||
+    (abandoned && receipt.proofClass !== "owner_acknowledgement_only") ||
     (completed !== (operation.sellerResult !== undefined && operation.settlementEvidence !== undefined)) ||
     (settledWithoutResult !== (operation.sellerResult === undefined && operation.settlementEvidence !== undefined)) ||
     canonicalJson(receipt.settlement ?? null) !== canonicalJson(operation.settlementEvidence ?? null) ||

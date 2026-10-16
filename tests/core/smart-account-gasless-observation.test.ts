@@ -316,10 +316,15 @@ test("only finalized complete zero scans produce an expired-unused proof", async
   assert.equal(result.cursor.childScanComplete, true); assert.equal(result.cursor.transferScanComplete, true);
   assert.equal(result.cursor.expiryBlock?.timestampAtomic, String(complete.input.intent.beforeUnix));
 
-  for (const options of [{ finalizedLag: true }, { spent: "1" }, { transfer: true }, { zeroChild: true }]) {
+  for (const options of [{ finalizedLag: true }, { spent: "1" }, { zeroChild: true }]) {
     const harness = await expiryHarness(options), held = await observeSmartAccountGasless(harness.context, harness.input);
     assert.equal(held.observation.phase, "pending"); assert.equal(held.unusedProof, null);
   }
+  // An unrelated owner-to-recipient transfer of the same amount is recorded, but the child's zero spent amount at a
+  // finalized block after expiry still proves this operation unused, so it no longer stays pending for ever.
+  const anomaly = await expiryHarness({ transfer: true }), closed = await observeSmartAccountGasless(anomaly.context, anomaly.input);
+  assert.equal(closed.observation.phase, "expired_unused"); assert.equal(closed.unusedProof?.childSpentAtomic, "0");
+  assert.deepEqual(closed.cursor.transferAnomalies, [anomaly.transactionHash]);
 });
 
 function proofRead(method: string, params: readonly unknown[], intent: SmartAccountGaslessIntent,

@@ -1,5 +1,3 @@
-import { keccak256 } from "viem";
-import { hashObject } from "../../canonical.js";
 import type {
   MetaMaskGaslessApproval,
   MetaMaskGaslessBlock,
@@ -17,14 +15,15 @@ import type {
 import { MM_MIN_REMAINING_MS, MM_PROVIDER_STATUSES, MM_TTL_MS, MM_ZERO_ADDRESS } from "../model.js";
 import { mmActualGross, mmUnusedGross, mmAssertIntentEconomics, mmRepriceWithinCap } from "../economics.js";
 import { mmBinding, mmPrivateHash } from "../identity.js";
-import { mmProtocolPins } from "../single-protocol.js";
-import { mmRegistry } from "../registry.js";
+import { mmRecordedDeployment } from "../recorded.js";
 import { MM_REASON_CODES, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
 import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmIso, mmRequest, mmSame, mmUint, mmUuid } from "../validation.js";
 
 const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const EMPTY_CODE_HASH = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
+const BATCH_PROTOCOL = ["manager", "delegate", "limitedCalls", "exactBatch"] as const;
+const SPONSORED_PROTOCOL = ["manager", "delegate", "limitedCalls", "exactSingle"] as const;
 const STATES: readonly MetaMaskGaslessState[] = ["awaiting_approval", "execution_pending", "dispatch_pending",
   "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect", "abandoned_unknown"];
 const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "dispatch",
@@ -52,21 +51,19 @@ function blockOrder(first: MetaMaskGaslessBlock, second: MetaMaskGaslessBlock): 
   if (BigInt(second.numberAtomic) < BigInt(first.numberAtomic) ||
     (second.numberAtomic === first.numberAtomic && !mmSame(first, second))) corrupt();
 }
-function chainState(value: unknown, chainId: MetaMaskGaslessIntent["request"]["chainId"], feeMode?: "sponsored"): MetaMaskGaslessChainState {
+/**
+ * The prepare-time chain state as saved. Its pins were compared with the registry when it was read; a saved record is
+ * checked for shape only, so a later registry or token upgrade never turns it into corrupt state.
+ */
+function chainState(value: unknown, feeMode?: "sponsored"): MetaMaskGaslessChainState {
   const s = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress",
     "tokenImplementationCodeHash", "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic", "counterAtomic"]);
-  const row = mmRegistry(chainId).row, pins = mmProtocolPins(row, feeMode);
-  const codes = mmExact(s.protocolCodeHashes, Object.keys(pins));
-  for (const [name, pin] of Object.entries(pins)) {
-    if (mmHex(codes[name], 32) !== pin.codeHash) corrupt();
-  }
-  if (mmHex(s.tokenProxyCodeHash, 32) !== row.tokenProxyCodeHash ||
-    mmCanonicalAddress(s.tokenImplementationAddress) !== row.tokenImplementationAddress ||
-    mmHex(s.tokenImplementationCodeHash, 32) !== row.tokenImplementationCodeHash || s.tokenDecimals !== 6 ||
-    !["empty", "pinned"].includes(s.designation as string) || mmUint(s.counterAtomic).toString() !== "0") corrupt();
+  const codes = mmExact(s.protocolCodeHashes, feeMode === "sponsored" ? SPONSORED_PROTOCOL : BATCH_PROTOCOL);
+  for (const code of Object.values(codes)) mmHex(code, 32);
+  mmHex(s.tokenProxyCodeHash, 32); mmCanonicalAddress(s.tokenImplementationAddress); mmHex(s.tokenImplementationCodeHash, 32);
+  if (s.tokenDecimals !== 6 || !["empty", "pinned"].includes(s.designation as string) || mmUint(s.counterAtomic).toString() !== "0") corrupt();
   const ownerCodeHash = mmHex(s.ownerCodeHash, 32);
-  const pinnedOwnerCodeHash = keccak256(`0xef0100${row.protocol.delegate.address.slice(2)}`);
-  if (ownerCodeHash !== (s.designation === "pinned" ? pinnedOwnerCodeHash : EMPTY_CODE_HASH)) corrupt();
+  if (s.designation === "empty" ? ownerCodeHash !== EMPTY_CODE_HASH : ownerCodeHash === EMPTY_CODE_HASH) corrupt();
   mmUint(s.usdcBalanceAtomic);
   return s as unknown as MetaMaskGaslessChainState;
 }
@@ -76,7 +73,7 @@ function snapshot(value: unknown, chainId: MetaMaskGaslessIntent["request"]["cha
   if (s.chainId !== chainId) corrupt();
   mmHash(s.endpointHash); origin(s.endpointOrigin); mmIso(s.observedAt);
   const safeBlock = block(s.safeBlock), headBlock = block(s.headBlock); blockOrder(safeBlock, headBlock);
-  chainState(s.safeState, chainId, feeMode); chainState(s.headState, chainId, feeMode);
+  chainState(s.safeState, feeMode); chainState(s.headState, feeMode);
   return s as unknown as MetaMaskGaslessIntent["initialSnapshot"];
 }
 
@@ -101,7 +98,8 @@ export function mmJournalIntent(value: unknown, profileHash: string): MetaMaskGa
   mmAssertIntentEconomics(intent, profileHash);
   mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,
     signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode },
-  { owner: binding.address, chainId: request.chainId, executions: intent.quote.executions, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
+  { owner: binding.address, chainId: request.chainId, executions: intent.quote.executions, deployment: mmRecordedDeployment(intent),
+    ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
   return intent;
 }
 
@@ -122,10 +120,13 @@ function dispatchMaterial(value: unknown, intent: MetaMaskGaslessIntent): MetaMa
   if (value === null) return null;
   const d = mmExact(value, ["quote", "unsignedDelegation", "delegationHash", "signingDigest", "relayTo", "mode"]);
   mmHex(d.delegationHash, 32); mmHex(d.signingDigest, 32); mmCanonicalAddress(d.relayTo); mmHex(d.mode, 32);
-  const quote = mmRepriceWithinCap(d.quote, intent.request, intent.binding, "mm_gasless_state_corrupt");
+  // The redelegated batch must use the very deployment the prepared intent froze.
+  const deployment = mmRecordedDeployment(intent);
+  const quote = mmRepriceWithinCap(d.quote, intent.request, intent.binding, "mm_gasless_state_corrupt", deployment);
   mmValidateUnsigned({ unsignedDelegation: d.unsignedDelegation, delegationHash: d.delegationHash,
     signingDigest: d.signingDigest, relayTo: d.relayTo, mode: d.mode },
-  { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions, ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
+  { owner: intent.binding.address, chainId: intent.request.chainId, executions: quote.executions, deployment,
+    ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
   return d as unknown as MetaMaskGaslessDispatch;
 }
 function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, at: string): MetaMaskGaslessProviderObservation | null {
@@ -187,19 +188,9 @@ function settlement(value: unknown, intent: MetaMaskGaslessIntent, dispatched: M
   if (BigInt(transaction.numberAtomic) < BigInt(intent.initialSnapshot.safeBlock.numberAtomic)) corrupt();
   const outer = mmCanonicalAddress(s.outerSender);
   if (outer === MM_ZERO_ADDRESS || outer === intent.binding.address) corrupt();
+  // The protocol and token hashes are provenance of the deployment observed then; they are not recomputed from today's registry.
   mmHash(s.transactionProofHash); mmHash(s.receiptHash); mmHash(s.protocolHash); mmHash(s.tokenImplementationHash);
-  const deployment = mmRegistry(intent.request.chainId), row = deployment.row;
-  const protocolHash = hashObject({ deploymentEvidenceHash: deployment.deploymentEvidenceHash,
-    receipt: { block: transaction, code: Object.fromEntries(Object.entries(mmProtocolPins(row, intent.quote.feeMode)).map(([name, pin]) =>
-      [name, pin.codeHash])) },
-    finality: { block: finality, code: Object.fromEntries(Object.entries(mmProtocolPins(row, intent.quote.feeMode)).map(([name, pin]) =>
-      [name, pin.codeHash])) } });
-  const tokenState = { address: row.tokenImplementationAddress, codeHash: row.tokenImplementationCodeHash,
-    proxyCodeHash: row.tokenProxyCodeHash };
-  const tokenImplementationHash = hashObject({ token: row.token,
-    receipt: { block: transaction, ...tokenState }, finality: { block: finality, ...tokenState } });
-  if (s.protocolHash !== protocolHash || s.tokenImplementationHash !== tokenImplementationHash ||
-    s.deliveredAtomic !== dispatched.netAtomic || s.feeAtomic !== dispatched.feeAtomic ||
+  if (s.deliveredAtomic !== dispatched.netAtomic || s.feeAtomic !== dispatched.feeAtomic ||
     s.debitAtomic !== mmActualGross(dispatched) || s.refundAtomic !== "0" || s.unusedGrossAtomic !== mmUnusedGross(intent.request, dispatched) ||
     s.designation !== "pinned" || s.permission !== "consumed" || s.receiptCounterAtomic !== "1" || s.finalityCounterAtomic !== "1") corrupt();
   return s as unknown as MetaMaskGaslessSettlement;

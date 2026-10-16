@@ -7,7 +7,7 @@ import type { SmartAccountGaslessReason } from "./reasons.js";
 export const SA_OPERATION_VERSION = "apn.smart-account-gasless-operation.v1" as const;
 export const SA_OPERATION_KIND = "smart_account_gasless_transfer" as const;
 export const SA_RECEIPT_VERSION = "apn.smart-account-gasless-receipt.v1" as const;
-export const SA_TERMINAL: readonly SmartAccountGaslessState[] = Object.freeze(["failed_before_effect", "expired_unused", "completed"]);
+export const SA_TERMINAL: readonly SmartAccountGaslessState[] = Object.freeze(["failed_before_effect", "expired_unused", "completed", "abandoned_unknown"]);
 export const SA_HISTORY_LIMIT = 256;
 export const SA_FILE_LIMIT = 256 * 1024;
 export const SA_TERMINAL_RESERVE_TRANSITIONS = 2;
@@ -52,7 +52,8 @@ export interface SmartAccountGaslessPublicOperation {
   readonly state: SmartAccountGaslessState;
   readonly terminal: boolean;
   readonly reason: SmartAccountGaslessReason | null;
-  readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_unused";
+  readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_unused" |
+    "owner_acknowledgement_only";
   readonly transfer: {
     readonly chain_id: 8453; readonly token: Address; readonly symbol: "USDC"; readonly decimals: 6;
     readonly sender: Address; readonly recipient: Address; readonly gross_atomic: string;

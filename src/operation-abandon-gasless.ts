@@ -19,7 +19,8 @@ import type { RuntimeContext } from "./runtime.js";
 
 const CHAIN_NAMES: Readonly<Record<number, string>> = { 1: "Ethereum", 10: "Optimism", 130: "Unichain", 137: "Polygon",
   143: "Monad", 1329: "Sei", 8453: "Base", 42161: "Arbitrum", 43114: "Avalanche", 59144: "Linea" };
-const UNRESOLVED: readonly string[] = ["unknown_finality", "submitted_pending"];
+// A reverted relay leaves the delegation unredeemed, so MetaMask may still relay it: the owner may release it too.
+const UNRESOLVED: readonly string[] = ["unknown_finality", "submitted_pending", "failed_effects_pending"];
 
 interface Base { readonly context: RuntimeContext; readonly operations: OperationService }
 

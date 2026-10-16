@@ -6,7 +6,6 @@ export interface ProviderX402TransactionIntent {
     readonly payer: `0x${string}`;
     readonly payee: `0x${string}`;
     readonly amountAtomic: string;
-    readonly rpcOriginHash: string;
 }
 /** Read-only exact-transaction evidence. It has no search, payment, signing or submission capability. */
 export interface ProviderX402TransactionEvidencePort {

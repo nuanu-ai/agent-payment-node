@@ -2,6 +2,7 @@ import { encodeFunctionData, parseAbi } from "viem";
 import { hashObject } from "../canonical.js";
 import { MM_ZERO_ADDRESS } from "./model.js";
 import { mmRegistry } from "./registry.js";
+import { mmRecordedDeployment } from "./recorded.js";
 import { mmFail } from "./reasons.js";
 import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmRequest, mmUint } from "./validation.js";
 const transferAbi = parseAbi(["function transfer(address,uint256) returns (bool)"]);
@@ -24,11 +25,11 @@ export function mmQuoteHash(quote) {
         ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode, sponsorshipHash: quote.sponsorshipHash } : {}) });
 }
 /** Validate each quote independently; convergence and final G=N+F are separate checks. */
-export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasless_quote_invalid") {
+export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasless_quote_invalid", row = mmRegistry(request.chainId).row) {
     const sponsored = value !== null && typeof value === "object" && "feeMode" in value;
     const q = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
         ...(sponsored ? ["feeMode", "sponsorshipHash"] : [])], reason);
-    const { row } = mmRegistry(request.chainId), economics = mmEconomics(request);
+    const economics = mmEconomics(request);
     const net = mmUint(q.netAtomic, true, reason), fee = mmUint(q.feeAtomic, false, reason);
     if ((request.fixedNet && q.netAtomic !== request.fixedNet.netAtomic) || q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic))
         mmFail(reason);
@@ -39,7 +40,7 @@ export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasl
     if (sponsored)
         mmHash(q.sponsorshipHash, reason);
     const feeRecipient = sponsored ? null : mmCanonicalAddress(q.feeRecipient, reason);
-    const excluded = [MM_ZERO_ADDRESS, binding.address, row.token, ...Object.values(row.protocol).map(p => p.address)];
+    const excluded = [MM_ZERO_ADDRESS, binding.address, row.token, ...Object.values(row.protocol).flatMap(p => p === undefined ? [] : [p.address])];
     if (excluded.includes(request.recipient) || (feeRecipient !== null && (excluded.includes(feeRecipient) || feeRecipient === request.recipient)))
         mmFail(reason);
     if (!Array.isArray(q.executions) || q.executions.length !== (sponsored ? 1 : 2))
@@ -69,28 +70,28 @@ export function mmAssertStableQuote(request, quote, reason = "mm_gasless_quote_i
  * The owner approves a maximum, not one exact price. A quote taken after that approval is admissible when its fee
  * stays inside the effective cap, the recipient still clears the floor and the gross still splits exactly.
  */
-export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless_quote_invalid") {
+export function mmRepriceWithinCap(value, request, binding, reason = "mm_gasless_quote_invalid", row = mmRegistry(request.chainId).row) {
     const candidate = mmExact(value, ["netAtomic", "feeAtomic", "feeRecipient", "executions", "hash",
         ...(value !== null && typeof value === "object" && "feeMode" in value ? ["feeMode", "sponsorshipHash"] : [])], reason);
     const netAtomic = typeof candidate.netAtomic === "string" ? candidate.netAtomic : mmFail(reason);
-    const quote = mmQuote(candidate, request, binding, netAtomic, reason);
+    const quote = mmQuote(candidate, request, binding, netAtomic, reason, row);
     mmAssertStableQuote(request, quote, reason);
     return quote;
 }
-export function mmPolicyHash(profileHash, binding, request) {
+export function mmPolicyHash(profileHash, binding, request, token = mmRegistry(request.chainId).row.token) {
     return hashObject({ purpose: "apn.metamask-gasless.policy.v1", profileHash, binding,
-        chainId: request.chainId, token: mmRegistry(request.chainId).row.token, recipient: request.recipient,
+        chainId: request.chainId, token, recipient: request.recipient,
         grossAtomic: request.grossAtomic, maxFeeAtomic: request.maxFeeAtomic, minReceivedAtomic: request.minReceivedAtomic,
         ...(request.fixedNet ? { fixedNet: request.fixedNet } : {}) });
 }
+/** A saved intent is checked against the deployment it froze, never against today's registry. */
 export function mmAssertIntentEconomics(intent, profileHash) {
     const r = mmRequest(intent.request, "mm_gasless_state_corrupt");
-    const deployment = mmRegistry(r.chainId);
-    if (intent.token !== deployment.row.token || intent.decimals !== 6 ||
-        intent.deploymentEvidenceHash !== deployment.deploymentEvidenceHash ||
-        intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r))
+    const deployment = mmRecordedDeployment(intent);
+    if (intent.decimals !== 6 || intent.policyHash !== mmPolicyHash(profileHash, intent.binding, r, deployment.token)) {
         mmFail("mm_gasless_state_corrupt");
-    mmQuote(intent.quote, r, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt");
+    }
+    mmQuote(intent.quote, r, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt", deployment);
     mmAssertStableQuote(r, intent.quote, "mm_gasless_state_corrupt");
 }
 //# sourceMappingURL=economics.js.map

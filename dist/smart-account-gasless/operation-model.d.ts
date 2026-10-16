@@ -46,7 +46,7 @@ export interface SmartAccountGaslessPublicOperation {
     readonly state: SmartAccountGaslessState;
     readonly terminal: boolean;
     readonly reason: SmartAccountGaslessReason | null;
-    readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_unused";
+    readonly proof_class: "durable_pre_effect" | "effect_observation_pending" | "rpc_safe_correlated" | "rpc_finalized_unused" | "owner_acknowledgement_only";
     readonly transfer: {
         readonly chain_id: 8453;
         readonly token: Address;

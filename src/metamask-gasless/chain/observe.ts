@@ -12,8 +12,8 @@ import { parseReceiptLogs, quantity, receiptHash, recheckBlock, rpcAddress, rpcB
   sameBlock, type MmRpcCall } from "./abi.js";
 import { verifyRedemption } from "./delegation.js";
 import { verifyMetaMaskReceiptAccounting } from "./receipt.js";
-import { MM_SCAN_STOP_REASONS, scanMetaMaskRedemption } from "./scan.js";
-import { readMetaMaskChainState } from "./snapshot.js";
+import { MM_SCAN_STOP_REASONS, mmRedemptionCount, scanMetaMaskRedemption } from "./scan.js";
+import { mmProtocolPins } from "../single-protocol.js";
 import { verifyMetaMaskOuterTransaction } from "./transaction.js";
 
 export interface MetaMaskObservationContext {
@@ -35,11 +35,13 @@ export async function observeMetaMaskGasless(context: MetaMaskObservationContext
   cursorInput: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation> {
   const cursor = validateCursor(intent, cursorInput);
   const providerHash = provider?.txHash ?? null;
+  // One pass inspects a transaction hash once, whether the provider hinted it or the scan found it.
+  const inspected = new Map<Hex, Inspection>();
   let providerResult: Inspection | null = null;
-  if (providerHash !== null) providerResult = await inspectSafely(context, intent, providerHash);
+  if (providerHash !== null) providerResult = await inspectSafely(context, intent, providerHash, inspected);
   if (providerResult?.kind === "success") return result(cursor, providerHash, providerResult, context.clock);
 
-  const scan = await scanSafely(context, intent, cursor);
+  const scan = await scanSafely(context, intent, cursor, inspected);
   if (scan.inspection?.kind === "success") return result(scan.cursor, scan.candidate, scan.inspection, context.clock);
   if (scan.inspection?.kind === "reverted") {
     return result(scan.cursor, scan.candidate, scan.inspection, context.clock);
@@ -58,9 +60,14 @@ export async function observeMetaMaskGasless(context: MetaMaskObservationContext
 }
 
 async function inspectSafely(context: MetaMaskObservationContext, intent: MetaMaskGaslessIntent,
-  transactionHash: Hex): Promise<Inspection> {
-  try { return await inspectCandidate(context, intent, transactionHash); }
-  catch (error) { return classified(error); }
+  transactionHash: Hex, inspected: Map<Hex, Inspection>): Promise<Inspection> {
+  const known = inspected.get(transactionHash);
+  if (known !== undefined) return known;
+  let result: Inspection;
+  try { result = await inspectCandidate(context, intent, transactionHash); }
+  catch (error) { result = classified(error); }
+  inspected.set(transactionHash, result);
+  return result;
 }
 
 async function inspectCandidate(context: MetaMaskObservationContext, intent: MetaMaskGaslessIntent,
@@ -93,44 +100,45 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
   const logs = parseReceiptLogs(receipt.logs, transactionHash, included, transactionIndex);
   const status = rpcQuantity(receipt.status);
   if (status !== 0n && status !== 1n) mmFail("mm_gasless_evidence_invalid");
+  // The receipt's own IncreasedCount(limit 1, count 1) for this delegation proves the redemption at inclusion, so no
+  // state is read at the inclusion block: that would be an archive read once the operation is older than the
+  // RPC's state window, and the operation would stay unknown for ever.
   const accounting = status === 1n ? verifyMetaMaskReceiptAccounting(intent, outer.from, logs) : null;
-  const receiptState = await readMetaMaskChainState(context.call, context.deployment.row,
-    intent.binding.address, included, intent.delegationHash, intent.quote.feeMode);
-  if (!("counterAtomic" in receiptState) || receiptState.designation !== "pinned") {
-    mmFail("mm_gasless_evidence_invalid");
-  }
   const finality = (await rpcBlock(context.call, context.deployment.row.finalityTag)).block;
   if (BigInt(finality.numberAtomic) < blockNumber) {
     await recheckBlock(context.call, included); await recheckBlock(context.call, finality);
     return { kind: "pending", evidenceHash: hashObject({ transactionHash, included, finality }),
-      usableCandidate: accounting !== null && receiptState.counterAtomic === "1" };
+      usableCandidate: accounting !== null };
   }
-  const finalityState = await readMetaMaskChainState(context.call, context.deployment.row,
-    intent.binding.address, finality, intent.delegationHash, intent.quote.feeMode);
-  if (!("counterAtomic" in finalityState) || finalityState.designation !== "pinned") mmFail("mm_gasless_evidence_invalid");
+  // At the canonical finality block, pinned by hash: the redemption count and the owner's pinned 7702 designation.
+  const counter = await mmRedemptionCount({ row: context.deployment.row, call: context.call }, intent.delegationHash, finality);
+  const ownerCode = rpcHex(await context.call("eth_getCode", [intent.binding.address,
+    { blockHash: finality.hash, requireCanonical: true }]), 32 * 1024);
+  if (ownerCode !== `0xef0100${context.deployment.row.protocol.delegate.address.slice(2)}`) mmFail("mm_gasless_evidence_invalid");
   await recheckBlock(context.call, included); await recheckBlock(context.call, finality);
   const baseProof = { chainId: intent.request.chainId, transactionHash, transactionBlock: included,
     finalityBlock: finality, transactionIndexAtomic: transactionIndex.toString(), outer };
   if (status === 0n) {
-    if (receiptState.counterAtomic !== "0" || finalityState.counterAtomic !== "0") {
+    // The count never decreases: 0 at the canonical finality block means the delegation was never redeemed.
+    if (counter !== 0n) {
       return { kind: "pending", evidenceHash: hashObject({ ...baseProof, counterAdvancedAfterRevert: true }),
         usableCandidate: false };
     }
     return { kind: "reverted", transactionBlock: included, finalityBlock: finality,
       evidenceHash: hashObject({ ...baseProof, status: "reverted" }) };
   }
-  if (receiptState.counterAtomic !== "1" || finalityState.counterAtomic !== "1") mmFail("mm_gasless_evidence_invalid");
+  if (counter !== 1n) mmFail("mm_gasless_evidence_invalid");
   if (accounting === null) mmFail("mm_gasless_internal");
   const observedAt = context.clock.now().toISOString();
   const transactionProofHash = hashObject(baseProof);
+  // Provenance of the deployment the evidence was checked against, computed from its pins.
+  const row = context.deployment.row;
+  const code = Object.fromEntries(Object.entries(mmProtocolPins(row, intent.quote.feeMode)).map(([name, pin]) => [name, pin.codeHash]));
   const protocolHash = hashObject({ deploymentEvidenceHash: context.deployment.deploymentEvidenceHash,
-    receipt: { block: included, code: receiptState.protocolCodeHashes },
-    finality: { block: finality, code: finalityState.protocolCodeHashes } });
-  const tokenImplementationHash = hashObject({ token: context.deployment.row.token,
-    receipt: { block: included, address: receiptState.tokenImplementationAddress,
-      codeHash: receiptState.tokenImplementationCodeHash, proxyCodeHash: receiptState.tokenProxyCodeHash },
-    finality: { block: finality, address: finalityState.tokenImplementationAddress,
-      codeHash: finalityState.tokenImplementationCodeHash, proxyCodeHash: finalityState.tokenProxyCodeHash } });
+    receipt: { block: included, code }, finality: { block: finality, code } });
+  const tokenState = { address: row.tokenImplementationAddress, codeHash: row.tokenImplementationCodeHash, proxyCodeHash: row.tokenProxyCodeHash };
+  const tokenImplementationHash = hashObject({ token: row.token,
+    receipt: { block: included, ...tokenState }, finality: { block: finality, ...tokenState } });
   const settlement: MetaMaskGaslessSettlement = {
     observedAt, txHash: transactionHash, transactionBlock: included, finalityBlock: finality,
     outerSender: outer.from, transactionProofHash,
@@ -144,7 +152,7 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
 }
 
 async function scanSafely(context: MetaMaskObservationContext, intent: MetaMaskGaslessIntent,
-  cursor: MetaMaskGaslessCursor): Promise<{ readonly cursor: MetaMaskGaslessCursor; readonly candidate: Hex | null;
+  cursor: MetaMaskGaslessCursor, memo: Map<Hex, Inspection>): Promise<{ readonly cursor: MetaMaskGaslessCursor; readonly candidate: Hex | null;
     readonly inspection: Inspection | null; readonly evidenceHash: string | null }> {
   try {
     const scanned = await scanMetaMaskRedemption({ row: context.deployment.row, call: context.call }, intent, cursor);
@@ -152,7 +160,7 @@ async function scanSafely(context: MetaMaskObservationContext, intent: MetaMaskG
     if (scanned.kind === "stopped") return { cursor: scanned.cursor, candidate: null,
       inspection: { kind: "unavailable", evidenceHash: null, reason: scanned.reason }, evidenceHash: null };
     const inspections: Array<{ readonly hash: Hex; readonly result: Inspection }> = [];
-    for (const hash of scanned.candidates) inspections.push({ hash, result: await inspectSafely(context, intent, hash) });
+    for (const hash of scanned.candidates) inspections.push({ hash, result: await inspectSafely(context, intent, hash, memo) });
     for (const block of scanned.recheck) await recheckBlock(context.call, block);
     if (inspections.length !== 1) mmFail("mm_gasless_evidence_invalid");
     const inspected = inspections[0]!;

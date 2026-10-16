@@ -16,9 +16,8 @@ export class X402Erc7710RpcReconciler {
             operation.settlementEvidence !== undefined || operation.unusedExpiryEvidence !== undefined ||
             operation.delegatedMaterial === undefined)
             return operation;
+        // Any Base endpoint may reconcile; one pass must come from one endpoint, recorded in the evidence as provenance.
         const chain = await this.rpc.assertBaseChain();
-        if (sha256(chain.rpcOrigin) !== operation.delegatedMaterial.rpcOriginHash)
-            return operation;
         if (this.canProveExpiredUnused(operation)) {
             return await this.reconcileExpiredUnused(operation, chain.rpcOrigin);
         }

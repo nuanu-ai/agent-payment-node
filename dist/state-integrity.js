@@ -221,16 +221,16 @@ function validateProviderDirect(operation, binding) {
     if (operation.state === "awaiting_approval" && operation.providerEffect !== undefined) {
         stateCorrupt("Provider request exists before foreground approval.");
     }
-    if (operation.state === "abandoned_unknown" && (binding.executionMode !== "provider_atomic_send" || operation.transactionHash !== undefined ||
-        operation.providerEffect !== undefined || operation.reason !== "owner_acknowledged_unresolved_effect" ||
+    // Owner abandonment keeps any last known transaction hash or provider request reference (R4 exit).
+    if (operation.state === "abandoned_unknown" && (operation.reason !== "owner_acknowledged_unresolved_effect" ||
         operation.proofClass !== "owner_acknowledgement_only"))
         stateCorrupt("Provider direct owner abandonment classification is invalid.");
     const allowed = {
         awaiting_approval: ["started", "failed_before_effect"],
         started: ["provider_pending", "provider_acknowledged", "ambiguous_effect", "failed_before_effect", "failed_provider_rejected"],
-        provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected"],
-        provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect"],
-        evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect"],
+        provider_pending: ["provider_acknowledged", "ambiguous_effect", "failed_provider_rejected", "abandoned_unknown"],
+        provider_acknowledged: ["evidence_pending", "completed", "failed_confirmed_revert", "ambiguous_effect", "abandoned_unknown"],
+        evidence_pending: ["completed", "failed_confirmed_revert", "ambiguous_effect", "abandoned_unknown"],
         ambiguous_effect: ["provider_pending", "provider_acknowledged", "completed", "failed_provider_rejected", "failed_confirmed_revert", "abandoned_unknown",
             ...(binding.coinbaseGasless === undefined ? [] : ["ambiguous_effect"])],
         abandoned_unknown: [],
@@ -279,8 +279,7 @@ function validateCoinbaseGasless(operation, value) {
     if (minimum > gross)
         stateCorrupt("Coinbase gasless amount bounds are invalid.");
     validateCoinbaseBlock(value.safeBlock);
-    if (operation.providerEffect !== undefined || operation.state === "abandoned_unknown" ||
-        operation.transitions.some(row => row.state === "abandoned_unknown") || operation.coinbaseGaslessCursor === undefined) {
+    if (operation.providerEffect !== undefined || operation.coinbaseGaslessCursor === undefined) {
         stateCorrupt("Coinbase gasless journal posture is invalid.");
     }
     const cursor = operation.coinbaseGaslessCursor;
