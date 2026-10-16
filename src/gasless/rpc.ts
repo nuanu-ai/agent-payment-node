@@ -35,6 +35,7 @@ export class GaslessRpcRequestSession {
   private terminalStatus: number | null = null;
   private readonly verifiedChains = new Set<GaslessRpc>();
   private readonly protocolAnchors = new Map<GaslessRpc, { hash: Hex; proof: Promise<void> }>();
+  private readonly provenCode = new Set<object>();
   readonly maxBatchItems: number;
   /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
   readonly maxPosts: number;
@@ -60,11 +61,16 @@ export class GaslessRpcRequestSession {
   }
   hasVerifiedChain(rpc: GaslessRpc): boolean { return this.verifiedChains.has(rpc); }
   verifyChain(rpc: GaslessRpc): void { this.verifiedChains.add(rpc); }
-  protocolAt(rpc: GaslessRpc, hash: Hex, verify: () => Promise<void>): Promise<void> {
+  /** True once this invocation verified the pinned code hashes through `source`; code at those addresses is immutable. */
+  codeProven(source: object): boolean { return this.provenCode.has(source); }
+  proveCode(source: object): void { this.provenCode.add(source); }
+  protocolAt(rpc: GaslessRpc, hash: Hex, verify: (withCode: boolean) => Promise<void>): Promise<void> {
     const cached = this.protocolAnchors.get(rpc);
     if (cached?.hash === hash) return cached.proof;
-    // A changed latest anchor requires fresh code and proxy reads before the next effect gate.
-    const proof = verify();
+    // A changed latest anchor requires fresh proxy and identity reads before the next effect gate; the immutable code
+    // bytes are downloaded and hashed only by this invocation's first protocol proof.
+    const withCode = !this.codeProven(rpc);
+    const proof = verify(withCode).then(() => { if (withCode) this.proveCode(rpc); });
     this.protocolAnchors.set(rpc, { hash, proof });
     void proof.catch(() => { if (this.protocolAnchors.get(rpc)?.proof === proof) this.protocolAnchors.delete(rpc); });
     return proof;
@@ -171,7 +177,8 @@ export class GaslessRpc implements GaslessRpcPort {
       readAccountAt(this.rpcCall, this.deployment, owner, at.block, true),
       readFeeConfigurationAt(this.rpcCall, this.deployment, owner, at.block),
       this.rpcCall("eth_maxPriorityFeePerGas", []),
-      session.protocolAt(this, at.block.hash, async () => await verifyProtocolAt(this.rpcCall, this.deployment, at.block)),
+      session.protocolAt(this, at.block.hash, async (withCode) =>
+        await verifyProtocolAt(this.rpcCall, this.deployment, at.block, withCode)),
     ]).then(([accountState, configuration, priorityFee]) => [accountState, configuration, priorityFee] as const);
     if (account.pendingEoaNonceAtomic !== account.eoaNonceAtomic) {
       gaslessFailure("APN_OPERATION_BLOCKED", "gasless_nonce_drift");
@@ -286,8 +293,9 @@ export class GaslessRpc implements GaslessRpcPort {
     this.assertIntent(intent);
     const rpcChain = await this.rpcCall("eth_chainId", []);
     if (rpcQuantity(rpcChain) !== BigInt(this.chainId)) gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
+    const session = invocation.getStore() ?? this.fallbackSession;
     return await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, deployment: this.deployment,
-      rpc: this.rpcCall, bundler: this.bundlerCall }, intent, identity, cursor);
+      rpc: this.rpcCall, bundler: this.bundlerCall, codeProven: session.codeProven(this) }, intent, identity, cursor);
   }
 
   private async assertChainUnlessVerified(): Promise<void> {

@@ -19,9 +19,10 @@ export async function observeGaslessBootstrap(context, intent, identity, cursor)
             (final && BigInt(cursor.nextBlockAtomic) !== BigInt(safeBlock.numberAtomic) + 1n))
             throw new Error("scan");
         const headBlock = (await rpcBlock(context.rpc, "latest")).block;
-        await verifyProtocolAt(context.rpc, context.deployment, safeBlock);
+        await verifyProtocolAt(context.rpc, context.deployment, safeBlock, context.codeProven !== true);
         const safeAccount = await readAccountAt(context.rpc, context.deployment, intent.owner.address, safeBlock, false);
-        await verifyProtocolAt(context.rpc, context.deployment, headBlock);
+        // The safe-block proof above already verified the immutable code at these addresses.
+        await verifyProtocolAt(context.rpc, context.deployment, headBlock, false);
         const headAccount = await readAccountAt(context.rpc, context.deployment, intent.owner.address, headBlock, true);
         await recheckBlock(context.rpc, intent.initialSnapshot.block);
         await recheckBlock(context.rpc, safeBlock);

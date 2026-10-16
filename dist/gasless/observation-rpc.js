@@ -78,9 +78,9 @@ export class GaslessObservationRpc {
         }
         // Validate the original anchor before accepting even partial scan progress from another provider.
         await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
-        await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block);
+        await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block, true);
         const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin,
-            deployment: this.deployment, rpc: this.rpcCall }, intent, identity, cursor);
+            deployment: this.deployment, rpc: this.rpcCall, codeProven: true }, intent, identity, cursor);
         if (this.unavailable)
             throw observationUnavailable();
         await recheckBlock(this.rpcCall, intent.initialSnapshot.block);

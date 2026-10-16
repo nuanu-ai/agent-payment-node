@@ -8,10 +8,15 @@ const callData = (signature: string, words: readonly Hex[] = []): Hex =>
   `${toFunctionSelector(signature)}${words.map((word) => word.slice(2)).join("")}` as Hex;
 const ZERO_WORD = `0x${"0".repeat(64)}` as Hex;
 
+/**
+ * Proxy implementation slots and one-word identity calls are read at `block` every time. Code at a pinned address
+ * cannot change after deployment (EIP-6780; upgrades move only the implementation slots read here), so a caller that
+ * already verified the code hashes in this invocation passes `withCode: false` and skips the bytecode downloads.
+ */
 export async function verifyProtocolAt(call: GaslessRpcCall, deployment: GaslessDeployment,
-  block: GaslessBlock): Promise<void> {
+  block: GaslessBlock, withCode: boolean): Promise<void> {
   const pinned = { blockHash: block.hash, requireCanonical: true };
-  const codes = deployment.code.map(async (row) => {
+  const codes = (withCode ? deployment.code : []).map(async (row) => {
     const code = rpcHex(await call("eth_getCode", [row.address, pinned]), 256 * 1024);
     if (code === "0x" || keccak256(code) !== row.codeHash) {
       gaslessFailure("APN_RPC_PROTOCOL", "gasless_protocol_identity");
