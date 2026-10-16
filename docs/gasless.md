@@ -108,8 +108,17 @@ both fee fields at preparation from the fast tier. Before each effect, those
 frozen fields must still cover a fresh slow tier. A higher current fee stops the
 action without changing its approved budget. v4 operations take fresh prices at
 each step until signing, as described below.
-Configured bundlers must support this batch and gas-price API. Batch members and
-HTTP requests are separate counts; a batch does not guarantee provider admission.
+A configured `APN_<NETWORK>_BUNDLER_RPC_URL` must be Pimlico-compatible: every
+snapshot calls `pimlico_getUserOperationGasPrice` in this batch, so a bundler
+without that method fails each snapshot. Batch members and HTTP requests are
+separate counts; a batch does not guarantee provider admission.
+
+APN sends independent RPC reads as JSON-RPC batches. For an endpoint that limits
+batch size, set `APN_<NETWORK>_RPC_MAX_BATCH_ITEMS` (2 to 30, for example
+`APN_BASE_RPC_MAX_BATCH_ITEMS=3`). Every gasless command on that chain then
+splits its batches to that size and derives its request budget at that size.
+An explicit observation endpoint `APN_X_RPC_URL` takes `APN_X_RPC_MAX_BATCH_ITEMS`
+the same way.
 
 ### Offers, fee headroom and the pre-signing check
 
@@ -147,13 +156,15 @@ two, so the bootstrap disclosure uses the bootstrap guard's prices and the send
 is preceded by one bundler batch that proves the bundler chain, EntryPoint
 support and that the signed prices still cover its slow tier. A seal from an
 earlier invocation is always guarded by a full snapshot before its disclosure
-or send. The whole approval takes 17 HTTP requests; its request budget is
-derived from these steps plus one more guard's worth of requests for retries.
+or send. Each guard snapshot is three HTTP requests (the anchor header is
+re-read inside the pinned state batch, not by a separate request), so the whole
+approval takes 14; its request budget is derived from these steps plus one more
+guard's worth of requests for retries.
 
 Every check retries a transient failure inside the approval window while that
 retry allowance still pays for the step: a quote above your maximum fee,
 bundler price drift, a provider error, an RPC transport failure, or a mirror
-estimate the bundler could not run. One guard retry, two mirror retries or four
+estimate the bundler could not run. One guard retry, one mirror retry or three
 pre-send price checks fit. A retry waits 5 seconds and stops while the window
 still leaves room for the remaining steps. Interrupting the command stops the
 wait at once. A retry never re-signs, never re-discloses and never re-sends.
@@ -286,14 +297,18 @@ APN writes `started` before exactly one `awal@2.12.1 send ... --chain base
 in error text is only a locator. A missing hash is allowed. After `started`,
 approval replay and resume never invoke AWAL again.
 
-Recovery scans at most 256 safe Base blocks per resume, in log requests of at
-most ten blocks. Finite absence advances the durable cursor but never proves
-failure or permits redispatch. Completion requires one independently verified
-EntryPoint v0.6 UserOperation for the frozen account call, exact canonical-USDC
-sender debit and recipient credit, a unique native-fee sponsorship event,
-unchanged account deployment, transaction/block membership and safe inclusion.
-Multiple candidates, deployment drift, reorgs, nonzero token fees, extra account
-calls or unavailable evidence retain the guard. Keep the bound Coinbase account
+Recovery scans from the durable cursor to the current safe Base head in one
+resume, with `eth_getLogs` windows of up to 2,000 blocks that halve when the RPC
+refuses the range (24 log queries per resume). A rate limit stops the pass and
+keeps the windows already read. Finite absence advances the durable cursor but
+never proves failure or permits redispatch. Completion requires one
+independently verified EntryPoint v0.6 UserOperation for the frozen account
+call, exact canonical-USDC sender debit and recipient credit, a unique
+native-fee sponsorship event, transaction/block membership and safe inclusion,
+all from the receipt; no historical state is read, so a keyless non-archive RPC
+can close the operation. The Coinbase deployment pins gate prepare and approval
+only. Multiple candidates, reorgs, nonzero token fees, extra account calls or
+unavailable evidence retain the guard. Keep the bound Coinbase account
 exclusive to this operation until its positive settlement is terminal.
 
 ## Local wallet permissions and failures
@@ -307,9 +322,13 @@ limits new APN actions, not the lifetime of already signed material.
 
 The account batch sends exactly `N` USDC and clears the paymaster allowance.
 A failed transfer can still pay a USDC fee. The receipt reports the observed
-prefund, refund, actual charge and residual allowance separately. A failed
-operation with residual permission remains `failed_effects_pending`; APN
-keeps the profile guard until safe evidence proves the permission cleared.
+prefund, refund, actual charge and residual allowance separately. The residual
+allowance is informational: it is read at the latest head
+(`residual_allowance_read_at`) and never holds a close, so a safe receipt ends
+the operation as `completed` or `failed_confirmed_revert` whatever it reads. A
+later gasless prepare still refuses a non-zero paymaster allowance
+(`gasless_allowance_drift`) until the owner clears it. Records written before
+0.5.43 may remain `failed_effects_pending`; the next observation closes them.
 There is no automatic revocation, extra cleanup transaction or new payment.
 
 ## Local wallet recovery and proof
@@ -364,10 +383,26 @@ preserving the original submission-attempt marker and unknown past financial
 results. It never reports an unacknowledged attempt as a confirmed submission,
 successful payment or zero-cost failure. External recovery fees remain separate.
 
-Canonical recovery scans at most 256 safe blocks per resume, using log requests
-of at most ten blocks each. Failed requests and invalid logs never advance the
-cursor; a reorganization can rewind it. The next observation cannot skip an
-unread range.
+Canonical recovery scans up to four windows of 256 safe blocks per resume
+(1,024 blocks), each window one request of log ranges of at most ten blocks.
+Failed requests and invalid logs never advance the cursor; a reorganization can
+rewind it. The next observation cannot skip an unread range. The permission
+invalidation probe runs only once the scan has reached the current safe head.
+
+Observation reads no historical state, so a keyless public RPC that keeps only
+recent state can close an operation at any later time. Success, revert and fee
+accounting come from the receipt logs; inclusion is proven by header membership;
+the verdict waits until the receipt's block is at or below the safe head
+(Polygon: finalized) and that block's hash still matches a header read at its
+height; a receipt above safe is "not yet" and a hash mismatch is a reorg, never
+a terminal. The residual allowance, nonces and delegation are then read at the
+latest head, which every keyless node serves even where the safe head trails by
+more than its state window (Arbitrum, Unichain); nonces only grow, so they show
+the consumed permission. An invalidated-permission proof, which has no receipt
+to anchor it, still reads the account at the safe head and at the latest head;
+on a node that refuses safe-head state it stays unresolved until it can.
+An already-sent operation is observed through the contracts and protocol hash
+saved in its own intent, so a later registry pin update cannot strand it.
 
 `operation status` and `receipt get` use saved evidence without network access;
 they may repair local operation or receipt records after an interrupted write. Receipts
@@ -377,15 +412,15 @@ UserOperations, encrypted keys or provider response text.
 ### Explicit observation RPC recovery
 
 APN 0.5.12 includes an explicit recovery option for a saved Local gasless
-operation whose original RPC cannot serve historical reads. APN 0.5.16 extends
+operation whose original RPC is unavailable. APN 0.5.16 extends
 it to saved MetaMask Agent and Smart Account gasless operations. The published
 0.5.11 binary does not include this option; use a verified 0.5.12 or later
 compatible artifact.
 
 ```sh
-export APN_ETHEREUM_ARCHIVE_RPC_URL='<verified-public-https-rpc-url>'
+export APN_ETHEREUM_RECOVERY_RPC_URL='<verified-public-https-rpc-url>'
 apn operation resume --operation <operation-id> \
-  --observation-rpc-env APN_ETHEREUM_ARCHIVE_RPC_URL
+  --observation-rpc-env APN_ETHEREUM_RECOVERY_RPC_URL
 ```
 
 The option names a local environment variable; it does not take a URL. Names
@@ -396,9 +431,9 @@ operations accept it; other operation kinds reject it.
 
 This mode only observes. It cannot access signing material, estimate fees,
 disclose permissions or send a transaction, even if an approved phase could
-otherwise continue. APN verifies the selected chain, registered contracts and
-token domain, and the original preparation block before accepting evidence.
-It uses the canonical EntryPoint scan without a bundler locator and keeps the
+otherwise continue. For Local operations APN verifies the selected chain and the
+saved intent against its own hashes before accepting evidence; it needs no
+archive state. It uses the canonical EntryPoint scan without a bundler locator and keeps the
 same bounded scan, reorg, receipt, nonce and allowance rules described above.
 Unavailable or conflicting evidence retains the guard.
 
@@ -551,6 +586,30 @@ public HTTPS RPC must provide canonical block-hash state reads, the listed
 finality tag, complete transaction/receipt membership and bounded log queries.
 APN checks protocol and USDC implementation code at preparation and settlement.
 Unichain and Avalanche belong to the local-wallet path above.
+
+### Tested keyless RPC endpoints
+
+APN has no per-chain default RPC (owner rule: no silent defaults); set the
+variable above explicitly. These keyless endpoints passed a read-only check on
+2026-10-17: JSON-RPC batches, the `safe` (Polygon: `finalized`) tag, state at
+that block pinned by hash, and a 2,000-block `eth_getLogs`. Public endpoints
+change without notice; a refusal is reported, never retried with another
+provider.
+
+| Chain | Endpoint | Notes |
+| --- | --- | --- |
+| Ethereum (1) | `https://ethereum-rpc.publicnode.com` | refuses 2,000-block logs; scans halve the window |
+| Optimism (10) | `https://mainnet.optimism.io`, `https://optimism-rpc.publicnode.com` | |
+| Polygon PoS (137) | `https://polygon-bor-rpc.publicnode.com` | no `safe` tag; Polygon uses `finalized` |
+| Monad (143) | `https://rpc.monad.xyz` | logs limited to 100 blocks; scans halve the window |
+| Sei (1329) | `https://evm-rpc.sei-apis.com` | |
+| Base (8453) | `https://base-rpc.publicnode.com` | `https://mainnet.base.org` answered "request limit reached" to 2,000-block logs |
+| Arbitrum One (42161) | `https://arb1.arbitrum.io/rpc` | publicnode refuses state at the safe head (about 3,000 blocks behind latest) |
+| Linea (59144) | `https://rpc.linea.build` | publicnode refuses 2,000-block logs |
+| Unichain (130, local wallet) | `https://mainnet.unichain.org`, `https://unichain-rpc.publicnode.com` | |
+
+`*.drpc.org` endpoints refuse JSON-RPC batches of more than three requests and
+do not fit these lanes.
 
 After dispatch, each resume first reads the delegation's one-use counter
 (`LimitedCallsEnforcer.callCounts` for the pinned DelegationManager) and the
@@ -726,7 +785,7 @@ option appeared in next actions remain valid.
 
 Use an existing `metamask-smart-account` profile with its original Base owner,
 session key and active periodic USDC permission. Set `APN_BASE_RPC_URL` to an
-explicit public HTTPS Base RPC. The RPC must support numeric block reads,
+explicit public HTTPS Base RPC (see Tested keyless RPC endpoints above). The RPC must support numeric block reads,
 `safe` and `finalized` blocks, complete transaction receipts and bounded logs.
 APN checks the current permission nonce, available allowance, owner USDC balance,
 session state and pinned contract deployments before signing and disclosure.

@@ -35,6 +35,7 @@ export declare class SmartAccountGaslessRpc implements SmartAccountGaslessRpcPor
     private sequence;
     private queue;
     private lastRequestStartedAt;
+    private provenPins;
     constructor(options: SmartAccountGaslessRpcOptions);
     snapshot(binding: SmartAccountGaslessBinding, expectedPreparationBlock?: SmartAccountGaslessBlock): Promise<SmartAccountGaslessSnapshot>;
     assertUnspent(input: {

@@ -38,7 +38,7 @@ test("ordinary public hostname retains DNS validation and original finite batch 
   t.mock.method(dns, "lookup", async () => { lookups++; return [{ address: "8.8.8.8", family: 4 }]; });
   syncBuiltinESMExports();
   const result = await observePermit2Production({ ...f.input, rpcUrl: "https://rpc.example/private" });
-  assert.equal(result.projection.outcome, "settled"); assert.equal(lookups, 1); assert.equal(f.batches.length, 4);
+  assert.equal(result.projection.outcome, "settled"); assert.equal(lookups, 1); assert.equal(f.batches.length, 3);
 });
 
 test("hostname with nonpublic DNS result holds before HTTPS construction", async t => {

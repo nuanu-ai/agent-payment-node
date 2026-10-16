@@ -63,7 +63,8 @@ for (const settlement of [false, true]) test(`actual runCli unpaid GET through e
   });
   const result = await runCli(argv(f), {}, options(f)); assert.equal(result.ok, true); safe(result);
   assert.equal(ui, 1); assert.equal(f.signatures(), 2); assert.ok(f.keys() > 0); assert.equal(wire.paid.length, 1);
-  assert.equal(wire.calls.filter(c => c === "unsigned_GET").length, 1); assert.equal(wire.calls.filter(c => c === "supported_GET").length, 1);
+  assert.equal(wire.calls.filter(c => c === "unsigned_GET").length, 1); assert.equal(wire.calls.filter(c => c === "supported_GET").length, 0, "no PayAI gate");
+  assert.equal(wire.calls.filter(c => c === "eth_getProof").length, 0);
   const saved = (await f.records.findOperation(f.id))!;
   assert.equal(saved.exposureJournal!.request!.attempt, 1); assert.equal(saved.material.checked.request.method, "GET"); assert.deepEqual(saved.material.checked.request.headers, {}); assert.equal(saved.material.checked.request.bodyBase64, null);
   assert.equal(saved.state, settlement ? "settled" : "request_pending");

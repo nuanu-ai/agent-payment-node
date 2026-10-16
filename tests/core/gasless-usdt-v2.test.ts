@@ -204,7 +204,7 @@ test("long secret retrieval with still-valid sponsorship expires authentication 
   assert.equal(sends, 0); assert.equal(f.wrapping.loads, 1); assert.equal((await execute.status(f.bound.profileHash, f.bound.operationId)).execution?.state, "failed_before_effect");
 });
 
-test("v2 owner signing and send happen once after3fresh snapshot guards and1auth batch, with shared crossrail cap refusal", async t => {
+test("v2 owner signing and send happen once after two fresh snapshot guards and one auth batch, with shared crossrail cap refusal", async t => {
   for (const blocked of [false, true]) {
     const f = await setup("expected", "03"); t.after(f.temporary.cleanup); let sends = 0;
     if (blocked) for (const idempotencyKey of ["direct-hold-001", "direct-hold-002"]) await new AssetUsageLedger(f.state.root).reserve({ account: V2_OWNER,
@@ -216,14 +216,14 @@ test("v2 owner signing and send happen once after3fresh snapshot guards and1auth
     else {
       const result = await execute.execute(f.bound.profileHash, f.bound.operationId);
       assert.equal(result.state, "submitted_pending"); assert.equal(sends, 1); assert.equal(f.wrapping.loads, 1);
-      assert.equal(f.f.state.snapshots, 4); // initial prepare + two reserve guards + submitting guard
+      assert.equal(f.f.state.snapshots, 3); // initial prepare + the reservation guard + the submitting guard (GASL-09)
       assert.equal(f.f.state.reads.length, 2); // prepare auth + exposure auth; each exactly one2call batch
       await assert.rejects(execute.execute(f.bound.profileHash, f.bound.operationId)); assert.equal(sends, 1);
     }
   }
 });
 
-test("one shared execution budget observes exactly7fake physical posts for3two-batch snapshots plus1auth, send separate", async t => {
+test("one shared execution budget observes exactly five physical posts for two two-batch snapshots plus one auth, send separate", async t => {
   const f = await setup("expected"); t.after(f.temporary.cleanup);
   const { mintUsdtSponsorPermit } = await import("../../src/gasless-usdt/sponsor-permit.js");
   let physicalFakePosts = 0, logicalCalls = 0, sends = 0;
@@ -246,8 +246,9 @@ test("one shared execution budget observes exactly7fake physical posts for3two-b
   const execute = new GaslessUsdtCommandExecute(f.state, { now: f.f.now }, f.wrapping,
     { preparePort: f.f.prepare, signer: f.signer, approval: { approve: async () => {} }, sendTransport: { send: async op => { sends++; return usdtUserOperationHash(op); } } });
   const result = await execute.execute(f.bound.profileHash, f.bound.operationId);
-  assert.equal(result.state, "submitted_pending"); assert.equal(budget.count(), 7); assert.equal(physicalFakePosts, 7);
-  assert.equal(logicalCalls, 44); assert.equal(sends, 1); assert.equal(f.wrapping.loads, 1);
+  // Reservation guard and submission guard (two POSTs each) and the sponsor attestation; the cap keeps one snapshot spare.
+  assert.equal(result.state, "submitted_pending"); assert.equal(budget.count(), 5); assert.equal(physicalFakePosts, 5);
+  assert.equal(logicalCalls, 30); assert.equal(sends, 1); assert.equal(f.wrapping.loads, 1);
 });
 
 test("policy revocation during fresh sponsor authentication fences before custody and releases allocated hold", async t => {

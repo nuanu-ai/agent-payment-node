@@ -39,7 +39,7 @@ for (const sponsor of [false, true]) test(`actual scoped ${sponsor ? "sponsored"
   const saved = await f.journal.findOperation(f.id), lease = await f.lease();
   await f.fence.withScope(f.id, "exposed", async scope => {
     const checked = await f.fence.checkScoped(scope, f.id, "exposed"); assert.ok(checked.fact);
-    assert.equal(checked.projection.rpc.physicalDispatches, 4); assert.equal(checked.projection.rpc.logicalReads, sponsor ? 12 : 11);
+    assert.equal(checked.projection.rpc.physicalDispatches, 2); assert.equal(checked.projection.rpc.logicalReads, sponsor ? 7 : 6);
     await assert.rejects(f.fence.consume(checked.fact, f.id, "exposed"));
     assert.equal((await f.fence.consumeScoped(scope, checked.fact, f.id, "exposed")).outcome, "checked");
     await assert.rejects(f.fence.consumeScoped(scope, checked.fact, f.id, "exposed"));
@@ -108,7 +108,7 @@ test("actual competing wallet, operation, custody and allowlist writes wait for 
 for (const fault of ["wallet", "lease", "conflict", "clock"] as const) test(`scoped ${fault} drift across RPC denies the fact without broad self exclusion`, async t => {
   const f = await setup(t);
   f.wire.beforeBatch = async calls => {
-    if (!calls.some(c => c.method === "eth_getBlockByNumber" && c.params[0] !== "finalized")) return;
+    if (!calls.some(c => c.method === "eth_getCode")) return;
     if (fault === "wallet") { const envelope = await f.state.loadEncryptedWalletEnvelope("owner") as any;
       envelope.identity.chainId = 1; await f.state.writeEncryptedWalletEnvelope("owner", envelope); }
     if (fault === "lease") await f.usage.transition({ ...productionUsageIdentity(f.record), reservationId: f.record.usageReservationId,

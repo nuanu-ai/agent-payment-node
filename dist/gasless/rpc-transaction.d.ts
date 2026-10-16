@@ -11,5 +11,10 @@ export interface GaslessOuterTransaction {
     readonly maxFeePerGasAtomic: string;
     readonly maxPriorityFeePerGasAtomic: string;
 }
-/** Reconstruct and authenticate a signed outer EVM transaction of type 0 through 4. */
-export declare function verifyGaslessOuterTransaction(raw: Record<string, unknown>, chainId: GaslessChainId, expectedHash: Hex): Promise<GaslessOuterTransaction>;
+/**
+ * The bundler's outer transaction as the RPC reports it, bound to the receipt by hash and canonical block membership.
+ * Its signature is not reconstructed: the RPC is the trust root for chain data and could serve any self-consistent
+ * signed transaction, so recovery proves nothing more. The effect is proven by the receipt logs; this projection only
+ * fixes the EntryPoint target, the zero value and a sender other than the owner for the transaction proof hash.
+ */
+export declare function gaslessOuterTransaction(raw: Record<string, unknown>, chainId: GaslessChainId, expectedHash: Hex): GaslessOuterTransaction;

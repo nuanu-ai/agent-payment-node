@@ -1,5 +1,5 @@
 import { getAddress } from "viem";
-import { isPlainRecord, sha256 } from "../canonical.js";
+import { isPlainRecord } from "../canonical.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import type { Address } from "../model.js";
@@ -11,7 +11,6 @@ import { decodeCanonicalBase64Json, decodePaymentRequiredHeader } from "../x402-
 import { createPermit2ProductionReadPort, type Permit2ReadRpcSource, type Permit2UsageReader } from "./read-port.js";
 import { preparePermit2WithPort } from "./prepare.js";
 import type { Permit2Requirement } from "./offer.js";
-import type { GaslessTransport } from "../gasless/https.js";
 
 export interface Permit2PreflightRequest {
   readonly profile: string;
@@ -23,7 +22,6 @@ export interface Permit2PreflightRequest {
 
 export interface Permit2PreflightPorts {
   readonly rpc: Permit2ReadRpcSource;
-  readonly transport?: GaslessTransport;
   readonly now?: () => Date;
   readonly usage?: Permit2UsageReader;
 }
@@ -62,7 +60,7 @@ export async function permit2CurrentOwnerPreflight(root: string, request: Permit
   const at = now();
   const read = createPermit2ProductionReadPort({ profile, stateRoot: root, localAccount,
     usage: ports.usage ?? { usage: (identity, when) => new AssetUsageLedger(root).usageReadOnly(identity, when) },
-    rpc: ports.rpc, ...(ports.transport === undefined ? {} : { transport: ports.transport }), now });
+    rpc: ports.rpc, now });
   const prepared = await preparePermit2WithPort(read, { payer, localWallet: true, challenge,
     expected: { challengeHash: request.expectedChallengeHash, index: Number(request.expectedIndex),
       requirement: expected as unknown as Permit2Requirement }, nowSeconds: Math.floor(at.getTime() / 1000) });
@@ -74,59 +72,25 @@ export async function permit2CurrentOwnerPreflight(root: string, request: Permit
     blockerCodes: ["permit2_execution_not_exposed"] };
 }
 
-const RPC_GAP_MS = 750;
-const RPC_CRASH_GUARD_MS = 15_000 + RPC_GAP_MS;
-/** Cross-process pacing uses APN's kernel-backed state lock and operational RPC pacing record. */
+/**
+ * Prepare-time Permit2 reads go through the shared direct-EVM transport: provider-family pacing across processes and a
+ * per-command POST cap (EvmDirectRpcGuard), the same mechanism as the signing fence and the observer. One instance per
+ * command keeps the DNS pin; each batch races the caller's abort signal.
+ */
 export function permit2PublicRpc(url: string, stateRoot: string,
-  transport?: Pick<HttpsBaseRpc, "permit2ReadCall">): Permit2ReadRpcSource {
-  const rpc = new HttpsBaseRpc(url);
-  const endpoint = rpc.endpoint.toString();
-  const state = new StateStore(stateRoot);
-  const endpointHash = sha256(`permit2-rpc-endpoint\0${endpoint}`);
-  return { call: async (method, params, signal) => {
-    return await state.withLocks([`rpc-provider-family:${endpointHash}`], async () => {
-      if (signal.aborted) aborted();
-      const lastStart = await state.loadRpcProviderPacing(endpointHash);
-      const cooldownUntil = await state.loadRpcProviderCooldown(endpointHash);
-      let now = Date.now();
-      if (lastStart !== null && now < lastStart) {
-        throw new ApnError("APN_RPC_CONFIG", "Permit2 RPC pacing clock moved backwards.");
-      }
-      const nextAllowed = Math.max(lastStart === null ? 0 : lastStart + RPC_GAP_MS, cooldownUntil ?? 0);
-      while (now < nextAllowed) {
-        await pause(nextAllowed - now, signal);
-        now = Date.now();
-      }
-      if (signal.aborted) aborted();
-      // A crash releases the kernel lock without running finally. Reserve the whole read window before transport.
-      await state.writeRpcProviderCooldown(endpointHash, Date.now() + RPC_CRASH_GUARD_MS);
-      try {
-        if (signal.aborted) aborted();
-        return await (transport ?? rpc).permit2ReadCall(method, params, signal);
-      } finally {
-        const completed = Date.now();
-        await state.writeRpcProviderPacing(endpointHash, completed);
-        await state.writeRpcProviderCooldown(endpointHash, completed);
-      }
-    }, { waitMs: 1_900 });
+  transport?: Pick<HttpsBaseRpc, "batchCall">): Permit2ReadRpcSource {
+  const rpc = new HttpsBaseRpc(url, { directGuardState: new StateStore(stateRoot) });
+  if (transport === undefined) rpc.armEvmDirectRpcGuard();
+  return { batch: async (calls, signal) => {
+    if (signal.aborted) aborted();
+    let onAbort!: () => void;
+    const rejection = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted."));
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try { return await Promise.race([(transport ?? rpc).batchCall(calls), rejection]); }
+    finally { signal.removeEventListener("abort", onAbort); }
   } };
-}
-
-async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) aborted();
-  let onAbort!: () => void;
-  const rejection = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted."));
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try { return await Promise.race([promise, rejection]); }
-  finally { signal.removeEventListener("abort", onAbort); }
-}
-
-async function pause(milliseconds: number, signal: AbortSignal): Promise<void> {
-  let timer!: ReturnType<typeof setTimeout>;
-  try { await abortable(new Promise<void>(resolve => { timer = setTimeout(resolve, milliseconds); }), signal); }
-  finally { clearTimeout(timer); }
 }
 
 function aborted(): never { throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted."); }

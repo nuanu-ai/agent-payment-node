@@ -1,7 +1,7 @@
 import { USDT_GASLESS, usdtFailure } from "./model.js";
 import { validateUsdtPaymasterData } from "./paymaster-data.js";
 import { planUsdtTransfer, validateUsdtGasPrice, validateUsdtTokenQuote } from "./quote.js";
-import { verifyUsdtReceipt } from "./receipt.js";
+import { USDT_CURRENT_PINS, verifyUsdtReceipt } from "./receipt.js";
 import { usdtUserOperation } from "./userop.js";
 export async function quoteUsdtGasless(ports, request) {
     await ports.chain.verifyPins();
@@ -33,6 +33,7 @@ export async function observeUsdtGasless(ports, plan, userOpHash) {
     const receipt = await ports.chain.receiptAt(locator);
     if (receipt === null)
         return { state: "pending" };
-    return { state: "completed", settlement: verifyUsdtReceipt(plan, userOpHash, receipt) };
+    // A plan observed in the invocation that prepared it was just validated against the current pins.
+    return { state: "completed", settlement: verifyUsdtReceipt(plan, userOpHash, receipt, USDT_CURRENT_PINS) };
 }
 //# sourceMappingURL=engine.js.map

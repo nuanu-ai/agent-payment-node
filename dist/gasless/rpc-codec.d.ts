@@ -19,7 +19,6 @@ export declare function addressWord(value: Address): Hex;
 export declare function rpcBlock(call: GaslessRpcCall, tag: "latest" | "safe" | "finalized" | Hex): Promise<GaslessRawBlock>;
 /** Polygon exposes milestone finality through finalized; unavailable finality never falls back to latest. */
 export declare function rpcFinalityBlock(call: GaslessRpcCall, chainId: GaslessChainId): Promise<GaslessRawBlock>;
-export declare function recheckBlock(call: GaslessRpcCall, block: GaslessBlock): Promise<void>;
 export declare function sameBlock(left: GaslessBlock, right: GaslessBlock): boolean;
 export declare function parseReceiptLogs(value: unknown, transactionHash: Hex, block: GaslessBlock, transactionIndex: bigint): readonly GaslessLog[];
 export declare function receiptHash(chainId: number, transactionHash: Hex, block: GaslessBlock, status: bigint, logs: readonly GaslessLog[]): string;

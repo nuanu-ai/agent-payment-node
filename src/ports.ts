@@ -58,8 +58,7 @@ export interface FeeEstimate {
 export interface X402PrepareEvidence {
   readonly address: Address;
   readonly usdcAtomic: string;
-  readonly tokenName: string;
-  readonly tokenVersion: string;
+  /** keccak(domain(name, version, chainId, token)): binds the seller's name and version without reading them. */
   readonly domainSeparator: Hex;
   readonly rpcOriginHash: string;
   readonly observedAt: string;
@@ -172,6 +171,8 @@ export interface X402RpcPort {
   }): Promise<X402AuthorizationUsedLogs>;
   getX402TransferLogs(input: {
     readonly from: Address;
+    /** Optional recipient topic, so a busy payer's other transfers neither count against nor overflow the log bound. */
+    readonly to?: Address;
     readonly fromBlock: string;
     readonly toBlock: string;
   }): Promise<X402TransferLogs>;

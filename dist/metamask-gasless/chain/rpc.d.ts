@@ -39,9 +39,9 @@ export declare class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     }): Promise<MetaMaskGaslessSnapshot>;
     observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
     /**
-     * Observation reads today's deployment addresses, so the saved operation must name the same token, manager and
-     * enforcers; the aggregate registry hash, the endpoint and the prepare-time code pins of a saved record are not
-     * compared, so adding a chain, rotating the RPC or a token upgrade never strands an operation.
+     * Observation proves a saved operation against the deployment it froze (token, manager and enforcers from the
+     * record, code pins from its prepare snapshot), never against today's registry: a later pin change refuses new
+     * prepares only, and an operation sent before it still closes.
      */
     private assertIntent;
     private assertChain;

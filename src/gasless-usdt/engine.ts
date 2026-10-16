@@ -2,7 +2,7 @@ import type { Hex } from "../model.js";
 import { USDT_GASLESS, usdtFailure, type UsdtTransferPlan, type UsdtTransferRequest } from "./model.js";
 import { validateUsdtPaymasterData } from "./paymaster-data.js";
 import { planUsdtTransfer, validateUsdtGasPrice, validateUsdtTokenQuote } from "./quote.js";
-import { verifyUsdtReceipt, type UsdtChainReceipt, type UsdtSettlement } from "./receipt.js";
+import { USDT_CURRENT_PINS, verifyUsdtReceipt, type UsdtChainReceipt, type UsdtSettlement } from "./receipt.js";
 import { usdtUserOperation, type UsdtAuthorization, type UsdtUserOperation } from "./userop.js";
 
 /** Read-only sponsor surface. There is deliberately no signing or submission method. */
@@ -55,5 +55,6 @@ export async function observeUsdtGasless(ports: { sponsor: Pick<UsdtSponsorPort,
   if (locator === null) return { state: "pending" };
   const receipt = await ports.chain.receiptAt(locator);
   if (receipt === null) return { state: "pending" };
-  return { state: "completed", settlement: verifyUsdtReceipt(plan, userOpHash, receipt) };
+  // A plan observed in the invocation that prepared it was just validated against the current pins.
+  return { state: "completed", settlement: verifyUsdtReceipt(plan, userOpHash, receipt, USDT_CURRENT_PINS) };
 }

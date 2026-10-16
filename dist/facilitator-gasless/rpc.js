@@ -1,6 +1,6 @@
 import { canonicalJson, exactKeys, sha256 } from "../canonical.js";
 import { GaslessHttps } from "../gasless/https.js";
-import { addressWord, parseReceiptLogs, quantity, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, receiptHash, recheckBlock } from "../gasless/rpc-codec.js";
+import { addressWord, parseReceiptLogs, quantity, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, receiptHash } from "../gasless/rpc-codec.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { facilitatorFail, facilitatorRpcConfigFail } from "./failure.js";
 import { AVALANCHE_FACILITATOR as R } from "./registry.js";
@@ -83,10 +83,10 @@ export class AvalancheFacilitatorRpc {
         if (used.length !== 1 || transfers.length !== 1 || transfers[0].topics[2] !== addressWord(query.recipient) ||
             rpcWord(transfers[0].data) !== BigInt(query.amountAtomic))
             facilitatorFail("facilitator_gasless_evidence");
-        // The used-nonce mapping is permanent, so the finalized block proves it without historical state.
+        // The used-nonce mapping is permanent, so the finalized block proves it without historical state. The inclusion
+        // block is at or below that finalized head, which does not reorganise, so its header is not read a second time.
         if (!await this.authorizationUsed(query.owner, query.nonce, finalized))
             facilitatorFail("facilitator_gasless_evidence");
-        await recheckBlock(this.call, included.block);
         return { transactionHash: query.transactionHash, block: included.block, finalized,
             receiptHash: receiptHash(R.chainId, query.transactionHash, included.block, status, logs), deliveredAtomic: query.amountAtomic };
     }

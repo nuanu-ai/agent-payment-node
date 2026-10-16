@@ -10,8 +10,6 @@ export declare function observerBlock(value: unknown, tag: string): Readonly<{
     timestamp: bigint;
 }>;
 export declare function assertObserverChain(value: unknown): void;
-export declare function observerIdentityCalls(material: Permit2ProductionMaterial, block: Permit2ObservedBlock): readonly ReadOnlyRpcBatchCall[];
-export declare function assertObserverIdentity(material: Permit2ProductionMaterial, values: readonly unknown[]): void;
 export declare function observerNonceCalls(material: Permit2ProductionMaterial, block: Permit2ObservedBlock): readonly ReadOnlyRpcBatchCall[];
 /** Permit2 unordered nonces are single-use and APN signed one witness transfer with this nonce: a set bit is settlement. */
 export declare function nonceConsumed(material: Permit2ProductionMaterial, value: unknown): boolean;

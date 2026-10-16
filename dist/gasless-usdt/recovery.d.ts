@@ -1,7 +1,7 @@
 import type { Address, Hex } from "../model.js";
 import type { UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operation.js";
 import { UsdtExecutionJournal, type UsdtExecutionRecord } from "./execution-journal.js";
-import { type UsdtChainReceipt } from "./receipt.js";
+import { type UsdtChainReceipt, type UsdtReceiptPins } from "./receipt.js";
 /** Untrusted bundler locator. The chain receipt and its EntryPoint event remain the outcome authority. */
 export interface UsdtUserOperationReceipt {
     readonly userOpHash: Hex;
@@ -20,7 +20,12 @@ export interface UsdtUserOperationScanInput {
     readonly fromBlockHash: Hex;
     /** Signed paymaster `validUntil`; EntryPoint refuses the operation in any block with a later timestamp. */
     readonly validUntil: bigint;
+    /** The record's own paymaster and EntryPoint (see `usdtRecordPins`). */
+    readonly paymaster: Address;
+    readonly entryPoint: Address;
 }
+/** The record's own token, signed paymaster and signed treasury; the EntryPoint its operation hash is bound to. */
+export declare function usdtRecordPins(bound: UsdtBoundOperation): UsdtReceiptPins;
 export type UsdtUserOperationScan = {
     readonly status: "found";
     readonly transactionHash: Hex;

@@ -7,8 +7,10 @@ import { UsdtBoundOperationRepository } from "../../src/gasless-usdt/bound-opera
 import { UsdtExecutionJournal, usdtExecutionIntent } from "../../src/gasless-usdt/execution-journal.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
 import { preparePolicyBoundUsdtV2 } from "../../src/gasless-usdt/policy-prepare-v2.js";
-import type { UsdtChainReceipt } from "../../src/gasless-usdt/receipt.js";
-import { UsdtRecoveryService, type UsdtRecoveryPort, type UsdtUserOperationScan } from "../../src/gasless-usdt/recovery.js";
+import { decodeUsdtPaymasterData } from "../../src/gasless-usdt/paymaster-data.js";
+import { verifyUsdtReceipt, type UsdtChainReceipt } from "../../src/gasless-usdt/receipt.js";
+import { restoreUsdtPlan } from "../../src/gasless-usdt/restored-plan.js";
+import { UsdtRecoveryService, usdtRecordPins, type UsdtRecoveryPort, type UsdtUserOperationScan } from "../../src/gasless-usdt/recovery.js";
 import { scanUsdtUserOperation } from "../../src/gasless-usdt/rpc-scan.js";
 import { temporaryState } from "./helpers.js";
 import { v2Fixture, V2_NOW, V2_OWNER, V2_RECIPIENT } from "./gasless-usdt-v2-fixture.js";
@@ -51,6 +53,22 @@ function port(scan: () => Promise<UsdtUserOperationScan>, receipts: Readonly<Rec
     scanUserOperation: async input => { scans.push(input); return await scan(); } };
 }
 
+test("receipt proofs of a saved operation use the pins stored in its record, not today's constants", async t => {
+  const s = await submitted(t), b = s.bound.binding, pins = usdtRecordPins(s.bound);
+  assert.deepEqual(pins, { token: b.token, paymaster: b.unsignedOperation.paymaster,
+    treasury: decodeUsdtPaymasterData(b.paymasterData).treasury, entryPoint: USDT_GASLESS.entryPoint });
+  // A later release that moved the paymaster or treasury must still close an operation sent under the earlier pair.
+  const moved = { ...pins, paymaster: "0x1111111111111111111111111111111111111111" as const,
+    treasury: "0x2222222222222222222222222222222222222222" as const };
+  const sent = receipt(HASH, true), rewrite = (address: string) =>
+    address.toLowerCase() === USDT_GASLESS.paymaster.toLowerCase() ? moved.paymaster : address.toLowerCase() === USDT_GASLESS.treasury.toLowerCase() ? moved.treasury : address;
+  const underOldPins: UsdtChainReceipt = { ...sent, logs: sent.logs.map(log => ({ ...log,
+    topics: log.topics.map(topic => /^0x0{24}/u.test(topic) ? padHex(rewrite(`0x${topic.slice(26)}`) as Hex, { size: 32 }) : topic) })) };
+  const plan = restoreUsdtPlan(s.bound);
+  assert.equal(verifyUsdtReceipt(plan, HASH, underOldPins, moved).recipientCreditAtomic, plan.netAtomic.toString());
+  assert.throws(() => verifyUsdtReceipt(plan, HASH, underOldPins, pins), /receipt_paymaster|receipt_transfers/u);
+});
+
 test("a missing bundler locator falls back to the canonical EntryPoint scan and settles from the chain receipt", async t => {
   for (const success of [true, false]) {
     const s = await submitted(t);
@@ -59,7 +77,7 @@ test("a missing bundler locator falls back to the canonical EntryPoint scan and 
     const result = await new UsdtRecoveryService(s.journal, recovery, () => V2_NOW).observe(s.bound);
     assert.equal(result.state, success ? "finalized" : "failed_confirmed_revert");
     assert.deepEqual(recovery.scans, [{ userOpHash: HASH, sender: V2_OWNER, fromBlock: 26_002_950n,
-      fromBlockHash: `0x${"12".repeat(32)}`, validUntil: VALID_UNTIL }]);
+      fromBlockHash: `0x${"12".repeat(32)}`, validUntil: VALID_UNTIL, paymaster: USDT_GASLESS.paymaster, entryPoint: USDT_GASLESS.entryPoint }]);
     assert.equal((await s.ledger.load(identity, result.reservationId))?.state, result.state);
   }
 });
@@ -118,7 +136,8 @@ function scanPeer(blocks: Readonly<Record<string, { number: bigint; hash: Hex; t
 
 test("the canonical scan is bounded by validUntil, batched in public-RPC windows and proves absence only when final", async () => {
   const anchor = { number: 1_000n, hash: `0x${"12".repeat(32)}` as Hex, timestamp: 1_000_000n };
-  const input = { userOpHash: HASH, sender: V2_OWNER, fromBlock: 1_000n, fromBlockHash: anchor.hash, validUntil: 1_003_600n };
+  const input = { userOpHash: HASH, sender: V2_OWNER, fromBlock: 1_000n, fromBlockHash: anchor.hash, validUntil: 1_003_600n,
+    paymaster: USDT_GASLESS.paymaster, entryPoint: USDT_GASLESS.entryPoint };
   const blocks = { finalized: { number: 9_000n, hash: `0x${"99".repeat(32)}` as Hex, timestamp: 1_100_000n }, "1000": anchor,
     "1301": { number: 1_301n, hash: `0x${"13".repeat(32)}` as Hex, timestamp: 1_003_612n } };
   const empty = scanPeer(blocks, () => []);

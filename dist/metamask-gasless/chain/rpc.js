@@ -7,6 +7,7 @@ import { mmRegistry, MM_RPC_ENV } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { mmEvidenceAt, mmEvidenceFail } from "./diagnostic.js";
 import { mmValidateUnsigned } from "../unsigned.js";
+import { mmObservedDeployment, mmRecordedDeployment } from "../recorded.js";
 import { mmAddress, mmChain, mmHex, mmUint } from "../validation.js";
 import { observeMetaMaskGasless } from "./observe.js";
 import { recheckBlock, rpcBlock, rpcQuantity, rpcRecord } from "./abi.js";
@@ -76,9 +77,9 @@ export class MetaMaskGaslessRpc {
         await this.assertChain();
         const at = await rpcBlock(this.callRpc, this.deployment.row.finalityTag);
         const state = await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, at.block, null);
+        // Every read was pinned to this block by hash with requireCanonical, so its header is not rechecked.
         if ("counterAtomic" in state)
             mmFail("mm_gasless_internal");
-        await recheckBlock(this.callRpc, at.block, "mm_gasless_evidence_invalid");
         return { chainId: this.chainId, endpointHash: this.endpointHash, endpointOrigin: this.endpointOrigin,
             observedAt: this.clock.now().toISOString(), block: at.block, state };
     }
@@ -99,11 +100,9 @@ export class MetaMaskGaslessRpc {
                 mmEvidenceAt("safe", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, safe.block, delegationHash, input.feeMode)),
                 mmEvidenceAt("latest", async () => await readMetaMaskChainState(this.callRpc, this.deployment.row, owner, head.block, delegationHash, input.feeMode)),
             ]);
+        // Both states were read pinned to their block hash with requireCanonical, so no header is rechecked.
         if (!("counterAtomic" in safeState) || !("counterAtomic" in headState))
             mmFail("mm_gasless_internal");
-        await mmEvidenceAt("safe", async () => await recheckBlock(this.callRpc, safe.block, "mm_gasless_evidence_invalid"));
-        if (!sameBlock)
-            await mmEvidenceAt("latest", async () => await recheckBlock(this.callRpc, head.block, "mm_gasless_evidence_invalid"));
         const snapshot = { chainId: this.chainId, endpointHash: this.endpointHash,
             endpointOrigin: this.endpointOrigin, observedAt: this.clock.now().toISOString(),
             safeBlock: safe.block, headBlock: head.block, safeState, headState };
@@ -116,22 +115,23 @@ export class MetaMaskGaslessRpc {
         // Another provider must first prove the same chain history at the operation's frozen safe anchor.
         // Any endpoint of the chain may observe once it proves the same history at the operation's frozen safe anchor.
         await recheckBlock(this.callRpc, intent.initialSnapshot.safeBlock, "mm_gasless_rpc_binding");
-        return await observeMetaMaskGasless({ deployment: this.deployment, call: this.callRpc, clock: this.clock }, intent, cursor, provider);
+        return await observeMetaMaskGasless({ deployment: mmObservedDeployment(intent, this.deployment), call: this.callRpc,
+            clock: this.clock }, intent, cursor, provider);
     }
     /**
-     * Observation reads today's deployment addresses, so the saved operation must name the same token, manager and
-     * enforcers; the aggregate registry hash, the endpoint and the prepare-time code pins of a saved record are not
-     * compared, so adding a chain, rotating the RPC or a token upgrade never strands an operation.
+     * Observation proves a saved operation against the deployment it froze (token, manager and enforcers from the
+     * record, code pins from its prepare snapshot), never against today's registry: a later pin change refuses new
+     * prepares only, and an operation sent before it still closes.
      */
     assertIntent(intent) {
-        if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
-            intent.token !== this.deployment.row.token || intent.relayTo !== this.deployment.row.protocol.manager.address) {
+        if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId)
             mmFail("mm_gasless_rpc_binding");
-        }
-        mmQuote(intent.quote, intent.request, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt");
+        const recorded = mmRecordedDeployment(intent);
+        mmQuote(intent.quote, intent.request, intent.binding, intent.quote.netAtomic, "mm_gasless_state_corrupt", recorded);
         mmAssertStableQuote(intent.request, intent.quote, "mm_gasless_state_corrupt");
         mmValidateUnsigned({ unsignedDelegation: intent.unsignedDelegation, delegationHash: intent.delegationHash,
-            signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode }, { owner: intent.binding.address, chainId: intent.request.chainId, executions: intent.quote.executions, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
+            signingDigest: intent.signingDigest, relayTo: intent.relayTo, mode: intent.mode }, { owner: intent.binding.address, chainId: intent.request.chainId, executions: intent.quote.executions,
+            deployment: recorded, ...(intent.quote.feeMode === "sponsored" ? { feeMode: intent.quote.feeMode } : {}) }, "mm_gasless_state_corrupt");
     }
     async assertChain() {
         if (rpcQuantity(await this.callRpc("eth_chainId", [])) !== BigInt(this.chainId))
@@ -149,7 +149,8 @@ export class MetaMaskGaslessRpc {
             return mmFail("mm_gasless_rpc_unavailable");
         }
         if (response.status !== 200 || Buffer.byteLength(response.body, "utf8") > MAX_RESPONSE) {
-            mmFail(method === "eth_getLogs" && response.status === 429 ? "mm_gasless_rpc_rate_limited" : "mm_gasless_rpc_unavailable");
+            // HTTP 429 on any read is the RPC asking APN to slow down; the pre-dispatch guard does not re-ask inside its window.
+            mmFail(response.status === 429 ? "mm_gasless_rpc_rate_limited" : "mm_gasless_rpc_unavailable");
         }
         let parsed;
         try {

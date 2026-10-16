@@ -11,7 +11,7 @@ import { encodePaymentRequiredHeader } from "../../src/x402-codec.js";
 import { canonicalJson } from "../../src/canonical.js";
 import { Permit2ProductionRepository, permit2ProductionId } from "../../src/x402-permit2/production-repository.js";
 import { encodePermit2ProductionProxyCall } from "../../src/x402-permit2/production-proxy-call.js";
-import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_PERMIT2_ASSETS } from "../../src/x402-permit2/registry.js";
+import { PERMIT2_ADDRESS, X402_PERMIT2_ASSETS } from "../../src/x402-permit2/registry.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
 
@@ -47,7 +47,6 @@ export function cliWire(t: TestContext, f: Awaited<ReturnType<typeof permit2CliF
     if (c.method === "eth_getBlockByNumber") return c.params[0] === "finalized" || c.params[0] === w.finalized.number ? w.finalized : w.block;
     if (c.method === "eth_getTransactionByHash") return options.settle ? w.tx : null;
     if (c.method === "eth_getTransactionReceipt") return options.settle ? w.receipt : null;
-    if (c.method === "eth_getProof") return { address: c.params[0], codeHash: c.params[0] === PERMIT2_ADDRESS ? PERMIT2_CODE_HASH : asset.proxyCodeHash };
     if (c.method === "eth_getCode") return c.params[0] === f.record.material.wallet.account ? w.payerCode : c.params[0].toLowerCase() === PERMIT2_ADDRESS.toLowerCase() ? w.permit2Code : w.proxyCode;
     assert.equal(c.method, "eth_call"); const data = c.params[0].data;
     // The nonce is consumed only once the facilitator settled after the paid request.
