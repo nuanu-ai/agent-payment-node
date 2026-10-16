@@ -102,6 +102,8 @@ export declare class OperationService {
     assertProfileAvailable(profileHash: string): Promise<void>;
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** R8 (OWNR-16): a native Arbitrum move to a local custody wallet does not wait for this account's Circle routes whose source burn is final. */
+    assertEvmNativeAccountAvailableBesideSettledCircle(profileHash: string, account: string): Promise<void>;
     /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
     assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
     /** Only the real current foreground owner may exclude its exact own native journal claim. */
