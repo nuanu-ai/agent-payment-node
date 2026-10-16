@@ -19,6 +19,8 @@ import { LINEA_DEPLOYMENT_MIGRATION_CANDIDATE, assertLineaDeploymentMigrationPro
 import { bridgeProtocolEmitter } from "./deployments.js";
 import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation } from "./base-deployment-migration.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
+import { bridgeDestinationObservationRequests, bridgeSourceObservationRequests } from "./observation-budget.js";
+import { bridgeSendStepPostBudget } from "./send-budget.js";
 import { sha256 } from "../canonical.js";
 export class BridgeService {
     context;
@@ -165,12 +167,12 @@ export class BridgeService {
     }
     execution(op) {
         const d = this.dependencies(), m = op.intent.materialization;
-        const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeRpcPhysicalPolicy(op));
-        // The modeled worst-case first token guard spends 19 requests: two safe heads, 6+9 Ethereum/Base archive chunks and two account batches.
-        // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof. Arbitrum code remains fully fresh
-        // because this verifier lacks an exact fork activation point: two safe heads, four Base plus five Arbitrum chunks,
-        // and two source account/simulation batches total 13 physical reads.
-        // Four later guards reuse immutable evidence and spend one mutable account/simulation batch each.
+        // The invocation cap covers the derived sign-and-send step plus explicit retry headroom (Base USDC to Arbitrum Across: 24 + 4).
+        const physicalBudget = new BridgeRpcPhysicalBudget(undefined, undefined, bridgeRpcPhysicalPolicy(op), bridgeSendStepPostBudget(op, 3));
+        // The command session serves every guard of the invocation. The first full guard is counted in send-budget.ts from its read
+        // plans (Base USDC with Ethereum or Arbitrum USDC Across: two safe heads, 10+7 archive chunks and two account batches = 21).
+        // Base/Arbitrum Stargate retains only Base's operation-bound ordinary-code proof; Arbitrum code remains fully fresh.
+        // Later guards reuse immutable evidence and read the two mutable account/simulation batches again.
         const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 28, maxHttpAttempts: 30,
             archiveDeploymentBatchMaxItems: 3, providerScheduler: this.providerScheduler, physicalBudget });
         const lazy = (chainId, options) => {
@@ -178,15 +180,15 @@ export class BridgeService {
             return () => rpc ??= d.rpcFor(chainId, new RpcReadSession({ ...options, providerScheduler: this.providerScheduler, physicalBudget }));
         };
         const common = { now: () => this.context.clock.now().getTime(), archiveDeploymentBatchMaxItems: 3 };
-        // Base source observation with explicit scalar receipt and archive readers needs 15 clean requests:
-        // primary chain+transaction+included+safe (4), receipt chain+receipt (2), four three-item archive chunks for
-        // the pinned Base fee/code/config/operator/header proof, and four chunks for the historical deployment proof.
-        // The latter reuses only exact pinned fee code/storage/reviewed-getter/Multicall and header cache entries;
-        // protocol code, proxy/facet/implementation storage and unknown/caller-sensitive calls remain fresh and direct.
-        // One uncached primary batch rechecks the two canonical headers after the fee proof.
-        // Base retains one additional attempt; other source paths keep their existing request ceiling.
-        const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: m.request.fromChainId === 8453 ? 15 : 14, maxHttpAttempts: 16 });
-        const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: 16, maxHttpAttempts: 16 });
+        // One source effect observation is bounded by its exact read plans: the canonical receipt sequence, Base's pinned fee
+        // proof and the route's historical deployment proof after exact cache reuse (Base USDC to Arbitrum Across needs 19).
+        // Protocol code, proxy/facet/implementation storage and caller-sensitive calls stay fresh; two attempts retain the retry reserve.
+        const sourceRequests = bridgeSourceObservationRequests(m.request.fromChainId, m.request.toChainId, m.tool, m.request.fromToken, common.archiveDeploymentBatchMaxItems);
+        const sourceObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: sourceRequests, maxHttpAttempts: sourceRequests + 2 });
+        // The destination proof is bounded the same way after the principal has left: canonical receipt, any provider-bound
+        // native delivery reads, and the destination deployment chunks (Base USDC needs 17, the BNB composite 19).
+        const destinationRequests = bridgeDestinationObservationRequests(m.request, m.tool, op.intent.decoded.composite !== undefined, common.archiveDeploymentBatchMaxItems);
+        const destinationObservation = lazy(m.request.toChainId, { ...common, maxHttpRequests: destinationRequests, maxHttpAttempts: destinationRequests + 2 });
         const residualObservation = lazy(m.request.fromChainId, { ...common, maxHttpRequests: 2, maxHttpAttempts: 3 });
         return new BridgeExecution(this.context.state, d.rpcFor(m.request.fromChainId, session), d.rpcFor(m.request.toChainId, session), d.provider, d.custody, () => this.context.clock.now().getTime(), async (previous, patch) => await this.save(previous, patch), { source: sourceObservation, destination: destinationObservation, residual: residualObservation }, physicalBudget);
     }

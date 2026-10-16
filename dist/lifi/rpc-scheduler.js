@@ -84,9 +84,12 @@ export class RpcProviderScheduler {
                 // The physical gate may wait for a POST on another provider family.
                 if (entry.beforeStart !== undefined) {
                     await entry.beforeStart();
-                    current = clock();
-                    if (current < nextAllowed)
+                    // Only a clock that moved backwards across the gate is a rollback. The family boundary was settled above:
+                    // exactly for a persisted coordinator, within one early timer wake for an in-process scheduler.
+                    const gated = clock();
+                    if (gated < current)
                         throw schedulerClockRollback(entry.family);
+                    current = gated;
                 }
                 // The family lock covers transport. A crash releases that lock without running completion cleanup.
                 // Reserve a conservative window before transport; a failed completion write leaves it durable.

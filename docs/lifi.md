@@ -1144,6 +1144,36 @@ Source gas 85529811980376 wei plus messaging value 191812223813721 wei totals
 SAFE allowance was reused without another approval. Canonical-USDC delivery
 across the three required directions is now evidenced; WBTC remains separate.
 
+## Source observation budget derived from read plans, 2026-10-16
+
+The source observation request cap was a hand-counted constant (15 on Base, 14
+elsewhere) modelled on the compact Base native route. Base canonical USDC Across
+is not compact: its historical deployment proof sends eight archive chunks after
+the fee proof, so the exact sequence needs 18 POSTs, 19 with a scalar or fallback
+receipt read, and every resume after a paid approval failed with
+`APN_RPC_BUDGET_EXCEEDED`. The cap is now counted from the same deployment and
+Base fee read plans the adapter sends (seven canonical requests, fee chunks, then
+deployment chunks after exact cache reuse), plus two retry attempts. Base USDC
+Across needs 19 and Ethereum USDC Stargate 16; no check, chunk size or the shared
+24-POST invocation cap changed. Tests compare every admitted source route and
+receipt route with its production trace.
+
+The destination observation cap, a fixed 16, is counted the same way from the
+destination deployment plan, plus five requests for a provider-bound native
+delivery (pre-delivery header, archive chain identity, two hash-pinned balances,
+trace). Ethereum or Arbitrum to Base USDC Across needs 17 with a scalar Base
+receipt reader and the Ethereum to BNB composite needs 19; both previously failed
+after the principal had left. Every admitted destination is tested the same way.
+
+The step that signs and sends an unsent effect is counted from the guard's read
+plans too: per chain a safe head and its deployment chunks, two account batches,
+a second guard's two account batches after sealing and the raw send, plus two
+more account batches when a foreground approval runs it. The 24-POST invocation
+cap is raised to that step plus four retry POSTs: Base USDC to Arbitrum Across
+sends at POST 24 of 28 (it had been 24 of 24), and its foreground approval step
+fits in 30. Guards, the sign-before-send room check and continuation caps are
+unchanged; an exhausted budget still stops before signing and resumes cleanly.
+
 ## Finite Base to Mega native funding
 
 `apn mega funding prepare`, `approve` and `status` use an independent GasZip
