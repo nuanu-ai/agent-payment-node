@@ -7,12 +7,23 @@ export interface MoneyConflictDomain {
   readonly family: "evm" | "solana" | "tron";
   readonly network: string;
   readonly account: string;
+  /** A shared claim coexists with other shared claims on the same key and excludes every exclusive one. */
+  readonly shared?: true;
 }
 
 export function evmConflictDomain(chainId: number | string, account: string): MoneyConflictDomain {
   const network = String(chainId);
   if (!/^[1-9][0-9]{0,15}$/u.test(network) || !/^0x[0-9a-fA-F]{40}$/u.test(account)) throw new Error("Invalid EVM conflict domain.");
   return { family: "evm", network, account: account.toLowerCase() };
+}
+
+/**
+ * Local EIP-3009 x402 spends by its own random nonce, so concurrent purchases may share one account. It still excludes
+ * every family that uses the account nonce or an EIP-7702 designation (which switches USDC signature checks to
+ * ERC-1271), and spends share the balance.
+ */
+export function sharedEvmConflictDomain(chainId: number | string, account: string): MoneyConflictDomain {
+  return { ...evmConflictDomain(chainId, account), shared: true };
 }
 
 export function railConflictDomain(rail: "solana" | "tron", account: string): MoneyConflictDomain {
@@ -43,6 +54,10 @@ export function conflictDomainKey(domain: MoneyConflictDomain): string {
 export function conflictDomainKeys(domains: () => readonly MoneyConflictDomain[]): ReadonlySet<string> {
   try { return new Set(domains().map(conflictDomainKey)); } catch { return new Set(); }
 }
+/** Keys the caller claims as shared; an unreadable list yields none, so every held claim stays exclusive to it. */
+export function sharedConflictDomainKeys(domains: () => readonly MoneyConflictDomain[]): ReadonlySet<string> {
+  try { return new Set(domains().filter(domain => domain.shared === true).map(conflictDomainKey)); } catch { return new Set(); }
+}
 export { assertUsdtConflictDomainsAvailable } from "./gasless-usdt/account-conflict.js";
 
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
@@ -58,8 +73,10 @@ export function storedOperationDomains(operation: StoredMoneyOperation): readonl
     if (operation.kind === "relay_unsigned") return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];
     if (operation.kind === "direct_transfer") return [evmConflictDomain(operation.record.chainId, operation.record.walletAddress)];
     if (operation.kind === "x402_fetch") {
-      // A local EIP-3009 authorization spends by its own random nonce, never the account nonce: it holds no account domain.
-      if (operation.strategy === "local" && operation.record.selectedOffer.resolved.assetTransferMethod === "eip3009") return [];
+      // A local EIP-3009 authorization spends by its own random nonce: it shares the account with other purchases only.
+      if (operation.strategy === "local" && operation.record.selectedOffer.resolved.assetTransferMethod === "eip3009") {
+        return [sharedEvmConflictDomain(operation.record.chainId, operation.record.wallet)];
+      }
       // Provider-atomic x402 is Base-only; its record carries the network as CAIP-2 instead of a chain id.
       return [operation.strategy === "local" ? evmConflictDomain(operation.record.chainId, operation.record.wallet)
         : evmConflictDomain(8453, operation.record.provider.payer)];

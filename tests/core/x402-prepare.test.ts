@@ -584,7 +584,7 @@ test("global idempotency and active-operation scans cover direct and x402 stores
   });
   assert.equal(directConflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
   assert.equal(directAfter.balanceCalls, 0);
-  // An open EIP-3009 authorization spends by its own random nonce: it neither holds nor waits for the account.
+  // An open EIP-3009 purchase holds a shared account claim: a direct transfer on that account waits for it.
   const differentDirectRpc = new TestRpc();
   const differentDirect = await makeCore({ root: x402First.root, rpc: differentDirectRpc }).execute({
     command: "transfer.prepare",
@@ -593,18 +593,28 @@ test("global idempotency and active-operation scans cover direct and x402 stores
     recipient: RECIPIENT,
     amount: "1",
   });
-  const blocking = (differentDirect.error?.details as { readonly blockingOperationId?: unknown } | undefined)?.blockingOperationId;
-  assert.equal(blocking, undefined, JSON.stringify(differentDirect));
+  assert.equal(differentDirect.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(differentDirectRpc.balanceCalls, 0);
+  // Another purchase on the same account shares the claim and proceeds.
+  const secondPurchaseHttp = challenge();
+  const secondPurchaseRpc = new TestRpc();
+  const secondPurchase = await makeCore({ root: x402First.root, rpc: secondPurchaseRpc, http: secondPurchaseHttp }).execute({
+    ...PREPARE_REQUEST,
+    idempotencyKey: "second-x402-key",
+  });
+  assert.equal(secondPurchase.ok, true, JSON.stringify(secondPurchase));
+  assert.equal(secondPurchaseHttp.calls.length, 1);
+  assert.equal(secondPurchaseRpc.x402PrepareCalls, 1);
 
   const activeHttp = challenge();
   const activeRpc = new TestRpc();
-  const activeX402 = await makeCore({ root: directFirst.root, rpc: activeRpc, http: activeHttp }).execute({
+  const activeBlocked = await makeCore({ root: directFirst.root, rpc: activeRpc, http: activeHttp }).execute({
     ...PREPARE_REQUEST,
     idempotencyKey: "different-x402-key",
   });
-  assert.equal(activeX402.ok, true, JSON.stringify(activeX402));
-  assert.equal(activeHttp.calls.length, 1);
-  assert.equal(activeRpc.x402PrepareCalls, 1);
+  assert.equal(activeBlocked.error?.code, "APN_OPERATION_BLOCKED");
+  assert.equal(activeHttp.calls.length, 0);
+  assert.equal(activeRpc.x402PrepareCalls, 0);
 });
 
 test("direct and x402 concurrency shares profile then operation locks", async (t) => {
@@ -624,10 +634,11 @@ test("direct and x402 concurrency shares profile then operation locks", async (t
     }),
     makeCore({ root: temporary.root, rpc, http }).execute({ ...PREPARE_REQUEST, idempotencyKey: "concurrent-x402" }),
   ]);
-  // Both serialize on the profile lock; neither blocks the other because EIP-3009 never uses the account nonce.
-  assert.equal([direct, x402].filter((result) => result.ok).length, 2, JSON.stringify([direct, x402]));
-  assert.equal(rpc.x402PrepareCalls, 1);
-  assert.equal(http.calls.length, 1);
+  // Both serialize on the profile lock; the direct transfer's exclusive claim and the purchase's shared claim exclude each other.
+  assert.equal([direct, x402].filter((result) => result.ok).length, 1, JSON.stringify([direct, x402]));
+  assert.equal([direct, x402].filter((result) => result.error?.code === "APN_OPERATION_BLOCKED").length, 1);
+  assert.equal(rpc.balanceCalls + rpc.x402PrepareCalls, 1);
+  assert.ok(http.calls.length === 0 || http.calls.length === 1);
 
   class ObservedStore extends StateStore {
     readonly acquired: string[] = [];

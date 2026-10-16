@@ -102,6 +102,8 @@ export declare class OperationService {
     assertProfileAvailable(profileHash: string): Promise<void>;
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
+    assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
     /** Only the real current foreground owner may exclude its exact own native journal claim. */
     assertMetaMaskNativeOwnedAccountAvailable(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
     assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void>;
