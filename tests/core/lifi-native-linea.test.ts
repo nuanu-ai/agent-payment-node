@@ -15,7 +15,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { decodeFunctionData } from "viem";
 import { acrossBridgeAbi } from "../../src/lifi/abi.js";
-import { canonicalJson, sha256 } from "../../src/canonical.js";
+import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
+import { BridgeQuoteRepository } from "../../src/lifi/quote-repository.js";
 import { BridgeRpc } from "../../src/lifi/rpc.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 
@@ -234,6 +235,36 @@ test("Linea is preparable only as an Ethereum destination; reverse discovery nam
   const gate = new BridgeAllowlistGate({ state: r.state, clock: { now: () => new Date(r.now) } });
   await assert.rejects(gate.admit(r.profile, LIFI_SYNTHETIC_SENDER, r.request, "across"),
     (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "bridge_source_execution_unreviewed");
+});
+
+class RawBridgeQuotes extends BridgeQuoteRepository {
+  async raw(path: string): Promise<any> { return await this.readJson(path); }
+  async put(path: string, value: unknown): Promise<void> { await this.writeJson(path, value); }
+}
+
+test("a reverse Linea quote saved before the source gate is refused, and only real route drift is corrupt", async (t) => {
+  const now = new Date("2026-09-20T10:54:00.000Z"), step = reverseLineaStep((await lifiSteps("eth-linea", now))[0]);
+  step.id = "synthetic-linea-ethereum-native-across";
+  const provider = new LifiTestProvider([step], now), temporary = await temporaryState(); t.after(temporary.cleanup);
+  const r = await lifiFixture(temporary.root, "eth-linea", { provider, policy: false });
+  const discovered = await r.core.execute({ command: "bridge.routes", profile: r.profile, request: r.request });
+  assert.equal(discovered.ok, true, discovered.error?.message);
+  const dir = `bridge-quotes/${r.state.profileHash(r.profile)}`, quotes = new RawBridgeQuotes(r.state.root);
+  const saved = await quotes.raw(`${dir}/${(discovered.data as any).quote_hash}.json`);
+  const resaved = async (mutate: (routes: any[]) => void, key: string) => {
+    const { snapshotHash: _old, ...body } = structuredClone(saved); mutate(body.routes);
+    const quote = { ...body, snapshotHash: hashObject(body) };
+    await quotes.put(`${dir}/${quote.snapshotHash}.json`, quote);
+    return await r.core.execute({ command: "bridge.prepare", profile: r.profile, quote: quote.snapshotHash, route: quote.routes[0].routeId, idempotencyKey: key });
+  };
+  const legacy = await resaved((routes) => { for (const row of routes) Object.assign(row, { preparable: true, unavailableReason: null }); }, "linea-legacy-quote-001");
+  assert.equal(legacy.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  assert.equal(legacy.error?.message, "Bridge validation failed: source_execution_unreviewed.");
+  const tampered = await resaved((routes) => Object.assign(routes[0], { preparable: true, unavailableReason: null, quotedOutputAtomic: "1" }), "linea-tampered-quote-001");
+  assert.equal(tampered.error?.code, "APN_STATE_CORRUPT");
+  assert.equal(tampered.error?.message, "Bridge validation failed: bridge_quote_route_binding.");
+  assert.equal(provider.materializeCalls, 0); assert.equal(r.source.calls.length, 0); assert.equal(r.destination.calls.length, 0);
+  assert.equal(r.approval.calls.length, 0); assert.equal(r.wrapping.loads, 0);
 });
 
 test("Linea shared usage reservation is atomic, survives unknown outcome, and blocks daily-cap bypass", async (t) => {
