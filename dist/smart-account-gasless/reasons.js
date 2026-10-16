@@ -24,6 +24,7 @@ export const SA_REASON_CODES = Object.freeze({
     sa_gasless_verify_rejected: "APN_OPERATION_BLOCKED",
     sa_gasless_unknown: "APN_OPERATION_BLOCKED",
     sa_gasless_partial: "APN_OPERATION_BLOCKED",
+    sa_gasless_owner_abandoned: "APN_OPERATION_BLOCKED",
     sa_gasless_internal: "APN_INTERNAL",
 });
 export function saError(reason) {

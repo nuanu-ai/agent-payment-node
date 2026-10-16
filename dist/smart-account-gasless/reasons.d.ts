@@ -24,6 +24,7 @@ export declare const SA_REASON_CODES: Readonly<{
     readonly sa_gasless_verify_rejected: "APN_OPERATION_BLOCKED";
     readonly sa_gasless_unknown: "APN_OPERATION_BLOCKED";
     readonly sa_gasless_partial: "APN_OPERATION_BLOCKED";
+    readonly sa_gasless_owner_abandoned: "APN_OPERATION_BLOCKED";
     readonly sa_gasless_internal: "APN_INTERNAL";
 }>;
 export type SmartAccountGaslessReason = keyof typeof SA_REASON_CODES;
