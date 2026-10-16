@@ -18,7 +18,7 @@ export class UniswapTokenRpcBudgetJournal extends SecureStateStore {
             const row = { reservation, command, cap, requestSessionCap, budgetClass, physicalRequests: null, attempts: null, logicalItems: null,
                 methodClasses: null, batchSizes: null, budgetRejects: null };
             await this.writeJson(this.path(binding), { schemaVersion: "apn.uniswap-token-rpc-budget.v1", binding,
-                quoteBinding: current?.quoteBinding ?? null, rows: [...(current?.rows ?? []), row] });
+                quoteBinding: current?.quoteBinding ?? null, rows: retained([...(current?.rows ?? []), row]) });
             return reservation;
         });
     }
@@ -88,6 +88,15 @@ function mergeRows(target, source) {
             seen.add(row.reservation);
         }
     return rows;
+}
+/**
+ * Zero-cap recovery rows (status, observe-only execute and cleanup) never count toward the operation cap; only the most
+ * recent ones are kept, so a long-lived operation can be observed indefinitely without its journal outgrowing the state cap.
+ */
+const RECOVERY_ROWS_KEPT = 16;
+function retained(rows) {
+    const recovery = rows.filter((row) => row.cap === 0), drop = new Set(recovery.slice(0, Math.max(0, recovery.length - RECOVERY_ROWS_KEPT)));
+    return rows.filter((row) => !drop.has(row));
 }
 function usage(rows) { return rows.reduce((sum, row) => sum + (row.cap === 0 ? 0 : row.physicalRequests ?? row.cap), 0); }
 function validRow(value) {

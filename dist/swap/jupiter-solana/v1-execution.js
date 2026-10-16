@@ -13,6 +13,8 @@ import { routeConfigForMaterial } from "./v1-route-config.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
 import { proveSolanaUnlanded } from "../unlanded.js";
+/** Logical reads one status or observe-only invocation may make; a new invocation starts again from zero. */
+export const JUPITER_V1_OBSERVATION_READ_CAP = 64;
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
     core;
@@ -280,6 +282,8 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
     stageKey;
     calls = 0;
     priorQuoteCalls = 0;
+    observing;
+    observationCalls = 0;
     constructor(base, root, stage, operationId) {
         super();
         this.base = base;
@@ -287,8 +291,11 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
         this.originHash = base.originHash;
         this.budget = base.budget;
         this.journal = new JupiterV1StageBudgetStore(root);
-        this.stageKey = sha256(`jupiter-v1-runtime-stage:${stage}:${stage === "execute" || stage === "observe" ? operationId : randomUUID()}`);
+        this.stageKey = sha256(`jupiter-v1-runtime-stage:${stage}:${stage === "execute" ? operationId : randomUUID()}`);
+        this.observing = stage === "observe";
     }
+    /** Observing a marked operation: reads are bounded per invocation, never by a lifetime per-operation cap (SWAP-19). */
+    enterObservation() { this.observing = true; }
     get hasPersistentPacer() { return this.base.hasPersistentPacer; }
     get maximumAccountsPerRead() { return this.base.maximumAccountsPerRead; }
     async bindOperation(quoteHash) { if (this.stage === "execute")
@@ -296,7 +303,15 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
     async bindQuote(quoteHash) { if (this.stage !== "quote")
         corrupt(); await this.journal.bindQuote(quoteHash, this.calls); }
     async chargeOfficialRead() { await this.charge(); }
-    async charge() { this.calls = await this.journal.charge(this.stageKey, this.priorQuoteCalls); }
+    async charge() {
+        if (this.observing) {
+            if (this.observationCalls >= JUPITER_V1_OBSERVATION_READ_CAP)
+                blocked("Jupiter's per-invocation observation read cap was reached; run status again.");
+            this.observationCalls++;
+            return;
+        }
+        this.calls = await this.journal.charge(this.stageKey, this.priorQuoteCalls);
+    }
     async call(method, params) {
         await this.charge();
         if (method === "getBlockHeight" && typeof this.base.batch === "function") {

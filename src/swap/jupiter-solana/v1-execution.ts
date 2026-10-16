@@ -20,6 +20,8 @@ import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.j
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
 import { proveSolanaUnlanded, type SwapUnlandedProof } from "../unlanded.js";
 
+/** Logical reads one status or observe-only invocation may make; a new invocation starts again from zero. */
+export const JUPITER_V1_OBSERVATION_READ_CAP = 64;
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
  constructor(private readonly core:GuardedSwapService,private readonly materials:SavedJupiterV1MaterialStore,
@@ -161,16 +163,22 @@ class JupiterV1StageBudgetStore extends SecureStateStore{
 export class JupiterV1BudgetedRpc extends SolanaRpc{
  override readonly originHash:string;override readonly budget:SolanaRpc["budget"];
  private readonly journal:JupiterV1StageBudgetStore;private readonly stageKey:string;private calls=0;private priorQuoteCalls=0;
+ private observing:boolean;private observationCalls=0;
  constructor(private readonly base:SolanaRpc,root:string,private readonly stage:"quote"|"prepare"|"execute"|"observe",operationId?:string){
   super();this.originHash=base.originHash;this.budget=base.budget;this.journal=new JupiterV1StageBudgetStore(root);
-  this.stageKey=sha256(`jupiter-v1-runtime-stage:${stage}:${stage==="execute"||stage==="observe"?operationId:randomUUID()}`);
+  this.stageKey=sha256(`jupiter-v1-runtime-stage:${stage}:${stage==="execute"?operationId:randomUUID()}`);this.observing=stage==="observe";
  }
+ /** Observing a marked operation: reads are bounded per invocation, never by a lifetime per-operation cap (SWAP-19). */
+ enterObservation():void{this.observing=true;}
  override get hasPersistentPacer(){return this.base.hasPersistentPacer;}
  override get maximumAccountsPerRead(){return this.base.maximumAccountsPerRead;}
  async bindOperation(quoteHash:string):Promise<void>{if(this.stage==="execute")this.priorQuoteCalls=await this.journal.quoteCalls(quoteHash);}
  async bindQuote(quoteHash:string):Promise<void>{if(this.stage!=="quote")corrupt();await this.journal.bindQuote(quoteHash,this.calls);}
  async chargeOfficialRead():Promise<void>{await this.charge();}
- private async charge(){this.calls=await this.journal.charge(this.stageKey,this.priorQuoteCalls);}
+ private async charge(){
+  if(this.observing){if(this.observationCalls>=JUPITER_V1_OBSERVATION_READ_CAP)blocked("Jupiter's per-invocation observation read cap was reached; run status again.");this.observationCalls++;return;}
+  this.calls=await this.journal.charge(this.stageKey,this.priorQuoteCalls);
+ }
  override async call(method:SolanaMethod,params:readonly unknown[]):Promise<unknown>{await this.charge();
   if(method==="getBlockHeight"&&typeof this.base.batch==="function"){
    const results=await this.base.batch([{method,params}]);
