@@ -20,4 +20,6 @@ export interface GaszipNativeDelivery {
 export declare function inspectGaszipNativeDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock: string | undefined, chain: 1329 | 4326, short: 246 | 514, floor: bigint, h: Helpers): GaszipNativeDelivery | null;
 /** Observed type-0 EIP-155 native payouts only. Reconstruct signed bytes before trusting the gross/net equation. */
 export declare function gaszipNativeNet(tv: unknown, d: GaszipNativeDelivery, owner: string, chain: 1329 | 4326, floor: bigint, h: Helpers): Promise<string>;
+/** Status refusals keep code and reason, and name the public operation, observer phase and the only same-operation step. */
+export declare function gaszipObservationRefusal(error: unknown, operationId: string, phase: string, statusCommand: string): never;
 export {};
