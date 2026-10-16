@@ -21,7 +21,8 @@ import { assertBridgeOwner, bridgeOwner } from "./owner.js";
 import { BridgeHttps } from "./https.js";
 import { SEI_FUNDING, inspectSeiDelivery, inspectSeiFundingQuote, seiFail, seiHash, seiJson, seiUint } from "./sei-gaszip-contract.js";
 import { SeiFundingJournal, publicSeiFunding, sealSeiFunding, type SeiFundingRecord } from "./sei-gaszip-journal.js";
-import { SeiFundingRpc, assertSeiFundingFresh, readSeiFundingPlan, proveSeiDelivery, proveSeiSource, type SeiRpcPort } from "./sei-gaszip-rpc.js";
+import { SeiFundingRpc, assertSeiFundingFresh, readSeiFundingPlan, proveSeiDelivery, proveSeiSource, type SeiRpcPort, type SeiSafeProof } from "./sei-gaszip-rpc.js";
+import { gaszipObservationRefusal } from "./gaszip-native-delivery.js";
 const ORIGIN="https://backend.gas.zip";
 export interface SeiFundingPrepareRequest {readonly profile:string;readonly expectedPayer:string;readonly amountAtomic:string;
   readonly minimumOutputAtomic:string;readonly maximumFeeAtomic:string;readonly idempotencyKey:string}
@@ -138,17 +139,20 @@ export class SeiFundingService {
       const ended=await this.state.withLocks(this.locks(r),async()=>{const saved=await this.required(id);if(saved.state!=="prepared")return saved;
         await this.journal.assertNoEffectClaimsLocked(saved); const next=sealSeiFunding({...saved,state:"failed_before_effect",terminal:true,outcomeDigest:hashObject({id,reason:"unsigned_quote_expired"})});await this.journal.saveLocked(next);return next;}); if(ended.state==="failed_before_effect")await this.usage(ended,"failed_before_effect");return publicSeiFunding(ended);
     }
-    if(r.transactionHash===null)return publicSeiFunding(r);const source=await proveSeiSource(this.rpc("source"),r);if(source===null)return publicSeiFunding(r);
-    if(source.actualFee===null || BigInt(source.actualFee)>BigInt(r.maximumFeeAtomic))seiFail("source_actual_fee_cap");
-    let destination:unknown=null,claimHash:Hex|null=null;
-    if(source.status==="success"){
-      const response=await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`,"GET",null,256*1024,"APN_HTTP_CONFIG");
-      if(response.status!==200)seiFail("status_http");const d=inspectSeiDelivery(seiJson(response.body),r.transactionHash,r.owner.address,r.amountAtomic,source.blockNumber);
-      if(d===null)return publicSeiFunding(r);
-      const proof=await proveSeiDelivery(this.rpc("destination"),r.owner.address,d);if(proof===null)return publicSeiFunding(r);
-      if(BigInt(proof.amount)<BigInt(r.minimumOutputAtomic))seiFail("delivery_owner_floor");
-      destination={...proof,providerDigest:d.providerDigest};claimHash=d.hash;
-    }
+    if(r.transactionHash===null)return publicSeiFunding(r);
+    let phase="source_proof",source:SeiSafeProof|null=null,destination:unknown=null,claimHash:Hex|null=null;
+    try{
+      source=await proveSeiSource(this.rpc("source"),r);if(source===null)return publicSeiFunding(r);
+      if(source.actualFee===null || BigInt(source.actualFee)>BigInt(r.maximumFeeAtomic))seiFail("source_actual_fee_cap");
+      if(source.status==="success"){
+        phase="provider_correlation";const response=await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`,"GET",null,256*1024,"APN_HTTP_CONFIG");
+        if(response.status!==200)seiFail("status_http");const d=inspectSeiDelivery(seiJson(response.body),r.transactionHash,r.owner.address,r.amountAtomic,source.blockNumber);
+        if(d===null)return publicSeiFunding(r);
+        phase="destination_proof";const proof=await proveSeiDelivery(this.rpc("destination"),r.owner.address,d);if(proof===null)return publicSeiFunding(r);
+        if(BigInt(proof.amount)<BigInt(r.minimumOutputAtomic))seiFail("delivery_owner_floor");
+        destination={...proof,providerDigest:d.providerDigest};claimHash=d.hash;
+      }
+    }catch(error){return gaszipObservationRefusal(error,id,phase,"apn sei funding status");}
     r=await this.state.withLocks([...this.locks(r),"sei-gaszip:destination-claims"],async()=>{
       const saved=await this.required(id);if(saved.terminal)return saved;if(saved.transactionHash!==r.transactionHash)seiFail("observation_record_drift");
       if(claimHash!==null)await this.journal.claimDestinationLocked(claimHash,id);

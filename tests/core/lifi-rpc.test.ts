@@ -28,7 +28,7 @@ import { temporaryState } from "./helpers.js";
 type Json = Record<string, any>;
 const word = (n: bigint): Hex => `0x${n.toString(16).padStart(64, "0")}`, quantity = (n: bigint | number) => `0x${n.toString(16)}`;
 const TYPES = ["legacy", "eip2930", "eip1559", "eip4844", "eip7702"] as const;
-async function signedRpcTransaction(index = 2, nonce = 7, chainId = 1) {
+async function signedRpcTransaction(index = 2, nonce = 7, chainId = 1, authorizationNonce = 0) {
   const type = TYPES[index]!, account = privateKeyToAccount(LIFI_SYNTHETIC_KEY);
   const common = { chainId, to: BRIDGE_DIAMOND, nonce, gas: 400000n, value: 0n, data: "0x12345678" as Hex };
   const fees = { maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 0n };
@@ -37,7 +37,7 @@ async function signedRpcTransaction(index = 2, nonce = 7, chainId = 1) {
   else if (type === "eip2930") transaction = { ...common, type, gasPrice: 2000000000n, accessList: [{ address: LIFI_RECIPIENT, storageKeys: [word(5n) as Hex] }] };
   else if (type === "eip1559") transaction = { ...common, ...fees, type, accessList: [] };
   else if (type === "eip4844") transaction = { ...common, ...fees, type, maxFeePerBlobGas: 100n, blobVersionedHashes: [`0x01${"67".repeat(31)}`], accessList: [] };
-  else transaction = { ...common, ...fees, type, accessList: [], authorizationList: [await account.signAuthorization({ chainId: 1, contractAddress: LIFI_RECIPIENT, nonce: 0 })] };
+  else transaction = { ...common, ...fees, type, accessList: [], authorizationList: [await account.signAuthorization({ chainId: 1, contractAddress: LIFI_RECIPIENT, nonce: authorizationNonce })] };
   const raw = await account.signTransaction(transaction), parsed = parseTransaction(raw) as Json, hash = keccak256(raw);
   const rpc: Json = { hash, chainId: quantity(chainId), type: quantity(index), nonce: quantity(nonce), from: account.address, to: common.to,
     gas: quantity(common.gas), value: "0x0", input: common.data, r: parsed.r, s: parsed.s, v: quantity(parsed.v ?? BigInt(parsed.yParity)),
@@ -82,6 +82,25 @@ test("LI.FI RPC reconstructs the exact transaction hash and sender from a short 
   const verified = await verifyRpcTransaction(shortened, 1, selected.hash);
   assert.equal(verified.from, LIFI_SYNTHETIC_SENDER);
   assert.equal(keccak256(selected.raw), selected.hash);
+});
+
+test("LI.FI RPC reconstructs type-4 authorizations whose r or s is a QUANTITY without a leading zero nibble", async () => {
+  const found = new Map<"r" | "s", Awaited<ReturnType<typeof signedRpcTransaction>>>();
+  for (let authorizationNonce = 0; authorizationNonce < 256 && found.size < 2; authorizationNonce++) {
+    const candidate = await signedRpcTransaction(4, 7, 1, authorizationNonce), authorization = candidate.rpc.authorizationList[0] as Json;
+    for (const field of ["r", "s"] as const) if (!found.has(field) && BigInt(authorization[field]) < 1n << 252n) found.set(field, candidate);
+  }
+  assert.equal(found.size, 2, "deterministic signing fixture must produce leading-zero authorization r and s");
+  for (const [field, signed] of found) {
+    const authorization = signed.rpc.authorizationList[0] as Json, short = quantity(BigInt(authorization[field]));
+    const withScalar = (value: string) => ({ ...signed.rpc, authorizationList: [{ ...authorization, [field]: value }] });
+    assert.ok(short.length < 66);
+    assert.equal((await verifyRpcTransaction(withScalar(short), 1, signed.hash)).from, LIFI_SYNTHETIC_SENDER);
+    for (const invalid of [`0x0${short.slice(2)}`.length === 66 ? `0x00${short.slice(2)}` : `0x0${short.slice(2)}`, "0x", `0x${"g".repeat(64)}`, `0x1${"0".repeat(64)}`]) {
+      await assert.rejects(verifyRpcTransaction(withScalar(invalid), 1, signed.hash), { code: "APN_RPC_PROTOCOL" });
+    }
+    await assert.rejects(verifyRpcTransaction(withScalar(quantity(BigInt(short) ^ 1n)), 1, signed.hash), { code: "APN_RPC_PROTOCOL" });
+  }
 });
 
 test("LI.FI source signature validation accepts canonical zero nonce and priority while rejecting any frozen-field change", async () => {
