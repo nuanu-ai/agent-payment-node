@@ -5,8 +5,9 @@ import type { UsdtAnyBoundOperation as UsdtBoundOperation } from "./bound-operat
 import { validateUsdtStoredBoundOperation } from "./bound-stored.js";
 import { UsdtExecutionJournal, type UsdtExecutionRecord } from "./execution-journal.js";
 import { USDT_GASLESS } from "./model.js";
+import { decodeUsdtPaymasterData } from "./paymaster-data.js";
 import { restoreUsdtPlan } from "./restored-plan.js";
-import { verifyUsdtReceipt, verifyUsdtRevert, type UsdtChainReceipt, type UsdtSettlement } from "./receipt.js";
+import { verifyUsdtReceipt, verifyUsdtRevert, type UsdtChainReceipt, type UsdtReceiptPins, type UsdtSettlement } from "./receipt.js";
 
 /** Untrusted bundler locator. The chain receipt and its EntryPoint event remain the outcome authority. */
 export interface UsdtUserOperationReceipt {
@@ -26,6 +27,16 @@ export interface UsdtUserOperationScanInput {
   readonly fromBlockHash: Hex;
   /** Signed paymaster `validUntil`; EntryPoint refuses the operation in any block with a later timestamp. */
   readonly validUntil: bigint;
+  /** The record's own paymaster and EntryPoint (see `usdtRecordPins`). */
+  readonly paymaster: Address;
+  readonly entryPoint: Address;
+}
+
+/** The record's own token, signed paymaster and signed treasury; the EntryPoint its operation hash is bound to. */
+export function usdtRecordPins(bound: UsdtBoundOperation): UsdtReceiptPins {
+  const b = bound.binding;
+  return { token: b.token as Address, paymaster: b.unsignedOperation.paymaster,
+    treasury: decodeUsdtPaymasterData(b.paymasterData).treasury, entryPoint: USDT_GASLESS.entryPoint };
 }
 export type UsdtUserOperationScan =
   | { readonly status: "found"; readonly transactionHash: Hex }
@@ -60,7 +71,7 @@ export class UsdtRecoveryService {
     if (current.userOperationHash === null || !["submitting", "submitted_pending", "unknown_finality"].includes(current.state)) {
       throw new ApnError("APN_OPERATION_BLOCKED", "Gasless USDT has no submitted intent to observe.", { rail: "gasless_usdt" });
     }
-    const hash = current.userOperationHash as Hex;
+    const hash = current.userOperationHash as Hex, pins = usdtRecordPins(bound);
     let outcome: ObservedOutcome | null = null;
     let neverLanded: Extract<UsdtUserOperationScan, { status: "not_found" }> | null = null;
     try {
@@ -68,20 +79,20 @@ export class UsdtRecoveryService {
       try {
         const locator = await this.port.userOperationReceipt(hash);
         if (locator !== null && locator.userOpHash.toLowerCase() === hash && locator.sender === current.sender &&
-          locator.entryPoint === USDT_GASLESS.entryPoint && locator.paymaster === USDT_GASLESS.paymaster) candidate = locator.transactionHash;
+          locator.entryPoint === pins.entryPoint && locator.paymaster === pins.paymaster) candidate = locator.transactionHash;
       } catch { /* The bundler locator is only a hint; the canonical EntryPoint scan below does not depend on it. */ }
       if (candidate !== null) {
         const receipt = await this.port.canonicalFinalizedReceipt(candidate);
         // A receipt not yet finalized is pending; a finalized receipt without this operation's event contradicts the hint.
-        if (receipt !== null) { outcome = this.proven(bound, current, hash, candidate, receipt); contradicted = outcome === null; }
+        if (receipt !== null) { outcome = this.proven(bound, current, hash, candidate, receipt, pins); contradicted = outcome === null; }
       }
       if (candidate === null || contradicted) {
         const scan = await this.port.scanUserOperation({ userOpHash: hash, sender: current.sender as Address,
           fromBlock: BigInt(current.safeBlockNumber), fromBlockHash: current.safeBlockHash as Hex,
-          validUntil: BigInt(current.paymasterValidUntil) });
+          validUntil: BigInt(current.paymasterValidUntil), paymaster: pins.paymaster, entryPoint: pins.entryPoint });
         if (scan.status === "found") {
           const receipt = await this.port.canonicalFinalizedReceipt(scan.transactionHash);
-          if (receipt !== null) outcome = this.proven(bound, current, hash, scan.transactionHash, receipt);
+          if (receipt !== null) outcome = this.proven(bound, current, hash, scan.transactionHash, receipt, pins);
         } else if (scan.final) neverLanded = scan;
       }
     } catch {
@@ -99,14 +110,14 @@ export class UsdtRecoveryService {
 
   /** The chain decides: exactly one successful event with the exact debits settles; one failed event is a confirmed revert. */
   private proven(bound: UsdtBoundOperation, current: UsdtExecutionRecord, hash: Hex, transactionHash: Hex,
-    receipt: UsdtChainReceipt): ObservedOutcome | null {
+    receipt: UsdtChainReceipt, pins: UsdtReceiptPins): ObservedOutcome | null {
     if (receipt.transactionHash.toLowerCase() !== transactionHash.toLowerCase()) return null;
     try {
-      const settlement = verifyUsdtReceipt(restoreUsdtPlan(bound), hash, receipt);
+      const settlement = verifyUsdtReceipt(restoreUsdtPlan(bound), hash, receipt, pins);
       return { state: "finalized", settlement, digest: hashObject({ operationId: bound.operationId, result: "finalized", settlement }) };
     } catch { /* Not a successful settlement of this operation; a failed event is checked next. */ }
     try {
-      verifyUsdtRevert(current.sender as Address, hash, receipt);
+      verifyUsdtRevert(current.sender as Address, hash, receipt, pins);
       return { state: "failed_confirmed_revert", settlement: null, digest: hashObject({ operationId: bound.operationId,
         result: "failed_confirmed_revert", transactionHash: receipt.transactionHash, blockNumber: receipt.blockNumber.toString(), userOpHash: hash }) };
     } catch { return null; }

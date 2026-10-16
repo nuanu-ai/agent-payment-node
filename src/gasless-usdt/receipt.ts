@@ -7,18 +7,28 @@ const USER_OPERATION_EVENT = toEventSelector(
 const TRANSFER = toEventSelector("Transfer(address indexed from, address indexed to, uint256 value)");
 
 export interface UsdtReceiptLog { readonly address: string; readonly topics: readonly string[]; readonly data: string }
+/**
+ * The contracts a receipt is checked against. For a saved operation they come from the record itself (its token, the
+ * paymaster in its signed UserOperation, the treasury in its signed paymaster payload), never today's constants, so a
+ * later pin update cannot strand the proof of an operation sent under the earlier set. The EntryPoint is the v0.8
+ * singleton the operation's hash is bound to.
+ */
+export interface UsdtReceiptPins { readonly token: Address; readonly paymaster: Address; readonly treasury: Address; readonly entryPoint: Address }
+/** Pins of a freshly prepared plan: the current constants it was just validated against. */
+export const USDT_CURRENT_PINS: UsdtReceiptPins = Object.freeze({ token: USDT_GASLESS.token, paymaster: USDT_GASLESS.paymaster,
+  treasury: USDT_GASLESS.treasury, entryPoint: USDT_GASLESS.entryPoint });
 export interface UsdtChainReceipt {
   readonly transactionHash: Hex; readonly blockNumber: bigint; readonly status: "success" | "reverted";
   readonly logs: readonly UsdtReceiptLog[];
 }
 
 /** A failed UserOperationEvent in a successful, canonical EntryPoint transaction proves no account effect. */
-export function verifyUsdtRevert(sender: Address, userOpHash: Hex, receipt: UsdtChainReceipt): void {
+export function verifyUsdtRevert(sender: Address, userOpHash: Hex, receipt: UsdtChainReceipt, pins: UsdtReceiptPins): void {
   if (receipt.status !== "success") usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_revert_outer_status");
-  const events = receipt.logs.filter(log => same(log.address, USDT_GASLESS.entryPoint) && log.topics[0] === USER_OPERATION_EVENT);
+  const events = receipt.logs.filter(log => same(log.address, pins.entryPoint) && log.topics[0] === USER_OPERATION_EVENT);
   const ours = events.filter(log => log.topics[1]?.toLowerCase() === userOpHash.toLowerCase());
   if (ours.length !== 1 || topicAddress(ours[0]!.topics[2]) !== sender ||
-    topicAddress(ours[0]!.topics[3]) !== USDT_GASLESS.paymaster) {
+    topicAddress(ours[0]!.topics[3]) !== pins.paymaster) {
     usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_revert_user_operation");
   }
   let success: boolean;
@@ -26,7 +36,7 @@ export function verifyUsdtRevert(sender: Address, userOpHash: Hex, receipt: Usdt
     [{ type: "uint256" }, { type: "bool" }, { type: "uint256" }, { type: "uint256" }], ours[0]!.data as Hex); }
   catch { usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_revert_event_data"); }
   if (success) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_revert_success_event");
-  if (receipt.logs.some(log => same(log.address, USDT_GASLESS.token) && log.topics[0] === TRANSFER &&
+  if (receipt.logs.some(log => same(log.address, pins.token) && log.topics[0] === TRANSFER &&
     topicAddress(log.topics[1]) === sender)) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_revert_token_debit");
 }
 
@@ -51,24 +61,25 @@ export interface UsdtSettlement {
  * exactly one USDT debit to the recipient of N, exactly one USDT debit to the treasury of A <= F, and no other USDT
  * leaving the sender in that transaction. Anything else is ambiguous and never closes the operation.
  */
-export function verifyUsdtReceipt(plan: Pick<UsdtTransferPlan, "request" | "feeCapAtomic" | "netAtomic">, userOpHash: Hex, receipt: UsdtChainReceipt): UsdtSettlement {
+export function verifyUsdtReceipt(plan: Pick<UsdtTransferPlan, "request" | "feeCapAtomic" | "netAtomic">, userOpHash: Hex,
+  receipt: UsdtChainReceipt, pins: UsdtReceiptPins): UsdtSettlement {
   if (receipt.status !== "success") usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_outer_reverted");
   const sender = plan.request.sender;
-  const events = receipt.logs.filter((log) => same(log.address, USDT_GASLESS.entryPoint) && log.topics[0] === USER_OPERATION_EVENT);
+  const events = receipt.logs.filter((log) => same(log.address, pins.entryPoint) && log.topics[0] === USER_OPERATION_EVENT);
   const ours = events.filter((log) => log.topics[1]?.toLowerCase() === userOpHash.toLowerCase());
   if (ours.length !== 1 || ours[0]!.topics[1]?.toLowerCase() !== userOpHash.toLowerCase()) {
     usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_user_operation");
   }
   const event = ours[0]!;
   if (topicAddress(event.topics[2]) !== sender) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_sender");
-  if (topicAddress(event.topics[3]) !== USDT_GASLESS.paymaster) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_paymaster");
+  if (topicAddress(event.topics[3]) !== pins.paymaster) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_paymaster");
   const [, success, actualGasCost] = decodeAbiParameters(
     [{ type: "uint256" }, { type: "bool" }, { type: "uint256" }, { type: "uint256" }], event.data as Hex);
   if (!success) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_user_operation_failed");
-  const debits = receipt.logs.filter((log) => same(log.address, USDT_GASLESS.token) && log.topics[0] === TRANSFER &&
+  const debits = receipt.logs.filter((log) => same(log.address, pins.token) && log.topics[0] === TRANSFER &&
     topicAddress(log.topics[1]) === sender).map((log) => ({ to: topicAddress(log.topics[2]), value: BigInt(log.data) }));
   const delivery = debits.filter((debit) => debit.to === plan.request.recipient);
-  const fee = debits.filter((debit) => debit.to === USDT_GASLESS.treasury);
+  const fee = debits.filter((debit) => debit.to === pins.treasury);
   if (debits.length !== 2 || delivery.length !== 1 || fee.length !== 1) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_transfers");
   if (delivery[0]!.value !== plan.netAtomic) usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_delivery_amount");
   const charged = fee[0]!.value;
