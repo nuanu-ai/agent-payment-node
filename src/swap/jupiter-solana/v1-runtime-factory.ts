@@ -1,5 +1,5 @@
 import { swapMechanismDigest } from "../pin.js";
-import { JUPITER_V1_OLD_ROUTE, routeConfigForMaterial, type JupiterV1RouteConfig } from "./v1-route-config.js";
+import { JUPITER_V1_ROUTES, routeConfigForMaterial, type JupiterV1RouteConfig } from "./v1-route-config.js";
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
@@ -116,7 +116,7 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
   if(op.mechanismDigest!==swapMechanismDigest(route.mechanismPin)||op.protocolRegistryDigest!==registry.registryDigest||op.protocolRegistryVersion!==registry.registryVersion)blocked("Jupiter saved operation registry or mechanism differs from its authenticated material.");return make(route);}
  // This canonical instance owns the shared Native signer, RPC journal and cached fixed-registry runtimes.
  // Asynchronous selection stays inside existing command methods; no public route/pin selector exists.
- const old=make(JUPITER_V1_OLD_ROUTE);
+ const old=make(JUPITER_V1_ROUTES[0]!);
  class JupiterFiniteRuntime extends GuardedSwapRuntime<JupiterV1QuoteRequest>{
   override async quote(request:JupiterV1QuoteRequest,now:Date){const value=detached(request),selected=await admission.resolveRoute(value.profile,value.amountAtomic,"1",value.account);return await make(selected.route).quote(value,now);}
   override async prepare(request:{readonly profile:string;readonly quoteHash:string;readonly idempotencyKey:string},now:Date){const value=detached(request);return await make(await materialRoute(value.quoteHash)).prepare(value,now);}

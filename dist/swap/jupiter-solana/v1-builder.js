@@ -3,7 +3,7 @@ import { snapshotFromJupiterV1QuoteProof } from "./v1-proof.js";
 import { WRAPPED_SOL_MINT, SOLANA_USDC_MINT } from "./catalog.js";
 import { jupiterV1MaximumNativeExpense } from "./v1-guard.js";
 import { jupiterV1GasDisplay, assertJupiterV1FreshMaterial, validateJupiterV1PreparedMaterial } from "./v1-material.js";
-import { JUPITER_V1_OLD_ROUTE, JUPITER_V1_FINITE_ROUTES, routeConfigForQuote, routeConfigForQuoteBuild } from "./v1-route-config.js";
+import { JUPITER_V1_ROUTES, routeConfigForQuote, routeConfigForQuoteBuild } from "./v1-route-config.js";
 export class JupiterV1QuoteBuilder {
     provider;
     resolver;
@@ -21,8 +21,8 @@ export class JupiterV1QuoteBuilder {
         const payer = await this.options.resolvePayer(input.profile, input.amountAtomic);
         if (input.account !== payer || input.recipient !== payer)
             throw new ApnError("APN_INVALID_INPUT", "Jupiter V1 quoted parties differ from the owned payer.");
-        const routeId = this.options.resolveRouteId === undefined ? JUPITER_V1_OLD_ROUTE.routeId : await this.options.resolveRouteId(input.profile, input.amountAtomic);
-        const legacy = JUPITER_V1_FINITE_ROUTES.find(route => route.routeId === routeId)?.variant === 17;
+        const routeId = this.options.resolveRouteId === undefined ? JUPITER_V1_ROUTES[0].routeId : await this.options.resolveRouteId(input.profile, input.amountAtomic);
+        const legacy = JUPITER_V1_ROUTES.find(route => route.routeId === routeId)?.variant === 17;
         const request = { inputMint: WRAPPED_SOL_MINT, outputMint: SOLANA_USDC_MINT, amount: input.amountAtomic, taker: payer, recipient: payer, slippageBps: input.slippageBps, computeUnitPriceMicroLamports: this.options.computeUnitPriceMicroLamports,
             ...(legacy ? { maximumInnerAccounts: 12 } : {}) };
         let quoteResponse;
@@ -53,7 +53,7 @@ export class JupiterV1QuoteBuilder {
         const material = { quote, approvalCapAtomic: "0", gasOrEnergy: jupiterV1GasDisplay(execution), execution };
         validateJupiterV1PreparedMaterial(material);
         await this.store.save(material);
-        return { quoteHash: quote.quoteHash, quote, fees: material.gasOrEnergy, mechanism: "jupiter_v1_direct_whirlpool", provenance: "runtime_bytes_only", signed: false, broadcast: false };
+        return { quoteHash: quote.quoteHash, quote, fees: material.gasOrEnergy, mechanism: "jupiter_v1_direct_whirlpool", provenance: "upgrade_authority", signed: false, broadcast: false };
     }
     async load(hash) { return await this.store.load(hash); }
 }

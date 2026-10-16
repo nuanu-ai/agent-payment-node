@@ -35,31 +35,32 @@ function publicPort(batched: boolean, change?: (key: string, data: Buffer) => vo
  }} : {})};
  return {rpc, reads, batches: grouped};
 }
-test("batched public resolution retains the complete frozen message and full executable byte proof", async () => {
+const programData = () => m.programPins.filter(p => p.programDataAddress !== null).map(p => p.programDataAddress!);
+test("batched public resolution retains the complete frozen message and reads every program as a 45-byte header", async () => {
  const ordinary = publicPort(false), batched = publicPort(true);
  const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
  const b = await new JupiterV1MaterialResolver(batched.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
  assert.deepEqual(b, a); assert.equal(b.messageHash, m.messageHash);
- assert.deepEqual(b.programPins, m.programPins);
+ assert.ok(b.programPins.every(p => p.provenance === "upgrade_authority"));
  assert.equal(batched.reads.length, ordinary.reads.length);
- assert.equal(batched.batches.length, 2);
  assert.ok(batched.batches.every(r => r.length >= 2 && r.length <= 8));
- for (const pin of b.programPins.filter(p => p.programDataAddress !== null)) {
-  const original = m.semanticAccounts.find(a => a.address === pin.programDataAddress)!;
-  const resolved = b.semanticAccounts.find(a => a.address === pin.programDataAddress)!;
-  assert.equal(resolved.dataBase64, original.dataBase64);
+ const headers = ordinary.reads.filter(r => (r.params[1] as { dataSlice?: unknown } | undefined)?.dataSlice !== undefined);
+ assert.equal(headers.length, 1); assert.deepEqual((headers[0]!.params[1] as { dataSlice: unknown }).dataSlice, { offset: 0, length: 45 });
+ for (const address of programData()) {
+  const original = Buffer.from(m.semanticAccounts.find(a => a.address === address)!.dataBase64, "base64");
+  assert.equal(b.semanticAccounts.find(a => a.address === address)!.dataBase64, original.subarray(0, 45).toString("base64"));
  }
 });
-test("PublicNode-sized reads preserve all accounts and frozen executable proof without exceeding eight keys", async () => {
+test("PublicNode-sized reads preserve all accounts and the frozen message without exceeding eight keys", async () => {
  const ordinary = publicPort(false), bounded = publicPort(true);
  const rpc = { ...bounded.rpc, maximumAccountsPerRead: 8 as const };
  const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
  const b = await new JupiterV1MaterialResolver(rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
- assert.deepEqual(b, a);
+ assert.deepEqual(b.semanticAccounts.map(a => a.address).sort(), a.semanticAccounts.map(a => a.address).sort());
+ assert.equal(b.messageHash, a.messageHash); assert.deepEqual(b.programPins, a.programPins);
  const accountReads = bounded.reads.filter(r => r.method === "getMultipleAccounts");
- assert.equal(accountReads.length, 3);
  assert.ok(accountReads.every(r => (r.params[0] as string[]).length <= 8));
- assert.equal(bounded.reads.length, ordinary.reads.length + 1);
+ assert.ok(accountReads.length > ordinary.reads.filter(r => r.method === "getMultipleAccounts").length);
 });
 test("the durable Jupiter RPC forwards the endpoint account-read bound", async t => {
  const temp = await temporaryState(); t.after(temp.cleanup);
@@ -67,41 +68,43 @@ test("the durable Jupiter RPC forwards the endpoint account-read bound", async t
   assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc(endpoint), temp.root, "quote").maximumAccountsPerRead, 8);
  assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc("https://api.mainnet-beta.solana.com"), temp.root, "quote").maximumAccountsPerRead, 16);
 });
-test("public ProgramData resolution retains every byte in ten bounded chunks without header-only reads",async()=>{
- const p=publicPort(false),resolved=await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse,m.maximumNativeExpenseLamports);
- const reads=p.reads.filter(r=>r.method==="getAccountInfo");assert.equal(reads.length,10);
- assert.ok(reads.every(r=>{const slice=(r.params[1] as any).dataSlice;return slice.length>45&&slice.length<=1500000;}));
- for(const pin of resolved.programPins.filter(p=>p.programDataAddress!==null)){
-  const data=Buffer.from(m.semanticAccounts.find(a=>a.address===pin.programDataAddress)!.dataBase64,"base64"),parts=reads.filter(r=>r.params[0]===pin.programDataAddress);
-  assert.equal(parts.length,Math.ceil(data.length/1500000));
-  assert.deepEqual(parts.map(r=>(r.params[1] as any).dataSlice.offset),parts.map((_,i)=>i*1500000));
-  assert.equal(resolved.semanticAccounts.find(a=>a.address===pin.programDataAddress)!.dataBase64,data.toString("base64"));
- }
+test("public resolution never downloads ProgramData beyond its header", async () => {
+ const p = publicPort(false); await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
+ assert.equal(p.reads.some(r => r.method === "getAccountInfo"), false);
+ for (const read of p.reads.filter(r => r.method === "getMultipleAccounts" && (r.params[0] as string[]).some(k => programData().includes(k))))
+  assert.deepEqual((read.params[1] as { dataSlice?: unknown }).dataSlice, { offset: 0, length: 45 });
 });
-for(const mutation of ["short-first","short-later","changed-owner","changed-lamports","changed-space","stale-first"] as const)test(`public ProgramData chunks refuse ${mutation} before fee proof`,async()=>{
- const p=publicPort(false),original=p.rpc.call;let first=0;
- p.rpc.call=async(method,params)=>{const value=await original(method,params);
-  if(method==="getAccountInfo"){
-   const row=value as any,slice=(params[1] as any).dataSlice;first++;
-   if(mutation==="short-first"&&slice.offset===0||mutation==="short-later"&&slice.offset>0){const b=Buffer.from(row.value.data[0],"base64");row.value.data[0]=b.subarray(0,b.length-1).toString("base64");}
-   if(mutation==="changed-owner"&&slice.offset>0)row.value.owner=m.payer;
-   if(mutation==="changed-lamports"&&slice.offset>0)row.value.lamports++;
-   if(mutation==="changed-space"&&slice.offset>0)row.value.space++;
-   if(mutation==="stale-first"&&first===1)row.context.slot=1n;
-  }return value;
+for (const mutation of ["short header", "stale header", "ProgramData owner"] as const) test(`a ${mutation} refuses before fee proof`, async () => {
+ const p = publicPort(false), original = p.rpc.call;
+ p.rpc.call = async (method, params) => {
+  const value = await original(method, params), slice = (params[1] as { dataSlice?: unknown } | undefined)?.dataSlice;
+  if (method === "getMultipleAccounts" && slice !== undefined) {
+   const row = value as { context: { slot: bigint }; value: ({ data: [string, string]; owner: string } | null)[] }, keys = params[0] as string[];
+   if (mutation === "stale header") row.context.slot = 1n;
+   for (const [i, key] of keys.entries()) if (programData().includes(key)) {
+    if (mutation === "short header") row.value[i]!.data[0] = Buffer.from(row.value[i]!.data[0], "base64").subarray(0, 44).toString("base64");
+    if (mutation === "ProgramData owner") row.value[i]!.owner = m.payer;
+   }
+  }
+  return value;
  };
- await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer,m.quoteResponse,m.rawBuildResponse,m.maximumNativeExpenseLamports));
- assert.equal(p.reads.some(r=>r.method==="getFeeForMessage"),false);
-});
-test("batched public proof still refuses a changed deployed executable payload", async () => {
- const p = publicPort(true, (key, bytes) => {if (key === m.programPins.find(p => p.programDataAddress !== null)!.programDataAddress) bytes[45] = bytes[45]! ^ 1;});
- await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports), /runtime executable pin changed/);
+ await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports));
  assert.equal(p.reads.some(r => r.method === "getFeeForMessage"), false);
 });
-test("an incomplete public batch refuses before any executable chunk or fee proof", async () => {
+test("a changed executable payload is never read; a changed upgrade authority refuses before fee proof", async () => {
+ const first = programData()[0]!;
+ const payload = publicPort(true, (key, bytes) => { if (key === first) bytes[45] = bytes[45]! ^ 1; });
+ const resolved = await new JupiterV1MaterialResolver(payload.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
+ assert.equal(resolved.messageHash, m.messageHash);
+ const authority = publicPort(true, (key, bytes) => { if (key === programData().find(k => Buffer.from(m.semanticAccounts.find(a => a.address === k)!.dataBase64, "base64")[12] === 1)) bytes[20] = bytes[20]! ^ 1; });
+ await assert.rejects(new JupiterV1MaterialResolver(authority.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports),
+  (error: { details?: { reason?: string } }) => error.details?.reason === "solana_program_authority_changed");
+ assert.equal(authority.reads.some(r => r.method === "getFeeForMessage"), false);
+});
+test("an incomplete public batch refuses before any fee proof", async () => {
  const p = publicPort(true); p.rpc.batch = async () => [];
  await assert.rejects(new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports), /batch is incomplete/);
- assert.deepEqual(p.reads.map(r => r.method), ["getGenesisHash"]);
+ assert.equal(p.reads.some(r => r.method === "getFeeForMessage"), false);
 });
 const small: readonly SolanaBatchRead[] = [{method: "getBlockHeight", params: []}, {method: "getMinimumBalanceForRentExemption", params: [165]}];
 test("one physical POST retains two durable Jupiter logical charges and base budget charges", async t => {

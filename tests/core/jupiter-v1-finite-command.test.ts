@@ -10,7 +10,7 @@ import { SolanaRpc, SolanaRpcBudget } from "../../src/solana/rpc.js";
 import { SolanaRpcPacer } from "../../src/solana/pacing.js";
 import { createJupiterV1Runtime } from "../../src/swap/jupiter-solana/v1-runtime-factory.js";
 import { executeJupiterCommand } from "../../src/swap/jupiter-solana/command-service.js";
-import { JUPITER_V1_CURRENT_ROUTES, JUPITER_V1_FINITE_ROUTES, JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE as OLD, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE as NEW, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE as NEW83 } from "../../src/swap/jupiter-solana/v1-route-config.js";
+import { JUPITER_V1_ROUTES, JUPITER_V1_KNOWN_ROUTES, JUPITER_V1_OLD_ROUTE, JUPITER_V1_WHIRLPOOL_FP_ROUTE as OLD, JUPITER_V1_WHIRLPOOL_FP_RUNTIME_099DA3_ROUTE as NEW, JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_ROUTE as NEW83 } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { guardJupiterV1WhirlpoolMaterial } from "../../src/swap/jupiter-solana/v1-guard.js";
 import { syntheticFpMaterial } from "../fixtures/jupiter-v1-whirlpool-fp/material.js";
 import { syntheticRuntime099da3Material } from "../fixtures/jupiter-v1-runtime-099da3/material.js";
@@ -19,16 +19,16 @@ import type { RuntimeContext } from "../../src/runtime.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { validateSwapOperation } from "../../src/swap/model.js";
 
-test("finite inventory offers only the current generation of each pool and lists older generations as observe-only",async t => {
+test("finite inventory offers one current route per pool and lists the byte-pinned generations as observe-only",async t => {
  const temp=await temporaryState();t.after(temp.cleanup);
  const result=await executeJupiterCommand({command:"swap.jupiter.inventory"},{state:new StateStore(temp.root),clock:{now:()=>new Date()}} as RuntimeContext);
  const data=result.data as {ownerAdmission:{evaluated:boolean};execution:string;v1:{routes:{mechanismDigest:string;routeDigest:string}[];historicalObserveOnly:{mechanismDigest:string}[]}};
- assert.deepEqual(data.v1.routes.map(r=>r.mechanismDigest),JUPITER_V1_CURRENT_ROUTES.map(r=>swapMechanismDigest(r.mechanismPin)));
- assert.deepEqual([...data.v1.routes.map(r=>r.mechanismDigest),...data.v1.historicalObserveOnly.map(r=>r.mechanismDigest)].sort(),JUPITER_V1_FINITE_ROUTES.map(r=>swapMechanismDigest(r.mechanismPin)).sort());
+ assert.deepEqual(data.v1.routes.map(r=>r.mechanismDigest),JUPITER_V1_ROUTES.map(r=>swapMechanismDigest(r.mechanismPin)));
+ assert.deepEqual([...data.v1.routes.map(r=>r.mechanismDigest),...data.v1.historicalObserveOnly.map(r=>r.mechanismDigest)].sort(),JUPITER_V1_KNOWN_ROUTES.map(r=>swapMechanismDigest(r.mechanismPin)).sort());
  assert.equal(new Set(data.v1.routes.map(r=>r.routeDigest)).size,4);assert.equal(data.ownerAdmission.evaluated,false);assert.equal(data.execution,"dormant");
 });
 for (const [label,ROUTE,material] of [["historical",OLD,syntheticFpMaterial],["runtime 099da3",NEW,syntheticRuntime099da3Material],["runtime 099da3 83",NEW83,()=>syntheticRuntime099da3Material("83")]] as const)
-test(`SYNTHETIC ${label} Fp production factory quote, prepare and CLI status pass the same finite mechanism gate without custody or send`,async t => {
+test(`SYNTHETIC ${label} bytes served: an admission of that generation quotes and prepares the pool's current route without custody or send`,async t => {
  const temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root),profile="test-fp-command",m=material();
  const wrapping={async load(){return Buffer.alloc(32,77);},async create(){return Buffer.alloc(32,77);}},accounts=new ChainAccountStore(temp.root,wrapping);
  await accounts.ensureLocal({profile,rail:"solana",create:async()=>({address:m.payer,seed:Buffer.alloc(32,9)})});
@@ -43,5 +43,5 @@ test(`SYNTHETIC ${label} Fp production factory quote, prepare and CLI status pas
  const op=await runtime.prepare({profile,quoteHash:quote.quoteHash,idempotencyKey:"test-fp-command"},new Date());
  const result=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},{state,clock:{now:()=>new Date()},jupiterV1Runtime:runtime} as RuntimeContext);
  const checked=validateSwapOperation(result.operation);
- assert.equal(checked.operationId,op.operationId);assert.equal(checked.mechanismDigest,swapMechanismDigest(ROUTE.mechanismPin));assert.equal(checked.submissionMarker,null);assert.equal(checked.state,"awaiting_approval");assert.deepEqual(result.nextActions,[`apn swap solana jupiter approve --operation ${op.operationId}`]);assert.equal(checked.usageLease,null);assert.equal(secrets,0);assert.equal(sends,0);
+ assert.equal(checked.operationId,op.operationId);assert.equal(checked.mechanismDigest,swapMechanismDigest(JUPITER_V1_ROUTES.find(r=>r.pool===ROUTE.pool)!.mechanismPin));assert.equal(checked.submissionMarker,null);assert.equal(checked.state,"awaiting_approval");assert.deepEqual(result.nextActions,[`apn swap solana jupiter approve --operation ${op.operationId}`]);assert.equal(checked.usageLease,null);assert.equal(secrets,0);assert.equal(sends,0);
 });

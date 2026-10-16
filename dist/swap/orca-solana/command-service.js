@@ -5,13 +5,13 @@ import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "..
 import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "./stable-mechanism.js";
 import { SwapOperationRepository } from "../repository.js";
 import { orcaStableInventory } from "./stable-readonly.js";
-import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, isOrcaKeylessMechanismDigest, ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_POOL_FEE_RATE, ORCA_POOL_TICK_SPACING, ORCA_PROGRAM_PINS, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_SOLANA_CHAIN, ORCA_USDC_VAULT, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
+import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, isOrcaKeylessMechanismDigest, ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_POOL_TICK_SPACING, ORCA_PROGRAM_AUTHORITIES, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_SOLANA_CHAIN, ORCA_USDC_VAULT, SYSTEM_PROGRAM, TOKEN_PROGRAM, USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG, WSOL_MINT, } from "./pins.js";
 /** Inventory is the owner's source for the keyless pin and digest; nothing here admits or signs anything. */
 export function orcaInventory(runtimeInstalled) {
     return { chain: ORCA_SOLANA_CHAIN, ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION, execution: runtimeInstalled ? "foreground_cli_after_owner_admission" : "dormant",
         pool: { address: ORCA_SOL_USDC_POOL, program: WHIRLPOOL_PROGRAM, config: WHIRLPOOLS_CONFIG, tokenA: WSOL_MINT, tokenB: USDC_MINT,
-            vaultA: ORCA_SOL_VAULT, vaultB: ORCA_USDC_VAULT, tickSpacing: ORCA_POOL_TICK_SPACING, feeRate: ORCA_POOL_FEE_RATE, direction: "SOL_to_USDC_exact_input" },
-        allowedPrograms: [COMPUTE_BUDGET_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM], programPins: ORCA_PROGRAM_PINS,
+            vaultA: ORCA_SOL_VAULT, vaultB: ORCA_USDC_VAULT, tickSpacing: ORCA_POOL_TICK_SPACING, feeRate: "read_from_pool_at_quote", direction: "SOL_to_USDC_exact_input" },
+        allowedPrograms: [COMPUTE_BUDGET_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM], programAuthorities: ORCA_PROGRAM_AUTHORITIES,
         keyless: { route: swapRouteOf(ORCA_KEYLESS_MECHANISM_PIN), routeDigest: swapRouteDigest(ORCA_KEYLESS_MECHANISM_PIN),
             mechanismPin: ORCA_KEYLESS_MECHANISM_PIN, mechanismDigest: swapMechanismDigest(ORCA_KEYLESS_MECHANISM_PIN),
             protocolRegistryDigest: ORCA_KEYLESS_PROTOCOL_REGISTRY.registryDigest } };

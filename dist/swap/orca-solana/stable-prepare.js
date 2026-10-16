@@ -216,7 +216,7 @@ function validateMarketSnapshot(input, tickAddresses) {
     const pool = decodeWhirlpool(ORCA_STABLE_POOL, s.pool, WHIRLPOOL_PROGRAM, WHIRLPOOL_ACCOUNT_DISCRIMINATOR);
     if (pool.config !== WHIRLPOOLS_CONFIG || pool.mintA !== USDC_MINT || pool.mintB !== SOLANA_USDT ||
         pool.vaultA !== ORCA_STABLE_VAULT_A || pool.vaultB !== ORCA_STABLE_VAULT_B || pool.tickSpacing !== 1 ||
-        pool.feeTierIndexSeed !== 1 || pool.feeRate !== 100 || pool.tickCurrentIndex !== q.tickCurrentIndex ||
+        pool.feeTierIndexSeed !== 1 || pool.tickCurrentIndex !== q.tickCurrentIndex ||
         s.oracle !== null || s.tickArrays.length !== 3)
         blocked("Caller supplied stable pool state differs from pins.", "orca_stable_pool_state");
     const arrays = s.tickArrays.map((account, i) => decodeTickArray(tickAddresses[i], account, WHIRLPOOL_PROGRAM, TICK_ARRAY_ACCOUNT_DISCRIMINATOR));

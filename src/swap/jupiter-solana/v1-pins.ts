@@ -1,8 +1,15 @@
-import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin } from "../pin.js";
+import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin, type SwapMechanismPin } from "../pin.js";
 import { compileSwapProtocolRegistry } from "../protocol-registry.js";
+import { BPF_LOADER_2, NATIVE_LOADER, UPGRADEABLE_LOADER, type SolanaImmutableProgramAuthority,
+  type SolanaUpgradeableProgramAuthority } from "../solana-program-authority.js";
 import { JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM } from "./catalog.js";
 export const JUPITER_V1_WHIRLPOOL_PROGRAM = "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc";
 export const JUPITER_V1_POOL = "83v8iPyZihDEjDdY8RdZddyZNyUtXngz69Lgo9Kt5d6d";
+/**
+ * Everything from here to the current route set below is historical: the byte-pinned generations 899161 (JUP6),
+ * 099da3 (JUP6) and c422b2 (Whirlpool) of APN 0.5.42 and earlier. They identify saved materials and operations so those
+ * stay readable and observable; they never quote, approve or sign again.
+ */
 export interface JupiterV1RegisteredProgramPin {
     readonly programId: string; readonly programDataAddress: string; readonly payloadHash: string;
     /** New snapshots also bind the complete loader header; historical pins remain exact. */
@@ -51,7 +58,8 @@ export const JUPITER_V1_WHIRLPOOL_RUNTIME_099DA3_PROTOCOL_REGISTRY = compileSwap
 /** Additional finite route; the historical 83 mechanism and registry above remain unchanged. */
 export const JUPITER_V1_WHIRLPOOL_V2_POOL = "Esvfxt3jMDdtTZqLF1fqRhDjzM8Bpr7fZxJMrK69PB7e";
 export const JUPITER_V1_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
-export const JUPITER_V1_MEMO_PIN = Object.freeze({ programId: JUPITER_V1_MEMO_PROGRAM, loader: "BPFLoader2111111111111111111111111111111111", byteLength: 74800, payloadHash: "f520eaf096361abbb9639ea4dc3e5388a87b9330e121f476607b87c46ef67954" });
+/** Memo and the fixed setup programs cannot be upgraded; their loader is the pin. */
+export const JUPITER_V1_MEMO_PIN = Object.freeze({ programId: JUPITER_V1_MEMO_PROGRAM, loader: "BPFLoader2111111111111111111111111111111111" });
 export const JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN = Object.freeze(validateSwapMechanismPin({ ...JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, protocolVersion: "jup6-route-v1-whirlpool-swap-v2.1", auxiliaryContractProgramIdentities: Object.freeze([JUPITER_V1_WHIRLPOOL_PROGRAM, JUPITER_V1_WHIRLPOOL_V2_POOL, TOKEN_PROGRAM, ASSOCIATED_TOKEN_PROGRAM, SYSTEM_PROGRAM, COMPUTE_BUDGET_PROGRAM, JUPITER_V1_MEMO_PROGRAM]), quoteSchemaVersion: "jupiter-v1-exact-in-whirlpool-swap-v2.1", transactionSchemaVersion: "v0-jup6-route-whirlpool-swap-v2-wrap-close.1", validationPolicyIdentity: "apn.jupiter-v1.runtime-pinned-sol-usdc-whirlpool-swap-v2" }));
 export const JUPITER_V1_WHIRLPOOL_V2_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-swap-v2.2026-10-08", pins: [JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN] });
 
@@ -82,9 +90,9 @@ export const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_099DA3_PROTOCOL_REGISTRY = compileS
 });
 
 export const JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS = Object.freeze([
-    Object.freeze({programId: ASSOCIATED_TOKEN_PROGRAM, loader: "BPFLoader2111111111111111111111111111111111", payloadHash: "6804554e69fd3a58caa191dc4a58f4c67223d30ca28ab8987f39fc18d2f7374d"}),
-    Object.freeze({programId: COMPUTE_BUDGET_PROGRAM, loader: "NativeLoader1111111111111111111111111111111", payloadHash: "005950c007e8e550a16beddf836f0082d26d197f5f645ff7c04a5c8d171cf8a1"}),
-    Object.freeze({programId: SYSTEM_PROGRAM, loader: "NativeLoader1111111111111111111111111111111", payloadHash: "c94b792a6d8b25d3e53ea94d8b80111735ed80d6a7dc8deb937cd342707f5f03"}),
+    Object.freeze({programId: ASSOCIATED_TOKEN_PROGRAM, loader: "BPFLoader2111111111111111111111111111111111"}),
+    Object.freeze({programId: COMPUTE_BUDGET_PROGRAM, loader: "NativeLoader1111111111111111111111111111111"}),
+    Object.freeze({programId: SYSTEM_PROGRAM, loader: "NativeLoader1111111111111111111111111111111"}),
 ]);
 
 /**
@@ -128,3 +136,38 @@ export const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_MECHANISM_PIN = Object.freez
 export const JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({
  registryVersion: "jupiter-v1-whirlpool-swap-v2-4h-runtime-c422b2.2026-10-16", pins: [JUPITER_V1_WHIRLPOOL_4H_RUNTIME_C422B2_MECHANISM_PIN]
 });
+
+/**
+ * Current route set (owner decision, phase 2): one mechanism per pool that names no executable bytes, so a routine
+ * JUP6 or Whirlpool upgrade changes nothing. What is pinned instead is each upgradeable program's ProgramData address and
+ * upgrade authority, read from 45-byte loader headers (2026-10-16, slot 457686204): JUP6 CvQZZ23q… (deployed at slot
+ * 454465850), Whirlpool's Squads v4 vault GwH3Hiv5… (deployed at slot 457152296), and SPL Token, whose authority was
+ * removed. A different authority refuses; a new deployment slot alone is accepted.
+ */
+export const JUPITER_V1_PROGRAM_AUTHORITIES: readonly SolanaUpgradeableProgramAuthority[] = Object.freeze([
+ { role: "jupiter_v6_program", programId: JUPITER_V6_PROGRAM, loader: UPGRADEABLE_LOADER, programDataAddress: "4Ec7ZxZS6Sbdg5UGSLHbAnM7GQHp2eFd4KYWRexAipQT",
+  upgradeAuthority: "CvQZZ23qYDWF2RUpxYJ8y9K4skmuvYEEjH7fK58jtipQ" },
+ { role: "whirlpool_program", programId: JUPITER_V1_WHIRLPOOL_PROGRAM, loader: UPGRADEABLE_LOADER, programDataAddress: "CtXfPzz36dH5Ws4UYKZvrQ1Xqzn42ecDW6y8NKuiN8nD",
+  upgradeAuthority: "GwH3Hiv5mACLX3ufTw1pFsrhSPon5tdw252DBs4Rx4PV" },
+ { role: "spl_token_program", programId: TOKEN_PROGRAM, loader: UPGRADEABLE_LOADER, programDataAddress: "3gvYRKWyXRR9xKWe1ZjPhLY5ZJRN7KDB4rFZFGoJfFk2",
+  upgradeAuthority: null },
+].map(pin => Object.freeze(pin)) as SolanaUpgradeableProgramAuthority[]);
+/** Programs that can never be upgraded: BPFLoader2 or native. Their loader is the pin. */
+export const JUPITER_V1_IMMUTABLE_PROGRAMS: readonly SolanaImmutableProgramAuthority[] = Object.freeze([
+ { role: "associated_token_program", programId: ASSOCIATED_TOKEN_PROGRAM, loader: BPF_LOADER_2 },
+ { role: "system_program", programId: SYSTEM_PROGRAM, loader: NATIVE_LOADER },
+ { role: "compute_budget_program", programId: COMPUTE_BUDGET_PROGRAM, loader: NATIVE_LOADER },
+ { role: "memo_program", programId: JUPITER_V1_MEMO_PROGRAM, loader: BPF_LOADER_2 },
+].map(pin => Object.freeze(pin)) as SolanaImmutableProgramAuthority[]);
+function authorityPinned(pin: SwapMechanismPin, protocolVersion: string, pool: string): SwapMechanismPin {
+ return Object.freeze(validateSwapMechanismPin({ ...pin, protocolVersion, validationPolicyIdentity: `apn.jupiter-v1.upgrade-authority-sol-usdc-whirlpool-${pool}`,
+  validationPolicyVersion: "4.0.0" }));
+}
+export const JUPITER_V1_83_MECHANISM_PIN = authorityPinned(JUPITER_V1_WHIRLPOOL_MECHANISM_PIN, "jup6-route-v1-whirlpool.upgrade-authority", "83");
+export const JUPITER_V1_FP_MECHANISM_PIN = authorityPinned(JUPITER_V1_WHIRLPOOL_FP_MECHANISM_PIN, "jup6-route-v1-whirlpool-fp.upgrade-authority", "fp");
+export const JUPITER_V1_ESV_MECHANISM_PIN = authorityPinned(JUPITER_V1_WHIRLPOOL_V2_MECHANISM_PIN, "jup6-route-v1-whirlpool-swap-v2.upgrade-authority", "swap-v2-esv");
+export const JUPITER_V1_4H_MECHANISM_PIN = authorityPinned(JUPITER_V1_WHIRLPOOL_4H_MECHANISM_PIN, "jup6-route-v1-whirlpool-swap-v2-4h.upgrade-authority", "swap-v2-4h");
+export const JUPITER_V1_83_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-83.2026-10-17", pins: [JUPITER_V1_83_MECHANISM_PIN] });
+export const JUPITER_V1_FP_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-fp.2026-10-17", pins: [JUPITER_V1_FP_MECHANISM_PIN] });
+export const JUPITER_V1_ESV_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-swap-v2-esv.2026-10-17", pins: [JUPITER_V1_ESV_MECHANISM_PIN] });
+export const JUPITER_V1_4H_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "jupiter-v1-whirlpool-swap-v2-4h.2026-10-17", pins: [JUPITER_V1_4H_MECHANISM_PIN] });

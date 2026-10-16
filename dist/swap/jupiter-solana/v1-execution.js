@@ -98,12 +98,15 @@ export class JupiterV1SingleSender {
 export async function proveJupiterV1Preconsent(rpc, clock, op, materialValue) {
     const material = validateJupiterV1PreparedMaterial(materialValue);
     const fresh = await new JupiterV1MaterialResolver(rpc).resolve(material.execution.payer, material.execution.quoteResponse, material.execution.rawBuildResponse, material.execution.maximumNativeExpenseLamports, material.execution.quoteRpcLifetime, routeConfigForMaterial(material.execution).routeId);
+    // A routine upgrade by the pinned authority between quote and consent is accepted: the simulation below runs against the
+    // program as deployed now. The program identities and authorities must stay those the quote was built with.
     if (fresh.transactionBase64 !== material.execution.transactionBase64 || fresh.messageHash !== material.execution.messageHash ||
-        fresh.lookupBindingDigest !== material.execution.lookupBindingDigest || canonicalJson(fresh.programPins) !== canonicalJson(material.execution.programPins))
-        blocked("Jupiter's frozen message, lookup or runtime executable identity changed.");
+        fresh.lookupBindingDigest !== material.execution.lookupBindingDigest || canonicalJson(programIdentities(fresh)) !== canonicalJson(programIdentities(material.execution)))
+        blocked("Jupiter's frozen message, lookup or program authority changed.");
     const guarded = await guardJupiterV1WhirlpoolMaterial(fresh, { now: clock.now().getTime(), deadline: op.quote.expiresAt }), simulation = await proveJupiterV1Simulation(rpc, guarded);
     return detached({ operationId: op.operationId, materialDigest: material.execution.materialDigest, fresh, simulation });
 }
+function programIdentities(m) { return m.programPins.map(({ programId, loader, programDataAddress, upgradeAuthority }) => ({ programId, loader, programDataAddress, upgradeAuthority })); }
 export class JupiterV1ExecutionDriver {
     d;
     constructor(d) {
