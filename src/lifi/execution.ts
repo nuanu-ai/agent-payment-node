@@ -72,6 +72,7 @@ export class BridgeExecution {
   }
   async run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord> {
     if (op.terminal || op.state === "awaiting_approval") return op;
+    op = await this.releaseUnsignedSeal(op);
     const haltReason = op.failure?.reason.startsWith("unsent_") ? op.failure.reason : null;
     const refreshed = await this.observation.sources(op); op = refreshed.operation;
     if (!refreshed.reliable) {
@@ -157,6 +158,21 @@ export class BridgeExecution {
     return op;
   }
   private claims(): BridgeEffectClaims { return new BridgeEffectClaims(this.state.root); }
+  /**
+   * signing_started with no sealed material and no SEND claim: the process stopped between the durable marker and custody,
+   * so nothing was signed into custody and nothing could have been broadcast. The effect returns to unsealed; the normal
+   * path then runs the full guard again and re-signs the identical envelope (same nonce and fields; RFC 6979 gives the same
+   * bytes, and the idempotent SIGN claim proves the same intent), or ends it on the expiry path. A SEND claim keeps its own
+   * observe-only path.
+   */
+  private async releaseUnsignedSeal(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
+    for (const effect of op.effects) {
+      if (effect.phase !== "signing_started" || await this.claims().sendClaim(op, effect.role) !== null ||
+        await this.custody.load(op, effect.role) !== null) continue;
+      op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "unsealed" }) });
+    }
+    return op;
+  }
   /** Catches the journal up with a SEND claim from the exact sealed material, without signing or sending, then observes. */
   private async recordClaimedSend(op: BridgeOperationRecord, effect: BridgeEffect,
     claimed: Readonly<{ materialHash: string; transactionHash: string }>): Promise<BridgeOperationRecord> {

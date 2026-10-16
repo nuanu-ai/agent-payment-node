@@ -202,8 +202,8 @@ for (const boundary of ["signing_started", "sealed", "submitting", "submitted_pe
   const stored = (await s.core.bridges.records.findOperation(id))!; assert.equal(stored.effects[0]!.phase, boundary);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
   const resumed = await restart.core.execute({ command: "operation.resume", operationId: id });
-  if (boundary === "signing_started") { assert.equal(resumed.error?.code, "APN_PROVIDER_EFFECT_UNAVAILABLE"); assert.equal(s.source.submissions.length, 0); }
-  else if (boundary === "submitting") { assert.equal(resumed.ok, true, resumed.error?.message); assert.equal((resumed.operation as { state: string }).state, "unknown_finality"); assert.equal(s.source.submissions.length, 0); }
+  // signing_started without sealed material or a SEND claim signed nothing: resume re-runs the guard and re-seals the same envelope.
+  if (boundary === "submitting") { assert.equal(resumed.ok, true, resumed.error?.message); assert.equal((resumed.operation as { state: string }).state, "unknown_finality"); assert.equal(s.source.submissions.length, 0); }
   else { assert.equal(resumed.ok, true, resumed.error?.message); assert.equal((resumed.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 1); }
   assert.equal(restart.approval.calls.length, 0);
 });
