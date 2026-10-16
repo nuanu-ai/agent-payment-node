@@ -89,8 +89,6 @@ export class Permit2ProductionResults {
         }
         if (record.exposureJournal?.signed == null)
             return this.#result(record, "not_exposed");
-        if (mode === "settlement" && locator === null)
-            return this.#result(record, "held");
         try {
             if (canonicalJson(await permit2WalletBinding(this.#state, record.material.wallet.profile)) !== canonicalJson(record.material.wallet))
                 return this.#result(record, "owner_mismatch");
