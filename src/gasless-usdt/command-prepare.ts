@@ -15,7 +15,7 @@ import { type UsdtPreparePort } from "./policy-prepare.js";
 import { preparePolicyBoundUsdtV2 } from "./policy-prepare-v2.js";
 import { attestUsdtSponsor } from "./sponsor-auth.js";
 import type { UsdtSponsorPort } from "./engine.js";
-import { usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
+import { UsdtCodePins, usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
 
 type PrepareCommand = Extract<CommandRequest, { readonly command: "gasless.usdt.prepare" }>;
@@ -103,12 +103,13 @@ export class GaslessUsdtCommandPrepare {
     }
     const budget = needRpc ? new UsdtCommandReadBudget(this.state, this.options.transport ?? new GaslessHttps(),
       this.options.pacingNow, this.options.wait, "prepare-v2") : undefined;
+    const codePins = new UsdtCodePins();
     const prepare: UsdtPreparePort = this.options.preparePort ?? {
       now: () => this.clock.now(),
       activePolicy: async (profile) => await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile),
       dailyUsage: async (sender: Address, at: Date) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
         chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
-      safeSnapshot: async (sender: Address) => await usdtSafeSnapshot(budget!, rpcUrl!, sender),
+      safeSnapshot: async (sender: Address) => await usdtSafeSnapshot(budget!, rpcUrl!, sender, codePins),
       sponsorAuth: async (op, snapshot) => await attestUsdtSponsor({ op, snapshot, expectedBlockHash: snapshot.blockHash, transport: budget!, rpcUrl: rpcUrl!, clock: this.clock }),
     };
     const sponsor = this.options.sponsorPort ?? usdtSponsorPort(budget!);

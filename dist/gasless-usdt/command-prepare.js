@@ -11,7 +11,7 @@ import { USDT_GASLESS } from "./model.js";
 import {} from "./policy-prepare.js";
 import { preparePolicyBoundUsdtV2 } from "./policy-prepare-v2.js";
 import { attestUsdtSponsor } from "./sponsor-auth.js";
-import { usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
+import { UsdtCodePins, usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
 /** Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. */
 export class UsdtCommandReadBudget {
@@ -92,12 +92,13 @@ export class GaslessUsdtCommandPrepare {
             throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT preparation.");
         }
         const budget = needRpc ? new UsdtCommandReadBudget(this.state, this.options.transport ?? new GaslessHttps(), this.options.pacingNow, this.options.wait, "prepare-v2") : undefined;
+        const codePins = new UsdtCodePins();
         const prepare = this.options.preparePort ?? {
             now: () => this.clock.now(),
             activePolicy: async (profile) => await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile),
             dailyUsage: async (sender, at) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
                 chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
-            safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender),
+            safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender, codePins),
             sponsorAuth: async (op, snapshot) => await attestUsdtSponsor({ op, snapshot, expectedBlockHash: snapshot.blockHash, transport: budget, rpcUrl: rpcUrl, clock: this.clock }),
         };
         const sponsor = this.options.sponsorPort ?? usdtSponsorPort(budget);

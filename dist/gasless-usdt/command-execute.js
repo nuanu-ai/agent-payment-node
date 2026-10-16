@@ -11,7 +11,7 @@ import { USDT_GASLESS } from "./model.js";
 import { UsdtRecoveryService } from "./recovery.js";
 import { usdtPacedRecoveryPort } from "./recovery-port.js";
 import { mintUsdtSponsorPermit } from "./sponsor-permit.js";
-import { usdtSafeSnapshot, usdtSendPort } from "./rpc.js";
+import { UsdtCodePins, usdtSafeSnapshot, usdtSendPort } from "./rpc.js";
 import { GuardedUsdtSendService } from "./send.js";
 import { createInterface } from "node:readline/promises";
 import { approvalCode } from "../approval-code.js";
@@ -107,12 +107,13 @@ export class GaslessUsdtCommandExecute {
         if (!rpcUrl)
             throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT execution.");
         const budget = new UsdtCommandReadBudget(this.state, this.options.transport ?? new GaslessHttps());
+        const codePins = new UsdtCodePins();
         return {
             now: () => this.clock.now(),
             activePolicy: async (profile) => await loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, profile),
             dailyUsage: async (sender, at) => (await new AssetUsageLedger(this.state.root).usage({ account: sender,
                 chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token } }, at)).amountAtomic,
-            safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender),
+            safeSnapshot: async (sender) => await usdtSafeSnapshot(budget, rpcUrl, sender, codePins),
             sponsorPermit: async (bound, identity, snapshot) => await mintUsdtSponsorPermit({ bound, identity, snapshot, transport: budget, rpcUrl, clock: this.clock }),
         };
     }
