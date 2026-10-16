@@ -4,6 +4,8 @@ import { sha256 } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import { MetaMaskGaslessRpc, metaMaskGaslessObservationRpcFactory, mmObservationRpcEnv } from "../../src/metamask-gasless/chain/rpc.js";
+import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/journal/repository.js";
+import { metaMaskGaslessReceipt, validateMetaMaskGaslessReceipt } from "../../src/metamask-gasless/journal/receipt.js";
 import type { MetaMaskGaslessRpcPort } from "../../src/metamask-gasless/ports.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
@@ -109,4 +111,28 @@ test("MetaMask observation environment names are validated and never resolved to
   assert.throws(() => factory(8453, ENV), { details: { reason: "mm_gasless_rpc_binding" } });
   const rpc = metaMaskGaslessObservationRpcFactory({ [ENV]: ARCHIVE_URL }, { now: () => new Date() })(8453, ENV);
   assert.equal(rpc.endpointOrigin, "https://archive.example"); assert.equal(rpc.endpointHash, sha256(ARCHIVE_URL));
+});
+
+test("an unresolved MetaMask operation observed through a named RPC keeps that option in its next action", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { f, id } = await dispatched(temporary.root);
+  const archive = archiveRpc(f.now); archive.base.phase = "pending"; archive.base.candidate = null;
+  f.now.setTime(f.now.getTime() + 60_000);
+  const core = new ApnCore({ state: new StateStore(temporary.root), clock: f.clock, metaMaskGasless: { ...f.dependencies,
+    observationRpcFor: () => archive.rpc } });
+  const result = await core.execute({ command: "operation.resume", operationId: id, observationRpcEnv: ENV });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  const after = await f.record(id);
+  assert.equal(after.terminal, false); assert.equal(after.observation?.source?.environmentName, ENV);
+  const actions = (result.operation as { next_actions: string[] }).next_actions;
+  assert.equal(actions.at(-1), `apn operation resume --operation ${id} --observation-rpc-env ${ENV}`);
+  // A receipt an earlier release wrote for the same transition, without the option, is still its exact derivative.
+  const legacy = metaMaskGaslessReceipt(after, true);
+  assert.equal(legacy.next_actions.at(-1), `apn operation resume --operation ${id}`);
+  assert.deepEqual(validateMetaMaskGaslessReceipt(legacy, after), legacy);
+  assert.throws(() => validateMetaMaskGaslessReceipt({ ...legacy, next_actions: ["apn operation resume --operation other"] }, after),
+    { code: "APN_STATE_CORRUPT" });
+  const repository = new MetaMaskGaslessOperationRepository(temporary.root);
+  await repository.repairReceipt(after);
+  assert.deepEqual(await repository.loadReceipt(after.profileHash, after.operationId), metaMaskGaslessReceipt(after));
 });

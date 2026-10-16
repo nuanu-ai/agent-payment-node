@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parseTransaction, keccak256, type Hex } from "viem";
+import { getAddress, parseTransaction, keccak256, type Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { temporaryState } from "./helpers.js";
 import { StateStore } from "../../src/state.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
@@ -11,7 +12,9 @@ import { TtyAllowlistPolicyApproval } from "../../src/allowlist-policy-activatio
 import { runCli } from "../../src/cli.js";
 import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import { OperationService } from "../../src/operation-service.js";
-import { SEI_FUNDING, inspectSeiFundingQuote, inspectSeiDelivery, seiJson } from "../../src/lifi/sei-gaszip-contract.js";
+import { SEI_FUNDING, inspectSeiFundingQuote, inspectSeiDelivery, seiJson, seiFail, seiObject, seiUint, seiQuantity, seiHash, seiAddress, seiExact } from "../../src/lifi/sei-gaszip-contract.js";
+import { MEGA_FUNDING, megaFail, megaObject, megaUint, megaQuantity, megaHash, megaAddress, megaExact } from "../../src/lifi/mega-gaszip-contract.js";
+import { gaszipNativeNet } from "../../src/lifi/gaszip-native-delivery.js";
 import { SeiFundingJournal, sealSeiFunding, validateSeiFunding, type SeiFundingRecord } from "../../src/lifi/sei-gaszip-journal.js";
 import { SeiFundingService } from "../../src/lifi/sei-gaszip-service.js";
 import { assertSeiFundingFresh, proveSeiSafeTransaction, type SeiRpcPort } from "../../src/lifi/sei-gaszip-rpc.js";
@@ -173,4 +176,25 @@ test("normal direct Base prepare cannot interleave the held caller fee reserve",
  assert.equal(other.ok,false);assert.equal(other.error?.code,"APN_OPERATION_BLOCKED");assert.equal(other.error?.details?.blockingOperationId,r.operationId);assert.equal(f.source.sends,0);
  f.source.queueHook=async()=>{const state=new StateStore(f.temp.root);Object.assign(state,{lockWaitMs:0});const native=new LocalWalletNative(state,f.wrapping);await assert.rejects(native.request({version:"apn.native.v1",requestId:"synthetic-gaszip-custody",operation:"wallet.describe",payload:{profile:"gaszip-test"}}),{code:"APN_STATE_BUSY"});};
  await f.service.approve(r.operationId);assert.equal(f.source.sends,1);
+});
+test("native payout proof keeps r/s lossless in QUANTITY and 32-byte DATA forms on Sei and MegaETH; malformed scalars refuse",async()=>{
+ const relayer=privateKeyToAccount(`0x${"5a".repeat(32)}`),owner=getAddress(SIGNER),value=300_000_000_000_000_000n,gas=23_520n,gasPrice=73_150_000_000n;
+ const lanes=[{chain:1329 as const,floor:SEI_FUNDING.minimumOutput,prefix:"sei",h:{fail:seiFail,object:seiObject,uint:seiUint,quantity:seiQuantity,hash:seiHash,address:seiAddress,exact:seiExact}},
+  {chain:4326 as const,floor:MEGA_FUNDING.minimumOutput,prefix:"mega",h:{fail:megaFail,object:megaObject,uint:megaUint,quantity:megaQuantity,hash:megaHash,address:megaAddress,exact:megaExact}}];
+ for(const lane of lanes){
+  const short={r:undefined as Record<string,string>|undefined,s:undefined as Record<string,string>|undefined};
+  const vector=async(nonce:number)=>{const raw=await relayer.signTransaction({type:"legacy",chainId:lane.chain,nonce,gas,gasPrice,to:owner,value,data:"0x"}),t=parseTransaction(raw),hash=keccak256(raw);
+   return {hash,row:{type:"0x0",chainId:h(BigInt(lane.chain)),nonce:h(BigInt(nonce)),gas:h(gas),gasPrice:h(gasPrice),value:h(value),input:"0x",to:owner.toLowerCase(),from:relayer.address.toLowerCase(),hash,v:h(t.v!),r:h(BigInt(t.r!)),s:h(BigInt(t.s!))} as Record<string,string>};};
+  for(let nonce=0;nonce<512 && (short.r===undefined || short.s===undefined);nonce++){const c=await vector(nonce);for(const k of ["r","s"] as const)if(short[k]===undefined && c.row[k]!.length<66)short[k]=c.row;}
+  for(const field of ["r","s"] as const){
+   const row=short[field];assert.ok(row,`deterministic synthetic signer must yield a leading-zero ${field}`);
+   const d={hash:row.hash as Hex,amount:(value+gas*gasPrice).toString(),signer:relayer.address,nonce:BigInt(row.nonce!).toString(),providerDigest:"0".repeat(64),grossNative:true as const};
+   const net=(t:Record<string,string>)=>gaszipNativeNet(t,d,owner,lane.chain,lane.floor,lane.h),scalar=row[field]!,padded=`0x${scalar.slice(2).padStart(64,"0")}`;
+   for(const form of [scalar,padded,scalar.toUpperCase().replace("0X","0x")])assert.equal(await net({...row,[field]:form}),value.toString());
+   for(const [bad,reason] of [[`0x0${scalar.slice(2)}`.length===66?`0x00${scalar.slice(2)}`:`0x0${scalar.slice(2)}`,"signature"],["0x","signature"],["0x0","signature"],[`0x${"0".repeat(64)}`,"signature"],[`0x${"f".repeat(64)}`,"signature"],
+    [`0x${"g".repeat(scalar.length-2)}`,"signature"],[`0x${(BigInt(scalar)^1n).toString(16)}`,"signed_hash"],[`0x${(BigInt(scalar)^1n).toString(16).padStart(64,"0")}`,"signed_hash"]] as const)
+    await assert.rejects(net({...row,[field]:bad}),{message:reason==="signature"?`${lane.prefix}_gaszip_native_signature_${field}`:`${lane.prefix}_gaszip_native_signed_hash`});
+   await assert.rejects(net({...row,value:h(value+1n)}),{message:`${lane.prefix}_gaszip_native_signed_hash`});
+  }
+ }
 });

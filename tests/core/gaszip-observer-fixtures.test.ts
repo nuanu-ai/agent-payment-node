@@ -10,7 +10,7 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { SEI_FUNDING, seiJson, inspectSeiDelivery } from "../../src/lifi/sei-gaszip-contract.js";
 import { MEGA_FUNDING, megaJson, inspectMegaDelivery } from "../../src/lifi/mega-gaszip-contract.js";
-import { SeiFundingRpc, proveSeiDelivery } from "../../src/lifi/sei-gaszip-rpc.js";
+import { SeiFundingRpc, proveSeiDelivery, type SeiRpcPort } from "../../src/lifi/sei-gaszip-rpc.js";
 import { MegaFundingRpc, proveMegaDelivery } from "../../src/lifi/mega-gaszip-rpc.js";
 import { SeiFundingService } from "../../src/lifi/sei-gaszip-service.js";
 import { MegaFundingService } from "../../src/lifi/mega-gaszip-service.js";
@@ -81,6 +81,19 @@ for(const lane of ["sei","mega"] as const){
   assert.throws(()=>(lane==="sei"?inspectSeiDelivery:inspectMegaDelivery)(v,f.sourceHash,f.prepare.owner.address,f.prepare.amountAtomic));
  });
  test(`${lane} pending complete fixture stays unresolved`,async()=>{const f=await fixture(lane);f.parsed.txs[0].status="PENDING";assert.equal(f.delivery(),null);});
+ test(`${lane} status refusal names the public operation, observer phase, scalar field and same-operation step`,async t=>{
+  const f=await fixture(lane),temp=await temporaryState();t.after(temp.cleanup);const state=new StateStore(temp.root);await state.initialize();
+  f.calls.find(c=>c.url===(lane==="sei"?sei:mega)&&c.method==="eth_getTransactionByHash")!.body.result.s=`0x${"g".repeat(64)}`;
+  const record={...f.prepare,usageReservationId:null,state:"submitted" as const,rawTransaction:f.sourceRaw,transactionHash:f.sourceHash,submissionAttempts:1 as const};
+  const wrapping={load:async():Promise<Buffer>=>{throw new Error("observer must never load key");},create:async():Promise<Buffer>=>{throw new Error("observer must never create key");}};
+  const journal=lane==="sei"?new SeiFundingJournal(temp.root):new MegaFundingJournal(temp.root);
+  if(lane==="sei")await (journal as SeiFundingJournal).saveLocked(sealSeiFunding(record as SeiFundingRecord),true);else await (journal as MegaFundingJournal).saveLocked(sealMegaFunding(record as MegaFundingRecord),true);
+  const now=Date.parse("2026-10-09T06:00:00.000Z"),service=lane==="sei"?new SeiFundingService(state,wrapping,{APN_BASE_RPC_URL:base,APN_SEI_RPC_URL:sei},{https:f.transport,now:()=>now}):new MegaFundingService(state,wrapping,{APN_BASE_RPC_URL:base,APN_MEGA_RPC_URL:mega},{https:f.transport,now:()=>now});
+  const before=await journal.findOperation(record.operationId);
+  await assert.rejects(service.status(record.operationId),{code:"APN_OPERATION_BLOCKED",message:`${lane}_gaszip_native_signature_s`,details:{operationId:record.operationId,phase:"destination_proof",
+   nextActions:[`apn ${lane} funding status --operation ${record.operationId}`],reason:`${lane}_gaszip_native_signature_s`}});
+  assert.deepEqual(await journal.findOperation(record.operationId),before);
+ });
  for(const kind of ["gross","gas","price","net","type2","signature","receipt-fee","receipt-gas","receipt-revert","receipt-zero-gas","parent","membership","safe-pending"] as const)test(`${lane} independent public RPC fixture ${kind} cannot settle`,async()=>{
   const f=await fixture(lane),d=f.delivery(),url=lane==="sei"?sei:mega;
   const tx=f.calls.find(c=>c.url===url&&c.method==="eth_getTransactionByHash")!.body.result;
@@ -92,3 +105,36 @@ for(const lane of ["sei","mega"] as const){
   else await assert.rejects((lane==="sei"?proveSeiDelivery:proveMegaDelivery)(f.rpc(),f.prepare.owner.address,d));
  });
 }
+/** QA GASZIP-LIVE-SCALAR-001: the real Sei payout whose RPC `s` is a 63-digit QUANTITY (no leading zero nibble). */
+async function shortScalarPayout(){
+ const q=JSON.parse(await raw("sei-short-scalar-payout.json")) as Row,captured=q.calls.find((c:Row)=>c.method==="eth_getTransactionByHash").body.result as Row;
+ const delivery=inspectSeiDelivery(seiJson(q.provider.body),q.sourceHash,q.owner,q.amountAtomic,q.sourceBlock)!;
+ const port=(tx:Row):SeiRpcPort=>({call:async(method:string,params:readonly unknown[])=>{
+  const header=q.recordedHeaders;if(method==="eth_chainId")return header.chainId;if(method==="eth_getTransactionByHash")return structuredClone(tx);
+  if(method==="eth_getBlockByNumber"&&params[0]==="safe")return header.safe;if(method==="eth_getBlockByNumber"&&params[0]===header.previous.number)return header.previous;
+  const c=q.calls.find((c:Row)=>c.method===method&&JSON.stringify(c.params)===JSON.stringify(params));assert.ok(c,`${method} ${JSON.stringify(params)}`);return structuredClone(c.body.result);
+ }});
+ return {q,captured,delivery,prove:(tx:Row)=>proveSeiDelivery(port(tx),q.owner,delivery)};
+}
+test("sei QA-captured payout with a 63-digit s closes through the production destination proof",async()=>{
+ const p=await shortScalarPayout();assert.equal(p.captured.s.length,65);assert.equal(p.captured.r.length,66);assert.equal(p.delivery.grossNative,true);
+ const proof=await p.prove(p.captured);assert.equal(proof?.amount,p.q.netAtomic);assert.equal(proof?.status,"success");assert.equal(proof?.hash,p.captured.hash);
+ assert.equal(BigInt(p.delivery.amount)-BigInt(p.q.netAtomic),BigInt(p.captured.gas)*BigInt(p.captured.gasPrice));
+ // The 32-byte DATA form of the same s proves the same payout; only the digest of the raw RPC object differs.
+ const padded=await p.prove({...p.captured,s:`0x${p.captured.s.slice(2).padStart(64,"0")}`});assert.deepEqual({...padded,transactionDigest:null},{...proof,transactionDigest:null});
+});
+for(const [name,change,reason] of [
+ ["one-bit-changed s",(t:Row)=>({s:`0x${(BigInt(t.s)^1n).toString(16).padStart(64,"0")}`}),/sei_gaszip_native_signed_hash/],
+ ["one-bit-changed r",(t:Row)=>({r:`0x${(BigInt(t.r)^1n).toString(16)}`}),/sei_gaszip_native_signed_hash/],
+ ["zero s",()=>({s:"0x0"}),/sei_gaszip_native_signature_s/],
+ ["zero-width s",()=>({s:`0x${"0".repeat(64)}`}),/sei_gaszip_native_signature_s/],
+ ["non-hex s",()=>({s:`0x${"g".repeat(63)}`}),/sei_gaszip_native_signature_s/],
+ ["empty r",()=>({r:"0x"}),/sei_gaszip_native_signature_r/],
+ ["noncanonical leading-zero s",(t:Row)=>({s:`0x0${t.s.slice(3)}`}),/sei_gaszip_native_signature_s/],
+ ["over-wide s",(t:Row)=>({s:`0x00${t.s.slice(2)}`}),/sei_gaszip_native_signature_s/],
+ ["s at curve order",()=>({s:"0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"}),/sei_gaszip_native_signature_s/],
+ ["other payout amount",(t:Row)=>({value:`0x${(BigInt(t.value)+1n).toString(16)}`}),/sei_gaszip_native_signed_hash/],
+ ["63-digit transaction hash",(t:Row)=>({hash:`0x${t.hash.slice(3)}`}),/sei_gaszip_hash/],
+] as const)test(`sei QA-captured short-scalar payout still refuses ${name}`,async()=>{
+ const p=await shortScalarPayout();await assert.rejects(p.prove({...p.captured,...change(p.captured)}),reason);
+});

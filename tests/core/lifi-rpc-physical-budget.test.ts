@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { keccak256 } from "viem";
+import { ApnError } from "../../src/errors.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
 
 const raw = `0x${"02".repeat(32)}` as const;
@@ -94,4 +95,23 @@ test("persisted family start follows physical admission delayed by another chain
   assert.deepEqual(starts, [
     { family: "publicnode.com", at: 0 }, { family: "drpc.org", at: 750 }, { family: "drpc.org", at: 1_500 },
   ]);
+});
+
+test("an in-process scheduler behind the physical gate treats an early timer wake as pacing, not a clock rollback", async () => {
+  let now = 1_000; const starts: number[] = [];
+  const budget = new BridgeRpcPhysicalBudget(() => now, async (ms) => { now += ms; });
+  // A real timer can fire about a millisecond before Date.now reaches its target; the transport then takes 50 ms.
+  const session = new RpcReadSession({ now: () => now, wait: async (ms) => { now += ms > 1 ? ms - 1 : ms; }, physicalBudget: budget });
+  const read = async (method: string) => await session.read("https://base.example", 8453, method, [], async () => { starts.push(now); now += 50; return "0x2105"; });
+  assert.equal(await read("eth_chainId"), "0x2105"); assert.equal(await read("eth_maxPriorityFeePerGas"), "0x2105");
+  assert.deepEqual(starts, [1_000, 1_799]); assert.equal(budget.remaining(), 22);
+});
+
+test("a clock that moves backwards across the physical gate is still refused before transport", async () => {
+  let now = 1_000, calls = 0;
+  class Rewinding extends BridgeRpcPhysicalBudget { override async beforePost(method: string) { await super.beforePost(method); now -= 5; } }
+  const session = new RpcReadSession({ now: () => now, wait: async (ms) => { now += ms; }, physicalBudget: new Rewinding(() => now, async (ms) => { now += ms; }) });
+  await assert.rejects(session.read("https://base.example", 8453, "eth_chainId", [], async () => { calls += 1; return "0x2105"; }),
+    (error: unknown) => error instanceof ApnError && error.details?.reason === "rpc_scheduler_clock_rollback");
+  assert.equal(calls, 0);
 });

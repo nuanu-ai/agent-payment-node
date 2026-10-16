@@ -2,7 +2,7 @@ import { ApnError } from "../../errors.js";
 import { SwapOperationRepository } from "../repository.js";
 import { admitOrcaStableOwner, type OrcaStableAdmissionPorts } from "./stable-admission.js";
 import { SavedOrcaStableMaterialStore } from "./stable-material.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest, ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
 import { AssetUsageLedger } from "../../asset-usage-ledger.js";
 import { stableReservationAdmissionPorts } from "./stable-reservation-admission.js";
 import { GuardedSwapService } from "../service.js";
@@ -13,7 +13,7 @@ export async function orcaStablePreparedStatus(operations: SwapOperationReposito
   ports: OrcaStableAdmissionPorts, operationId: string, now: Date) {
   const operation = await operations.loadAny(operationId);
   if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
-  if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST)
+  if (!isOrcaStableGuardedMechanismDigest(operation.mechanismDigest))
     throw new ApnError("APN_OPERATION_BLOCKED", "Operation does not use the stable guarded mechanism.", { reason: "orca_stable_mechanism_mismatch" });
   if (operation.state === "failed_before_effect" || operation.submissionMarker !== null) {
     const staged = await materialStore.loadStaged(operationId);

@@ -29,6 +29,7 @@ export interface X402ReconciliationStore {
 
 export interface X402ReconciliationOutcome {
   readonly operation: X402OperationRecord;
+  /** True only when this call revalidated a complete zero scan anchored at or below its observed safe head. */
   readonly completeZeroScanValidated: boolean;
   readonly completeZeroScanRead: boolean;
 }
@@ -47,30 +48,31 @@ export class X402RpcReconciler {
         input.settlementResponseObservation === undefined ||
         settlementResponseTransaction(input.settlementResponseObservation.normalizedCanonicalJson) === input.settlementEvidence.transactionHash
       ))
-    ) return outcome(input, false);
+    ) return outcome(input, false, false);
     const chain = await assertX402RpcChain(this.rpc, x402Network(input.network).chainId);
     const rpcOriginHash = sha256(chain.rpcOrigin);
     const safe = await this.rpc.getX402Head("safe");
-    if (!validX402Head(safe) || !sameRpcOrigin(safe.rpcOrigin, chain.rpcOrigin)) return outcome(input, false);
+    if (!validX402Head(safe) || !sameRpcOrigin(safe.rpcOrigin, chain.rpcOrigin)) return outcome(input, false, false);
     const expiryRelevant = BigInt(safe.timestamp) >= BigInt(input.authorization.validBefore) ||
       BigInt(Math.floor(this.clock.now().getTime() / 1000)) >= BigInt(input.authorization.validBefore);
     const finalized = expiryRelevant ? await this.rpc.getX402Head("finalized") : undefined;
     if (finalized !== undefined && (
       !validX402Head(finalized) || !sameRpcOrigin(finalized.rpcOrigin, chain.rpcOrigin) ||
       BigInt(finalized.number) > BigInt(safe.number)
-    )) return outcome(input, false);
+    )) return outcome(input, false, false);
     if (finalized !== undefined) {
       let canonicalFinalized;
       try { canonicalFinalized = await this.rpc.getX402Block(finalized.number); }
-      catch { return outcome(input, false); }
+      catch { return outcome(input, false, false); }
       if (
         canonicalFinalized.number !== finalized.number || canonicalFinalized.hash !== finalized.hash ||
         canonicalFinalized.timestamp !== finalized.timestamp ||
         !sameRpcOrigin(canonicalFinalized.rpcOrigin, chain.rpcOrigin)
-      ) return outcome(input, false);
+      ) return outcome(input, false, false);
     }
 
     let operation = input;
+    let completeZeroScanValidated = false;
     let completeZeroScanRead = false;
     if (operation.transactionHint?.source !== "payment_response") {
       const scanner = new X402RpcScanner(
@@ -82,29 +84,28 @@ export class X402RpcReconciler {
       );
       const scanned = await scanner.scanOneChunk(operation, safe, chain.rpcOrigin);
       operation = scanned.operation;
-      completeZeroScanRead = scanned.read && isCompleteZeroScan(operation.authorizationUsedScan) &&
-        scanCoversObservedSafe(operation.authorizationUsedScan, safe);
-      if (scanned.reorg || scanned.unavailable || scanned.malformed) {
-        return outcome(operation, completeZeroScanRead);
-      }
+      if (scanned.reorg || scanned.unavailable || scanned.malformed) return outcome(operation, false, false);
+      completeZeroScanValidated = isCompleteZeroScan(operation.authorizationUsedScan) &&
+        scanAnchoredWithinObservedSafe(operation.authorizationUsedScan, safe);
       if (isCompleteZeroScan(operation.authorizationUsedScan) &&
           !scanCoversObservedSafe(operation.authorizationUsedScan, safe)) {
-        return outcome(operation, false);
+        return outcome(operation, completeZeroScanValidated, false);
       }
+      completeZeroScanRead = scanned.read && completeZeroScanValidated;
     }
 
     if (operation.transactionHint !== undefined) {
       operation = await this.reconcileHint(operation, safe, rpcOriginHash, chain.rpcOrigin);
-      return outcome(operation, completeZeroScanRead);
+      return outcome(operation, completeZeroScanValidated, completeZeroScanRead);
     }
-    if (!isCompleteZeroScan(operation.authorizationUsedScan)) return outcome(operation, completeZeroScanRead);
+    if (!isCompleteZeroScan(operation.authorizationUsedScan)) return outcome(operation, completeZeroScanValidated, completeZeroScanRead);
     if (finalized === undefined || BigInt(finalized.timestamp) < BigInt(operation.authorization.validBefore)) {
-      return outcome(operation, completeZeroScanRead);
+      return outcome(operation, completeZeroScanValidated, completeZeroScanRead);
     }
     if (
       operation.settlementResponseObservation !== undefined || operation.settlementEvidence !== undefined ||
       operation.resultLink !== undefined
-    ) return outcome(operation, completeZeroScanRead);
+    ) return outcome(operation, completeZeroScanValidated, completeZeroScanRead);
 
     const authorizationState = await this.rpc.getX402AuthorizationState(
       operation.wallet,
@@ -116,7 +117,7 @@ export class X402RpcReconciler {
       authorizationState.value || authorizationState.blockTag !== "finalized" ||
       authorizationState.blockNumber !== finalized.number || authorizationState.blockHash !== finalized.hash ||
       !sameHead(finalized, finalizedRecheck) || !sameRpcOrigin(authorizationState.rpcOrigin, chain.rpcOrigin)
-    ) return outcome(operation, completeZeroScanRead);
+    ) return outcome(operation, completeZeroScanValidated, completeZeroScanRead);
 
     if (operation.chainId !== "8453") await assertX402RpcChain(this.rpc, x402Network(operation.network).chainId);
     const body = {
@@ -151,7 +152,7 @@ export class X402RpcReconciler {
       evidenceHash: domainHash("apn.x402.unused-expiry-evidence.v1", canonicalJson(body)),
     };
     operation = await this.persist(operation, { unusedExpiryEvidence: evidence });
-    return outcome(operation, completeZeroScanRead);
+    return outcome(operation, completeZeroScanValidated, completeZeroScanRead);
   }
 
   private async reconcileHint(
@@ -294,13 +295,19 @@ export class X402RpcReconciler {
 
 function outcome(
   operation: X402OperationRecord,
+  completeZeroScanValidated: boolean,
   completeZeroScanRead: boolean,
 ): X402ReconciliationOutcome {
-  return {
-    operation,
-    completeZeroScanValidated: isCompleteZeroScan(operation.authorizationUsedScan),
-    completeZeroScanRead,
-  };
+  return { operation, completeZeroScanValidated, completeZeroScanRead };
+}
+
+function scanAnchoredWithinObservedSafe(
+  scan: X402OperationRecord["authorizationUsedScan"],
+  safe: X402RpcHead,
+): boolean {
+  return scan !== undefined && (
+    BigInt(scan.targetSafeHead.number) < BigInt(safe.number) || scanCoversObservedSafe(scan, safe)
+  );
 }
 
 function sameHead(

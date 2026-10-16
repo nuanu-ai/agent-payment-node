@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
+import { chmod, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { OperationAbandonApprovalPort } from "../../src/operation-abandon-approval.js";
 import type { WaitPort } from "../../src/ports.js";
 import { createExactExecutionBatchTerms, createLimitedCallsTerms, hashDelegation } from "@metamask/delegation-core";
 import { TypedDataEncoder } from "ethers";
 import { encodeFunctionData, keccak256, parseAbi } from "viem";
 import { ApnCore } from "../../src/core.js";
-import { hashObject, sha256 } from "../../src/canonical.js";
+import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import type { Address, Hex } from "../../src/model.js";
 import { StateStore } from "../../src/state.js";
 import { accountBindingHash, capabilityHash, metamaskDirectCapabilitySnapshot,
@@ -189,4 +191,10 @@ export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 
   const restart = () => new ApnCore({ state: new StateStore(root), metaMaskGasless: dependencies, clock, wait, ...abandon });
   return { state, now, profile, publicProfile, binding, provider, rpc, approval, dependencies, clock, wait, advance,
     makeCore, core, request, prepare, record, restart };
+}
+
+/** Replaces the saved journal file as an earlier release could have left it; the reader must still accept it. */
+export async function mmWriteOperationFile(root: string, operation: MetaMaskGaslessOperationRecord): Promise<void> {
+  const path = join(root, "metamask-gasless-operations", operation.profileHash, `${operation.operationId}.json`);
+  await writeFile(path, `${canonicalJson(operation)}\n`, { mode: 0o600 }); await chmod(path, 0o600);
 }

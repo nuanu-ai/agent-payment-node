@@ -5,6 +5,7 @@ import { evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import { BridgeHttps } from "./https.js";
 import { bridgeArchiveEndpoint, bridgeReceiptEndpoint, isArchiveRead, isHistoricalStateRead } from "./rpc-archive.js";
+import { jsonRpcRateLimit } from "./rpc-session-helpers.js";
 import { rpcBlockValue } from "./rpc-batch-codec.js";
 import { BridgeRpc } from "./rpc-adapter.js";
 import { parseRetryAfter, RpcHttpFailure, RpcReadSession } from "./rpc-session.js";
@@ -121,6 +122,8 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
             if (method === "eth_getTransactionReceipt" && historicalReceiptUnavailable(r.error, chainId, target, method)) {
                 throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC historical receipt read is unavailable.", { rpcMethod: method, reason: "historical_receipt_unavailable" });
             }
+            if (jsonRpcRateLimit(r.error))
+                throw new ApnError("APN_RPC_RATE_LIMITED", "Bridge RPC provider requested a cooldown.", { rpcMethod: method, reason: "json_rpc_rate_limit", providerCode: r.error.code });
             bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: method });
         }
         if (!Object.hasOwn(r, "result"))

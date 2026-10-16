@@ -8,6 +8,9 @@ export interface OperationAbandonIntent {
     readonly recipient: string;
     readonly amountAtomic: string;
     readonly amountDecimal: string;
+    /** The owner's approved maximum when it differs from the amount actually dispatched. */
+    readonly budgetCeilingAtomic?: string;
+    readonly budgetCeilingDecimal?: string;
     readonly chainLabel: string;
     readonly assetLabel: string;
     readonly unit: string;

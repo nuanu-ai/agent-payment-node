@@ -14,11 +14,13 @@ export class BridgeRpcPhysicalBudget {
   private tail: Promise<void> = Promise.resolve();
   constructor(private readonly now: () => number = Date.now,
     private readonly wait: (milliseconds: number) => Promise<void> = async (ms) => await new Promise((resolve) => setTimeout(resolve, ms)),
-    private readonly policy: BridgeRpcPhysicalPolicy = "default") {}
+    private readonly policy: BridgeRpcPhysicalPolicy = "default",
+    /** The derived sign-and-send step with its retry headroom; it raises the policy cap and is zero without an unsent effect. */
+    private readonly sendStepPosts = 0) {}
   remaining(): number {
     const limit = this.policy === "canonical_wbtc_across_approval_continuation" ? WBTC_ACROSS_CONTINUATION_POST_LIMIT
       : this.policy === "canonical_usdc_across_approval_continuation" ? USDC_ACROSS_CONTINUATION_POST_LIMIT : BRIDGE_INVOCATION_RPC_POST_LIMIT;
-    return limit - this.posts;
+    return Math.max(limit, this.sendStepPosts) - this.posts;
   }
   require(posts: number, method: string): void {
     if (this.remaining() < posts) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Bridge RPC invocation POST budget exhausted.",
@@ -41,6 +43,15 @@ export class BridgeRpcPhysicalBudget {
       this.posts += 1; this.lastStart = this.now();
     } finally { release(); }
   }
+}
+/**
+ * JSON-RPC error codes that only report a provider rate limit: EIP-1474 "limit exceeded" (-32005), the official Base
+ * endpoint's per-second and request limits (-32007, -32011) and providers that echo HTTP 429 as the code.
+ */
+const JSON_RPC_RATE_LIMIT_CODES: ReadonlySet<number> = new Set([-32005, -32007, -32011, 429]);
+export function jsonRpcRateLimit(error: unknown): boolean {
+  return typeof error === "object" && error !== null && !Array.isArray(error) &&
+    JSON_RPC_RATE_LIMIT_CODES.has((error as { readonly code?: unknown }).code as number);
 }
 export const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 export const RPC_DEFAULT_LOGICAL_ITEMS = 96;

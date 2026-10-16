@@ -67,7 +67,7 @@ function upgraded(lane: "esv" | "4h"): JupiterV1ResolvedMaterial {
 const lanes = [{lane: "esv", old: OLD_ESV, fresh: NEW_ESV}, {lane: "4h", old: OLD_4H, fresh: NEW_4H}] as const;
 
 test("SwapV2 registrations append two generations without changing preceding route order or per-pool contracts", () => {
- assert.deepEqual(JUPITER_V1_FINITE_ROUTES.map(r => r.routeId), ["whirlpool-v1-83-sol-usdc", "whirlpool-swap-v2-esv-sol-usdc", "whirlpool-swap-v2-4h-sol-usdc", "whirlpool-v1-fp-sol-usdc", "whirlpool-v1-fp-sol-usdc-runtime-099da3", "whirlpool-v1-83-sol-usdc-runtime-099da3", NEW_ESV.routeId, NEW_4H.routeId]);
+ assert.deepEqual(JUPITER_V1_FINITE_ROUTES.slice(0, 8).map(r => r.routeId), ["whirlpool-v1-83-sol-usdc", "whirlpool-swap-v2-esv-sol-usdc", "whirlpool-swap-v2-4h-sol-usdc", "whirlpool-v1-fp-sol-usdc", "whirlpool-v1-fp-sol-usdc-runtime-099da3", "whirlpool-v1-83-sol-usdc-runtime-099da3", NEW_ESV.routeId, NEW_4H.routeId]);
  for (const {old, fresh} of lanes) {
   assert.equal(fresh.runtimeProgramPins, JUPITER_V1_RUNTIME_099DA3_PROGRAM_PINS);
   const {routeId: _oldId, mechanismPin: _oldPin, protocolRegistry: _oldRegistry, ...oldContract} = old;

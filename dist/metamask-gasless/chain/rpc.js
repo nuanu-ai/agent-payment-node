@@ -1,5 +1,6 @@
 import { canonicalJson, exactKeys, sha256 } from "../../canonical.js";
 import { parsePublicHttpsUrl } from "../../network-policy.js";
+import { classifyX402LogAvailabilityMessage } from "../../rpc-envelope.js";
 import { GaslessHttps } from "../../gasless/https.js";
 import { mmAssertStableQuote, mmQuote } from "../economics.js";
 import { mmRegistry, MM_RPC_ENV } from "../registry.js";
@@ -147,7 +148,7 @@ export class MetaMaskGaslessRpc {
             return mmFail("mm_gasless_rpc_unavailable");
         }
         if (response.status !== 200 || Buffer.byteLength(response.body, "utf8") > MAX_RESPONSE) {
-            mmFail("mm_gasless_rpc_unavailable");
+            mmFail(method === "eth_getLogs" && response.status === 429 ? "mm_gasless_rpc_rate_limited" : "mm_gasless_rpc_unavailable");
         }
         let parsed;
         try {
@@ -162,9 +163,21 @@ export class MetaMaskGaslessRpc {
             mmEvidenceFail("mm_gasless_evidence_invalid", "rpc_envelope", method);
         }
         if (hasError)
-            mmFail("mm_gasless_rpc_unavailable");
+            mmFail(method === "eth_getLogs" ? mmLogQueryRefusal(record.error) : "mm_gasless_rpc_unavailable");
         return record.result;
     }
+}
+/**
+ * Sort an eth_getLogs error into a closed class from its JSON-RPC message, which is read and then discarded: a range
+ * or result-size limit is deterministic and worth a narrower window; a request limit is a rate limit; anything
+ * else stays plain unavailability.
+ */
+export function mmLogQueryRefusal(error) {
+    const message = typeof error === "object" && error !== null && typeof error.message === "string"
+        ? (error.message).slice(0, 512) : "";
+    if (/\b(?:rate[ -]limit(?:ed|ing)?|request limit|too many requests)\b/iu.test(message))
+        return "mm_gasless_rpc_rate_limited";
+    return classifyX402LogAvailabilityMessage(message) === "range_unavailable" ? "mm_gasless_rpc_log_range" : "mm_gasless_rpc_unavailable";
 }
 function strictOwner(value) {
     const owner = mmAddress(value, "mm_gasless_evidence_invalid");

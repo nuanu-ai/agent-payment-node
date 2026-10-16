@@ -5,7 +5,8 @@ import { hashObject, sha256 } from "../../../src/canonical.js";
 import { mmWalletIdentityHash } from "../../../src/metamask-gasless/identity.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessMutable, MetaMaskGaslessUnsignedDelegation } from
   "../../../src/metamask-gasless/model.js";
-import { mmRequestHash, type MetaMaskGaslessOperationRecord } from "../../../src/metamask-gasless/operation-model.js";
+import { mmMutable, mmRequestHash, type MetaMaskGaslessOperationRecord } from "../../../src/metamask-gasless/operation-model.js";
+import { validateMetaMaskGaslessOperation } from "../../../src/metamask-gasless/journal/validation.js";
 import { mmRegistry } from "../../../src/metamask-gasless/registry.js";
 import { mmFailure } from "../../../src/metamask-gasless/reasons.js";
 import { MM_ANY_BENEFICIARY, MM_BATCH_MODE, MM_ROOT_AUTHORITY } from "../../../src/metamask-gasless/unsigned.js";
@@ -130,4 +131,33 @@ export function complete(operation: MetaMaskGaslessOperationRecord, at = "2026-0
     reason: "mm_gasless_success", candidateTxHash: txHash, transactionBlock, finalityBlock,
     evidenceHash: hashObject({ fixture: "evidence" }) }, settlement, failure: null };
   return advanceMetaMaskGaslessOperation(operation, patch, at);
+}
+
+/** Appends the way a release before the terminal reserve did: no reserved slot, so the 96th can be nonterminal. */
+export function legacyAppend(operation: MetaMaskGaslessOperationRecord, patch: Partial<MetaMaskGaslessMutable>,
+  at: string): MetaMaskGaslessOperationRecord {
+  const mutable = { ...mmMutable(operation), ...patch } as MetaMaskGaslessMutable;
+  const entry = { ...mutable, at, previousHash: operation.transitions.at(-1)!.transitionHash };
+  const { integrityHash: _old, ...body } = operation;
+  const next = { ...body, ...mutable, updatedAt: at, terminal: false,
+    transitions: [...operation.transitions, { ...entry, transitionHash: hashObject(entry) }] };
+  return validateMetaMaskGaslessOperation({ ...next, integrityHash: hashObject(next) });
+}
+
+/** Fills a dispatched operation with distinct unavailable observations up to `length`, one second apart. */
+export function fillLegacyHistory(operation: MetaMaskGaslessOperationRecord, length: number,
+  startMs = Date.parse(operation.updatedAt)): MetaMaskGaslessOperationRecord {
+  let current = operation, millis = startMs;
+  while (current.transitions.length < length) {
+    millis += 1_000;
+    const at = new Date(millis).toISOString();
+    current = legacyAppend(current, { state: "unknown_finality",
+      providerObservation: { observedAt: at, requestIdHash: hashObject({ purpose: "apn.metamask-gasless.request-id.v1",
+        value: current.intent.requestId }), status: "unavailable", txHash: current.providerObservation?.txHash ?? null },
+      observation: { observedAt: at, phase: "unavailable", reason: "mm_gasless_rpc_unavailable",
+        candidateTxHash: current.observation?.candidateTxHash ?? null, transactionBlock: null, finalityBlock: null,
+        evidenceHash: hashObject({ fixture: "legacy-observation", at }) },
+      failure: mmFailure(current.transitions.length % 2 === 0 ? "mm_gasless_rpc_unavailable" : "mm_gasless_provider_unavailable") }, at);
+  }
+  return current;
 }

@@ -242,12 +242,12 @@ function providerObservation(value, intent, now, reason) {
     // approval details, links, signatures and any future metadata never leave this helper.
     const txHash = value.txHash === undefined ? null : mmHex(value.txHash, 32, reason);
     const pending = ["EVALUATING", "SIGNING", "BROADCASTING"];
-    const failed = ["DENIED", "EXPIRED", "FAILED", "BROADCAST_FAILED"];
+    const failed = ["FAILED", "BROADCAST_FAILED"];
     const unavailableStatuses = ["BROADCAST_TRACKING_EXPIRED", "CONFIRMATION_TRACKING_EXPIRED"];
     const status = value.status === "AWAITING_MFA" ? "awaiting_approval" : pending.includes(value.status) ? "pending" :
         value.status === "BROADCASTED" ? "broadcasted" :
-            value.status === "CONFIRMED" ? "confirmed" : failed.includes(value.status) ? "failed" :
-                unavailableStatuses.includes(value.status) ? "unavailable" : mmFail(reason);
+            value.status === "CONFIRMED" ? "confirmed" : value.status === "DENIED" ? "denied" : value.status === "EXPIRED" ? "expired" :
+                failed.includes(value.status) ? "failed" : unavailableStatuses.includes(value.status) ? "unavailable" : mmFail(reason);
     return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status, txHash };
 }
 function unavailable(intent, now) {

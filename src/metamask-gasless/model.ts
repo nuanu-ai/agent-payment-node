@@ -7,6 +7,10 @@ export const MM_TTL_MS = 300_000;
 export const MM_MIN_REMAINING_MS = 15_000;
 export const MM_OBSERVATION_MAX_AGE_MS = 120_000;
 export const MM_MAX_UINT = (1n << 256n) - 1n;
+export const MM_PROVIDER_STATUSES = ["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "denied", "expired",
+  "unavailable"] as const;
+/** Final provider job statuses: a later failed read cannot replace them. */
+export const MM_CLOSED_PROVIDER_STATUSES = ["failed", "denied", "expired"] as const;
 export const MM_ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 export const MM_ZERO_HASH = "0".repeat(64);
 
@@ -167,7 +171,11 @@ export interface MetaMaskGaslessApproval {
 export interface MetaMaskGaslessProviderObservation {
   readonly observedAt: string;
   readonly requestIdHash: string;
-  readonly status: "awaiting_approval" | "pending" | "broadcasted" | "confirmed" | "failed" | "unavailable";
+  /**
+   * MetaMask's closed job statuses stay distinct where they mean different things: `denied` and `expired` are the
+   * provider's DENIED and EXPIRED, `failed` is FAILED or BROADCAST_FAILED. None of them proves that no signature exists.
+   */
+  readonly status: "awaiting_approval" | "pending" | "broadcasted" | "confirmed" | "failed" | "denied" | "expired" | "unavailable";
   readonly txHash: Hex | null;
 }
 export interface MetaMaskGaslessCursor {

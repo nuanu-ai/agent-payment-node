@@ -21,7 +21,8 @@ import { assertBridgeOwner, bridgeOwner } from "./owner.js";
 import { BridgeHttps } from "./https.js";
 import { MEGA_FUNDING, inspectMegaDelivery, inspectMegaFundingQuote, megaFail, megaHash, megaJson, megaUint } from "./mega-gaszip-contract.js";
 import { MegaFundingJournal, publicMegaFunding, sealMegaFunding, type MegaFundingRecord } from "./mega-gaszip-journal.js";
-import { MegaFundingRpc, assertMegaFundingFresh, readMegaFundingPlan, proveMegaDelivery, proveMegaSource, type MegaRpcPort } from "./mega-gaszip-rpc.js";
+import { MegaFundingRpc, assertMegaFundingFresh, readMegaFundingPlan, proveMegaDelivery, proveMegaSource, type MegaRpcPort, type MegaSafeProof } from "./mega-gaszip-rpc.js";
+import { gaszipObservationRefusal } from "./gaszip-native-delivery.js";
 const ORIGIN="https://backend.gas.zip";
 export interface MegaFundingPrepareRequest {readonly profile:string;readonly expectedPayer:string;readonly amountAtomic:string;
   readonly minimumOutputAtomic:string;readonly maximumFeeAtomic:string;readonly idempotencyKey:string}
@@ -137,17 +138,20 @@ export class MegaFundingService {
       const ended=await this.state.withLocks(this.locks(r),async()=>{const saved=await this.required(id);if(saved.state!=="prepared")return saved;
         await this.journal.assertNoEffectClaimsLocked(saved); const next=sealMegaFunding({...saved,state:"failed_before_effect",terminal:true,outcomeDigest:hashObject({id,reason:"unsigned_quote_expired"})});await this.journal.saveLocked(next);return next;}); if(ended.state==="failed_before_effect")await this.usage(ended,"failed_before_effect");return publicMegaFunding(ended);
     }
-    if(r.transactionHash===null)return publicMegaFunding(r);const source=await proveMegaSource(this.rpc("source"),r);if(source===null)return publicMegaFunding(r);
-    if(source.actualFee===null || BigInt(source.actualFee)>BigInt(r.maximumFeeAtomic))megaFail("source_actual_fee_cap");
-    let destination:unknown=null,claimHash:Hex|null=null;
-    if(source.status==="success"){
-      const response=await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`,"GET",null,256*1024,"APN_HTTP_CONFIG");
-      if(response.status!==200)megaFail("status_http");const d=inspectMegaDelivery(megaJson(response.body),r.transactionHash,r.owner.address,r.amountAtomic,source.blockNumber);
-      if(d===null)return publicMegaFunding(r);
-      const proof=await proveMegaDelivery(this.rpc("destination"),r.owner.address,d);if(proof===null)return publicMegaFunding(r);
-      if(BigInt(proof.amount)<BigInt(r.minimumOutputAtomic))megaFail("delivery_owner_floor");
-      destination={...proof,providerDigest:d.providerDigest};claimHash=d.hash;
-    }
+    if(r.transactionHash===null)return publicMegaFunding(r);
+    let phase="source_proof",source:MegaSafeProof|null=null,destination:unknown=null,claimHash:Hex|null=null;
+    try{
+      source=await proveMegaSource(this.rpc("source"),r);if(source===null)return publicMegaFunding(r);
+      if(source.actualFee===null || BigInt(source.actualFee)>BigInt(r.maximumFeeAtomic))megaFail("source_actual_fee_cap");
+      if(source.status==="success"){
+        phase="provider_correlation";const response=await this.https.request(`${ORIGIN}/v2/deposit/${r.transactionHash}`,"GET",null,256*1024,"APN_HTTP_CONFIG");
+        if(response.status!==200)megaFail("status_http");const d=inspectMegaDelivery(megaJson(response.body),r.transactionHash,r.owner.address,r.amountAtomic,source.blockNumber);
+        if(d===null)return publicMegaFunding(r);
+        phase="destination_proof";const proof=await proveMegaDelivery(this.rpc("destination"),r.owner.address,d);if(proof===null)return publicMegaFunding(r);
+        if(BigInt(proof.amount)<BigInt(r.minimumOutputAtomic))megaFail("delivery_owner_floor");
+        destination={...proof,providerDigest:d.providerDigest};claimHash=d.hash;
+      }
+    }catch(error){return gaszipObservationRefusal(error,id,phase,"apn mega funding status");}
     r=await this.state.withLocks([...this.locks(r),"mega-gaszip:destination-claims"],async()=>{
       const saved=await this.required(id);if(saved.terminal)return saved;if(saved.transactionHash!==r.transactionHash)megaFail("observation_record_drift");
       if(claimHash!==null)await this.journal.claimDestinationLocked(claimHash,id);

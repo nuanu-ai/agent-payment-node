@@ -1,0 +1,174 @@
+{
+ "provenance": "APN 0.5.40 QA GASZIP-LIVE-SCALAR-001 public read-only captures 2026-10-15; operation 9f3624c11a557c62867b60cf07b92081dfcc689572f94a8cbc23e582b2e3fb10. Provider body and RPC bodies are unmodified.",
+ "operationId": "9f3624c11a557c62867b60cf07b92081dfcc689572f94a8cbc23e582b2e3fb10",
+ "owner": "0x69691Ec6B104f6482F6547e1a201619115854332",
+ "sourceHash": "0xf4ed6493275b7bfb84e9ca2049da07530ebd1b5e65583485a2d36cf5b1a06ed5",
+ "sourceBlock": "52646405",
+ "amountAtomic": "10000000000000",
+ "netAtomic": "382505011493149312",
+ "provider": {
+  "capturedAt": "2026-10-15T16:38:33.980Z",
+  "url": "https://backend.gas.zip/v2/deposit/0xf4ed6493275b7bfb84e9ca2049da07530ebd1b5e65583485a2d36cf5b1a06ed5",
+  "body": "{\"deposit\":{\"block\":52646405,\"chain\":8453,\"hash\":\"0xf4ed6493275b7bfb84e9ca2049da07530ebd1b5e65583485a2d36cf5b1a06ed5\",\"log\":0,\"seen\":1792082157,\"sender\":\"0x69691ec6b104f6482f6547e1a201619115854332\",\"shorts\":[246],\"status\":\"CONFIRMED\",\"time\":1792082157,\"to\":\"0x69691ec6b104f6482f6547e1a201619115854332\",\"token\":\"0x0000000000000000000000000000000000000000\",\"type\":\"EOA\",\"usd\":0.0243,\"value\":\"10000000000000\",\"valueNative\":\"10000000000000\"},\"txs\":[{\"chain\":1329,\"data\":\"0x\",\"hash\":\"0xce41be980318c2ac95c603b8ee0858df7e5330f8477f9ede2a96f82c34dfa799\",\"minValue\":\"0\",\"nonce\":27179,\"retries\":1,\"signer\":\"0x8C826F795466E39acbfF1BB4eEeB759609377ba1\",\"status\":\"CONFIRMED\",\"time\":1792082158,\"to\":\"0x69691ec6b104f6482f6547e1a201619115854332\",\"updated\":1792082158,\"usd\":0.0235,\"value\":\"384225499493149312\",\"valueNative\":\"384225499493149312\"}]}\n"
+ },
+ "calls": [
+  {
+   "capturedAt": "2026-10-15T16:39:26.445Z",
+   "url": "https://evm-rpc.sei-apis.com",
+   "method": "eth_getTransactionByHash",
+   "params": [
+    "0xce41be980318c2ac95c603b8ee0858df7e5330f8477f9ede2a96f82c34dfa799"
+   ],
+   "body": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockHash": "0x5761c19a19225823901ee8aef659257565c6d4e20cd570dc65145f5c96614b83",
+     "blockNumber": "0xe2bfe9f",
+     "chainId": "0x531",
+     "from": "0x8c826f795466e39acbff1bb4eeeb759609377ba1",
+     "gas": "0x5be0",
+     "gasPrice": "0x1108146b80",
+     "hash": "0xce41be980318c2ac95c603b8ee0858df7e5330f8477f9ede2a96f82c34dfa799",
+     "input": "0x",
+     "nonce": "0x6a2b",
+     "r": "0x7ba36d79aa91ecf021c011f3340193a7f9eb8177744b4c3ca14733b4d5dbad7d",
+     "s": "0xc440d78687ce116d7569d1c96a99ff6531953fb3209857c72798d326f188043",
+     "to": "0x69691ec6b104f6482f6547e1a201619115854332",
+     "transactionIndex": "0x0",
+     "type": "0x0",
+     "v": "0xa86",
+     "value": "0x54eee4806db1a80"
+    },
+    "id": 21
+   }
+  },
+  {
+   "capturedAt": "2026-10-15T16:43:19.375171+00:00",
+   "url": "https://evm-rpc.sei-apis.com",
+   "method": "eth_getTransactionReceipt",
+   "params": [
+    "0xce41be980318c2ac95c603b8ee0858df7e5330f8477f9ede2a96f82c34dfa799"
+   ],
+   "body": {
+    "jsonrpc": "2.0",
+    "result": {
+     "blockHash": "0x5761c19a19225823901ee8aef659257565c6d4e20cd570dc65145f5c96614b83",
+     "blockNumber": "0xe2bfe9f",
+     "contractAddress": null,
+     "cumulativeGasUsed": "0x5208",
+     "effectiveGasPrice": "0x1108146b80",
+     "from": "0x8c826f795466e39acbff1bb4eeeb759609377ba1",
+     "gasUsed": "0x5208",
+     "logs": [],
+     "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+     "status": "0x1",
+     "to": "0x69691ec6b104f6482f6547e1a201619115854332",
+     "transactionHash": "0xce41be980318c2ac95c603b8ee0858df7e5330f8477f9ede2a96f82c34dfa799",
+     "transactionIndex": "0x0",
+     "type": "0x0"
+    },
+    "id": 3
+   }
+  },
+  {
+   "capturedAt": "2026-10-15T16:43:20.795596+00:00",
+   "url": "https://evm-rpc.sei-apis.com",
+   "method": "eth_getBlockByNumber",
+   "params": [
+    "0xe2bfe9f",
+    false
+   ],
+   "body": {
+    "jsonrpc": "2.0",
+    "result": {
+     "baseFeePerGas": "0xba43b7400",
+     "difficulty": "0x0",
+     "extraData": "0x",
+     "gasLimit": "0xbebc20",
+     "gasUsed": "0x5208",
+     "hash": "0x5761c19a19225823901ee8aef659257565c6d4e20cd570dc65145f5c96614b83",
+     "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+     "miner": "0x7482d68a8c68fd7204273223d90864207b1558b5",
+     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+     "nonce": "0x0000000000000000",
+     "number": "0xe2bfe9f",
+     "parentHash": "0x615c4f4a938bfd9f712dadcca04ffec3d4e17f4076b5c7098621a44c1176897f",
+     "receiptsRoot": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+     "size": "0x135c",
+     "stateRoot": "0x0562141b20a17013b82e87f184038e6db645e162e2cdd7ad5154c2ced29e2daa",
+     "timestamp": "0x6ad100ee",
+     "transactions": [
+      "0xce41be980318c2ac95c603b8ee0858df7e5330f8477f9ede2a96f82c34dfa799"
+     ],
+     "transactionsRoot": "0x3e94777fb5face0fc4524ea5b1449e56d34ad103c6200f8077d644ff67b39e5b",
+     "uncles": []
+    },
+    "id": 6
+   }
+  },
+  {
+   "capturedAt": "2026-10-15T16:43:21.717511+00:00",
+   "url": "https://evm-rpc.sei-apis.com",
+   "method": "eth_getBalance",
+   "params": [
+    "0x69691Ec6B104f6482F6547e1a201619115854332",
+    {
+     "blockHash": "0x615c4f4a938bfd9f712dadcca04ffec3d4e17f4076b5c7098621a44c1176897f",
+     "requireCanonical": true
+    }
+   ],
+   "body": {
+    "jsonrpc": "2.0",
+    "result": "0x0",
+    "id": 8
+   }
+  },
+  {
+   "capturedAt": "2026-10-15T16:43:22.197704+00:00",
+   "url": "https://evm-rpc.sei-apis.com",
+   "method": "eth_getBalance",
+   "params": [
+    "0x69691Ec6B104f6482F6547e1a201619115854332",
+    {
+     "blockHash": "0x5761c19a19225823901ee8aef659257565c6d4e20cd570dc65145f5c96614b83",
+     "requireCanonical": true
+    }
+   ],
+   "body": {
+    "jsonrpc": "2.0",
+    "result": "0x54eee4806db1a80",
+    "id": 9
+   }
+  },
+  {
+   "capturedAt": "2026-10-15T16:43:22.657560+00:00",
+   "url": "https://evm-rpc.sei-apis.com",
+   "method": "eth_getCode",
+   "params": [
+    "0x69691Ec6B104f6482F6547e1a201619115854332",
+    {
+     "blockHash": "0x615c4f4a938bfd9f712dadcca04ffec3d4e17f4076b5c7098621a44c1176897f",
+     "requireCanonical": true
+    }
+   ],
+   "body": {
+    "jsonrpc": "2.0",
+    "result": "0x",
+    "id": 10
+   }
+  }
+ ],
+ "recordedHeaders": {
+  "note": "Header values recorded by the QA independent proof (analysis/gaszip-independent-proof.json), not raw response bodies.",
+  "chainId": "0x531",
+  "safe": {
+   "number": "0xe2c025d",
+   "hash": "0xf61f9b65e1ba9147060d4a157923d624c3f9ef48b41d3274699e073595bd62d3"
+  },
+  "previous": {
+   "number": "0xe2bfe9e",
+   "hash": "0x615c4f4a938bfd9f712dadcca04ffec3d4e17f4076b5c7098621a44c1176897f"
+  }
+ }
+}

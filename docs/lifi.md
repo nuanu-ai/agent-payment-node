@@ -393,7 +393,8 @@ Operators must not run a separate synthetic RPC capability preflight before the
 real `bridge prepare`. The prepare command performs the exact chain, deployment,
 configuration and block identity checks that its materialized operation needs.
 HTTP 429 is a typed cooldown (`APN_RPC_RATE_LIMITED`) with a sanitized
-`retryAfterMs`; APN does not retry it. HTTP 408, 5xx and approved transport
+`retryAfterMs`; APN does not retry it. JSON-RPC rate-limit codes (-32005, the
+official Base endpoint's -32007 and -32011, and 429) are typed the same way. HTTP 408, 5xx and approved transport
 timeouts may receive one retry after at least two seconds when the command
 deadline still permits it. Permanent HTTP errors, JSON-RPC errors and malformed
 JSON fail immediately. A command budget or deadline failure is typed and occurs
@@ -605,7 +606,10 @@ signing. Provider-bound native delivery to Linea, Monad and BNB remains
 self-recipient only.
 Ethereum, Base and Arbitrum are the reviewed source chains. BNB Smart Chain,
 Monad and Linea remain destination-only and are refused before LI.FI step
-materialization when presented as a source.
+materialization when presented as a source. Route discovery from such a
+source returns every otherwise reviewed row as `preparable: false` with
+`source_execution_unreviewed`, and `bridge prepare` refuses that quote with the
+same reason, including an otherwise intact quote saved before this gate.
 
 ```sh
 apn bridge routes --profile existing-local \
@@ -691,21 +695,23 @@ durable before custody is entered; a recovered commitment can load only its
 original authenticated seal. Missing committed material blocks recovery and
 never permits a replacement signature.
 
-If an RPC transport fails during a pre-sign guard, the terminal operation and
-receipt keep `unsent_apn_rpc_ambiguous` and add `pre_sign_rpc_failure`. This
-integrity-bound record names the effect role, source or destination chain, the
-finite guard stage, its category and the exact JSON-RPC method when the
-transport reached one. It never stores an endpoint, header, provider message,
-calldata or signing material. The failure remains final and does not add a
-retry, fallback, signature or send. A first-effect guard ends as
-`failed_before_effect`; a bridge guard after a safely completed approval ends
-as `failed_after_approval` and keeps the same bridge-stage context while the
-bridge effect remains unsigned and unsent. If the approval is only included,
-or the residual-allowance read fails, the operation remains
-`unknown_finality`, retains `unsent_apn_rpc_ambiguous` and its finite context,
-and exposes `residual_allowance_status` when that read was attempted. A later
-observation can terminalize the operation without signing or sending the
-bridge, while keeping the original diagnostic in status and receipt.
+If an RPC transport fails, or an endpoint answers HTTP 408 or 5xx after its one
+retry, during a pre-sign guard, nothing has been sealed, signed or sent, so the
+operation is not ended. It keeps its state with reason `pre_sign_rpc_unavailable`
+and adds `pre_sign_rpc_failure`. This integrity-bound record names the effect
+role, source or destination chain, the finite guard stage, its category and the
+exact JSON-RPC method when the transport reached one. It never stores an
+endpoint, header, provider message, calldata or signing material. The next
+action is `apn bridge approve` before consent and `apn operation resume` after
+it; the next run repeats the full guard and clears the reason when it signs. Once
+the quote has expired, that run ends the operation on the usual path:
+`failed_before_effect` before any effect, or `failed_after_approval` with
+`unsent_apn_reprepare_required` and the observed residual allowance after a safe
+approval. A rate limit is treated the same way with `pre_sign_rpc_rate_limited`.
+A timeout or rate limit on the raw send itself keeps the first-attempt rule: the
+attempt is final, it is only observed and never resent. Journals written before
+this change that already retain `unsent_apn_rpc_ambiguous` keep their recorded
+final outcome.
 
 Bridge journals written before the allowlist/usage-ledger upgrade remain
 readable through a separate, strict legacy decoder. The decoder verifies the
@@ -1140,6 +1146,47 @@ Source gas 85529811980376 wei plus messaging value 191812223813721 wei totals
 277342035794097 wei, below the frozen 590000000000000-wei native cap. Existing
 SAFE allowance was reused without another approval. Canonical-USDC delivery
 across the three required directions is now evidenced; WBTC remains separate.
+
+## Source observation budget derived from read plans, 2026-10-16
+
+The source observation request cap was a hand-counted constant (15 on Base, 14
+elsewhere) modelled on the compact Base native route. Base canonical USDC Across
+is not compact: its historical deployment proof sends eight archive chunks after
+the fee proof, so the exact sequence needs 18 POSTs, 19 with a scalar or fallback
+receipt read, and every resume after a paid approval failed with
+`APN_RPC_BUDGET_EXCEEDED`. The cap is now counted from the same deployment and
+Base fee read plans the adapter sends (seven canonical requests, fee chunks, then
+deployment chunks after exact cache reuse), plus two retry attempts. Base USDC
+Across needs 19 and Ethereum USDC Stargate 16; no check, chunk size or the shared
+24-POST invocation cap changed. Tests compare every admitted source route and
+receipt route with its production trace.
+
+The destination observation cap, a fixed 16, is counted the same way from the
+destination deployment plan, plus five requests for a provider-bound native
+delivery (pre-delivery header, archive chain identity, two hash-pinned balances,
+trace). Ethereum or Arbitrum to Base USDC Across needs 17 with a scalar Base
+receipt reader and the Ethereum to BNB composite needs 19; both previously failed
+after the principal had left. Every admitted destination is tested the same way.
+
+The step that signs and sends an unsent effect is counted from the guard's read
+plans too: per chain a safe head and its deployment chunks, two account batches,
+a second guard's two account batches after sealing and the raw send, plus two
+more account batches when a foreground approval runs it. The 24-POST invocation
+cap is raised to that step plus four retry POSTs: Base USDC to Arbitrum Across
+sends at POST 24 of 28 (it had been 24 of 24), and its foreground approval step
+fits in 30. Guards, the sign-before-send room check and continuation caps are
+unchanged; an exhausted budget still stops before signing and resumes cleanly.
+
+A provider rate limit during a pre-sign guard is not terminal. Nothing is sealed,
+signed or sent; the operation keeps its state with reason
+`pre_sign_rpc_rate_limited` and `apn operation resume` as next action, and the
+next resume repeats the full guard (an expired quote then ends on the usual
+`failed_after_approval` / `unsent_apn_reprepare_required` path). Deterministic
+refusals (identity, deployment, fee, allowance, nonce, balance) keep their
+terminal outcomes; a transport failure or HTTP 408/5xx in the guard is recoverable
+in the same way (`pre_sign_rpc_unavailable`, see the pre-sign RPC section).
+Source, destination and residual observation already keep any RPC failure,
+including rate limits, recoverable.
 
 ## Finite Base to Mega native funding
 

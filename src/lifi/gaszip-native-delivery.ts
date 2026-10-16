@@ -1,5 +1,6 @@
 import { getAddress, keccak256, recoverTransactionAddress, serializeTransaction, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
+import { ApnError } from "../errors.js";
 
 interface Helpers {
   fail(reason:string):never; object(v:unknown):Record<string,unknown>; uint(v:unknown):bigint;
@@ -46,8 +47,20 @@ export async function gaszipNativeNet(tv:unknown,d:GaszipNativeDelivery,owner:st
     gas===0n || price===0n || v!==BigInt(chain)*2n+35n && v!==BigInt(chain)*2n+36n ||
     Object.hasOwn(t,"maxFeePerGas") || Object.hasOwn(t,"maxPriorityFeePerGas") || Object.hasOwn(t,"accessList"))h.fail("native_signed_envelope");
   const raw=serializeTransaction({type:"legacy",chainId:chain,nonce:Number(nonce),gas,gasPrice:price,to:getAddress(owner),value:net,data:"0x"},
-    {r:h.hash(t.r),s:h.hash(t.s),v});
+    {r:signatureScalar(t.r,"r",h),s:signatureScalar(t.s,"s",h),v});
   if(keccak256(raw)!==d.hash || h.hash(t.hash)!==d.hash || await recoverTransactionAddress({serializedTransaction:raw})!==d.signer)h.fail("native_signed_hash");
   if(h.uint(d.amount)!==net+gas*price || net<floor)h.fail("native_gross_net");
   return net.toString();
+}
+const SECP256K1_ORDER=0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
+/** RPC r/s are QUANTITYs, so a valid scalar may have fewer than 64 digits; exact 32-byte DATA stays accepted. Never a hash. */
+function signatureScalar(value:unknown,field:"r"|"s",h:Helpers):Hex {
+  if(typeof value!=="string" || !/^0x(?:[0-9a-fA-F]{64}|[1-9a-fA-F][0-9a-fA-F]{0,63})$/u.test(value))return h.fail(`native_signature_${field}`);
+  const scalar=BigInt(value);if(scalar===0n || scalar>=SECP256K1_ORDER)h.fail(`native_signature_${field}`);
+  return `0x${scalar.toString(16).padStart(64,"0")}`;
+}
+/** Status refusals keep code and reason, and name the public operation, observer phase and the only same-operation step. */
+export function gaszipObservationRefusal(error:unknown,operationId:string,phase:string,statusCommand:string):never {
+  if(!(error instanceof ApnError))throw error;
+  throw new ApnError(error.code,error.message,{operationId,phase,nextActions:[`${statusCommand} --operation ${operationId}`],...error.details});
 }
