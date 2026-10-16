@@ -8,12 +8,12 @@ import { validateGaslessIntent } from "./intent-validation.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation } from "./model.js";
 import { gaslessObservationRpcEnv, gaslessObservationSource } from "./observation-source.js";
 import type { GaslessObservationPort, GaslessObservationRpcFactory } from "./ports.js";
-import { gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation, type GaslessRpcRequestSession } from "./rpc.js";
-import { recheckBlock, rpcJson, rpcQuantity, rpcRecord, type GaslessRpcCall, type GaslessRpcMethod } from "./rpc-codec.js";
+import { gaslessBatchCap, gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation,
+  type GaslessRpcRequestSession } from "./rpc.js";
+import { rpcJson, rpcQuantity, rpcRecord, type GaslessRpcCall, type GaslessRpcMethod } from "./rpc-codec.js";
 import { observeGasless } from "./rpc-observe.js";
-import { verifyProtocolAt } from "./rpc-state.js";
-import { gaslessDeployment, gaslessProtocolHash } from "./registry.js";
-import { gaslessChain, gaslessFailure, gaslessSame } from "./validation.js";
+import { gaslessDeployment } from "./registry.js";
+import { gaslessChain, gaslessFailure } from "./validation.js";
 
 const READ_METHODS = new Set<GaslessRpcMethod>(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode",
   "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
@@ -46,7 +46,8 @@ export function gaslessObservationRpcFactory(environment: Readonly<Record<string
     const name = gaslessObservationRpcEnv(environmentName), rpcUrl = environment[name];
     const action = `Set ${name} to a public, credential-free HTTPS ${gaslessDeployment(chainId).network} RPC endpoint without a query string or fragment, or resume without --observation-rpc-env.`;
     if (rpcUrl === undefined || rpcUrl.length === 0) throw gaslessConfigError("gasless_observation_rpc_missing", action);
-    try { return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing()); }
+    const batchCap = gaslessBatchCap(environment, name);
+    try { return new GaslessObservationRpc(chainId, rpcUrl, name, transport, defaultPacing(), batchCap); }
     catch (error) {
       if (error instanceof ApnError && error.code === "APN_RPC_CONFIG") throw new ApnError(error.code, error.message, { nextActions: [action] });
       throw error;
@@ -61,7 +62,6 @@ export class GaslessObservationRpc implements GaslessObservationPort {
   readonly rpcEndpointHash: string;
   private readonly endpoint: string;
   private readonly environmentName: string;
-  private readonly deployment;
   private sequence = 0n;
   private readonly rpcCall: GaslessRpcCall;
   private queue: Promise<void> = Promise.resolve();
@@ -71,10 +71,10 @@ export class GaslessObservationRpc implements GaslessObservationPort {
 
   constructor(chainId: GaslessChainId, rpcUrl: string, environmentName: string,
     private readonly transport: GaslessTransport = new GaslessHttps(),
-    private readonly pacing: GaslessObservationPacing = defaultPacing()) {
+    private readonly pacing: GaslessObservationPacing = defaultPacing(),
+    private readonly maxBatchItems?: number) {
     this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
     this.environmentName = gaslessObservationRpcEnv(environmentName);
-    this.deployment = gaslessDeployment(this.chainId);
     const endpoint = parsePublicHttpsUrl(rpcUrl, "APN_RPC_CONFIG", "Observation RPC endpoint", 2048);
     if (endpoint.search !== "" || endpoint.hash !== "") gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_endpoint");
     this.endpoint = endpoint.toString(); this.rpcOrigin = endpoint.origin; this.rpcEndpointHash = sha256(this.endpoint);
@@ -88,24 +88,19 @@ export class GaslessObservationRpc implements GaslessObservationPort {
   private async observeWithinInvocation(intent: GaslessIntent, identity: GaslessEffectIdentity,
     cursor: GaslessCursor): Promise<GaslessObservation> {
     this.unavailable = false;
+    // The saved intent (validated against its own hashes) names the contracts; today's registry pins are not consulted,
+    // so an operation sent before a pin update stays observable. Only the chain must match.
     validateGaslessIntent(intent);
-    if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
-      intent.token !== this.deployment.token || intent.paymaster !== this.deployment.paymaster ||
-      intent.entryPoint !== this.deployment.entryPoint || intent.delegate !== this.deployment.delegate ||
-      intent.initialSnapshot.protocolHash !== gaslessProtocolHash(this.deployment) ||
-      !gaslessSame(intent.tokenDomain, this.deployment.tokenDomain)) {
+    if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId) {
       gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_binding");
     }
     if (rpcQuantity(await this.rpcCall("eth_chainId", [])) !== BigInt(this.chainId)) {
       gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
     }
-    // Validate the original anchor before accepting even partial scan progress from another provider.
-    await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
-    await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block, true);
-    const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin,
-      deployment: this.deployment, rpc: this.rpcCall, codeProven: true }, intent, identity, cursor);
+    // No state is read at the prepare block: every proof is the receipt plus current safe/latest state (archive-free).
+    const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, rpc: this.rpcCall },
+      intent, identity, cursor);
     if (this.unavailable) throw observationUnavailable();
-    await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
     return { ...result, source: gaslessObservationSource(intent, this.environmentName, this) };
   }
 
@@ -125,21 +120,26 @@ export class GaslessObservationRpc implements GaslessObservationPort {
     if (reads === undefined) return;
     this.pendingReads.delete(session);
     try {
-      const requests = reads.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
-      const response = await this.request(canonicalJson(requests.length === 1 ? requests[0] : requests), session);
-      if (reads.length === 1) {
-        reads[0]!.resolve(parseObservationResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), reads[0]!.id));
-        return;
-      }
-      const rows = rpcJson(response.body, MAX_RESPONSE);
-      if (!Array.isArray(rows) || rows.length !== reads.length) gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
-      const expected = new Set(reads.map(row => row.id)), results = new Map<string, unknown>();
-      for (const value of rows) {
-        const record = rpcRecord(value), id = record.id;
-        if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
-          gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+      session.limitBatch(this.maxBatchItems);
+      const results = new Map<string, unknown>();
+      for (let start = 0; start < reads.length; start += session.maxBatchItems) {
+        const chunk = reads.slice(start, start + session.maxBatchItems);
+        const requests = chunk.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
+        const response = await this.request(canonicalJson(requests.length === 1 ? requests[0] : requests), session);
+        if (chunk.length === 1) {
+          results.set(chunk[0]!.id, parseObservationResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), chunk[0]!.id));
+          continue;
         }
-        results.set(id, parseObservationResult(record, id));
+        const rows = rpcJson(response.body, MAX_RESPONSE);
+        if (!Array.isArray(rows) || rows.length !== chunk.length) gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+        const expected = new Set(chunk.map(row => row.id));
+        for (const value of rows) {
+          const record = rpcRecord(value), id = record.id;
+          if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
+            gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
+          }
+          results.set(id, parseObservationResult(record, id));
+        }
       }
       for (const read of reads) read.resolve(results.get(read.id));
     } catch (error) {
