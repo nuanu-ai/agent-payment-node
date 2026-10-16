@@ -5,7 +5,7 @@ import { listLocalWallets, listEncryptedWalletEnvelopes } from "./wallet-import-
 import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
 import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-resume.js";
 import { cleanup85ConflictExclusion, type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
-import { circleNativeSourceIdentity, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
+import { circleNativeSourceIdentity, circleSourceSettled, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
@@ -167,6 +167,11 @@ export class OperationService {
   async assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
   }
+  /** R8 (OWNR-16): a native Arbitrum move to a local custody wallet does not wait for this account's Circle routes whose source burn is final. */
+  async assertEvmNativeAccountAvailableBesideSettledCircle(profileHash: string, account: string): Promise<void> {
+    const settled = (await this.circleOperations(profileHash)).filter(op => !op.terminal && circleSourceSettled(op, profileHash, account));
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], undefined, false, new Map(settled.map(op => [op.operationId, circleNativeSourceIdentity(op)])));
+  }
   /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
   async assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [sharedEvmConflictDomain(chainId, account)]);
@@ -235,7 +240,7 @@ export class OperationService {
         // Only another CCTP operation may queue a source nonce after canonical inclusion. Other rails remain conservative.
         held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       }
-      if (operation.kind === "circle_route" && operation.record.schemaVersion === "apn.circle-v2-evm-operation.v1" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
+      if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
         held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash) held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)) &&

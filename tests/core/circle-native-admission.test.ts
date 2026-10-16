@@ -64,17 +64,30 @@ async function setup() {
   return { ...core, root, buyer, recipient: recipient.address, path, port, save, get op() { return op; }, set op(value) { op = value; }, calls: () => calls, setZero: () => { zero = false; }, setReorg: () => { reorg = true; } };
 }
 
-test("Arbitrum native prepare neither locks nor reads profile default; an unsettled Circle source keeps its account held", async () => {
+test("R8: native Arbitrum ETH to any local custody wallet does not wait for this account's finalized Circle source; other recipients do", async () => {
   const s = await setup(); try {
-    const before = await readFile(s.path);
+    const before = await readFile(s.path), treasury = await s.core.wallet.ensure("treasury-ops") as { address: string };
     let entered!: () => void, release!: () => void;
     const inside = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
     const held = s.state.withLocks([`profile:${s.state.profileHash("default")}`], async () => { entered(); await gate; }); await inside;
-    const value = await s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient: s.recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: "circle-direct" });
+    const prepare = (recipient: string, key: string) => s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: key });
+    // A recipient that is not a local custody wallet still waits for the unresolved Circle route.
+    const outside = await prepare(`0x${"55".repeat(20)}`, "circle-direct-outside");
+    assert.equal(outside.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(outside));
+    // Any local custody profile's wallet (not only `default`): admitted while profile default stays locked elsewhere.
+    const inner = await prepare(treasury.address, "circle-direct-treasury");
     release(); await held;
-    assert.equal(value.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(value));
-    assert.equal(s.calls(), 0, "no Circle source or default custody read"); assert.deepEqual(await readFile(s.path), before);
-    assert.equal((await s.state.listOperations(s.op.profileHash)).length, 0);
+    assert.equal(inner.ok, true, JSON.stringify(inner));
+    assert.equal(s.calls(), 0, "no Circle source re-read: the journal's own finalized source proof decides"); assert.deepEqual(await readFile(s.path), before);
+    assert.equal((await s.state.listOperations(s.op.profileHash)).length, 1);
+  } finally { await rm(s.root, { recursive: true, force: true }); }
+});
+
+test("R8: an INCLUDED (not yet finalized) Circle source keeps the account held even for a local custody recipient", async () => {
+  const s = await setup(); try {
+    s.op = advanceCircle(s.op, { source: { ...s.op.source!, finalityTag: "included", integrityHash: hashObject((({ integrityHash: _, ...body }) => ({ ...body, finalityTag: "included" }))(s.op.source!)) } }, "included", Date.parse(s.op.preparedAt)); await s.save();
+    const value = await s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient: s.recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: "circle-direct-included" });
+    assert.equal(value.error?.code, "APN_OPERATION_BLOCKED", JSON.stringify(value)); assert.equal(s.calls(), 0);
   } finally { await rm(s.root, { recursive: true, force: true }); }
 });
 
