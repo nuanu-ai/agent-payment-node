@@ -1,8 +1,8 @@
 import { ApnError } from "./errors.js";
-import { effectiveX402Cap, requireProfilePolicy } from "./profile-policy.js";
+import { assertX402PayeeAdmitted, effectiveX402Cap, requireProfilePolicy } from "./profile-policy.js";
 import type { RuntimeContext } from "./runtime.js";
 import { assertLocalNetworkProfile, x402Network } from "./x402-network.js";
-import { resolveX402Payer } from "./x402-payer.js";
+import { resolveX402Payer, x402PolicyBinding } from "./x402-payer.js";
 import type { X402OperationRecord } from "./x402-state-integrity.js";
 
 /**
@@ -18,4 +18,13 @@ export async function assertCurrentNetworkPolicy(context: RuntimeContext, operat
   const payer = await resolveX402Payer(context, operation.profileHash, selected.chainId);
   if (payer.wallet !== operation.wallet || payer.transferMethod !== "eip3009") throw new ApnError("APN_WALLET_MISMATCH", "Current local payer differs from the frozen x402 wallet.");
   effectiveX402Cap(requireProfilePolicy(await context.requirePolicy().load(payer.policy)), operation.capAtomic);
+}
+
+/**
+ * The owner's optional x402 payee pin (profile policy; absent = not restricted), re-read from local state before signing
+ * and before the first paid request on every network, so a pin added after prepare stops an unsent payment.
+ */
+export async function assertCurrentX402Payee(context: RuntimeContext, operation: X402OperationRecord): Promise<void> {
+  const binding = await x402PolicyBinding(context, operation.profileHash, x402Network(operation.network).chainId);
+  assertX402PayeeAdmitted(requireProfilePolicy(await context.requirePolicy().load(binding)), operation.authorization.to);
 }

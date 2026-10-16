@@ -21,6 +21,15 @@ export interface X402PayerBinding {
   };
 }
 
+/** The profile x402 policy binding of a payer, from local state only (no provider call). */
+export async function x402PolicyBinding(context: RuntimeContext, profileHash: string, chainId: EvmChainId): Promise<ProfilePolicyBinding> {
+  const provider = context.profileRepository === undefined ? null : await context.requireProfileRepository().load(profileHash);
+  if (provider !== null && provider.provider_id !== LOCAL_PROVIDER_ID) return policyBinding(provider);
+  const wallet = await context.state.loadWallet(profileHash);
+  if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+  return networkPolicyBinding(policyBinding(wallet), chainId);
+}
+
 export async function resolveX402Payer(
   context: RuntimeContext,
   profileHash: string,
