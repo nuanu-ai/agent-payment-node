@@ -1283,6 +1283,61 @@ test("ambiguous submission rebroadcasts only the sealed bytes and exact receipt 
   } finally { await fixture.temporary.cleanup(); }
 });
 
+test("two ambiguous submissions do not wedge: the sealed hash is observed and only the same bytes are rebroadcast", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountRpc();
+    rpc.submitError = new Error("HTTP 429");
+    const allowance = new FixtureAllowance(), engine = new FixtureDelegationEngine(), approval = new FixtureApproval();
+    const runtime = directRuntime(fixture, rpc, allowance, engine, approval);
+    const prepared = await runtime.core.execute({
+      command: "transfer.prepare", profile: PROFILE, idempotencyKey: "smart-account-wedge-0001",
+      recipient: DIRECT_RECIPIENT, amount: "0.01",
+    });
+    const operationId = String((prepared.operation as any).operation_id);
+    assert.equal(((await runtime.core.execute({ command: "transfer.approve", operationId })).operation as any).state, "provider_pending");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const still = await runtime.core.execute({ command: "operation.resume", operationId });
+      assert.equal((still.operation as any).state, "provider_pending", JSON.stringify(still));
+    }
+    assert.equal((await runtime.effects.load(operationId))?.submission_attempts, 2);
+    rpc.submitError = null;
+    const resumed = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((resumed.operation as any).state, "evidence_pending", JSON.stringify(resumed));
+    assert.equal((resumed.operation as any).transaction_hash, keccak256(RAW_TRANSACTION));
+    assert.equal(new Set(rpc.submissions).size, 1, "only the sealed bytes are ever sent");
+    assert.equal(engine.signCalls, 1);
+    rpc.receipt = exactSmartAccountReceipt(keccak256(RAW_TRANSACTION), "10000");
+    const sends = rpc.submissions.length;
+    const completed = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((completed.operation as any).state, "completed");
+    assert.equal(rpc.submissions.length, sends);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
+test("an ambiguous submission whose sealed nonce is taken is observed by hash without another send", async () => {
+  const fixture = await makeFixture();
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    const rpc = new SmartAccountRpc();
+    rpc.submitError = new Error("response lost");
+    const runtime = directRuntime(fixture, rpc, new FixtureAllowance(), new FixtureDelegationEngine(), new FixtureApproval());
+    const prepared = await runtime.core.execute({
+      command: "transfer.prepare", profile: PROFILE, idempotencyKey: "smart-account-nonce-used-0001",
+      recipient: DIRECT_RECIPIENT, amount: "0.01",
+    });
+    const operationId = String((prepared.operation as any).operation_id);
+    assert.equal(((await runtime.core.execute({ command: "transfer.approve", operationId })).operation as any).state, "provider_pending");
+    rpc.submitError = null;
+    rpc.nonceAtomic = "8";
+    const resumed = await runtime.core.execute({ command: "operation.resume", operationId });
+    assert.equal((resumed.operation as any).state, "evidence_pending", JSON.stringify(resumed));
+    assert.equal((resumed.operation as any).transaction_hash, keccak256(RAW_TRANSACTION));
+    assert.equal(rpc.submissions.length, 1);
+  } finally { await fixture.temporary.cleanup(); }
+});
+
 test("official MetaMask engine creates deterministic session-to-session exact child and redemption bytes", async () => {
   const fixture = await makeFixture();
   try {
