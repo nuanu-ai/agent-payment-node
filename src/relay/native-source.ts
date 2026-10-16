@@ -151,29 +151,24 @@ export class RelayNativeSourceRuntime {
     if (!bridgeMechanismAdmitted(decision, { provider: "relay", reference: op.nativeQuote!.routeReference })) blocked("route_pin");
     return active;
   }
+  /** Chain and head, then the balance pinned to the head hash (EIP-1898 requireCanonical) and the pending nonce; Base
+   * adds its exact simulation and OP fee reads at that height. No header is re-read around pinned reads (P2). */
   private async funding(op: RelayUnsignedOperation, rpc: Rpc): Promise<bigint> {
     const head = await rpc.batchCall([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
     if (head.length !== 2 || evmRpcQuantity(head[0]) !== BigInt(op.sourceChainId)) blocked("bnb_rpc_chain");
     const block = evmRpcRecord(head[1]), number = evmRpcQuantity(block.number), hash = evmRpcHex(block.hash, 32);
     const reference = { blockHash: hash, requireCanonical: true };
     const rows = await rpc.batchCall([
-      { method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] },
       { method: "eth_getBalance", params: [op.sourceAccount, reference] },
       { method: "eth_getTransactionCount", params: [op.sourceAccount, "pending"] },
-      { method: "eth_chainId", params: [] },
     ]);
-    if (rows.length !== 4 || evmRpcQuantity(rows[3]) !== BigInt(op.sourceChainId) || evmRpcQuantity(evmRpcRecord(rows[0]).number) !== number ||
-      evmRpcHex(evmRpcRecord(rows[0]).hash, 32) !== hash) blocked("bnb_source_block_changed");
+    if (rows.length !== 2) blocked("bnb_source_batch");
     const d = op.nativeQuote!.deposit;
-    if (evmRpcQuantity(rows[1]) < BigInt(d.value) + BigInt(op.depositNetworkFeeCeilingWei!) ||
+    if (evmRpcQuantity(rows[0]) < BigInt(d.value) + BigInt(op.depositNetworkFeeCeilingWei!) ||
       !evmFrozenFeeAdmitted(evmRpcQuantity(block.baseFeePerGas), { maxFeePerGasWei: BigInt(d.maxFeePerGas),
         maxPriorityFeePerGasWei: BigInt(d.maxPriorityFeePerGas) })) blocked("native_funding_or_fee");
-    if (op.sourceChainId === 8453) {
-      await verifyRelayBaseFunding(op, rpc, `0x${number.toString(16)}`);
-      const [again] = await rpc.batchCall([{ method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] }]);
-      if (evmRpcHex(evmRpcRecord(again).hash, 32) !== hash) blocked("base_preflight_block_changed");
-    }
-    const nonce = evmRpcQuantity(rows[2]);
+    if (op.sourceChainId === 8453) await verifyRelayBaseFunding(op, rpc, `0x${number.toString(16)}`);
+    const nonce = evmRpcQuantity(rows[1]);
     if (nonce > BigInt(Number.MAX_SAFE_INTEGER)) blocked("nonce_unbounded");
     return nonce;
   }
@@ -293,6 +288,8 @@ export class RelayNativeSourceRuntime {
         authority!.assert();
         j = await this.journals.advance(op, null, "pending");
       }
+      // P2: bytes signed in this invocation go out on the funding and nonce just read under the held locks.
+      let signedNonce: bigint | null = null;
       if (j.phase === "pending") {
         const active = await this.admission(op, this.clock.now());
         const prior = await this.usage.load(identity, reservationId);
@@ -320,7 +317,7 @@ export class RelayNativeSourceRuntime {
             maxPriorityFeePerGas: BigInt(d.maxPriorityFeePerGas), accessList: [] });
         } finally { this.wallets.clear(wallet.secret); }
         const hash = await verifySigned(op, raw, nonce);
-        await this.custody(op, { raw, hash });
+        await this.custody(op, { raw, hash }); signedNonce = nonce;
       }
       if (j.phase === "signing_started") {
         if (op.sourceChainId === 8453 && (await this.usage.load(identity, reservationId))?.state === "reserved")
@@ -336,7 +333,7 @@ export class RelayNativeSourceRuntime {
       }
       if (j.phase === "sealed") {
         authority ??= new RelayNativeAuthority(op, await this.admission(op, this.clock.now()), this.clock, signal);
-        const nonce = await this.funding(op, rpc);
+        const nonce = signedNonce ?? await this.funding(op, rpc);
         const signed = await this.custody(op);
         if (signed === null || signed.hash !== j.transactionHash) corrupt("sealed custody missing");
         await verifySigned(op, signed.raw, nonce);

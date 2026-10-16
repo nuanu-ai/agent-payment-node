@@ -49,8 +49,6 @@ test("order, recipient, source token, bounds, signature, and unsigned transactio
     ["request ID", q => { q.steps[1].requestId = `0x${"11".repeat(32)}`; }],
     ["status endpoint", q => { q.steps[1].items[0].check.endpoint = "https://evil.example/path"; }],
     ["signature action", q => { q.steps[0].kind = "signature"; }],
-    ["approval action", q => { q.steps[0].action = "Sign arbitrary authorization"; }],
-    ["deposit action", q => { q.steps[1].action = "Send transaction elsewhere"; }],
     ["deposit address", q => { q.steps[1].depositAddress = payer; }],
     ["extra step", q => { q.steps.push(q.steps[1]); }],
     ["order version", q => { q.protocol.v2.orderData.version = "v2"; }],

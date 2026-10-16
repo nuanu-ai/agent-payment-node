@@ -60,6 +60,8 @@ export interface RelayApprovalObservation {
     }>;
     /** Hash of the canonical block at receipt.blockNumber from a fresh read. */
     readonly canonicalBlockHash: string;
+    /** False while the receipt is only included (confirmed below the latest head); absent means finalized. */
+    readonly finalized?: boolean;
 }
 export interface RelayApprovalPorts {
     now(): Date;

@@ -160,8 +160,11 @@ export class RelayApprovalEffectService {
             if (effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent")
                 return journal;
             const resumedSeal = effect.phase === "sealed";
+            // P2: bytes signed in this invocation, under these held locks, go out on the nonce and admission just checked.
+            let signedNonce = null;
             if (effect.phase === "pending") {
                 const nonce = firstNonce ?? await this.revalidate(op);
+                signedNonce = nonce;
                 journal = await this.effects.transition(profileHash, operationId, journal.integrityHash, { kind: "mark_signing", role: "approval", marker: randomBytes(32).toString("hex"), at: this.ports.now().toISOString() });
                 const raw = await this.ports.sign(op);
                 const signed = await verifySigned(op, raw, undefined, nonce);
@@ -193,7 +196,7 @@ export class RelayApprovalEffectService {
                 effect = journal.effects[0];
             }
             if (effect.phase === "sealed") {
-                const nonce = await this.revalidate(op);
+                const nonce = signedNonce ?? await this.revalidate(op);
                 const signed = await this.ports.custody.load(op);
                 if (signed === null || !same(signed.transactionHash, effect.attempt.transactionHash))
                     corrupt("sealed custody missing");
@@ -310,8 +313,9 @@ export function verifyApprovalObservation(op, hash, value) {
         !same(tx.input, op.quote.approval.data) || receipt.blockNumber < 0n ||
         !same(receipt.blockHash, canonicalBlockHash) || !/^0x[0-9a-fA-F]{64}$/u.test(canonicalBlockHash))
         corrupt("transaction or canonical inclusion");
+    // A revert is recorded only once final; a successful approval may gate the deposit while included (BRDG-22).
     if (receipt.status === "reverted")
-        return "failed";
+        return value.finalized === false ? "pending" : "failed";
     const owner = `0x${op.sourceAccount.slice(2).padStart(64, "0")}`;
     const spender = `0x${ETHEREUM_DEPOSITORY.slice(2).padStart(64, "0")}`;
     const amount = `0x${BigInt(op.amountAtomic).toString(16).padStart(64, "0")}`;

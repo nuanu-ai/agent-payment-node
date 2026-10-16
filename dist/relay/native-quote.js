@@ -2,7 +2,7 @@
 import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import { hashObject } from "../canonical.js";
-import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
+import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
 export const RELAY_BNB_POLYGON_ROUTE_REFERENCE = "bnb-native-polygon-native-v1";
 export const RELAY_BNB_MONAD_ROUTE_REFERENCE = "bnb-native-monad-native-v1";
 export const RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE = "bnb-native-monad-native-default-v1";
@@ -178,7 +178,7 @@ export async function validateRelayNativeQuote(value, intent) {
         fail("output minimum");
     const deadline = output.deadline;
     if (typeof deadline !== "number" || !Number.isSafeInteger(deadline) || deadline <= intent.nowSeconds + 60 ||
-        deadline > intent.nowSeconds + 7 * 86400)
+        deadline > intent.nowSeconds + RELAY_MAX_DEADLINE_SECONDS)
         fail("deadline");
     const expectedRefunds = [{ chainId: route.sourceChain, recipient: intent.payer, currency: BNB_NATIVE },
         { chainId: route.chain, recipient: intent.recipient, currency: route.refundCurrency }];
