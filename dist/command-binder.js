@@ -96,7 +96,7 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path.join(" ") === "relay arbitrum prepare")
         return { request: { command: "relay.arbitrum.prepare", profile: value(options, "--profile"), owner: value(options, "--owner"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxProviderFeeAtomic: value(options, "--max-provider-fee-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), quoteFile: value(options, "--quote-file"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay arbitrum observe")
-        return { request: { command: "relay.arbitrum.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.arbitrum.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
     if (parsed.command.path.join(" ") === "relay arbitrum approval-check")
         return { request: { command: "relay.arbitrum.approval-check", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay arbitrum approval-execute")

@@ -60,6 +60,9 @@ export type RelayEthereumUsdcCreditResult = Readonly<{
     status: "pending" | "unproven" | "mismatch";
     reason: string;
 }>);
+export type RelayEthereumUsdcCreditProof = Extract<RelayEthereumUsdcCreditResult, {
+    status: "recipient_credit_proven";
+}>["proof"];
 /** A candidate from Relay status is only a discovery hint, including when it is a real credit. */
 export declare function proveRelayEthereumUsdcCredit(quote: Quote, candidateHash: string, ports: RelayEthereumUsdcProofPorts): Promise<RelayEthereumUsdcCreditResult>;
 /** Keyless, shared-guard JSON-RPC session. At most seven physical POSTs per candidate. */

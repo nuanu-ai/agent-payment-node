@@ -1,4 +1,5 @@
-/** Saved-operation Arbitrum source observation. No wallet, signer, send, or destination assertion. */
+/** Saved-operation Arbitrum source observation and, once the deposit is final and an Ethereum reader is configured, the
+ * Ethereum USDC credit to the operation's own recipient. No wallet, signer or send. */
 import { getAddress } from "viem";
 import { hashObject } from "../canonical.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
@@ -45,10 +46,22 @@ export class RelayArbitrumSourceObserveService {
     state;
     observer;
     ports;
-    constructor(state, observer, ports = {}) {
+    destination;
+    constructor(state, observer, ports = {}, 
+    /** Present when the caller supplied an Ethereum RPC: the final deposit then continues to the destination credit. */
+    destination) {
         this.state = state;
         this.observer = observer;
         this.ports = ports;
+        this.destination = destination;
+    }
+    /** A final deposit is proven; with an Ethereum reader the same invocation proves (or reads the recorded) credit. */
+    async withDestination(op, journal, source) {
+        const hash = journal.effects[1].attempt?.transactionHash;
+        if (this.destination === undefined || journal.effects[1].phase !== "confirmed" || typeof hash !== "string")
+            return source;
+        const destination = await this.destination.observe(op, hash);
+        return { ...source, ...destination, sourceFinalized: true };
     }
     async finalizeUsage(op, journal) {
         const proofDigest = journal.effects[1].attempt?.observationDigest;
@@ -131,7 +144,7 @@ export class RelayArbitrumSourceObserveService {
         }
         if (depositEffect.phase === "confirmed") {
             await this.finalizeUsage(op, journal);
-            return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
+            return this.withDestination(op, journal, output("deposit_source_confirmed", "saved_deposit_source_confirmation"));
         }
         if (approvalEffect.phase === "approval_skipped" && depositEffect.phase === "pending")
             return output("approval_skipped", "canonical_allowance_observed_deposit_recheck_required");
@@ -179,7 +192,8 @@ export class RelayArbitrumSourceObserveService {
             corrupt("transition_result");
         if (role === "deposit")
             await this.finalizeUsage(op, next);
-        return { ...output(role === "approval" ? "approval_source_confirmed" : "deposit_source_confirmed", "canonical_safe_source_receipt", proof), approvalPhase: next.effects[0].phase, depositPhase: next.effects[1].phase };
+        const observed = { ...output(role === "approval" ? "approval_source_confirmed" : "deposit_source_confirmed", "canonical_safe_source_receipt", proof), approvalPhase: next.effects[0].phase, depositPhase: next.effects[1].phase };
+        return role === "deposit" ? this.withDestination(op, next, observed) : observed;
     }
     async recordRevert(op, journal, role, chosen, reverted, output) {
         const proofDigest = hashObject(reverted);
