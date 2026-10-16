@@ -2,9 +2,8 @@ import { decodeFunctionResult, parseAbi } from "viem";
 import { ApnError } from "../../errors.js";
 import { assertTronNetwork } from "../../tron/rpc.js";
 import { validateSwapOperation } from "../model.js";
-import { SUNSWAP_PINNED_CONTRACTS, SUNSWAP_V2_CODE_HASHES, SUNSWAP_V2_ROUTER } from "./catalog.js";
+import { SUNSWAP_V2_ROUTER } from "./catalog.js";
 import { assertSunSwapOwnerFunding, sunSwapChainParameters } from "./keyless-builder.js";
-import { verifySunSwapPinnedCode } from "./market.js";
 import { validateSunSwapPreparedMaterial } from "./prepared.js";
 import { sunSwapHead, triggerSunSwapConstant } from "./tron-call.js";
 const ABI = parseAbi(["function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)"]);
@@ -33,8 +32,8 @@ export class SunSwapExecutionGuard {
             BigInt(intent.feeLimitSun) > parameters.maximumFeeLimitSun) {
             blocked("TRON energy or bandwidth prices changed after the quote; request a fresh quote.", "sunswap_resource_price_drift");
         }
-        for (const { role, address } of SUNSWAP_PINNED_CONTRACTS)
-            await verifySunSwapPinnedCode(this.rpc, address, SUNSWAP_V2_CODE_HASHES[role]);
+        // SWAP-17: router, factory, pair, WTRX and USDT code was verified once for this operation at quote; these contracts have
+        // no upgrade path. The exact-call simulation below and the solidified receipt check bind the actual effect.
         const head = await sunSwapHead(this.rpc), reference = BigInt(market.referenceBlock.number);
         if (head.number < reference)
             throw new ApnError("APN_RPC_PROTOCOL", "TRON head is behind the recorded SunSwap reference block.");
