@@ -1,5 +1,6 @@
 import { type MetaMaskNativeDeadline, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { type AssetUsageReservation } from "./asset-usage-ledger.js";
+import type { OperationAbandonIntent } from "./operation-abandon-approval.js";
 import { type MetaMaskNativeFeeQuote } from "./metamask-native-fee-evidence.js";
 import { type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
 export declare const METAMASK_NATIVE_OWNER_PROFILE: "metamask-live-v042";
@@ -53,6 +54,27 @@ export declare function runFixedMetaMaskNativeTransfer(stateRoot: string, chainI
 }>;
 export declare function readFixedMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean): Promise<{
     read_observation?: MetaMaskNativeReadObservation;
+    receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    diagnostic?: MetaMaskNativeDiagnostic;
+    operation_id: string;
+    state: string;
+    chain_id: 1 | 10 | 59144 | 143 | 1329;
+    profile: string;
+    sender: `0x${string}`;
+    seller: "0x991e254b5c8e0aaf6c244eaa2706bad059809b04";
+    token: `0x${string}`;
+    usdc_atomic: string;
+    maximum_native_fee_atomic: string;
+    transaction_hash: `0x${string}` | null;
+    effect_attempts: 0 | 1;
+    proof_class: string;
+}>;
+export declare function metaMaskNativeOperationExists(stateRoot: string, id: string): Promise<boolean>;
+/**
+ * Owner release (R4) of a native transfer whose outcome stayed unknown after its quote expired. It observes once,
+ * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed.
+ */
+export declare function abandonFixedMetaMaskNativeTransfer(stateRoot: string, idInput: string, approve: (intent: OperationAbandonIntent) => Promise<void>, now: () => Date): Promise<{
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
