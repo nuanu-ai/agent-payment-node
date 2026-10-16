@@ -15,6 +15,8 @@ export declare class MerchantOwner {
     private readonly ledger;
     constructor(state: StateStore, now: () => Date, policyLocked?: boolean);
     withPolicyLock<T>(profile: string, action: (owner: MerchantOwner) => Promise<T>): Promise<T>;
+    /** Before any merchant request: the profile has an active policy naming the payer as its EVM account. */
+    assertPayerPolicy(profile: string, payer: string): Promise<void>;
     /** The profile's active policy, whose EVM account must be the payer (custody of the same profile). */
     private active;
     private evaluate;

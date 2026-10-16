@@ -1,10 +1,8 @@
-import { decodeFunctionResult, encodeFunctionData, erc20Abi, keccak256 } from "viem";
+import { decodeFunctionResult, encodeFunctionData, erc20Abi } from "viem";
 import { hashObject } from "../canonical.js";
-import { merchantCurrent, object, quantity, hexHash, bytes } from "./rpc.js";
-import { MERCHANT_PROXY_HASH, MERCHANT_IMPLEMENTATION, MERCHANT_IMPLEMENTATION_HASH } from "./pins.js";
+import { deploymentMatches, deploymentReads, merchantCurrent, object, quantity, hexHash, bytes, readNamed } from "./rpc.js";
 import { merchantTerms } from "./terms.js";
 import { refuse } from "./protocol.js";
-const SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 /** Absence of effects is established by dispatch fences; canonical unchanged state is supporting evidence. */
 export async function merchantUnsentProof(rpc, o) {
     if (o.feeContext === undefined)
@@ -16,15 +14,14 @@ export async function merchantUnsentProof(rpc, o) {
         refuse("merchant_retirement_anchor");
     const read = async (head) => {
         const tag = { blockHash: hexHash(head.hash), requireCanonical: true };
-        const v = await rpc.batch([
-            { method: "eth_getTransactionCount", params: [t.payer, tag] }, { method: "eth_getBalance", params: [t.payer, tag] },
-            { method: "eth_call", params: [{ to: t.token, data: encodeFunctionData({ abi: erc20Abi, functionName: "balanceOf", args: [t.payer] }) }, tag] },
-            { method: "eth_getCode", params: [t.token, tag] }, { method: "eth_getStorageAt", params: [t.token, SLOT, tag] }, { method: "eth_getCode", params: [MERCHANT_IMPLEMENTATION, tag] },
-            { method: "eth_getBlockByNumber", params: [head.number, false] }
+        const v = await readNamed(rpc, [
+            ["nonce", { method: "eth_getTransactionCount", params: [t.payer, tag] }], ["native", { method: "eth_getBalance", params: [t.payer, tag] }],
+            ["token", { method: "eth_call", params: [{ to: t.token, data: encodeFunctionData({ abi: erc20Abi, functionName: "balanceOf", args: [t.payer] }) }, tag] }],
+            ...deploymentReads(t, tag), ["anchor", { method: "eth_getBlockByNumber", params: [head.number, false] }]
         ]);
-        if (keccak256(bytes(v[3])) !== MERCHANT_PROXY_HASH || bytes(v[4]) !== `0x${MERCHANT_IMPLEMENTATION.slice(2).toLowerCase().padStart(64, "0")}` || keccak256(bytes(v[5])) !== MERCHANT_IMPLEMENTATION_HASH || hexHash(object(v[6]).hash) !== hexHash(head.hash))
+        if (!deploymentMatches(t, v) || hexHash(object(v.anchor).hash) !== hexHash(head.hash))
             refuse("merchant_retirement_runtime_or_reanchor");
-        return { nonce: quantity(v[0]).toString(), native: quantity(v[1]).toString(), token: decodeFunctionResult({ abi: erc20Abi, functionName: "balanceOf", data: bytes(v[2]) }).toString(), head };
+        return { nonce: quantity(v.nonce).toString(), native: quantity(v.native).toString(), token: decodeFunctionResult({ abi: erc20Abi, functionName: "balanceOf", data: bytes(v.token) }).toString(), head };
     };
     const before = await read(original), after = await read(safe);
     if (before.nonce !== o.envelope.nonce || after.nonce !== before.nonce || after.native !== before.native || after.token !== before.token)

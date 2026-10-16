@@ -5,7 +5,7 @@ import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { parseRpcBatchResultEnvelope } from "../rpc.js";
 import type { StateStore } from "../state.js";
-import { MERCHANT_IMPLEMENTATION, MERCHANT_IMPLEMENTATION_HASH, MERCHANT_PROXY_HASH, MERCHANT_RPC } from "./pins.js";
+import { MERCHANT_RPC } from "./pins.js";
 import { merchantTerms, type MerchantTerms } from "./terms.js";
 import { refuse } from "./protocol.js";
 import type { MerchantEnvelope, MerchantOperation, MerchantReceipt } from "./model.js";
@@ -58,7 +58,23 @@ export function bytes(v: unknown): Hex { if (typeof v !== "string" || !/^0x(?:[a
 export function hexHash(v: unknown): Hex { const h = bytes(v); if (h.length !== 66)
     refuse("merchant_rpc_hash"); return h; }
 export function rpcTransaction(t: MerchantTerms) { return { from: t.payer, to: t.token, data: merchantTransferData(t), value: "0x0" }; }
-/** Fresh runtime, proxy implementation, real domain, balances and pending nonce at one rechecked anchor. */
+type Read = { method: string; params: readonly unknown[] };
+/** Named reads in one batch: positions never shift when an asset has no deployment pins. */
+export async function readNamed<K extends string>(rpc: MerchantRpcPort, reads: readonly (readonly [K, Read])[]): Promise<Readonly<Record<K, unknown>>> {
+    const values = await rpc.batch(reads.map(([, read]) => read));
+    return Object.fromEntries(reads.map(([name], i) => [name, values[i]])) as Record<K, unknown>;
+}
+/** The asset's EIP-1967 proxy, implementation slot and implementation code at `tag`, when the asset pins its deployment. */
+export function deploymentReads(t: MerchantTerms, tag: unknown): readonly (readonly ["code" | "slot" | "impl", Read])[] {
+    const d = t.asset.deployment;
+    return d === undefined ? [] : [["code", { method: "eth_getCode", params: [t.token, tag] }], ["slot", { method: "eth_getStorageAt", params: [t.token, IMPLEMENTATION_SLOT, tag] }],
+        ["impl", { method: "eth_getCode", params: [d.implementation, tag] }]];
+}
+export function deploymentMatches(t: MerchantTerms, v: Readonly<Record<string, unknown>>): boolean {
+    const d = t.asset.deployment;
+    return d === undefined || keccak256(bytes(v.code)) === d.proxyCodeHash && bytes(v.slot) === `0x${d.implementation.slice(2).toLowerCase().padStart(64, "0")}` && keccak256(bytes(v.impl)) === d.implementationCodeHash;
+}
+/** Fresh chain, token identity (and deployment pins when the asset has them), balances and pending nonce at one rechecked anchor. */
 export async function merchantCurrent(rpc: MerchantRpcPort,t: MerchantTerms,frozenEnvelope?:MerchantEnvelope,maximumNativeFee="1000000000000000000"): Promise<{
     nonce: string;
     gas: string;
@@ -68,26 +84,25 @@ export async function merchantCurrent(rpc: MerchantRpcPort,t: MerchantTerms,froz
     token: string;
     feeContext: MerchantFeeContext;
 }> {
-    const head = object(await rpc.call("eth_getBlockByNumber", ["latest", false])), tag = head.number, blockHash = hexHash(head.hash);
-    const call = (functionName: "name" | "symbol" | "decimals" | "balanceOf", args?: readonly [string]) =>
+    const head = object(await rpc.call("eth_getBlockByNumber", ["latest", false])), tag = head.number, blockHash = hexHash(head.hash), d = t.asset.deployment;
+    const call = (functionName: "name" | "symbol" | "decimals" | "balanceOf", args?: readonly [string]): Read =>
         ({ method: "eth_call", params: [{ to: t.token, data: encodeFunctionData({ abi: erc20Abi, functionName, args } as never) }, tag] });
-    const v = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getCode", params: [t.token, tag] },
-        { method: "eth_getStorageAt", params: [t.token, IMPLEMENTATION_SLOT, tag] }, { method: "eth_getCode", params: [MERCHANT_IMPLEMENTATION, tag] },
-        call("name"), call("symbol"), call("decimals"), { method: "eth_call", params: [{ to: t.token, data: encodeFunctionData({ abi: DOMAIN_ABI, functionName: "DOMAIN_SEPARATOR" }) }, tag] },
-        call("balanceOf", [t.payer]), { method: "eth_getBalance", params: [t.payer, "pending"] }, { method: "eth_getTransactionCount", params: [t.payer, "pending"] },
-        { method: "eth_getCode", params: [t.payer, tag] }, { method: "eth_estimateGas", params: [rpcTransaction(t)] }, { method: "eth_maxPriorityFeePerGas", params: [] },
-        { method: "eth_getBlockByNumber", params: [tag, false] }]);
-    if (quantity(v[0]) !== 4326n || keccak256(bytes(v[1])) !== MERCHANT_PROXY_HASH || bytes(v[2]) !== `0x${MERCHANT_IMPLEMENTATION.slice(2).toLowerCase().padStart(64, "0")}` || keccak256(bytes(v[3])) !== MERCHANT_IMPLEMENTATION_HASH ||
-        bytes(v[11]) !== "0x" || hexHash(object(v[14]).hash) !== blockHash)
+    const v = await readNamed(rpc, [["chain", { method: "eth_chainId", params: [] }], ...deploymentReads(t, tag),
+        ["name", call("name")], ["symbol", call("symbol")], ["decimals", call("decimals")],
+        ...(d === undefined ? [] : [["domain", { method: "eth_call", params: [{ to: t.token, data: encodeFunctionData({ abi: DOMAIN_ABI, functionName: "DOMAIN_SEPARATOR" }) }, tag] }] as const]),
+        ["balance", call("balanceOf", [t.payer])], ["native", { method: "eth_getBalance", params: [t.payer, "pending"] }], ["nonce", { method: "eth_getTransactionCount", params: [t.payer, "pending"] }],
+        ["payerCode", { method: "eth_getCode", params: [t.payer, tag] }], ["gas", { method: "eth_estimateGas", params: [rpcTransaction(t)] }], ["tip", { method: "eth_maxPriorityFeePerGas", params: [] }],
+        ["anchor", { method: "eth_getBlockByNumber", params: [tag, false] }]] as const);
+    if (quantity(v.chain) !== 4326n || !deploymentMatches(t, v) || bytes(v.payerCode) !== "0x" || hexHash(object(v.anchor).hash) !== blockHash)
         refuse("merchant_runtime_identity");
     const decode = (name: "name" | "symbol" | "decimals" | "balanceOf", raw: unknown) => decodeFunctionResult({ abi: erc20Abi, functionName: name, data: bytes(raw) });
-    if (decode("name", v[4]) !== "MegaUSD" || decode("symbol", v[5]) !== "USDm" || decode("decimals", v[6]) !== 18 ||
-        bytes(v[7]) !== hashDomain({ types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"},{name:"chainId",type:"uint256"},{name:"verifyingContract",type:"address"}] }, domain: { name: "MegaUSD", version: "1", chainId: 4326n, verifyingContract: t.token as Hex } }))
+    if (decode("name", v.name) !== t.asset.name || decode("symbol", v.symbol) !== t.asset.symbol || decode("decimals", v.decimals) !== t.asset.decimals ||
+        d !== undefined && bytes((v as Record<string, unknown>).domain) !== hashDomain({ types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"},{name:"chainId",type:"uint256"},{name:"verifyingContract",type:"address"}] }, domain: { name: t.asset.name, version: d.domainVersion, chainId: 4326n, verifyingContract: t.token as Hex } }))
         refuse("merchant_token_domain");
-    const gas = quantity(v[12]) * 12n / 10n + 1n, priority = quantity(v[13]), fee = quantity(head.baseFeePerGas) * 2n + priority;
-    const e=frozenEnvelope??{nonce:quantity(v[10]).toString(),gas:gas.toString(),maxFeePerGas:fee.toString(),maxPriorityFeePerGas:priority.toString(),maximumNativeFee};
+    const gas = quantity(v.gas) * 12n / 10n + 1n, priority = quantity(v.tip), fee = quantity(head.baseFeePerGas) * 2n + priority;
+    const e=frozenEnvelope??{nonce:quantity(v.nonce).toString(),gas:gas.toString(),maxFeePerGas:fee.toString(),maxPriorityFeePerGas:priority.toString(),maximumNativeFee};
     const feeContext=await merchantFeeQuote(rpc,head,e,t);
-    return {feeContext, nonce: quantity(v[10]).toString(), gas: gas.toString(), maxFeePerGas: fee.toString(), maxPriorityFeePerGas: priority.toString(), native: quantity(v[9]).toString(), token: String(decode("balanceOf", v[8])) };
+    return {feeContext, nonce: quantity(v.nonce).toString(), gas: gas.toString(), maxFeePerGas: fee.toString(), maxPriorityFeePerGas: priority.toString(), native: quantity(v.native).toString(), token: String(decode("balanceOf", v.balance)) };
 }
 export function checkMerchantEnvelope(current: Awaited<ReturnType<typeof merchantCurrent>>, envelope: MerchantEnvelope,t: MerchantTerms,feeContext?:MerchantFeeContext): void {
     checkMerchantFullFee(current.feeContext,feeContext??current.feeContext,envelope,current.native,t);
@@ -125,8 +140,9 @@ export async function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation
     const r = object(first[1]), tx = object(first[2]), head = object(first[3]), headIdentity = merchantHeader(head);
     if (quantity(r.blockNumber) > quantity(head.number))
         return null;
-    const [block, code, impl, storage, headAnchor] = await rpc.batch([{ method: "eth_getBlockByNumber", params: [r.blockNumber, true] }, { method: "eth_getCode", params: [t.token, r.blockNumber] },
-        { method: "eth_getCode", params: [MERCHANT_IMPLEMENTATION, r.blockNumber] }, { method: "eth_getStorageAt", params: [t.token, IMPLEMENTATION_SLOT, r.blockNumber] }, { method: "eth_getBlockByNumber", params: [head.number, false] }]);
+    const pinned = await readNamed(rpc, [["block", { method: "eth_getBlockByNumber", params: [r.blockNumber, true] }], ...deploymentReads(t, r.blockNumber),
+        ["headAnchor", { method: "eth_getBlockByNumber", params: [head.number, false] }]] as const);
+    const block = pinned.block, headAnchor = pinned.headAnchor;
     const blockIdentity = merchantHeader(block), fullBlock = object(block), index = quantity(r.transactionIndex), boundTransaction = transactionBinding(tx);
     if (!Array.isArray(fullBlock.transactions) || fullBlock.transactions.length > 65536 || index >= BigInt(fullBlock.transactions.length) ||
         canonicalJson(transactionBinding(fullBlock.transactions[Number(index)])) !== canonicalJson(boundTransaction) ||
@@ -136,7 +152,7 @@ export async function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation
     if (hexHash(object(block).hash) !== hexHash(r.blockHash) || hexHash(r.transactionHash) !== o.txHash || hexHash(tx.hash) !== o.txHash || hexHash(tx.blockHash) !== hexHash(r.blockHash) || quantity(tx.blockNumber) !== quantity(r.blockNumber) ||
         getAddress(String(tx.from)) !== t.payer || getAddress(String(tx.to)) !== t.token || bytes(tx.input) !== merchantTransferData(t) || quantity(tx.value) !== 0n || quantity(tx.nonce) !== BigInt(o.envelope.nonce) || quantity(tx.chainId) !== 4326n ||
         quantity(tx.gas) !== BigInt(o.envelope.gas) || quantity(tx.maxFeePerGas) !== BigInt(o.envelope.maxFeePerGas) || quantity(tx.maxPriorityFeePerGas) !== BigInt(o.envelope.maxPriorityFeePerGas) ||
-        keccak256(bytes(code)) !== MERCHANT_PROXY_HASH || keccak256(bytes(impl)) !== MERCHANT_IMPLEMENTATION_HASH || bytes(storage) !== `0x${MERCHANT_IMPLEMENTATION.slice(2).toLowerCase().padStart(64, "0")}`)
+        !deploymentMatches(t, pinned))
         refuse("merchant_receipt_binding");
     const gasUsed = quantity(r.gasUsed), effectiveGasPrice = quantity(r.effectiveGasPrice), baseFee = quantity(fullBlock.baseFeePerGas);
     const signedPrice = BigInt(o.envelope.maxFeePerGas), offeredPrice = baseFee + BigInt(o.envelope.maxPriorityFeePerGas);
@@ -198,6 +214,7 @@ export async function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation
     }
     const receipt:MerchantReceipt={ transactionHash: o.txHash, blockNumber: quantity(r.blockNumber).toString(), blockHash: hexHash(r.blockHash), finality: "finalized", status: status === 1n ? "success" : "reverted", networkFeeWei: actual?.total??(gasUsed * effectiveGasPrice).toString(),...(fullFee===undefined?{}:{fullFee}),
         canonical: { transactionIndex: index.toString(), blockHeaderHash: hashObject(blockIdentity), finalizedNumber: quantity(currentHead.number).toString(), finalizedHash: hexHash(currentHead.hash), finalizedHeaderHash: hashObject(currentIdentity) },
-        evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, currentFinalizedHead: currentHead, code, impl, storage,...(fullFee===undefined?{}:{fullFee}) }) };
+        evidenceHash: hashObject({ receipt: r, transaction: tx, block, finalizedHead: head, currentFinalizedHead: currentHead,
+            ...(t.asset.deployment === undefined ? {} : { code: pinned.code, impl: pinned.impl, storage: pinned.slot }),...(fullFee===undefined?{}:{fullFee}) }) };
     if(receipt.fullFee!==undefined)canonicalReceipts.set(receipt,{fingerprint:o.fingerprint,hash:hashObject(receipt)});return receipt;
 }
