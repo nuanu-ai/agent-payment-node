@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import { GASZIP_TERMINAL_STATES } from "./gaszip-outcome.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { keccak256, parseTransaction, recoverTransactionAddress } from "viem";
 import { SEI_FUNDING, seiFail, seiHash, seiUint } from "./sei-gaszip-contract.js";
@@ -24,8 +25,8 @@ export function validateSeiFunding(value) {
     if (seiUint(r.plan.feeUpper) !== seiUint(r.plan.gas) * seiUint(r.plan.maxFee) + seiUint(r.plan.l1FeeUpper) + seiUint(r.plan.operatorFeeUpper) ||
         seiUint(r.plan.feeUpper) > seiUint(r.maximumFeeAtomic) || seiUint(r.plan.tip) > seiUint(r.plan.maxFee))
         seiFail("record_fee");
-    const terminal = ["completed", "failed_before_effect", "failed_confirmed_revert"].includes(r.state);
-    if (terminal !== r.terminal || !["prepared", "signing_started", "sealed", "submitting", "submitted", "unknown_finality", "completed", "failed_before_effect", "failed_confirmed_revert"].includes(r.state))
+    const terminal = GASZIP_TERMINAL_STATES.includes(r.state);
+    if (terminal !== r.terminal || !["prepared", "signing_started", "sealed", "submitting", "submitted", "unknown_finality", ...GASZIP_TERMINAL_STATES].includes(r.state))
         seiFail("record_state");
     if (r.transactionHash === null ? r.rawTransaction !== null : r.rawTransaction === null || keccak256(r.rawTransaction) !== r.transactionHash)
         seiFail("record_transaction");
@@ -37,8 +38,8 @@ export function validateSeiFunding(value) {
             seiFail("record_envelope");
     }
     if ((r.state === "prepared" || r.state === "signing_started" || r.state === "failed_before_effect") && r.rawTransaction !== null ||
-        r.submissionAttempts !== 0 && r.submissionAttempts !== 1 || ["submitting", "submitted", "completed", "failed_confirmed_revert"].includes(r.state) && r.submissionAttempts !== 1 ||
-        r.state === "completed" && (r.sourceProof === null || r.destinationProof === null || r.outcomeDigest === null))
+        r.submissionAttempts !== 0 && r.submissionAttempts !== 1 || ["submitting", "submitted", "completed", "failed_confirmed_revert", "destination_failed"].includes(r.state) && r.submissionAttempts !== 1 ||
+        (r.state === "completed" || r.state === "destination_failed") && (r.sourceProof === null || r.destinationProof === null || r.outcomeDigest === null))
         seiFail("record_phase");
     return r;
 }
@@ -67,6 +68,8 @@ export class SeiFundingJournal extends SecureStateStore {
         if (await this.readJson(`sei-gaszip-first-sign/${r.operationId}.json`) !== null || await this.readJson(`sei-gaszip-first-send/${r.operationId}.json`) !== null)
             seiFail("effect_marker_blocks_retirement");
     }
+    /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */
+    async sendClaimedLocked(r) { return await this.readJson(`sei-gaszip-first-send/${r.operationId}.json`) !== null; }
     async claimSigningLocked(r) {
         await this.ensureDirectory("sei-gaszip-first-sign");
         await this.writeJson(`sei-gaszip-first-sign/${r.operationId}.json`, { operationId: r.operationId, fingerprint: r.integrityHash, nonce: r.plan.nonce }, true);

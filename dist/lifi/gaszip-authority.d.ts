@@ -1,4 +1,5 @@
 import { type Hex } from "viem";
+export declare function gaszipGuardRefused(guard: () => void): boolean;
 export interface GaszipEffectBinding {
     readonly operationId: string;
     readonly profile: string;

@@ -1,3 +1,4 @@
+import { type GaszipProviderFailure } from "./gaszip-native-delivery.js";
 import { type Hex } from "viem";
 /** A separate GasZip direct deposit; never grants LI.FI GasZip execution. */
 export declare const SEI_FUNDING: Readonly<{
@@ -39,4 +40,4 @@ export interface SeiCorrelatedDelivery {
     readonly grossNative?: true;
 }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
-export declare function inspectSeiDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): SeiCorrelatedDelivery | null;
+export declare function inspectSeiDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): SeiCorrelatedDelivery | GaszipProviderFailure | null;
