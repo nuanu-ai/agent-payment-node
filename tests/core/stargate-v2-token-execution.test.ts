@@ -279,7 +279,7 @@ test("v4 FileJournal rejects malformed zero and inverted fee bindings", async (t
   }
 });
 
-test("post-approval exact estimate and eth_call pass before one bridge signature", async () => { const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"staged-pass"}),s.ports,s.journal); const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:1,bridgeEstimates:2,bridgeCalls:2}); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.bridgeSimulation.mode,"pending_post_approval"); assert.equal(receipt.bridgeSimulation.gasCeilingAtomic,prepared.sendEnvelope.gasLimitAtomic); });
+test("post-approval exact estimate and eth_call pass before one bridge signature", async () => { const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"staged-pass"}),s.ports,s.journal); const observed=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(observed.phase,"observed"); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:1,bridgeEstimates:1,bridgeCalls:1}); assert.deepEqual(s.counts(),{sends:2,signs:2,approvals:1}); const receipt=stargateV2TokenCanonicalReceipt(observed); assert.equal(receipt.bridgeSimulation.mode,"pending_post_approval"); assert.equal(receipt.bridgeSimulation.gasCeilingAtomic,prepared.sendEnvelope.gasLimitAtomic); });
 
 test("safe approval lag beyond the preparation TTL binds one fresh quote and sends one bridge", async () => {
   const s=setup({approvalPendingPolls:1}),prepared=await prepareStargateV2Token(request({idempotencyKey:"safe-lag-requote",ttlMs:60_000}),s.ports,s.journal);
@@ -487,4 +487,17 @@ test("BRDG-35: the owner lock is the kernel evmAddressLock shared with every EVM
   const stargate = journal.withOwnerLock(OWNER, async () => { order.push("stargate"); });
   await new Promise(resolve => setTimeout(resolve, 50)); release(); await Promise.all([family, stargate]);
   assert.deepEqual(order, ["other-family", "other-family-done", "stargate"]);
+});
+
+test("BRDG-32: a source receipt already proven at safe finality is not re-read while the destination is pending", async () => {
+  const s = setup(); let pending = true, receiptReads = 0;
+  const observeDestination = s.ports.observeDestination, waitSourceReceipt = s.ports.waitSourceReceipt;
+  (s.ports as any).observeDestination = async (input: Parameters<typeof observeDestination>[0]) => pending ? null : observeDestination(input);
+  (s.ports as any).waitSourceReceipt = async (...args: Parameters<typeof waitSourceReceipt>) => { receiptReads++; return waitSourceReceipt(...args); };
+  const prepared = await prepareStargateV2Token(request({ idempotencyKey: "brdg32-saved-source" }), s.ports, s.journal);
+  const submitted = await executeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(submitted.phase, "submitted"); assert.ok(submitted.sourceReceipt); assert.ok(submitted.residualAllowanceAtomic !== undefined);
+  const before = receiptReads; pending = false;
+  const observed = await observeStargateV2Token(prepared.operationId, s.ports, s.journal);
+  assert.equal(observed.phase, "observed"); assert.equal(receiptReads, before);
 });
