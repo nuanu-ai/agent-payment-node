@@ -1,3 +1,5 @@
+import type { BridgeChainId } from "./chains.js";
+import type { BridgeBlock, BridgeTool } from "./model.js";
 import type { RpcBatchReadItem } from "./rpc-session.js";
 import type { Address, Hex } from "../model.js";
 export declare const ERC20_READ: readonly [{
@@ -59,3 +61,151 @@ export type DeploymentReadRow = {
 export declare function deploymentAggregateItem(rows: readonly DeploymentReadRow[], tag: unknown): Omit<RpcBatchReadItem, "batchAttempt">;
 export declare const LINEA_TRACE_PROBE_TRANSACTION: Hex;
 export declare const MONAD_TRACE_PROBE_TRANSACTION: Hex;
+type PlannedRead = Omit<RpcBatchReadItem, "batchAttempt">;
+/** The exact archive batch of one deployment proof. `BridgeRpc.deployment` sends it and the observation budget counts it. */
+export declare function bridgeDeploymentReadPlan(chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address, at: BridgeBlock, exactHashPin: boolean): {
+    contract: import("./model.js").BridgeDeploymentContract;
+    feeContract: {
+        readonly code: readonly [{
+            readonly address: `0x${string}`;
+            readonly codeHash: Hex;
+        }, {
+            readonly address: `0x${string}`;
+            readonly codeHash: Hex;
+        }];
+        readonly reads: readonly [{
+            readonly kind: "storage";
+            readonly address: `0x${string}`;
+            readonly data: Hex;
+            readonly expected: Hex;
+        }, {
+            readonly kind: "storage";
+            readonly address: `0x${string}`;
+            readonly data: Hex;
+            readonly expected: Hex;
+        }, {
+            readonly kind: "call";
+            readonly address: `0x${string}`;
+            readonly data: Hex;
+            readonly expected: `0x${string}`;
+        }, {
+            readonly kind: "call";
+            readonly address: `0x${string}`;
+            readonly data: Hex;
+            readonly expected: `0x${string}`;
+        }, {
+            readonly kind: "call";
+            readonly address: `0x${string}`;
+            readonly data: Hex;
+            readonly expected: Hex;
+        }, {
+            readonly kind: "call";
+            readonly address: `0x${string}`;
+            readonly data: Hex;
+            readonly expected: Hex;
+        }];
+    } | {
+        code: never[];
+        reads: never[];
+    };
+    verificationCodeRows: {
+        readonly address: Address;
+        readonly codeHash: Hex;
+    }[];
+    readRows: {
+        readonly kind: "call" | "storage";
+        readonly address: Address;
+        readonly data: Hex;
+        readonly expected: Hex;
+    }[];
+    directRows: {
+        readonly kind: "call" | "storage";
+        readonly address: Address;
+        readonly data: Hex;
+        readonly expected: Hex;
+    }[];
+    aggregateGroups: {
+        readonly kind: "call" | "storage";
+        readonly address: Address;
+        readonly data: Hex;
+        readonly expected: Hex;
+    }[][];
+    traceProbe: {
+        transaction: Hex;
+        from: string;
+        to: string;
+        value: bigint;
+    } | undefined;
+    items: PlannedRead[];
+};
+/** The exact archive batch of the Base pinned fee proof, at the included block's canonical hash. */
+export declare function basePinnedFeeReadPlan(gas: bigint, block: BridgeBlock, safe: BridgeBlock): {
+    codeRows: {
+        readonly address: `0x${string}`;
+        readonly codeHash: Hex;
+    }[];
+    directRows: ({
+        readonly kind: "storage";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    } | {
+        readonly kind: "storage";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: `0x${string}`;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: `0x${string}`;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    })[];
+    aggregateRows: ({
+        readonly kind: "storage";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    } | {
+        readonly kind: "storage";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: `0x${string}`;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: `0x${string}`;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    } | {
+        readonly kind: "call";
+        readonly address: `0x${string}`;
+        readonly data: Hex;
+        readonly expected: Hex;
+    })[];
+    items: PlannedRead[];
+};
+export {};
