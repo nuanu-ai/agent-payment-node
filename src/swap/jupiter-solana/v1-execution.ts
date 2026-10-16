@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { SecureStateStore } from "../../secure-state-store.js";
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
@@ -20,8 +18,6 @@ import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.j
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
 import { proveSolanaUnlanded, type SwapUnlandedProof } from "../unlanded.js";
 
-/** Logical reads one status or observe-only invocation may make; a new invocation starts again from zero. */
-export const JUPITER_V1_OBSERVATION_READ_CAP = 64;
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
  constructor(private readonly core:GuardedSwapService,private readonly materials:SavedJupiterV1MaterialStore,
@@ -37,7 +33,7 @@ export class JupiterV1SingleSender {
   const effect=await this.native.savedEffect(op,binding);if(effect===null)corrupt();
   const height=rpcAtomic(await this.rpc.call("getBlockHeight",[{commitment:"confirmed"}]));observedHeight=height.toString();if(height>BigInt(fresh.lifetime.lastValidBlockHeight))blocked("Jupiter's frozen blockhash expired before send.");
   const at=this.clock.now();if(at.toISOString()>=op.quote.expiresAt||at.getTime()-Date.parse(binding.checkedAt)>30000||this.rpc.budget===undefined||
-   this.rpc.budget.maxPhysicalRequests!==64||this.rpc.budget.remainingPhysicalRequests<1||!this.rpc.hasPersistentPacer)blocked("Jupiter send freshness or runtime RPC budget is unavailable.");
+   this.rpc.budget.remainingPhysicalRequests<1||!this.rpc.hasPersistentPacer)blocked("Jupiter send freshness or runtime RPC budget is unavailable.");
   // Persist before any transport. A crash from here permanently makes this operation observe-only.
   await this.native.assertDispatchAdmission(op,binding);
   await this.bindings.claim(op,binding,effect,at);let state:"submitted"|"unknown_finality"="unknown_finality",dispatch=jupiterV1DispatchResult("signature_mismatch");
@@ -145,53 +141,24 @@ async function guardReceipt(fresh:Parameters<typeof guardJupiterV1WhirlpoolMater
 function blocked(message:string):never{throw new ApnError("APN_OPERATION_BLOCKED",message,{reason:"jupiter_v1_execution_boundary"});}
 function corrupt():never{throw new ApnError("APN_STATE_CORRUPT","Jupiter V1 execution evidence is missing or changed.");}
 
-/** Counts every logical attempt durably before RPC, including failed reads and the single send. */
-class JupiterV1StageBudgetStore extends SecureStateStore{
- private readyPromise:Promise<void>|undefined;
- private async ready(){this.readyPromise??=(async()=>{await super.initialize();await this.ensureDirectory("jupiter-v1-runtime-budgets");await this.ensureDirectory("jupiter-v1-budget-quotes");})();await this.readyPromise;}
- async charge(key:string,priorQuoteCalls:number):Promise<number>{await this.ready();return await this.withLocks([`jupiter-v1-runtime-budget:${key}`],async()=>{
-  const path=`jupiter-v1-runtime-budgets/${key}.json`,raw=await this.readJson(path);let count=0;
-  if(raw!==null){if(!isPlainRecord(raw)||raw.key!==key||raw.priorQuoteCalls!==priorQuoteCalls||typeof raw.calls!=="number")corrupt();const {recordHash,...body}=raw;if(recordHash!==domainHash("apn.jupiter-v1-runtime-budget.v1",canonicalJson(body)))corrupt();count=raw.calls;}
-  if(!Number.isSafeInteger(count)||count<0||count>=64||priorQuoteCalls+count>=192)blocked("Jupiter's trusted runtime stage/cumulative logical RPC cap was exhausted.");
-  const body={schemaVersion:"apn.jupiter-v1-runtime-budget.v1",key,calls:count+1,priorQuoteCalls,authority:"runtime_cap",stageCap:64,cumulativeCap:192};
-  await this.writeJson(path,{...body,recordHash:domainHash(body.schemaVersion,canonicalJson(body))});return count+1;
- });}
- async bindQuote(hash:string,calls:number):Promise<void>{await this.ready();const body={quoteHash:hash,calls,authority:"runtime_cap",stageCap:64};
- const path=`jupiter-v1-budget-quotes/${hash}.json`,record={...body,recordHash:domainHash("apn.jupiter-v1-quote-budget.v1",canonicalJson(body))},old=await this.readJson(path);
- if(old!==null){if(canonicalJson(old)!==canonicalJson(record))corrupt();return;}await this.writeJson(path,record,true);}
- async quoteCalls(hash:string):Promise<number>{await this.ready();const raw=await this.readJson(`jupiter-v1-budget-quotes/${hash}.json`);
- if(!isPlainRecord(raw)||raw.quoteHash!==hash||typeof raw.calls!=="number"||!Number.isSafeInteger(raw.calls)||raw.calls<1||raw.calls>64)corrupt();const {recordHash,...body}=raw;if(recordHash!==domainHash("apn.jupiter-v1-quote-budget.v1",canonicalJson(body)))corrupt();return raw.calls;}
-}
-/** Owns the actual bounded Solana rail transport; no new URL, fallback or financial callback is accepted. */
+/**
+ * The Jupiter rail transport: the configured Solana RPC with its per-command physical budget (solanaSwapCommandRequests)
+ * and persistent provider pacing. No read budget is stored or carried across commands (SWAP-19), so retrying a command
+ * after a rate limit never exhausts an operation. A height read uses a one-element batch: PublicNode returns another
+ * shape for the scalar call.
+ */
 export class JupiterV1BudgetedRpc extends SolanaRpc{
  override readonly originHash:string;override readonly budget:SolanaRpc["budget"];
- private readonly journal:JupiterV1StageBudgetStore;private readonly stageKey:string;private calls=0;private priorQuoteCalls=0;
- private observing:boolean;private observationCalls=0;
- constructor(private readonly base:SolanaRpc,root:string,private readonly stage:"quote"|"prepare"|"execute"|"observe",operationId?:string){
-  super();this.originHash=base.originHash;this.budget=base.budget;this.journal=new JupiterV1StageBudgetStore(root);
-  this.stageKey=sha256(`jupiter-v1-runtime-stage:${stage}:${stage==="execute"?operationId:randomUUID()}`);this.observing=stage==="observe";
- }
- /** Observing a marked operation: reads are bounded per invocation, never by a lifetime per-operation cap (SWAP-19). */
- enterObservation():void{this.observing=true;}
+ constructor(private readonly base:SolanaRpc){super();this.originHash=base.originHash;this.budget=base.budget;}
  override get hasPersistentPacer(){return this.base.hasPersistentPacer;}
  override get maximumAccountsPerRead(){return this.base.maximumAccountsPerRead;}
- async bindOperation(quoteHash:string):Promise<void>{if(this.stage==="execute")this.priorQuoteCalls=await this.journal.quoteCalls(quoteHash);}
- async bindQuote(quoteHash:string):Promise<void>{if(this.stage!=="quote")corrupt();await this.journal.bindQuote(quoteHash,this.calls);}
- async chargeOfficialRead():Promise<void>{await this.charge();}
- private async charge(){
-  if(this.observing){if(this.observationCalls>=JUPITER_V1_OBSERVATION_READ_CAP)blocked("Jupiter's per-invocation observation read cap was reached; run status again.");this.observationCalls++;return;}
-  this.calls=await this.journal.charge(this.stageKey,this.priorQuoteCalls);
- }
- override async call(method:SolanaMethod,params:readonly unknown[]):Promise<unknown>{await this.charge();
+ override async call(method:SolanaMethod,params:readonly unknown[]):Promise<unknown>{
   if(method==="getBlockHeight"&&typeof this.base.batch==="function"){
    const results=await this.base.batch([{method,params}]);
    if(!Array.isArray(results)||results.length!==1)throw new ApnError("APN_RPC_PROTOCOL","Jupiter height batch is incomplete.");
    return results[0];
   }
   return await this.base.call(method,params);}
- override async batch(reads:readonly SolanaBatchRead[]):Promise<readonly unknown[]>{
-  // Every logical read consumes the durable stage cap before the shared physical POST.
-  for(const _read of reads)await this.charge();return await this.base.batch(reads);
- }
- override async sendTransactionAtStart(params:readonly unknown[],beforeStart:()=>void|Promise<void>):Promise<unknown>{await this.charge();return await this.base.sendTransactionAtStart(params,beforeStart);}
+ override async batch(reads:readonly SolanaBatchRead[]):Promise<readonly unknown[]>{return await this.base.batch(reads);}
+ override async sendTransactionAtStart(params:readonly unknown[],beforeStart:()=>void|Promise<void>):Promise<unknown>{return await this.base.sendTransactionAtStart(params,beforeStart);}
 }
