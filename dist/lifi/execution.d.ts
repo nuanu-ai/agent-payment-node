@@ -26,6 +26,11 @@ export declare class BridgeExecution {
     private guard;
     private authorityPolicy;
     private allowlist;
+    /**
+     * A provider rate limit during a guard is transient: nothing is sealed, signed or sent, the operation keeps its state with a
+     * visible reason, and the next resume repeats the full guard, which ends the operation on the normal expiry path once late.
+     */
+    private deferRateLimited;
     private haltUnsent;
     private terminalFailure;
 }

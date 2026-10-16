@@ -8,6 +8,7 @@ import type { BridgeChainId } from "./chains.js";
 import { BridgeHttps } from "./https.js";
 import type { BridgeRpcFactory, BridgeRpcPort, LifiResponse } from "./ports.js";
 import { bridgeArchiveEndpoint, bridgeReceiptEndpoint, isArchiveRead, isHistoricalStateRead, type BridgeReceiptEndpoint } from "./rpc-archive.js";
+import { jsonRpcRateLimit } from "./rpc-session-helpers.js";
 import { rpcBlockValue } from "./rpc-batch-codec.js";
 import { BridgeRpc } from "./rpc-adapter.js";
 import { parseRetryAfter, RpcHttpFailure, type RpcBatchAttempt, type RpcBatchReadItem, RpcReadSession } from "./rpc-session.js";
@@ -125,6 +126,8 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
         throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC historical receipt read is unavailable.",
           { rpcMethod: method, reason: "historical_receipt_unavailable" });
       }
+      if (jsonRpcRateLimit(r.error)) throw new ApnError("APN_RPC_RATE_LIMITED", "Bridge RPC provider requested a cooldown.",
+        { rpcMethod: method, reason: "json_rpc_rate_limit", providerCode: (r.error as { code: number }).code });
       bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: method });
     }
     if (!Object.hasOwn(r, "result")) bridgeFailure("APN_RPC_PROTOCOL", "bridge_RPC_response", { rpcMethod: method });
