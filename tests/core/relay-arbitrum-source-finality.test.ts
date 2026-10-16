@@ -96,6 +96,19 @@ test("canonical reorg, unsafe head, changed receipt, revert and missing transact
   }
 });
 
+test("a receipt reverted at safe finality yields a bound revert proof; a successful one yields none", async t => {
+  const reverted = await setup((rows, _, pass) => {
+    const index = pass === 0 ? 2 : 3; rows[index] = { ...rows[index] as object, status: "0x0" };
+  }); t.after(reverted.cleanup);
+  const proof = await reverted.observer.observeRevert(deposit);
+  assert.equal(proof?.proofClass, "canonical_safe_source_revert");
+  assert.equal(proof?.reverted.transactionHash, deposit.transactionHash);
+  assert.equal(proof?.safeHead.hash, safe);
+  assert.equal(reverted.posts(), 3);
+  const success = await setup(); t.after(success.cleanup);
+  assert.equal(await success.observer.observeRevert(deposit), null);
+});
+
 test("failed approval blocks deposit reads; malformed receipt status fails protocol", async t => {
   const failed = await setup((rows, leg, pass) => {
     if (leg === 0 && pass === 0) rows[2] = { ...rows[2] as object, status: "0x0" };

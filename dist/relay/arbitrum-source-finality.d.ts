@@ -32,6 +32,21 @@ export interface RelayArbitrumSourceProof {
     readonly causalLinkCryptographicallyProven: false;
     readonly paidAcceptance: false;
 }
+/** A source effect whose receipt reverted at safe finality. A revert at that depth is final; nothing is resent. */
+export interface RelayArbitrumRevertProof {
+    readonly sourceChainId: 42161;
+    readonly rpcOrigin: string;
+    readonly reverted: Readonly<{
+        transactionHash: Hex;
+        blockNumber: string;
+        blockHash: Hex;
+    }>;
+    readonly safeHead: Readonly<{
+        number: string;
+        hash: Hex;
+    }>;
+    readonly proofClass: "canonical_safe_source_revert";
+}
 /** One shared 24-POST guard; at most two batches per effect plus one joint final recheck. */
 export declare class RelayArbitrumSourceFinalityObserver {
     private readonly url;
@@ -41,6 +56,8 @@ export declare class RelayArbitrumSourceFinalityObserver {
     private readonly rpc;
     constructor(url: string, state: StateStore, rpc?: Pick<HttpsBaseRpc, "batchCall">, guardFactory?: () => EvmDirectRpcGuard, holdAfterPost?: () => Promise<void>);
     observe(deposit: RelayArbitrumExpectedEffect, approval?: RelayArbitrumExpectedEffect): Promise<RelayArbitrumSourceProof | null>;
+    /** The same canonical safe reads as `observe`, accepting only a reverted receipt. */
+    observeRevert(effect: RelayArbitrumExpectedEffect): Promise<RelayArbitrumRevertProof | null>;
     private batch;
     private confirmTogether;
     private effect;

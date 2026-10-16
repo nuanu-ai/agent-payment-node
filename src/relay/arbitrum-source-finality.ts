@@ -30,6 +30,15 @@ export interface RelayArbitrumSourceProof {
   readonly paidAcceptance: false;
 }
 
+/** A source effect whose receipt reverted at safe finality. A revert at that depth is final; nothing is resent. */
+export interface RelayArbitrumRevertProof {
+  readonly sourceChainId: 42161;
+  readonly rpcOrigin: string;
+  readonly reverted: Readonly<{ transactionHash: Hex; blockNumber: string; blockHash: Hex }>;
+  readonly safeHead: Readonly<{ number: string; hash: Hex }>;
+  readonly proofClass: "canonical_safe_source_revert";
+}
+
 /** One shared 24-POST guard; at most two batches per effect plus one joint final recheck. */
 export class RelayArbitrumSourceFinalityObserver {
   private readonly rpc: Pick<HttpsBaseRpc, "batchCall">;
@@ -45,21 +54,33 @@ export class RelayArbitrumSourceFinalityObserver {
     validateExpected(deposit);
     if (approval !== undefined) validateExpected(approval);
     const guard = this.guardFactory();
-    const approved = approval === undefined ? null : await this.effect(approval, guard);
+    const approved = approval === undefined ? null : await this.effect(approval, guard, 1n);
     if (approval !== undefined && approved === null) return null;
-    const deposited = await this.effect(deposit, guard);
+    const deposited = await this.effect(deposit, guard, 1n);
     if (deposited === null) return null;
     // Earlier safe observations cannot be combined into a joint proof: the
     // approval or safe head may have reorganized while the deposit was read.
     const finalSafe = await this.confirmTogether(guard, [
       ...(approval === undefined || approved === null ? [] : [{ expected: approval, proof: approved.effect }]),
       { expected: deposit, proof: deposited.effect },
-    ]);
+    ], 1n);
     if (finalSafe === null) return null;
     return { sourceChainId: 42161, rpcOrigin: new URL(this.url).origin,
       deposit: deposited.effect, approval: approved?.effect ?? null, safeHead: finalSafe,
       proofClass: "canonical_safe_source_receipts", destinationDeliveryProven: false,
       causalLinkCryptographicallyProven: false, paidAcceptance: false };
+  }
+
+  /** The same canonical safe reads as `observe`, accepting only a reverted receipt. */
+  async observeRevert(effect: RelayArbitrumExpectedEffect): Promise<RelayArbitrumRevertProof | null> {
+    validateExpected(effect);
+    const guard = this.guardFactory();
+    const reverted = await this.effect(effect, guard, 0n);
+    if (reverted === null) return null;
+    const finalSafe = await this.confirmTogether(guard, [{ expected: effect, proof: reverted.effect }], 0n);
+    if (finalSafe === null) return null;
+    return { sourceChainId: 42161, rpcOrigin: new URL(this.url).origin, reverted: reverted.effect,
+      safeHead: finalSafe, proofClass: "canonical_safe_source_revert" };
   }
 
   private async batch(guard: EvmDirectRpcGuard, calls: readonly ReadOnlyRpcBatchCall[]): Promise<readonly unknown[]> {
@@ -76,7 +97,7 @@ export class RelayArbitrumSourceFinalityObserver {
   private async confirmTogether(guard: EvmDirectRpcGuard, effects: readonly {
     expected: RelayArbitrumExpectedEffect;
     proof: Readonly<{ transactionHash: Hex; blockNumber: string; blockHash: Hex }>;
-  }[]): Promise<{ number: string; hash: Hex } | null> {
+  }[], expectedStatus: 0n | 1n): Promise<{ number: string; hash: Hex } | null> {
     const calls: ReadOnlyRpcBatchCall[] = [{ method: "eth_chainId", params: [] }];
     for (const { expected, proof } of effects) calls.push(
       { method: "eth_getBlockByNumber", params: [`0x${BigInt(proof.blockNumber).toString(16)}`, false] },
@@ -107,12 +128,12 @@ export class RelayArbitrumSourceFinalityObserver {
         evmRpcQuantity(tx.value) !== expected.valueWei) invalid("transaction_envelope");
       const status = evmRpcQuantity(receipt.status);
       if (status !== 0n && status !== 1n) invalid("receipt_status");
-      if (status !== 1n) return null;
+      if (status !== expectedStatus) return null;
     }
     return { number: safe.number, hash: safe.hash };
   }
 
-  private async effect(expected: RelayArbitrumExpectedEffect, guard: EvmDirectRpcGuard) {
+  private async effect(expected: RelayArbitrumExpectedEffect, guard: EvmDirectRpcGuard, expectedStatus: 0n | 1n) {
     const [chain, rawTx, rawReceipt, rawSafe] = await this.batch(guard, [
       { method: "eth_chainId", params: [] },
       { method: "eth_getTransactionByHash", params: [expected.transactionHash] },
@@ -157,7 +178,7 @@ export class RelayArbitrumSourceFinalityObserver {
     }
     const status = evmRpcQuantity(receipt.status), statusAgain = evmRpcQuantity(receiptAgain.status);
     if ((status !== 0n && status !== 1n) || (statusAgain !== 0n && statusAgain !== 1n)) invalid("receipt_status");
-    if (status !== 1n || statusAgain !== 1n) return null;
+    if (status !== expectedStatus || statusAgain !== expectedStatus) return null;
     return { effect: { transactionHash: txHash, blockNumber: blockNumber.toString(), blockHash: block.hash } };
   }
 }

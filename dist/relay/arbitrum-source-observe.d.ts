@@ -13,19 +13,23 @@ export interface RelayArbitrumSourceObservePorts {
         role: ArbitrumEffectRole;
         outcome: "confirmed" | "failed";
         proofDigest: string;
-    }) => Promise<boolean>) => Promise<ArbitrumSourceEffectJournal>;
+    }) => Promise<boolean>, outcome: "confirmed" | "failed") => Promise<ArbitrumSourceEffectJournal>;
     /** Synthetic seam; production finalizes the shared usage reservation from the saved safe source proof. */
     readonly finalizeUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
+    /** Synthetic seam; production releases the shared usage reservation after a safe source revert proof. */
+    readonly releaseRevertedUsage?: (operation: RelayUnsignedOperation, proofDigest: string) => Promise<void>;
 }
 export declare class RelayArbitrumSourceObserveService {
     private readonly state;
     private readonly observer;
     private readonly ports;
-    constructor(state: StateStore, observer: Pick<RelayArbitrumSourceFinalityObserver, "observe">, ports?: RelayArbitrumSourceObservePorts);
+    constructor(state: StateStore, observer: Pick<RelayArbitrumSourceFinalityObserver, "observe" | "observeRevert">, ports?: RelayArbitrumSourceObservePorts);
     private finalizeUsage;
+    /** A reverted approval or deposit moved no principal: the hold is released, never counted as spent. */
+    private releaseRevertedUsage;
     observe(operationId: string): Promise<{
         operationId: string;
-        state: "observation_only" | "approval_skipped" | "source_effect_not_recorded" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";
+        state: "source_effect_reverted" | "observation_only" | "approval_skipped" | "source_effect_not_recorded" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";
         reason: string;
         approvalPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;
         depositPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;
@@ -58,4 +62,5 @@ export declare class RelayArbitrumSourceObserveService {
         executionAdmitted: false;
         nextActions: readonly [];
     }>;
+    private recordRevert;
 }
