@@ -181,7 +181,8 @@ export class GaslessUsdtCommandExecute {
     const bound = await this.load(profileHash, operationId);
     const rpcUrl = this.options.rpcUrl ?? process.env.APN_ETHEREUM_RPC_URL;
     if (this.options.recoveryPort === undefined && !rpcUrl) {
-      throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT observation.");
+      throw new ApnError("APN_RPC_CONFIG", "APN_ETHEREUM_RPC_URL is required for gasless USDT observation.",
+        { nextActions: ["Set APN_ETHEREUM_RPC_URL to a public HTTPS Ethereum RPC endpoint."] });
     }
     const port = this.options.recoveryPort ?? usdtPacedRecoveryPort(this.state, this.options.transport ?? new GaslessHttps(), rpcUrl!);
     return await new UsdtRecoveryService(this.journal, port, () => this.clock.now()).observe(bound);
