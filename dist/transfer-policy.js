@@ -1,5 +1,6 @@
 import { encodeFunctionData, getAddress, keccak256, parseTransaction, recoverTransactionAddress } from "viem";
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
+import { containsRawControlCharacters, createCliHandoff } from "./cli-handoff.js";
 import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from "./constants.js";
 import { ApnError, assertInput } from "./errors.js";
 import { evmUint, MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
@@ -222,6 +223,15 @@ export { canonicalAddress, validateBalance };
 function addressTopic(address) {
     return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 }
+/** A new key derived from the failed operation: following the action twice prepares one transfer, never two. */
+function retryKey(operation) { return `retry-${operation.operationId.slice(0, 16)}`; }
+/** Next actions reuse the RPC endpoint this invocation was given; only an offline status keeps the placeholder. */
+export function withInvocationRpc(view, rpcUrl) {
+    if (rpcUrl === undefined || containsRawControlCharacters(rpcUrl) || !isPlainRecord(view) || !Array.isArray(view.next_actions))
+        return view;
+    const argument = createCliHandoff(["apn", rpcUrl]).shell.slice("apn ".length);
+    return { ...view, next_actions: view.next_actions.map((action) => typeof action === "string" ? action.replaceAll("--rpc-url <https-url>", `--rpc-url ${argument}`) : action) };
+}
 function operationNextActions(operation) {
     if (operation.providerDirect?.coinbaseGasless !== undefined) {
         if (operation.terminal)
@@ -235,7 +245,9 @@ function operationNextActions(operation) {
             `apn operation status --operation ${operation.operationId}`, `apn receipt get --operation ${operation.operationId}`];
     }
     if (operation.evm !== undefined && operation.state === "failed_before_effect")
-        return ["apn pay transfer prepare-asset --help"];
+        return [
+            `apn pay transfer prepare-asset --profile ${operation.profile} --chain eip155:${operation.chainId} --asset ${operation.evm.asset.kind === "native" ? "native" : operation.evm.asset.address} --to ${operation.recipient} --amount ${operation.amountDecimal} --max-fee-wei ${operation.evm.maxFeeWei} --idempotency-key ${retryKey(operation)} --rpc-url <https-url>`,
+        ];
     if (operation.state === "failed_before_effect" && operation.reason === "provider_sender_changed" &&
         operation.providerDirect !== undefined)
         return [
@@ -243,11 +255,11 @@ function operationNextActions(operation) {
         ];
     if (operation.state === "failed_before_effect" && operation.reason === "provider_amount_encoding_incompatible")
         return [
-            `apn pay transfer prepare --profile ${operation.profile} --idempotency-key <new-key> --to ${operation.recipient} --amount-usdc <exact-provider-compatible-decimal> --rpc-url <https-url>`,
+            `apn pay transfer prepare --profile ${operation.profile} --idempotency-key ${retryKey(operation)} --to ${operation.recipient} --amount-usdc <exact-provider-compatible-decimal> --rpc-url <https-url>`,
         ];
     if (operation.state === "failed_before_effect")
         return [
-            `apn pay transfer prepare --profile ${operation.profile} --idempotency-key <new-key> --to ${operation.recipient} --amount-usdc ${operation.amountDecimal} --rpc-url <https-url>`,
+            `apn pay transfer prepare --profile ${operation.profile} --idempotency-key ${retryKey(operation)} --to ${operation.recipient} --amount-usdc ${operation.amountDecimal} --rpc-url <https-url>`,
         ];
     if (operation.terminal)
         return [];

@@ -1,6 +1,7 @@
 import { encodeFunctionData, getAddress, keccak256, parseTransaction, recoverTransactionAddress } from "viem";
 import type { TransactionSerialized } from "viem";
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
+import { containsRawControlCharacters, createCliHandoff } from "./cli-handoff.js";
 import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from "./constants.js";
 import { ApnError, assertInput } from "./errors.js";
 import { evmUint, MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
@@ -249,6 +250,17 @@ function addressTopic(address: Address): string {
   return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 }
 
+/** A new key derived from the failed operation: following the action twice prepares one transfer, never two. */
+function retryKey(operation: OperationRecord): string { return `retry-${operation.operationId.slice(0, 16)}`; }
+
+/** Next actions reuse the RPC endpoint this invocation was given; only an offline status keeps the placeholder. */
+export function withInvocationRpc(view: unknown, rpcUrl: string | undefined): unknown {
+  if (rpcUrl === undefined || containsRawControlCharacters(rpcUrl) || !isPlainRecord(view) || !Array.isArray(view.next_actions)) return view;
+  const argument = createCliHandoff(["apn", rpcUrl]).shell.slice("apn ".length);
+  return { ...view, next_actions: view.next_actions.map((action: unknown) =>
+    typeof action === "string" ? action.replaceAll("--rpc-url <https-url>", `--rpc-url ${argument}`) : action) };
+}
+
 function operationNextActions(operation: OperationRecord): readonly string[] {
   if (operation.providerDirect?.coinbaseGasless !== undefined) {
     if (operation.terminal) return [];
@@ -259,7 +271,9 @@ function operationNextActions(operation: OperationRecord): readonly string[] {
     return [`apn operation resume --operation ${operation.operationId}`,
       `apn operation status --operation ${operation.operationId}`, `apn receipt get --operation ${operation.operationId}`];
   }
-  if (operation.evm !== undefined && operation.state === "failed_before_effect") return ["apn pay transfer prepare-asset --help"];
+  if (operation.evm !== undefined && operation.state === "failed_before_effect") return [
+    `apn pay transfer prepare-asset --profile ${operation.profile} --chain eip155:${operation.chainId} --asset ${operation.evm.asset.kind === "native" ? "native" : operation.evm.asset.address} --to ${operation.recipient} --amount ${operation.amountDecimal} --max-fee-wei ${operation.evm.maxFeeWei} --idempotency-key ${retryKey(operation)} --rpc-url <https-url>`,
+  ];
   if (
     operation.state === "failed_before_effect" && operation.reason === "provider_sender_changed" &&
     operation.providerDirect !== undefined
@@ -267,10 +281,10 @@ function operationNextActions(operation: OperationRecord): readonly string[] {
     `apn wallet connect --profile ${operation.profile} --provider ${operation.providerDirect.providerId} --expected-revision ${operation.providerDirect.profileRevision}`,
   ];
   if (operation.state === "failed_before_effect" && operation.reason === "provider_amount_encoding_incompatible") return [
-    `apn pay transfer prepare --profile ${operation.profile} --idempotency-key <new-key> --to ${operation.recipient} --amount-usdc <exact-provider-compatible-decimal> --rpc-url <https-url>`,
+    `apn pay transfer prepare --profile ${operation.profile} --idempotency-key ${retryKey(operation)} --to ${operation.recipient} --amount-usdc <exact-provider-compatible-decimal> --rpc-url <https-url>`,
   ];
   if (operation.state === "failed_before_effect") return [
-    `apn pay transfer prepare --profile ${operation.profile} --idempotency-key <new-key> --to ${operation.recipient} --amount-usdc ${operation.amountDecimal} --rpc-url <https-url>`,
+    `apn pay transfer prepare --profile ${operation.profile} --idempotency-key ${retryKey(operation)} --to ${operation.recipient} --amount-usdc ${operation.amountDecimal} --rpc-url <https-url>`,
   ];
   if (operation.terminal) return [];
   if (operation.state === "awaiting_approval") return [

@@ -1,4 +1,5 @@
 import { refuse, requireListedDirectAsset, validateDirectAllowlistBinding, validateDirectAllowlistLease } from "./direct-allowlist-gate.js";
+import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { evmToken } from "./evm-asset.js";
 import { directEvmListRows, directEvmNetworkByCaip2 } from "./evm-direct-networks.js";
@@ -26,8 +27,13 @@ export function listedEvmAsset(chainValue, tokenValue, decimals) {
 }
 export function evmAllowlistSubject(operation) {
     const asset = operation.evm?.asset;
+    // The local `pay transfer prepare` Base USDC record is the same direct asset row and shares its owner caps.
+    if (asset === undefined && operation.providerDirect === undefined && operation.chainId === CHAIN_ID && operation.token === BASE_USDC) {
+        return { profile: operation.profile, operationId: operation.operationId, family: "evm", account: operation.walletAddress,
+            chain: `eip155:${CHAIN_ID}`, amountAtomic: operation.amountAtomic, asset: { kind: "token", identifier: BASE_USDC } };
+    }
     if (asset === undefined)
-        throw new ApnError("APN_STATE_CORRUPT", "Only an explicit EVM asset transfer carries a direct allowlist binding.");
+        throw new ApnError("APN_STATE_CORRUPT", "Only a local direct EVM transfer carries a direct allowlist binding.");
     return { profile: operation.profile, operationId: operation.operationId, family: "evm", account: operation.walletAddress,
         chain: `eip155:${operation.chainId}`, amountAtomic: operation.amountAtomic,
         asset: asset.kind === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: asset.address } };

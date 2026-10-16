@@ -35,6 +35,7 @@ import {
   ensureWallet,
   makeCore,
   temporaryState,
+  activateBaseUsdcDirectPolicy,
 } from "./helpers.js";
 
 const PREPARE_REQUEST = {
@@ -533,6 +534,7 @@ test("global idempotency and active-operation scans cover direct and x402 stores
   const directFirst = await temporaryState();
   t.after(directFirst.cleanup);
   await ensureWallet(makeCore({ root: directFirst.root, native: new CanonicalDirectTestNative(directFirst.root) }));
+  await activateBaseUsdcDirectPolicy(directFirst.root);
   const directRpc = new TestRpc();
   const direct = await makeCore({ root: directFirst.root, rpc: directRpc }).execute({
     command: "transfer.prepare",
@@ -608,6 +610,7 @@ test("direct and x402 concurrency shares profile then operation locks", async (t
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await ensureWallet(makeCore({ root: temporary.root, native: new CanonicalDirectTestNative(temporary.root) }));
+  await activateBaseUsdcDirectPolicy(temporary.root);
   const rpc = new TestRpc();
   const http = challenge();
   const [direct, x402] = await Promise.all([

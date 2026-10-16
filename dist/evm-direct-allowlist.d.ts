@@ -11,7 +11,7 @@ export interface ListedEvmAsset {
  * again at prepare, before any RPC, custody or signing call.
  */
 export declare function listedEvmAsset(chainValue: unknown, tokenValue: unknown, decimals?: number): ListedEvmAsset;
-export declare function evmAllowlistSubject(operation: Pick<OperationRecord, "profile" | "operationId" | "walletAddress" | "chainId" | "token" | "amountAtomic" | "evm">): DirectAllowlistSubject;
+export declare function evmAllowlistSubject(operation: Pick<OperationRecord, "profile" | "operationId" | "walletAddress" | "chainId" | "token" | "amountAtomic"> & Partial<Pick<OperationRecord, "evm" | "providerDirect">>): DirectAllowlistSubject;
 /** A binding is optional so records written before the gate still validate; once present its lease is mandatory past `started`. */
 export declare function validateEvmAllowlist(operation: OperationRecord): void;
 /** The shared ledger follows the EVM journal: a signature alone stays reserved; a broadcast is charged until proven. */

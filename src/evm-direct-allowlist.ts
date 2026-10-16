@@ -1,4 +1,5 @@
 import { refuse, requireListedDirectAsset, validateDirectAllowlistBinding, validateDirectAllowlistLease, type DirectAllowlistSubject, type DirectUsageTarget } from "./direct-allowlist-gate.js";
+import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { evmToken, type EvmAssetSelection } from "./evm-asset.js";
 import { directEvmListRows, directEvmNetworkByCaip2 } from "./evm-direct-networks.js";
@@ -34,9 +35,15 @@ export function listedEvmAsset(chainValue: unknown, tokenValue: unknown, decimal
   return { selection: { chainId: network.chainId, token, ...(decimals === undefined ? {} : { decimals }) }, decimals: row.decimals };
 }
 
-export function evmAllowlistSubject(operation: Pick<OperationRecord, "profile" | "operationId" | "walletAddress" | "chainId" | "token" | "amountAtomic" | "evm">): DirectAllowlistSubject {
+export function evmAllowlistSubject(operation: Pick<OperationRecord, "profile" | "operationId" | "walletAddress" | "chainId" | "token" | "amountAtomic"> &
+  Partial<Pick<OperationRecord, "evm" | "providerDirect">>): DirectAllowlistSubject {
   const asset = operation.evm?.asset;
-  if (asset === undefined) throw new ApnError("APN_STATE_CORRUPT", "Only an explicit EVM asset transfer carries a direct allowlist binding.");
+  // The local `pay transfer prepare` Base USDC record is the same direct asset row and shares its owner caps.
+  if (asset === undefined && operation.providerDirect === undefined && operation.chainId === CHAIN_ID && operation.token === BASE_USDC) {
+    return { profile: operation.profile, operationId: operation.operationId, family: "evm", account: operation.walletAddress,
+      chain: `eip155:${CHAIN_ID}`, amountAtomic: operation.amountAtomic, asset: { kind: "token", identifier: BASE_USDC } };
+  }
+  if (asset === undefined) throw new ApnError("APN_STATE_CORRUPT", "Only a local direct EVM transfer carries a direct allowlist binding.");
   return { profile: operation.profile, operationId: operation.operationId, family: "evm", account: operation.walletAddress,
     chain: `eip155:${operation.chainId}`, amountAtomic: operation.amountAtomic,
     asset: asset.kind === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: asset.address } };

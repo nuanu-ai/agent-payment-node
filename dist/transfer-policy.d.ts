@@ -19,3 +19,5 @@ export declare function hasSoleExactTransfer(receipt: RpcReceipt, operation: Ope
 export declare function publicOperation(operation: OperationRecord): unknown;
 export declare function publicReceipt(receipt: ReceiptRecord): unknown;
 export { canonicalAddress, validateBalance };
+/** Next actions reuse the RPC endpoint this invocation was given; only an offline status keeps the placeholder. */
+export declare function withInvocationRpc(view: unknown, rpcUrl: string | undefined): unknown;

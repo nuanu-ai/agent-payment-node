@@ -1,6 +1,6 @@
 import { BASE_USDC } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { checkEvmTransferFunding } from "./evm-transfer-approval.js";
+import { checkEvmTransferFunding, frozenEconomicsRemainExecutable } from "./evm-transfer-approval.js";
 import { parseAtomic } from "./money.js";
 import type { Economics, Hex, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
@@ -33,8 +33,6 @@ export async function checkTransferApproval(
     if (error instanceof ApnError && ["APN_INSUFFICIENT_USDC", "APN_INSUFFICIENT_GAS"].includes(error.code)) await failBeforeEffect("funding_changed");
     throw error;
   }
-  const fresh = validateEconomics(nonceAtomic, currentFees);
-  if (fresh.gasLimitAtomic !== operation.economics.gasLimitAtomic ||
-      fresh.maxFeePerGasAtomic !== operation.economics.maxFeePerGasAtomic ||
-      fresh.maxPriorityFeePerGasAtomic !== operation.economics.maxPriorityFeePerGasAtomic) await failBeforeEffect("fee_economics_changed");
+  // The signed gas limit and max fee are the bounded cap the owner approves; a harmless fee move keeps them executable.
+  if (!frozenEconomicsRemainExecutable(validateEconomics(nonceAtomic, currentFees), operation.economics)) await failBeforeEffect("fee_economics_changed");
 }
