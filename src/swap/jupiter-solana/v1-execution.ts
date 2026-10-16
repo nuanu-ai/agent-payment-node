@@ -151,7 +151,6 @@ export class JupiterV1BudgetedRpc extends SolanaRpc{
  override readonly originHash:string;override readonly budget:SolanaRpc["budget"];
  constructor(private readonly base:SolanaRpc){super();this.originHash=base.originHash;this.budget=base.budget;}
  override get hasPersistentPacer(){return this.base.hasPersistentPacer;}
- override get maximumAccountsPerRead(){return this.base.maximumAccountsPerRead;}
  override async call(method:SolanaMethod,params:readonly unknown[]):Promise<unknown>{
   if(method==="getBlockHeight"&&typeof this.base.batch==="function"){
    const results=await this.base.batch([{method,params}]);

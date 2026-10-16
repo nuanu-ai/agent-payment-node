@@ -242,7 +242,6 @@ export class JupiterV1BudgetedRpc extends SolanaRpc {
         this.budget = base.budget;
     }
     get hasPersistentPacer() { return this.base.hasPersistentPacer; }
-    get maximumAccountsPerRead() { return this.base.maximumAccountsPerRead; }
     async call(method, params) {
         if (method === "getBlockHeight" && typeof this.base.batch === "function") {
             const results = await this.base.batch([{ method, params }]);

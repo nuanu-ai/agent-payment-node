@@ -28,9 +28,11 @@ export interface OrcaMarketRead {
     readonly swap: WhirlpoolSwapQuote;
 }
 /**
- * Reads the pinned pool, its two vaults, the three downward tick arrays derived from the current tick, the oracle PDA
- * and the owner's accounts in one `getMultipleAccounts` at one slot, then prices the exact input with the local port of
- * the program's swap math. The tick arrays are derived from a first pool read and re-derived from the same-slot read.
+ * Reads the pinned pool, the three downward tick arrays derived from the current tick, the oracle PDA, its two vaults
+ * and the owner's accounts: the first eight keys (pool and tick arrays first) in one getMultipleAccounts at one slot,
+ * the owner's two token accounts in a second page no more than ORCA_MAX_SLOT_DRIFT slots away, then prices the exact
+ * input with the local port of the program's swap math. The tick arrays are derived from a first pool read and
+ * re-derived from the pool in the first page.
  */
 export declare function readOrcaMarket(rpc: SolanaRpcPort, owner: string, amountIn: bigint): Promise<OrcaMarketRead>;
 export interface OrcaKeptWsol {

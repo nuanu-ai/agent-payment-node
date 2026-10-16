@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readdir } from "node:fs/promises";
 import { SolanaRpc, SolanaRpcBudget, type SolanaBatchRead, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
+import { canonicalJson } from "../../src/canonical.js";
 import { JupiterV1BudgetedRpc } from "../../src/swap/jupiter-solana/v1-execution.js";
 import { JupiterV1MaterialResolver } from "../../src/swap/jupiter-solana/v1-resolver.js";
 import { liveSimulationCapture } from "../fixtures/jupiter-v1-live-simulation-83/capture.js";
@@ -44,27 +45,22 @@ test("batched public resolution retains the complete frozen message and reads ev
  assert.equal(batched.reads.length, ordinary.reads.length);
  assert.ok(batched.batches.every(r => r.length >= 2 && r.length <= 8));
  const headers = ordinary.reads.filter(r => (r.params[1] as { dataSlice?: unknown } | undefined)?.dataSlice !== undefined);
- assert.equal(headers.length, 1); assert.deepEqual((headers[0]!.params[1] as { dataSlice: unknown }).dataSlice, { offset: 0, length: 45 });
+ // Nine program and ProgramData keys (no Memo on this route): an eight-key and a one-key request, both 45-byte slices.
+ assert.deepEqual(headers.map(r => (r.params[0] as string[]).length), [8, 1]);
+ assert.ok(headers.every(r => canonicalJson((r.params[1] as { dataSlice: unknown }).dataSlice) === canonicalJson({ offset: 0, length: 45 })));
  for (const address of programData()) {
   const original = Buffer.from(m.semanticAccounts.find(a => a.address === address)!.dataBase64, "base64");
   assert.equal(b.semanticAccounts.find(a => a.address === address)!.dataBase64, original.subarray(0, 45).toString("base64"));
  }
 });
-test("PublicNode-sized reads preserve all accounts and the frozen message without exceeding eight keys", async () => {
- const ordinary = publicPort(false), bounded = publicPort(true);
- const rpc = { ...bounded.rpc, maximumAccountsPerRead: 8 as const };
+test("every account read sends at most eight keys, whatever the endpoint, and preserves the frozen message", async () => {
+ const ordinary = publicPort(false), batched = publicPort(true);
  const a = await new JupiterV1MaterialResolver(ordinary.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
- const b = await new JupiterV1MaterialResolver(rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
- assert.deepEqual(b.semanticAccounts.map(a => a.address).sort(), a.semanticAccounts.map(a => a.address).sort());
- assert.equal(b.messageHash, a.messageHash); assert.deepEqual(b.programPins, a.programPins);
- const accountReads = bounded.reads.filter(r => r.method === "getMultipleAccounts");
- assert.ok(accountReads.every(r => (r.params[0] as string[]).length <= 8));
- assert.ok(accountReads.length > ordinary.reads.filter(r => r.method === "getMultipleAccounts").length);
-});
-test("the Jupiter RPC forwards the endpoint account-read bound", () => {
- for (const endpoint of ["https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"])
-  assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc(endpoint)).maximumAccountsPerRead, 8);
- assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc("https://api.mainnet-beta.solana.com")).maximumAccountsPerRead, 16);
+ const b = await new JupiterV1MaterialResolver(batched.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
+ assert.deepEqual(b, a); assert.equal(b.messageHash, m.messageHash);
+ const accountReads = ordinary.reads.filter(r => r.method === "getMultipleAccounts");
+ assert.ok(accountReads.length >= 2 && accountReads.every(r => (r.params[0] as string[]).length <= 8));
+ assert.ok(accountReads.every(r => (r.params[1] as { minContextSlot?: number }).minContextSlot === m.quoteResponse.contextSlot));
 });
 test("public resolution never downloads ProgramData beyond its header", async () => {
  const p = publicPort(false); await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);

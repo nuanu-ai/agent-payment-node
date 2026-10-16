@@ -1,12 +1,13 @@
+import { SOLANA_ACCOUNT_KEYS_PER_READ } from "./solana-account-pages.js";
 /**
  * Worst-case physical Solana POSTs of one swap command, derived from the reads each step sends (P4), not hand-counted.
- * A keyless public endpoint never shares a POST between account reads (the smallest key limit, PublicNode's, is 8 keys
- * per read), while fee, height and rent share one POST. Nothing retries inside a command: a refused or rate-limited read
- * ends it, the next command starts a fresh budget, and no budget is stored, so no number of retries can exhaust an
- * operation. Persistent per-provider pacing protects the public endpoint across commands.
+ * Every swap account read goes out in requests of at most 8 keys (readSolanaAccountPages: PublicNode's limit), and a
+ * keyless public endpoint never shares a POST between account reads, while fee, height and rent share one POST.
+ * Nothing retries inside a command: a refused or rate-limited read ends it, the next command starts a fresh budget, and
+ * no budget is stored, so no number of retries can exhaust an operation. Persistent per-provider pacing protects the
+ * public endpoint across commands.
  */
-const PUBLIC_KEYS_PER_ACCOUNT_READ = 8;
-const accountReads = (keys) => Math.ceil(keys / PUBLIC_KEYS_PER_ACCOUNT_READ);
+const accountReads = (keys) => Math.ceil(keys / SOLANA_ACCOUNT_KEYS_PER_READ);
 /** Explicit headroom: one unplanned split of a batched read and one extra account page. */
 export const SOLANA_SWAP_PLAN_HEADROOM_REQUESTS = 2;
 const GENESIS = 1, BLOCKHASH = 1, FEE = 1, SIMULATION = 1, HEIGHT = 1, SEND = 1;
@@ -15,8 +16,8 @@ const OBSERVE = 2;
 /** Finalized height, then the signature status with full history (proveSolanaUnlanded). */
 const UNLANDED = 2;
 const STATUS = OBSERVE + UNLANDED;
-/** Orca keyless: one 45-byte header read of seven program keys, the pool, the same-slot market read, token rent. */
-const ORCA_MARKET = 1 + 1 + 1 + 1;
+/** Orca keyless: the 45-byte headers of seven program keys, the pool, the ten-key market read, token rent. */
+const ORCA_MARKET = accountReads(7) + accountReads(1) + accountReads(10) + 1;
 const ORCA_QUOTE = GENESIS + ORCA_MARKET + BLOCKHASH + FEE + SIMULATION;
 /** The pre-signing guard repeats the quote reads and the lifetime height, then the one send and its observation. */
 const ORCA_APPROVE = GENESIS + ORCA_MARKET + BLOCKHASH + FEE + SIMULATION + HEIGHT + SEND + OBSERVE;
