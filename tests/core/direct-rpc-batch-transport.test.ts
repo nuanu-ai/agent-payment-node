@@ -164,3 +164,11 @@ test("batch refuses write methods before network and scalar calls retain string 
   assert.deepEqual(await rpc.assertBaseChain(), { chainId: 8453, rpcOrigin: "https://8.8.8.8" });
   assert.equal(bodies.length, 1);
 });
+
+test("an endpoint that answers a batch with one object is named as not supporting batches, after one POST", async (t) => {
+  const bodies = mockHttps(t, () => ({ status: 200, raw: JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "batch requests are not supported" } }) }));
+  const error = await new HttpsBaseRpc(endpoint).batchCall(read).then(() => undefined, (failure: unknown) => failure) as { code?: string; details?: unknown } | undefined;
+  assert.equal(error?.code, "APN_RPC_PROTOCOL");
+  assert.deepEqual(error?.details, { reason: "rpc_batch_unsupported" });
+  assert.equal(bodies.length, 1, "there is no per-call retry behind the refusal");
+});
