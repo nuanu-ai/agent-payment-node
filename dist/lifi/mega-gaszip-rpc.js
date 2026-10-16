@@ -1,4 +1,5 @@
 import { gaszipNativeNet } from "./gaszip-native-delivery.js";
+import { gaszipSendRefused } from "./gaszip-outcome.js";
 import { assertGaszipPhysicalGuard } from "./gaszip-authority.js";
 import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi } from "viem";
@@ -42,6 +43,9 @@ export class MegaFundingRpc {
         catch {
             return megaFail("rpc_json");
         }
+        // A well-formed JSON-RPC error answer to the one send is a definite refusal, unless it says the node already holds the bytes.
+        if (method === "eth_sendRawTransaction" && gaszipSendRefused(v, id))
+            megaFail("send_rejected");
         if (v.jsonrpc !== "2.0" || v.id !== id || !Object.hasOwn(v, "result") || Object.hasOwn(v, "error"))
             megaFail("rpc_result");
         return v.result;
@@ -136,7 +140,7 @@ export async function proveMegaDelivery(rpc, owner, d) {
             return null;
         const t = megaObject(tv);
         signedBudget = { gas: megaQuantity(t.gas).toString(), gasPrice: megaQuantity(t.gasPrice).toString() };
-        amount = await gaszipNativeNet(tv, d, owner, 4326, MEGA_FUNDING.minimumOutput, { fail: megaFail, object: megaObject, uint: megaUint, quantity: megaQuantity, hash: megaHash, address: megaAddress, exact: megaExact });
+        amount = await gaszipNativeNet(tv, d, owner, 4326, 0n, { fail: megaFail, object: megaObject, uint: megaUint, quantity: megaQuantity, hash: megaHash, address: megaAddress, exact: megaExact });
     }
     const p = await proveMegaSafeTransaction(rpc, 4326, d.hash, { from: d.signer, to: owner, data: "0x", value: amount, nonce: d.nonce, ...signedBudget });
     if (p === null)

@@ -1,4 +1,5 @@
 import { hashObject } from "../canonical.js";
+import { GASZIP_TERMINAL_STATES, type GaszipTerminalState } from "./gaszip-outcome.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { keccak256, parseTransaction, recoverTransactionAddress, type Hex } from "viem";
 import { MEGA_FUNDING, megaFail, megaHash, megaUint } from "./mega-gaszip-contract.js";
@@ -11,7 +12,7 @@ export interface MegaFundingRecord {
   readonly providerBinding: BridgeProviderBinding; readonly amountAtomic: string; readonly minimumOutputAtomic: string;
   readonly maximumFeeAtomic: string; readonly quoteDigest: string; readonly quoteExpectedAtomic: string; readonly expiresAt: string;
   readonly policyDigest: string; readonly policyRevision: number; readonly activationDigest?: string; readonly plan: MegaFundingPlan;
-  readonly state: "prepared"|"signing_started"|"sealed"|"submitting"|"submitted"|"unknown_finality"|"completed"|"failed_before_effect"|"failed_confirmed_revert";
+  readonly state: "prepared"|"signing_started"|"sealed"|"submitting"|"submitted"|"unknown_finality"|GaszipTerminalState;
   readonly terminal: boolean; readonly rawTransaction: Hex|null; readonly transactionHash: Hex|null; readonly submissionAttempts: 0|1;
   readonly usageReservationId: string|null; readonly outcomeDigest: string|null; readonly sourceProof: unknown|null; readonly destinationProof: unknown|null;
   readonly integrityHash: string;
@@ -28,16 +29,16 @@ export function validateMegaFunding(value: unknown): MegaFundingRecord {
   megaHash(r.plan.blockHash); for(const x of [r.plan.nonce,r.plan.gas,r.plan.maxFee,r.plan.tip,r.plan.l1FeeUpper,r.plan.operatorFeeUpper,r.plan.feeUpper]) megaUint(x);
   if(megaUint(r.plan.feeUpper)!==megaUint(r.plan.gas)*megaUint(r.plan.maxFee)+megaUint(r.plan.l1FeeUpper)+megaUint(r.plan.operatorFeeUpper) ||
     megaUint(r.plan.feeUpper)>megaUint(r.maximumFeeAtomic) || megaUint(r.plan.tip)>megaUint(r.plan.maxFee)) megaFail("record_fee");
-  const terminal=["completed","failed_before_effect","failed_confirmed_revert"].includes(r.state);
-  if(terminal!==r.terminal || !["prepared","signing_started","sealed","submitting","submitted","unknown_finality","completed","failed_before_effect","failed_confirmed_revert"].includes(r.state)) megaFail("record_state");
+  const terminal=GASZIP_TERMINAL_STATES.includes(r.state);
+  if(terminal!==r.terminal || !["prepared","signing_started","sealed","submitting","submitted","unknown_finality",...GASZIP_TERMINAL_STATES].includes(r.state)) megaFail("record_state");
   if(r.transactionHash===null ? r.rawTransaction!==null : r.rawTransaction===null || keccak256(r.rawTransaction)!==r.transactionHash) megaFail("record_transaction");
   if(r.rawTransaction!==null){ const t=parseTransaction(r.rawTransaction);
     if(t.type!=="eip1559" || t.chainId!==8453 || t.to?.toLowerCase()!==MEGA_FUNDING.target.toLowerCase() || t.data!==MEGA_FUNDING.data || t.value!==megaUint(r.amountAtomic) ||
       t.nonce?.toString()!==r.plan.nonce || t.gas?.toString()!==r.plan.gas || t.maxFeePerGas?.toString()!==r.plan.maxFee ||
       t.maxPriorityFeePerGas?.toString()!==r.plan.tip || (t.accessList??[]).length!==0 || t.r===undefined || t.s===undefined) megaFail("record_envelope"); }
   if((r.state==="prepared" || r.state==="signing_started" || r.state==="failed_before_effect") && r.rawTransaction!==null ||
-    r.submissionAttempts!==0 && r.submissionAttempts!==1 || ["submitting","submitted","completed","failed_confirmed_revert"].includes(r.state) && r.submissionAttempts!==1 ||
-    r.state==="completed" && (r.sourceProof===null || r.destinationProof===null || r.outcomeDigest===null)) megaFail("record_phase");
+    r.submissionAttempts!==0 && r.submissionAttempts!==1 || ["submitting","submitted","completed","failed_confirmed_revert","destination_failed"].includes(r.state) && r.submissionAttempts!==1 ||
+    (r.state==="completed" || r.state==="destination_failed") && (r.sourceProof===null || r.destinationProof===null || r.outcomeDigest===null)) megaFail("record_phase");
   return r;
 }
 export function publicMegaFunding(r: MegaFundingRecord): unknown { const {rawTransaction:_raw,...rest}=validateMegaFunding(r); return rest; }
@@ -54,6 +55,8 @@ export class MegaFundingJournal extends SecureStateStore {
   async assertNoEffectClaimsLocked(r:MegaFundingRecord):Promise<void>{
     if(await this.readJson(`mega-gaszip-first-sign/${r.operationId}.json`)!==null || await this.readJson(`mega-gaszip-first-send/${r.operationId}.json`)!==null)megaFail("effect_marker_blocks_retirement");
   }
+  /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */
+  async sendClaimedLocked(r:{operationId:string}):Promise<boolean>{return await this.readJson(`mega-gaszip-first-send/${r.operationId}.json`)!==null;}
   async claimSigningLocked(r:MegaFundingRecord):Promise<void>{
     await this.ensureDirectory("mega-gaszip-first-sign");await this.writeJson(`mega-gaszip-first-sign/${r.operationId}.json`,{operationId:r.operationId,fingerprint:r.integrityHash,nonce:r.plan.nonce},true);
   }
