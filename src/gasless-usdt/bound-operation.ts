@@ -14,6 +14,7 @@ import { usdtUserOperation } from "./userop.js";
 
 import { USDT_BOUND_V2_SCHEMA, validateUsdtBoundOperationV2, type UsdtBoundOperationV2 } from "./bound-v2-codec.js";
 import { consumeUsdtV2Prepared, type UsdtPolicyPreparedV2 } from "./policy-prepare-v2.js";
+import { validateUsdtStoredBoundOperation } from "./bound-stored.js";
 export type UsdtAnyBoundOperation = UsdtBoundOperation | UsdtBoundOperationV2;
 export function validateUsdtAnyBoundOperation(value: unknown): UsdtAnyBoundOperation {
   return isPlainRecord(value) && value.schemaVersion === USDT_BOUND_V2_SCHEMA ? validateUsdtBoundOperationV2(value) : validateUsdtBoundOperation(value);
@@ -202,7 +203,8 @@ export class UsdtBoundOperationRepository {
       (stat.mode & 0o777) !== FILE_MODE || stat.size > MAX_BYTES) fail("bound_file", "APN_STATE_SECURITY");
     let parsed: unknown;
     try { parsed = JSON.parse(await readFile(path, "utf8")); } catch { fail("bound_json"); }
-    return validateUsdtAnyBoundOperation(parsed);
+    // R2: a saved record loads against its own hashes and schema; signing and sending re-validate it against current pins.
+    return validateUsdtStoredBoundOperation(parsed);
   }
   private async readClaim(idempotencyKey: string): Promise<UsdtAnyBoundOperation | null> {
     if (!await this.dir(this.claimsPath(), false)) return null;
@@ -356,7 +358,9 @@ export async function classifyUsdtBoundRecovery(operation: UsdtAnyBoundOperation
       snapshot.account.usdtBalanceAtomic < BigInt(b.plan.request.grossAtomic)) {
       return { state: "capability_unavailable", reason: "chain_state_drift", operation };
     }
-    if (snapshot.blockNumber !== BigInt(b.safeBlockNumber) || snapshot.blockHash !== b.safeBlockHash) {
+    // A later safe block is the normal case: execution re-guards at its own fresh safe block. Only a different block at
+    // the prepared height (the prepared anchor itself left the canonical chain) needs recovery.
+    if (snapshot.blockNumber === BigInt(b.safeBlockNumber) && snapshot.blockHash !== b.safeBlockHash) {
       return { state: "recovery_required", reason: "safe_block_changed", operation };
     }
     return { state: "prepared", operation };

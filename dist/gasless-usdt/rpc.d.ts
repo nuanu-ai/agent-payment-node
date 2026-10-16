@@ -17,8 +17,19 @@ export declare class UsdtJsonRpc {
         readonly params: readonly unknown[];
     }[], phase?: "batch" | "safe_head" | "account_snapshot"): Promise<readonly unknown[]>;
 }
+type UsdtCodeHashPins = Omit<import("./sponsor-auth.js").UsdtSponsorSnapshot["pins"], "paymasterEntryPoint">;
+/**
+ * Code at an address cannot change on Ethereum (EIP-6780), and none of the four pinned contracts is a proxy. One verified
+ * `eth_getCode` read per command invocation and RPC endpoint therefore proves them for every later safe snapshot of that
+ * invocation; the storage-backed fee, pause and EntryPoint reads stay in every snapshot.
+ */
+export declare class UsdtCodePins {
+    private proven;
+    provenFor(rpcUrl: string): UsdtCodeHashPins | null;
+    prove(rpcUrl: string, codes: readonly unknown[]): UsdtCodeHashPins;
+}
 /** Read one authenticated safe-block account view. Every contract and account read uses the same safe tag. */
-export declare function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: string, sender: Address): Promise<{
+export declare function usdtSafeSnapshot(transport: GaslessTransport, rpcUrl: string, sender: Address, codePins: UsdtCodePins): Promise<{
     readonly chainId: bigint;
     readonly blockNumber: bigint;
     readonly blockHash: Hex;
@@ -36,3 +47,4 @@ export declare function usdtSendPort(transport: GaslessTransport): (op: UsdtUser
 export declare function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): UsdtRecoveryPort;
 /** Canonical Ethereum reads through the owner's explicit `APN_ETHEREUM_RPC_URL`; no default endpoint exists. */
 export declare function usdtChainPort(transport: GaslessTransport, rpcUrl: string): UsdtChainPort;
+export {};

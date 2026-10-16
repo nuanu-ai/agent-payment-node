@@ -4,6 +4,7 @@ import type { RuntimeContext } from "../runtime.js";
 import type { FacilitatorSignerPort } from "./custody.js";
 import type { FacilitatorPort } from "./facilitator.js";
 import { type FacilitatorGaslessRepositoryPort } from "./operation-repository.js";
+import { FacilitatorGaslessPolicy } from "./policy.js";
 import type { FacilitatorRpcPort } from "./rpc.js";
 export interface FacilitatorGaslessDependencies {
     readonly rpc: () => FacilitatorRpcPort;
@@ -17,6 +18,7 @@ export declare class FacilitatorGaslessService {
     private readonly context;
     readonly records: FacilitatorGaslessRepositoryPort;
     readonly operations: OperationService;
+    readonly policy: FacilitatorGaslessPolicy;
     constructor(context: RuntimeContext);
     balance(profile: string): Promise<{
         profile: string;

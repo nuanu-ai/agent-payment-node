@@ -338,7 +338,7 @@ export function createApnCore(bound, options = {}) {
         ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
             gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock, options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
         } : {}),
-        ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe"].includes(bound.request.command) ||
+        ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe", "gasless.usdt.resume"].includes(bound.request.command) ||
             options.gaslessUsdtExecute !== undefined ? {
             gaslessUsdtExecute: options.gaslessUsdtExecute ?? new GaslessUsdtCommandExecute(state, clock, wrappingSecret, options.gaslessUsdtExecuteOptions),
         } : {}),

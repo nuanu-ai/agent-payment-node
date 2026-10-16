@@ -16,7 +16,8 @@ import type { GaslessEstimate, GaslessIntent, GaslessSnapshot } from "../../src/
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import { gaslessOwner } from "../../src/gasless/owner.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
-import { baseLocalGaslessMechanism } from "../../src/gasless/asset-policy.js";
+import { baseLocalGaslessMechanism, localGaslessMechanism } from "../../src/gasless/asset-policy.js";
+import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { newGaslessOperation, transitionGasless } from "../../src/gasless/transitions.js";
 import { gaslessBatch, gaslessEnvelopeBinding, gaslessUserOperation } from "../../src/gasless/wire.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -696,7 +697,13 @@ async function gaslessProfileFixture(root: string, profile: string, now: Date, w
     await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile, profileHash: state.profileHash(profile),
       address: identity.address, createdAt: identity.createdAt, bindingHash: identity.bindingHash }));
   }
-  // These cross-network lock tests exercise the generic local gasless path; Base has a separate owner allowlist.
+  // These cross-network lock tests exercise the local gasless path on Polygon. Like every executable gasless chain it
+  // needs the owner's allowlist, added beside whatever the other family's fixture already admitted for this profile.
+  const overlay = (await new AllowlistPolicyStore(root).read(profile)).records.at(-1)?.overlay;
+  const accounts = overlay !== undefined && "accounts" in overlay ? overlay.accounts : {};
+  await activateDirectPolicy(root, profile, { now, accounts: { ...accounts, evm: account.address },
+    admissions: [...(overlay?.admissions ?? []), { chain: "eip155:137", kind: "token", identifier: gaslessDeployment(137).token,
+      rail: "gasless", maximumPerTransferAtomic: "100000000", dailyLimitAtomic: "1000000000", mechanism: localGaslessMechanism(137) }] });
   const rpc = new GaslessTestRpc(137, account.address, "empty", now), approval = new GaslessApproval();
   const custody = new LocalGaslessCustody(state, wrapping, () => now.getTime());
   const dependencies = { rpcFor: () => rpc, custody, approval };

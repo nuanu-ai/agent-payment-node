@@ -17,7 +17,7 @@ import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
 import { GaslessPreparation } from "./prepare.js";
 import { withGaslessRpcInvocation } from "./rpc.js";
 import { publicGaslessOperation } from "./receipt.js";
-import { gaslessAsset, gaslessDeployment, gaslessIntentAsset } from "./registry.js";
+import { gaslessAsset, gaslessDeployment } from "./registry.js";
 import { snapshotSchema } from "./schema.js";
 import { transitionGasless } from "./transitions.js";
 import { GASLESS_ZERO_ADDRESS, assertGaslessExecutionChain, gaslessAddress, gaslessFailure, validateGaslessRequest } from "./validation.js";
@@ -51,7 +51,7 @@ export class GaslessService {
         address: owner.address, balance_atomic: snapshot.balanceAtomic, native_balance_wei: snapshot.nativeBalanceWei,
         paymaster_allowance_atomic: snapshot.allowanceAtomic, delegation: snapshot.delegation,
         block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read" };
-    });
+    }, "read");
   }
   async quote(input: { readonly profile: string; readonly owner: string; readonly request: GaslessRequest; readonly rpcMaxBatchItems?: number }) {
     return await withGaslessRpcInvocation(async () => {
@@ -94,7 +94,7 @@ export class GaslessService {
         delegation: snapshot.delegation, gas, fee_configuration: snapshot.feeConfiguration,
         block: snapshot.block, rpc_origin: snapshot.rpcOrigin, proof_class: "chain_verified_public_read",
         quote_scope: "fee_snapshot_only_prepare_revalidates_policy_usage_and_quote" };
-    }, input.rpcMaxBatchItems);
+    }, "read", input.rpcMaxBatchItems);
   }
   async prepare(input: Parameters<GaslessPreparation["prepare"]>[0]) {
     return await withGaslessRpcInvocation(async () => {
@@ -102,7 +102,7 @@ export class GaslessService {
       const preparation = new GaslessPreparation({ state: this.context.state, records: this.records,
         operations: this.operations, rpcFor: d.rpcFor, now: () => this.context.clock.now().getTime(), policy: this.policy });
       return publicGaslessOperation(await preparation.prepare(input));
-    });
+    }, "read");
   }
   async approve(operationId: string) {
     return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
@@ -110,12 +110,12 @@ export class GaslessService {
       if (this.legacyPolicyOperation(op)) return publicGaslessOperation(await this.save(op,
         { state: "failed_before_effect", failure: "gasless_legacy_observation_only" }));
       const approval = this.dependencies().approval;
-      const unit = gaslessIntentAsset(op.intent).symbol;
+      const unit = gaslessAsset(op.intent.request.chainId, op.intent.token).symbol;
       if (approval === undefined) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Approve this ${unit} fee transfer in a foreground terminal.`, {
         nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
       });
       return publicGaslessOperation(await this.execution(op).approve(op, approval));
-    }));
+    }), "execute");
   }
   async approveSealed(operationId: string) {
     return await withGaslessRpcInvocation(async () => await this.locked(operationId, async (op) => {
@@ -126,7 +126,7 @@ export class GaslessService {
       return publicGaslessOperation(await new GaslessSealedFirstSendExecution(this.context.state,
         d.rpcFor(op.intent.request.chainId), d.custody, this.policy, () => this.context.clock.now().getTime(),
         async (previous, patch) => await this.save(previous, patch)).approve(op, d.approval));
-    }));
+    }), "first_send");
   }
   async resume(operationId: string, observationRpcEnv?: string) {
     return await withGaslessRpcInvocation(async () => {
@@ -147,7 +147,7 @@ export class GaslessService {
       return await this.locked(operationId, async (op) => publicGaslessOperation(
         op.terminal ? op : this.legacyPolicyOperation(op) ? await this.legacyRecovery(op)
           : op.state === "awaiting_approval" ? op : await this.execution(op).run(op)));
-    });
+    }, "resume");
   }
   async status(operationId: string) { return await this.locked(operationId, async (op) => publicGaslessOperation(op)); }
   async receipt(operationId: string) {

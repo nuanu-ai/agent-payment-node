@@ -4,11 +4,13 @@ import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { gaslessDeployment } from "./registry.js";
-import { gaslessFailure } from "./validation.js";
-export const BASE_GASLESS_CHAIN = "eip155:8453";
-export const ETHEREUM_GASLESS_CHAIN = "eip155:1";
+import { GASLESS_EIP7702_CHAINS, gaslessFailure } from "./validation.js";
+/**
+ * Every executable Circle gasless chain moves USDC only under the owner's allowlist and asset-usage caps, exactly like
+ * a direct transfer. Only the historical, non-executable Avalanche row of this adapter has no policy chain.
+ */
 export function gaslessPolicyChain(chainId) {
-    return chainId === 8453 ? BASE_GASLESS_CHAIN : chainId === 1 ? ETHEREUM_GASLESS_CHAIN : null;
+    return GASLESS_EIP7702_CHAINS.includes(chainId) ? `eip155:${chainId}` : null;
 }
 /** The reference names the canonical Circle USDC paymaster for the selected network. */
 export function localGaslessMechanism(chainId) {
@@ -19,12 +21,12 @@ export function localGaslessMechanism(chainId) {
         reference: `${chain}:${gaslessDeployment(chainId).paymaster}` };
 }
 export const baseLocalGaslessMechanism = () => localGaslessMechanism(8453);
+/** The usage identity of a saved intent comes from its own token, never from a later registry row (rule R2). */
 const identity = (intent) => {
     const chain = gaslessPolicyChain(intent.request.chainId);
     if (chain === null)
         return refused("gasless_allowlist_unsupported_chain");
-    return { account: intent.owner.address, chain,
-        asset: { kind: "token", identifier: gaslessDeployment(intent.request.chainId).token } };
+    return { account: intent.owner.address, chain, asset: { kind: "token", identifier: intent.token } };
 };
 const at = (now) => new Date(now);
 const refused = (reason) => gaslessFailure("APN_ALLOWLIST_REFUSED", reason);
@@ -206,11 +208,11 @@ export class GaslessAssetPolicy {
                 target === "failed_confirmed_revert" || target === "finalized"
                 ? { outcomeDigest: op.integrityHash } : {}) });
     }
+    /** Runs on every read (reconcile): only the saved binding's own fields, which `validateGaslessIntent` also checks. */
     assertBinding(op) {
-        const bound = op.intent.allowlist;
-        if (bound === undefined || bound.chain !== gaslessPolicyChain(op.intent.request.chainId) ||
-            bound.token !== gaslessDeployment(op.intent.request.chainId).token ||
-            canonicalJson(bound.mechanism) !== canonicalJson(localGaslessMechanism(op.intent.request.chainId)) ||
+        const bound = op.intent.allowlist, chain = gaslessPolicyChain(op.intent.request.chainId);
+        if (bound === undefined || chain === null || bound.chain !== chain || bound.token !== op.intent.token ||
+            canonicalJson(bound.mechanism) !== canonicalJson({ provider: "local", reference: `${chain}:${op.intent.paymaster}` }) ||
             bound.reservationId !== assetUsageReservationId(identity(op.intent), op.operationId))
             corrupt();
     }

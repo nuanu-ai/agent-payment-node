@@ -5,7 +5,7 @@ import { addressWord, parseReceiptLogs, quantity, rpcBlock, rpcHex, rpcJson, rpc
   recheckBlock, type GaslessRpcCall, type GaslessRpcMethod } from "../gasless/rpc-codec.js";
 import type { Address, Hex } from "../model.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
-import { facilitatorFail } from "./failure.js";
+import { facilitatorFail, facilitatorRpcConfigFail } from "./failure.js";
 import { AVALANCHE_FACILITATOR as R } from "./registry.js";
 
 const METHODS = new Set<GaslessRpcMethod>(["eth_chainId", "eth_getBlockByNumber", "eth_call", "eth_getTransactionReceipt", "eth_getLogs"]);
@@ -43,7 +43,7 @@ export interface FacilitatorRpcPort {
 export function avalancheFacilitatorRpc(environment: Readonly<Record<string, string | undefined>>,
   transport?: GaslessTransport): FacilitatorRpcPort {
   const rpcUrl = environment[R.rpcEnv];
-  if (rpcUrl === undefined || rpcUrl.length === 0) facilitatorFail("facilitator_gasless_rpc_binding");
+  if (rpcUrl === undefined || rpcUrl.length === 0) facilitatorRpcConfigFail("missing");
   return new AvalancheFacilitatorRpc(rpcUrl, transport);
 }
 
@@ -137,5 +137,5 @@ export class AvalancheFacilitatorRpc implements FacilitatorRpcPort {
 
 function rpcEndpoint(value: string): URL {
   try { return parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Avalanche RPC endpoint", 2048); }
-  catch { return facilitatorFail("facilitator_gasless_rpc_binding"); }
+  catch { return facilitatorRpcConfigFail("invalid"); }
 }
