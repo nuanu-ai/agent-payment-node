@@ -157,10 +157,10 @@ test("approval executes one exact signed transaction; replay is observation-only
   assert.equal(first.approvalPhase, "submitted");
   assert.equal(first.depositPhase, "pending");
   assert.equal("rawTransaction" in first, false);
-  assert.deepEqual(h.counts(), { reads: 2, signs: 1, sends: 1, confirmations: 1 });
+  assert.deepEqual(h.counts(), { reads: 1, signs: 1, sends: 1, confirmations: 1 });
   assert.equal((await lease(state, op))?.state, "submitted");
   assert.equal((await h.service.execute("default", op.operationId)).state, "observation_only");
-  assert.deepEqual(h.counts(), { reads: 2, signs: 1, sends: 1, confirmations: 1 });
+  assert.deepEqual(h.counts(), { reads: 1, signs: 1, sends: 1, confirmations: 1 });
 });
 
 test("buyer approval execution reads its selected profile policy and rejects profile mismatch", async t => {
@@ -195,7 +195,7 @@ test("approval already sufficient and a pre-signing reorg never sign or dispatch
   assert.equal(covered.counts().signs, 0);
   assert.equal(await lease(first.state, first.op), null);
   const second = await setup(); t.after(second.temporary.cleanup);
-  const reorg = harness(second.state, second.op, { failReadAt: 1 });
+  const reorg = harness(second.state, second.op, { failReadAt: 0 });
   await assert.rejects(reorg.service.execute("default", second.op.operationId), /canonical block reorg/);
   assert.equal(reorg.journal.current(), null);
   assert.equal(reorg.counts().signs, 0);
@@ -205,7 +205,7 @@ test("approval already sufficient and a pre-signing reorg never sign or dispatch
 
 test("a revoked policy at the pre-signing read refuses before signing", async t => {
   const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
-  const h = harness(state, op, { revokeAtPolicyRead: 2 });
+  const h = harness(state, op, { revokeAtPolicyRead: 1 });
   await assert.rejects(h.service.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(h.counts().signs, 0);
   assert.equal(h.counts().sends, 0);
@@ -227,7 +227,7 @@ test("an approval sealed before an interrupted send resumes under fresh consent 
   const resumed = await h.service.execute("default", op.operationId);
   assert.equal(resumed.state, "approval_submitted");
   assert.deepEqual(sent, [sealedRaw]);
-  assert.deepEqual(h.counts(), { reads: 4, signs: 1, sends: 1, confirmations: 2 });
+  assert.deepEqual(h.counts(), { reads: 2, signs: 1, sends: 1, confirmations: 2 });
   assert.equal((await lease(state, op))?.state, "submitted");
 });
 

@@ -202,9 +202,9 @@ test(`production estimate pending ${kind} HTTP result ${result} fails closed bef
   } });
   const wrapping = { create: async () => { keys++; throw Error("NO_KEY"); }, load: async () => { keys++; throw Error("NO_KEY"); } };
   const service = kind === "legacy-cleanup" ? new CircleEvmService(new StateStore(root), wrapping, {}, () => at) : new CircleFundingEvmService(new StateStore(root), wrapping, {}, () => at, {}, { request: async () => ({ status: 200, body: JSON.stringify([{ finalityThreshold: 1000, minimumFee: 1 }]) }) });
-  const internal = service as unknown as { remotes(chain: number): unknown; preflightDeployments(...args: unknown[]): Promise<unknown>; assertPriorSourcesCanonical(...args: unknown[]): Promise<void>; retirements: { intent(...args: unknown[]): Promise<null> }; ports(o: unknown): { preflight(o: unknown, e: unknown): Promise<void> } };
+  const internal = service as unknown as { remotes(chain: number): unknown; preflightDeployments(...args: unknown[]): Promise<unknown>; retirements: { intent(...args: unknown[]): Promise<null> }; ports(o: unknown): { preflight(o: unknown, e: unknown): Promise<void> } };
   t.mock.method(internal, "remotes", () => ({ source: remote, destination: remote })); t.mock.method(internal, "preflightDeployments", async () => ({ digest: op.deploymentDigest }));
-  if (kind === "legacy-cleanup") { t.mock.method(internal, "assertPriorSourcesCanonical", async () => {}); t.mock.method(internal.retirements, "intent", async () => null); }
+  if (kind === "legacy-cleanup") t.mock.method(internal.retirements, "intent", async () => null);
   const action = internal.ports(op).preflight(op, effect);
   if (result === "0x10000") await action; else await assert.rejects(action);
   assert.equal(requests.filter(q => q.method === "eth_estimateGas").length, 1);

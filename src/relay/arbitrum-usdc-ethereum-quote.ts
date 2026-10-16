@@ -3,7 +3,7 @@ import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Hex } from "viem";
 import { hashObject } from "../canonical.js";
-import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
+import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
 
 export const RELAY_ARBITRUM_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as const;
 export const RELAY_ETHEREUM_USDC_RECIPIENT = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04" as const;
@@ -63,7 +63,6 @@ function transaction(value: unknown, id: "approve" | "deposit", payer: string) {
   const step = object(value, "step");
   keys(step, ["id", "action", "description", "kind", "items", "requestId", "depositAddress"], "step extension");
   if (step.id !== id || step.kind !== "transaction" ||
-    step.action !== "Confirm transaction in your wallet" ||
     (step.depositAddress !== undefined && step.depositAddress !== "")) fail("step action");
   const item = one(step.items, "step items");
   keys(item, ["status", "data", "check"], "step item extension");
@@ -125,7 +124,7 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown,
     array(output.calls, "calls").length !== 0 || array(order.fees, "fees").length !== 0 ||
     refunds.length !== 2 || output.extraData !== ROUTER_DATA ||
     typeof deadline !== "number" || !Number.isSafeInteger(deadline) ||
-    deadline <= intent.nowSeconds + 60 || deadline > intent.nowSeconds + 7 * 86400) fail("order identity");
+    deadline <= intent.nowSeconds + 60 || deadline > intent.nowSeconds + RELAY_MAX_DEADLINE_SECONDS) fail("order identity");
   const minimum = atomic(payee.minimumAmount, "output minimum");
   const expected = atomic(payee.expectedAmount, "expected output");
   if (minimum < atomic(intent.minimumOutputAtomic, "required minimum") || expected < minimum) fail("output bound");

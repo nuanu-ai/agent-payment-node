@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { freezeRelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
-import { proveRelayBnbDestination, type RelayBnbProofPorts } from "../../src/relay/destination-proof.js";
+import { proveRelayBnbDestination, RELAY_ROUTER_V3, type RelayBnbProofPorts, type RelayBnbReceipt } from "../../src/relay/destination-proof.js";
 import { ETHEREUM_DEPOSITORY, validateRelayQuote } from "../../src/relay/quote.js";
 
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14".toLowerCase();
@@ -27,18 +27,16 @@ async function fixture() {
     receipt: { transactionHash: hash("a"), status: "success" as const, blockNumber: 100n, blockHash: hash("b") },
     canonicalBlockHash: hash("b") } };
   const destHash = hash("c"), destBlockHash = hash("d"), safeHash = hash("e");
-  let traceCalls = 0;
   const ports: RelayBnbProofPorts = {
     chainId: async () => 56,
     transaction: async () => ({ hash: destHash, chainId: 56, to: recipient,
       valueWei: BigInt(op.minOutputAtomic), blockNumber: 200n, blockHash: destBlockHash }),
-    receipt: async () => ({ transactionHash: destHash, status: "success", blockNumber: 200n, blockHash: destBlockHash }),
+    receipt: async () => ({ transactionHash: destHash, status: "success", blockNumber: 200n, blockHash: destBlockHash, logs: [] }),
     block: async number => ({ number, hash: number === 200n ? destBlockHash : safeHash }),
     finalityCheckpoint: async () => ({ number: 205n, hash: safeHash }),
-    nativeTrace: async () => { traceCalls++; return null; },
   };
   const input = { operation: op, sourceDeposit, candidateHashes: [destHash] };
-  return { input, ports, destHash, destBlockHash, safeHash, traceCalls: () => traceCalls };
+  return { input, ports, destHash, destBlockHash, safeHash };
 }
 
 test("direct BNB native credit is observed only after canonical safe receipt and source deposit", async () => {
@@ -52,7 +50,6 @@ test("direct BNB native credit is observed only after canonical safe receipt and
     assert.equal(result.proof.orderId, f.input.operation.quote!.orderId);
     assert.equal(result.proof.creditedWei, f.input.operation.minOutputAtomic);
   }
-  assert.equal(f.traceCalls(), 0);
 });
 
 test("reorg, unsafe inclusion, wrong recipient or value, and failed receipt never prove", async () => {
@@ -74,22 +71,39 @@ test("reorg, unsafe inclusion, wrong recipient or value, and failed receipt neve
   assert.equal((await proveRelayBnbDestination(failedSource, f.ports)).status, "mismatch");
 });
 
-test("contract payout needs receipt-bound complete trace; ambiguous credits stay unproven", async () => {
+test("contract payout is proven by the pinned router's SolverNativeTransfer in the receipt; ambiguous or foreign events stay unproven", async () => {
   const f = await fixture();
   const tx = await f.ports.transaction(f.destHash); assert.ok(tx);
-  const contract = { ...f.ports, transaction: async () => ({ ...tx, to: "0x1111111111111111111111111111111111111111", valueWei: 0n }) };
-  assert.equal((await proveRelayBnbDestination(f.input, contract)).status, "unproven");
-  const transfer = { from: "0x1111111111111111111111111111111111111111", to: recipient,
-    valueWei: BigInt(f.input.operation.minOutputAtomic) };
-  const trace = { transactionHash: f.destHash, blockHash: f.destBlockHash, complete: true as const,
-    revertedCallsExcluded: true as const, transfers: [transfer] };
-  const proven = await proveRelayBnbDestination(f.input, { ...contract, nativeTrace: async () => trace });
+  const receipt = await f.ports.receipt(f.destHash) as RelayBnbReceipt; assert.ok(receipt);
+  const solverTopic = "0xd35467972d1fda5b63c735f59d3974fa51785a41a92aa3ed1b70832836f8dba6";
+  const event = (to: string, amount: bigint, address = RELAY_ROUTER_V3) => ({ address, topics: [solverTopic],
+    data: `0x${to.slice(2).padStart(64, "0")}${amount.toString(16).padStart(64, "0")}` });
+  const minimum = BigInt(f.input.operation.minOutputAtomic);
+  const contract = (logs: NonNullable<RelayBnbReceipt["logs"]>) => ({ ...f.ports,
+    transaction: async () => ({ ...tx, to: "0x1111111111111111111111111111111111111111", valueWei: 0n }),
+    receipt: async () => ({ ...receipt, logs }) });
+  assert.equal((await proveRelayBnbDestination(f.input, contract([]))).status, "unproven");
+  const proven = await proveRelayBnbDestination(f.input, contract([event(RELAY_ROUTER_V3, minimum), event(recipient, minimum)]));
   assert.equal(proven.status, "recipient_credit_proven");
-  if (proven.status === "recipient_credit_proven") assert.equal(proven.proof.method, "receipt_bound_native_trace");
-  assert.equal((await proveRelayBnbDestination(f.input, { ...contract,
-    nativeTrace: async () => ({ ...trace, transfers: [transfer, transfer] }) })).status, "unproven");
-  assert.equal((await proveRelayBnbDestination(f.input, { ...contract,
-    nativeTrace: async () => ({ ...trace, blockHash: hash("f") }) })).status, "mismatch");
+  if (proven.status === "recipient_credit_proven") { assert.equal(proven.proof.method, "relay_router_event"); assert.equal(proven.proof.creditedWei, minimum.toString()); }
+  assert.equal((await proveRelayBnbDestination(f.input, contract([event(recipient, minimum), event(recipient, minimum)]))).status, "unproven");
+  assert.equal((await proveRelayBnbDestination(f.input, contract([event(recipient, minimum, "0x2222222222222222222222222222222222222222")]))).status, "unproven");
+  assert.equal((await proveRelayBnbDestination(f.input, contract([event(recipient, minimum - 1n)]))).status, "mismatch");
+});
+
+test("one proof requests chain, transaction, receipt and checkpoint together, then the inclusion block", async () => {
+  // Each read resolves only when its simulated batch POST flushes, as with the real adapter.
+  const f = await fixture(), order: string[][] = []; let pending: { name: string; run: () => void }[] = [];
+  const track = <T>(name: string, value: () => Promise<T>) => new Promise<T>((resolve, reject) => {
+    pending.push({ name, run: () => { value().then(resolve, reject); } });
+    if (pending.length === 1) setImmediate(() => { const batch = pending; pending = []; order.push(batch.map(x => x.name)); for (const x of batch) x.run(); });
+  });
+  const ports: RelayBnbProofPorts = { chainId: () => track("chain", f.ports.chainId), transaction: hash => track("tx", () => f.ports.transaction(hash)),
+    receipt: hash => track("receipt", () => f.ports.receipt(hash)), block: number => track(`block:${number}`, () => f.ports.block(number)),
+    finalityCheckpoint: () => track("checkpoint", f.ports.finalityCheckpoint) };
+  assert.equal((await proveRelayBnbDestination(f.input, ports)).status, "recipient_credit_proven");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(order, [["receipt", "chain", "tx", "checkpoint"], ["block:200"]]);
 });
 
 test("an unrelated valid transfer to the recipient remains credit evidence, never Relay fulfillment", async () => {

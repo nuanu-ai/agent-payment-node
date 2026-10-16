@@ -8,6 +8,7 @@ import { STARGATE_SEND_ABI } from "./abi.js";
 import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNativeSigner, prepareStargateV2NativeEth, stargateV2NativeCanonicalReceipt } from "./native-execution.js";
 import { TtyStargateNativeApproval } from "./native-tty.js";
 import { StargateNativeUsage } from "./native-usage.js";
+import { scanStargateLogs, StargateDestinationScanStore, STARGATE_UNICHAIN_SCAN_WINDOW } from "./destination-scan.js";
 const SOURCE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
 function blocked(reason) { throw new ApnError("APN_RPC_CONFIG", `Stargate native runtime unavailable: ${reason}.`, { reason }); }
@@ -121,14 +122,14 @@ export class StargateNativeService {
     }
     async execute(operationId) {
         const operation = await this.required(operationId);
-        return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
+        return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner, operationId), this.journal);
     }
     async observe(operationId) {
         const operation = await this.required(operationId);
         // Terminal phases only settle their usage hold; they never sign or send.
         if (!["submission_started", "submitted", "unknown_finality", "observed", "failed_confirmed_revert"].includes(operation.phase))
             throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate operation can be observed.");
-        return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
+        return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner, operationId), this.journal);
     }
     async status(operationId) { return await this.required(operationId); }
     async receipt(operationId) { return stargateV2NativeCanonicalReceipt(await this.required(operationId)); }
@@ -138,18 +139,25 @@ export class StargateNativeService {
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate native operation was not found.");
         return found;
     }
-    async ports(profile, owner) {
+    async ports(profile, owner, operationId) {
         const signer = await this.local.port(profile, owner), { source, destination } = this.remote();
+        // P2: one chain-id read per endpoint per command; the pool reads' trailing chain re-check is then free.
+        const once = (rpc) => {
+            let chain = null;
+            return (method, params) => method === "eth_chainId" ? (chain ??= rpc.call(method, params).catch(error => { chain = null; throw error; })) : rpc.call(method, params);
+        };
+        const sourceCall = once(source), destinationCall = once(destination);
+        const cursor = operationId === undefined ? undefined : new StargateDestinationScanStore(this.state.root).cursor(operationId, "native-oft");
         const prepareBatch = this.environment.APN_STARGATE_NATIVE_PREPARE_BATCH === "1";
         return {
             ...(prepareBatch ? { sourcePrepareBatch: (calls) => source.batchCall(calls),
                 destinationPrepareBatch: (calls) => destination.batchCall(calls) } : {}),
-            sourceCall: (method, params) => source.call(method, params), destinationCall: (method, params) => destination.call(method, params),
+            sourceCall, destinationCall,
             destinationBalance: async (recipient, finalityTag) => await stargateDestinationBalance(destination, recipient, finalityTag),
             prepareEnvelope: async (tx) => {
                 const [chain, head] = prepareBatch ? await source.batchCall([{ method: "eth_chainId", params: [] },
                     { method: "eth_getBlockByNumber", params: ["latest", false] }]) :
-                    [await source.call("eth_chainId", []), await source.call("eth_getBlockByNumber", ["latest", false])];
+                    [await sourceCall("eth_chainId", []), await source.call("eth_getBlockByNumber", ["latest", false])];
                 if (quantity(chain) !== 1n)
                     throw new ApnError("APN_CHAIN_MISMATCH", "Ethereum RPC identity changed.");
                 const block = record(head);
@@ -170,7 +178,7 @@ export class StargateNativeService {
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
                 throw new Error("hash"); return returned; },
             waitSourceReceipt: async (transactionHash, finalityTag) => await confirmedStargateSourceReceipt(source, transactionHash, finalityTag),
-            observeDestination: async (input) => await observeStargateDestination(destination, input), now: this.now,
+            observeDestination: async (input) => await observeStargateDestination(destination, input, cursor), now: this.now,
         };
     }
     remote() {
@@ -211,17 +219,16 @@ export async function confirmedStargateSourceReceipt(rpc, transactionHash, final
     return { transactionHash: hash(receipt.transactionHash), status: quantity(receipt.status) === 1n ? "success" : "reverted",
         blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: finalityTag, logs };
 }
-export async function observeStargateDestination(rpc, input) {
+/** BRDG-30: the GUID- and recipient-filtered OFTReceived is found by a resumable windowed scan up to the finality head,
+ * never one ever-growing range from the prepare block. */
+export async function observeStargateDestination(rpc, input, cursor) {
     if (input.destinationPool !== DESTINATION_POOL || input.sourceEid !== 30101)
         blocked("destination_binding");
     const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), baselineTag = `0x${BigInt(input.fromBlockNumberAtomic).toString(16)}`, baseline = record(await rpc.call("eth_getBlockByNumber", [baselineTag, false])), topic = encodeEventTopics({ abi: STARGATE_SEND_ABI,
         eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
     if (hash(baseline.hash) !== input.fromBlockHash)
         throw new ApnError("APN_RPC_PROTOCOL", "Stargate destination baseline is no longer canonical.");
-    const raw = await rpc.call("eth_getLogs", [{ address: DESTINATION_POOL,
-            fromBlock: baselineTag, toBlock: finalityHead.number, topics: topic }]);
-    if (!Array.isArray(raw))
-        blocked("destination_logs");
+    const raw = await scanStargateLogs((method, params) => rpc.call(method, params), { address: DESTINATION_POOL, topics: topic }, BigInt(input.fromBlockNumberAtomic), quantity(finalityHead.number), STARGATE_UNICHAIN_SCAN_WINDOW, cursor);
     for (const value of raw) {
         const log = record(value);
         try {

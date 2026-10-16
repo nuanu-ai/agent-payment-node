@@ -159,7 +159,7 @@ test("verified skip permits one pinned deposit; replay is observation only and l
   assert.equal((await lease(state, op))?.state, "submitted");
   const replay = await h.service.execute("default", op.operationId);
   assert.equal(replay.state, "observation_only");
-  assert.deepEqual(h.counts(), { reads: 2, signs: 1, sends: 1, confirmations: 1 });
+  assert.deepEqual(h.counts(), { reads: 1, signs: 1, sends: 1, confirmations: 1 });
 });
 
 test("buyer deposit dispatch reads its selected profile policy and rejects profile mismatch", async t => {
@@ -224,10 +224,10 @@ test("approval gate, owner decline, policy race and canonical reorg prevent send
   const declined = harness(state, op, await skippedJournal(op), { confirm: false });
   await assert.rejects(() => declined.service.execute("default", op.operationId));
   assert.equal(declined.counts().signs, 0);
-  const race = harness(state, op, await skippedJournal(op), { revokeAtPolicyRead: 2 });
+  const race = harness(state, op, await skippedJournal(op), { revokeAtPolicyRead: 1 });
   await assert.rejects(race.service.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(race.counts().signs, 0); assert.equal(race.counts().sends, 0);
-  const reorg = harness(state, op, await skippedJournal(op), { failReadAt: 1 });
+  const reorg = harness(state, op, await skippedJournal(op), { failReadAt: 0 });
   await assert.rejects(reorg.service.execute("default", op.operationId), /canonical block reorg/);
   assert.equal(reorg.counts().signs, 0); assert.equal(reorg.counts().sends, 0);
   assert.equal(reorg.journal().effects[1].phase, "pending");

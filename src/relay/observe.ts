@@ -12,7 +12,7 @@ import { RelayNativeObserveService } from "./native-observe.js";
 
 const OPERATION = /^[a-f0-9]{64}$/u;
 export interface RelaySourceFinalityPorts {
-  /** A fresh, canonical, finalized Ethereum observation. At most three physical RPC POSTs. */
+  /** A fresh, canonical, finalized Ethereum observation. At most two physical RPC POSTs. */
   finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null>;
 }
 export type RelayObserveState = "prepared_waiting" | "approval_pending" | "deposit_pending" |
@@ -89,8 +89,8 @@ export class RelayObserveService {
     try { provider = await this.status.status(operationId); }
     catch { return result("source_finalized", "provider_status_unavailable_or_ambiguous", true); }
     const sourceBound = provider.chainIdentityObserved && provider.inTxHashes.includes(sourceHash.toLowerCase());
-    // One candidate fits the strict eight-POST budget. Multiple provider hashes
-    // are ambiguous here; selecting one could silently ignore a competing payout.
+    // One candidate fits the two-POST destination proof budget. Multiple provider
+    // hashes are ambiguous here; selecting one could silently ignore a competing payout.
     if (provider.txHashes.length > 1) return result("provider_candidate_unproven", "multiple_provider_candidates",
       true, provider.status, sourceBound);
     const candidateHashes = provider.txHashes;

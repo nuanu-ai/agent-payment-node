@@ -23,22 +23,9 @@ export interface RelayBnbBlock {
     readonly number: bigint;
     readonly hash: string;
 }
-/**
- * The adapter must derive effective transfers from an exhaustive transaction trace,
- * excluding reverted child calls. A partial or provider-enriched transfer list is
- * not a reliable trace. A missing trace leaves contract payouts unproven.
- */
-export interface RelayBnbNativeTrace {
-    readonly transactionHash: string;
-    readonly blockHash: string;
-    readonly complete: true;
-    readonly revertedCallsExcluded: true;
-    readonly transfers: readonly Readonly<{
-        from: string;
-        to: string;
-        valueWei: bigint;
-    }>[];
-}
+/** Destination reads of one proof. Every credit is proven from the receipt of the candidate transaction at a safe or
+ * finalized checkpoint (P1): its direct native value, the pinned Relay router's SolverNativeTransfer event, or the
+ * pinned token's Transfer event. No trace, historical balance or code-hash read is needed. */
 export interface RelayBnbProofPorts {
     chainId(): Promise<number>;
     transaction(hash: string): Promise<RelayBnbTransaction | null>;
@@ -48,21 +35,6 @@ export interface RelayBnbProofPorts {
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
     /** Polygon milestone consensus finality, required by the new Base source lane. */
     polygonFinalizedCheckpoint?(): Promise<RelayBnbBlock | null>;
-    /** null when trace support or exhaustive success semantics are unavailable. */
-    nativeTrace(hash: string): Promise<RelayBnbNativeTrace | null>;
-    /** Exhaustive canonical callTracer plus adjacent balance proof for the finite Base→Polygon lane. */
-    /** Proves the payout to the operation's own recorded recipient, never a fixed account. */
-    polygonNativeTrace?(hash: string, recipient: string): Promise<RelayBnbNativeTrace | null>;
-    /** Base only: bytecode identity and two balances from one pinned inclusion window. */
-    routerCodeHash?(address: string, block: bigint): Promise<string>;
-    tokenIdentityAndBalances?(token: string, recipient: string, block: bigint, blockHash: string): Promise<Readonly<{
-        proxyHash: string;
-        implementation: string;
-        implementationHash: string;
-        before: bigint;
-        after: bigint;
-    }>>;
-    adjacentBalances?(address: string, block: bigint, expectedBlockHash: string): Promise<readonly [bigint, bigint]>;
 }
 export interface RelaySourceDepositProof {
     readonly transactionHash: string;
@@ -84,7 +56,7 @@ export interface RelayBnbRecipientCreditEvidence {
     readonly recipient: string;
     readonly minimumOutputWei: string;
     readonly creditedWei: string;
-    readonly method: "direct_native_transaction" | "receipt_bound_native_trace" | "verified_relay_router_event_balance" | "pinned_erc20_transfer_balance";
+    readonly method: "direct_native_transaction" | "relay_router_event" | "pinned_erc20_transfer_event";
 }
 export type RelayBnbProofResult = Readonly<{
     /** A candidate hash can be an unrelated transfer, even when its recipient credit is real. */
@@ -97,6 +69,14 @@ export type RelayBnbProofResult = Readonly<{
     status: "pending" | "unproven" | "mismatch";
     reason: string;
 }>);
+/** Relay router V3 (relay-periphery cc6808ba97f7, deployments/v3/addresses.json): one immutable, non-proxy CREATE2
+ * deployment at the same address on Base, BNB, Polygon, Monad and MegaETH. Its SolverNativeTransfer(to, amount) is
+ * emitted only by a frame that completed the native transfer, so the receipt event proves the credit (P5: address pin,
+ * no code-hash pin). */
+export declare const RELAY_ROUTER_V3 = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
+/** Physical POSTs of one candidate proof: chain, transaction, receipt and finality head; then the inclusion block and,
+ * for a depth checkpoint, the checkpoint block (P4). */
+export declare const RELAY_DESTINATION_PROOF_POSTS = 2;
 /**
  * Provider transaction hashes are discovery hints only. A valid credit can be an
  * unrelated payment to the same recipient; this function never proves Relay order

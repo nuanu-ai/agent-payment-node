@@ -3,7 +3,6 @@ import { verifyDepositObservation } from "./deposit-effect.js";
 import { BNB_NATIVE } from "./quote.js";
 import { relayNativeRoute, RELAY_MEGA_USDM } from "./native-quote.js";
 const HASH = /^0x[0-9a-fA-F]{64}$/u;
-const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const same = (left, right) => left.toLowerCase() === right.toLowerCase();
 const pending = (reason) => ({ status: "pending", reason,
     relayOrderFulfillmentProven: false, paidAcceptance: false });
@@ -11,26 +10,35 @@ const unproven = (reason) => ({ status: "unproven", reason,
     relayOrderFulfillmentProven: false, paidAcceptance: false });
 const mismatch = (reason) => ({ status: "mismatch", reason,
     relayOrderFulfillmentProven: false, paidAcceptance: false });
-/** Former official Base V3 deployment: relay-periphery cc6808ba97f7, deployments/v3/addresses.json.
- * Runtime hash matches its verified Base bytecode (Blockscout) at safe block 51770413. */
-const BASE_RELAY_ROUTER_V3 = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
-const BASE_RELAY_ROUTER_V3_CODE_HASH = "0xde894e5c12e9513d50613c8fff375ecbf19b5d9a53bec0662e2b9667e3ec8f15";
+/** Relay router V3 (relay-periphery cc6808ba97f7, deployments/v3/addresses.json): one immutable, non-proxy CREATE2
+ * deployment at the same address on Base, BNB, Polygon, Monad and MegaETH. Its SolverNativeTransfer(to, amount) is
+ * emitted only by a frame that completed the native transfer, so the receipt event proves the credit (P5: address pin,
+ * no code-hash pin). */
+export const RELAY_ROUTER_V3 = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
 const SOLVER_NATIVE_TRANSFER_TOPIC = "0xd35467972d1fda5b63c735f59d3974fa51785a41a92aa3ed1b70832836f8dba6";
+const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/** Physical POSTs of one candidate proof: chain, transaction, receipt and finality head; then the inclusion block and,
+ * for a depth checkpoint, the checkpoint block (P4). */
+export const RELAY_DESTINATION_PROOF_POSTS = 2;
 function routerEventCredit(receipt, recipient) {
     const logs = receipt.logs;
     if (!logs || logs.length > 256)
         return null;
-    const transfers = logs.filter(log => same(log.address, BASE_RELAY_ROUTER_V3) &&
+    const transfers = logs.filter(log => same(log.address, RELAY_ROUTER_V3) &&
         log.topics.length > 0 && same(log.topics[0], SOLVER_NATIVE_TRANSFER_TOPIC));
     if (transfers.some(log => log.topics.length !== 1 || !/^0x[0-9a-fA-F]{128}$/u.test(log.data) ||
         log.data.slice(2, 26) !== "0".repeat(24)))
         return null;
-    const matching = transfers.filter(log => /^0x[0-9a-fA-F]{128}$/u.test(log.data) &&
-        log.data.slice(2, 26) === "0".repeat(24) &&
-        same(`0x${log.data.slice(26, 66)}`, recipient));
+    const matching = transfers.filter(log => same(`0x${log.data.slice(26, 66)}`, recipient));
     if (matching.length !== 1)
         return null;
     return BigInt(`0x${matching[0].data.slice(66)}`);
+}
+function tokenTransferCredit(receipt, token, recipient) {
+    const recipientTopic = `0x${recipient.slice(2).toLowerCase().padStart(64, "0")}`;
+    const credits = (receipt.logs ?? []).filter(log => same(log.address, token) && log.topics.length === 3 &&
+        same(log.topics[0], ERC20_TRANSFER_TOPIC) && same(log.topics[2], recipientTopic) && /^0x[0-9a-fA-F]{64}$/u.test(log.data));
+    return credits.length === 1 ? BigInt(credits[0].data) : null;
 }
 /**
  * Provider transaction hashes are discovery hints only. A valid credit can be an
@@ -61,15 +69,6 @@ export async function proveRelayBnbDestination(input, ports) {
     const hashes = [...new Set(input.candidateHashes.map(hash => hash.toLowerCase()))];
     if (hashes.length === 0)
         return pending("destination_candidate_missing");
-    let chainId;
-    try {
-        chainId = await ports.chainId();
-    }
-    catch {
-        return unproven("bnb_rpc_unavailable");
-    }
-    if (chainId !== 56)
-        return mismatch("destination_chain_id");
     const results = [];
     for (const hash of hashes)
         results.push(await inspectCandidate(op, input.sourceDeposit.transactionHash.toLowerCase(), hash, ports, 56));
@@ -94,15 +93,6 @@ export async function proveRelayBaseDestination(operation, candidateHashes, port
         return mismatch("saved_quote_binding");
     if (candidateHashes.length !== 1 || !HASH.test(candidateHashes[0]))
         return mismatch("candidate_hashes_invalid");
-    let chainId;
-    try {
-        chainId = await ports.chainId();
-    }
-    catch {
-        return unproven("base_rpc_unavailable");
-    }
-    if (chainId !== 8453)
-        return mismatch("destination_chain_id");
     return inspectCandidate(op, "", candidateHashes[0].toLowerCase(), ports, 8453);
 }
 /** A provider candidate is only a discovery hint; even a real native credit is not causal proof. */
@@ -115,25 +105,26 @@ export async function proveRelayNativeDestination(operation, sourceHash, candida
         return mismatch("saved_native_quote_binding");
     if (!HASH.test(sourceHash) || candidateHashes.length !== 1 || !HASH.test(candidateHashes[0]))
         return mismatch("native_candidate_hashes_invalid");
-    let chainId;
+    return inspectCandidate(op, sourceHash.toLowerCase(), candidateHashes[0].toLowerCase(), ports, op.destinationChainId);
+}
+async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
+    const polygonMilestone = op.sourceChainId === 8453 && expectedChainId === 137;
+    if (polygonMilestone && !ports.polygonFinalizedCheckpoint)
+        return unproven("polygon_consensus_finality_unavailable");
+    // P3: chain, transaction, receipt and checkpoint are requested together; the inclusion block is requested as soon
+    // as the receipt names it, so an adapter can send the whole proof in two POSTs. The checkpoint is read with or
+    // after the receipt, so a canonical inclusion block at or below it is final without a header recheck (P2).
+    let chainId, tx, receipt, block, safe;
     try {
-        chainId = await ports.chainId();
+        const receiptRead = ports.receipt(hash), inclusionRead = receiptRead.then(value => value === null ? null : ports.block(value.blockNumber));
+        [chainId, tx, receipt, block, safe] = await Promise.all([ports.chainId(), ports.transaction(hash), receiptRead, inclusionRead,
+            polygonMilestone ? ports.polygonFinalizedCheckpoint() : ports.finalityCheckpoint()]);
     }
     catch {
         return unproven("destination_rpc_unavailable");
     }
-    if (chainId !== op.destinationChainId)
+    if (chainId !== expectedChainId)
         return mismatch("destination_chain_id");
-    return inspectCandidate(op, sourceHash.toLowerCase(), candidateHashes[0].toLowerCase(), ports, op.destinationChainId);
-}
-async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
-    let tx, receipt;
-    try {
-        [tx, receipt] = await Promise.all([ports.transaction(hash), ports.receipt(hash)]);
-    }
-    catch {
-        return unproven("bnb_rpc_unavailable");
-    }
     if (tx === null || receipt === null)
         return pending("destination_transaction_or_receipt_missing");
     if (!same(tx.hash, hash) || !same(receipt.transactionHash, hash) || tx.chainId !== expectedChainId ||
@@ -142,124 +133,37 @@ async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
         return mismatch("destination_transaction_receipt_identity");
     if (receipt.status !== "success")
         return mismatch("destination_receipt_failed");
-    let block, safe, safeCanonical;
-    try {
-        if (op.sourceChainId === 8453 && expectedChainId === 137 && !ports.polygonFinalizedCheckpoint)
-            return unproven("polygon_consensus_finality_unavailable");
-        [block, safe] = await Promise.all([ports.block(receipt.blockNumber),
-            op.sourceChainId === 8453 && expectedChainId === 137 ? ports.polygonFinalizedCheckpoint() : ports.finalityCheckpoint()]);
-        safeCanonical = safe === null ? null : await ports.block(safe.number);
-    }
-    catch {
-        return unproven("bnb_finality_rpc_unavailable");
-    }
-    if (block === null || safe === null || safeCanonical === null)
+    if (block === null || safe === null)
         return pending("destination_finality_unavailable");
-    if (block.number !== receipt.blockNumber || !same(block.hash, receipt.blockHash) ||
-        safeCanonical.number !== safe.number || !same(safeCanonical.hash, safe.hash) ||
-        !HASH.test(safe.hash))
+    if (block.number !== receipt.blockNumber || !same(block.hash, receipt.blockHash) || !HASH.test(safe.hash))
         return mismatch("destination_noncanonical_block");
     if (safe.number < receipt.blockNumber)
         return pending("destination_not_safe");
-    if (op.sourceChainId === 8453 && expectedChainId === 137) {
-        let inclusionAgain;
-        try {
-            inclusionAgain = await ports.block(receipt.blockNumber);
-        }
-        catch {
-            return unproven("polygon_inclusion_recheck_unavailable");
-        }
-        if (inclusionAgain === null || inclusionAgain.number !== receipt.blockNumber || !same(inclusionAgain.hash, receipt.blockHash))
-            return mismatch("destination_noncanonical_block");
-    }
     const minimum = BigInt(op.minOutputAtomic);
     let credited, method;
     if (expectedChainId === 4326) {
-        if (!ports.tokenIdentityAndBalances || receipt.blockNumber === 0n || !receipt.logs)
-            return unproven("mega_token_ports_unavailable");
-        const topic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-        const recipientTopic = `0x${op.recipient.slice(2).toLowerCase().padStart(64, "0")}`;
-        const credits = receipt.logs.filter(log => same(log.address, RELAY_MEGA_USDM) && log.topics.length === 3 &&
-            same(log.topics[0], topic) && same(log.topics[2], recipientTopic) && /^0x[0-9a-fA-F]{64}$/u.test(log.data));
-        if (credits.length !== 1)
+        credited = tokenTransferCredit(receipt, RELAY_MEGA_USDM, op.recipient);
+        if (credited === null)
             return unproven("mega_token_credit_missing_or_ambiguous");
-        credited = BigInt(credits[0].data);
-        if (credited < minimum)
-            return mismatch("destination_value_below_minimum");
-        let token;
-        try {
-            token = await ports.tokenIdentityAndBalances(RELAY_MEGA_USDM, op.recipient, receipt.blockNumber, receipt.blockHash);
-        }
-        catch {
-            return unproven("mega_token_state_unavailable");
-        }
-        if (!same(token.proxyHash, "0xfdf85d183a122fe611bc878683b722b2b22633e13900c4b13767742b9f5f5a90") ||
-            !same(token.implementation, "0xAC37677261885fDB372A37Ac8D5d47044196073C") ||
-            !same(token.implementationHash, "0x781c9c39ab69e9b7d099ec75e5a28df41dc891c8fffbe0148c94ed5adc8b0c09"))
-            return mismatch("mega_token_runtime_identity");
-        if (token.before < 0n || token.after - token.before !== credited)
-            return unproven("mega_token_balance_delta_ambiguous");
-        method = "pinned_erc20_transfer_balance";
+        method = "pinned_erc20_transfer_event";
     }
     else if (tx.to !== null && same(tx.to, op.recipient)) {
-        if (tx.valueWei < minimum)
-            return mismatch("destination_value_below_minimum");
         credited = tx.valueWei;
         method = "direct_native_transaction";
     }
     else {
-        let trace;
-        try {
-            trace = await (op.sourceChainId === 8453 && expectedChainId === 137 ? ports.polygonNativeTrace?.(hash, op.recipient) ?? Promise.resolve(null) : ports.nativeTrace(hash));
-        }
-        catch {
-            return unproven("destination_trace_unavailable");
-        }
-        if (trace === null && expectedChainId === 8453) {
-            if (!ports.routerCodeHash || !ports.adjacentBalances || receipt.blockNumber === 0n ||
-                tx.to === null || !same(tx.to, BASE_RELAY_ROUTER_V3))
-                return unproven("base_router_fallback_unavailable");
-            const eventAmount = routerEventCredit(receipt, op.recipient);
-            if (eventAmount === null || eventAmount <= 0n)
-                return unproven("base_router_event_missing_or_ambiguous");
-            if (eventAmount < minimum)
-                return mismatch("destination_value_below_minimum");
-            let codeHash, balances;
-            try {
-                codeHash = await ports.routerCodeHash(BASE_RELAY_ROUTER_V3, receipt.blockNumber);
-                balances = await ports.adjacentBalances(op.recipient, receipt.blockNumber, receipt.blockHash);
-            }
-            catch {
-                return unproven("base_router_state_unavailable");
-            }
-            if (!same(codeHash, BASE_RELAY_ROUTER_V3_CODE_HASH))
-                return mismatch("base_router_code_identity");
-            if (balances[0] < 0n || balances[1] < balances[0] || balances[1] - balances[0] !== eventAmount)
-                return unproven("base_balance_delta_ambiguous");
-            credited = eventAmount;
-            method = "verified_relay_router_event_balance";
-        }
-        else {
-            if (trace === null)
-                return unproven("destination_trace_unavailable");
-            if (!same(trace.transactionHash, hash) || !same(trace.blockHash, receipt.blockHash) ||
-                trace.complete !== true || trace.revertedCallsExcluded !== true ||
-                trace.transfers.some(transfer => !ADDRESS.test(transfer.from) || !ADDRESS.test(transfer.to) || transfer.valueWei < 0n))
-                return mismatch("destination_trace_binding");
-            const credits = trace.transfers.filter(transfer => same(transfer.to, op.recipient) && transfer.valueWei > 0n);
-            if (credits.length !== 1)
-                return unproven("destination_trace_ambiguous_or_no_credit");
-            credited = credits[0].valueWei;
-            if (credited < minimum)
-                return mismatch("destination_value_below_minimum");
-            method = "receipt_bound_native_trace";
-        }
+        credited = routerEventCredit(receipt, op.recipient);
+        if (credited === null || credited <= 0n)
+            return unproven("relay_router_event_missing_or_ambiguous");
+        method = "relay_router_event";
     }
+    if (credited < minimum)
+        return mismatch("destination_value_below_minimum");
     return { status: "recipient_credit_proven", relayOrderFulfillmentProven: false, paidAcceptance: false, proof: {
             operationId: op.operationId, operationIntegrityHash: op.integrityHash, quoteDigest: op.quoteDigest,
             orderId: op.nativeQuote?.orderId ?? op.quote.orderId, sourceDepositHash: sourceHash === "" ? null : sourceHash, destinationTransactionHash: hash,
             destinationBlockNumber: receipt.blockNumber.toString(), destinationBlockHash: receipt.blockHash.toLowerCase(),
-            ...(op.sourceChainId === 8453 && expectedChainId === 137 ? { finalityKind: "polygon_milestone_finalized" } : {}),
+            ...(polygonMilestone ? { finalityKind: "polygon_milestone_finalized" } : {}),
             finalityBlockNumber: safe.number.toString(), finalityBlockHash: safe.hash.toLowerCase(),
             recipient: op.recipient.toLowerCase(), minimumOutputWei: op.minOutputAtomic, creditedWei: credited.toString(), method
         } };

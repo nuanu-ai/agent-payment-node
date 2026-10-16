@@ -216,11 +216,13 @@ export function decodeCircleDestination(source: CircleSourceProof, attested: Cir
     attestedMessageHash: attested.hash, nonce: attested.nonce, nonceConsumed: true as const, recipient: e.recipient,
     token: route.token, amountAtomic: attested.receivedAtomic };
 }
-export function verifyCircleApproval(input: CircleObservation, reset: boolean, allowanceAtReceiptAtomic: string, binding?: CircleFundingBindingV2): CircleReceiptProof {
+/** `allowanceAtReceiptAtomic: null` proves the allowance from the receipt alone (P1): the transaction is a direct
+ * `approve` from the owner to the exact token, and its single canonical Approval event carries the value it set. */
+export function verifyCircleApproval(input: CircleObservation, reset: boolean, allowanceAtReceiptAtomic: string | null, binding?: CircleFundingBindingV2): CircleReceiptProof {
   const e = binding === undefined ? circleEconomics(1329) : circleEconomics(binding.destinationChain, binding);
   const proof = verifyCircleObservation(input, { chain: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_SOURCE_TOKEN,
     data: encodeCircleApproval(reset, binding), maxNativeDebitAtomic: 30_000_000_000_000n, maxGasAtomic: 100_000n });
   const args = oneEvent(input, "Approval", CIRCLE_SOURCE_TOKEN).args, amount = reset ? 0n : binding === undefined ? e.amount : circleEconomics(binding.destinationChain, binding).amount;
   if (!addressEquals(args.owner, CIRCLE_SOURCE_OWNER) || !addressEquals(args.spender, CIRCLE_MESSENGER) ||
-    args.value !== amount || circleUint(allowanceAtReceiptAtomic) !== amount) circleFail("approval_binding"); return proof;
+    args.value !== amount || allowanceAtReceiptAtomic !== null && circleUint(allowanceAtReceiptAtomic) !== amount) circleFail("approval_binding"); return proof;
 }

@@ -176,21 +176,17 @@ export class RelayArbitrumApprovalExecuteService {
       if (journal !== null && (!RESUMABLE.includes(journal.effects[0].phase) || journal.effects[1].phase !== "pending"))
         return this.result(op, journal, "observation_only", "approval_effect_already_started");
       const unsent = journal !== null && journal.effects[0].phase !== "pending";
-      const firstPolicy = await this.lockedPolicy(profile);
-      if (firstPolicy === null) blocked("active_owner_policy_required");
-      const first = await this.snapshot(op, firstPolicy);
-      if (!first.approvalRequired) {
-        if (unsent) blocked("signed_approval_no_longer_required");
-        return this.result(op, journal, "approval_not_needed", "fresh_allowance_covers_principal");
-      }
-      if (!first.readOnlyConditionsSatisfied) blocked(`preflight:${first.reasons.join(",")}`);
-      // A second canonical read closes the gap between owner consent and signing. Every refusable check runs here,
-      // before signing (R3); the profile, policy and owner-address locks stay held until the send settles.
+      // One canonical read after owner consent, under the held profile, policy and owner-address locks, closes the
+      // gap between consent and signing (BRDG-21); every refusable check runs here, before signing (R3).
       const freshPolicy = await this.lockedPolicy(profile);
       if (freshPolicy === null) blocked("active_owner_policy_required");
       const fresh = await this.snapshot(op, freshPolicy);
-      if (!fresh.approvalRequired || !fresh.readOnlyConditionsSatisfied || fresh.confirmedNonce !== fresh.pendingNonce ||
-        this.now().getTime() - Date.parse(fresh.observedAt) > 30_000) blocked("approval_preflight_changed");
+      if (!fresh.approvalRequired) {
+        if (unsent) blocked("signed_approval_no_longer_required");
+        return this.result(op, journal, "approval_not_needed", "fresh_allowance_covers_principal");
+      }
+      if (!fresh.readOnlyConditionsSatisfied) blocked(`preflight:${fresh.reasons.join(",")}`);
+      if (fresh.confirmedNonce !== fresh.pendingNonce || this.now().getTime() - Date.parse(fresh.observedAt) > 30_000) blocked("approval_preflight_changed");
       const sealedNonce = journal?.effects[0].phase === "sealed" ? journal.effects[0].attempt!.nonce : null;
       if (sealedNonce !== null && sealedNonce !== fresh.confirmedNonce) blocked("sealed_approval_nonce_unavailable");
       if (journal === null) journal = await this.journals.createUnderLocks(profileHash, operationId, this.now().toISOString());

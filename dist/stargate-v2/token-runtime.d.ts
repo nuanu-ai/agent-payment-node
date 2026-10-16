@@ -4,6 +4,7 @@ import type { Address } from "../model.js";
 import type { StateStore } from "../state.js";
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
 import { type StargateTokenDestinationEvidence, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
+import { type StargateScanCursor } from "./destination-scan.js";
 export declare class StargateTokenService {
     private readonly state;
     private readonly env;
@@ -108,5 +109,10 @@ export declare class StargateTokenService {
     private followUsage;
     private remote;
 }
-export declare function confirmedStargateTokenSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex, finalityTag: Parameters<typeof confirmedStargateSourceReceipt>[2], expectedCodeHash?: Hex): Promise<import("./native-execution.js").StargateConfirmedReceipt | null>;
-export declare function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>, expectedCodeHash?: Hex): Promise<StargateTokenDestinationEvidence | null>;
+/** BRDG-31: the source proof is the pinned pool's OFTSent and the endpoint's PacketSent naming the pinned TokenMessaging as
+ * sender (checked in sourceReceipt); TokenMessaging's runtime code is not re-read after the send. */
+export declare function confirmedStargateTokenSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex, finalityTag: Parameters<typeof confirmedStargateSourceReceipt>[2]): Promise<import("./native-execution.js").StargateConfirmedReceipt | null>;
+/** BRDG-30/31: the GUID- and recipient-filtered OFTReceived from the pinned pool, found by a resumable windowed scan, at
+ * the destination finality head, is the delivery proof; PacketDelivered (and the native drop when the Executor applied it
+ * in the same transaction) come from that transaction's receipt, so a redelivery by any caller still proves it. */
+export declare function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>, cursor?: StargateScanCursor): Promise<StargateTokenDestinationEvidence | null>;

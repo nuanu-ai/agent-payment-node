@@ -14,6 +14,8 @@ const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm
 const DEPOSIT_ABI = parseAbi(["function depositErc20(address depositor, address token, uint256 amount, bytes32 id)"]);
 const APPROVE_ABI = parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]);
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+/** Relay's own seven-day order deadline plus ten minutes of clock skew between Relay and this machine (BRDG-24). */
+export const RELAY_MAX_DEADLINE_SECONDS = 7 * 86400 + 600;
 const UINT = /^(0|[1-9][0-9]*)$/;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
@@ -216,7 +218,7 @@ export async function validateRelayQuote(value: unknown, intent: RelayQuoteInten
   const minimum = amount(payee.minimumAmount, "minimum output");
   if (minimum < amount(intent.minimumOutputWei, "required minimum") || amount(payee.expectedAmount, "expected output") < minimum) fail("output minimum");
   const deadline = output.deadline;
-  if (typeof deadline !== "number" || !Number.isSafeInteger(deadline) || deadline <= intent.nowSeconds + 60 || deadline > intent.nowSeconds + 7 * 86400) fail("deadline");
+  if (typeof deadline !== "number" || !Number.isSafeInteger(deadline) || deadline <= intent.nowSeconds + 60 || deadline > intent.nowSeconds + RELAY_MAX_DEADLINE_SECONDS) fail("deadline");
   for (const [index, expected] of [[0, { chain: "ethereum", recipient: intent.payer, currency: ETHEREUM_USDC }],
     [1, { chain: destinationChain, recipient: intent.recipient, currency: BNB_NATIVE }]] as const) {
     const refund = object(refunds[index], "refund");

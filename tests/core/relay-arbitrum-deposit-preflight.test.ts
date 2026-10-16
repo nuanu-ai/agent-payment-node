@@ -48,8 +48,8 @@ async function prepared() {
 }
 
 function rows(allowance = 0n, baseFee = "0x1", pendingNonce = "0x7") {
-  return [["0xa4b1", head], [head, "0x3a352944000", word(500_000n), word(allowance)],
-    ["0xa4b1", { ...head, baseFeePerGas: baseFee }, "0x7", pendingNonce]] as const;
+  return [["0xa4b1", { ...head, baseFeePerGas: baseFee }], ["0x3a352944000", word(500_000n), word(allowance)],
+    ["0x7", pendingNonce]] as const;
 }
 
 
@@ -69,8 +69,8 @@ test("deposit requires canonical allowance and deposit gas quote at the pinned b
   index = 0;
   await assert.rejects(preflightRelayArbitrumDeposit(operation, active(), owner, "0", now,
     { now: () => now, batch: async () => index++ < 2 ? rows(500_000n)[index - 1]! :
-      ["0xa4b1", { ...head, hash: `0x${"34".repeat(32)}` }, "0x7", "0x7"] }),
-  { code: "APN_OPERATION_BLOCKED" });
+      [{ error: { code: -32000, message: "block hash not canonical" } }, "0x7"] }),
+  { code: "APN_RPC_PROTOCOL" });
 });
 
 test("deposit reader shares one 24 POST guard and stops on 429", async t => {

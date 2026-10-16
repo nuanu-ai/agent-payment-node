@@ -69,13 +69,13 @@ test("normal CLI prepare uses seller Base policy alternatives, saves durable quo
   await assert.rejects(service.prepareNative({ ...input, idempotencyKey: "relay-base-mega-0002", maxDepositNetworkFeeWei: "1000000000001" }), { code: "APN_INVALID_INPUT" });
   assert.equal(calls, 1);
 });
-test("Base runtime pin, gas estimate and OP Stack L1/operator fee enforce full budget", async t => {
+test("Base exact deposit simulation and OP Stack L1/operator fee enforce full budget without a runtime code read", async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const saved = await op(new StateStore(tmp.root));
-  const code = JSON.parse(await readFile("tests/core/relay-fixtures/base-depository-runtime-20261009.json", "utf8")).code;
   const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
-  const rpc = (rows: unknown[]) => ({ batchCall: async (calls: readonly unknown[]) => { assert.equal(calls.length, 4); return rows; } });
-  await verifyRelayBaseFunding(saved, rpc([code, "0x7fc9", word(1000n), word(1000n)]), "0x1");
-  for (const rows of [["0x", "0x7fc9", word(0n), word(0n)], [code, "0xffff", word(0n), word(0n)], [code, "0x7fc9", word(1000000000000n), word(0n)]])
+  const rpc = (rows: unknown[]) => ({ batchCall: async (calls: readonly { method: string }[]) => {
+    assert.deepEqual(calls.map(call => call.method), ["eth_estimateGas", "eth_call", "eth_call"]); return rows; } });
+  await verifyRelayBaseFunding(saved, rpc(["0x7fc9", word(1000n), word(1000n)]), "0x1");
+  for (const rows of [["0xffff", word(0n), word(0n)], ["0x7fc9", word(1000000000000n), word(0n)], ["0x0", word(0n), word(0n)]])
     await assert.rejects(verifyRelayBaseFunding(saved, rpc(rows), "0x1"), { code: "APN_OPERATION_BLOCKED" });
 });
 test("Base durable dispatch marker prevents ambiguous retry and wrong raw transaction", async t => {
@@ -88,40 +88,36 @@ test("Base durable dispatch marker prevents ambiguous retry and wrong raw transa
   assert.equal(sent.phase, "submitting"); assert.deepEqual(await dispatchRelayNativeDepositOnce(saved, sent, store, async () => { sends++; return ""; }, bytes, new Date()), sent);
   assert.equal(sends, 1);
 });
-test("Mega USDm proof needs pinned token runtime, canonical finality, exact transfer and adjacent balance", async t => {
+test("Mega USDm proof needs the pinned token's exact Transfer to the recipient in a canonical safe receipt, no runtime or balance reads", async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const saved = await op(new StateStore(tmp.root));
   const hash = `0x${"a".repeat(64)}`, blockHash = `0x${"b".repeat(64)}`, amount = BigInt(saved.minOutputAtomic);
-  let changed = false, low = false;
+  let foreign = false, low = false;
   const ports: RelayBnbProofPorts = { chainId: async () => 4326,
     transaction: async () => ({ hash, chainId: 4326, to: RELAY_BASE_SOURCE, valueWei: 0n, blockNumber: 100n, blockHash }),
-    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash, logs: [{ address: "0xfafddbb3fc7688494971a79cc65dca3ef82079e7",
+    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash, logs: [{ address: foreign ? "0x1111111111111111111111111111111111111111" : "0xfafddbb3fc7688494971a79cc65dca3ef82079e7",
       topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", `0x${"0".repeat(64)}`, `0x${saved.recipient.slice(2).padStart(64, "0")}`], data: `0x${(low ? 1n : amount).toString(16).padStart(64, "0")}` }] }),
-    block: async number => ({ number, hash: blockHash }), finalityCheckpoint: async () => ({ number: 101n, hash: blockHash }), nativeTrace: async () => null,
-    tokenIdentityAndBalances: async () => ({ proxyHash: changed ? hash : "0xfdf85d183a122fe611bc878683b722b2b22633e13900c4b13767742b9f5f5a90",
-      implementation: "0xAC37677261885fDB372A37Ac8D5d47044196073C", implementationHash: "0x781c9c39ab69e9b7d099ec75e5a28df41dc891c8fffbe0148c94ed5adc8b0c09", before: 0n, after: amount }) };
+    block: async number => ({ number, hash: blockHash }), finalityCheckpoint: async () => ({ number: 101n, hash: blockHash }) };
   const proof = await proveRelayNativeDestination(saved, hash, [hash], ports); assert.equal(proof.status, "recipient_credit_proven"); assert.equal(proof.relayOrderFulfillmentProven, false);
-  changed = true; assert.equal((await proveRelayNativeDestination(saved, hash, [hash], ports)).status, "mismatch");
-  changed = false; low = true; assert.equal((await proveRelayNativeDestination(saved, hash, [hash], ports)).status, "mismatch");
+  foreign = true; assert.equal((await proveRelayNativeDestination(saved, hash, [hash], ports)).status, "unproven");
+  foreign = false; low = true; assert.equal((await proveRelayNativeDestination(saved, hash, [hash], ports)).status, "mismatch");
 });
 test("Base funding rechecks chain, balance plus full fee, nonce and pinned block before sign", async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root), saved = await op(state);
   const { RelayNativeSourceRuntime } = await import("../../src/relay/native-source.js");
   const runtime = new RelayNativeSourceRuntime(state, { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) },
     { confirm: async () => true, rpc: { batchCall: async () => [], submitRawTransaction: async () => "0x00" as Hex } });
-  const code = JSON.parse(await readFile("tests/core/relay-fixtures/base-depository-runtime-20261009.json", "utf8")).code;
   const hash = `0x${"b".repeat(64)}`, word = `0x${"0".repeat(64)}`;
-  function rpc(balance = 51000000000000n, drift = false) {
+  function rpc(balance = 51000000000000n, chain = "0x2105") {
     let n = 0;
-    return { batchCall: async () => {
-      n++; if (n === 1) return ["0x2105", { number: "0x1", hash, baseFeePerGas: "0x1" }];
-      if (n === 2) return [{ number: "0x1", hash }, `0x${balance.toString(16)}`, "0x1", "0x2105"];
-      if (n === 3) return [code, "0x7fc9", word, word];
-      return [{ number: "0x1", hash: drift ? `0x${"c".repeat(64)}` : hash }];
+    return { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
+      n++; if (n === 1) return [chain, { number: "0x1", hash, baseFeePerGas: "0x1" }];
+      if (n === 2) { assert.deepEqual(calls[0]!.params[1], { blockHash: hash, requireCanonical: true }); return [`0x${balance.toString(16)}`, "0x1"]; }
+      return ["0x7fc9", word, word];
     }, submitRawTransaction: async () => { throw new Error("no send in funding"); } };
   }
   assert.equal(await (runtime as any).funding(saved, rpc()), 1n);
   await assert.rejects((runtime as any).funding(saved, rpc(50999999999999n)), { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects((runtime as any).funding(saved, rpc(51000000000000n, true)), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects((runtime as any).funding(saved, rpc(51000000000000n, "0x1")), { code: "APN_OPERATION_BLOCKED" });
 });
 for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} lost signed material retains hold and forbids exact seller retirement`, async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root);

@@ -62,11 +62,10 @@ test("BNB native funding admits the frozen fee envelope against the block base f
   let baseFeePerGas = "0x5", sends = 0;
   const bodies = mockHttps(t, (body) => {
     assert.ok(Array.isArray(body));
-    const methods = body.map((item: { method: string }) => item.method);
-    const results = methods.length === 2 ? ["0x38", { number: "0x10", hash, baseFeePerGas }] :
-      [{ number: "0x10", hash, baseFeePerGas }, "0xc9", "0x1", "0x38"];
-    assert.deepEqual(methods, methods.length === 2 ? ["eth_chainId", "eth_getBlockByNumber"] :
-      ["eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_chainId"]);
+    const methods = body.map((item: { method: string }) => item.method), head = methods[0] === "eth_chainId";
+    // Chain and head, then the balance pinned to that head hash and the pending nonce (no header re-read, P2).
+    const results = head ? ["0x38", { number: "0x10", hash, baseFeePerGas }] : ["0xc9", "0x1"];
+    assert.deepEqual(methods, head ? ["eth_chainId", "eth_getBlockByNumber"] : ["eth_getBalance", "eth_getTransactionCount"]);
     return { status: 200, raw: JSON.stringify(body.map((item: { id: number }, index: number) =>
       ({ jsonrpc: "2.0", id: item.id, result: results[index] })).reverse()) };
   });

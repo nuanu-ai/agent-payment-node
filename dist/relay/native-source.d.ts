@@ -40,6 +40,8 @@ export declare class RelayNativeSourceRuntime {
     private usageIdentity;
     private active;
     private admission;
+    /** Chain and head, then the balance pinned to the head hash (EIP-1898 requireCanonical) and the pending nonce; Base
+     * adds its exact simulation and OP fee reads at that height. No header is re-read around pinned reads (P2). */
     private funding;
     private custody;
     private observe;

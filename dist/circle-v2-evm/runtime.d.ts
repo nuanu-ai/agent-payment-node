@@ -88,7 +88,6 @@ export declare class CircleEvmService {
     cleanup(id: string): Promise<CircleOperationV1>;
     private required;
     private run;
-    private assertPriorSourcesCanonical;
     private preflightDeployments;
     private preflightAttesters;
     private remotes;
