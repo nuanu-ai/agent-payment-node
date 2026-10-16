@@ -21,13 +21,17 @@ export declare class GaslessExecution {
     private advance;
     /** `fees` are this invocation's guard result when it signed the effect, and null when the effect was already signed. */
     private material;
-    /** The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. */
+    /**
+     * The same UserOperation signed by a throwaway key must fit the frozen offer before any owner material exists. The
+     * balance-layout witness is the guard snapshot just taken, a block whose state every keyless node still holds.
+     */
     private mirror;
     /** Owner, policy and caps locally, then one bundler batch: the signed fees must still cover its slow tier. */
     private feeCheck;
     private key;
     private at;
     private guard;
+    private checked;
     /**
      * A price spike, rate limit or transport failure is waited out while the approved window still leaves room for the
      * remaining steps. An interrupt, an exhausted window and every definite refusal end the operation at once.

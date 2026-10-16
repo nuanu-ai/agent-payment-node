@@ -7,11 +7,10 @@ import { GaslessHttps } from "./https.js";
 import { validateGaslessIntent } from "./intent-validation.js";
 import { gaslessObservationRpcEnv, gaslessObservationSource } from "./observation-source.js";
 import { gaslessConfigError, gaslessRpcInvocation, withinGaslessRpcInvocation } from "./rpc.js";
-import { recheckBlock, rpcJson, rpcQuantity, rpcRecord } from "./rpc-codec.js";
+import { rpcJson, rpcQuantity, rpcRecord } from "./rpc-codec.js";
 import { observeGasless } from "./rpc-observe.js";
-import { verifyProtocolAt } from "./rpc-state.js";
-import { gaslessDeployment, gaslessProtocolHash } from "./registry.js";
-import { gaslessChain, gaslessFailure, gaslessSame } from "./validation.js";
+import { gaslessDeployment } from "./registry.js";
+import { gaslessChain, gaslessFailure } from "./validation.js";
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode",
     "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
 const MAX_RESPONSE = 2 * 1024 * 1024;
@@ -47,7 +46,6 @@ export class GaslessObservationRpc {
     rpcEndpointHash;
     endpoint;
     environmentName;
-    deployment;
     sequence = 0n;
     rpcCall;
     queue = Promise.resolve();
@@ -59,7 +57,6 @@ export class GaslessObservationRpc {
         this.pacing = pacing;
         this.chainId = gaslessChain(chainId, "APN_RPC_CONFIG");
         this.environmentName = gaslessObservationRpcEnv(environmentName);
-        this.deployment = gaslessDeployment(this.chainId);
         const endpoint = parsePublicHttpsUrl(rpcUrl, "APN_RPC_CONFIG", "Observation RPC endpoint", 2048);
         if (endpoint.search !== "" || endpoint.hash !== "")
             gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_endpoint");
@@ -73,25 +70,19 @@ export class GaslessObservationRpc {
     }
     async observeWithinInvocation(intent, identity, cursor) {
         this.unavailable = false;
+        // The saved intent (validated against its own hashes) names the contracts; today's registry pins are not consulted,
+        // so an operation sent before a pin update stays observable. Only the chain must match.
         validateGaslessIntent(intent);
-        if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
-            intent.token !== this.deployment.token || intent.paymaster !== this.deployment.paymaster ||
-            intent.entryPoint !== this.deployment.entryPoint || intent.delegate !== this.deployment.delegate ||
-            intent.initialSnapshot.protocolHash !== gaslessProtocolHash(this.deployment) ||
-            !gaslessSame(intent.tokenDomain, this.deployment.tokenDomain)) {
+        if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId) {
             gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_binding");
         }
         if (rpcQuantity(await this.rpcCall("eth_chainId", [])) !== BigInt(this.chainId)) {
             gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
         }
-        // Validate the original anchor before accepting even partial scan progress from another provider.
-        await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
-        await verifyProtocolAt(this.rpcCall, this.deployment, intent.initialSnapshot.block, true);
-        const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin,
-            deployment: this.deployment, rpc: this.rpcCall, codeProven: true }, intent, identity, cursor);
+        // No state is read at the prepare block: every proof is the receipt plus current safe/latest state (archive-free).
+        const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, rpc: this.rpcCall }, intent, identity, cursor);
         if (this.unavailable)
             throw observationUnavailable();
-        await recheckBlock(this.rpcCall, intent.initialSnapshot.block);
         return { ...result, source: gaslessObservationSource(intent, this.environmentName, this) };
     }
     async call(method, params) {

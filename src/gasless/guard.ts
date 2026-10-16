@@ -2,7 +2,7 @@ import { ApnError } from "../errors.js";
 import type { StateStore } from "../state.js";
 import { assertGaslessSnapshot } from "./economics.js";
 import { assertGaslessIntentCurrent } from "./intent-validation.js";
-import type { GaslessFees } from "./model.js";
+import type { GaslessFees, GaslessSnapshot } from "./model.js";
 import type { GaslessOperationRecord } from "./operation-model.js";
 import { assertGaslessOwner } from "./owner.js";
 import type { GaslessRpcPort } from "./ports.js";
@@ -20,16 +20,18 @@ export function assertGaslessRemaining(op: GaslessOperationRecord, now: number):
  * quotes within the owner's fee cap; signed fees, and every earlier intent's frozen fees, must cover the current slow tier.
  */
 export async function guardGaslessOperation(state: StateStore, rpc: GaslessRpcPort,
-  op: GaslessOperationRecord, now: () => number, signed?: GaslessFees): Promise<GaslessFees> {
+  op: GaslessOperationRecord, now: () => number, signed?: GaslessFees): Promise<GaslessGuardResult> {
   assertGaslessExecutionChain(op.intent.request.chainId);
   assertGaslessRemaining(op, now());
-  const fees = await checkGaslessCurrentState(state, rpc, op, signed);
+  const checked = await checkGaslessCurrentState(state, rpc, op, signed);
   assertGaslessRemaining(op, now());
-  return fees;
+  return checked;
 }
+/** The fees the next step uses and the fresh snapshot that admitted them (the mirror estimate's balance witness). */
+export interface GaslessGuardResult { readonly fees: GaslessFees; readonly snapshot: GaslessSnapshot }
 /** Read-only facts shared by original-window execution and fresh sealed-first-send consent. */
 export async function checkGaslessCurrentState(state: StateStore, rpc: GaslessRpcPort,
-  op: GaslessOperationRecord, signed?: GaslessFees): Promise<GaslessFees> {
+  op: GaslessOperationRecord, signed?: GaslessFees): Promise<GaslessGuardResult> {
   assertGaslessExecutionChain(op.intent.request.chainId);
   assertGaslessIntentCurrent(op.intent);
   await assertGaslessOwner(state, op.intent);
@@ -43,7 +45,7 @@ export async function checkGaslessCurrentState(state: StateStore, rpc: GaslessRp
   const fees = gaslessWireFees(op.intent, approved ?? { maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas });
   assertGaslessSnapshot(op.intent, current, fees);
   await assertGaslessOwner(state, op.intent);
-  return fees;
+  return { fees, snapshot: current };
 }
 /** Only reason tokens produced by this module family may enter the durable journal. */
 export function gaslessReason(error: unknown, fallback: string): string {

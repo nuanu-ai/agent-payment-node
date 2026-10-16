@@ -1,6 +1,6 @@
 import { keccak256, toFunctionSelector } from "viem";
 import type { Address, Hex } from "../model.js";
-import type { GaslessAccountState, GaslessBlock, GaslessDeployment, GaslessFeeConfiguration } from "./model.js";
+import type { GaslessAccountState, GaslessBlock, GaslessDeployment, GaslessFeeConfiguration, GaslessIntent } from "./model.js";
 import { addressWord, rpcBool, rpcHex, rpcQuantity, rpcWord, type GaslessRpcCall } from "./rpc-codec.js";
 import { GASLESS_MAX_UINT120, gaslessAddress, gaslessFailure, gaslessUint } from "./validation.js";
 
@@ -32,7 +32,17 @@ export async function verifyProtocolAt(call: GaslessRpcCall, deployment: Gasless
   await Promise.all([...codes, ...reads]);
 }
 
-export async function readAccountAt(call: GaslessRpcCall, deployment: GaslessDeployment, ownerInput: Address,
+type GaslessContracts = Pick<GaslessDeployment, "token" | "paymaster" | "entryPoint" | "delegate">;
+
+/**
+ * The contracts an already-sent operation is observed through are the ones its own intent saved, never today's
+ * registry row: a later pin update cannot strand the proof of an operation sent under the earlier pin set.
+ */
+export function gaslessObservedContracts(intent: GaslessIntent): GaslessContracts {
+  return { token: intent.token, paymaster: intent.paymaster, entryPoint: intent.entryPoint, delegate: intent.delegate };
+}
+
+export async function readAccountAt(call: GaslessRpcCall, deployment: GaslessContracts, ownerInput: Address,
   block: GaslessBlock, readPending: boolean): Promise<GaslessAccountState> {
   const owner = gaslessAddress(ownerInput);
   if (owner !== ownerInput) gaslessFailure("APN_RPC_PROTOCOL", "gasless_owner_identity");

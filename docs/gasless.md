@@ -364,10 +364,19 @@ preserving the original submission-attempt marker and unknown past financial
 results. It never reports an unacknowledged attempt as a confirmed submission,
 successful payment or zero-cost failure. External recovery fees remain separate.
 
-Canonical recovery scans at most 256 safe blocks per resume, using log requests
-of at most ten blocks each. Failed requests and invalid logs never advance the
-cursor; a reorganization can rewind it. The next observation cannot skip an
-unread range.
+Canonical recovery scans up to four windows of 256 safe blocks per resume
+(1,024 blocks), each window one request of log ranges of at most ten blocks.
+Failed requests and invalid logs never advance the cursor; a reorganization can
+rewind it. The next observation cannot skip an unread range. The permission
+invalidation probe runs only once the scan has reached the current safe head.
+
+Observation reads no historical state, so a keyless public RPC that keeps only
+recent state can close an operation at any later time. Success, revert and fee
+accounting come from the receipt logs; inclusion is proven by header membership;
+the residual allowance, nonces and delegation are read at the current safe head
+(Polygon: finalized) and, for an invalidated permission, at the latest head too.
+An already-sent operation is observed through the contracts and protocol hash
+saved in its own intent, so a later registry pin update cannot strand it.
 
 `operation status` and `receipt get` use saved evidence without network access;
 they may repair local operation or receipt records after an interrupted write. Receipts
@@ -377,15 +386,15 @@ UserOperations, encrypted keys or provider response text.
 ### Explicit observation RPC recovery
 
 APN 0.5.12 includes an explicit recovery option for a saved Local gasless
-operation whose original RPC cannot serve historical reads. APN 0.5.16 extends
+operation whose original RPC is unavailable. APN 0.5.16 extends
 it to saved MetaMask Agent and Smart Account gasless operations. The published
 0.5.11 binary does not include this option; use a verified 0.5.12 or later
 compatible artifact.
 
 ```sh
-export APN_ETHEREUM_ARCHIVE_RPC_URL='<verified-public-https-rpc-url>'
+export APN_ETHEREUM_RECOVERY_RPC_URL='<verified-public-https-rpc-url>'
 apn operation resume --operation <operation-id> \
-  --observation-rpc-env APN_ETHEREUM_ARCHIVE_RPC_URL
+  --observation-rpc-env APN_ETHEREUM_RECOVERY_RPC_URL
 ```
 
 The option names a local environment variable; it does not take a URL. Names
@@ -396,9 +405,9 @@ operations accept it; other operation kinds reject it.
 
 This mode only observes. It cannot access signing material, estimate fees,
 disclose permissions or send a transaction, even if an approved phase could
-otherwise continue. APN verifies the selected chain, registered contracts and
-token domain, and the original preparation block before accepting evidence.
-It uses the canonical EntryPoint scan without a bundler locator and keeps the
+otherwise continue. For Local operations APN verifies the selected chain and the
+saved intent against its own hashes before accepting evidence; it needs no
+archive state. It uses the canonical EntryPoint scan without a bundler locator and keeps the
 same bounded scan, reorg, receipt, nonce and allowance rules described above.
 Unavailable or conflicting evidence retains the guard.
 

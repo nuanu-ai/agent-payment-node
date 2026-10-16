@@ -63,11 +63,6 @@ export async function rpcBlock(call, tag) {
 export async function rpcFinalityBlock(call, chainId) {
     return await rpcBlock(call, chainId === 137 ? "finalized" : "safe");
 }
-export async function recheckBlock(call, block) {
-    const again = await rpcBlock(call, quantity(BigInt(block.numberAtomic)));
-    if (!sameBlock(again.block, block))
-        gaslessFailure("APN_RPC_PROTOCOL", "gasless_block_reorg");
-}
 export function sameBlock(left, right) {
     return left.numberAtomic === right.numberAtomic && left.hash === right.hash && left.timestampAtomic === right.timestampAtomic;
 }

@@ -24,9 +24,13 @@ function consumed(i, a) {
         BigInt(a.entryPointNonceAtomic) > BigInt(i.initialSnapshot.entryPointNonceAtomic) &&
         BigInt(a.eoaNonceAtomic) >= BigInt(i.initialSnapshot.eoaNonceAtomic) + (i.initialSnapshot.delegation === "empty" ? 1n : 0n);
 }
-/** Later safe observations can establish cleanup, but cannot replace the proven effect. */
+/**
+ * Later safe observations can establish cleanup, but cannot replace the proven effect: the receipt identity, inclusion
+ * block, transaction proof, protocol hash and log accounting. Both accounts are state reads at the observing safe head
+ * (older records read `effectAccount` at the inclusion block), so they may move between observations.
+ */
 export function gaslessSettlementEffect(p) {
-    const { safeBlock: _safe, safeAccount: _account, ...effect } = p;
+    const { safeBlock: _safe, safeAccount: _account, effectAccount: _effect, ...effect } = p;
     return effect;
 }
 export function assertGaslessSettlementContinuation(previous, next) {

@@ -11,7 +11,7 @@ import type { GaslessAsset, GaslessChainId, GaslessCursor, GaslessEffectIdentity
   GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
 import type { GaslessBootstrapMaterial, GaslessRpcFactory, GaslessRpcPort, GaslessUserOperationMaterial } from "./ports.js";
 import { observeGasless } from "./rpc-observe.js";
-import { rpcAddress, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, recheckBlock,
+import { quantity, rpcAddress, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, sameBlock,
   type GaslessRpcCall, type GaslessRpcMethod } from "./rpc-codec.js";
 import { readAccountAt, readFeeConfigurationAt, verifyProtocolAt } from "./rpc-state.js";
 import { gaslessPostBudget, type GaslessInvocationPlan } from "./rpc-budget.js";
@@ -182,18 +182,21 @@ export class GaslessRpc implements GaslessRpcPort {
       this.rpcCall("eth_chainId", []), this.bundlerState(), rpcBlock(this.rpcCall, "latest"),
     ]);
     this.validateChain(rpcChain, bundler[0], bundler[1]);
-    const [account, feeConfiguration, priority] = await Promise.all([
+    // Every state read is pinned to the anchor by hash with requireCanonical; the anchor's header is re-read by number
+    // in the same request, so a reorganised anchor still fails closed without a separate recheck POST.
+    const [account, feeConfiguration, priority, , again] = await Promise.all([
       readAccountAt(this.rpcCall, this.deployment, owner, at.block, true),
       readFeeConfigurationAt(this.rpcCall, this.deployment, owner, at.block),
       this.rpcCall("eth_maxPriorityFeePerGas", []),
       session.protocolAt(this, at.block.hash, async (withCode) =>
         await verifyProtocolAt(this.rpcCall, this.deployment, at.block, withCode)),
-    ]).then(([accountState, configuration, priorityFee]) => [accountState, configuration, priorityFee] as const);
+      rpcBlock(this.rpcCall, quantity(BigInt(at.block.numberAtomic))),
+    ]);
+    if (!sameBlock(again.block, at.block)) gaslessFailure("APN_RPC_PROTOCOL", "gasless_block_reorg");
     if (account.pendingEoaNonceAtomic !== account.eoaNonceAtomic) {
       gaslessFailure("APN_OPERATION_BLOCKED", "gasless_nonce_drift");
     }
     const prices = bundlerGasPrices(bundler[2], at.raw.baseFeePerGas, priority, approvedGas);
-    await recheckBlock(this.rpcCall, at.block);
     session.verifyChain(this);
     return { chainId: this.chainId, rpcOrigin: this.rpcOrigin, rpcEndpointHash: this.rpcEndpointHash,
       bundlerOrigin: this.bundlerOrigin, bundlerEndpointHash: this.bundlerEndpointHash, block: at.block,
@@ -239,11 +242,11 @@ export class GaslessRpc implements GaslessRpcPort {
     return requests.map(request => results.get(request.id));
   }
 
-  async mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate> {
+  async mirrorEstimate(intent: GaslessIntent, witness: GaslessSnapshot, fees?: GaslessFees): Promise<GaslessEstimate> {
     assertGaslessExecutionChain(this.chainId);
     const asset = this.assertIntent(intent);
-    // Proved before any use: the row's balance-layout claim must reproduce the owner's own snapshot balance on chain.
-    const slot = await this.provenBalanceSlot(asset, intent);
+    // Proved before any use: the row's balance-layout claim must reproduce the owner's balance from a fresh snapshot.
+    const slot = await this.provenBalanceSlot(asset, intent, witness);
     // One bounded request: the guard snapshot before it already proved both endpoint chains and EntryPoint support.
     const mirror = await gaslessMirrorBootstrap(intent);
     const wire = gaslessUserOperation(mirror.intent, mirror, GASLESS_ESTIMATE_SIGNATURE, fees);
@@ -297,27 +300,37 @@ export class GaslessRpc implements GaslessRpcPort {
     } catch { throw new ApnError("APN_RPC_AMBIGUOUS", "Gasless submission state is unknown."); }
   }
 
+  /**
+   * Observation proves an effect APN already sent, so it reads the addresses and protocol hash saved in the intent and
+   * never today's registry pins: a later pin update cannot strand an operation that was sent under the earlier set.
+   */
   async observe(intent: GaslessIntent, identity: GaslessEffectIdentity,
     cursor: GaslessCursor): Promise<GaslessObservation> {
-    this.assertIntent(intent);
-    const rpcChain = await this.rpcCall("eth_chainId", []);
-    if (rpcQuantity(rpcChain) !== BigInt(this.chainId)) gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
+    this.assertEndpoint(intent);
     const session = invocation.getStore() ?? this.fallbackSession;
-    return await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, deployment: this.deployment,
-      rpc: this.rpcCall, bundler: this.bundlerCall, codeProven: session.codeProven(this) }, intent, identity, cursor);
+    if (!session.hasVerifiedChain(this)) {
+      const rpcChain = await this.rpcCall("eth_chainId", []);
+      if (rpcQuantity(rpcChain) !== BigInt(this.chainId)) gaslessFailure("APN_CHAIN_MISMATCH", "gasless_chain_identity");
+    }
+    return await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin,
+      rpc: this.rpcCall, bundler: this.bundlerCall }, intent, identity, cursor);
   }
 
   private async assertChainUnlessVerified(): Promise<void> {
     if (!(invocation.getStore() ?? this.fallbackSession).hasVerifiedChain(this)) await this.assertChain();
   }
 
-  /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */
-  private assertIntent(intent: GaslessIntent): GaslessAsset {
+  private assertEndpoint(intent: GaslessIntent): void {
     if (intent.request.chainId !== this.chainId || intent.initialSnapshot.chainId !== this.chainId ||
       intent.initialSnapshot.rpcOrigin !== this.rpcOrigin || intent.initialSnapshot.rpcEndpointHash !== this.rpcEndpointHash ||
       intent.initialSnapshot.bundlerOrigin !== this.bundlerOrigin || intent.initialSnapshot.bundlerEndpointHash !== this.bundlerEndpointHash) {
       gaslessFailure("APN_RPC_CONFIG", "gasless_endpoint_identity");
     }
+  }
+
+  /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */
+  private assertIntent(intent: GaslessIntent): GaslessAsset {
+    this.assertEndpoint(intent);
     const asset = gaslessIntentAsset(intent);
     if (intent.entryPoint !== this.deployment.entryPoint || intent.delegate !== this.deployment.delegate ||
       intent.initialSnapshot.protocolHash !== gaslessProtocolHash(this.deployment)) {
@@ -330,21 +343,26 @@ export class GaslessRpc implements GaslessRpcPort {
    * The row's `balanceLayout` is a claim about one token implementation's storage, never protocol knowledge, so it is
    * proved twice before it is trusted. First the claim must name the implementation this chain is verified to run, so
    * a layout description can never outlive the code it describes. Then it is measured: the owner's balance word at the
-   * claimed slot must equal the balance the frozen snapshot already read through `balanceOf` at that exact block.
+   * claimed slot must equal the balance the guard snapshot just read through `balanceOf` at that exact recent block
+   * (never the prepare block, whose state a keyless node may already have pruned).
    * A row with no claim, a claim for another implementation, a zero witness balance or any disagreement fails closed
    * rather than fabricating a balance at an unverified slot.
    */
-  private async provenBalanceSlot(asset: GaslessAsset, intent: GaslessIntent): Promise<string> {
+  private async provenBalanceSlot(asset: GaslessAsset, intent: GaslessIntent, snapshot: GaslessSnapshot): Promise<string> {
     const layout = asset.balanceLayout;
     if (layout === null) gaslessFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "gasless_balance_layout_unknown");
     if (layout.implementationHash !== asset.implementationHash) {
       gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_stale");
     }
-    const witness = BigInt(intent.initialSnapshot.balanceAtomic);
+    if (snapshot.chainId !== this.chainId || snapshot.rpcEndpointHash !== this.rpcEndpointHash ||
+      snapshot.owner !== intent.owner.address || snapshot.token !== asset.token) {
+      gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_unproven");
+    }
+    const witness = BigInt(snapshot.balanceAtomic);
     if (witness === 0n) gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_unproven");
     const observed = rpcWord(await this.rpcCall("eth_getStorageAt", [asset.token,
       gaslessBalanceSlot(intent.owner.address, layout.mappingSlotAtomic),
-      { blockHash: intent.initialSnapshot.block.hash, requireCanonical: true }]));
+      { blockHash: snapshot.block.hash, requireCanonical: true }]));
     if (observed !== witness) gaslessFailure("APN_PROVIDER_PROTOCOL", "gasless_balance_layout_mismatch");
     return layout.mappingSlotAtomic;
   }

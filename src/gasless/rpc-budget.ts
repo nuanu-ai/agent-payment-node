@@ -2,14 +2,26 @@ import { GASLESS_DEPLOYMENTS } from "./registry.js";
 
 /**
  * Physical POST budgets are derived from the steps each command performs, never hand-counted. One guard snapshot
- * (`GaslessRpc.snapshot`) is the chain-and-anchor read batch, the bundler batch, the state batch (split by an RPC
- * batch cap) and one anchor recheck. The state batch holds the account reads (8), the fee configuration (5), the
- * priority fee (1) and the deployment's protocol pins; the largest row bounds every chain.
+ * (`GaslessRpc.snapshot`) is the chain-and-anchor read batch, the bundler batch and the state batch (split by an RPC
+ * batch cap). The state batch holds the account reads (8), the fee configuration (5), the priority fee (1), the
+ * deployment's protocol pins and the anchor's own header, re-read in the same request instead of a separate recheck;
+ * the largest row bounds every chain.
  */
-const STATE_READS = Math.max(...GASLESS_DEPLOYMENTS.map((row) => 8 + 5 + 1 + row.code.length + row.reads.length));
+const ACCOUNT_READS = 8;
+const STATE_READS = Math.max(...GASLESS_DEPLOYMENTS.map((row) => ACCOUNT_READS + 5 + 1 + row.code.length + row.reads.length + 1));
+
+/** Blocks one canonical scan window covers; each window is one request of bounded `eth_getLogs` ranges. */
+export const GASLESS_SCAN_WINDOW_BLOCKS = 256n;
+/** Range of one `eth_getLogs` request, inside the limits public RPCs put on log queries. */
+export const GASLESS_LOG_REQUEST_BLOCKS = 10n;
+/** Windows one observation step may scan before it stops at a durable cursor (1,024 blocks). */
+export const GASLESS_SCAN_WINDOWS = 4;
+const LOG_REQUESTS = Number((GASLESS_SCAN_WINDOW_BLOCKS + GASLESS_LOG_REQUEST_BLOCKS - 1n) / GASLESS_LOG_REQUEST_BLOCKS);
+
+function posts(items: number, maxBatchItems: number): number { return Math.max(1, Math.ceil(items / maxBatchItems)); }
 
 export function gaslessSnapshotPosts(maxBatchItems: number): number {
-  return 3 + Math.max(1, Math.ceil(STATE_READS / maxBatchItems));
+  return 2 + posts(STATE_READS, maxBatchItems);
 }
 
 /** Unsplit step costs of the original-window path (`execution.ts`); approve and resume never take a batch cap. */
@@ -36,11 +48,17 @@ function executionPosts(guard: number): number {
 }
 
 /**
- * One observation step (`rpc-observe.ts`): chain identity, two locator reads, one scan window, then either the receipt
- * inspection or the permission-invalidation probe, plus an explicit source's anchor checks. This is the measured 0.5.41
- * allowance; the observation read diet re-derives it step by step.
+ * One observation step (`rpc-observe.ts`): the chain identity, two bundler locator reads, the safe and cursor anchors,
+ * up to `GASLESS_SCAN_WINDOWS` scan windows (each window's end header and its log ranges in one request), then either
+ * the receipt inspection (transaction and receipt; the inclusion, parent and safe headers; the safe-head account with
+ * the inclusion header re-read) or the permission-invalidation probe (the head header; the safe and head accounts).
  */
-const OBSERVATION_POSTS = 24;
+function observationPosts(maxBatchItems: number): number {
+  const inspect = 1 + posts(3, maxBatchItems) + posts(ACCOUNT_READS + 1, maxBatchItems);
+  const probe = posts(1, maxBatchItems) + posts(2 * ACCOUNT_READS, maxBatchItems);
+  return 1 + 2 + posts(2, maxBatchItems) + GASLESS_SCAN_WINDOWS * posts(1 + LOG_REQUESTS, maxBatchItems) +
+    Math.max(inspect, probe);
+}
 
 /**
  * `read`: one snapshot (balance, quote, prepare). `execute`: the original-window path. `resume`: either that path or one
@@ -53,8 +71,8 @@ export function gaslessPostBudget(plan: GaslessInvocationPlan, maxBatchItems: nu
   switch (plan) {
     case "read": return snapshot;
     case "execute": return executionPosts(snapshot);
-    case "resume": return Math.max(executionPosts(snapshot), OBSERVATION_POSTS);
+    case "resume": return Math.max(executionPosts(snapshot), observationPosts(maxBatchItems));
     case "first_send": return 2 * snapshot + GASLESS_STEP_POSTS.send;
-    case "observe": return OBSERVATION_POSTS;
+    case "observe": return observationPosts(maxBatchItems);
   }
 }
