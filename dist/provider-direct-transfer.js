@@ -18,6 +18,7 @@ import { coinbaseGaslessPreconditionsMatch, prepareCoinbaseGasless, reobserveCoi
 import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfile, requiredProviderDirectAdapter } from "./provider-direct-guards.js";
 import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
+import { resolveProviderPrepare } from "./provider-prepare-identity.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
     verdict: "foreground_approval_required",
@@ -80,16 +81,11 @@ export class ProviderDirectTransferService {
                 amountAtomic: amount.atomic,
                 amountDecimal,
                 policy: DIRECT_POLICY,
-                rpcBindingHash,
             };
             const requestHash = hashObject(materialRequest);
-            const existing = await this.operations.resolvePrepare({
-                kind: "direct_transfer",
-                profileHash,
-                operationId,
-                idempotencyHash,
-                requestHash,
-            });
+            const existing = await resolveProviderPrepare(this.operations, {
+                kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash,
+            }, hashObject({ ...materialRequest, rpcBindingHash }));
             if (existing !== null)
                 return publicOperation(existing.record);
             await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
@@ -337,15 +333,11 @@ export class ProviderDirectTransferService {
         });
     }
     async assertFrozenPreconditions(operation, binding) {
-        const rpcUrl = binding.coinbaseGasless === undefined ? this.context.requireRpcUrl() : this.context.requireCoinbaseRpcUrl();
         if (binding.policy.identity !== DIRECT_POLICY.identity || binding.policy.verdict !== DIRECT_POLICY.verdict ||
-            binding.policy.foregroundApprovalRequired !== true ||
-            sha256(`direct-rpc\0${rpcUrl}`) !== binding.rpcBindingHash)
-            await this.failBeforeEffect(operation, "frozen_policy_or_rpc_binding_changed");
-        const rpcIdentity = await (binding.coinbaseGasless === undefined ? this.context.requireRpc() : this.context.requireCoinbaseRpc()).assertBaseChain();
-        if (sha256(`direct-rpc-origin\0${rpcIdentity.rpcOrigin}`) !== binding.rpcOriginHash) {
-            await this.failBeforeEffect(operation, "rpc_origin_changed");
-        }
+            binding.policy.foregroundApprovalRequired !== true)
+            await this.failBeforeEffect(operation, "frozen_policy_changed");
+        // The operation is bound to Base, not to one endpoint: any Base RPC may approve and observe it.
+        await (binding.coinbaseGasless === undefined ? this.context.requireRpc() : this.context.requireCoinbaseRpc()).assertBaseChain();
         const current = await this.context.requireProfileRepository().load(operation.profileHash);
         if (current === null || current.drift.state !== "bound" || current.capability_snapshot.direct.available !== true ||
             current.capability_snapshot.direct.mode !== binding.executionMode ||

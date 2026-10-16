@@ -1,4 +1,3 @@
-import { sha256 } from "./canonical.js";
 import { providerDirectReceipt, recoverProviderTerminalOperation } from "./provider-direct-receipt.js";
 import { appendTransition, sealOperation } from "./state.js";
 import { hasExactTransfer } from "./transfer-policy.js";
@@ -28,14 +27,11 @@ export class ProviderDirectState {
         const binding = operation.providerDirect;
         if (binding === undefined)
             return operation;
-        let receipt;
+        let receipt, origin;
         try {
-            if (sha256(`direct-rpc\0${this.context.requireRpcUrl()}`) !== binding.rpcBindingHash)
-                throw new Error("rpc binding drift");
+            // Any Base endpoint may serve the receipt; its origin stays in the receipt as provenance only.
             const rpc = this.context.requireRpc();
-            const identity = await rpc.assertBaseChain();
-            if (sha256(`direct-rpc-origin\0${identity.rpcOrigin}`) !== binding.rpcOriginHash)
-                throw new Error("rpc origin drift");
+            origin = (await rpc.assertBaseChain()).rpcOrigin;
             receipt = await rpc.getReceipt(operation.transactionHash);
         }
         catch {
@@ -43,8 +39,7 @@ export class ProviderDirectState {
         }
         if (receipt === null)
             return await this.receiptPending(operation, "receipt_evidence_pending");
-        if (receipt.rpcOrigin.length === 0 ||
-            sha256(`direct-rpc-origin\0${receipt.rpcOrigin}`) !== binding.rpcOriginHash ||
+        if (receipt.rpcOrigin.length === 0 || receipt.rpcOrigin !== origin ||
             receipt.transactionHash.toLowerCase() !== operation.transactionHash.toLowerCase()) {
             return await this.receiptAmbiguous(operation, "receipt_identity_mismatch");
         }
